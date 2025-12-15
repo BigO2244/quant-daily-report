@@ -7,7 +7,36 @@ import yfinance as yf
 # ===== Config =====
 UNIVERSE_PATH = "data/universe.csv"
 TICKER_COL = "ticker"
-BUCKET_COL = "bucket"
+
+# Accept any of these as the bucket column (in priority order)
+BUCKET_COL_CANDIDATES = ["bucket", "coarse_bucket", "sector", "industry", "group", "category"]
+
+def load_universe(path: str = UNIVERSE_PATH) -> pd.DataFrame:
+    df = pd.read_csv(path)
+
+    # ticker column
+    if TICKER_COL not in df.columns:
+        raise AssertionError(f"Universe missing '{TICKER_COL}' column. Found: {list(df.columns)}")
+
+    # bucket column auto-detect
+    bucket_col = None
+    for c in BUCKET_COL_CANDIDATES:
+        if c in df.columns:
+            bucket_col = c
+            break
+    if bucket_col is None:
+        raise AssertionError(
+            f"Universe missing a bucket column. Expected one of {BUCKET_COL_CANDIDATES}. "
+            f"Found: {list(df.columns)}"
+        )
+
+    df[TICKER_COL] = df[TICKER_COL].astype(str).str.upper().str.strip()
+    df[bucket_col] = df[bucket_col].astype(str).str.strip()
+
+    df = df.dropna(subset=[TICKER_COL, bucket_col]).drop_duplicates(subset=[TICKER_COL])
+    df = df.rename(columns={bucket_col: "bucket"})   # normalize to a single name internally
+    return df
+
 
 TREASURY_TICKER = "IEF"   # Recommendation: intermediate Treasuries (less whippy than TLT)
 REB_FREQ = "W-FRI"        # rebalance weekly (Friday close -> next open in backtest)
