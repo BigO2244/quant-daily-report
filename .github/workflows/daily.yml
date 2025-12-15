@@ -25,9 +25,9 @@ jobs:
 
       - name: Run quant report
         env:
-          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
-          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
-          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          SENDER_EMAIL: ${{ secrets.EMAIL_SENDER }}
+          RECIPIENT_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+          SENDER_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           ACCOUNT_EQUITY: ${{ secrets.ACCOUNT_EQUITY }}
         run: |
           python quant_report.py
