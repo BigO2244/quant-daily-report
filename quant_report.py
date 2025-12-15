@@ -1,5 +1,7 @@
 import os
 import smtplib
+import tempfile
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List
@@ -7,6 +9,13 @@ from typing import List
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+IN_CI = os.getenv("CI", "").lower() == "true" or bool(os.getenv("GITHUB_ACTIONS"))
+
+if IN_CI:
+    # Put yfinance timezone cache in a per-run temp folder to avoid sqlite lock collisions
+    yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
+
 
 # =========================
 # CONFIG (shared by report & backtest)
@@ -74,12 +83,33 @@ def download_prices(tickers: List[str], period: str = "1y", interval: str = "1d"
     for t in tickers:
         try:
             yt = _yahoo_symbol(t)
-            df = yf.download(
-                yt,
-                period=period,
-                interval=interval,
-                progress=False,
-                auto_adjust=False,
+
+            # In CI, avoid any concurrency and add a quick retry for transient sqlite locks
+            attempts = 3 if IN_CI else 1
+            last_err = None
+
+            for i in range(attempts):
+                try:
+                    df = yf.download(
+                        yt,
+                        period=period,
+                        interval=interval,
+                        progress=False,
+                        auto_adjust=False,
+                        threads=False if IN_CI else True,  # yfinance supports this param
+                        timeout=30,
+                    )
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    # small backoff for sqlite lock / transient network errors
+                    time.sleep(1.5 * (i + 1))
+
+            if last_err is not None:
+                failed.append(t)
+                continue
+
             )
 
             if df is None or df.empty:
