@@ -1,3 +1,6 @@
+print("RUNNING: SLEEVE 2 BACKTEST")
+
+
 # sleeve2/sleeve2_backtest.py
 import pandas as pd
 import numpy as np
