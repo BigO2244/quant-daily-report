@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
+TICKER_COL = "ticker"
+BUCKET_COL = "sector"
+
+
 # ===== Config =====
 UNIVERSE_PATH = "data/universe.csv"
 TICKER_COL = "ticker"
