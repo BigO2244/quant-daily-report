@@ -62,7 +62,7 @@ def backtest(start: str = "2023-01-01") -> pd.DataFrame:
     w_daily = w_df.reindex(close.index).ffill().fillna(0.0)
 
     # Daily returns
-    ret = close.pct_change().fillna(0.0)
+    ret = close.pct_change(fill_method=None).fillna(0.0)
     port_ret = (w_daily * ret).sum(axis=1)
 
     equity_curve = (1.0 + port_ret).cumprod()
