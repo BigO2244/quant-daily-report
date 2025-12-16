@@ -387,6 +387,76 @@ def backtest(signals_atr: pd.DataFrame):
 
     return equity_df, trades_df
 
+    def build_daily_sleeve_output(
+        equity_df: pd.DataFrame,
+        trades_df: pd.DataFrame,
+        sleeve_name: str,
+    ) -> pd.DataFrame:
+        """
+        Convert equity + trades into a canonical daily sleeve output.
+        """
+    
+        df = equity_df.copy().reset_index()
+        df["sleeve"] = sleeve_name
+    
+        # Daily returns
+        df["daily_return"] = df["equity"].pct_change().fillna(0.0)
+    
+        # Position counts per day
+        if trades_df.empty:
+            df["num_positions"] = 0
+            df["gross_exposure"] = 0.0
+            df["net_exposure"] = 0.0
+            return df[
+                ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
+            ]
+    
+        # Build position activity table
+        pos_days = []
+        for _, t in trades_df.iterrows():
+            days = pd.date_range(t["entry_date"], t["exit_date"], freq="D")
+            for d in days:
+                pos_days.append(
+                    {
+                        "date": d,
+                        "direction": t["direction"],
+                        "shares": t["shares"],
+                        "entry_price": t["entry_price"],
+                    }
+                )
+    
+        pos_df = pd.DataFrame(pos_days)
+    
+        if pos_df.empty:
+            df["num_positions"] = 0
+            df["gross_exposure"] = 0.0
+            df["net_exposure"] = 0.0
+        else:
+            exposure = (
+                pos_df.assign(
+                    notional=lambda x: x["shares"] * x["entry_price"],
+                    signed_notional=lambda x: x["direction"] * x["shares"] * x["entry_price"],
+                )
+                .groupby("date")
+                .agg(
+                    gross_exposure=("notional", "sum"),
+                    net_exposure=("signed_notional", "sum"),
+                    num_positions=("direction", "count"),
+                )
+                .reset_index()
+            )
+    
+            df = df.merge(exposure, on="date", how="left")
+    
+            equity_map = df.set_index("date")["equity"]
+            df["gross_exposure"] = df["gross_exposure"].div(equity_map).fillna(0.0)
+            df["net_exposure"] = df["net_exposure"].div(equity_map).fillna(0.0)
+            df["num_positions"] = df["num_positions"].fillna(0).astype(int)
+    
+        return df[
+            ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
+        ]
+
 
 def compute_stats(equity_df: pd.DataFrame, trades_df: pd.DataFrame):
     # ---- REQUIRED DEBUG OUTPUT #1
