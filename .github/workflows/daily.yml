@@ -1,4 +1,4 @@
-name: Morning Quant Report
+name: Morning Quant Report (Sleeve 2)
 
 on:
   schedule:
@@ -21,7 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python3 -m pip install -r requirements.txt
 
       - name: Run quant report
         env:
@@ -30,4 +30,4 @@ jobs:
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           ACCOUNT_EQUITY: ${{ secrets.ACCOUNT_EQUITY }}
         run: |
-          python quant_report.py
+          python3 run.py --mode report --sleeve sleeve-2
