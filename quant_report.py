@@ -110,8 +110,6 @@ def download_prices(tickers: List[str], period: str = "1y", interval: str = "1d"
                 failed.append(t)
                 continue
 
-            )
-
             if df is None or df.empty:
                 failed.append(t)
                 continue
