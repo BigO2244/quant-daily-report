@@ -1,9 +1,7 @@
-print("RUNNING: SLEEVE 2 BACKTEST")
-
-
 # sleeve2/sleeve2_backtest.py
+from __future__ import annotations
+
 import pandas as pd
-import numpy as np
 
 from sleeve2.sleeve2_engine import (
     load_universe,
@@ -14,63 +12,36 @@ from sleeve2.sleeve2_engine import (
     build_equity_candidates,
     pick_positions,
     build_target_weights,
-    TREASURY_TICKER,
-    REB_FREQ,
-    TOP_LONGS,
 )
 
+
 def backtest(start: str = "2023-01-01") -> pd.DataFrame:
+    """Very simple Sleeve 2 V1 backtest (signal -> equal weight -> daily equity curve)."""
     univ = load_universe()
-    tickers = sorted(univ["ticker"].unique().tolist())
-    all_tickers = tickers + [TREASURY_TICKER]
+    tickers = univ["ticker"].tolist()
 
-    close = download_prices(all_tickers, start=start)
-    close = close.dropna(how="all")
+    close = download_prices(tickers, start=start)
+    close = close.sort_index()
 
-    # Rebalance dates (weekly Friday)
-    rebal_dates = close.resample(REB_FREQ).last().index
-    rebal_dates = [d for d in rebal_dates if d in close.index]
+    pe = fetch_trailing_pe_snapshot(tickers)
+    pe_z = compute_bucket_zscores(univ, pe)
 
-    # V1: P/E snapshot (today). Used for ranking across buckets consistently.
-    pe_snap = fetch_trailing_pe_snapshot(tickers)
-    pe_z_df = compute_bucket_zscores(univ, pe_snap)
+    # momentum computed on last available date; in V1 we select once and hold
+    mom = compute_momentum(close)
 
-    weights_hist = []
-    for d in rebal_dates:
-        hist = close.loc[:d]
-        if len(hist) < 40:
-            continue
+    cands = build_equity_candidates(pe_z, mom)
+    selected = pick_positions(cands)
+    weights = build_target_weights(selected)
 
-        mom = compute_momentum(hist)
-        cands = build_equity_candidates(pe_z_df, mom)
-        selected = pick_positions(cands, top_n=TOP_LONGS)
-        w = build_target_weights(selected)
-        weights_hist.append((d, w))
+    if not weights:
+        raise RuntimeError("No positions selected (empty weights). Check filters / data availability.")
 
-    # Build daily portfolio returns from weights applied forward until next rebalance
-    w_df = pd.DataFrame(
-        [
-            {"date": d, **w}
-            for d, w in weights_hist
-        ]
-    ).set_index("date").sort_index()
+    ret = close[selected].pct_change(fill_method=None).fillna(0.0)
+    w = pd.Series(weights)
+    port_ret = ret.mul(w, axis=1).sum(axis=1)
+    equity = (1.0 + port_ret).cumprod()
 
-    # Align columns with prices
-    w_df = w_df.reindex(columns=close.columns).fillna(0.0)
-
-    # Forward fill weights until next rebalance day
-    w_daily = w_df.reindex(close.index).ffill().fillna(0.0)
-
-    # Daily returns
-    ret = close.pct_change(fill_method=None).fillna(0.0)
-    port_ret = (w_daily * ret).sum(axis=1)
-
-    equity_curve = (1.0 + port_ret).cumprod()
-    out = pd.DataFrame({
-        "port_ret": port_ret,
-        "equity": equity_curve,
-    })
-
+    out = pd.DataFrame({"date": equity.index, "equity": equity.values}).set_index("date")
     return out
 
 
