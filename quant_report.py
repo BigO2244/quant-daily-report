@@ -42,6 +42,11 @@ def load_universe_df(path: str = "data/universe.csv") -> pd.DataFrame:
     u = u.dropna(subset=["ticker"]).drop_duplicates(subset=["ticker"])
     return u.reset_index(drop=True)
 
+# Auto-load tickers from universe if not explicitly overridden above
+if not TICKERS:
+    _u = load_universe_df()
+    TICKERS = _u['ticker'].tolist()
+
 def _yahoo_symbol(t: str) -> str:
     """Hook to map internal symbols to Yahoo symbols if needed."""
     return str(t).strip().upper()
