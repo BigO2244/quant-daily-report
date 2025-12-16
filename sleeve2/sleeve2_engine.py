@@ -143,7 +143,7 @@ def compute_bucket_zscores(univ: pd.DataFrame, pe: pd.Series) -> pd.DataFrame:
 
 def compute_momentum(close: pd.DataFrame, lookback: int = MOM_LOOKBACK) -> pd.Series:
     # simple momentum: % return over lookback
-    mom = close.pct_change(lookback).iloc[-1]
+    mom = close.pct_change(lookback, fill_method=None).iloc[-1]
     return mom.rename("momentum")
 
 
