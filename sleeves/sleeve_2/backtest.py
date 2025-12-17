@@ -142,13 +142,7 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
                     continue
                 if hold_days >= MAX_HOLD_DAYS_SHORT:
                     close_position(ticker, date, "max_hold_short")
-                    continue
-
-        # ENTRIES
-        # Sell SGOV to fund equity entries
-        if CASH_PROXY_TICKER in positions:
-            close_position(CASH_PROXY_TICKER, date, reason="cash_proxy_fund_entries")
-
+                    continue        # ENTRIES
         # Sell SGOV to fund equity entries if needed
         if CASH_PROXY_TICKER in positions:
             close_position(CASH_PROXY_TICKER, date, reason="cash_proxy_fund_entries")
@@ -166,6 +160,13 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
         short_candidates = day_sig[
             (day_sig["z_pe"] >= Z_EXTREME_SHORT)
         ].sort_values("score_short", ascending=False)
+
+        # Sell SGOV ONLY if we need cash for new entries
+        need_long = (len(current_longs) < TOP_LONGS) and (not long_candidates.empty)
+        need_short = (len(current_shorts) < TOP_SHORTS) and (not short_candidates.empty)
+        if (need_long or need_short) and (CASH_PROXY_TICKER in positions) and (cash <= 0):
+            close_position(CASH_PROXY_TICKER, date, reason="cash_proxy_fund_entries")
+
 
         def enter_position(ticker: str, direction: int):
             nonlocal cash
