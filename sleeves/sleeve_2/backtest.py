@@ -14,6 +14,7 @@ from sleeves.sleeve_2.config import (
     MAX_HOLD_DAYS_LONG,
     MAX_HOLD_DAYS_SHORT,
     Z_EXTREME,
+    Z_EXTREME_SHORT,
     Z_ENTRY_LONG,
     PE_CHANGE_20D_MAX_LONG_ENTRY,
     Z_SHORT_EXIT_MEAN_REVERT,
@@ -67,6 +68,8 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
     equity = INITIAL_EQUITY
     positions = {}  # ticker -> dict(direction, shares, entry_date, entry_price, hold_days)
     trades = []
+
+
 
     def close_position(ticker: str, date: pd.Timestamp, reason: str):
         nonlocal cash, equity
@@ -142,6 +145,15 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
                     continue
 
         # ENTRIES
+        # Sell SGOV to fund equity entries
+        if CASH_PROXY_TICKER in positions:
+            close_position(CASH_PROXY_TICKER, date, reason="cash_proxy_fund_entries")
+
+        # Sell SGOV to fund equity entries if needed
+        if CASH_PROXY_TICKER in positions:
+            close_position(CASH_PROXY_TICKER, date, reason="cash_proxy_fund_entries")
+
+
         current_longs = [t for t, p in positions.items() if p["direction"] == 1]
         current_shorts = [t for t, p in positions.items() if p["direction"] == -1]
 
@@ -152,7 +164,7 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
         ].sort_values("score_long", ascending=False)
 
         short_candidates = day_sig[
-            (day_sig["z_pe"] >= Z_EXTREME)
+            (day_sig["z_pe"] >= Z_EXTREME_SHORT)
         ].sort_values("score_short", ascending=False)
 
         def enter_position(ticker: str, direction: int):
@@ -191,6 +203,22 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
                 continue
             enter_position(tkr, -1)
             current_shorts.append(tkr)
+
+
+        # Buy SGOV with remaining cash
+        if cash > 0 and CASH_PROXY_TICKER not in positions:
+            px = _get_price(px_map, date, CASH_PROXY_TICKER)
+            if px is not None and px > 0:
+                shares = int(cash / px)
+                if shares > 0:
+                    cash -= shares * px
+                    positions[CASH_PROXY_TICKER] = {
+                        "direction": 1,
+                        "shares": shares,
+                        "entry_date": date,
+                        "entry_price": px,
+                        "hold_days": 0,
+                    }
 
     last_date = calendar.max()
     for t in list(positions.keys()):

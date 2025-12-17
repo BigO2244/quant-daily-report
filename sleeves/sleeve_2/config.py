@@ -24,6 +24,9 @@ MAX_HOLD_DAYS_SHORT = 30
 # Valuation extreme threshold (confirmed)
 Z_EXTREME = 2.0
 
+# Stricter threshold for initiating shorts (keep Z_EXTREME=2.0 for long exits)
+Z_EXTREME_SHORT = 2.5
+
 # Long entry valuation gate
 Z_ENTRY_LONG = -0.5
 
