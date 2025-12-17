@@ -240,6 +240,16 @@ def main():
     print(f"Final Equity:   ${final:,.2f}")
     print(f"Total Return:   {total_return*100:,.2f}%")
     print(f"Number of trades: {len(trades_df)}")
+    # "Real trades" view: exclude SGOV funding sweeps (cash proxy mechanics)
+    if not trades_df.empty:
+        real = trades_df[~((trades_df["ticker"] == CASH_PROXY_TICKER) & (trades_df["reason_exit"] == "cash_proxy_fund_entries"))].copy()
+        print(f"Real trades (excl SGOV funding): {len(real)}")
+        if not real.empty:
+            print("\nExit reasons (real):")
+            print(real["reason_exit"].value_counts().head(10))
+            print("\nPnL by ticker (real top 10):")
+            print(real.groupby("ticker")["pnl"].sum().sort_values(ascending=False).head(10))
+
 
     if not trades_df.empty:
         print("\nPnL by direction:")
