@@ -1,10 +1,19 @@
+# ============================================================
+# SLEEVE 1 — LOCKED
+# Do not modify trading logic or parameters without:
+#   1) creating a new versioned sleeve folder, OR
+#   2) explicit "bug fix only" justification
+# ============================================================
+
 print("Backtest Version Check: 2025-12-14-Debug-2")
+
+assert __name__.startswith("sleeves.sleeve_1"), "Invalid import context for Sleeve 1"
 
 import os
 import pandas as pd
 import numpy as np
 
-from quant_report import (
+from core.quant_report import (
     TICKERS,
     download_prices,
     fetch_factor_data,
