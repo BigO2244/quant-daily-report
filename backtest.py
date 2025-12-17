@@ -387,6 +387,60 @@ def backtest(signals_atr: pd.DataFrame):
 
     return equity_df, trades_df
 
+def build_daily_sleeve_output(
+    equity_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+    sleeve_name: str,
+) -> pd.DataFrame:
+    """
+    Canonical daily sleeve output for reporting / aggregation.
+    """
+
+    df = equity_df.copy()
+    df["sleeve"] = sleeve_name
+    df["daily_return"] = df["equity"].pct_change().fillna(0.0)
+
+    # Defaults if no trades
+    df["gross_exposure"] = 0.0
+    df["net_exposure"] = 0.0
+    df["num_positions"] = 0
+
+    if trades_df is None or trades_df.empty:
+        return df[
+            ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
+        ]
+
+    # Build daily position exposure from trades
+    rows = []
+    for _, t in trades_df.iterrows():
+        entry = pd.to_datetime(t["entry_date"])
+        exit_ = pd.to_datetime(t["exit_date"])
+        notional = abs(t.get("shares", 0) * t["entry_price"])
+        signed = t.get("shares", 0) * t["entry_price"]
+
+        for d in pd.date_range(entry, exit_):
+            rows.append(
+                {
+                    "date": d,
+                    "gross": notional,
+                    "net": signed,
+                }
+            )
+
+    expo = (
+        pd.DataFrame(rows)
+        .groupby("date", as_index=False)
+        .agg(gross=("gross", "sum"), net=("net", "sum"))
+    )
+
+    df = df.merge(expo, on="date", how="left").fillna(0.0)
+    df["gross_exposure"] = df["gross"] / df["equity"]
+    df["net_exposure"] = df["net"] / df["equity"]
+    df["num_positions"] = (df["gross"] > 0).astype(int)
+
+    return df[
+        ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
+    ]
 
 def compute_stats(equity_df: pd.DataFrame, trades_df: pd.DataFrame):
     # ---- REQUIRED DEBUG OUTPUT #1
