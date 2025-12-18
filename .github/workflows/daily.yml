@@ -23,6 +23,15 @@ jobs:
         run: |
           python3 -m pip install -r requirements.txt
 
+      - name: Email secrets sanity check
+        run: |
+          python3 - <<'PY'
+          import os
+          keys = ["SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","REPORT_TO_EMAIL"]
+          for k in keys:
+              print(k, "SET" if os.environ.get(k) else "MISSING")
+          PY
+
       - name: Run daily quant report (Sleeve 1 + Sleeve 2)
         env:
           ACCOUNT_EQUITY: ${{ secrets.ACCOUNT_EQUITY }}
