@@ -43,4 +43,7 @@ jobs:
               print(k, "SET" if os.environ.get(k) else "MISSING")
           PY
 
+      - name: Run daily quant report (Sleeve 1 + Sleeve 2)
+        run: |
+          python3 daily_quant_report.py
 
