@@ -151,6 +151,40 @@ def summarize_equity(equity_df: pd.DataFrame, sleeve_name: str) -> dict:
         "Day PnL": _fmt_money(pnl),
         "Day Return": _fmt_pct(ret),
     }
+def summarize_allocated_equity(equity_df: pd.DataFrame, label: str, alloc_capital: float) -> dict:
+    """
+    Report-only scaling:
+      alloc_equity[t] = alloc_capital * (raw_equity[t] / raw_equity[0])
+    This keeps sleeve logic unchanged but makes the snapshot reconcile to a single portfolio.
+    """
+    if equity_df is None or equity_df.empty:
+        return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
+
+    df = equity_df.copy()
+    if "equity" not in df.columns:
+        return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
+
+    df = df.reset_index(drop=True)
+
+    start_equity = float(df["equity"].iloc[0])
+    last_equity = float(df["equity"].iloc[-1])
+    prev_equity = float(df["equity"].iloc[-2]) if len(df) > 1 else last_equity
+
+    if start_equity <= 0:
+        return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
+
+    alloc_last = alloc_capital * (last_equity / start_equity)
+    alloc_prev = alloc_capital * (prev_equity / start_equity)
+
+    pnl = alloc_last - alloc_prev
+    ret = (pnl / alloc_prev) if alloc_prev != 0 else 0.0
+
+    return {
+        "Sleeve": label,
+        "Equity": _fmt_money(alloc_last),
+        "Day PnL": _fmt_money(pnl),
+        "Day Return": _fmt_pct(ret),
+    }
 
 
 def build_html_report(
@@ -159,10 +193,36 @@ def build_html_report(
     s2_equity, s2_trades,
 ) -> str:
 
-    summary_df = pd.DataFrame([
-        summarize_equity(s1_equity, "Sleeve 1 — Momentum"),
-        summarize_equity(s2_equity, "Sleeve 2 — Valuation (P/E)"),
-    ])
+    BASE_EQUITY = 10_000.0
+W_S1 = 0.80
+W_S2 = 0.20
+
+s1_alloc = BASE_EQUITY * W_S1
+s2_alloc = BASE_EQUITY * W_S2
+
+s1_row = summarize_allocated_equity(s1_equity, "Sleeve 1 — Momentum (80%)", s1_alloc)
+s2_row = summarize_allocated_equity(s2_equity, "Sleeve 2 — Valuation (20%)", s2_alloc)
+
+# Portfolio row = sum of the two allocated sleeves (parse from formatted strings safely)
+def _to_float_money(x):
+    try:
+        return float(str(x).replace("$", "").replace(",", ""))
+    except Exception:
+        return 0.0
+
+p_equity = _to_float_money(s1_row["Equity"]) + _to_float_money(s2_row["Equity"])
+p_pnl = _to_float_money(s1_row["Day PnL"]) + _to_float_money(s2_row["Day PnL"])
+p_ret = (p_pnl / (p_equity - p_pnl)) if (p_equity - p_pnl) != 0 else 0.0
+
+portfolio_row = {
+    "Sleeve": "TOTAL — Portfolio ($10,000)",
+    "Equity": _fmt_money(p_equity),
+    "Day PnL": _fmt_money(p_pnl),
+    "Day Return": _fmt_pct(p_ret),
+}
+
+summary_df = pd.DataFrame([s1_row, s2_row, portfolio_row])
+
 
     css = """
     <style>
