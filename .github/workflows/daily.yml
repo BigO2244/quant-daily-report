@@ -10,6 +10,17 @@ jobs:
   run-report:
     runs-on: ubuntu-latest
 
+    env:
+      ACCOUNT_EQUITY: ${{ secrets.ACCOUNT_EQUITY }}
+
+      # Map existing email secrets to SMTP vars expected by send_email()
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: ${{ secrets.EMAIL_SENDER }}
+      SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+      REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -32,16 +43,4 @@ jobs:
               print(k, "SET" if os.environ.get(k) else "MISSING")
           PY
 
-      - name: Run daily quant report (Sleeve 1 + Sleeve 2)
-        env:
-          ACCOUNT_EQUITY: ${{ secrets.ACCOUNT_EQUITY }}
-
-          # Map existing email secrets to SMTP vars expected by send_email()
-          SMTP_HOST: smtp.gmail.com
-          SMTP_PORT: "587"
-          SMTP_USER: ${{ secrets.EMAIL_SENDER }}
-          SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
-          REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
-        run: |
-          python3 daily_quant_report.py
 
