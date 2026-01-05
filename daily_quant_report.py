@@ -153,31 +153,28 @@ def summarize_equity(equity_df: pd.DataFrame, sleeve_name: str) -> dict:
     }
 def summarize_allocated_equity(equity_df: pd.DataFrame, label: str, alloc_capital: float) -> dict:
     """
-    Report-only scaling:
+    Report-only scaling so both sleeves reconcile to a single portfolio allocation:
       alloc_equity[t] = alloc_capital * (raw_equity[t] / raw_equity[0])
-    This keeps sleeve logic unchanged but makes the snapshot reconcile to a single portfolio.
+    This keeps sleeve logic unchanged while making the snapshot add up to the portfolio baseline.
     """
-    if equity_df is None or equity_df.empty:
+    equity_df = _safe_df(equity_df)
+
+    if equity_df.empty or "equity" not in equity_df.columns:
         return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
 
-    df = equity_df.copy()
-    if "equity" not in df.columns:
+    df = equity_df.reset_index(drop=True)
+    start = float(df["equity"].iloc[0])
+    last = float(df["equity"].iloc[-1])
+    prev = float(df["equity"].iloc[-2]) if len(df) > 1 else last
+
+    if start <= 0:
         return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
 
-    df = df.reset_index(drop=True)
-
-    start_equity = float(df["equity"].iloc[0])
-    last_equity = float(df["equity"].iloc[-1])
-    prev_equity = float(df["equity"].iloc[-2]) if len(df) > 1 else last_equity
-
-    if start_equity <= 0:
-        return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
-
-    alloc_last = alloc_capital * (last_equity / start_equity)
-    alloc_prev = alloc_capital * (prev_equity / start_equity)
+    alloc_last = alloc_capital * (last / start)
+    alloc_prev = alloc_capital * (prev / start)
 
     pnl = alloc_last - alloc_prev
-    ret = (pnl / alloc_prev) if alloc_prev != 0 else 0.0
+    ret = pnl / alloc_prev if alloc_prev else None
 
     return {
         "Sleeve": label,
@@ -194,53 +191,63 @@ def build_html_report(
 ) -> str:
 
     BASE_EQUITY = 10_000.0
-W_S1 = 0.80
-W_S2 = 0.20
+    S1_W = 0.80
+    S2_W = 0.20
 
-s1_alloc = BASE_EQUITY * W_S1
-s2_alloc = BASE_EQUITY * W_S2
+    summary_df = pd.DataFrame([
+        summarize_allocated_equity(
+            s1_equity,
+            "Sleeve 1 — Momentum (80%)",
+            BASE_EQUITY * S1_W,
+        ),
+        summarize_allocated_equity(
+            s2_equity,
+            "Sleeve 2 — Valuation (P/E) (20%)",
+            BASE_EQUITY * S2_W,
+        ),
+    ])
 
-s1_row = summarize_allocated_equity(s1_equity, "Sleeve 1 — Momentum (80%)", s1_alloc)
-s2_row = summarize_allocated_equity(s2_equity, "Sleeve 2 — Valuation (20%)", s2_alloc)
+    # Add portfolio total row (sum of allocated sleeves)
+    def _money_to_float(x):
+        try:
+            return float(str(x).replace("$", "").replace(",", ""))
+        except Exception:
+            return 0.0
 
-# Portfolio row = sum of the two allocated sleeves (parse from formatted strings safely)
-def _to_float_money(x):
-    try:
-        return float(str(x).replace("$", "").replace(",", ""))
-    except Exception:
-        return 0.0
+    s1_eq = _money_to_float(summary_df.loc[0, "Equity"])
+    s2_eq = _money_to_float(summary_df.loc[1, "Equity"])
+    s1_pnl = _money_to_float(summary_df.loc[0, "Day PnL"])
+    s2_pnl = _money_to_float(summary_df.loc[1, "Day PnL"])
 
-p_equity = _to_float_money(s1_row["Equity"]) + _to_float_money(s2_row["Equity"])
-p_pnl = _to_float_money(s1_row["Day PnL"]) + _to_float_money(s2_row["Day PnL"])
-p_ret = (p_pnl / (p_equity - p_pnl)) if (p_equity - p_pnl) != 0 else 0.0
+    p_eq = s1_eq + s2_eq
+    p_pnl = s1_pnl + s2_pnl
+    p_prev = p_eq - p_pnl
+    p_ret = (p_pnl / p_prev) if p_prev else None
 
-portfolio_row = {
-    "Sleeve": "TOTAL — Portfolio ($10,000)",
-    "Equity": _fmt_money(p_equity),
-    "Day PnL": _fmt_money(p_pnl),
-    "Day Return": _fmt_pct(p_ret),
-}
+    portfolio_row = pd.DataFrame([{
+        "Sleeve": "TOTAL — Portfolio ($10,000)",
+        "Equity": _fmt_money(p_eq),
+        "Day PnL": _fmt_money(p_pnl),
+        "Day Return": _fmt_pct(p_ret),
+    }])
 
-summary_df = pd.DataFrame([s1_row, s2_row, portfolio_row])
-
+    summary_df = pd.concat([summary_df, portfolio_row], ignore_index=True)
 
     css = """
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Arial; color:#111827; }
-      .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
-      .card { background:#f9fafb; border:1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin: 12px 0; }
-      h2 { margin-bottom: 4px; }
-      h3 { margin-top: 16px; }
-      .tbl { width:100%; border-collapse: collapse; font-size: 13px; }
-      .tbl th { text-align:left; border-bottom:1px solid #e5e7eb; padding:6px; }
-      .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }
-      .muted { color:#6b7280; font-size:12px; }
-    </style>
-    """
-
+     body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Arial; color:#111827; }
+     .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
+     .card { background:#f9fafb; border:1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin: 12px 0; }
+     h2 { margin-bottom: 4px; }
+     h3 { margin-top: 16px; }
+     .tbl { width:100%; border-collapse: collapse; font-size: 13px; }
+     .tbl th { text-align:left; border-bottom:1px solid #e5e7eb; padding:6px; }
+     .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }
+     .muted { color:#6b7280; font-size:12px; }
+   """
+ 
     html = f"""
     <html>
-    <head>{css}</head>
+   <head><style>{css}</style></head>
     <body>
       <div class="wrap">
         <h2>Daily Quant Report</h2>
