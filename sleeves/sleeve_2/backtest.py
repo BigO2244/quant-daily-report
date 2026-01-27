@@ -1,3 +1,4 @@
+from calendar import calendar
 import os
 import pandas as pd
 import numpy as np
@@ -40,13 +41,12 @@ def _get_price(px_map: dict, date: pd.Timestamp, ticker: str) -> float | None:
         return float(px)
     except Exception:
         return None
-        return float(px)
-    except Exception:
-        return None
+
 
 def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame, pd.DataFrame]:
     print("Sleeve 2 Backtest v1.0")
     print("Preparing data...")
+    asof = pd.Timestamp.today().normalize()
 
     tickers = prepare_universe()
     prices = download_prices(tickers, period=period, interval=interval)
@@ -63,12 +63,22 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
     sig = sig[sig["ticker"] != CASH_PROXY_TICKER].copy()
 
     calendar = factor_df["date"].drop_duplicates().sort_values()
+    # --- Forward-only guard: valuation snapshot is "as-of today" (no historical fundamentals) ---
+    calendar = calendar[calendar >= asof]
+    sig = sig[sig["date"] >= asof].copy()
+    factor_df = factor_df[factor_df["date"] >= asof].copy()
+
+    if calendar.empty:
+      print(f"[WARN] Sleeve 2 forward-only mode: no dates on/after {asof.date()} in this period.")
+      return pd.DataFrame(columns=["date","equity"]), pd.DataFrame()
+
 
     cash = INITIAL_EQUITY
     equity = INITIAL_EQUITY
     positions = {}  # ticker -> dict(direction, shares, entry_date, entry_price, hold_days)
     trades = []
-
+    equity_rows = []
+ 
 
 
     def close_position(ticker: str, date: pd.Timestamp, reason: str):
@@ -220,13 +230,34 @@ def run_backtest(period: str = "1y", interval: str = "1d") -> tuple[pd.DataFrame
                         "entry_price": px,
                         "hold_days": 0,
                     }
+        # --- Daily mark-to-market equity snapshot ---
+        px_map_day = factor_df[factor_df["date"] == date].set_index("ticker")["close"].to_dict()
+
+        mtm_equity = cash
+        for tkr, pos in positions.items():
+            px = px_map_day.get(tkr)
+            if px is None or pd.isna(px):
+                continue
+            direction = pos["direction"]
+            shares = pos["shares"]
+            entry_px = pos["entry_price"]
+
+            # MTM contribution (long: value, short: proceeds +/- pnl)
+            if direction == 1:
+                mtm_equity += float(px) * shares
+            else:
+                # short marked as entry proceeds + unrealized pnl
+                mtm_equity += (entry_px * shares) + ((entry_px - float(px)) * shares)
+
+        equity_rows.append({"date": date, "equity": float(mtm_equity)})
+
 
     last_date = calendar.max()
     for t in list(positions.keys()):
         close_position(t, last_date, "end_of_backtest")
 
     trades_df = pd.DataFrame(trades)
-    equity_df = pd.DataFrame([{"date": last_date, "equity": equity}])
+    equity_df = pd.DataFrame(equity_rows)
     return equity_df, trades_df
 
 def main():
