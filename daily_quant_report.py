@@ -9,23 +9,25 @@ from sleeves.sleeve_1.backtest import (
     prepare_data as s1_prepare_data,
     backtest as s1_backtest,
 )
+# ============================================================
+# Sleeve Trend — structured access
+# ============================================================
+from sleeves.sleeve_trend.backtest import (
+    prepare_data as st_prepare_data,
+    backtest as st_backtest,
+)
 
 # ============================================================
-# Sleeve 2 — allow either run_backtest OR prepare_data/backtest
+# Sleeve 2 — import module once; resolve symbols dynamically
 # ============================================================
 try:
-    from sleeves.sleeve_2.backtest import run_backtest as s2_run_backtest
+    import sleeves.sleeve_2.backtest as s2_mod
 except Exception:
-    s2_run_backtest = None
+    s2_mod = None
 
-try:
-    from sleeves.sleeve_2.backtest import (
-        prepare_data as s2_prepare_data,
-        backtest as s2_backtest,
-    )
-except Exception:
-    s2_prepare_data = None
-    s2_backtest = None
+s2_run_backtest = getattr(s2_mod, "run_backtest", None) if s2_mod else None
+s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
+s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
 
 
 # ============================================================
@@ -110,6 +112,12 @@ def run_sleeve_1():
     equity_df, trades_df = s1_backtest(signals)
     return equity_df, trades_df
 
+def run_sleeve_trend():
+    print("[SLEEVE TREND] Preparing data...")
+    signals = st_prepare_data()
+    print("[SLEEVE TREND] Running backtest...")
+    equity_df, trades_df = st_backtest(signals)
+    return equity_df, trades_df
 
 def run_sleeve_2():
     if s2_run_backtest is not None:
@@ -291,6 +299,12 @@ def main():
         s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
 
     try:
+        st_equity, st_trades = run_sleeve_trend()
+    except Exception as e:
+        print(f"[WARN] Sleeve Trend failed: {e}")
+        st_equity, st_trades = pd.DataFrame(), pd.DataFrame()
+
+    try:
         s2_equity, s2_trades = run_sleeve_2()
     except Exception as e:
         print(f"[WARN] Sleeve 2 failed: {e}")
@@ -309,13 +323,17 @@ def main():
     print(f"[OK] HTML report written: {out_path}")
 
     if send_email:
+     try:
         send_email(
             subject=f"Daily Quant Report — {today}",
             body_html=html,
         )
         print("[OK] Email sent")
-    else:
-        print("[WARN] send_email not found — HTML generated only")
+     except Exception as e:
+        print(f"[WARN] Email not sent: {e}")
+     else:
+      print("[WARN] send_email not found — HTML generated only")
+
 
 
 if __name__ == "__main__":
