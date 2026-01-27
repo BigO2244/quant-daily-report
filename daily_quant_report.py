@@ -210,7 +210,7 @@ def build_html_report(
         ),
         summarize_allocated_equity(
             s2_equity,
-            "Sleeve 2 — Valuation (P/E) (20%)",
+            "Sleeve 2 — Valuation (forward test)",
             BASE_EQUITY * S2_W,
         ),
     ])
