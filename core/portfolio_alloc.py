@@ -161,7 +161,19 @@ class PortfolioAllocator:
     
     def _compute_sleeve_allocations(self, sleeve_outputs: list[SleeveOutput]) -> dict[str, float]:
         """Compute allocation percentage for each sleeve based on activity and strength."""
-        active_sleeves = [s for s in sleeve_outputs if s.meta.is_active]
+        active_sleeves = []
+        for s in sleeve_outputs:
+            df = s.positions_df
+            has_weights = (
+                df is not None
+                and not df.empty
+                and "target_weight" in df.columns
+                and float(df["target_weight"].abs().sum()) > WEIGHT_TOLERANCE
+        )
+            s.meta.is_active = bool(has_weights)   # keep report consistent
+            if s.meta.is_active:
+                active_sleeves.append(s)
+
         
         if not active_sleeves:
             return {s.meta.sleeve_name: 0.0 for s in sleeve_outputs}
@@ -187,8 +199,9 @@ class PortfolioAllocator:
         
         for sleeve in sleeve_outputs:
             alloc_pct = sleeve_allocations.get(sleeve.meta.sleeve_name, 0.0)
-            if alloc_pct <= 0 or sleeve.positions_df.empty:
+            if alloc_pct <= 0 or sleeve.positions_df is None or sleeve.positions_df.empty:
                 continue
+
             
             for _, row in sleeve.positions_df.iterrows():
                 scaled_weight = float(row["target_weight"]) * alloc_pct
