@@ -26,7 +26,7 @@ DEFAULT_MAX_POSITION_PCT = 0.10
 DEFAULT_MAX_SLEEVE_EXPOSURE = 1.00
 DEFAULT_MAX_TURNOVER = 0.50
 CASH_TICKER = "CASH"
-WEIGHT_TOLERANCE = 1e-6
+WEIGHT_TOLERANCE = 1e-8
 
 # =============================================================================
 # DATA STRUCTURES
@@ -215,53 +215,74 @@ class PortfolioAllocator:
         """Apply max position size constraint. Does NOT renormalize after capping."""
         if combined.empty:
             return combined
-        
+
         df = combined.copy()
-        for idx, row in df.iterrows():
-            if row["target_weight"] > self.max_position_pct:
-                excess = row["target_weight"] - self.max_position_pct
-                df.at[idx, "target_weight"] = self.max_position_pct
+
+        # Use integer-position assignment to avoid Pylance/pandas index typing issues
+        weight_col_idx = df.columns.get_loc("target_weight")  # type: ignore
+        ticker_col_idx = df.columns.get_loc("ticker")  # type: ignore
+
+        for i, row in enumerate(df.itertuples(index=False)):
+            orig = float(getattr(row, "target_weight"))
+            if orig > self.max_position_pct:
+                excess = orig - self.max_position_pct
+                df.iat[i, weight_col_idx] = self.max_position_pct  # type: ignore
+        
                 self._skipped_trades.append({
-                    "ticker": row["ticker"],
+                    "ticker": getattr(row, "ticker"),
                     "action": "WEIGHT_CAPPED",
-                    "original_weight": row["target_weight"],
+                    "original_weight": orig,
                     "capped_weight": self.max_position_pct,
                     "excess": excess,
                     "reason": f"Max position {self.max_position_pct:.1%} exceeded",
                 })
         return df
+
     
     def _apply_turnover_constraints(self, combined: pd.DataFrame, previous_weights: pd.DataFrame) -> pd.DataFrame:
         """Apply maximum turnover constraint."""
-        if combined.empty or previous_weights.empty:
+        if combined.empty or previous_weights.empty or self.max_turnover is None:
             return combined
-        
+
         df = combined.copy()
         prev = previous_weights[["ticker", "target_weight"]].copy().rename(columns={"target_weight": "prev_weight"})
         df = df.merge(prev, on="ticker", how="outer")
+
         df["target_weight"] = df["target_weight"].fillna(0.0)
         df["prev_weight"] = df["prev_weight"].fillna(0.0)
-        
+
         df["weight_change"] = (df["target_weight"] - df["prev_weight"]).abs()
-        total_turnover = df["weight_change"].sum() / 2
-        
+        total_turnover = float(df["weight_change"].sum()) / 2.0
+
         if total_turnover > self.max_turnover:
             scale_factor = self.max_turnover / total_turnover
-            for idx, row in df.iterrows():
-                change = row["target_weight"] - row["prev_weight"]
-                new_weight = row["prev_weight"] + change * scale_factor
-                if abs(new_weight - row["target_weight"]) > WEIGHT_TOLERANCE:
+
+            # Integer column positions for .iat assignments
+            weight_col_idx = df.columns.get_loc("target_weight")  # type: ignore
+            prev_col_idx = df.columns.get_loc("prev_weight")  # type: ignore
+            ticker_col_idx = df.columns.get_loc("ticker")  # type: ignore
+
+            for i, row in enumerate(df.itertuples(index=False)):
+                target_w = float(getattr(row, "target_weight"))
+                prev_w = float(getattr(row, "prev_weight"))
+
+                change = target_w - prev_w
+                new_weight = prev_w + change * scale_factor
+
+                if abs(new_weight - target_w) > WEIGHT_TOLERANCE:
                     self._skipped_trades.append({
-                        "ticker": row["ticker"],
+                        "ticker": df.iat[i, ticker_col_idx],  # type: ignore
                         "action": "TURNOVER_LIMITED",
-                        "original_weight": row["target_weight"],
+                        "original_weight": target_w,
                         "limited_weight": new_weight,
                         "reason": f"Turnover limit {self.max_turnover:.1%} exceeded",
                     })
-                df.at[idx, "target_weight"] = new_weight
-        
+
+                df.iat[i, weight_col_idx] = new_weight  # type: ignore
+
         df = df[df["target_weight"].abs() > WEIGHT_TOLERANCE].copy()
         return df.drop(columns=["prev_weight", "weight_change"], errors="ignore")
+
     
     def _add_cash_allocation(self, combined: pd.DataFrame) -> pd.DataFrame:
         """Add explicit CASH row for remaining allocation."""
