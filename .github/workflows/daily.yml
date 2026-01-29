@@ -2,8 +2,8 @@ name: Morning Quant Report (Sleeve 2)
 
 on:
   schedule:
-    # 12:00 UTC = 7:00 AM Eastern (Mon–Fri)
-    - cron: "0 12 * * 1-5"
+    # 10:00 UTC = 5:00 AM Eastern (Mon–Fri, standard time)
+    - cron: "0 10 * * 1-5"
   workflow_dispatch:
 
 jobs:
