@@ -177,88 +177,222 @@ def extract_sleeve_output(
     notes = f"Active: {len(positions)} positions, equity ${latest_equity:,.0f}" if is_active else "Inactive"
     return create_sleeve_output(positions, sleeve_name, strength, notes)
 
-# ============================================================
-# Report builder
-# ============================================================
-def summarize_allocated_equity(equity_df: pd.DataFrame, label: str, alloc_capital: float) -> dict:
-    """Scale sleeve equity to allocated capital for reporting."""
-    equity_df = _safe_df(equity_df)
-    if equity_df.empty or "equity" not in equity_df.columns:
-        return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
-    
-    df = equity_df.reset_index(drop=True)
-    start, last = float(df["equity"].iloc[0]), float(df["equity"].iloc[-1])
-    prev = float(df["equity"].iloc[-2]) if len(df) > 1 else last
-    
-    if start <= 0:
-        return {"Sleeve": label, "Equity": "—", "Day PnL": "—", "Day Return": "—"}
-    
-    alloc_last = alloc_capital * (last / start)
-    alloc_prev = alloc_capital * (prev / start)
-    pnl = alloc_last - alloc_prev
-    ret = pnl / alloc_prev if alloc_prev else None
-    
-    return {"Sleeve": label, "Equity": _fmt_money(alloc_last), "Day PnL": _fmt_money(pnl), "Day Return": _fmt_pct(ret)}
 
+# ============================================================
+# Portfolio equity computation (FIXED)
+# ============================================================
+def compute_portfolio_equity(
+    sleeve_equity_map: dict[str, pd.DataFrame],
+    sleeve_allocations: dict[str, float],
+    cash_weight: float,
+    base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
+) -> dict:
+    """
+    Compute TRUE portfolio equity from sleeve returns and allocations.
+    
+    This computes:
+        portfolio_return = sum(sleeve_alloc_i * sleeve_return_i) + cash_weight * 0
+        portfolio_equity = base_equity * (1 + portfolio_return)
+    
+    Returns dict with: equity, prev_equity, day_pnl, day_return, cumulative_return
+    
+    NOTE: This is the ONLY correct way to compute portfolio total.
+    Do NOT sum sleeve equities - they are independent backtests on their own base.
+    """
+    portfolio_return = 0.0
+    portfolio_prev_return = 0.0
+    
+    for sleeve_name, alloc in sleeve_allocations.items():
+        if alloc <= WEIGHT_TOLERANCE:
+            continue
+        
+        equity_df = _safe_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
+        if equity_df.empty or "equity" not in equity_df.columns:
+            continue
+        
+        df = equity_df.reset_index(drop=True)
+        start = float(df["equity"].iloc[0])
+        last = float(df["equity"].iloc[-1])
+        prev = float(df["equity"].iloc[-2]) if len(df) > 1 else last
+        
+        if start <= 0:
+            continue
+        
+        # Sleeve cumulative return (from its own backtest)
+        sleeve_cum_return = (last / start) - 1.0
+        sleeve_prev_return = (prev / start) - 1.0
+        
+        # Weighted contribution to portfolio return
+        portfolio_return += alloc * sleeve_cum_return
+        portfolio_prev_return += alloc * sleeve_prev_return
+    
+    # Cash contributes 0 return (already accounted for by not adding anything)
+    
+    # Portfolio equity
+    portfolio_equity = base_equity * (1.0 + portfolio_return)
+    portfolio_prev_equity = base_equity * (1.0 + portfolio_prev_return)
+    
+    day_pnl = portfolio_equity - portfolio_prev_equity
+    day_return = day_pnl / portfolio_prev_equity if portfolio_prev_equity > 0 else 0.0
+    
+    return {
+        "equity": portfolio_equity,
+        "prev_equity": portfolio_prev_equity,
+        "day_pnl": day_pnl,
+        "day_return": day_return,
+        "cumulative_return": portfolio_return,
+    }
+
+
+# ============================================================
+# Report builder (FIXED)
+# ============================================================
 def build_html_report(
     report_date: str,
     st_equity, st_trades,
     s2_equity, s2_trades,
     alloc_result: AllocationResult = None,
 ) -> str:
-    """Build HTML report with dynamic allocation support."""
+    """
+    Build HTML report with CORRECT portfolio math.
+    
+    Portfolio Snapshot now shows:
+    - Sleeve rows: allocated notional only (for attribution), NOT additive equity
+    - CASH row: allocated notional with 0 return
+    - TOTAL row: TRUE portfolio equity computed from weighted sleeve returns
+    
+    The TOTAL is the ONLY authoritative equity figure.
+    """
     BASE_EQUITY = DEFAULT_PORTFOLIO_BASE_EQUITY
     
-    # Build summary with dynamic or static allocation
+    # Build summary with dynamic allocation
     if alloc_result is not None:
         trend_alloc = alloc_result.sleeve_allocations.get("sleeve_trend", 0.0)
         val_alloc = alloc_result.sleeve_allocations.get("sleeve_2", 0.0)
+        cash_alloc = alloc_result.cash_weight
         
+        # Build sleeve equity map for portfolio computation
+        sleeve_equity_map = {
+            "sleeve_trend": st_equity,
+            "sleeve_2": s2_equity,
+        }
+        
+        # Compute TRUE portfolio equity (the only correct total)
+        portfolio_stats = compute_portfolio_equity(
+            sleeve_equity_map=sleeve_equity_map,
+            sleeve_allocations=alloc_result.sleeve_allocations,
+            cash_weight=cash_alloc,
+            base_equity=BASE_EQUITY,
+        )
+        
+        # Build sleeve rows - show ALLOCATED NOTIONAL only (attribution)
+        # Do NOT show sleeve backtest equity as it's not additive
         rows = []
+        
         if trend_alloc > WEIGHT_TOLERANCE:
-            rows.append(summarize_allocated_equity(st_equity, f"Sleeve Trend — Momentum ({trend_alloc:.0%})", BASE_EQUITY * trend_alloc))
+            alloc_notional = BASE_EQUITY * trend_alloc
+            # Compute sleeve-level return for display (attribution only)
+            st_df = _safe_df(st_equity)
+            if not st_df.empty and "equity" in st_df.columns:
+                st_start = float(st_df["equity"].iloc[0])
+                st_last = float(st_df["equity"].iloc[-1])
+                st_prev = float(st_df["equity"].iloc[-2]) if len(st_df) > 1 else st_last
+                if st_start > 0:
+                    st_ret = (st_last / st_start) - 1.0
+                    st_day_ret = (st_last - st_prev) / st_prev if st_prev > 0 else 0.0
+                    # Attribution: this sleeve's contribution to portfolio
+                    contrib_equity = BASE_EQUITY * trend_alloc * (1.0 + st_ret)
+                    rows.append({
+                        "Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.0%})",
+                        "Allocated": _fmt_money(alloc_notional),
+                        "Equity": _fmt_money(contrib_equity),
+                        "Day Return": _fmt_pct(st_day_ret),
+                    })
+                else:
+                    rows.append({"Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.0%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
+            else:
+                rows.append({"Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.0%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
         else:
-            rows.append({"Sleeve": "Sleeve Trend — Momentum (inactive)", "Equity": "—", "Day PnL": "—", "Day Return": "—"})
+            rows.append({"Sleeve": "Sleeve Trend — Momentum (inactive)", "Allocated": "—", "Equity": "—", "Day Return": "—"})
         
         if val_alloc > WEIGHT_TOLERANCE:
-            rows.append(summarize_allocated_equity(s2_equity, f"Sleeve 2 — Valuation ({val_alloc:.0%})", BASE_EQUITY * val_alloc))
+            alloc_notional = BASE_EQUITY * val_alloc
+            s2_df = _safe_df(s2_equity)
+            if not s2_df.empty and "equity" in s2_df.columns:
+                s2_start = float(s2_df["equity"].iloc[0])
+                s2_last = float(s2_df["equity"].iloc[-1])
+                s2_prev = float(s2_df["equity"].iloc[-2]) if len(s2_df) > 1 else s2_last
+                if s2_start > 0:
+                    s2_ret = (s2_last / s2_start) - 1.0
+                    s2_day_ret = (s2_last - s2_prev) / s2_prev if s2_prev > 0 else 0.0
+                    contrib_equity = BASE_EQUITY * val_alloc * (1.0 + s2_ret)
+                    rows.append({
+                        "Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.0%})",
+                        "Allocated": _fmt_money(alloc_notional),
+                        "Equity": _fmt_money(contrib_equity),
+                        "Day Return": _fmt_pct(s2_day_ret),
+                    })
+                else:
+                    rows.append({"Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.0%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
+            else:
+                rows.append({"Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.0%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
         else:
-            rows.append({"Sleeve": "Sleeve 2 — Valuation (inactive)", "Equity": "—", "Day PnL": "—", "Day Return": "—"})
+            rows.append({"Sleeve": "Sleeve 2 — Valuation (inactive)", "Allocated": "—", "Equity": "—", "Day Return": "—"})
         
-        cash_alloc = alloc_result.cash_weight
+        # CASH row
         if cash_alloc > WEIGHT_TOLERANCE:
-            rows.append({"Sleeve": f"CASH ({cash_alloc:.0%})", "Equity": _fmt_money(BASE_EQUITY * cash_alloc), "Day PnL": _fmt_money(0), "Day Return": _fmt_pct(0)})
+            cash_notional = BASE_EQUITY * cash_alloc
+            rows.append({
+                "Sleeve": f"CASH ({cash_alloc:.0%})",
+                "Allocated": _fmt_money(cash_notional),
+                "Equity": _fmt_money(cash_notional),  # Cash doesn't grow
+                "Day Return": _fmt_pct(0),
+            })
         
         summary_df = pd.DataFrame(rows)
+        
+        # TOTAL row - THE AUTHORITATIVE PORTFOLIO EQUITY
+        # Computed from weighted sleeve returns, NOT by summing rows above
+        total_row = pd.DataFrame([{
+            "Sleeve": f"TOTAL — Portfolio (${BASE_EQUITY:,.0f})",
+            "Allocated": _fmt_money(BASE_EQUITY),
+            "Equity": _fmt_money(portfolio_stats["equity"]),
+            "Day Return": _fmt_pct(portfolio_stats["day_return"]),
+        }])
+        
+        summary_df = pd.concat([summary_df, total_row], ignore_index=True)
+        
         alloc_summary = allocation_summary_df(alloc_result)
         holdings = holdings_snapshot_df(alloc_result)
         skipped_df = pd.DataFrame(alloc_result.skipped_trades) if alloc_result.skipped_trades else pd.DataFrame()
+        
     else:
-        # Legacy static allocation
-        summary_df = pd.DataFrame([
-            summarize_allocated_equity(st_equity, "Sleeve Trend — Momentum (80%)", BASE_EQUITY * 0.80),
-            summarize_allocated_equity(s2_equity, "Sleeve 2 — Valuation (20%)", BASE_EQUITY * 0.20),
-        ])
+        # Legacy static allocation fallback
+        # Still compute correctly using weighted returns
+        sleeve_equity_map = {"sleeve_trend": st_equity, "sleeve_2": s2_equity}
+        static_allocs = {"sleeve_trend": 0.80, "sleeve_2": 0.20}
+        
+        portfolio_stats = compute_portfolio_equity(
+            sleeve_equity_map=sleeve_equity_map,
+            sleeve_allocations=static_allocs,
+            cash_weight=0.0,
+            base_equity=BASE_EQUITY,
+        )
+        
+        rows = [
+            {"Sleeve": "Sleeve Trend — Momentum (80%)", "Allocated": _fmt_money(BASE_EQUITY * 0.80), "Equity": "—", "Day Return": "—"},
+            {"Sleeve": "Sleeve 2 — Valuation (20%)", "Allocated": _fmt_money(BASE_EQUITY * 0.20), "Equity": "—", "Day Return": "—"},
+        ]
+        
+        total_row = {
+            "Sleeve": f"TOTAL — Portfolio (${BASE_EQUITY:,.0f})",
+            "Allocated": _fmt_money(BASE_EQUITY),
+            "Equity": _fmt_money(portfolio_stats["equity"]),
+            "Day Return": _fmt_pct(portfolio_stats["day_return"]),
+        }
+        
+        summary_df = pd.concat([pd.DataFrame(rows), pd.DataFrame([total_row])], ignore_index=True)
         alloc_summary, holdings, skipped_df = None, None, pd.DataFrame()
-
-    # Portfolio total row
-    def _money_to_float(x):
-        try:
-            return float(str(x).replace("$", "").replace(",", ""))
-        except:
-            return 0.0
-    
-    total_equity = sum(_money_to_float(summary_df.iloc[i].get("Equity", 0)) for i in range(len(summary_df)))
-    total_pnl = sum(_money_to_float(summary_df.iloc[i].get("Day PnL", 0)) for i in range(len(summary_df)))
-    p_prev = total_equity - total_pnl
-    p_ret = (total_pnl / p_prev) if p_prev else None
-    
-    summary_df = pd.concat([summary_df, pd.DataFrame([{
-        "Sleeve": f"TOTAL — Portfolio (${BASE_EQUITY:,.0f})",
-        "Equity": _fmt_money(total_equity),
-        "Day PnL": _fmt_money(total_pnl),
-        "Day Return": _fmt_pct(p_ret),
-    }])], ignore_index=True)
 
     # Build exit log
     exit_log_rows = []
@@ -313,7 +447,7 @@ def build_html_report(
           {html_table(_safe_df(st_equity).tail(10), "Equity — Sleeve Trend (last 10 days)", 10)}
           {html_table(_safe_df(s2_equity).tail(10), "Equity — Sleeve 2 (last 10 days)", 10)}
         </div>
-        <div class="muted">Automated daily report. Dynamic allocation enabled. Strategy logic unchanged.</div>
+        <div class="muted">Automated daily report. Portfolio TOTAL computed from weighted sleeve returns (not sum of rows).</div>
       </div>
     </body>
     </html>
