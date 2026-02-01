@@ -95,6 +95,28 @@ def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
     return trades
 
 # ============================================================
+# Sleeve health check
+# ============================================================
+def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
+    """
+    Check whether a sleeve produced valid results.
+
+    Returns (is_valid, reason) where reason is empty string if valid.
+    """
+    equity_df = _safe_df(equity_df)
+    if equity_df.empty:
+        return False, "empty equity_df"
+    if "equity" not in equity_df.columns:
+        return False, "no 'equity' column"
+    if len(equity_df) < 1:
+        return False, "zero rows"
+    last_eq = equity_df["equity"].iloc[-1]
+    if pd.isna(last_eq) or last_eq <= 0:
+        return False, f"invalid terminal equity ({last_eq})"
+    return True, ""
+
+
+# ============================================================
 # Sleeve runners
 # ============================================================
 def run_sleeve_1():
@@ -147,7 +169,7 @@ def extract_sleeve_output(
         real_trades = trades_df.copy()
         if "reason_exit" in real_trades.columns:
             real_trades = real_trades[~((real_trades.get("ticker", "") == "SGOV") & 
-                                        (real_trades.get("reason_exit", "") == "cash_proxy_fund_entries"))]
+                                        (real_trades.get("reason_exit", "") == "cash_proxy_fund_entries"))].copy()
         
         if not real_trades.empty and "entry_date" in real_trades.columns:
             real_trades["entry_date"] = pd.to_datetime(real_trades["entry_date"], errors="coerce")
@@ -164,6 +186,26 @@ def extract_sleeve_output(
                         "ticker": ticker,
                         "target_weight": weight,
                         "reason": row.get("reason_exit", "signal"),
+                        "signal_strength": 1.0,
+                    })
+
+        # Also handle engine-style trades (which have "date" + "weight_to" instead
+        # of "entry_date" + "shares").  This allows Sleeve 2 engine trades to
+        # register as active positions for allocation purposes.
+        if not real_trades.empty and "weight_to" in real_trades.columns and not positions:
+            real_trades_sorted = real_trades.copy()
+            if "date" in real_trades_sorted.columns:
+                real_trades_sorted["date"] = pd.to_datetime(real_trades_sorted["date"], errors="coerce")
+                real_trades_sorted = real_trades_sorted.sort_values("date", ascending=False)
+            latest_engine_trades = real_trades_sorted.head(5)
+            for _, row in latest_engine_trades.iterrows():
+                ticker = row.get("ticker", "")
+                w = abs(row.get("weight_to", 0.0))
+                if ticker and w > 1e-6:
+                    positions.append({
+                        "ticker": ticker,
+                        "target_weight": w,
+                        "reason": "engine_signal",
                         "signal_strength": 1.0,
                     })
     
@@ -460,7 +502,7 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     today = dt.date.today().strftime("%Y-%m-%d")
 
-    # Run sleeves
+    # ── Run sleeves ───────────────────────────────────────────────
     try:
         s1_equity, s1_trades = run_sleeve_1()
     except Exception as e:
@@ -479,27 +521,63 @@ def main():
         print(f"[WARN] Sleeve 2 failed: {e}")
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
 
-    # Extract sleeve outputs for dynamic allocation
+    # ── Sleeve health checks ─────────────────────────────────────
+    # Validate each sleeve BEFORE allocation.  Invalid sleeves get
+    # their weight routed to CASH, never to another sleeve.
+    trend_valid, trend_reason = _sleeve_is_valid(st_equity)
+    s2_valid, s2_reason = _sleeve_is_valid(s2_equity)
+
+    if not trend_valid:
+        print(f"sleeve_trend inactive: {trend_reason} -> routed to CASH")
+    if not s2_valid:
+        print(f"sleeve_2 inactive: {s2_reason} -> routed to CASH")
+
+    # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
-    
-    # Run dynamic allocation
+
+    # ── Run dynamic allocation ────────────────────────────────────
     allocator = PortfolioAllocator()
     alloc_result = allocator.allocate([trend_output, val_output])
-    
-    # Validate allocation
+
+    # ── SAFE ALLOCATION POLICY ────────────────────────────────────
+    # If a sleeve is invalid, force its allocation to 0 and route
+    # the freed weight to CASH (never to another sleeve).
+    patched = False
+    freed_weight = 0.0
+
+    if not trend_valid and alloc_result.sleeve_allocations.get("sleeve_trend", 0.0) > WEIGHT_TOLERANCE:
+        freed_weight += alloc_result.sleeve_allocations["sleeve_trend"]
+        alloc_result.sleeve_allocations["sleeve_trend"] = 0.0
+        patched = True
+
+    if not s2_valid and alloc_result.sleeve_allocations.get("sleeve_2", 0.0) > WEIGHT_TOLERANCE:
+        freed_weight += alloc_result.sleeve_allocations["sleeve_2"]
+        alloc_result.sleeve_allocations["sleeve_2"] = 0.0
+        patched = True
+
+    if patched:
+        alloc_result.cash_weight = alloc_result.cash_weight + freed_weight
+        # Re-normalise total_weight (should be 1.0)
+        alloc_result.total_weight = (
+            sum(alloc_result.sleeve_allocations.values())
+            + alloc_result.cash_weight
+        )
+        print(f"[ALLOCATION] Freed {freed_weight:.1%} from inactive sleeve(s) -> CASH")
+
+    # ── Validate allocation ───────────────────────────────────────
     errors = validate_allocation_result(alloc_result)
     if errors:
         print(f"[WARN] Allocation validation errors: {errors}")
-    
-    # Log allocation summary
+
+    # ── Log allocation summary ────────────────────────────────────
     print(f"\n[ALLOCATION] Sleeve allocations:")
     for sleeve, pct in alloc_result.sleeve_allocations.items():
         print(f"  {sleeve}: {pct:.1%}")
     print(f"  CASH: {alloc_result.cash_weight:.1%}")
     print(f"  Total weight: {alloc_result.total_weight:.4f}")
 
-    # Build report
+    # ── Build report ──────────────────────────────────────────────
     html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result)
 
     out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")

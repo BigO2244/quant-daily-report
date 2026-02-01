@@ -1,5 +1,5 @@
 # ============================================================
-# SLEEVE 2 — Valuation (P/E vs Industry + Trend) — v1.0
+# SLEEVE 2 — Valuation (P/E vs Industry + Trend) — v1.1
 # ============================================================
 
 SLEEVE_NAME = "sleeve_2"
@@ -49,3 +49,6 @@ PE_ABS_CAP = 500.0
 # Scoring weights
 W_Z = 0.7
 W_TREND = 0.3
+
+# Rolling lookback window (trading days) for position state machine
+LOOKBACK_DAYS = 60
