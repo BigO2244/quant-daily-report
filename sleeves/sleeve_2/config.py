@@ -52,3 +52,14 @@ W_TREND = 0.3
 
 # Rolling lookback window (trading days) for position state machine
 LOOKBACK_DAYS = 60
+
+# ============================================================
+# Risk levels for daily report (configurable)
+# ============================================================
+# ATR-based risk levels (preferred)
+STOP_ATR_MULT = 1.5
+TAKE_PROFIT_ATR_MULT = 2.0
+
+# Percent fallback when ATR is unavailable
+STOP_PCT = 0.05
+TAKE_PROFIT_PCT = 0.10
