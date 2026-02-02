@@ -1,0 +1,12 @@
+{
+  "initial_equity": 10000.0,
+  "benchmark_ticker": "SPY",
+  "execution": {
+    "price": "next_open",
+    "slippage_bps": 5
+  },
+  "constraints": {
+    "allow_fractional_shares": true,
+    "min_trade_dollars": 5.0
+  }
+}
