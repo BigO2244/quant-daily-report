@@ -18,25 +18,30 @@ class PaperConfig:
     slippage_bps: float
     allow_fractional: bool
     min_trade_dollars: float
-    cash_buffer_bps: float = 0.0  # NEW (default to 0 if not in config)
+    cash_buffer_bps: float = 0.0  # keep small cash buffer to avoid negative cash
+
 
 def load_config(path: str) -> PaperConfig:
     with open(path, "r") as f:
         cfg = json.load(f)
 
+    execution = cfg.get("execution", {})
     constraints = cfg.get("constraints", {})
 
     return PaperConfig(
         initial_equity=float(cfg["initial_equity"]),
         benchmark_ticker=str(cfg["benchmark_ticker"]),
-        slippage_bps=float(cfg["execution"]["slippage_bps"]),
+        slippage_bps=float(execution.get("slippage_bps", 0.0)),
         allow_fractional=bool(constraints.get("allow_fractional_shares", True)),
         min_trade_dollars=float(constraints.get("min_trade_dollars", 5.0)),
-        cash_buffer_bps=float(constraints.get("cash_buffer_bps", 0.0)),  # NEW
+        cash_buffer_bps=float(constraints.get("cash_buffer_bps", 0.0)),
     )
 
+
 def _ensure_parent_dir(filepath: str) -> None:
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    parent = os.path.dirname(filepath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
 
 def append_csv(df: pd.DataFrame, path: str) -> None:
@@ -60,7 +65,7 @@ def read_latest_holdings_from_ledger(ledger_path: str) -> Tuple[pd.DataFrame, fl
     if led.empty:
         return pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 0.0, 0.0, ""
 
-    last_date = led["date"].max()
+    last_date = str(led["date"].max())
     last = led[led["date"] == last_date].copy()
 
     cash = float(last["cash"].iloc[0])
@@ -69,7 +74,7 @@ def read_latest_holdings_from_ledger(ledger_path: str) -> Tuple[pd.DataFrame, fl
     holdings = last[["ticker", "sleeve", "shares"]].copy()
     holdings["shares"] = holdings["shares"].astype(float)
 
-    return holdings, cash, total_equity, str(last_date)
+    return holdings, cash, total_equity, last_date
 
 
 def load_targets(signals_path: str) -> pd.DataFrame:
@@ -96,17 +101,16 @@ def load_targets(signals_path: str) -> pd.DataFrame:
 
 def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
     """
-    Fetches the 'Open' price for each ticker for run_date (YYYY-MM-DD).
-    Uses yfinance with per-run tz cache folder to avoid sqlite lock collisions.
+    Fetch the 'Open' price for each ticker for run_date (YYYY-MM-DD).
+    Uses per-run yfinance tz cache folder. Uses threads=False and retries per-ticker.
     """
     if not tickers:
         return pd.Series(dtype=float)
 
-    # yfinance end is exclusive; use next day
     start = pd.Timestamp(run_date)
-    end = start + pd.Timedelta(days=1)
+    end = start + pd.Timedelta(days=1)  # yfinance end is exclusive
 
-    # Avoid tz-cache sqlite lock issues (you already do this pattern elsewhere)
+    # Avoid tz-cache sqlite lock issues
     yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
 
     px = yf.download(
@@ -123,33 +127,24 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
     if px is None or len(px) == 0:
         raise RuntimeError(f"No price data returned from yfinance for {run_date}")
 
-    # Normalize to a Series indexed by ticker
-    # Multi-ticker download often returns MultiIndex columns: (Field, Ticker)
+    # Build a Series of opens
     if isinstance(px.columns, pd.MultiIndex):
-        # Expect ("Open", "AAPL") style
         opens = {}
         for t in tickers:
-            if ("Open", t) in px.columns:
+            if ("Open", t) in px.columns and len(px[("Open", t)]) > 0:
                 opens[t] = float(px[("Open", t)].iloc[0])
         s = pd.Series(opens, dtype=float)
     else:
-        # Single ticker can return flat columns like ["Open","High",...]
         if "Open" not in px.columns:
             raise RuntimeError("Open column not found in yfinance response.")
-        # If only one ticker, map it back
         s = pd.Series({tickers[0]: float(px["Open"].iloc[0])}, dtype=float)
 
-        # Retry any missing tickers one-by-one (helps with intermittent tz-cache locks)
-    if isinstance(px.columns, pd.MultiIndex):
-        # s already created above
-        pass
-
+    # Retry missing tickers one by one
     missing_pre = [t for t in tickers if t not in s.index or pd.isna(s.loc[t])]
     if missing_pre:
         retries = {}
         for t in missing_pre:
             try:
-                # isolate tz cache per retry too
                 yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
                 px1 = yf.download(
                     tickers=[t],
@@ -164,20 +159,15 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
                 if px1 is not None and len(px1) > 0 and "Open" in px1.columns:
                     retries[t] = float(px1["Open"].iloc[0])
             except Exception:
-                # swallow and leave missing; we handle downstream
                 continue
-
         if retries:
             s = pd.concat([s, pd.Series(retries, dtype=float)])
 
-    
+    # Drop any still-missing tickers (degrade gracefully)
     missing = [t for t in tickers if t not in s.index or pd.isna(s.loc[t])]
     if missing:
-        # Keep benchmark if available; drop only missing tickers
         print(f"[PAPER][WARN] Missing open prices on {run_date}: {missing} — dropping from execution.")
         s = s.drop(labels=[t for t in missing if t in s.index], errors="ignore")
-
-
 
     return s
 
@@ -198,22 +188,29 @@ def build_rebalance_trades(
     targets: pd.DataFrame,
     prices: pd.Series,
     total_equity: float,
-    cfg: PaperConfig
+    cfg: PaperConfig,
 ) -> pd.DataFrame:
     h = holdings.set_index("ticker")["shares"].to_dict()
 
     targets = targets.copy()
+
+    # Leave cash buffer to avoid negative cash due to slippage
     cash_buffer = 1.0 - (cfg.cash_buffer_bps / 10000.0)
-    targets["target_dollars"] = targets["target_weight"] * total_equity * cash_buffer  
+    cash_buffer = max(0.0, min(1.0, cash_buffer))
+    targets["target_dollars"] = targets["target_weight"] * total_equity * cash_buffer
 
-
-    trades = []
+    trades: List[Dict[str, object]] = []
 
     # Buy/sell to reach targets
     for _, row in targets.iterrows():
         tkr = row["ticker"]
+        if tkr not in prices.index:
+            continue
         px = float(prices.loc[tkr])
-        target_shares = row["target_dollars"] / px if px > 0 else 0.0
+        if px <= 0:
+            continue
+
+        target_shares = row["target_dollars"] / px
         if not cfg.allow_fractional:
             target_shares = int(target_shares)
 
@@ -221,37 +218,43 @@ def build_rebalance_trades(
         delta = target_shares - current_shares
         trade_notional = abs(delta) * px
 
-        if trade_notional < cfg.min_trade_dollars:
+        if trade_notional < cfg.min_trade_dollars or abs(delta) < 1e-12:
             continue
 
         side = "BUY" if delta > 0 else "SELL"
         slipped_px, slip_cost_per_share = apply_slippage(px, side, cfg.slippage_bps)
 
-        trades.append({
-            "ticker": tkr,
-            "side": side,
-            "shares": float(abs(delta)),
-            "price": float(slipped_px),
-            "slippage_cost": float(slip_cost_per_share * abs(delta)),
-            "notional": float(abs(delta) * slipped_px),
-            "reason": "rebalance_to_target"
-        })
+        trades.append(
+            {
+                "ticker": tkr,
+                "side": side,
+                "shares": float(abs(delta)),
+                "price": float(slipped_px),
+                "slippage_cost": float(slip_cost_per_share * abs(delta)),
+                "notional": float(abs(delta) * slipped_px),
+                "reason": "rebalance_to_target",
+            }
+        )
 
     # Liquidate positions not in targets
     target_set = set(targets["ticker"].tolist())
     for tkr, sh in h.items():
         if tkr not in target_set and abs(sh) > 1e-12:
+            if tkr not in prices.index:
+                continue
             px = float(prices.loc[tkr])
             slipped_px, slip_cost_per_share = apply_slippage(px, "SELL", cfg.slippage_bps)
-            trades.append({
-                "ticker": tkr,
-                "side": "SELL",
-                "shares": float(abs(sh)),
-                "price": float(slipped_px),
-                "slippage_cost": float(slip_cost_per_share * abs(sh)),
-                "notional": float(abs(sh) * slipped_px),
-                "reason": "removed_from_targets"
-            })
+            trades.append(
+                {
+                    "ticker": tkr,
+                    "side": "SELL",
+                    "shares": float(abs(sh)),
+                    "price": float(slipped_px),
+                    "slippage_cost": float(slip_cost_per_share * abs(sh)),
+                    "notional": float(abs(sh) * slipped_px),
+                    "reason": "removed_from_targets",
+                }
+            )
 
     return pd.DataFrame(trades)
 
@@ -260,11 +263,8 @@ def apply_trades_to_holdings(
     holdings: pd.DataFrame,
     targets: pd.DataFrame,
     trades: pd.DataFrame,
-    starting_cash: float
+    starting_cash: float,
 ) -> Tuple[pd.DataFrame, float]:
-    """
-    Applies trades to holdings shares and cash. Also carries sleeve labels from targets where possible.
-    """
     sleeve_map_from_targets = targets.set_index("ticker")["sleeve"].to_dict()
 
     shares_map: Dict[str, float] = {}
@@ -272,8 +272,9 @@ def apply_trades_to_holdings(
 
     if not holdings.empty:
         for _, r in holdings.iterrows():
-            shares_map[str(r["ticker"])] = float(r["shares"])
-            sleeve_map[str(r["ticker"])] = str(r.get("sleeve", "core"))
+            tkr = str(r["ticker"])
+            shares_map[tkr] = float(r["shares"])
+            sleeve_map[tkr] = str(r.get("sleeve", "core"))
 
     cash = float(starting_cash)
 
@@ -295,17 +296,25 @@ def apply_trades_to_holdings(
             if tkr in sleeve_map_from_targets:
                 sleeve_map[tkr] = sleeve_map_from_targets[tkr]
 
-    out = pd.DataFrame(
-        [{"ticker": k, "sleeve": sleeve_map.get(k, "core"), "shares": v}
-         for k, v in shares_map.items() if abs(v) > 1e-12]
-    ).sort_values("ticker").reset_index(drop=True)
+    out = (
+        pd.DataFrame(
+            [
+                {"ticker": k, "sleeve": sleeve_map.get(k, "core"), "shares": v}
+                for k, v in shares_map.items()
+                if abs(v) > 1e-12
+            ]
+        )
+        .sort_values("ticker")
+        .reset_index(drop=True)
+    )
 
     return out, cash
 
 
 def mark_to_market(holdings: pd.DataFrame, prices: pd.Series) -> pd.DataFrame:
     h = holdings.copy()
-    h["price"] = h["ticker"].apply(lambda x: float(prices.loc[x]))
+    h["price"] = h["ticker"].apply(lambda x: float(prices.loc[x]) if x in prices.index else float("nan"))
+    h = h.dropna(subset=["price"]).copy()
     h["market_value"] = h["shares"] * h["price"]
     return h
 
@@ -315,31 +324,32 @@ def run_paper_day(
     signals_path: str,
     ledger_path: str,
     trades_path: str,
-    config_path: str
+    config_path: str,
+    force: bool = False,
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
-    
-    if last_date == run_date:
+
+    # Guardrail: prevent accidental double execution
+    if last_date == run_date and not force:
         raise RuntimeError(f"Ledger already contains run_date={run_date}. Refusing to run twice.")
 
     # Bootstrap day 1
     if last_date == "":
         cash_prev = cfg.initial_equity
         equity_prev = cfg.initial_equity
-    
-
 
     targets = load_targets(signals_path)
 
+    # Universe for pricing: targets + benchmark + existing holdings
     tickers = sorted(set(targets["ticker"].tolist() + [cfg.benchmark_ticker]))
     if not holdings_prev.empty:
         tickers = sorted(set(tickers + holdings_prev["ticker"].tolist()))
 
     prices_open = fetch_open_prices_yfinance(tickers, run_date=run_date)
-    
-    # If any tickers are missing prices, drop them from targets and renormalize weights
+
+    # If any tickers missing prices, drop them from targets and renormalize
     priced = set(prices_open.index.tolist())
     targets = targets[targets["ticker"].isin(priced)].copy()
     wsum = float(targets["target_weight"].sum())
@@ -347,17 +357,16 @@ def run_paper_day(
         raise RuntimeError("After dropping missing-priced tickers, no targets remain.")
     targets["target_weight"] = targets["target_weight"] / wsum
 
-
     trades = build_rebalance_trades(
         holdings=holdings_prev,
         targets=targets,
         prices=prices_open,
         total_equity=equity_prev,
-        cfg=cfg
+        cfg=cfg,
     )
 
     if trades is None or trades.empty:
-        trades_out = pd.DataFrame(columns=["date","ticker","side","shares","price","slippage_cost","notional","reason"])
+        trades_out = pd.DataFrame(columns=["date", "ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
     else:
         trades_out = trades.copy()
         trades_out.insert(0, "date", run_date)
@@ -368,7 +377,7 @@ def run_paper_day(
         holdings=holdings_prev,
         targets=targets,
         trades=trades,
-        starting_cash=cash_prev
+        starting_cash=cash_prev,
     )
 
     m2m = mark_to_market(holdings_new, prices_open)
@@ -381,17 +390,14 @@ def run_paper_day(
     ledger_day["total_equity"] = total_equity
     append_csv(ledger_day, ledger_path)
 
-    executed_trades = len(trades_out) if trades_out is not None else 0
+    executed_trades = int(len(trades_out)) if trades_out is not None else 0
     turnover = float(trades_out["notional"].sum()) if executed_trades and "notional" in trades_out.columns else 0.0
-
-    if trades_out is not None and not trades_out.empty and "notional" in trades_out.columns:
-        turnover = float(trades_out["notional"].sum())
 
     return {
         "date": run_date,
         "total_equity": total_equity,
         "cash": cash_new,
-        "num_trades": int(executed_trades),
-        "turnover_notional": float(turnover),
-        "benchmark": cfg.benchmark_ticker
-}
+        "num_trades": executed_trades,
+        "turnover_notional": turnover,
+        "benchmark": cfg.benchmark_ticker,
+    }
