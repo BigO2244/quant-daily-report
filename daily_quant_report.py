@@ -2,6 +2,10 @@ import os
 import datetime as dt
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
+from paper.paper_broker import run_paper_day
+from paper.paper_report import build_paper_report_html
+from paper.trading_calendar import prev_trading_day
+
 
 
 # ============================================================
@@ -923,15 +927,89 @@ def main():
         st_signals=st_signals,
         s2_details=s2_details,
     )
+    # --- Paper trading execution (real-world cadence) ---
+    # Signals are generated "after close" for report_date.
+    # Paper execution confirms trades for report_date using PRIOR business day's signals.
+    trade_date_str = report_date.strftime("%Y-%m-%d")
+    signal_date_str = prev_trading_day(trade_date_str)
+    signals_path_exec = os.path.join("signals", f"{signal_date_str}.json")
 
+    paper_summary = None
+    paper_html = ""
+
+    if os.path.exists(signals_path_exec):
+        try:
+            paper_summary = run_paper_day(
+                run_date=trade_date_str,
+                signals_path=signals_path_exec,
+                ledger_path="paper/ledger.csv",
+                trades_path="paper/trades.csv",
+                config_path="paper/config_paper.json",
+            )
+            paper_html = build_paper_report_html(
+                run_date=trade_date_str,
+                ledger_path="paper/ledger.csv",
+                trades_path="paper/trades.csv",
+                benchmark_ticker="SPY",
+            )
+            print(f"[PAPER] Executed paper trading for {trade_date_str} using signals {signals_path_exec}")
+        except Exception as e:
+            print(f"[PAPER][WARN] Paper execution failed: {repr(e)}")
+    else:
+        print(f"[PAPER][WARN] Missing signals for execution: {signals_path_exec}")
+
+    # --- Paper trading execution + report append (real-world workflow) ---
+    trade_date_str = report_date.strftime("%Y-%m-%d")
+    signal_date_str = prev_trading_day(trade_date_str)
+    signals_exec_path = os.path.join("signals", f"{signal_date_str}.json")
+
+    paper_summary = None
+    paper_html = ""
+
+    if os.path.exists(signals_exec_path):
+        try:
+            paper_summary = run_paper_day(
+                run_date=trade_date_str,
+                signals_path=signals_exec_path,
+                ledger_path="paper/ledger.csv",
+                trades_path="paper/trades.csv",
+                config_path="paper/config_paper.json",
+                force=False,  # never force in production email runs
+            )
+            paper_html = build_paper_report_html(
+                run_date=trade_date_str,
+                ledger_path="paper/ledger.csv",
+                trades_path="paper/trades.csv",
+                benchmark_ticker="SPY",
+            )
+            print(f"[PAPER] Paper execution complete for {trade_date_str} using signals {signals_exec_path}")
+        except Exception as e:
+            print(f"[PAPER][WARN] Paper execution failed: {repr(e)}")
+    else:
+        print(f"[PAPER][WARN] Missing signals for paper execution: {signals_exec_path}")
+
+    
     subject, email_body = create_trade_email(daily_snapshot)
     email_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
     with open(email_path, "w", encoding="utf-8") as f:
         f.write(email_body)
     print(f"[OK] Daily trade email written: {email_path}")
 
+    if paper_summary:
+        email_body += (
+            f"\n\n---\nPaper Trading Execution ({paper_summary['date']}): "
+            f"equity=${paper_summary['total_equity']:.2f}, "
+            f"cash=${paper_summary['cash']:.2f}, "
+            f"trades={paper_summary['num_trades']}, "
+            f"turnover=${paper_summary['turnover_notional']:.2f}\n"
+    )
+
+
     # ── Build report ──────────────────────────────────────────────
     html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result)
+    if paper_html:
+     html = html + "<hr/>" + paper_html
+
 
     out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")
     with open(out_path, "w", encoding="utf-8") as f:
