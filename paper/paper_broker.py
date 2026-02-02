@@ -18,19 +18,22 @@ class PaperConfig:
     slippage_bps: float
     allow_fractional: bool
     min_trade_dollars: float
-
+    cash_buffer_bps: float = 0.0  # NEW (default to 0 if not in config)
 
 def load_config(path: str) -> PaperConfig:
     with open(path, "r") as f:
         cfg = json.load(f)
+
+    constraints = cfg.get("constraints", {})
+
     return PaperConfig(
         initial_equity=float(cfg["initial_equity"]),
         benchmark_ticker=str(cfg["benchmark_ticker"]),
         slippage_bps=float(cfg["execution"]["slippage_bps"]),
-        allow_fractional=bool(cfg["constraints"]["allow_fractional_shares"]),
-        min_trade_dollars=float(cfg["constraints"]["min_trade_dollars"]),
+        allow_fractional=bool(constraints.get("allow_fractional_shares", True)),
+        min_trade_dollars=float(constraints.get("min_trade_dollars", 5.0)),
+        cash_buffer_bps=float(constraints.get("cash_buffer_bps", 0.0)),  # NEW
     )
-
 
 def _ensure_parent_dir(filepath: str) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -200,7 +203,9 @@ def build_rebalance_trades(
     h = holdings.set_index("ticker")["shares"].to_dict()
 
     targets = targets.copy()
-    targets["target_dollars"] = targets["target_weight"] * total_equity
+    cash_buffer = 1.0 - (cfg.cash_buffer_bps / 10000.0)
+    targets["target_dollars"] = targets["target_weight"] * total_equity * cash_buffer  
+
 
     trades = []
 
@@ -315,11 +320,16 @@ def run_paper_day(
     cfg = load_config(config_path)
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
+    
+    if last_date == run_date:
+        raise RuntimeError(f"Ledger already contains run_date={run_date}. Refusing to run twice.")
 
     # Bootstrap day 1
     if last_date == "":
         cash_prev = cfg.initial_equity
         equity_prev = cfg.initial_equity
+    
+
 
     targets = load_targets(signals_path)
 
@@ -371,11 +381,17 @@ def run_paper_day(
     ledger_day["total_equity"] = total_equity
     append_csv(ledger_day, ledger_path)
 
+    executed_trades = len(trades_out) if trades_out is not None else 0
+    turnover = float(trades_out["notional"].sum()) if executed_trades and "notional" in trades_out.columns else 0.0
+
+    if trades_out is not None and not trades_out.empty and "notional" in trades_out.columns:
+        turnover = float(trades_out["notional"].sum())
+
     return {
         "date": run_date,
         "total_equity": total_equity,
         "cash": cash_new,
-        "num_trades": int(0 if trades is None else len(trades)),
-        "turnover_notional": float(0.0 if trades is None or trades.empty else trades["notional"].sum()),
+        "num_trades": int(executed_trades),
+        "turnover_notional": float(turnover),
         "benchmark": cfg.benchmark_ticker
-    }
+}
