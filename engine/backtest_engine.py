@@ -294,3 +294,70 @@ def _compute_stats(equity: np.ndarray, turnover: list[float], dates: pd.Datetime
         "n_rebalances": n_rebal,
         "n_days": n,
     }
+
+
+def infer_latest_entries(weights: pd.DataFrame) -> pd.DataFrame:
+    """
+    Infer the latest entry date for each ticker based on the most recent
+    non-zero weight streak.
+    """
+    if weights is None or weights.empty:
+        return pd.DataFrame(columns=["ticker", "entry_date", "entry_weight", "current_weight"])
+
+    w = weights.copy()
+    if not isinstance(w.index, pd.DatetimeIndex):
+        w.index = pd.to_datetime(w.index)
+
+    entries = []
+    for ticker in w.columns:
+        series = w[ticker].fillna(0.0)
+        nonzero = series.abs() > 1e-8
+        if not nonzero.any():
+            continue
+        last_pos = np.where(nonzero.values)[0][-1]
+        entry_pos = last_pos
+        while entry_pos > 0 and nonzero.iloc[entry_pos - 1]:
+            entry_pos -= 1
+        entries.append({
+            "ticker": ticker,
+            "entry_date": series.index[entry_pos],
+            "entry_weight": float(series.iloc[entry_pos]),
+            "current_weight": float(series.iloc[last_pos]),
+        })
+
+    return pd.DataFrame(entries)
+
+
+def attach_entry_prices(entries: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
+    """
+    Attach entry prices to an entry table using the closest available close
+    at or before the entry date.
+    """
+    if entries is None or entries.empty:
+        return pd.DataFrame(columns=["ticker", "entry_date", "entry_weight", "current_weight", "entry_price"])
+
+    out = entries.copy()
+    if prices is None or prices.empty:
+        out["entry_price"] = np.nan
+        return out
+
+    px = prices.copy()
+    if not isinstance(px.index, pd.DatetimeIndex):
+        px.index = pd.to_datetime(px.index)
+
+    entry_prices = []
+    for _, row in out.iterrows():
+        ticker = row["ticker"]
+        entry_date = pd.Timestamp(row["entry_date"])
+        price = np.nan
+        if ticker in px.columns:
+            if entry_date in px.index:
+                price = px.loc[entry_date, ticker]
+            else:
+                prior = px.loc[px.index <= entry_date, ticker]
+                if not prior.empty:
+                    price = prior.iloc[-1]
+        entry_prices.append(price)
+
+    out["entry_price"] = entry_prices
+    return out

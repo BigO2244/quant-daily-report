@@ -31,6 +31,7 @@ so on weekends the sleeve runs against Friday's bar and still contributes.
 Public interface
 ----------------
     run_backtest(period="1y", interval="1d") -> (equity_df, trades_df)
+    run_backtest_with_details(period="1y", interval="1d") -> dict
 
 equity_df has columns ["date", "equity"].
 trades_df has columns produced by the backtest engine.
@@ -45,8 +46,6 @@ import pandas as pd
 # ── project imports ───────────────────────────────────────────────
 from core.quant_report import (
     download_prices,
-    fetch_factor_data,
-    add_atr,
     load_universe_df,
 )
 
@@ -87,12 +86,42 @@ def run_backtest(
         equity_df : DataFrame with columns ["date", "equity"]
         trades_df : DataFrame with engine trade log columns
     """
+    result = _run_backtest_core(period=period, interval=interval)
+    return result["equity_df"], result["trades_df"]
+
+
+def run_backtest_with_details(
+    period: str = "1y",
+    interval: str = "1d",
+) -> dict:
+    """
+    Run the Sleeve 2 backtest and return additional details needed for
+    reporting (weights, prices, signals, asof date).
+    """
+    return _run_backtest_core(period=period, interval=interval)
+
+
+# =====================================================================
+# Core run implementation
+# =====================================================================
+
+def _run_backtest_core(
+    period: str = "1y",
+    interval: str = "1d",
+) -> dict:
+    """
+    Run the Sleeve 2 rolling-lookback forward-only backtest.
+
+    Returns dict with:
+        equity_df, trades_df, weights_df, holdings_df, prices_wide,
+        prices_long, signals, factor_df, target_weights, asof, calendar
+    """
     # ── 1. load universe ──────────────────────────────────────────
     universe_df = load_universe_df()
     tickers = sorted(universe_df["ticker"].unique().tolist())
     if not tickers:
         print("[SLEEVE2] empty universe — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     # Ensure cash proxy is in the download list (needed for parking)
     dl_tickers = sorted(set(tickers) | {CASH_PROXY_TICKER})
@@ -101,13 +130,13 @@ def run_backtest(
     prices_raw = download_prices(dl_tickers, period=period, interval=interval)
     if prices_raw is None or prices_raw.empty:
         print("[SLEEVE2] no price data — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     # wide format: DatetimeIndex × ticker columns
     prices_wide = _to_wide(prices_raw, dl_tickers)
     if prices_wide.empty:
         print("[SLEEVE2] prices_wide empty after pivot — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     # ── 3. asof_effective and calendar window ─────────────────────
     today_norm = pd.Timestamp(dt.date.today())
@@ -121,13 +150,13 @@ def run_backtest(
     calendar = prices_wide.index[cal_mask]
     if calendar.empty:
         print("[SLEEVE2] empty calendar window — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     # ── 4. valuation snapshot ─────────────────────────────────────
     val_snap = fetch_valuation_snapshot(tickers)
     if val_snap.empty:
         print("[SLEEVE2] valuation snapshot empty — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     # ── 5. build factor data & signals over entire price history ──
     #    signals.build_signals needs multi-date factor_df for the
@@ -135,12 +164,12 @@ def run_backtest(
     factor_df = _build_factor_df(prices_wide, val_snap, tickers)
     if factor_df.empty:
         print("[SLEEVE2] factor_df empty — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     signals = build_signals(factor_df)
     if signals.empty:
         print("[SLEEVE2] signals empty — returning flat equity")
-        return _flat_equity(), pd.DataFrame()
+        return _flat_result()
 
     signals["date"] = pd.to_datetime(signals["date"])
 
@@ -162,6 +191,8 @@ def run_backtest(
 
     equity_df = result["equity_curve"]
     trades_df = result["trades"]
+    weights_df = result["weights"]
+    holdings_df = result["holdings"]
 
     # ── 8. debug summary ──────────────────────────────────────────
     last_gross = target_w.iloc[-1].abs().sum()   # gross exposure (always ≥ 0)
@@ -176,7 +207,19 @@ def run_backtest(
         f"last_gross={last_gross:.6f} last_net={last_net:.6f}"
     )
 
-    return equity_df, trades_df
+    return {
+        "equity_df": equity_df,
+        "trades_df": trades_df,
+        "weights_df": weights_df,
+        "holdings_df": holdings_df,
+        "prices_wide": prices_wide,
+        "prices_long": prices_raw,
+        "signals": signals,
+        "factor_df": factor_df,
+        "target_weights": target_w,
+        "asof": asof,
+        "calendar": calendar,
+    }
 
 
 # =====================================================================
@@ -390,10 +433,23 @@ def _positions_to_weights(
 # Data preparation helpers
 # =====================================================================
 
-def _flat_equity() -> pd.DataFrame:
-    """Flat (no-trade) equity curve — signals 'inactive' to the allocator."""
+def _flat_result() -> dict:
+    """Flat (no-trade) result — signals 'inactive' to the allocator."""
     today = pd.Timestamp(dt.date.today())
-    return pd.DataFrame({"date": [today], "equity": [10_000.0]})
+    equity_df = pd.DataFrame({"date": [today], "equity": [10_000.0]})
+    return {
+        "equity_df": equity_df,
+        "trades_df": pd.DataFrame(),
+        "weights_df": pd.DataFrame(),
+        "holdings_df": pd.DataFrame(),
+        "prices_wide": pd.DataFrame(),
+        "prices_long": pd.DataFrame(),
+        "signals": pd.DataFrame(),
+        "factor_df": pd.DataFrame(),
+        "target_weights": pd.DataFrame(),
+        "asof": today,
+        "calendar": pd.DatetimeIndex([today]),
+    }
 
 
 def _to_wide(prices_raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
