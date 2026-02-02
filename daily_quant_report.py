@@ -1,6 +1,8 @@
 import os
 import datetime as dt
 import pandas as pd
+from paper.signals_io import write_signals_snapshot
+
 
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
@@ -387,6 +389,21 @@ def build_daily_snapshot(
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
+
+    # --- Paper trading signals snapshot (daily immutable file) ---
+    # Prefer a YYYY-MM-DD string you already use in the report.
+    # If you already have something like report_date_str / asof_date_str / today_str, use that here.
+    run_date_str = report_date.strftime("%Y-%m-%d")
+
+
+    signals_path = write_signals_snapshot(
+        df_targets=weights_df,
+        run_date=run_date_str,
+        out_dir="signals",
+        sleeve_col="sleeve"  # if column exists; otherwise writer will default to "core"
+    )
+    print(f"[PAPER] Wrote signals snapshot: {signals_path}")
+
 
     tickers = sorted(weights_df["ticker"].unique().tolist()) if not weights_df.empty else []
 
