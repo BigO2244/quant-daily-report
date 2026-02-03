@@ -62,6 +62,10 @@ from core.quant_report import (
     add_atr,
     create_trade_email,
 )
+from core.alpha_attribution import (
+    calc_alpha_stats,
+    load_benchmark_prices,
+)
 from engine.backtest_engine import infer_latest_entries, attach_entry_prices
 from sleeves.sleeve_2.config import (
     STOP_ATR_MULT,
@@ -98,6 +102,61 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
+def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
+    df = _safe_df(df)
+    if df.empty or "equity" not in df.columns:
+        return pd.Series(dtype=float)
+    series = pd.Series(df["equity"].values, index=pd.to_datetime(df["date"]) if "date" in df.columns else df.index)
+    return series.dropna().sort_index()
+def _load_equity_history(path: str) -> pd.Series:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return pd.Series(dtype=float)
+    df = pd.read_csv(path)
+    if df.empty or "date" not in df.columns or "equity" not in df.columns:
+        return pd.Series(dtype=float)
+    df["date"] = pd.to_datetime(df["date"])
+    return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+def _append_equity_history(path: str, report_date: pd.Timestamp, equity: float) -> pd.Series:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    report_date = pd.to_datetime(report_date).normalize()
+    rows = []
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        df = pd.read_csv(path)
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+            rows = df.to_dict(orient="records")
+            if (df["date"] == report_date).any():
+                return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+    rows.append({"date": report_date.strftime("%Y-%m-%d"), "equity": float(equity)})
+    out_df = pd.DataFrame(rows)
+    out_df.to_csv(path, index=False)
+    out_df["date"] = pd.to_datetime(out_df["date"])
+    return pd.Series(out_df["equity"].values, index=out_df["date"]).dropna().sort_index()
+def compute_portfolio_equity_series(
+    sleeve_equity_map: dict[str, pd.DataFrame],
+    sleeve_allocations: dict[str, float],
+    cash_weight: float,
+    base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
+) -> pd.Series:
+    returns_map = {}
+    for sleeve_name, alloc in sleeve_allocations.items():
+        if alloc <= WEIGHT_TOLERANCE:
+            continue
+        series = _equity_series_from_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
+        if series.empty:
+            continue
+        returns_map[sleeve_name] = series.pct_change(fill_method=None).dropna()
+    if not returns_map:
+        return pd.Series(dtype=float)
+    aligned = pd.concat(returns_map, axis=1, join="inner").dropna()
+    if aligned.empty:
+        return pd.Series(dtype=float)
+    weights = pd.Series({k: sleeve_allocations.get(k, 0.0) for k in aligned.columns})
+    portfolio_ret = aligned.mul(weights, axis=1).sum(axis=1)
+    portfolio_equity = base_equity * (1.0 + portfolio_ret).cumprod()
+    if cash_weight > WEIGHT_TOLERANCE:
+        portfolio_equity = portfolio_equity * (1.0 + 0.0)
+    return portfolio_equity
 def _compute_execution_price(price_map: dict, ticker: str) -> float | None:
     entry = price_map.get(ticker, {})
     return entry.get("next_open") or entry.get("last_close")
@@ -312,6 +371,45 @@ def compute_portfolio_equity(
         "day_return": day_return,
         "cumulative_return": portfolio_return,
     }
+
+
+def resolve_portfolio_equity_series(
+    sleeve_equity_map: dict[str, pd.DataFrame],
+    alloc_result: AllocationResult,
+    report_date: pd.Timestamp,
+    portfolio_equity: float,
+    offline_fixture: bool,
+    base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
+) -> pd.Series:
+    history_path = os.path.join(OUTPUT_DIR, "equity_history.csv")
+    history_series = _load_equity_history(history_path)
+    if not history_series.empty:
+        return history_series
+
+    ledger_path = os.path.join("paper", "ledger.csv")
+    if os.path.exists(ledger_path) and os.path.getsize(ledger_path) > 0:
+        ledger = pd.read_csv(ledger_path)
+        if not ledger.empty and "date" in ledger.columns and "total_equity" in ledger.columns:
+            ledger["date"] = pd.to_datetime(ledger["date"])
+            ledger = ledger.sort_values("date")
+            ledger_daily = ledger.groupby("date", as_index=True)["total_equity"].last()
+            ledger_series = ledger_daily.dropna().sort_index()
+            if not ledger_series.empty:
+                return ledger_series
+
+    derived = compute_portfolio_equity_series(
+        sleeve_equity_map=sleeve_equity_map,
+        sleeve_allocations=alloc_result.sleeve_allocations,
+        cash_weight=alloc_result.cash_weight,
+        base_equity=base_equity,
+    )
+    if not derived.empty:
+        return derived
+
+    if offline_fixture:
+        return pd.Series(dtype=float)
+
+    return _append_equity_history(history_path, report_date, portfolio_equity)
 # ============================================================
 # Daily snapshot builder
 # ============================================================
@@ -506,9 +604,15 @@ def build_daily_snapshot(
         "cash": alloc_result.cash_weight,
         "sleeves": alloc_result.sleeve_allocations,
     }
+    performance_summary = {
+        "current_equity": portfolio_stats.get("equity"),
+        "day_return": portfolio_stats.get("day_return"),
+        "cumulative_return": portfolio_stats.get("cumulative_return"),
+    }
     return {
         "asof": report_date,
         "allocations": allocations,
+        "performance_summary": performance_summary,
         "orders": orders,
         "risk_levels": risk_levels,
         "holdings": holdings,
@@ -523,6 +627,7 @@ def build_html_report(
     st_equity, st_trades,
     s2_equity, s2_trades,
     alloc_result: AllocationResult = None,
+    alpha_stats: dict | None = None,
 ) -> str:
     """
     Build HTML report with CORRECT portfolio math.
@@ -671,6 +776,56 @@ def build_html_report(
      .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }
      .muted { color:#6b7280; font-size:12px; }
    """
+    performance_rows = [
+        {"Metric": "Current Equity", "Value": _fmt_money(portfolio_stats["equity"])},
+        {"Metric": "Day Return", "Value": _fmt_pct(portfolio_stats["day_return"])},
+        {"Metric": "Cumulative Return", "Value": _fmt_pct(portfolio_stats["cumulative_return"])},
+    ]
+    performance_section = f'<div class="card">{html_table(pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10)}</div>'
+
+    def _fmt_float(value: float | None) -> str:
+        try:
+            return f"{float(value):.2f}"
+        except Exception:
+            return "n/a"
+
+    if alpha_stats and alpha_stats.get("n_days", 0) >= 20:
+        alpha_rows = [
+            {
+                "Metric": "Since inception",
+                "Value": "Port {port}, SPY {bench}, Excess {excess}".format(
+                    port=_fmt_pct(alpha_stats.get("port_cum_return")),
+                    bench=_fmt_pct(alpha_stats.get("bench_cum_return")),
+                    excess=_fmt_pct(alpha_stats.get("excess_cum_return")),
+                ),
+            },
+            {
+                "Metric": "Beta (63d), Alpha (ann., 63d)",
+                "Value": "{beta}, {alpha}".format(
+                    beta=_fmt_float(alpha_stats.get("beta_63d")),
+                    alpha=_fmt_pct(alpha_stats.get("alpha_ann_63d")),
+                ),
+            },
+            {
+                "Metric": "Tracking Error (ann.), Information Ratio",
+                "Value": "{te}, {ir}".format(
+                    te=_fmt_pct(alpha_stats.get("tracking_error_ann")),
+                    ir=_fmt_float(alpha_stats.get("info_ratio")),
+                ),
+            },
+            {
+                "Metric": "Max Drawdown: Port %, SPY %",
+                "Value": "Port {port}, SPY {bench}".format(
+                    port=_fmt_pct(alpha_stats.get("mdd_port")),
+                    bench=_fmt_pct(alpha_stats.get("mdd_bench")),
+                ),
+            },
+            {"Metric": "n_days used", "Value": str(alpha_stats.get("n_days", 0))},
+        ]
+        alpha_section = f'<div class="card">{html_table(pd.DataFrame(alpha_rows), "Alpha Attribution vs SPY", 10)}</div>'
+    else:
+        alpha_section = '<div class="card"><h3>Alpha Attribution vs SPY</h3><p><em>Alpha attribution unavailable (insufficient data or benchmark fetch failed).</em></p></div>'
+
     # Build sections
     alloc_section = f'<div class="card"><h3>Sleeve Allocation (Dynamic)</h3>{alloc_summary.to_html(index=False, border=0, classes="tbl", justify="left")}</div>' if alloc_summary is not None else ""
     holdings_section = f'<div class="card">{html_table(holdings, "Holdings Snapshot", 20)}</div>' if holdings is not None and not holdings.empty else ""
@@ -684,6 +839,8 @@ def build_html_report(
         <h2>Daily Quant Report</h2>
         <div class="muted">{report_date}</div>
         <div class="card">{html_table(summary_df, "Portfolio Snapshot")}</div>
+        {performance_section}
+        {alpha_section}
         {alloc_section}
         {holdings_section}
         <div class="card">
@@ -796,6 +953,25 @@ def main():
     # ── Build daily snapshot/email ────────────────────────────────
     report_date = s2_details.get("asof") if s2_details.get("asof") is not None else _asof_date_from_df(st_equity)
     report_date = report_date or pd.Timestamp(fixture_date if offline_fixture else dt.date.today())
+    portfolio_equity_series = resolve_portfolio_equity_series(
+        sleeve_equity_map=sleeve_equity_map,
+        alloc_result=alloc_result,
+        report_date=report_date,
+        portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+        offline_fixture=offline_fixture,
+        base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+    )
+    bench_prices = load_benchmark_prices(
+        ticker="SPY",
+        start=portfolio_equity_series.index.min() if not portfolio_equity_series.empty else None,
+        end=portfolio_equity_series.index.max() if not portfolio_equity_series.empty else None,
+        offline_fixture=offline_fixture,
+    )
+    alpha_stats = None
+    if portfolio_equity_series.empty or bench_prices.empty:
+        logger.warning("[WARN] Alpha attribution skipped (missing portfolio or benchmark history).")
+    else:
+        alpha_stats = calc_alpha_stats(portfolio_equity_series, bench_prices)
     try:
         daily_snapshot = build_daily_snapshot(
             report_date=report_date,
@@ -807,6 +983,7 @@ def main():
     except RuntimeError as e:
         logger.error("[ERROR] %s", e)
         sys.exit(0)
+    daily_snapshot["alpha_attribution"] = alpha_stats
     # --- Paper trading execution + report (real-world cadence) ---
     # Signals are generated "after close" for report_date.
     # Paper execution confirms trades for report_date using PRIOR business day's signals.
@@ -874,7 +1051,7 @@ def main():
         f.write(email_body)
     logger.info("[OK] Daily trade email written: %s", email_path)
     # ── Build report ──────────────────────────────────────────────
-    html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result)
+    html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result, alpha_stats)
     # Append paper trading HTML section (if available)
     if paper_html:
         html = html + "<hr/>" + paper_html
