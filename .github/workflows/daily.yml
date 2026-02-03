@@ -1,28 +1,17 @@
-name: Morning Quant Report (Sleeve 2)
+name: Daily Quant Report
 
 on:
+  workflow_dispatch: {}
   schedule:
-    # 10:00 UTC = 5:00 AM Eastern (Mon–Fri, standard time)
-    - cron: "0 10 * * 1-5"
-  workflow_dispatch:
+    # 9:30am ET = 14:30 UTC (Mon–Fri)
+    - cron: "30 14 * * 1-5"
 
 jobs:
   run-report:
     runs-on: ubuntu-latest
 
-    env:
-      ACCOUNT_EQUITY: ${{ secrets.ACCOUNT_EQUITY }}
-
-      # Map existing email secrets to SMTP vars expected by send_email()
-      SMTP_HOST: smtp.gmail.com
-      SMTP_PORT: "587"
-      SMTP_USER: ${{ secrets.EMAIL_SENDER }}
-      SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
-      REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
-
-
     steps:
-      - name: Check out repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -32,18 +21,29 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python3 -m pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Email secrets sanity check
+      - name: Run daily quant report (paper mode)
+        env:
+          PAPER_TRADING: "1"
+          DATE_FORMAT: "US"
+          DISPLAY_DECIMALS: "2"
+
+          # Disable SMTP in GitHub
+          SMTP_HOST: ""
+          SMTP_PORT: ""
+          SMTP_USER: ""
+          SMTP_PASSWORD: ""
+          REPORT_TO_EMAIL: ""
         run: |
-          python3 - <<'PY'
-          import os
-          keys = ["SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","REPORT_TO_EMAIL"]
-          for k in keys:
-              print(k, "SET" if os.environ.get(k) else "MISSING")
-          PY
+          python daily_quant_report.py
 
-      - name: Run daily quant report (Sleeve 1 + Sleeve 2)
-        run: |
-          python3 daily_quant_report.py
-
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-outputs
+          path: |
+            outputs/daily/**
+            signals/**
