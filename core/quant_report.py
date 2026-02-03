@@ -200,6 +200,12 @@ def _fmt_pct(value: Optional[float]) -> str:
     except Exception:
         return "n/a"
 
+def _fmt_float(value: Optional[float]) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except Exception:
+        return "n/a"
+
 
 def _format_table(headers: List[str], rows: List[List[str]]) -> str:
     if not rows:
@@ -319,6 +325,46 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     lines.append(f"   - Difference: {_fmt_money(recon.get('difference'))}")
     if recon.get("note"):
         lines.append(f"   - Note: {recon.get('note')}")
+
+    lines.append("")
+    lines.append("6) Performance Summary (Portfolio)")
+    perf = snapshot.get("performance_summary", {})
+    lines.append(f"   - Current Equity: {_fmt_money(perf.get('current_equity'))}")
+    lines.append(f"   - Day Return: {_fmt_pct(perf.get('day_return'))}")
+    lines.append(f"   - Cumulative Return: {_fmt_pct(perf.get('cumulative_return'))}")
+
+    lines.append("")
+    lines.append("7) Alpha Attribution vs SPY")
+    alpha = snapshot.get("alpha_attribution")
+    if not alpha or alpha.get("n_days", 0) < 20:
+        lines.append("   - Alpha attribution unavailable (insufficient data or benchmark fetch failed).")
+    else:
+        lines.append(
+            "   - Since inception: Port {port}, SPY {bench}, Excess {excess}".format(
+                port=_fmt_pct(alpha.get("port_cum_return")),
+                bench=_fmt_pct(alpha.get("bench_cum_return")),
+                excess=_fmt_pct(alpha.get("excess_cum_return")),
+            )
+        )
+        lines.append(
+            "   - Beta (63d): {beta}, Alpha (ann., 63d): {alpha}".format(
+                beta=_fmt_float(alpha.get("beta_63d")),
+                alpha=_fmt_pct(alpha.get("alpha_ann_63d")),
+            )
+        )
+        lines.append(
+            "   - Tracking Error (ann.): {te}, Information Ratio: {ir}".format(
+                te=_fmt_pct(alpha.get("tracking_error_ann")),
+                ir=_fmt_float(alpha.get("info_ratio")),
+            )
+        )
+        lines.append(
+            "   - Max Drawdown: Port {port}, SPY {bench}".format(
+                port=_fmt_pct(alpha.get("mdd_port")),
+                bench=_fmt_pct(alpha.get("mdd_bench")),
+            )
+        )
+        lines.append(f"   - n_days used: {alpha.get('n_days', 0)}")
 
     return subject, "\n".join(lines)
 
