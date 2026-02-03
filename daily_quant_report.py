@@ -108,7 +108,21 @@ def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
         return pd.Series(dtype=float)
     series = pd.Series(df["equity"].values, index=pd.to_datetime(df["date"]) if "date" in df.columns else df.index)
     return series.dropna().sort_index()
+def _series_date_range(series: pd.Series) -> str:
+    series = pd.Series(series).dropna()
+    if series.empty:
+        return "empty"
+    idx = pd.to_datetime(series.index)
+    return f"{idx.min().date()} -> {idx.max().date()}"
 def _load_equity_history(path: str) -> pd.Series:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return pd.Series(dtype=float)
+    df = pd.read_csv(path)
+    if df.empty or "date" not in df.columns or "equity" not in df.columns:
+        return pd.Series(dtype=float)
+    df["date"] = pd.to_datetime(df["date"])
+    return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+def _load_portfolio_fixture(path: str) -> pd.Series:
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return pd.Series(dtype=float)
     df = pd.read_csv(path)
@@ -867,6 +881,9 @@ def main():
     fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     today = fixture_date if offline_fixture else dt.date.today().strftime("%Y-%m-%d")
+    portfolio_fixture = _load_portfolio_fixture("tests/fixtures/portfolio_equity.csv") if offline_fixture else pd.Series(dtype=float)
+    if offline_fixture and not portfolio_fixture.empty:
+        today = portfolio_fixture.index.max().strftime("%Y-%m-%d")
     # ── Run sleeves ───────────────────────────────────────────────
     if offline_fixture:
         logger.warning("[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches.")
@@ -953,6 +970,29 @@ def main():
     # ── Build daily snapshot/email ────────────────────────────────
     report_date = s2_details.get("asof") if s2_details.get("asof") is not None else _asof_date_from_df(st_equity)
     report_date = report_date or pd.Timestamp(fixture_date if offline_fixture else dt.date.today())
+    if offline_fixture and not portfolio_fixture.empty:
+        portfolio_equity_series = portfolio_fixture
+        report_date = portfolio_fixture.index.max()
+    else:
+        portfolio_equity_series = resolve_portfolio_equity_series(
+            sleeve_equity_map=sleeve_equity_map,
+            alloc_result=alloc_result,
+            report_date=report_date,
+            portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+            offline_fixture=offline_fixture,
+            base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+        )
+    if offline_fixture and not portfolio_fixture.empty:
+        portfolio_equity_for_alpha = portfolio_fixture
+    else:
+        portfolio_equity_for_alpha = resolve_portfolio_equity_series(
+            sleeve_equity_map=sleeve_equity_map,
+            alloc_result=alloc_result,
+            report_date=report_date,
+            portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+            offline_fixture=offline_fixture,
+            base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+        )
     portfolio_equity_series = resolve_portfolio_equity_series(
         sleeve_equity_map=sleeve_equity_map,
         alloc_result=alloc_result,
@@ -961,17 +1001,24 @@ def main():
         offline_fixture=offline_fixture,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
-    bench_prices = load_benchmark_prices(
+    bench_prices_for_alpha = load_benchmark_prices(
         ticker="SPY",
-        start=portfolio_equity_series.index.min() if not portfolio_equity_series.empty else None,
-        end=portfolio_equity_series.index.max() if not portfolio_equity_series.empty else None,
+        start=portfolio_equity_for_alpha.index.min() if not portfolio_equity_for_alpha.empty else None,
+        end=portfolio_equity_for_alpha.index.max() if not portfolio_equity_for_alpha.empty else None,
         offline_fixture=offline_fixture,
     )
     alpha_stats = None
-    if portfolio_equity_series.empty or bench_prices.empty:
+    logger.info(
+        "[ALPHA] Data readiness - portfolio_equity_for_alpha: %s rows (%s), bench_prices_for_alpha: %s rows (%s)",
+        len(portfolio_equity_for_alpha),
+        _series_date_range(portfolio_equity_for_alpha),
+        len(bench_prices_for_alpha),
+        _series_date_range(bench_prices_for_alpha),
+    )
+    if portfolio_equity_for_alpha.empty or bench_prices_for_alpha.empty:
         logger.warning("[WARN] Alpha attribution skipped (missing portfolio or benchmark history).")
     else:
-        alpha_stats = calc_alpha_stats(portfolio_equity_series, bench_prices)
+        alpha_stats = calc_alpha_stats(portfolio_equity_for_alpha, bench_prices_for_alpha, window=63)
     try:
         daily_snapshot = build_daily_snapshot(
             report_date=report_date,
