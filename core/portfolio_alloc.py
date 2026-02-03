@@ -14,6 +14,7 @@ Allocation Logic:
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
+import os
 from typing import Optional
 import pandas as pd
 
@@ -25,6 +26,9 @@ DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 0.80, "sleeve_2": 0.20}
 DEFAULT_MAX_POSITION_PCT = 0.10
 DEFAULT_MAX_SLEEVE_EXPOSURE = 1.00
 DEFAULT_MAX_TURNOVER = 0.50
+DEFAULT_MIN_GROSS_EXPOSURE = float(os.getenv("MIN_GROSS_EXPOSURE", "0.90"))
+DEFAULT_CASH_LAST_RESORT = os.getenv("CASH_LAST_RESORT", "true").lower() in ("1", "true", "yes", "y")
+CASH_LAST_RESORT_REASON = "Unallocated capital"
 CASH_TICKER = "CASH"
 WEIGHT_TOLERANCE = 1e-8
 
@@ -122,11 +126,17 @@ class PortfolioAllocator:
         max_position_pct: float = DEFAULT_MAX_POSITION_PCT,
         max_sleeve_exposure: float = DEFAULT_MAX_SLEEVE_EXPOSURE,
         max_turnover: Optional[float] = None,
+        min_gross_exposure: float = DEFAULT_MIN_GROSS_EXPOSURE,
+        cash_last_resort: bool = DEFAULT_CASH_LAST_RESORT,
+        risk_off: bool = False,
     ):
         self.base_equity = base_equity
         self.max_position_pct = max_position_pct
         self.max_sleeve_exposure = max_sleeve_exposure
         self.max_turnover = max_turnover
+        self.min_gross_exposure = max(0.0, min(1.0, float(min_gross_exposure)))
+        self.cash_last_resort = bool(cash_last_resort)
+        self.risk_off = bool(risk_off)
         self._skipped_trades: list[dict] = []
         self._exit_log: list[dict] = []
     
@@ -145,7 +155,8 @@ class PortfolioAllocator:
         
         if previous_weights is not None and self.max_turnover is not None:
             combined = self._apply_turnover_constraints(combined, previous_weights)
-        
+
+        combined = self._boost_to_min_gross_exposure(combined)
         combined = self._add_cash_allocation(combined)
         
         total = combined["target_weight"].sum()
@@ -237,15 +248,16 @@ class PortfolioAllocator:
 
         for i, row in enumerate(df.itertuples(index=False)):
             orig = float(getattr(row, "target_weight"))
-            if orig > self.max_position_pct:
-                excess = orig - self.max_position_pct
-                df.iat[i, weight_col_idx] = self.max_position_pct  # type: ignore
+            if abs(orig) > self.max_position_pct:
+                capped = self.max_position_pct if orig > 0 else -self.max_position_pct
+                excess = abs(orig) - self.max_position_pct
+                df.iat[i, weight_col_idx] = capped  # type: ignore
         
                 self._skipped_trades.append({
                     "ticker": getattr(row, "ticker"),
                     "action": "WEIGHT_CAPPED",
                     "original_weight": orig,
-                    "capped_weight": self.max_position_pct,
+                    "capped_weight": capped,
                     "excess": excess,
                     "reason": f"Max position {self.max_position_pct:.1%} exceeded",
                 })
@@ -307,11 +319,60 @@ class PortfolioAllocator:
                 "ticker": CASH_TICKER,
                 "target_weight": cash_weight,
                 "sleeve_name": "CASH",
-                "reason": "Unallocated capital",
+                "reason": CASH_LAST_RESORT_REASON,
                 "signal_strength": 0.0,
             }])
             combined = pd.concat([combined, cash_row], ignore_index=True)
         return combined
+
+    def _boost_to_min_gross_exposure(self, combined: pd.DataFrame) -> pd.DataFrame:
+        """Scale weights up to meet minimum gross exposure if possible."""
+        if combined.empty or not self.cash_last_resort or self.risk_off:
+            return combined
+
+        df = combined.copy()
+        gross = float(df["target_weight"].abs().sum())
+        if gross <= WEIGHT_TOLERANCE or gross >= self.min_gross_exposure - WEIGHT_TOLERANCE:
+            return df
+
+        if self.min_gross_exposure <= 0:
+            return df
+
+        abs_weights = df["target_weight"].abs()
+        headroom = (self.max_position_pct - abs_weights).clip(lower=0.0)
+        total_headroom = float(headroom.sum())
+        if total_headroom <= WEIGHT_TOLERANCE:
+            return df
+
+        needed = min(self.min_gross_exposure - gross, total_headroom)
+        if needed <= WEIGHT_TOLERANCE:
+            return df
+
+        additions = headroom / total_headroom * needed
+        new_abs = abs_weights + additions
+        signs = df["target_weight"].apply(lambda x: 1.0 if x >= 0 else -1.0)
+        df["target_weight"] = new_abs * signs
+        return df
+
+    def _derive_sleeve_allocations(
+        self,
+        sleeve_outputs: list[SleeveOutput],
+        combined: pd.DataFrame,
+    ) -> dict[str, float]:
+        """Derive sleeve allocations from combined weights for reporting."""
+        allocations = {s.meta.sleeve_name: 0.0 for s in sleeve_outputs}
+        if combined.empty:
+            return allocations
+
+        for _, row in combined.iterrows():
+            sleeve_names = str(row.get("sleeve_name", "")).split(",")
+            sleeve_names = [name.strip() for name in sleeve_names if name.strip() and name.strip().upper() != "CASH"]
+            if not sleeve_names:
+                continue
+            share = float(row.get("target_weight", 0.0)) / len(sleeve_names)
+            for name in sleeve_names:
+                allocations[name] = allocations.get(name, 0.0) + share
+        return allocations
 
 
 # =============================================================================
@@ -394,12 +455,12 @@ def allocation_summary_df(result: AllocationResult) -> pd.DataFrame:
         rows.append({
             "Sleeve": sleeve_name,
             "Active": "Yes" if alloc_pct > 0 else "No",
-            "Allocated %": f"{alloc_pct:.1%}",
+            "Allocated %": f"{alloc_pct:.2%}",
         })
     rows.append({
         "Sleeve": "CASH",
         "Active": "Yes" if result.cash_weight > WEIGHT_TOLERANCE else "No",
-        "Allocated %": f"{result.cash_weight:.1%}",
+        "Allocated %": f"{result.cash_weight:.2%}",
     })
     return pd.DataFrame(rows)
 
