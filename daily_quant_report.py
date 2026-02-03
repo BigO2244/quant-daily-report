@@ -1,5 +1,8 @@
-import os
 import datetime as dt
+import logging
+import os
+import sys
+
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day
@@ -68,6 +71,8 @@ from sleeves.sleeve_2.config import (
     LONG_THRESHOLD as S2_LONG_THRESHOLD,
     Z_EXTREME_SHORT,
 )
+
+logger = logging.getLogger(__name__)
 # ============================================================
 # Output config
 # ============================================================
@@ -163,28 +168,28 @@ def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
 # Sleeve runners
 # ============================================================
 def run_sleeve_1():
-    print("[SLEEVE 1] Preparing data...")
+    logger.info("[SLEEVE 1] Preparing data...")
     signals = s1_prepare_data()
-    print("[SLEEVE 1] Running backtest...")
+    logger.info("[SLEEVE 1] Running backtest...")
     return s1_backtest(signals)
 def run_sleeve_trend():
-    print("[SLEEVE TREND] Preparing data...")
+    logger.info("[SLEEVE TREND] Preparing data...")
     signals = st_prepare_data()
-    print("[SLEEVE TREND] Running backtest...")
+    logger.info("[SLEEVE TREND] Running backtest...")
     equity_df, trades_df = st_backtest(signals)
     return equity_df, trades_df, signals
 def run_sleeve_2():
     if s2_run_backtest_details is not None:
-        print("[SLEEVE 2] Running run_backtest_with_details()...")
+        logger.info("[SLEEVE 2] Running run_backtest_with_details()...")
         return s2_run_backtest_details(period="1y", interval="1d")
     if s2_run_backtest is not None:
-        print("[SLEEVE 2] Running run_backtest()...")
+        logger.info("[SLEEVE 2] Running run_backtest()...")
         equity_df, trades_df = s2_run_backtest(period="1y", interval="1d")
         return {"equity_df": equity_df, "trades_df": trades_df}
     if s2_prepare_data is not None and s2_backtest is not None:
-        print("[SLEEVE 2] Preparing data...")
+        logger.info("[SLEEVE 2] Preparing data...")
         signals = s2_prepare_data()
-        print("[SLEEVE 2] Running backtest...")
+        logger.info("[SLEEVE 2] Running backtest...")
         equity_df, trades_df = s2_backtest(signals)
         return {"equity_df": equity_df, "trades_df": trades_df}
     raise RuntimeError("No valid Sleeve 2 runner found")
@@ -320,21 +325,28 @@ def build_daily_snapshot(
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
-    # --- Paper trading signals snapshot (daily immutable file) ---
-    # Prefer a YYYY-MM-DD string you already use in the report.
-    # If you already have something like report_date_str / asof_date_str / today_str, use that here.
-    run_date_str = report_date.strftime("%Y-%m-%d")
-    signals_path = write_signals_snapshot(
-        df_targets=weights_df,
-        run_date=run_date_str,
-        out_dir="signals",
-        sleeve_col="sleeve"  # if column exists; otherwise writer will default to "core"
-    )
-    print(f"[PAPER] Wrote signals snapshot: {signals_path}")
     tickers = sorted(weights_df["ticker"].unique().tolist()) if not weights_df.empty else []
     prices = pd.DataFrame()
     if tickers:
         prices = download_prices(tickers, period="6mo", interval="1d")
+        if prices.empty or prices[["open", "high", "low", "close"]].isna().all().all():
+            logger.error("Downloaded price data is empty or all-NaN; aborting snapshot generation.")
+            raise RuntimeError("Downloaded price data is empty or all-NaN; aborting snapshot generation.")
+    # --- Paper trading signals snapshot (daily immutable file) ---
+    # Prefer a YYYY-MM-DD string you already use in the report.
+    # If you already have something like report_date_str / asof_date_str / today_str, use that here.
+    signals_path = None
+    if weights_df.empty:
+        logger.warning("[PAPER] No target weights available; skipping signals snapshot.")
+    else:
+        run_date_str = report_date.strftime("%Y-%m-%d")
+        signals_path = write_signals_snapshot(
+            df_targets=weights_df,
+            run_date=run_date_str,
+            out_dir="signals",
+            sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
+        )
+        logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
     price_map = _build_price_map(prices, report_date)
     atr_map = _build_atr_map(prices, report_date)
     entry_map = {}
@@ -693,36 +705,46 @@ def build_html_report(
 # Main
 # ============================================================
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    offline_fixture = os.getenv("OFFLINE_FIXTURE", "").lower() in {"1", "true", "yes"}
+    fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    today = dt.date.today().strftime("%Y-%m-%d")
+    today = fixture_date if offline_fixture else dt.date.today().strftime("%Y-%m-%d")
     # ── Run sleeves ───────────────────────────────────────────────
-    try:
-        s1_equity, s1_trades = run_sleeve_1()
-    except Exception as e:
-        print(f"[WARN] Sleeve 1 failed: {e}")
+    if offline_fixture:
+        logger.warning("[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches.")
         s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
-    try:
-        st_equity, st_trades, st_signals = run_sleeve_trend()
-    except Exception as e:
-        print(f"[WARN] Sleeve Trend failed: {e}")
         st_equity, st_trades, st_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    try:
-        s2_details = run_sleeve_2()
-        s2_equity = s2_details.get("equity_df", pd.DataFrame())
-        s2_trades = s2_details.get("trades_df", pd.DataFrame())
-    except Exception as e:
-        print(f"[WARN] Sleeve 2 failed: {e}")
         s2_details = {}
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
+    else:
+        try:
+            s1_equity, s1_trades = run_sleeve_1()
+        except Exception as e:
+            logger.warning("[WARN] Sleeve 1 failed: %s", e)
+            s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
+        try:
+            st_equity, st_trades, st_signals = run_sleeve_trend()
+        except Exception as e:
+            logger.warning("[WARN] Sleeve Trend failed: %s", e)
+            st_equity, st_trades, st_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        try:
+            s2_details = run_sleeve_2()
+            s2_equity = s2_details.get("equity_df", pd.DataFrame())
+            s2_trades = s2_details.get("trades_df", pd.DataFrame())
+        except Exception as e:
+            logger.warning("[WARN] Sleeve 2 failed: %s", e)
+            s2_details = {}
+            s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
     # ── Sleeve health checks ─────────────────────────────────────
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
     trend_valid, trend_reason = _sleeve_is_valid(st_equity)
     s2_valid, s2_reason = _sleeve_is_valid(s2_equity)
     if not trend_valid:
-        print(f"sleeve_trend inactive: {trend_reason} -> routed to CASH")
+        logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
     if not s2_valid:
-        print(f"sleeve_2 inactive: {s2_reason} -> routed to CASH")
+        logger.warning("sleeve_2 inactive: %s -> routed to CASH", s2_reason)
     # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
@@ -749,17 +771,17 @@ def main():
             sum(alloc_result.sleeve_allocations.values())
             + alloc_result.cash_weight
         )
-        print(f"[ALLOCATION] Freed {freed_weight:.1%} from inactive sleeve(s) -> CASH")
+        logger.info("[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH", freed_weight * 100)
     # ── Validate allocation ───────────────────────────────────────
     errors = validate_allocation_result(alloc_result)
     if errors:
-        print(f"[WARN] Allocation validation errors: {errors}")
+        logger.warning("[WARN] Allocation validation errors: %s", errors)
     # ── Log allocation summary ────────────────────────────────────
-    print(f"\n[ALLOCATION] Sleeve allocations:")
+    logger.info("\n[ALLOCATION] Sleeve allocations:")
     for sleeve, pct in alloc_result.sleeve_allocations.items():
-        print(f"  {sleeve}: {pct:.1%}")
-    print(f"  CASH: {alloc_result.cash_weight:.1%}")
-    print(f"  Total weight: {alloc_result.total_weight:.4f}")
+        logger.info("  %s: %.1f%%", sleeve, pct * 100)
+    logger.info("  CASH: %.1f%%", alloc_result.cash_weight * 100)
+    logger.info("  Total weight: %.4f", alloc_result.total_weight)
     # ── Portfolio stats for model equity ─────────────────────────
     sleeve_equity_map = {
         "sleeve_trend": st_equity,
@@ -773,14 +795,18 @@ def main():
     )
     # ── Build daily snapshot/email ────────────────────────────────
     report_date = s2_details.get("asof") if s2_details.get("asof") is not None else _asof_date_from_df(st_equity)
-    report_date = report_date or pd.Timestamp(dt.date.today())
-    daily_snapshot = build_daily_snapshot(
-        report_date=report_date,
-        alloc_result=alloc_result,
-        portfolio_stats=portfolio_stats,
-        st_signals=st_signals,
-        s2_details=s2_details,
-    )
+    report_date = report_date or pd.Timestamp(fixture_date if offline_fixture else dt.date.today())
+    try:
+        daily_snapshot = build_daily_snapshot(
+            report_date=report_date,
+            alloc_result=alloc_result,
+            portfolio_stats=portfolio_stats,
+            st_signals=st_signals,
+            s2_details=s2_details,
+        )
+    except RuntimeError as e:
+        logger.error("[ERROR] %s", e)
+        sys.exit(0)
     # --- Paper trading execution + report (real-world cadence) ---
     # Signals are generated "after close" for report_date.
     # Paper execution confirms trades for report_date using PRIOR business day's signals.
@@ -791,7 +817,7 @@ def main():
     # Bootstrap: if we don't have prior-day signals yet, use same-day signals (DEV ONLY)
     signals_path_exec = signals_prev if os.path.exists(signals_prev) else signals_today
     if signals_path_exec == signals_today:
-        print(f"[PAPER][BOOTSTRAP] Using same-day signals for execution: {signals_path_exec}")
+        logger.info("[PAPER][BOOTSTRAP] Using same-day signals for execution: %s", signals_path_exec)
     paper_summary = None
     paper_html = ""
     if os.path.exists(signals_path_exec):
@@ -804,14 +830,21 @@ def main():
                 config_path="paper/config_paper.json",
                 force=False,
             )
-            print(f"[PAPER] Executed paper trading for {trade_date_str} using signals {signals_path_exec}")
+            logger.info(
+                "[PAPER] Executed paper trading for %s using signals %s",
+                trade_date_str,
+                signals_path_exec,
+            )
         except Exception as e:
             msg = repr(e)
             # If already executed, don't fail the email — just render from ledger/trades
             if "Ledger already contains run_date" in msg:
-                print(f"[PAPER] Already executed for {trade_date_str}; rendering report from ledger.")
+                logger.info(
+                    "[PAPER] Already executed for %s; rendering report from ledger.",
+                    trade_date_str,
+                )
             else:
-                print(f"[PAPER][WARN] Paper execution failed: {msg}")
+                logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
         # Always attempt to render the paper section if ledger/trades exist
         try:
             paper_html = build_paper_report_html(
@@ -821,9 +854,9 @@ def main():
                 benchmark_ticker="SPY",
             )
         except Exception as e:
-            print(f"[PAPER][WARN] Paper report HTML build failed: {repr(e)}")
+            logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
     else:
-        print(f"[PAPER][WARN] Missing signals for execution: {signals_path_exec}")
+        logger.warning("[PAPER][WARN] Missing signals for execution: %s", signals_path_exec)
     # ── Build daily snapshot/email ────────────────────────────────
     subject, email_body = create_trade_email(daily_snapshot)
     # Append paper trading summary to plain-text email (if available)
@@ -839,7 +872,7 @@ def main():
     email_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
     with open(email_path, "w", encoding="utf-8") as f:
         f.write(email_body)
-    print(f"[OK] Daily trade email written: {email_path}")
+    logger.info("[OK] Daily trade email written: %s", email_path)
     # ── Build report ──────────────────────────────────────────────
     html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result)
     # Append paper trading HTML section (if available)
@@ -848,16 +881,16 @@ def main():
     out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"[OK] HTML report written: {out_path}")
-    print("\n[EMAIL PREVIEW]\n")
-    print(email_body)
+    logger.info("[OK] HTML report written: %s", out_path)
+    logger.info("\n[EMAIL PREVIEW]\n")
+    logger.info("%s", email_body)
     if send_email:
         try:
             send_email(subject=subject, body_html=html, body_text=email_body)
-            print("[OK] Email sent")
+            logger.info("[OK] Email sent")
         except Exception as e:
-            print(f"[WARN] Email not sent: {e}")
+            logger.warning("[WARN] Email not sent: %s", e)
     else:
-        print("[WARN] send_email not found — HTML generated only")
+        logger.warning("[WARN] send_email not found — HTML generated only")
 if __name__ == "__main__":
     main()

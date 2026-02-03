@@ -13,9 +13,14 @@ Allocation Logic:
 4. Final output: combined weights + CASH row, sum = 1.00
 """
 from __future__ import annotations
+
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
+
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # CONFIGURATION
@@ -150,7 +155,7 @@ class PortfolioAllocator:
         
         total = combined["target_weight"].sum()
         if abs(total - 1.0) > WEIGHT_TOLERANCE:
-            print(f"[WARN] Portfolio weights sum to {total:.6f}, expected 1.0")
+            logger.warning("[WARN] Portfolio weights sum to %s, expected 1.0", f"{total:.6f}")
         
         return AllocationResult(
             combined_weights=combined,
@@ -233,7 +238,6 @@ class PortfolioAllocator:
 
         # Use integer-position assignment to avoid Pylance/pandas index typing issues
         weight_col_idx = df.columns.get_loc("target_weight")  # type: ignore
-        ticker_col_idx = df.columns.get_loc("ticker")  # type: ignore
 
         for i, row in enumerate(df.itertuples(index=False)):
             orig = float(getattr(row, "target_weight"))
@@ -272,7 +276,6 @@ class PortfolioAllocator:
 
             # Integer column positions for .iat assignments
             weight_col_idx = df.columns.get_loc("target_weight")  # type: ignore
-            prev_col_idx = df.columns.get_loc("prev_weight")  # type: ignore
             ticker_col_idx = df.columns.get_loc("ticker")  # type: ignore
 
             for i, row in enumerate(df.itertuples(index=False)):
@@ -479,6 +482,7 @@ def test_allocation_scenarios() -> dict[str, bool]:
 
 
 if __name__ == "__main__":
-    print("Running allocation acceptance tests...")
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logger.info("Running allocation acceptance tests...")
     for scenario, passed in test_allocation_scenarios().items():
-        print(f"  {'✓ PASS' if passed else '✗ FAIL'}: {scenario}")
+        logger.info("  %s: %s", "✓ PASS" if passed else "✗ FAIL", scenario)

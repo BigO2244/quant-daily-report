@@ -1,3 +1,4 @@
+import logging
 import os
 import smtplib
 import tempfile
@@ -9,6 +10,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 IN_CI = os.getenv("CI", "").lower() == "true" or bool(os.getenv("GITHUB_ACTIONS"))
 
@@ -137,9 +140,9 @@ def download_prices(tickers: List[str], period: str = "1y", interval: str = "1d"
         raise RuntimeError("No price data downloaded. Check data/universe.csv and yfinance availability.")
 
     if failed:
-        print(f"⚠️ Skipped {len(failed)} tickers with no/invalid price data:")
+        logger.warning("⚠️ Skipped %s tickers with no/invalid price data:", len(failed))
         failed_unique = sorted(set(failed))
-        print(failed_unique[:50], "..." if len(failed_unique) > 50 else "")
+        logger.warning("%s %s", failed_unique[:50], "..." if len(failed_unique) > 50 else "")
 
     prices = pd.concat(data, ignore_index=True)
     prices["date"] = pd.to_datetime(prices["date"])
@@ -348,7 +351,7 @@ def send_email(subject: str, body_html: Optional[str] = None, body_text: Optiona
         server.starttls()
         server.login(user, password)
         refused = server.sendmail(user, [to_addr], msg.as_string())
-        print(f"[EMAIL DEBUG] refused={refused}")
+        logger.info("[EMAIL DEBUG] refused=%s", refused)
         if refused:
             raise RuntimeError(f"SMTP refused recipients: {refused}")
-        print("[OK] Email accepted by SMTP server")
+        logger.info("[OK] Email accepted by SMTP server")
