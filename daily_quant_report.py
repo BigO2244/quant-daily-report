@@ -976,6 +976,14 @@ def main():
             offline_fixture=offline_fixture,
             base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
         )
+    portfolio_equity_series = resolve_portfolio_equity_series(
+        sleeve_equity_map=sleeve_equity_map,
+        alloc_result=alloc_result,
+        report_date=report_date,
+        portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+        offline_fixture=offline_fixture,
+        base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+    )
     bench_prices = load_benchmark_prices(
         ticker="SPY",
         start=portfolio_equity_series.index.min() if not portfolio_equity_series.empty else None,
