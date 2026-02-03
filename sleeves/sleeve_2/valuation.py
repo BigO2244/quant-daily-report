@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 import pandas as pd
+
 
 def _cache_path() -> Path:
     Path("data/cache").mkdir(parents=True, exist_ok=True)
     return Path("data/cache/valuation_snapshot.csv")
 
-def fetch_valuation_snapshot(tickers: list[str], force_refresh: bool = False, sleep_s: float = 0.2) -> pd.DataFrame:
+
+def fetch_valuation_snapshot(
+    tickers: list[str], force_refresh: bool = False, sleep_s: float = 0.2
+) -> pd.DataFrame:
     """
     Fetch a snapshot of valuation metadata for tickers:
       - industry
@@ -24,7 +27,9 @@ def fetch_valuation_snapshot(tickers: list[str], force_refresh: bool = False, sl
     if cache.exists() and not force_refresh:
         try:
             df = pd.read_csv(cache)
-            if set(["ticker", "industry", "forward_pe", "trailing_pe"]).issubset(df.columns):
+            if set(["ticker", "industry", "forward_pe", "trailing_pe"]).issubset(
+                df.columns
+            ):
                 df["ticker"] = df["ticker"].astype(str).str.upper()
                 # Return only requested tickers if present
                 return df[df["ticker"].isin(tickers)].copy()
@@ -38,17 +43,23 @@ def fetch_valuation_snapshot(tickers: list[str], force_refresh: bool = False, sl
     for t in tickers:
         try:
             info = yf.Ticker(t).info or {}
-            industry = info.get("industry") or info.get("sector")  # fallback to sector if industry missing
+            industry = info.get("industry") or info.get(
+                "sector"
+            )  # fallback to sector if industry missing
             fpe = info.get("forwardPE")
             tpe = info.get("trailingPE")
-            rows.append({
-                "ticker": t,
-                "industry": industry,
-                "forward_pe": fpe,
-                "trailing_pe": tpe,
-            })
+            rows.append(
+                {
+                    "ticker": t,
+                    "industry": industry,
+                    "forward_pe": fpe,
+                    "trailing_pe": tpe,
+                }
+            )
         except Exception:
-            rows.append({"ticker": t, "industry": None, "forward_pe": None, "trailing_pe": None})
+            rows.append(
+                {"ticker": t, "industry": None, "forward_pe": None, "trailing_pe": None}
+            )
         time.sleep(sleep_s)
 
     out = pd.DataFrame(rows)

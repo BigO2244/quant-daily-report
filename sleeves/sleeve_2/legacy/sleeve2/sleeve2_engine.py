@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-
 # ===== Column definitions (data contract) =====
 TICKER_COL = "ticker"
 BUCKET_COL = "sector"  # Sleeve 2 uses sector as the "bucket"
@@ -33,10 +32,10 @@ TOP_LONGS = 3
 MAX_PER_BUCKET = 1  # at most 1 name per sector in V1
 
 # P/E stress rules (accelerates exits / forces Treasury)
-PE_Z_STRESS = 2.0         # "significant deviations" threshold
-MOM_LOOKBACK = 20         # momentum lookback (trading days)
-MOM_MIN = 0.00            # require non-negative momentum unless deeply cheap
-CHEAP_Z = -1.0            # allow negative mom if very cheap
+PE_Z_STRESS = 2.0  # "significant deviations" threshold
+MOM_LOOKBACK = 20  # momentum lookback (trading days)
+MOM_MIN = 0.00  # require non-negative momentum unless deeply cheap
+CHEAP_Z = -1.0  # allow negative mom if very cheap
 
 # Robustness for CI (GitHub Actions)
 IN_CI = os.getenv("CI", "").lower() == "true" or bool(os.getenv("GITHUB_ACTIONS"))
@@ -60,9 +59,13 @@ def load_universe(path: str = UNIVERSE_PATH) -> pd.DataFrame:
     df = pd.read_csv(path)
 
     if TICKER_COL not in df.columns:
-        raise AssertionError(f"Universe missing '{TICKER_COL}' column. Found: {list(df.columns)}")
+        raise AssertionError(
+            f"Universe missing '{TICKER_COL}' column. Found: {list(df.columns)}"
+        )
     if BUCKET_COL not in df.columns:
-        raise AssertionError(f"Universe missing '{BUCKET_COL}' column. Found: {list(df.columns)}")
+        raise AssertionError(
+            f"Universe missing '{BUCKET_COL}' column. Found: {list(df.columns)}"
+        )
 
     df[TICKER_COL] = df[TICKER_COL].astype(str).str.upper().str.strip()
     df[BUCKET_COL] = df[BUCKET_COL].astype(str).str.strip()

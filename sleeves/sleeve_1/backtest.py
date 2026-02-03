@@ -9,18 +9,16 @@ print("Backtest Version Check: 2025-12-14-Debug-2")
 
 assert __name__.startswith("sleeves.sleeve_1"), "Invalid import context for Sleeve 1"
 
-import os
-import pandas as pd
-import numpy as np
+import os  # noqa: E402
+import pandas as pd  # noqa: E402
 
-from core.quant_report import (
+from core.quant_report import (  # noqa: E402
     TICKERS,
     download_prices,
     fetch_factor_data,
     build_factor_scores,
     compute_full_signals,
     add_atr,
-    MAX_RISK_PCT_PER_TRADE,
 )
 
 # ===== Backtest configuration =====
@@ -62,7 +60,16 @@ VOL_BUCKET_RULES = {
 
 
 class Position:
-    def __init__(self, ticker, direction, shares, entry_price, entry_date, entry_atr=None, entry_signal=None):
+    def __init__(
+        self,
+        ticker,
+        direction,
+        shares,
+        entry_price,
+        entry_date,
+        entry_atr=None,
+        entry_signal=None,
+    ):
         self.ticker = ticker
         self.direction = direction
         self.shares = shares
@@ -90,7 +97,12 @@ def prepare_data():
         s = s.sort_values(["ticker", "date"])
         s["ret20"] = s.groupby("ticker")["close"].pct_change(20)
         s["ret60"] = s.groupby("ticker")["close"].pct_change(60)
-        s["vol20"] = s.groupby("ticker")["volume"].rolling(20).mean().reset_index(level=0, drop=True)
+        s["vol20"] = (
+            s.groupby("ticker")["volume"]
+            .rolling(20)
+            .mean()
+            .reset_index(level=0, drop=True)
+        )
 
         def rank(x):
             return x.rank(pct=True) * 100
@@ -139,19 +151,23 @@ def backtest(signals_atr: pd.DataFrame):
                 px = price_table.loc[(current_date, tkr), "close"]
                 pnl = pos.shares * (px - pos.entry_price) - 2 * TRADE_COST
                 equity += pnl
-                trades.append(dict(
-                    ticker=tkr,
-                    direction=1,
-                    entry_date=pos.entry_date,
-                    exit_date=current_date,
-                    entry_price=pos.entry_price,
-                    exit_price=px,
-                    pnl=pnl,
-                    hold_days=pos.hold_days,
-                ))
+                trades.append(
+                    dict(
+                        ticker=tkr,
+                        direction=1,
+                        entry_date=pos.entry_date,
+                        exit_date=current_date,
+                        entry_price=pos.entry_price,
+                        exit_price=px,
+                        pnl=pnl,
+                        hold_days=pos.hold_days,
+                    )
+                )
                 positions.pop(tkr)
 
-        today = signals_atr[signals_atr["date"] == current_date].sort_values("final_signal", ascending=False)
+        today = signals_atr[signals_atr["date"] == current_date].sort_values(
+            "final_signal", ascending=False
+        )
         for _, row in today.iterrows():
             if len(positions) >= TOP_LONGS:
                 break
@@ -163,12 +179,15 @@ def backtest(signals_atr: pd.DataFrame):
             px = row["open"]
             shares = int((equity * MAX_POSITION_PCT) / px)
             if shares > 0:
-                positions[row["ticker"]] = Position(row["ticker"], 1, shares, px, current_date)
+                positions[row["ticker"]] = Position(
+                    row["ticker"], 1, shares, px, current_date
+                )
                 equity -= TRADE_COST
 
         equity_curve.append({"date": current_date, "equity": equity})
 
     return pd.DataFrame(equity_curve), pd.DataFrame(trades)
+
 
 def build_daily_sleeve_output(
     equity_df: pd.DataFrame,
@@ -190,7 +209,15 @@ def build_daily_sleeve_output(
 
     if trades_df is None or trades_df.empty:
         return df[
-            ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
+            [
+                "date",
+                "sleeve",
+                "equity",
+                "daily_return",
+                "gross_exposure",
+                "net_exposure",
+                "num_positions",
+            ]
         ]
 
     # Build daily position exposure from trades
@@ -222,39 +249,15 @@ def build_daily_sleeve_output(
     df["num_positions"] = (df["gross"] > 0).astype(int)
 
     return df[
-        ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
-    ]
-
-def build_daily_sleeve_output(equity_df, trades_df, sleeve_name):
-    df = equity_df.copy()
-    df["sleeve"] = sleeve_name
-    df["daily_return"] = df["equity"].pct_change().fillna(0.0)
-
-    if trades_df.empty:
-        df["gross_exposure"] = 0.0
-        df["net_exposure"] = 0.0
-        df["num_positions"] = 0
-        return df
-
-    pos_days = []
-    for _, t in trades_df.iterrows():
-        for d in pd.date_range(t["entry_date"], t["exit_date"]):
-            pos_days.append(dict(
-                date=d,
-                notional=t["shares"] * t["entry_price"],
-                signed=t["shares"] * t["entry_price"],
-            ))
-
-    pos_df = pd.DataFrame(pos_days)
-    expo = pos_df.groupby("date").sum().reset_index()
-
-    df = df.merge(expo, on="date", how="left").fillna(0.0)
-    df["gross_exposure"] = df["notional"] / df["equity"]
-    df["net_exposure"] = df["signed"] / df["equity"]
-    df["num_positions"] = df["gross_exposure"].gt(0).astype(int)
-
-    return df[
-        ["date", "sleeve", "equity", "daily_return", "gross_exposure", "net_exposure", "num_positions"]
+        [
+            "date",
+            "sleeve",
+            "equity",
+            "daily_return",
+            "gross_exposure",
+            "net_exposure",
+            "num_positions",
+        ]
     ]
 
 

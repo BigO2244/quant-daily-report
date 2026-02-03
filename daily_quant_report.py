@@ -8,6 +8,7 @@ from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day
 from paper.paper_report import build_paper_report_html
 from paper.trading_calendar import prev_trading_day
+
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
 # ============================================================
@@ -15,6 +16,7 @@ from sleeves.sleeve_1.backtest import (
     prepare_data as s1_prepare_data,
     backtest as s1_backtest,
 )
+
 # ============================================================
 # Sleeve Trend — structured access
 # ============================================================
@@ -23,6 +25,7 @@ from sleeves.sleeve_trend.backtest import (
     backtest as st_backtest,
 )
 from sleeves.sleeve_trend import config as trend_cfg
+
 # ============================================================
 # Sleeve 2 — import module once; resolve symbols dynamically
 # ============================================================
@@ -31,21 +34,22 @@ try:
 except Exception:
     s2_mod = None
 s2_run_backtest = getattr(s2_mod, "run_backtest", None) if s2_mod else None
-s2_run_backtest_details = getattr(s2_mod, "run_backtest_with_details", None) if s2_mod else None
+s2_run_backtest_details = (
+    getattr(s2_mod, "run_backtest_with_details", None) if s2_mod else None
+)
 s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
 s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
 # ============================================================
 # Email sender (exact repo-aware lookup)
 # ============================================================
-send_email = None
 try:
     from core.quant_report import send_email
 except Exception:
-    pass
+    send_email = None
 # ============================================================
 # Portfolio allocation (dynamic)
 # ============================================================
-from core.portfolio_alloc import (
+from core.portfolio_alloc import (  # noqa: E402
     PortfolioAllocator,
     SleeveOutput,
     AllocationResult,
@@ -57,17 +61,20 @@ from core.portfolio_alloc import (
     DEFAULT_PORTFOLIO_BASE_EQUITY,
     WEIGHT_TOLERANCE,
 )
-from core.quant_report import (
+from core.quant_report import (  # noqa: E402
     download_prices,
     add_atr,
     create_trade_email,
 )
-from core.alpha_attribution import (
+from core.alpha_attribution import (  # noqa: E402
     calc_alpha_stats,
     load_benchmark_prices,
 )
-from engine.backtest_engine import infer_latest_entries, attach_entry_prices
-from sleeves.sleeve_2.config import (
+from engine.backtest_engine import (  # noqa: E402
+    infer_latest_entries,
+    attach_entry_prices,
+)
+from sleeves.sleeve_2.config import (  # noqa: E402
     STOP_ATR_MULT,
     TAKE_PROFIT_ATR_MULT,
     STOP_PCT,
@@ -84,11 +91,14 @@ OUTPUT_DIR = "outputs/daily"
 DATE_FORMAT = os.getenv("DATE_FORMAT", "US")
 DISPLAY_DECIMALS = int(os.getenv("DISPLAY_DECIMALS", "2"))
 
+
 # ============================================================
 # Helpers
 # ============================================================
 def _safe_df(df):
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+
 def _fmt_money(x):
     if isinstance(x, str) and x.strip().startswith("$"):
         return x
@@ -96,6 +106,8 @@ def _fmt_money(x):
         return f"${float(x):,.2f}"
     except Exception:
         return "n/a"
+
+
 def _fmt_pct(x):
     if isinstance(x, str) and "%" in x:
         return x
@@ -122,24 +134,35 @@ def _fmt_date(value) -> str:
         return dt_value.strftime("%Y-%m-%d")
     except Exception:
         return "n/a"
+
+
 def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if df is None or df.empty:
         return None
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
+
+
 def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
     df = _safe_df(df)
     if df.empty or "equity" not in df.columns:
         return pd.Series(dtype=float)
-    series = pd.Series(df["equity"].values, index=pd.to_datetime(df["date"]) if "date" in df.columns else df.index)
+    series = pd.Series(
+        df["equity"].values,
+        index=pd.to_datetime(df["date"]) if "date" in df.columns else df.index,
+    )
     return series.dropna().sort_index()
+
+
 def _series_date_range(series: pd.Series) -> str:
     series = pd.Series(series).dropna()
     if series.empty:
         return "empty"
     idx = pd.to_datetime(series.index)
     return f"{idx.min().date()} -> {idx.max().date()}"
+
+
 def _load_equity_history(path: str) -> pd.Series:
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return pd.Series(dtype=float)
@@ -148,6 +171,8 @@ def _load_equity_history(path: str) -> pd.Series:
         return pd.Series(dtype=float)
     df["date"] = pd.to_datetime(df["date"])
     return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+
+
 def _load_portfolio_fixture(path: str) -> pd.Series:
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return pd.Series(dtype=float)
@@ -156,7 +181,11 @@ def _load_portfolio_fixture(path: str) -> pd.Series:
         return pd.Series(dtype=float)
     df["date"] = pd.to_datetime(df["date"])
     return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
-def _append_equity_history(path: str, report_date: pd.Timestamp, equity: float) -> pd.Series:
+
+
+def _append_equity_history(
+    path: str, report_date: pd.Timestamp, equity: float
+) -> pd.Series:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     report_date = pd.to_datetime(report_date).normalize()
     rows = []
@@ -166,12 +195,20 @@ def _append_equity_history(path: str, report_date: pd.Timestamp, equity: float) 
             df["date"] = pd.to_datetime(df["date"]).dt.normalize()
             rows = df.to_dict(orient="records")
             if (df["date"] == report_date).any():
-                return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+                return (
+                    pd.Series(df["equity"].values, index=df["date"])
+                    .dropna()
+                    .sort_index()
+                )
     rows.append({"date": report_date.strftime("%Y-%m-%d"), "equity": float(equity)})
     out_df = pd.DataFrame(rows)
     out_df.to_csv(path, index=False)
     out_df["date"] = pd.to_datetime(out_df["date"])
-    return pd.Series(out_df["equity"].values, index=out_df["date"]).dropna().sort_index()
+    return (
+        pd.Series(out_df["equity"].values, index=out_df["date"]).dropna().sort_index()
+    )
+
+
 def compute_portfolio_equity_series(
     sleeve_equity_map: dict[str, pd.DataFrame],
     sleeve_allocations: dict[str, float],
@@ -182,7 +219,9 @@ def compute_portfolio_equity_series(
     for sleeve_name, alloc in sleeve_allocations.items():
         if alloc <= WEIGHT_TOLERANCE:
             continue
-        series = _equity_series_from_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
+        series = _equity_series_from_df(
+            sleeve_equity_map.get(sleeve_name, pd.DataFrame())
+        )
         if series.empty:
             continue
         returns_map[sleeve_name] = series.pct_change(fill_method=None).dropna()
@@ -197,9 +236,13 @@ def compute_portfolio_equity_series(
     if cash_weight > WEIGHT_TOLERANCE:
         portfolio_equity = portfolio_equity * (1.0 + 0.0)
     return portfolio_equity
+
+
 def _compute_execution_price(price_map: dict, ticker: str) -> float | None:
     entry = price_map.get(ticker, {})
     return entry.get("next_open") or entry.get("last_close")
+
+
 def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     price_map = {}
     if prices.empty:
@@ -217,6 +260,8 @@ def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
             "next_open": float(next_open) if next_open is not None else None,
         }
     return price_map
+
+
 def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     if prices.empty:
         return {}
@@ -228,9 +273,10 @@ def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
         if past.empty:
             atr_map[ticker] = None
         else:
-            atr_map[ticker] = float(past["atr"].iloc[-1]) if pd.notna(past["atr"].iloc[-1]) else None
+            atr_map[ticker] = (
+                float(past["atr"].iloc[-1]) if pd.notna(past["atr"].iloc[-1]) else None
+            )
     return atr_map
-def html_table(df: pd.DataFrame, title: str, max_rows: int = 25) -> str:
 
 
 def _format_df_for_email(df: pd.DataFrame) -> pd.DataFrame:
@@ -241,30 +287,63 @@ def _format_df_for_email(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].apply(_fmt_pct)
         elif "date" in col_lower:
             df[col] = df[col].apply(_fmt_date)
-        elif any(key in col_lower for key in ["p&l", "pnl", "equity", "notional", "allocated", "price", "value", "capital", "cash", "difference", "model", "broker", "amount"]):
+        elif any(
+            key in col_lower
+            for key in [
+                "p&l",
+                "pnl",
+                "equity",
+                "notional",
+                "allocated",
+                "price",
+                "value",
+                "capital",
+                "cash",
+                "difference",
+                "model",
+                "broker",
+                "amount",
+            ]
+        ):
             df[col] = df[col].apply(_fmt_money)
-        elif any(key in col_lower for key in ["return", "weight", "delta", "change", "gross", "net"]):
+        elif any(
+            key in col_lower
+            for key in ["return", "weight", "delta", "change", "gross", "net"]
+        ):
             df[col] = df[col].apply(_fmt_pct)
         elif "shares" in col_lower:
             df[col] = df[col].apply(_fmt_number)
     return df
 
 
-def html_table(df: pd.DataFrame, title: str, max_rows: int = 25, empty_message: str = "No data") -> str:
+def html_table(
+    df: pd.DataFrame, title: str, max_rows: int = 25, empty_message: str = "No data"
+) -> str:
     df = _safe_df(df).copy()
     df = df.where(pd.notnull(df), "—")
     if df.empty:
         return f"<h3>{title}</h3><p><em>{empty_message}</em></p>"
     df = _format_df_for_email(df)
-    return f"<h3>{title}</h3>" + df.head(max_rows).to_html(index=False, border=0, classes="tbl", justify="left")
+    return f"<h3>{title}</h3>" + df.head(max_rows).to_html(
+        index=False, border=0, classes="tbl", justify="left"
+    )
+
+
 def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
     """Remove SGOV 'cash_proxy_fund_entries' rows from trades."""
     trades = _safe_df(trades).copy()
     if trades.empty:
         return trades
     if "ticker" in trades.columns and "reason_exit" in trades.columns:
-        trades = trades[~((trades["ticker"] == "SGOV") & (trades["reason_exit"] == "cash_proxy_fund_entries"))].copy()
+        trades = trades[
+            ~(
+                (trades["ticker"] == "SGOV")
+                & (trades["reason_exit"] == "cash_proxy_fund_entries")
+            )
+        ].copy()
     return trades
+
+
 # ============================================================
 # Sleeve health check
 # ============================================================
@@ -284,6 +363,8 @@ def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
     if pd.isna(last_eq) or last_eq <= 0:
         return False, f"invalid terminal equity ({last_eq})"
     return True, ""
+
+
 # ============================================================
 # Sleeve runners
 # ============================================================
@@ -292,12 +373,16 @@ def run_sleeve_1():
     signals = s1_prepare_data()
     logger.info("[SLEEVE 1] Running backtest...")
     return s1_backtest(signals)
+
+
 def run_sleeve_trend():
     logger.info("[SLEEVE TREND] Preparing data...")
     signals = st_prepare_data()
     logger.info("[SLEEVE TREND] Running backtest...")
     equity_df, trades_df = st_backtest(signals)
     return equity_df, trades_df, signals
+
+
 def run_sleeve_2():
     if s2_run_backtest_details is not None:
         logger.info("[SLEEVE 2] Running run_backtest_with_details()...")
@@ -313,6 +398,8 @@ def run_sleeve_2():
         equity_df, trades_df = s2_backtest(signals)
         return {"equity_df": equity_df, "trades_df": trades_df}
     raise RuntimeError("No valid Sleeve 2 runner found")
+
+
 # ============================================================
 # Sleeve output extraction (for dynamic allocation)
 # ============================================================
@@ -332,15 +419,27 @@ def extract_sleeve_output(
     positions = []
     if equity_df.empty:
         return create_sleeve_output([], sleeve_name, 0.0, "No equity data")
-    latest_equity = float(equity_df["equity"].iloc[-1]) if "equity" in equity_df.columns else 10000.0
-    start_equity = float(equity_df["equity"].iloc[0]) if "equity" in equity_df.columns else 10000.0
+    latest_equity = (
+        float(equity_df["equity"].iloc[-1])
+        if "equity" in equity_df.columns
+        else 10000.0
+    )
+    start_equity = (
+        float(equity_df["equity"].iloc[0]) if "equity" in equity_df.columns else 10000.0
+    )
     if not trades_df.empty and "ticker" in trades_df.columns:
         real_trades = trades_df.copy()
         if "reason_exit" in real_trades.columns:
-            real_trades = real_trades[~((real_trades.get("ticker", "") == "SGOV") &
-                                        (real_trades.get("reason_exit", "") == "cash_proxy_fund_entries"))].copy()
+            real_trades = real_trades[
+                ~(
+                    (real_trades.get("ticker", "") == "SGOV")
+                    & (real_trades.get("reason_exit", "") == "cash_proxy_fund_entries")
+                )
+            ].copy()
         if not real_trades.empty and "entry_date" in real_trades.columns:
-            real_trades["entry_date"] = pd.to_datetime(real_trades["entry_date"], errors="coerce")
+            real_trades["entry_date"] = pd.to_datetime(
+                real_trades["entry_date"], errors="coerce"
+            )
             latest_trades = real_trades.nlargest(5, "entry_date")
             for _, row in latest_trades.iterrows():
                 ticker = row.get("ticker", "")
@@ -349,42 +448,56 @@ def extract_sleeve_output(
                 if ticker and shares > 0 and entry_price > 0:
                     notional = shares * entry_price
                     weight = notional / latest_equity if latest_equity > 0 else 0
-                    positions.append({
-                        "ticker": ticker,
-                        "target_weight": weight,
-                        "reason": row.get("reason_exit", "signal"),
-                        "signal_strength": 1.0,
-                    })
+                    positions.append(
+                        {
+                            "ticker": ticker,
+                            "target_weight": weight,
+                            "reason": row.get("reason_exit", "signal"),
+                            "signal_strength": 1.0,
+                        }
+                    )
         # Also handle engine-style trades (which have "date" + "weight_to" instead
         # of "entry_date" + "shares").  This allows Sleeve 2 engine trades to
         # register as active positions for allocation purposes.
-        if not real_trades.empty and "weight_to" in real_trades.columns and not positions:
+        if (
+            not real_trades.empty
+            and "weight_to" in real_trades.columns
+            and not positions
+        ):
             real_trades_sorted = real_trades.copy()
             if "date" in real_trades_sorted.columns:
-                real_trades_sorted["date"] = pd.to_datetime(real_trades_sorted["date"], errors="coerce")
-                real_trades_sorted = real_trades_sorted.sort_values("date", ascending=False)
+                real_trades_sorted["date"] = pd.to_datetime(
+                    real_trades_sorted["date"], errors="coerce"
+                )
+                real_trades_sorted = real_trades_sorted.sort_values(
+                    "date", ascending=False
+                )
             latest_engine_trades = real_trades_sorted.head(5)
             for _, row in latest_engine_trades.iterrows():
                 ticker = row.get("ticker", "")
                 w = abs(row.get("weight_to", 0.0))
                 if ticker and w > 1e-6:
-                    positions.append({
-                        "ticker": ticker,
-                        "target_weight": w,
-                        "reason": "engine_signal",
-                        "signal_strength": 1.0,
-                    })
+                    positions.append(
+                        {
+                            "ticker": ticker,
+                            "target_weight": w,
+                            "reason": "engine_signal",
+                            "signal_strength": 1.0,
+                        }
+                    )
 
     if not positions and target_weights is not None and not target_weights.empty:
         target_last = target_weights.iloc[-1]
         for ticker, weight in target_last.items():
             if abs(weight) > WEIGHT_TOLERANCE:
-                positions.append({
-                    "ticker": ticker,
-                    "target_weight": float(weight),
-                    "reason": "target_weights",
-                    "signal_strength": 1.0,
-                })
+                positions.append(
+                    {
+                        "ticker": ticker,
+                        "target_weight": float(weight),
+                        "reason": "target_weights",
+                        "signal_strength": 1.0,
+                    }
+                )
 
     is_active = len(positions) > 0
     if is_active and start_equity > 0:
@@ -392,8 +505,14 @@ def extract_sleeve_output(
         strength = min(1.0, base_strength * max(0.5, min(1.5, 1.0 + sleeve_return)))
     else:
         strength = 0.0
-    notes = f"Active: {len(positions)} positions, equity ${latest_equity:,.0f}" if is_active else "Inactive"
+    notes = (
+        f"Active: {len(positions)} positions, equity ${latest_equity:,.0f}"
+        if is_active
+        else "Inactive"
+    )
     return create_sleeve_output(positions, sleeve_name, strength, notes)
+
+
 # ============================================================
 # Portfolio equity computation (FIXED)
 # ============================================================
@@ -454,6 +573,11 @@ def resolve_portfolio_equity_series(
     portfolio_equity: float,
     offline_fixture: bool,
     base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
+    portfolio_stats: dict | None = None,
+    st_equity: pd.DataFrame | None = None,
+    s2_equity: pd.DataFrame | None = None,
+    st_signals: pd.DataFrame | None = None,
+    s2_details: dict | None = None,
 ) -> pd.Series:
     history_path = os.path.join(OUTPUT_DIR, "equity_history.csv")
     history_series = _load_equity_history(history_path)
@@ -463,7 +587,11 @@ def resolve_portfolio_equity_series(
     ledger_path = os.path.join("paper", "ledger.csv")
     if os.path.exists(ledger_path) and os.path.getsize(ledger_path) > 0:
         ledger = pd.read_csv(ledger_path)
-        if not ledger.empty and "date" in ledger.columns and "total_equity" in ledger.columns:
+        if (
+            not ledger.empty
+            and "date" in ledger.columns
+            and "total_equity" in ledger.columns
+        ):
             ledger["date"] = pd.to_datetime(ledger["date"])
             ledger = ledger.sort_values("date")
             ledger_daily = ledger.groupby("date", as_index=True)["total_equity"].last()
@@ -484,7 +612,9 @@ def resolve_portfolio_equity_series(
         return pd.Series(dtype=float)
 
     return _append_equity_history(history_path, report_date, portfolio_equity)
-def compute_portfolio_equity_series(
+
+
+def compute_portfolio_equity_df(
     sleeve_equity_map: dict[str, pd.DataFrame],
     sleeve_allocations: dict[str, float],
     base_equity: float,
@@ -504,7 +634,9 @@ def compute_portfolio_equity_series(
         if start <= 0:
             continue
         df["return"] = (df["equity"] / start) - 1.0
-        series.append(df[["date", "return"]].rename(columns={"return": f"{sleeve_name}_return"}))
+        series.append(
+            df[["date", "return"]].rename(columns={"return": f"{sleeve_name}_return"})
+        )
 
     if not series:
         return pd.DataFrame(columns=["date", "portfolio_equity"])
@@ -534,7 +666,7 @@ def compute_performance_summary(
     sleeve_allocations: dict[str, float],
     base_equity: float,
 ) -> dict:
-    series = compute_portfolio_equity_series(
+    series = compute_portfolio_equity_df(
         sleeve_equity_map=sleeve_equity_map,
         sleeve_allocations=sleeve_allocations,
         base_equity=base_equity,
@@ -569,7 +701,9 @@ def compute_performance_summary(
     ytd_equity = _equity_asof(year_start)
 
     return {
-        "total_return": (asof_equity / inception_equity) - 1.0 if inception_equity > 0 else None,
+        "total_return": (
+            (asof_equity / inception_equity) - 1.0 if inception_equity > 0 else None
+        ),
         "wtd": (asof_equity / wtd_equity) - 1.0 if wtd_equity > 0 else None,
         "mtd": (asof_equity / mtd_equity) - 1.0 if mtd_equity > 0 else None,
         "ytd": (asof_equity / ytd_equity) - 1.0 if ytd_equity > 0 else None,
@@ -602,12 +736,20 @@ def build_proposed_trades(
             continue
 
         action = "HOLD"
-        if abs(current_weight) <= WEIGHT_TOLERANCE and abs(target_weight) > WEIGHT_TOLERANCE:
+        if (
+            abs(current_weight) <= WEIGHT_TOLERANCE
+            and abs(target_weight) > WEIGHT_TOLERANCE
+        ):
             action = "BUY" if target_weight > 0 else "SELL"
-        elif abs(target_weight) <= WEIGHT_TOLERANCE and abs(current_weight) > WEIGHT_TOLERANCE:
+        elif (
+            abs(target_weight) <= WEIGHT_TOLERANCE
+            and abs(current_weight) > WEIGHT_TOLERANCE
+        ):
             action = "SELL"
         elif current_weight * target_weight >= 0:
-            action = "INCREASE" if abs(target_weight) > abs(current_weight) else "DECREASE"
+            action = (
+                "INCREASE" if abs(target_weight) > abs(current_weight) else "DECREASE"
+            )
         else:
             action = "SELL"
 
@@ -618,21 +760,25 @@ def build_proposed_trades(
             notional = abs(delta_weight) * model_equity
             shares = round(notional / exec_px, 2) if exec_px > 0 else None
 
-        proposed.append({
-            "ticker": ticker,
-            "action": action,
-            "sleeve": row.get("sleeve_name", ""),
-            "current_weight": current_weight,
-            "target_weight": target_weight,
-            "delta_weight": delta_weight,
-            "est_shares": shares,
-            "est_notional": notional,
-        })
+        proposed.append(
+            {
+                "ticker": ticker,
+                "action": action,
+                "sleeve": row.get("sleeve_name", ""),
+                "current_weight": current_weight,
+                "target_weight": target_weight,
+                "delta_weight": delta_weight,
+                "est_shares": shares,
+                "est_notional": notional,
+            }
+        )
 
     return proposed
 
 
-def derive_actual_sleeve_allocations(alloc_result: AllocationResult) -> dict[str, float]:
+def derive_actual_sleeve_allocations(
+    alloc_result: AllocationResult,
+) -> dict[str, float]:
     allocations = {name: 0.0 for name in alloc_result.sleeve_allocations.keys()}
     weights_df = _safe_df(alloc_result.combined_weights)
     if weights_df.empty:
@@ -665,19 +811,27 @@ def build_daily_snapshot(
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
-    tickers = sorted(weights_df["ticker"].unique().tolist()) if not weights_df.empty else []
+    tickers = (
+        sorted(weights_df["ticker"].unique().tolist()) if not weights_df.empty else []
+    )
     prices = pd.DataFrame()
     if tickers:
         prices = download_prices(tickers, period="6mo", interval="1d")
         if prices.empty or prices[["open", "high", "low", "close"]].isna().all().all():
-            logger.error("Downloaded price data is empty or all-NaN; aborting snapshot generation.")
-            raise RuntimeError("Downloaded price data is empty or all-NaN; aborting snapshot generation.")
+            logger.error(
+                "Downloaded price data is empty or all-NaN; aborting snapshot generation."
+            )
+            raise RuntimeError(
+                "Downloaded price data is empty or all-NaN; aborting snapshot generation."
+            )
     # --- Paper trading signals snapshot (daily immutable file) ---
     # Prefer a YYYY-MM-DD string you already use in the report.
     # If you already have something like report_date_str / asof_date_str / today_str, use that here.
     signals_path = None
     if weights_df.empty:
-        logger.warning("[PAPER] No target weights available; skipping signals snapshot.")
+        logger.warning(
+            "[PAPER] No target weights available; skipping signals snapshot."
+        )
     else:
         run_date_str = report_date.strftime("%Y-%m-%d")
         signals_path = write_signals_snapshot(
@@ -690,7 +844,11 @@ def build_daily_snapshot(
     price_map = _build_price_map(prices, report_date)
     atr_map = _build_atr_map(prices, report_date)
     entry_map = {}
-    if s2_details and s2_details.get("weights_df") is not None and not s2_details.get("weights_df").empty:
+    if (
+        s2_details
+        and s2_details.get("weights_df") is not None
+        and not s2_details.get("weights_df").empty
+    ):
         weights_history = s2_details.get("weights_df")
         prices_wide = s2_details.get("prices_wide")
         entries = infer_latest_entries(weights_history)
@@ -711,10 +869,20 @@ def build_daily_snapshot(
         price_info = price_map.get(ticker, {})
         last_px = price_info.get("last_close")
         entry_info = entry_map.get(ticker)
-        entry_date = entry_info.get("entry_date") if entry_info else report_date.strftime("%Y-%m-%d")
+        entry_date = (
+            entry_info.get("entry_date")
+            if entry_info
+            else report_date.strftime("%Y-%m-%d")
+        )
 
-        entry_date = entry_info.get("entry_date") if entry_info else _fmt_date(report_date)
-        entry_px = entry_info.get("entry_price") if entry_info and entry_info.get("entry_price") else last_px
+        entry_date = (
+            entry_info.get("entry_date") if entry_info else _fmt_date(report_date)
+        )
+        entry_px = (
+            entry_info.get("entry_price")
+            if entry_info and entry_info.get("entry_price")
+            else last_px
+        )
         if last_px is None or entry_px is None:
             pnl_dollars = None
             pnl_pct = None
@@ -726,20 +894,28 @@ def build_daily_snapshot(
             else:
                 pnl_dollars = shares * (entry_px - last_px)
                 pnl_pct = (entry_px / last_px) - 1.0 if last_px > 0 else None
-        days_held = (report_date - pd.to_datetime(entry_date)).days if entry_date else None
+        days_held = (
+            (report_date - pd.to_datetime(entry_date)).days if entry_date else None
+        )
 
-        days_held = (report_date - pd.to_datetime(entry_date)).days if entry_date and entry_date != "n/a" else None
+        days_held = (
+            (report_date - pd.to_datetime(entry_date)).days
+            if entry_date and entry_date != "n/a"
+            else None
+        )
 
-        holdings.append({
-            "ticker": ticker,
-            "direction": direction,
-            "entry_date": entry_date,
-            "entry_price": entry_px,
-            "last_price": last_px,
-            "pnl_dollars": pnl_dollars,
-            "pnl_pct": pnl_pct,
-            "days_held": days_held,
-        })
+        holdings.append(
+            {
+                "ticker": ticker,
+                "direction": direction,
+                "entry_date": entry_date,
+                "entry_price": entry_px,
+                "last_price": last_px,
+                "pnl_dollars": pnl_dollars,
+                "pnl_pct": pnl_pct,
+                "days_held": days_held,
+            }
+        )
         atr = atr_map.get(ticker)
         if entry_px is None:
             stop_loss = None
@@ -758,20 +934,28 @@ def build_daily_snapshot(
             else:
                 stop_loss = entry_px * (1 + STOP_PCT)
                 take_profit = entry_px * (1 - TAKE_PROFIT_PCT)
-        risk_levels.append({
-            "ticker": ticker,
-            "entry_price": entry_px,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-        })
+        risk_levels.append(
+            {
+                "ticker": ticker,
+                "entry_price": entry_px,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+            }
+        )
     # Trades for today
     prev_weights = {}
-    if s2_details and s2_details.get("weights_df") is not None and not s2_details.get("weights_df").empty:
+    if (
+        s2_details
+        and s2_details.get("weights_df") is not None
+        and not s2_details.get("weights_df").empty
+    ):
         hist = s2_details.get("weights_df")
         if len(hist) > 1:
             prev_row = hist.iloc[-2]
             prev_weights = prev_row.to_dict()
-    new_weights = {row["ticker"]: float(row["target_weight"]) for _, row in weights_df.iterrows()}
+    new_weights = {
+        row["ticker"]: float(row["target_weight"]) for _, row in weights_df.iterrows()
+    }
     all_tickers = sorted(set(prev_weights.keys()) | set(new_weights.keys()))
     orders = []
     for ticker in all_tickers:
@@ -781,6 +965,7 @@ def build_daily_snapshot(
         new_w = float(new_weights.get(ticker, 0.0))
         if abs(prev_w) <= WEIGHT_TOLERANCE and abs(new_w) <= WEIGHT_TOLERANCE:
             continue
+
         def _append_order(action, weight):
             exec_px = _compute_execution_price(price_map, ticker)
             shares = None
@@ -788,14 +973,17 @@ def build_daily_snapshot(
             if exec_px and model_equity > 0:
                 notional = abs(weight) * model_equity
                 shares = round(notional / exec_px, 2) if exec_px > 0 else None
-            orders.append({
-                "action": action,
-                "ticker": ticker,
-                "target_weight": weight,
-                "execution_price": exec_px,
-                "shares": shares,
-                "notional": notional,
-            })
+            orders.append(
+                {
+                    "action": action,
+                    "ticker": ticker,
+                    "target_weight": weight,
+                    "execution_price": exec_px,
+                    "shares": shares,
+                    "notional": notional,
+                }
+            )
+
         if abs(prev_w) <= WEIGHT_TOLERANCE and abs(new_w) > WEIGHT_TOLERANCE:
             _append_order("BUY" if new_w > 0 else "SHORT", new_w)
         elif abs(prev_w) > WEIGHT_TOLERANCE and abs(new_w) <= WEIGHT_TOLERANCE:
@@ -812,39 +1000,58 @@ def build_daily_snapshot(
         st_latest = st_latest[st_latest["passes_liquidity"]]
         st_latest["delta_long"] = trend_cfg.LONG_THRESHOLD - st_latest["final_signal"]
         st_latest["delta_short"] = trend_cfg.SHORT_THRESHOLD - st_latest["final_signal"]
-        near_long = st_latest[(st_latest["signal_long"]) & (st_latest["delta_long"] >= 0) & (st_latest["delta_long"] <= 5)]
-        near_short = st_latest[(st_latest["signal_short"]) & (st_latest["delta_short"] >= 0) & (st_latest["delta_short"] <= 5)]
+        near_long = st_latest[
+            (st_latest["signal_long"])
+            & (st_latest["delta_long"] >= 0)
+            & (st_latest["delta_long"] <= 5)
+        ]
+        near_short = st_latest[
+            (st_latest["signal_short"])
+            & (st_latest["delta_short"] >= 0)
+            & (st_latest["delta_short"] <= 5)
+        ]
         for _, row in pd.concat([near_long, near_short]).head(5).iterrows():
-            watchlist.append({
-                "ticker": row["ticker"],
-                "reason": f"trend score={row['final_signal']:.1f} vs {trend_cfg.LONG_THRESHOLD if row['signal_long'] else trend_cfg.SHORT_THRESHOLD} threshold",
-            })
+            threshold = (
+                trend_cfg.LONG_THRESHOLD
+                if row["signal_long"]
+                else trend_cfg.SHORT_THRESHOLD
+            )
+            reason = f"trend score={row['final_signal']:.1f} vs {threshold} threshold"
+            watchlist.append({"ticker": row["ticker"], "reason": reason})
     s2_signals = s2_details.get("signals") if s2_details else pd.DataFrame()
     if s2_signals is not None and not s2_signals.empty:
         s2_latest = s2_signals[s2_signals["date"] == s2_signals["date"].max()].copy()
         s2_latest = s2_latest[~s2_latest["ticker"].isin(held)]
         s2_latest["delta_score"] = S2_LONG_THRESHOLD - s2_latest["score_long"]
-        near_long = s2_latest[(s2_latest["delta_score"] >= 0) & (s2_latest["delta_score"] <= 5)]
+        near_long = s2_latest[
+            (s2_latest["delta_score"] >= 0) & (s2_latest["delta_score"] <= 5)
+        ]
         near_short = s2_latest[s2_latest["z_pe"] >= (Z_EXTREME_SHORT - 0.25)]
         for _, row in near_long.head(5).iterrows():
-            watchlist.append({
-                "ticker": row["ticker"],
-                "reason": f"score={row['score_long']:.1f} vs {S2_LONG_THRESHOLD} threshold",
-            })
+            reason = f"score={row['score_long']:.1f} vs {S2_LONG_THRESHOLD} threshold"
+            watchlist.append({"ticker": row["ticker"], "reason": reason})
         for _, row in near_short.head(5).iterrows():
-            watchlist.append({
-                "ticker": row["ticker"],
-                "reason": f"z_pe={row['z_pe']:.2f} vs {Z_EXTREME_SHORT} short threshold",
-            })
+            reason = f"z_pe={row['z_pe']:.2f} vs {Z_EXTREME_SHORT} short threshold"
+            watchlist.append({"ticker": row["ticker"], "reason": reason})
     watchlist = watchlist[:10]
     broker_equity = os.environ.get("BROKER_EQUITY")
-    broker_equity_val = float(broker_equity) if broker_equity not in (None, "") else None
+    broker_equity_val = (
+        float(broker_equity) if broker_equity not in (None, "") else None
+    )
     reconciliation = {
         "model_start_equity": DEFAULT_PORTFOLIO_BASE_EQUITY,
         "model_current_equity": portfolio_stats.get("equity"),
         "broker_equity": broker_equity_val,
-        "difference": (portfolio_stats.get("equity") - broker_equity_val) if broker_equity_val else None,
-        "note": "slippage/fees/timing" if broker_equity_val else "broker equity placeholder (set BROKER_EQUITY)",
+        "difference": (
+            (portfolio_stats.get("equity") - broker_equity_val)
+            if broker_equity_val
+            else None
+        ),
+        "note": (
+            "slippage/fees/timing"
+            if broker_equity_val
+            else "broker equity placeholder (set BROKER_EQUITY)"
+        ),
     }
     allocations = {
         "risk_on": 1.0 - alloc_result.cash_weight,
@@ -858,16 +1065,26 @@ def build_daily_snapshot(
     }
 
     previous_weights_df = None
-    if s2_details and s2_details.get("weights_df") is not None and not s2_details.get("weights_df").empty:
+    if (
+        s2_details
+        and s2_details.get("weights_df") is not None
+        and not s2_details.get("weights_df").empty
+    ):
         s2_weights_hist = s2_details.get("weights_df")
         prev_row = s2_weights_hist.iloc[-1]
-        previous_weights_df = pd.DataFrame({
-            "ticker": prev_row.index,
-            "target_weight": prev_row.values,
-        })
+        previous_weights_df = pd.DataFrame(
+            {
+                "ticker": prev_row.index,
+                "target_weight": prev_row.values,
+            }
+        )
 
     s2_no_picks = False
-    if s2_details and s2_details.get("target_weights") is not None and not s2_details.get("target_weights").empty:
+    if (
+        s2_details
+        and s2_details.get("target_weights") is not None
+        and not s2_details.get("target_weights").empty
+    ):
         s2_last_weights = s2_details.get("target_weights").iloc[-1]
         s2_no_picks = s2_last_weights.abs().sum() <= WEIGHT_TOLERANCE
 
@@ -901,13 +1118,17 @@ def build_daily_snapshot(
         "performance_summary": performance_summary,
         "s2_no_picks": s2_no_picks,
     }
+
+
 # ============================================================
 # Report builder (FIXED)
 # ============================================================
 def build_html_report(
     report_date: pd.Timestamp | str,
-    st_equity, st_trades,
-    s2_equity, s2_trades,
+    st_equity,
+    st_trades,
+    s2_equity,
+    s2_trades,
     alloc_result: AllocationResult = None,
     alpha_stats: dict | None = None,
     proposed_trades: list[dict] | None = None,
@@ -959,18 +1180,41 @@ def build_html_report(
                     st_day_ret = (st_last - st_prev) / st_prev if st_prev > 0 else 0.0
                     # Attribution: this sleeve's contribution to portfolio
                     contrib_equity = BASE_EQUITY * trend_alloc * (1.0 + st_ret)
-                    rows.append({
+                    rows.append(
+                        {
+                            "Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.2%})",
+                            "Allocated": _fmt_money(alloc_notional),
+                            "Equity": _fmt_money(contrib_equity),
+                            "Day Return": _fmt_pct(st_day_ret),
+                        }
+                    )
+                else:
+                    rows.append(
+                        {
+                            "Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.2%})",
+                            "Allocated": _fmt_money(alloc_notional),
+                            "Equity": "—",
+                            "Day Return": "—",
+                        }
+                    )
+            else:
+                rows.append(
+                    {
                         "Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.2%})",
                         "Allocated": _fmt_money(alloc_notional),
-                        "Equity": _fmt_money(contrib_equity),
-                        "Day Return": _fmt_pct(st_day_ret),
-                    })
-                else:
-                    rows.append({"Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.2%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
-            else:
-                rows.append({"Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.2%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
+                        "Equity": "—",
+                        "Day Return": "—",
+                    }
+                )
         else:
-            rows.append({"Sleeve": "Sleeve Trend — Momentum (inactive)", "Allocated": "—", "Equity": "—", "Day Return": "—"})
+            rows.append(
+                {
+                    "Sleeve": "Sleeve Trend — Momentum (inactive)",
+                    "Allocated": "—",
+                    "Equity": "—",
+                    "Day Return": "—",
+                }
+            )
         if val_alloc > WEIGHT_TOLERANCE:
             alloc_notional = BASE_EQUITY * val_alloc
             s2_df = _safe_df(s2_equity)
@@ -982,43 +1226,87 @@ def build_html_report(
                     s2_ret = (s2_last / s2_start) - 1.0
                     s2_day_ret = (s2_last - s2_prev) / s2_prev if s2_prev > 0 else 0.0
                     contrib_equity = BASE_EQUITY * val_alloc * (1.0 + s2_ret)
-                    rows.append({
+                    rows.append(
+                        {
+                            "Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.2%})",
+                            "Allocated": _fmt_money(alloc_notional),
+                            "Equity": _fmt_money(contrib_equity),
+                            "Day Return": _fmt_pct(s2_day_ret),
+                        }
+                    )
+                else:
+                    rows.append(
+                        {
+                            "Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.2%})",
+                            "Allocated": _fmt_money(alloc_notional),
+                            "Equity": "—",
+                            "Day Return": "—",
+                        }
+                    )
+            else:
+                rows.append(
+                    {
                         "Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.2%})",
                         "Allocated": _fmt_money(alloc_notional),
-                        "Equity": _fmt_money(contrib_equity),
-                        "Day Return": _fmt_pct(s2_day_ret),
-                    })
-                else:
-                    rows.append({"Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.2%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
-            else:
-                rows.append({"Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.2%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
+                        "Equity": "—",
+                        "Day Return": "—",
+                    }
+                )
         else:
-            rows.append({"Sleeve": "Sleeve 2 — Valuation (inactive)", "Allocated": "—", "Equity": "—", "Day Return": "—"})
-            sleeve2_label = "Sleeve 2 — Valuation (no eligible picks)" if s2_no_picks else "Sleeve 2 — Valuation (inactive)"
-            rows.append({"Sleeve": sleeve2_label, "Allocated": "—", "Equity": "—", "Day Return": "—"})
+            rows.append(
+                {
+                    "Sleeve": "Sleeve 2 — Valuation (inactive)",
+                    "Allocated": "—",
+                    "Equity": "—",
+                    "Day Return": "—",
+                }
+            )
+            sleeve2_label = (
+                "Sleeve 2 — Valuation (no eligible picks)"
+                if s2_no_picks
+                else "Sleeve 2 — Valuation (inactive)"
+            )
+            rows.append(
+                {
+                    "Sleeve": sleeve2_label,
+                    "Allocated": "—",
+                    "Equity": "—",
+                    "Day Return": "—",
+                }
+            )
 
         # CASH row
         if cash_alloc > WEIGHT_TOLERANCE:
             cash_notional = BASE_EQUITY * cash_alloc
-            rows.append({
-                "Sleeve": f"CASH ({cash_alloc:.2%})",
-                "Allocated": _fmt_money(cash_notional),
-                "Equity": _fmt_money(cash_notional),  # Cash doesn't grow
-                "Day Return": _fmt_pct(0),
-            })
+            rows.append(
+                {
+                    "Sleeve": f"CASH ({cash_alloc:.2%})",
+                    "Allocated": _fmt_money(cash_notional),
+                    "Equity": _fmt_money(cash_notional),  # Cash doesn't grow
+                    "Day Return": _fmt_pct(0),
+                }
+            )
         summary_df = pd.DataFrame(rows)
         # TOTAL row - THE AUTHORITATIVE PORTFOLIO EQUITY
         # Computed from weighted sleeve returns, NOT by summing rows above
-        total_row = pd.DataFrame([{
-            "Sleeve": f"TOTAL — Portfolio ({_fmt_money(BASE_EQUITY)})",
-            "Allocated": _fmt_money(BASE_EQUITY),
-            "Equity": _fmt_money(portfolio_stats["equity"]),
-            "Day Return": _fmt_pct(portfolio_stats["day_return"]),
-        }])
+        total_row = pd.DataFrame(
+            [
+                {
+                    "Sleeve": f"TOTAL — Portfolio ({_fmt_money(BASE_EQUITY)})",
+                    "Allocated": _fmt_money(BASE_EQUITY),
+                    "Equity": _fmt_money(portfolio_stats["equity"]),
+                    "Day Return": _fmt_pct(portfolio_stats["day_return"]),
+                }
+            ]
+        )
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
         alloc_summary = allocation_summary_df(alloc_result)
         holdings = holdings_snapshot_df(alloc_result)
-        skipped_df = pd.DataFrame(alloc_result.skipped_trades) if alloc_result.skipped_trades else pd.DataFrame()
+        skipped_df = (
+            pd.DataFrame(alloc_result.skipped_trades)
+            if alloc_result.skipped_trades
+            else pd.DataFrame()
+        )
     else:
         # Legacy static allocation fallback
         # Still compute correctly using weighted returns
@@ -1031,8 +1319,18 @@ def build_html_report(
             base_equity=BASE_EQUITY,
         )
         rows = [
-            {"Sleeve": "Sleeve Trend — Momentum (80%)", "Allocated": _fmt_money(BASE_EQUITY * 0.80), "Equity": "—", "Day Return": "—"},
-            {"Sleeve": "Sleeve 2 — Valuation (20%)", "Allocated": _fmt_money(BASE_EQUITY * 0.20), "Equity": "—", "Day Return": "—"},
+            {
+                "Sleeve": "Sleeve Trend — Momentum (80%)",
+                "Allocated": _fmt_money(BASE_EQUITY * 0.80),
+                "Equity": "—",
+                "Day Return": "—",
+            },
+            {
+                "Sleeve": "Sleeve 2 — Valuation (20%)",
+                "Allocated": _fmt_money(BASE_EQUITY * 0.20),
+                "Equity": "—",
+                "Day Return": "—",
+            },
         ]
         total_row = {
             "Sleeve": f"TOTAL — Portfolio ({_fmt_money(BASE_EQUITY)})",
@@ -1040,39 +1338,53 @@ def build_html_report(
             "Equity": _fmt_money(portfolio_stats["equity"]),
             "Day Return": _fmt_pct(portfolio_stats["day_return"]),
         }
-        summary_df = pd.concat([pd.DataFrame(rows), pd.DataFrame([total_row])], ignore_index=True)
+        summary_df = pd.concat(
+            [pd.DataFrame(rows), pd.DataFrame([total_row])], ignore_index=True
+        )
         alloc_summary, holdings, skipped_df = None, None, pd.DataFrame()
     # Build exit log
     exit_log_rows = []
     for trades_df, sleeve_name in [(st_trades, "Trend"), (s2_trades, "Valuation")]:
-        filtered = filter_sleeve2_cash_proxy(_safe_df(trades_df)) if sleeve_name == "Valuation" else _safe_df(trades_df)
+        filtered = (
+            filter_sleeve2_cash_proxy(_safe_df(trades_df))
+            if sleeve_name == "Valuation"
+            else _safe_df(trades_df)
+        )
         if not filtered.empty and "reason_exit" in filtered.columns:
             for _, row in filtered.tail(10).iterrows():
-                exit_log_rows.append({
-                    "Ticker": row.get("ticker", ""),
-                    "Sleeve": sleeve_name,
-                    "Exit Reason": row.get("reason_exit", ""),
-                    "Days Held": row.get("hold_days", ""),
-                    "P&L": _fmt_money(row.get("pnl", 0)),
-                })
+                exit_log_rows.append(
+                    {
+                        "Ticker": row.get("ticker", ""),
+                        "Sleeve": sleeve_name,
+                        "Exit Reason": row.get("reason_exit", ""),
+                        "Days Held": row.get("hold_days", ""),
+                        "P&L": _fmt_money(row.get("pnl", 0)),
+                    }
+                )
     # CSS
-    css = """
-     body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Arial; color:#111827; }
-     .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
-     .card { background:#f9fafb; border:1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin: 12px 0; }
-     h2 { margin-bottom: 4px; }
-     h3 { margin-top: 16px; }
-     .tbl { width:100%; border-collapse: collapse; font-size: 13px; }
-     .tbl th { text-align:left; border-bottom:1px solid #e5e7eb; padding:6px; }
-     .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }
-     .muted { color:#6b7280; font-size:12px; }
-   """
+    css = (
+        "body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Arial; color:#111827; }\n"
+        " .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }\n"
+        " .card { background:#f9fafb; border:1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin: 12px 0; }\n"
+        " h2 { margin-bottom: 4px; }\n"
+        " h3 { margin-top: 16px; }\n"
+        " .tbl { width:100%; border-collapse: collapse; font-size: 13px; }\n"
+        " .tbl th { text-align:left; border-bottom:1px solid #e5e7eb; padding:6px; }\n"
+        " .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }\n"
+        " .muted { color:#6b7280; font-size:12px; }\n"
+    )
     performance_rows = [
         {"Metric": "Current Equity", "Value": _fmt_money(portfolio_stats["equity"])},
         {"Metric": "Day Return", "Value": _fmt_pct(portfolio_stats["day_return"])},
-        {"Metric": "Cumulative Return", "Value": _fmt_pct(portfolio_stats["cumulative_return"])},
+        {
+            "Metric": "Cumulative Return",
+            "Value": _fmt_pct(portfolio_stats["cumulative_return"]),
+        },
     ]
-    performance_section = f'<div class="card">{html_table(pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10)}</div>'
+    performance_html = html_table(
+        pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10
+    )
+    performance_section = f'<div class="card">{performance_html}</div>'
 
     def _fmt_float(value: float | None) -> str:
         try:
@@ -1113,39 +1425,116 @@ def build_html_report(
             },
             {"Metric": "n_days used", "Value": str(alpha_stats.get("n_days", 0))},
         ]
-        alpha_section = f'<div class="card">{html_table(pd.DataFrame(alpha_rows), "Alpha Attribution vs SPY", 10)}</div>'
+        alpha_html = html_table(
+            pd.DataFrame(alpha_rows), "Alpha Attribution vs SPY", 10
+        )
+        alpha_section = f'<div class="card">{alpha_html}</div>'
     else:
-        alpha_section = '<div class="card"><h3>Alpha Attribution vs SPY</h3><p><em>Alpha attribution unavailable (insufficient data or benchmark fetch failed).</em></p></div>'
+        alpha_section = (
+            '<div class="card">'
+            "<h3>Alpha Attribution vs SPY</h3>"
+            "<p><em>Alpha attribution unavailable (insufficient data or benchmark fetch failed).</em></p>"
+            "</div>"
+        )
 
     # Build sections
     perf_rows = []
     if performance_summary:
         perf_rows = [
-            {"Metric": "Total Return (Since Inception)", "Return": _fmt_pct(performance_summary.get("total_return"))},
-            {"Metric": "Week-to-Date", "Return": _fmt_pct(performance_summary.get("wtd"))},
-            {"Metric": "Month-to-Date", "Return": _fmt_pct(performance_summary.get("mtd"))},
-            {"Metric": "Year-to-Date", "Return": _fmt_pct(performance_summary.get("ytd"))},
+            {
+                "Metric": "Total Return (Since Inception)",
+                "Return": _fmt_pct(performance_summary.get("total_return")),
+            },
+            {
+                "Metric": "Week-to-Date",
+                "Return": _fmt_pct(performance_summary.get("wtd")),
+            },
+            {
+                "Metric": "Month-to-Date",
+                "Return": _fmt_pct(performance_summary.get("mtd")),
+            },
+            {
+                "Metric": "Year-to-Date",
+                "Return": _fmt_pct(performance_summary.get("ytd")),
+            },
         ]
-    perf_section = f'<div class="card">{html_table(pd.DataFrame(perf_rows), "Performance Summary")}</div>' if perf_rows else ""
+    perf_section = (
+        f'<div class="card">{html_table(pd.DataFrame(perf_rows), "Performance Summary")}</div>'
+        if perf_rows
+        else ""
+    )
 
     proposed_df = pd.DataFrame(proposed_trades or [])
     if not proposed_df.empty:
-        proposed_df = proposed_df.rename(columns={
-            "ticker": "Ticker",
-            "action": "Action",
-            "sleeve": "Sleeve",
-            "current_weight": "Current Weight",
-            "target_weight": "Target Weight",
-            "delta_weight": "Delta Weight",
-            "est_shares": "Est. Shares",
-            "est_notional": "Est. Notional",
-        })
-    proposed_section = f'<div class="card">{html_table(proposed_df, "Proposed Trades / Next Rebalance", 25, "No proposed trades.")}</div>'
+        proposed_df = proposed_df.rename(
+            columns={
+                "ticker": "Ticker",
+                "action": "Action",
+                "sleeve": "Sleeve",
+                "current_weight": "Current Weight",
+                "target_weight": "Target Weight",
+                "delta_weight": "Delta Weight",
+                "est_shares": "Est. Shares",
+                "est_notional": "Est. Notional",
+            }
+        )
+    proposed_html = html_table(
+        proposed_df,
+        "Proposed Trades / Next Rebalance",
+        25,
+        "No proposed trades.",
+    )
+    proposed_section = f'<div class="card">{proposed_html}</div>'
 
-    alloc_section = f'<div class="card"><h3>Sleeve Allocation (Dynamic)</h3>{alloc_summary.to_html(index=False, border=0, classes="tbl", justify="left")}</div>' if alloc_summary is not None else ""
-    holdings_section = f'<div class="card">{html_table(holdings, "Holdings Snapshot", 20)}</div>' if holdings is not None and not holdings.empty else ""
-    skipped_section = f'<div class="card">{html_table(skipped_df, "Skipped Trades (Constraint Hits)", 10)}</div>' if not skipped_df.empty else ""
-    exit_section = f'<div class="card">{html_table(pd.DataFrame(exit_log_rows), "Exit Log", 15)}</div>' if exit_log_rows else ""
+    alloc_html = (
+        alloc_summary.to_html(index=False, border=0, classes="tbl", justify="left")
+        if alloc_summary is not None
+        else ""
+    )
+    alloc_section = (
+        f'<div class="card"><h3>Sleeve Allocation (Dynamic)</h3>{alloc_html}</div>'
+        if alloc_html
+        else ""
+    )
+
+    holdings_html = (
+        html_table(holdings, "Holdings Snapshot", 20)
+        if holdings is not None and not holdings.empty
+        else ""
+    )
+    holdings_section = (
+        f'<div class="card">{holdings_html}</div>' if holdings_html else ""
+    )
+
+    skipped_html = (
+        html_table(skipped_df, "Skipped Trades (Constraint Hits)", 10)
+        if not skipped_df.empty
+        else ""
+    )
+    skipped_section = f'<div class="card">{skipped_html}</div>' if skipped_html else ""
+
+    exit_html = (
+        html_table(pd.DataFrame(exit_log_rows), "Exit Log", 15) if exit_log_rows else ""
+    )
+    exit_section = f'<div class="card">{exit_html}</div>' if exit_html else ""
+
+    st_trades_html = html_table(
+        filter_sleeve2_cash_proxy(st_trades), "Recent Trades — Sleeve Trend", 15
+    )
+    s2_trades_html = html_table(
+        filter_sleeve2_cash_proxy(s2_trades),
+        "Recent Trades — Sleeve 2",
+        15,
+        "No eligible picks for Sleeve 2.",
+    )
+
+    st_equity_html = html_table(
+        _safe_df(st_equity).tail(10), "Equity — Sleeve Trend (last 10 days)", 10
+    )
+    s2_equity_html = html_table(
+        _safe_df(s2_equity).tail(10), "Equity — Sleeve 2 (last 10 days)", 10
+    )
+
     return f"""
     <html>
     <head><style>{css}</style></head>
@@ -1161,20 +1550,25 @@ def build_html_report(
         {alloc_section}
         {holdings_section}
         <div class="card">
-          {html_table(filter_sleeve2_cash_proxy(st_trades), "Recent Trades — Sleeve Trend", 15)}
-          {html_table(filter_sleeve2_cash_proxy(s2_trades), "Recent Trades — Sleeve 2", 15, "No eligible picks for Sleeve 2.")}
+          {st_trades_html}
+          {s2_trades_html}
         </div>
         {exit_section}
         {skipped_section}
         <div class="card">
-          {html_table(_safe_df(st_equity).tail(10), "Equity — Sleeve Trend (last 10 days)", 10)}
-          {html_table(_safe_df(s2_equity).tail(10), "Equity — Sleeve 2 (last 10 days)", 10)}
+          {st_equity_html}
+          {s2_equity_html}
         </div>
-        <div class="muted">Automated daily report. Portfolio TOTAL computed from weighted sleeve returns (not sum of rows).</div>
+        <div class="muted">
+          Automated daily report. Portfolio TOTAL computed from weighted sleeve returns
+          (not sum of rows).
+        </div>
       </div>
     </body>
     </html>
     """
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -1184,27 +1578,41 @@ def main():
     fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     today = fixture_date if offline_fixture else dt.date.today().strftime("%Y-%m-%d")
-    portfolio_fixture = _load_portfolio_fixture("tests/fixtures/portfolio_equity.csv") if offline_fixture else pd.Series(dtype=float)
+    portfolio_fixture = (
+        _load_portfolio_fixture("tests/fixtures/portfolio_equity.csv")
+        if offline_fixture
+        else pd.Series(dtype=float)
+    )
     if offline_fixture and not portfolio_fixture.empty:
         today = portfolio_fixture.index.max().strftime("%Y-%m-%d")
     # ── Run sleeves ───────────────────────────────────────────────
     if offline_fixture:
-        logger.warning("[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches.")
-        s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
-        st_equity, st_trades, st_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        logger.warning(
+            "[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches."
+        )
+        _, _ = pd.DataFrame(), pd.DataFrame()
+        st_equity, st_trades, st_signals = (
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+        )
         s2_details = {}
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
     else:
         try:
-            s1_equity, s1_trades = run_sleeve_1()
+            _, _ = run_sleeve_1()
         except Exception as e:
             logger.warning("[WARN] Sleeve 1 failed: %s", e)
-            s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
+            _, _ = pd.DataFrame(), pd.DataFrame()
         try:
             st_equity, st_trades, st_signals = run_sleeve_trend()
         except Exception as e:
             logger.warning("[WARN] Sleeve Trend failed: %s", e)
-            st_equity, st_trades, st_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+            st_equity, st_trades, st_signals = (
+                pd.DataFrame(),
+                pd.DataFrame(),
+                pd.DataFrame(),
+            )
         try:
             s2_details = run_sleeve_2()
             s2_equity = s2_details.get("equity_df", pd.DataFrame())
@@ -1244,11 +1652,17 @@ def main():
     # the freed weight to CASH (never to another sleeve).
     patched = False
     freed_weight = 0.0
-    if not trend_valid and alloc_result.sleeve_allocations.get("sleeve_trend", 0.0) > WEIGHT_TOLERANCE:
+    if (
+        not trend_valid
+        and alloc_result.sleeve_allocations.get("sleeve_trend", 0.0) > WEIGHT_TOLERANCE
+    ):
         freed_weight += alloc_result.sleeve_allocations["sleeve_trend"]
         alloc_result.sleeve_allocations["sleeve_trend"] = 0.0
         patched = True
-    if not s2_valid and alloc_result.sleeve_allocations.get("sleeve_2", 0.0) > WEIGHT_TOLERANCE:
+    if (
+        not s2_valid
+        and alloc_result.sleeve_allocations.get("sleeve_2", 0.0) > WEIGHT_TOLERANCE
+    ):
         freed_weight += alloc_result.sleeve_allocations["sleeve_2"]
         alloc_result.sleeve_allocations["sleeve_2"] = 0.0
         patched = True
@@ -1256,10 +1670,12 @@ def main():
         alloc_result.cash_weight = alloc_result.cash_weight + freed_weight
         # Re-normalise total_weight (should be 1.0)
         alloc_result.total_weight = (
-            sum(alloc_result.sleeve_allocations.values())
-            + alloc_result.cash_weight
+            sum(alloc_result.sleeve_allocations.values()) + alloc_result.cash_weight
         )
-        logger.info("[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH", freed_weight * 100)
+        logger.info(
+            "[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH",
+            freed_weight * 100,
+        )
     # ── Validate allocation ───────────────────────────────────────
     errors = validate_allocation_result(alloc_result)
     if errors:
@@ -1282,17 +1698,24 @@ def main():
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
     # ── Build daily snapshot/email ────────────────────────────────
-    report_date = s2_details.get("asof") if s2_details.get("asof") is not None else _asof_date_from_df(st_equity)
-    report_date = report_date or pd.Timestamp(fixture_date if offline_fixture else dt.date.today())
+    report_date = (
+        s2_details.get("asof")
+        if s2_details.get("asof") is not None
+        else _asof_date_from_df(st_equity)
+    )
+    report_date = report_date or pd.Timestamp(
+        fixture_date if offline_fixture else dt.date.today()
+    )
     if offline_fixture and not portfolio_fixture.empty:
-        portfolio_equity_series = portfolio_fixture
         report_date = portfolio_fixture.index.max()
     else:
-        portfolio_equity_series = resolve_portfolio_equity_series(
+        _ = resolve_portfolio_equity_series(
             sleeve_equity_map=sleeve_equity_map,
             alloc_result=alloc_result,
             report_date=report_date,
-            portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+            portfolio_equity=portfolio_stats.get(
+                "equity", DEFAULT_PORTFOLIO_BASE_EQUITY
+            ),
             offline_fixture=offline_fixture,
             base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
         )
@@ -1303,11 +1726,13 @@ def main():
             sleeve_equity_map=sleeve_equity_map,
             alloc_result=alloc_result,
             report_date=report_date,
-            portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+            portfolio_equity=portfolio_stats.get(
+                "equity", DEFAULT_PORTFOLIO_BASE_EQUITY
+            ),
             offline_fixture=offline_fixture,
             base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
         )
-    portfolio_equity_series = resolve_portfolio_equity_series(
+    _ = resolve_portfolio_equity_series(
         sleeve_equity_map=sleeve_equity_map,
         alloc_result=alloc_result,
         report_date=report_date,
@@ -1322,8 +1747,16 @@ def main():
     )
     bench_prices_for_alpha = load_benchmark_prices(
         ticker="SPY",
-        start=portfolio_equity_for_alpha.index.min() if not portfolio_equity_for_alpha.empty else None,
-        end=portfolio_equity_for_alpha.index.max() if not portfolio_equity_for_alpha.empty else None,
+        start=(
+            portfolio_equity_for_alpha.index.min()
+            if not portfolio_equity_for_alpha.empty
+            else None
+        ),
+        end=(
+            portfolio_equity_for_alpha.index.max()
+            if not portfolio_equity_for_alpha.empty
+            else None
+        ),
         offline_fixture=offline_fixture,
     )
     alpha_stats = None
@@ -1335,14 +1768,20 @@ def main():
         _series_date_range(bench_prices_for_alpha),
     )
     if portfolio_equity_for_alpha.empty or bench_prices_for_alpha.empty:
-        logger.warning("[WARN] Alpha attribution skipped (missing portfolio or benchmark history).")
+        logger.warning(
+            "[WARN] Alpha attribution skipped (missing portfolio or benchmark history)."
+        )
     else:
-        alpha_stats = calc_alpha_stats(portfolio_equity_for_alpha, bench_prices_for_alpha, window=63)
+        alpha_stats = calc_alpha_stats(
+            portfolio_equity_for_alpha, bench_prices_for_alpha, window=63
+        )
     try:
         daily_snapshot = build_daily_snapshot(
             report_date=report_date,
             alloc_result=alloc_result,
             portfolio_stats=portfolio_stats,
+            st_equity=st_equity,
+            s2_equity=s2_equity,
             st_signals=st_signals,
             s2_details=s2_details,
         )
@@ -1360,7 +1799,10 @@ def main():
     # Bootstrap: if we don't have prior-day signals yet, use same-day signals (DEV ONLY)
     signals_path_exec = signals_prev if os.path.exists(signals_prev) else signals_today
     if signals_path_exec == signals_today:
-        logger.info("[PAPER][BOOTSTRAP] Using same-day signals for execution: %s", signals_path_exec)
+        logger.info(
+            "[PAPER][BOOTSTRAP] Using same-day signals for execution: %s",
+            signals_path_exec,
+        )
     paper_summary = None
     paper_html = ""
     if os.path.exists(signals_path_exec):
@@ -1399,7 +1841,9 @@ def main():
         except Exception as e:
             logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
     else:
-        logger.warning("[PAPER][WARN] Missing signals for execution: %s", signals_path_exec)
+        logger.warning(
+            "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
+        )
     # ── Build daily snapshot/email ────────────────────────────────
     subject, email_body = create_trade_email(daily_snapshot)
     # Append paper trading summary to plain-text email (if available)
@@ -1417,7 +1861,9 @@ def main():
         f.write(email_body)
     logger.info("[OK] Daily trade email written: %s", email_path)
     # ── Build report ──────────────────────────────────────────────
-    html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result, alpha_stats)
+    html = build_html_report(
+        today, st_equity, st_trades, s2_equity, s2_trades, alloc_result, alpha_stats
+    )
     # Append paper trading HTML section (if available)
     if paper_html:
         html = html + "<hr/>" + paper_html
@@ -1447,5 +1893,7 @@ def main():
             logger.warning("[WARN] Email not sent: %s", e)
     else:
         logger.warning("[WARN] send_email not found — HTML generated only")
+
+
 if __name__ == "__main__":
     main()

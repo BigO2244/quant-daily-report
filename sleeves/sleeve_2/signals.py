@@ -9,6 +9,7 @@ from sleeves.sleeve_2.config import (
     W_TREND,
 )
 
+
 def _pick_pe_column(df: pd.DataFrame) -> pd.Series:
     cols = df.columns
 
@@ -21,15 +22,19 @@ def _pick_pe_column(df: pd.DataFrame) -> pd.Series:
         pe = df["pe"]
 
     if pe is None:
-        raise ValueError("No P/E column found. Expected: forward_pe, trailing_pe, or pe")
+        raise ValueError(
+            "No P/E column found. Expected: forward_pe, trailing_pe, or pe"
+        )
 
     pe = pd.to_numeric(pe, errors="coerce")
     pe = pe.where((pe > 0) & (pe <= PE_ABS_CAP))
     return pe
 
+
 def _rank_to_0_100(x: pd.Series) -> pd.Series:
     r = x.rank(pct=True, method="average")
     return (r * 100.0).clip(0, 100)
+
 
 def build_signals(factor_df: pd.DataFrame) -> pd.DataFrame:
     df = factor_df.copy()
@@ -61,10 +66,23 @@ def build_signals(factor_df: pd.DataFrame) -> pd.DataFrame:
     by_date = df.groupby("date")
 
     df["rank_long_z"] = by_date["z_pe"].transform(lambda s: _rank_to_0_100(-s))
-    df["rank_long_trend"] = by_date["pe_change_20d"].transform(lambda s: _rank_to_0_100(-s))
-    df["score_long"] = (W_Z * df["rank_long_z"] + W_TREND * df["rank_long_trend"]).clip(0, 100)
+    df["rank_long_trend"] = by_date["pe_change_20d"].transform(
+        lambda s: _rank_to_0_100(-s)
+    )
+    df["score_long"] = (W_Z * df["rank_long_z"] + W_TREND * df["rank_long_trend"]).clip(
+        0, 100
+    )
 
     df["score_short"] = by_date["z_pe"].transform(lambda s: _rank_to_0_100(s))
 
-    keep = ["date", "ticker", "industry", "pe", "z_pe", "pe_change_20d", "score_long", "score_short"]
+    keep = [
+        "date",
+        "ticker",
+        "industry",
+        "pe",
+        "z_pe",
+        "pe_change_20d",
+        "score_long",
+        "score_short",
+    ]
     return df[keep]

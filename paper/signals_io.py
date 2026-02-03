@@ -12,7 +12,9 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def normalize_weights(df: pd.DataFrame, weight_col: str = "target_weight") -> pd.DataFrame:
+def normalize_weights(
+    df: pd.DataFrame, weight_col: str = "target_weight"
+) -> pd.DataFrame:
     out = df.copy()
     out[weight_col] = out[weight_col].astype(float)
     s = float(out[weight_col].sum())
@@ -43,9 +45,17 @@ def write_signals_snapshot(
     required = {ticker_col, weight_col}
     missing = [c for c in required if c not in df_targets.columns]
     if missing:
-        raise ValueError(f"df_targets missing required columns: {missing}. Have: {list(df_targets.columns)}")
+        raise ValueError(
+            f"df_targets missing required columns: {missing}. Have: {list(df_targets.columns)}"
+        )
 
-    df = df_targets[[c for c in [ticker_col, weight_col, sleeve_col] if c and c in df_targets.columns]].copy()
+    df = df_targets[
+        [
+            c
+            for c in [ticker_col, weight_col, sleeve_col]
+            if c and c in df_targets.columns
+        ]
+    ].copy()
 
     if sleeve_col is None or sleeve_col not in df.columns:
         df["sleeve"] = "core"
@@ -62,11 +72,13 @@ def write_signals_snapshot(
     ensure_dir(out_dir)
     out_path = os.path.join(out_dir, f"{run_date}.json")
 
-    payload = df.rename(columns={
-        ticker_col: "ticker",
-        weight_col: "target_weight",
-        sleeve_col: "sleeve",
-    })[["ticker", "target_weight", "sleeve"]].to_dict(orient="records")
+    payload = df.rename(
+        columns={
+            ticker_col: "ticker",
+            weight_col: "target_weight",
+            sleeve_col: "sleeve",
+        }
+    )[["ticker", "target_weight", "sleeve"]].to_dict(orient="records")
 
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2)

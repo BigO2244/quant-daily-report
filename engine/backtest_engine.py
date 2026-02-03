@@ -154,8 +154,20 @@ def run_backtest(
     weights_df = pd.DataFrame(weight_rows, index=all_dates, columns=tickers)
     holdings_df = _weights_to_shares(weights_df, equity, px)
 
-    trades_df = pd.DataFrame(trade_records) if trade_records else pd.DataFrame(
-        columns=["date", "ticker", "side", "weight_from", "weight_to", "notional", "shares_delta"]
+    trades_df = (
+        pd.DataFrame(trade_records)
+        if trade_records
+        else pd.DataFrame(
+            columns=[
+                "date",
+                "ticker",
+                "side",
+                "weight_from",
+                "weight_to",
+                "notional",
+                "shares_delta",
+            ]
+        )
     )
 
     stats = _compute_stats(equity, turnover_daily, all_dates)
@@ -186,7 +198,15 @@ def _empty_result(initial_equity: float) -> dict:
         "equity_curve": pd.DataFrame({"date": [today], "equity": [initial_equity]}),
         "holdings": pd.DataFrame(),
         "trades": pd.DataFrame(
-            columns=["date", "ticker", "side", "weight_from", "weight_to", "notional", "shares_delta"]
+            columns=[
+                "date",
+                "ticker",
+                "side",
+                "weight_from",
+                "weight_to",
+                "notional",
+                "shares_delta",
+            ]
         ),
         "weights": pd.DataFrame(),
         "stats": {
@@ -234,19 +254,23 @@ def _log_trades(
         delta = new_w[t] - old_w[t]
         if abs(delta) < 1e-8:
             continue
-        records.append({
-            "date": dt,
-            "ticker": t,
-            "side": "BUY" if delta > 0 else "SELL",
-            "weight_from": round(old_w[t], 6),
-            "weight_to": round(new_w[t], 6),
-            "notional": round(abs(delta) * prev_equity, 2),
-            "shares_delta": 0,  # placeholder — filled by caller if needed
-        })
+        records.append(
+            {
+                "date": dt,
+                "ticker": t,
+                "side": "BUY" if delta > 0 else "SELL",
+                "weight_from": round(old_w[t], 6),
+                "weight_to": round(new_w[t], 6),
+                "notional": round(abs(delta) * prev_equity, 2),
+                "shares_delta": 0,  # placeholder — filled by caller if needed
+            }
+        )
 
 
 def _weights_to_shares(
-    weights: pd.DataFrame, equity: np.ndarray, prices: pd.DataFrame,
+    weights: pd.DataFrame,
+    equity: np.ndarray,
+    prices: pd.DataFrame,
 ) -> pd.DataFrame:
     """Approximate share counts from weights and equity."""
     eq_col = pd.Series(equity, index=weights.index)
@@ -255,13 +279,19 @@ def _weights_to_shares(
     return shares.fillna(0.0).round(2)
 
 
-def _compute_stats(equity: np.ndarray, turnover: list[float], dates: pd.DatetimeIndex) -> dict:
+def _compute_stats(
+    equity: np.ndarray, turnover: list[float], dates: pd.DatetimeIndex
+) -> dict:
     n = len(equity)
     if n < 2:
         return {
-            "total_return": 0.0, "cagr": 0.0, "sharpe": 0.0,
-            "max_drawdown": 0.0, "avg_daily_turnover": 0.0,
-            "n_rebalances": 0, "n_days": n,
+            "total_return": 0.0,
+            "cagr": 0.0,
+            "sharpe": 0.0,
+            "max_drawdown": 0.0,
+            "avg_daily_turnover": 0.0,
+            "n_rebalances": 0,
+            "n_days": n,
         }
 
     total_ret = equity[-1] / equity[0] - 1.0
@@ -302,7 +332,9 @@ def infer_latest_entries(weights: pd.DataFrame) -> pd.DataFrame:
     non-zero weight streak.
     """
     if weights is None or weights.empty:
-        return pd.DataFrame(columns=["ticker", "entry_date", "entry_weight", "current_weight"])
+        return pd.DataFrame(
+            columns=["ticker", "entry_date", "entry_weight", "current_weight"]
+        )
 
     w = weights.copy()
     if not isinstance(w.index, pd.DatetimeIndex):
@@ -318,12 +350,14 @@ def infer_latest_entries(weights: pd.DataFrame) -> pd.DataFrame:
         entry_pos = last_pos
         while entry_pos > 0 and nonzero.iloc[entry_pos - 1]:
             entry_pos -= 1
-        entries.append({
-            "ticker": ticker,
-            "entry_date": series.index[entry_pos],
-            "entry_weight": float(series.iloc[entry_pos]),
-            "current_weight": float(series.iloc[last_pos]),
-        })
+        entries.append(
+            {
+                "ticker": ticker,
+                "entry_date": series.index[entry_pos],
+                "entry_weight": float(series.iloc[entry_pos]),
+                "current_weight": float(series.iloc[last_pos]),
+            }
+        )
 
     return pd.DataFrame(entries)
 
@@ -334,7 +368,15 @@ def attach_entry_prices(entries: pd.DataFrame, prices: pd.DataFrame) -> pd.DataF
     at or before the entry date.
     """
     if entries is None or entries.empty:
-        return pd.DataFrame(columns=["ticker", "entry_date", "entry_weight", "current_weight", "entry_price"])
+        return pd.DataFrame(
+            columns=[
+                "ticker",
+                "entry_date",
+                "entry_weight",
+                "current_weight",
+                "entry_price",
+            ]
+        )
 
     out = entries.copy()
     if prices is None or prices.empty:

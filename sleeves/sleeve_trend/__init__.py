@@ -26,7 +26,7 @@ from .backtest import (
     RiskManager,
 )
 
-from .config import (
+from .config import (  # noqa: F401
     INITIAL_EQUITY,
     EMA_FAST,
     EMA_SLOW,
@@ -43,10 +43,10 @@ from .config import (
 
 __version__ = "1.0.1"  # Revision B
 __all__ = [
-    'prepare_data',
-    'backtest',
-    'build_daily_sleeve_output',
-    'compute_stats',
-    'Position',
-    'RiskManager',
+    "prepare_data",
+    "backtest",
+    "build_daily_sleeve_output",
+    "compute_stats",
+    "Position",
+    "RiskManager",
 ]

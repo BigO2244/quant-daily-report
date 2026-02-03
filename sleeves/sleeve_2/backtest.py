@@ -51,7 +51,7 @@ from core.quant_report import (
 
 from sleeves.sleeve_2.signals import build_signals
 from sleeves.sleeve_2.valuation import fetch_valuation_snapshot
-from sleeves.sleeve_2.config import (
+from sleeves.sleeve_2.config import (  # noqa: F401
     TOP_LONGS,
     TOP_SHORTS,
     LONG_THRESHOLD,
@@ -104,6 +104,7 @@ def run_backtest_with_details(
 # =====================================================================
 # Core run implementation
 # =====================================================================
+
 
 def _run_backtest_core(
     period: str = "1y",
@@ -195,8 +196,8 @@ def _run_backtest_core(
     holdings_df = result["holdings"]
 
     # ── 8. debug summary ──────────────────────────────────────────
-    last_gross = target_w.iloc[-1].abs().sum()   # gross exposure (always ≥ 0)
-    last_net = target_w.iloc[-1].sum()           # net exposure (signed)
+    last_gross = target_w.iloc[-1].abs().sum()  # gross exposure (always ≥ 0)
+    last_net = target_w.iloc[-1].sum()  # net exposure (signed)
 
     print(
         f"[SLEEVE2] today={today_norm.date()} last_bar={last_bar.date()} "
@@ -225,6 +226,7 @@ def _run_backtest_core(
 # =====================================================================
 # Position state machine
 # =====================================================================
+
 
 def _run_state_machine(
     signals: pd.DataFrame,
@@ -380,8 +382,7 @@ def _try_entries(
     # ── short candidates ──────────────────────────────────────────
     if open_short_slots > 0:
         cands = day_sig[
-            (day_sig["z_pe"].notna())
-            & (day_sig["z_pe"] >= Z_EXTREME_SHORT)
+            (day_sig["z_pe"].notna()) & (day_sig["z_pe"] >= Z_EXTREME_SHORT)
         ].copy()
 
         cands = cands[~cands.index.isin(positions.keys())]
@@ -432,6 +433,7 @@ def _positions_to_weights(
 # =====================================================================
 # Data preparation helpers
 # =====================================================================
+
 
 def _flat_result() -> dict:
     """Flat (no-trade) result — signals 'inactive' to the allocator."""

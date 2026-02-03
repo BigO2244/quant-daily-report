@@ -53,7 +53,9 @@ def append_csv(df: pd.DataFrame, path: str) -> None:
     df.to_csv(path, mode="a", header=header, index=False)
 
 
-def read_latest_holdings_from_ledger(ledger_path: str) -> Tuple[pd.DataFrame, float, float, str]:
+def read_latest_holdings_from_ledger(
+    ledger_path: str,
+) -> Tuple[pd.DataFrame, float, float, str]:
     """
     Returns:
       holdings_df: columns [ticker, sleeve, shares]
@@ -250,7 +252,9 @@ def build_rebalance_trades(
             if tkr not in prices.index:
                 continue
             px = float(prices.loc[tkr])
-            slipped_px, slip_cost_per_share = apply_slippage(px, "SELL", cfg.slippage_bps)
+            slipped_px, slip_cost_per_share = apply_slippage(
+                px, "SELL", cfg.slippage_bps
+            )
             trades.append(
                 {
                     "ticker": tkr,
@@ -320,7 +324,9 @@ def apply_trades_to_holdings(
 
 def mark_to_market(holdings: pd.DataFrame, prices: pd.Series) -> pd.DataFrame:
     h = holdings.copy()
-    h["price"] = h["ticker"].apply(lambda x: float(prices.loc[x]) if x in prices.index else float("nan"))
+    h["price"] = h["ticker"].apply(
+        lambda x: float(prices.loc[x]) if x in prices.index else float("nan")
+    )
     h = h.dropna(subset=["price"]).copy()
     h["market_value"] = h["shares"] * h["price"]
     return h
@@ -336,11 +342,15 @@ def run_paper_day(
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
-    holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
+    holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(
+        ledger_path
+    )
 
     # Guardrail: prevent accidental double execution
     if last_date == run_date and not force:
-        raise RuntimeError(f"Ledger already contains run_date={run_date}. Refusing to run twice.")
+        raise RuntimeError(
+            f"Ledger already contains run_date={run_date}. Refusing to run twice."
+        )
 
     # Bootstrap day 1
     if last_date == "":
@@ -373,7 +383,18 @@ def run_paper_day(
     )
 
     if trades is None or trades.empty:
-        trades_out = pd.DataFrame(columns=["date", "ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
+        trades_out = pd.DataFrame(
+            columns=[
+                "date",
+                "ticker",
+                "side",
+                "shares",
+                "price",
+                "slippage_cost",
+                "notional",
+                "reason",
+            ]
+        )
     else:
         trades_out = trades.copy()
         trades_out.insert(0, "date", run_date)
@@ -398,7 +419,11 @@ def run_paper_day(
     append_csv(ledger_day, ledger_path)
 
     executed_trades = int(len(trades_out)) if trades_out is not None else 0
-    turnover = float(trades_out["notional"].sum()) if executed_trades and "notional" in trades_out.columns else 0.0
+    turnover = (
+        float(trades_out["notional"].sum())
+        if executed_trades and "notional" in trades_out.columns
+        else 0.0
+    )
 
     return {
         "date": run_date,
