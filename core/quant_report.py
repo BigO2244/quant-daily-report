@@ -1,3 +1,4 @@
+import logging
 import os
 import smtplib
 import tempfile
@@ -9,6 +10,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 IN_CI = os.getenv("CI", "").lower() == "true" or bool(os.getenv("GITHUB_ACTIONS"))
 
@@ -139,9 +142,9 @@ def download_prices(tickers: List[str], period: str = "1y", interval: str = "1d"
         raise RuntimeError("No price data downloaded. Check data/universe.csv and yfinance availability.")
 
     if failed:
-        print(f"⚠️ Skipped {len(failed)} tickers with no/invalid price data:")
+        logger.warning("⚠️ Skipped %s tickers with no/invalid price data:", len(failed))
         failed_unique = sorted(set(failed))
-        print(failed_unique[:50], "..." if len(failed_unique) > 50 else "")
+        logger.warning("%s %s", failed_unique[:50], "..." if len(failed_unique) > 50 else "")
 
     prices = pd.concat(data, ignore_index=True)
     prices["date"] = pd.to_datetime(prices["date"])
@@ -210,6 +213,12 @@ def _fmt_date(value: Optional[object]) -> str:
         if DATE_FORMAT.upper() == "US":
             return dt_value.strftime("%m/%d/%Y")
         return dt_value.strftime("%Y-%m-%d")
+    except Exception:
+        return "n/a"
+
+def _fmt_float(value: Optional[float]) -> str:
+    try:
+        return f"{float(value):.2f}"
     except Exception:
         return "n/a"
 
@@ -362,6 +371,46 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     if recon.get("note"):
         lines.append(f"   - Note: {recon.get('note')}")
 
+    lines.append("")
+    lines.append("6) Performance Summary (Portfolio)")
+    perf = snapshot.get("performance_summary", {})
+    lines.append(f"   - Current Equity: {_fmt_money(perf.get('current_equity'))}")
+    lines.append(f"   - Day Return: {_fmt_pct(perf.get('day_return'))}")
+    lines.append(f"   - Cumulative Return: {_fmt_pct(perf.get('cumulative_return'))}")
+
+    lines.append("")
+    lines.append("7) Alpha Attribution vs SPY")
+    alpha = snapshot.get("alpha_attribution")
+    if not alpha or alpha.get("n_days", 0) < 20:
+        lines.append("   - Alpha attribution unavailable (insufficient data or benchmark fetch failed).")
+    else:
+        lines.append(
+            "   - Since inception: Port {port}, SPY {bench}, Excess {excess}".format(
+                port=_fmt_pct(alpha.get("port_cum_return")),
+                bench=_fmt_pct(alpha.get("bench_cum_return")),
+                excess=_fmt_pct(alpha.get("excess_cum_return")),
+            )
+        )
+        lines.append(
+            "   - Beta (63d): {beta}, Alpha (ann., 63d): {alpha}".format(
+                beta=_fmt_float(alpha.get("beta_63d")),
+                alpha=_fmt_pct(alpha.get("alpha_ann_63d")),
+            )
+        )
+        lines.append(
+            "   - Tracking Error (ann.): {te}, Information Ratio: {ir}".format(
+                te=_fmt_pct(alpha.get("tracking_error_ann")),
+                ir=_fmt_float(alpha.get("info_ratio")),
+            )
+        )
+        lines.append(
+            "   - Max Drawdown: Port {port}, SPY {bench}".format(
+                port=_fmt_pct(alpha.get("mdd_port")),
+                bench=_fmt_pct(alpha.get("mdd_bench")),
+            )
+        )
+        lines.append(f"   - n_days used: {alpha.get('n_days', 0)}")
+
     return subject, "\n".join(lines)
 
 
@@ -393,7 +442,7 @@ def send_email(subject: str, body_html: Optional[str] = None, body_text: Optiona
         server.starttls()
         server.login(user, password)
         refused = server.sendmail(user, [to_addr], msg.as_string())
-        print(f"[EMAIL DEBUG] refused={refused}")
+        logger.info("[EMAIL DEBUG] refused=%s", refused)
         if refused:
             raise RuntimeError(f"SMTP refused recipients: {refused}")
-        print("[OK] Email accepted by SMTP server")
+        logger.info("[OK] Email accepted by SMTP server")

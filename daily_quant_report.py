@@ -1,7 +1,13 @@
-import os
 import datetime as dt
-import pandas as pd
+import logging
+import os
+import sys
 
+import pandas as pd
+from paper.signals_io import write_signals_snapshot
+from paper.paper_broker import run_paper_day
+from paper.paper_report import build_paper_report_html
+from paper.trading_calendar import prev_trading_day
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
 # ============================================================
@@ -17,7 +23,6 @@ from sleeves.sleeve_trend.backtest import (
     backtest as st_backtest,
 )
 from sleeves.sleeve_trend import config as trend_cfg
-
 # ============================================================
 # Sleeve 2 — import module once; resolve symbols dynamically
 # ============================================================
@@ -25,12 +30,10 @@ try:
     import sleeves.sleeve_2.backtest as s2_mod
 except Exception:
     s2_mod = None
-
 s2_run_backtest = getattr(s2_mod, "run_backtest", None) if s2_mod else None
 s2_run_backtest_details = getattr(s2_mod, "run_backtest_with_details", None) if s2_mod else None
 s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
 s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
-
 # ============================================================
 # Email sender (exact repo-aware lookup)
 # ============================================================
@@ -39,7 +42,6 @@ try:
     from core.quant_report import send_email
 except Exception:
     pass
-
 # ============================================================
 # Portfolio allocation (dynamic)
 # ============================================================
@@ -55,15 +57,16 @@ from core.portfolio_alloc import (
     DEFAULT_PORTFOLIO_BASE_EQUITY,
     WEIGHT_TOLERANCE,
 )
-
 from core.quant_report import (
     download_prices,
     add_atr,
     create_trade_email,
 )
-
+from core.alpha_attribution import (
+    calc_alpha_stats,
+    load_benchmark_prices,
+)
 from engine.backtest_engine import infer_latest_entries, attach_entry_prices
-
 from sleeves.sleeve_2.config import (
     STOP_ATR_MULT,
     TAKE_PROFIT_ATR_MULT,
@@ -73,6 +76,7 @@ from sleeves.sleeve_2.config import (
     Z_EXTREME_SHORT,
 )
 
+logger = logging.getLogger(__name__)
 # ============================================================
 # Output config
 # ============================================================
@@ -83,11 +87,8 @@ DISPLAY_DECIMALS = int(os.getenv("DISPLAY_DECIMALS", "2"))
 # ============================================================
 # Helpers
 # ============================================================
-
 def _safe_df(df):
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
-
-
 def _fmt_money(x):
     if isinstance(x, str) and x.strip().startswith("$"):
         return x
@@ -95,8 +96,6 @@ def _fmt_money(x):
         return f"${float(x):,.2f}"
     except Exception:
         return "n/a"
-
-
 def _fmt_pct(x):
     if isinstance(x, str) and "%" in x:
         return x
@@ -123,29 +122,90 @@ def _fmt_date(value) -> str:
         return dt_value.strftime("%Y-%m-%d")
     except Exception:
         return "n/a"
-
-
 def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if df is None or df.empty:
         return None
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
-
-
+def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
+    df = _safe_df(df)
+    if df.empty or "equity" not in df.columns:
+        return pd.Series(dtype=float)
+    series = pd.Series(df["equity"].values, index=pd.to_datetime(df["date"]) if "date" in df.columns else df.index)
+    return series.dropna().sort_index()
+def _series_date_range(series: pd.Series) -> str:
+    series = pd.Series(series).dropna()
+    if series.empty:
+        return "empty"
+    idx = pd.to_datetime(series.index)
+    return f"{idx.min().date()} -> {idx.max().date()}"
+def _load_equity_history(path: str) -> pd.Series:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return pd.Series(dtype=float)
+    df = pd.read_csv(path)
+    if df.empty or "date" not in df.columns or "equity" not in df.columns:
+        return pd.Series(dtype=float)
+    df["date"] = pd.to_datetime(df["date"])
+    return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+def _load_portfolio_fixture(path: str) -> pd.Series:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return pd.Series(dtype=float)
+    df = pd.read_csv(path)
+    if df.empty or "date" not in df.columns or "equity" not in df.columns:
+        return pd.Series(dtype=float)
+    df["date"] = pd.to_datetime(df["date"])
+    return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+def _append_equity_history(path: str, report_date: pd.Timestamp, equity: float) -> pd.Series:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    report_date = pd.to_datetime(report_date).normalize()
+    rows = []
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        df = pd.read_csv(path)
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+            rows = df.to_dict(orient="records")
+            if (df["date"] == report_date).any():
+                return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
+    rows.append({"date": report_date.strftime("%Y-%m-%d"), "equity": float(equity)})
+    out_df = pd.DataFrame(rows)
+    out_df.to_csv(path, index=False)
+    out_df["date"] = pd.to_datetime(out_df["date"])
+    return pd.Series(out_df["equity"].values, index=out_df["date"]).dropna().sort_index()
+def compute_portfolio_equity_series(
+    sleeve_equity_map: dict[str, pd.DataFrame],
+    sleeve_allocations: dict[str, float],
+    cash_weight: float,
+    base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
+) -> pd.Series:
+    returns_map = {}
+    for sleeve_name, alloc in sleeve_allocations.items():
+        if alloc <= WEIGHT_TOLERANCE:
+            continue
+        series = _equity_series_from_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
+        if series.empty:
+            continue
+        returns_map[sleeve_name] = series.pct_change(fill_method=None).dropna()
+    if not returns_map:
+        return pd.Series(dtype=float)
+    aligned = pd.concat(returns_map, axis=1, join="inner").dropna()
+    if aligned.empty:
+        return pd.Series(dtype=float)
+    weights = pd.Series({k: sleeve_allocations.get(k, 0.0) for k in aligned.columns})
+    portfolio_ret = aligned.mul(weights, axis=1).sum(axis=1)
+    portfolio_equity = base_equity * (1.0 + portfolio_ret).cumprod()
+    if cash_weight > WEIGHT_TOLERANCE:
+        portfolio_equity = portfolio_equity * (1.0 + 0.0)
+    return portfolio_equity
 def _compute_execution_price(price_map: dict, ticker: str) -> float | None:
     entry = price_map.get(ticker, {})
     return entry.get("next_open") or entry.get("last_close")
-
-
 def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     price_map = {}
     if prices.empty:
         return price_map
-
     df = prices.copy()
     df["date"] = pd.to_datetime(df["date"])
-
     for ticker, group in df.groupby("ticker"):
         group = group.sort_values("date")
         past = group[group["date"] <= asof]
@@ -156,10 +216,7 @@ def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
             "last_close": float(last_close) if last_close is not None else None,
             "next_open": float(next_open) if next_open is not None else None,
         }
-
     return price_map
-
-
 def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     if prices.empty:
         return {}
@@ -173,6 +230,7 @@ def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
         else:
             atr_map[ticker] = float(past["atr"].iloc[-1]) if pd.notna(past["atr"].iloc[-1]) else None
     return atr_map
+def html_table(df: pd.DataFrame, title: str, max_rows: int = 25) -> str:
 
 
 def _format_df_for_email(df: pd.DataFrame) -> pd.DataFrame:
@@ -199,8 +257,6 @@ def html_table(df: pd.DataFrame, title: str, max_rows: int = 25, empty_message: 
         return f"<h3>{title}</h3><p><em>{empty_message}</em></p>"
     df = _format_df_for_email(df)
     return f"<h3>{title}</h3>" + df.head(max_rows).to_html(index=False, border=0, classes="tbl", justify="left")
-
-
 def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
     """Remove SGOV 'cash_proxy_fund_entries' rows from trades."""
     trades = _safe_df(trades).copy()
@@ -209,16 +265,12 @@ def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
     if "ticker" in trades.columns and "reason_exit" in trades.columns:
         trades = trades[~((trades["ticker"] == "SGOV") & (trades["reason_exit"] == "cash_proxy_fund_entries"))].copy()
     return trades
-
-
 # ============================================================
 # Sleeve health check
 # ============================================================
-
 def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
     """
     Check whether a sleeve produced valid results.
-
     Returns (is_valid, reason) where reason is empty string if valid.
     """
     equity_df = _safe_df(equity_df)
@@ -232,48 +284,38 @@ def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
     if pd.isna(last_eq) or last_eq <= 0:
         return False, f"invalid terminal equity ({last_eq})"
     return True, ""
-
-
 # ============================================================
 # Sleeve runners
 # ============================================================
-
 def run_sleeve_1():
-    print("[SLEEVE 1] Preparing data...")
+    logger.info("[SLEEVE 1] Preparing data...")
     signals = s1_prepare_data()
-    print("[SLEEVE 1] Running backtest...")
+    logger.info("[SLEEVE 1] Running backtest...")
     return s1_backtest(signals)
-
-
 def run_sleeve_trend():
-    print("[SLEEVE TREND] Preparing data...")
+    logger.info("[SLEEVE TREND] Preparing data...")
     signals = st_prepare_data()
-    print("[SLEEVE TREND] Running backtest...")
+    logger.info("[SLEEVE TREND] Running backtest...")
     equity_df, trades_df = st_backtest(signals)
     return equity_df, trades_df, signals
-
-
 def run_sleeve_2():
     if s2_run_backtest_details is not None:
-        print("[SLEEVE 2] Running run_backtest_with_details()...")
+        logger.info("[SLEEVE 2] Running run_backtest_with_details()...")
         return s2_run_backtest_details(period="1y", interval="1d")
     if s2_run_backtest is not None:
-        print("[SLEEVE 2] Running run_backtest()...")
+        logger.info("[SLEEVE 2] Running run_backtest()...")
         equity_df, trades_df = s2_run_backtest(period="1y", interval="1d")
         return {"equity_df": equity_df, "trades_df": trades_df}
     if s2_prepare_data is not None and s2_backtest is not None:
-        print("[SLEEVE 2] Preparing data...")
+        logger.info("[SLEEVE 2] Preparing data...")
         signals = s2_prepare_data()
-        print("[SLEEVE 2] Running backtest...")
+        logger.info("[SLEEVE 2] Running backtest...")
         equity_df, trades_df = s2_backtest(signals)
         return {"equity_df": equity_df, "trades_df": trades_df}
     raise RuntimeError("No valid Sleeve 2 runner found")
-
-
 # ============================================================
 # Sleeve output extraction (for dynamic allocation)
 # ============================================================
-
 def extract_sleeve_output(
     equity_df: pd.DataFrame,
     trades_df: pd.DataFrame,
@@ -288,23 +330,18 @@ def extract_sleeve_output(
     equity_df = _safe_df(equity_df)
     trades_df = _safe_df(trades_df)
     positions = []
-
     if equity_df.empty:
         return create_sleeve_output([], sleeve_name, 0.0, "No equity data")
-
     latest_equity = float(equity_df["equity"].iloc[-1]) if "equity" in equity_df.columns else 10000.0
     start_equity = float(equity_df["equity"].iloc[0]) if "equity" in equity_df.columns else 10000.0
-
     if not trades_df.empty and "ticker" in trades_df.columns:
         real_trades = trades_df.copy()
         if "reason_exit" in real_trades.columns:
             real_trades = real_trades[~((real_trades.get("ticker", "") == "SGOV") &
                                         (real_trades.get("reason_exit", "") == "cash_proxy_fund_entries"))].copy()
-
         if not real_trades.empty and "entry_date" in real_trades.columns:
             real_trades["entry_date"] = pd.to_datetime(real_trades["entry_date"], errors="coerce")
             latest_trades = real_trades.nlargest(5, "entry_date")
-
             for _, row in latest_trades.iterrows():
                 ticker = row.get("ticker", "")
                 shares = row.get("shares", 0)
@@ -318,7 +355,6 @@ def extract_sleeve_output(
                         "reason": row.get("reason_exit", "signal"),
                         "signal_strength": 1.0,
                     })
-
         # Also handle engine-style trades (which have "date" + "weight_to" instead
         # of "entry_date" + "shares").  This allows Sleeve 2 engine trades to
         # register as active positions for allocation purposes.
@@ -356,15 +392,11 @@ def extract_sleeve_output(
         strength = min(1.0, base_strength * max(0.5, min(1.5, 1.0 + sleeve_return)))
     else:
         strength = 0.0
-
     notes = f"Active: {len(positions)} positions, equity ${latest_equity:,.0f}" if is_active else "Inactive"
     return create_sleeve_output(positions, sleeve_name, strength, notes)
-
-
 # ============================================================
 # Portfolio equity computation (FIXED)
 # ============================================================
-
 def compute_portfolio_equity(
     sleeve_equity_map: dict[str, pd.DataFrame],
     sleeve_allocations: dict[str, float],
@@ -373,52 +405,39 @@ def compute_portfolio_equity(
 ) -> dict:
     """
     Compute TRUE portfolio equity from sleeve returns and allocations.
-
     This computes:
         portfolio_return = sum(sleeve_alloc_i * sleeve_return_i) + cash_weight * 0
         portfolio_equity = base_equity * (1 + portfolio_return)
-
     Returns dict with: equity, prev_equity, day_pnl, day_return, cumulative_return
-
     NOTE: This is the ONLY correct way to compute portfolio total.
     Do NOT sum sleeve equities - they are independent backtests on their own base.
     """
     portfolio_return = 0.0
     portfolio_prev_return = 0.0
-
     for sleeve_name, alloc in sleeve_allocations.items():
         if alloc <= WEIGHT_TOLERANCE:
             continue
-
         equity_df = _safe_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
         if equity_df.empty or "equity" not in equity_df.columns:
             continue
-
         df = equity_df.reset_index(drop=True)
         start = float(df["equity"].iloc[0])
         last = float(df["equity"].iloc[-1])
         prev = float(df["equity"].iloc[-2]) if len(df) > 1 else last
-
         if start <= 0:
             continue
-
         # Sleeve cumulative return (from its own backtest)
         sleeve_cum_return = (last / start) - 1.0
         sleeve_prev_return = (prev / start) - 1.0
-
         # Weighted contribution to portfolio return
         portfolio_return += alloc * sleeve_cum_return
         portfolio_prev_return += alloc * sleeve_prev_return
-
     # Cash contributes 0 return (already accounted for by not adding anything)
-
     # Portfolio equity
     portfolio_equity = base_equity * (1.0 + portfolio_return)
     portfolio_prev_equity = base_equity * (1.0 + portfolio_prev_return)
-
     day_pnl = portfolio_equity - portfolio_prev_equity
     day_return = day_pnl / portfolio_prev_equity if portfolio_prev_equity > 0 else 0.0
-
     return {
         "equity": portfolio_equity,
         "prev_equity": portfolio_prev_equity,
@@ -428,6 +447,43 @@ def compute_portfolio_equity(
     }
 
 
+def resolve_portfolio_equity_series(
+    sleeve_equity_map: dict[str, pd.DataFrame],
+    alloc_result: AllocationResult,
+    report_date: pd.Timestamp,
+    portfolio_equity: float,
+    offline_fixture: bool,
+    base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
+) -> pd.Series:
+    history_path = os.path.join(OUTPUT_DIR, "equity_history.csv")
+    history_series = _load_equity_history(history_path)
+    if not history_series.empty:
+        return history_series
+
+    ledger_path = os.path.join("paper", "ledger.csv")
+    if os.path.exists(ledger_path) and os.path.getsize(ledger_path) > 0:
+        ledger = pd.read_csv(ledger_path)
+        if not ledger.empty and "date" in ledger.columns and "total_equity" in ledger.columns:
+            ledger["date"] = pd.to_datetime(ledger["date"])
+            ledger = ledger.sort_values("date")
+            ledger_daily = ledger.groupby("date", as_index=True)["total_equity"].last()
+            ledger_series = ledger_daily.dropna().sort_index()
+            if not ledger_series.empty:
+                return ledger_series
+
+    derived = compute_portfolio_equity_series(
+        sleeve_equity_map=sleeve_equity_map,
+        sleeve_allocations=alloc_result.sleeve_allocations,
+        cash_weight=alloc_result.cash_weight,
+        base_equity=base_equity,
+    )
+    if not derived.empty:
+        return derived
+
+    if offline_fixture:
+        return pd.Series(dtype=float)
+
+    return _append_equity_history(history_path, report_date, portfolio_equity)
 def compute_portfolio_equity_series(
     sleeve_equity_map: dict[str, pd.DataFrame],
     sleeve_allocations: dict[str, float],
@@ -597,7 +653,6 @@ def derive_actual_sleeve_allocations(alloc_result: AllocationResult) -> dict[str
 # ============================================================
 # Daily snapshot builder
 # ============================================================
-
 def build_daily_snapshot(
     report_date: pd.Timestamp,
     alloc_result: AllocationResult,
@@ -610,16 +665,30 @@ def build_daily_snapshot(
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
-
     tickers = sorted(weights_df["ticker"].unique().tolist()) if not weights_df.empty else []
-
     prices = pd.DataFrame()
     if tickers:
         prices = download_prices(tickers, period="6mo", interval="1d")
-
+        if prices.empty or prices[["open", "high", "low", "close"]].isna().all().all():
+            logger.error("Downloaded price data is empty or all-NaN; aborting snapshot generation.")
+            raise RuntimeError("Downloaded price data is empty or all-NaN; aborting snapshot generation.")
+    # --- Paper trading signals snapshot (daily immutable file) ---
+    # Prefer a YYYY-MM-DD string you already use in the report.
+    # If you already have something like report_date_str / asof_date_str / today_str, use that here.
+    signals_path = None
+    if weights_df.empty:
+        logger.warning("[PAPER] No target weights available; skipping signals snapshot.")
+    else:
+        run_date_str = report_date.strftime("%Y-%m-%d")
+        signals_path = write_signals_snapshot(
+            df_targets=weights_df,
+            run_date=run_date_str,
+            out_dir="signals",
+            sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
+        )
+        logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
     price_map = _build_price_map(prices, report_date)
     atr_map = _build_atr_map(prices, report_date)
-
     entry_map = {}
     if s2_details and s2_details.get("weights_df") is not None and not s2_details.get("weights_df").empty:
         weights_history = s2_details.get("weights_df")
@@ -631,12 +700,10 @@ def build_daily_snapshot(
                 "entry_date": _fmt_date(pd.to_datetime(row["entry_date"])),
                 "entry_price": row.get("entry_price"),
             }
-
     # Holdings
     holdings = []
     risk_levels = []
     model_equity = portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY)
-
     for _, row in weights_df.iterrows():
         ticker = row["ticker"]
         weight = float(row["target_weight"])
@@ -644,10 +711,10 @@ def build_daily_snapshot(
         price_info = price_map.get(ticker, {})
         last_px = price_info.get("last_close")
         entry_info = entry_map.get(ticker)
+        entry_date = entry_info.get("entry_date") if entry_info else report_date.strftime("%Y-%m-%d")
 
         entry_date = entry_info.get("entry_date") if entry_info else _fmt_date(report_date)
         entry_px = entry_info.get("entry_price") if entry_info and entry_info.get("entry_price") else last_px
-
         if last_px is None or entry_px is None:
             pnl_dollars = None
             pnl_pct = None
@@ -659,6 +726,7 @@ def build_daily_snapshot(
             else:
                 pnl_dollars = shares * (entry_px - last_px)
                 pnl_pct = (entry_px / last_px) - 1.0 if last_px > 0 else None
+        days_held = (report_date - pd.to_datetime(entry_date)).days if entry_date else None
 
         days_held = (report_date - pd.to_datetime(entry_date)).days if entry_date and entry_date != "n/a" else None
 
@@ -672,7 +740,6 @@ def build_daily_snapshot(
             "pnl_pct": pnl_pct,
             "days_held": days_held,
         })
-
         atr = atr_map.get(ticker)
         if entry_px is None:
             stop_loss = None
@@ -691,14 +758,12 @@ def build_daily_snapshot(
             else:
                 stop_loss = entry_px * (1 + STOP_PCT)
                 take_profit = entry_px * (1 - TAKE_PROFIT_PCT)
-
         risk_levels.append({
             "ticker": ticker,
             "entry_price": entry_px,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
         })
-
     # Trades for today
     prev_weights = {}
     if s2_details and s2_details.get("weights_df") is not None and not s2_details.get("weights_df").empty:
@@ -706,20 +771,16 @@ def build_daily_snapshot(
         if len(hist) > 1:
             prev_row = hist.iloc[-2]
             prev_weights = prev_row.to_dict()
-
     new_weights = {row["ticker"]: float(row["target_weight"]) for _, row in weights_df.iterrows()}
     all_tickers = sorted(set(prev_weights.keys()) | set(new_weights.keys()))
     orders = []
-
     for ticker in all_tickers:
         if ticker == CASH_TICKER:
             continue
         prev_w = float(prev_weights.get(ticker, 0.0))
         new_w = float(new_weights.get(ticker, 0.0))
-
         if abs(prev_w) <= WEIGHT_TOLERANCE and abs(new_w) <= WEIGHT_TOLERANCE:
             continue
-
         def _append_order(action, weight):
             exec_px = _compute_execution_price(price_map, ticker)
             shares = None
@@ -735,7 +796,6 @@ def build_daily_snapshot(
                 "shares": shares,
                 "notional": notional,
             })
-
         if abs(prev_w) <= WEIGHT_TOLERANCE and abs(new_w) > WEIGHT_TOLERANCE:
             _append_order("BUY" if new_w > 0 else "SHORT", new_w)
         elif abs(prev_w) > WEIGHT_TOLERANCE and abs(new_w) <= WEIGHT_TOLERANCE:
@@ -743,11 +803,9 @@ def build_daily_snapshot(
         elif prev_w * new_w < 0:
             _append_order("SELL" if prev_w > 0 else "COVER", 0.0)
             _append_order("BUY" if new_w > 0 else "SHORT", new_w)
-
     # Watchlist
     watchlist = []
     held = {h["ticker"] for h in holdings}
-
     if st_signals is not None and not st_signals.empty:
         st_latest = st_signals[st_signals["date"] == st_signals["date"].max()].copy()
         st_latest = st_latest[~st_latest["ticker"].isin(held)]
@@ -761,7 +819,6 @@ def build_daily_snapshot(
                 "ticker": row["ticker"],
                 "reason": f"trend score={row['final_signal']:.1f} vs {trend_cfg.LONG_THRESHOLD if row['signal_long'] else trend_cfg.SHORT_THRESHOLD} threshold",
             })
-
     s2_signals = s2_details.get("signals") if s2_details else pd.DataFrame()
     if s2_signals is not None and not s2_signals.empty:
         s2_latest = s2_signals[s2_signals["date"] == s2_signals["date"].max()].copy()
@@ -779,12 +836,9 @@ def build_daily_snapshot(
                 "ticker": row["ticker"],
                 "reason": f"z_pe={row['z_pe']:.2f} vs {Z_EXTREME_SHORT} short threshold",
             })
-
     watchlist = watchlist[:10]
-
     broker_equity = os.environ.get("BROKER_EQUITY")
     broker_equity_val = float(broker_equity) if broker_equity not in (None, "") else None
-
     reconciliation = {
         "model_start_equity": DEFAULT_PORTFOLIO_BASE_EQUITY,
         "model_current_equity": portfolio_stats.get("equity"),
@@ -792,11 +846,15 @@ def build_daily_snapshot(
         "difference": (portfolio_stats.get("equity") - broker_equity_val) if broker_equity_val else None,
         "note": "slippage/fees/timing" if broker_equity_val else "broker equity placeholder (set BROKER_EQUITY)",
     }
-
     allocations = {
         "risk_on": 1.0 - alloc_result.cash_weight,
         "cash": alloc_result.cash_weight,
         "sleeves": alloc_result.sleeve_allocations,
+    }
+    performance_summary = {
+        "current_equity": portfolio_stats.get("equity"),
+        "day_return": portfolio_stats.get("day_return"),
+        "cumulative_return": portfolio_stats.get("cumulative_return"),
     }
 
     previous_weights_df = None
@@ -833,6 +891,7 @@ def build_daily_snapshot(
     return {
         "asof": report_date,
         "allocations": allocations,
+        "performance_summary": performance_summary,
         "orders": orders,
         "risk_levels": risk_levels,
         "holdings": holdings,
@@ -842,29 +901,25 @@ def build_daily_snapshot(
         "performance_summary": performance_summary,
         "s2_no_picks": s2_no_picks,
     }
-
-
 # ============================================================
 # Report builder (FIXED)
 # ============================================================
-
 def build_html_report(
     report_date: pd.Timestamp | str,
     st_equity, st_trades,
     s2_equity, s2_trades,
     alloc_result: AllocationResult = None,
+    alpha_stats: dict | None = None,
     proposed_trades: list[dict] | None = None,
     performance_summary: dict | None = None,
     s2_no_picks: bool = False,
 ) -> str:
     """
     Build HTML report with CORRECT portfolio math.
-
     Portfolio Snapshot now shows:
     - Sleeve rows: allocated notional only (attribution), NOT additive equity
     - CASH row: allocated notional with 0 return
     - TOTAL row: TRUE portfolio equity computed from weighted sleeve returns
-
     The TOTAL is the ONLY authoritative equity figure.
     """
     BASE_EQUITY = DEFAULT_PORTFOLIO_BASE_EQUITY
@@ -876,13 +931,11 @@ def build_html_report(
         trend_alloc = alloc_result.sleeve_allocations.get("sleeve_trend", 0.0)
         val_alloc = alloc_result.sleeve_allocations.get("sleeve_2", 0.0)
         cash_alloc = alloc_result.cash_weight
-
         # Build sleeve equity map for portfolio computation
         sleeve_equity_map = {
             "sleeve_trend": st_equity,
             "sleeve_2": s2_equity,
         }
-
         # Compute TRUE portfolio equity (the only correct total)
         portfolio_stats = compute_portfolio_equity(
             sleeve_equity_map=sleeve_equity_map,
@@ -890,11 +943,9 @@ def build_html_report(
             cash_weight=cash_alloc,
             base_equity=BASE_EQUITY,
         )
-
         # Build sleeve rows - show ALLOCATED NOTIONAL only (attribution)
         # Do NOT show sleeve backtest equity as it's not additive
         rows = []
-
         if trend_alloc > WEIGHT_TOLERANCE:
             alloc_notional = BASE_EQUITY * trend_alloc
             # Compute sleeve-level return for display (attribution only)
@@ -920,7 +971,6 @@ def build_html_report(
                 rows.append({"Sleeve": f"Sleeve Trend — Momentum ({trend_alloc:.2%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
         else:
             rows.append({"Sleeve": "Sleeve Trend — Momentum (inactive)", "Allocated": "—", "Equity": "—", "Day Return": "—"})
-
         if val_alloc > WEIGHT_TOLERANCE:
             alloc_notional = BASE_EQUITY * val_alloc
             s2_df = _safe_df(s2_equity)
@@ -943,6 +993,7 @@ def build_html_report(
             else:
                 rows.append({"Sleeve": f"Sleeve 2 — Valuation ({val_alloc:.2%})", "Allocated": _fmt_money(alloc_notional), "Equity": "—", "Day Return": "—"})
         else:
+            rows.append({"Sleeve": "Sleeve 2 — Valuation (inactive)", "Allocated": "—", "Equity": "—", "Day Return": "—"})
             sleeve2_label = "Sleeve 2 — Valuation (no eligible picks)" if s2_no_picks else "Sleeve 2 — Valuation (inactive)"
             rows.append({"Sleeve": sleeve2_label, "Allocated": "—", "Equity": "—", "Day Return": "—"})
 
@@ -955,9 +1006,7 @@ def build_html_report(
                 "Equity": _fmt_money(cash_notional),  # Cash doesn't grow
                 "Day Return": _fmt_pct(0),
             })
-
         summary_df = pd.DataFrame(rows)
-
         # TOTAL row - THE AUTHORITATIVE PORTFOLIO EQUITY
         # Computed from weighted sleeve returns, NOT by summing rows above
         total_row = pd.DataFrame([{
@@ -966,41 +1015,33 @@ def build_html_report(
             "Equity": _fmt_money(portfolio_stats["equity"]),
             "Day Return": _fmt_pct(portfolio_stats["day_return"]),
         }])
-
         summary_df = pd.concat([summary_df, total_row], ignore_index=True)
-
         alloc_summary = allocation_summary_df(alloc_result)
         holdings = holdings_snapshot_df(alloc_result)
         skipped_df = pd.DataFrame(alloc_result.skipped_trades) if alloc_result.skipped_trades else pd.DataFrame()
-
     else:
         # Legacy static allocation fallback
         # Still compute correctly using weighted returns
         sleeve_equity_map = {"sleeve_trend": st_equity, "sleeve_2": s2_equity}
         static_allocs = {"sleeve_trend": 0.80, "sleeve_2": 0.20}
-
         portfolio_stats = compute_portfolio_equity(
             sleeve_equity_map=sleeve_equity_map,
             sleeve_allocations=static_allocs,
             cash_weight=0.0,
             base_equity=BASE_EQUITY,
         )
-
         rows = [
             {"Sleeve": "Sleeve Trend — Momentum (80%)", "Allocated": _fmt_money(BASE_EQUITY * 0.80), "Equity": "—", "Day Return": "—"},
             {"Sleeve": "Sleeve 2 — Valuation (20%)", "Allocated": _fmt_money(BASE_EQUITY * 0.20), "Equity": "—", "Day Return": "—"},
         ]
-
         total_row = {
             "Sleeve": f"TOTAL — Portfolio ({_fmt_money(BASE_EQUITY)})",
             "Allocated": _fmt_money(BASE_EQUITY),
             "Equity": _fmt_money(portfolio_stats["equity"]),
             "Day Return": _fmt_pct(portfolio_stats["day_return"]),
         }
-
         summary_df = pd.concat([pd.DataFrame(rows), pd.DataFrame([total_row])], ignore_index=True)
         alloc_summary, holdings, skipped_df = None, None, pd.DataFrame()
-
     # Build exit log
     exit_log_rows = []
     for trades_df, sleeve_name in [(st_trades, "Trend"), (s2_trades, "Valuation")]:
@@ -1014,7 +1055,6 @@ def build_html_report(
                     "Days Held": row.get("hold_days", ""),
                     "P&L": _fmt_money(row.get("pnl", 0)),
                 })
-
     # CSS
     css = """
      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Arial; color:#111827; }
@@ -1027,6 +1067,55 @@ def build_html_report(
      .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }
      .muted { color:#6b7280; font-size:12px; }
    """
+    performance_rows = [
+        {"Metric": "Current Equity", "Value": _fmt_money(portfolio_stats["equity"])},
+        {"Metric": "Day Return", "Value": _fmt_pct(portfolio_stats["day_return"])},
+        {"Metric": "Cumulative Return", "Value": _fmt_pct(portfolio_stats["cumulative_return"])},
+    ]
+    performance_section = f'<div class="card">{html_table(pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10)}</div>'
+
+    def _fmt_float(value: float | None) -> str:
+        try:
+            return f"{float(value):.2f}"
+        except Exception:
+            return "n/a"
+
+    if alpha_stats and alpha_stats.get("n_days", 0) >= 20:
+        alpha_rows = [
+            {
+                "Metric": "Since inception",
+                "Value": "Port {port}, SPY {bench}, Excess {excess}".format(
+                    port=_fmt_pct(alpha_stats.get("port_cum_return")),
+                    bench=_fmt_pct(alpha_stats.get("bench_cum_return")),
+                    excess=_fmt_pct(alpha_stats.get("excess_cum_return")),
+                ),
+            },
+            {
+                "Metric": "Beta (63d), Alpha (ann., 63d)",
+                "Value": "{beta}, {alpha}".format(
+                    beta=_fmt_float(alpha_stats.get("beta_63d")),
+                    alpha=_fmt_pct(alpha_stats.get("alpha_ann_63d")),
+                ),
+            },
+            {
+                "Metric": "Tracking Error (ann.), Information Ratio",
+                "Value": "{te}, {ir}".format(
+                    te=_fmt_pct(alpha_stats.get("tracking_error_ann")),
+                    ir=_fmt_float(alpha_stats.get("info_ratio")),
+                ),
+            },
+            {
+                "Metric": "Max Drawdown: Port %, SPY %",
+                "Value": "Port {port}, SPY {bench}".format(
+                    port=_fmt_pct(alpha_stats.get("mdd_port")),
+                    bench=_fmt_pct(alpha_stats.get("mdd_bench")),
+                ),
+            },
+            {"Metric": "n_days used", "Value": str(alpha_stats.get("n_days", 0))},
+        ]
+        alpha_section = f'<div class="card">{html_table(pd.DataFrame(alpha_rows), "Alpha Attribution vs SPY", 10)}</div>'
+    else:
+        alpha_section = '<div class="card"><h3>Alpha Attribution vs SPY</h3><p><em>Alpha attribution unavailable (insufficient data or benchmark fetch failed).</em></p></div>'
 
     # Build sections
     perf_rows = []
@@ -1057,7 +1146,6 @@ def build_html_report(
     holdings_section = f'<div class="card">{html_table(holdings, "Holdings Snapshot", 20)}</div>' if holdings is not None and not holdings.empty else ""
     skipped_section = f'<div class="card">{html_table(skipped_df, "Skipped Trades (Constraint Hits)", 10)}</div>' if not skipped_df.empty else ""
     exit_section = f'<div class="card">{html_table(pd.DataFrame(exit_log_rows), "Exit Log", 15)}</div>' if exit_log_rows else ""
-
     return f"""
     <html>
     <head><style>{css}</style></head>
@@ -1068,6 +1156,8 @@ def build_html_report(
         {perf_section}
         {proposed_section}
         <div class="card">{html_table(summary_df, "Portfolio Snapshot")}</div>
+        {performance_section}
+        {alpha_section}
         {alloc_section}
         {holdings_section}
         <div class="card">
@@ -1085,50 +1175,56 @@ def build_html_report(
     </body>
     </html>
     """
-
 # ============================================================
 # Main
 # ============================================================
-
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    offline_fixture = os.getenv("OFFLINE_FIXTURE", "").lower() in {"1", "true", "yes"}
+    fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    today = dt.date.today().strftime("%Y-%m-%d")
-
+    today = fixture_date if offline_fixture else dt.date.today().strftime("%Y-%m-%d")
+    portfolio_fixture = _load_portfolio_fixture("tests/fixtures/portfolio_equity.csv") if offline_fixture else pd.Series(dtype=float)
+    if offline_fixture and not portfolio_fixture.empty:
+        today = portfolio_fixture.index.max().strftime("%Y-%m-%d")
     # ── Run sleeves ───────────────────────────────────────────────
-    try:
-        s1_equity, s1_trades = run_sleeve_1()
-    except Exception as e:
-        print(f"[WARN] Sleeve 1 failed: {e}")
+    if offline_fixture:
+        logger.warning("[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches.")
         s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
-
-    try:
-        st_equity, st_trades, st_signals = run_sleeve_trend()
-    except Exception as e:
-        print(f"[WARN] Sleeve Trend failed: {e}")
         st_equity, st_trades, st_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-    try:
-        s2_details = run_sleeve_2()
-        s2_equity = s2_details.get("equity_df", pd.DataFrame())
-        s2_trades = s2_details.get("trades_df", pd.DataFrame())
-    except Exception as e:
-        print(f"[WARN] Sleeve 2 failed: {e}")
         s2_details = {}
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
-
+    else:
+        try:
+            s1_equity, s1_trades = run_sleeve_1()
+        except Exception as e:
+            logger.warning("[WARN] Sleeve 1 failed: %s", e)
+            s1_equity, s1_trades = pd.DataFrame(), pd.DataFrame()
+        try:
+            st_equity, st_trades, st_signals = run_sleeve_trend()
+        except Exception as e:
+            logger.warning("[WARN] Sleeve Trend failed: %s", e)
+            st_equity, st_trades, st_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        try:
+            s2_details = run_sleeve_2()
+            s2_equity = s2_details.get("equity_df", pd.DataFrame())
+            s2_trades = s2_details.get("trades_df", pd.DataFrame())
+        except Exception as e:
+            logger.warning("[WARN] Sleeve 2 failed: %s", e)
+            s2_details = {}
+            s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
     # ── Sleeve health checks ─────────────────────────────────────
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
     trend_valid, trend_reason = _sleeve_is_valid(st_equity)
     s2_valid, s2_reason = _sleeve_is_valid(s2_equity)
-
     if not trend_valid:
-        print(f"sleeve_trend inactive: {trend_reason} -> routed to CASH")
+        logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
     if not s2_valid:
-        print(f"sleeve_2 inactive: {s2_reason} -> routed to CASH")
-
+        logger.warning("sleeve_2 inactive: %s -> routed to CASH", s2_reason)
     # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
+    val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
     val_output = extract_sleeve_output(
         s2_equity,
         s2_trades,
@@ -1148,17 +1244,14 @@ def main():
     # the freed weight to CASH (never to another sleeve).
     patched = False
     freed_weight = 0.0
-
     if not trend_valid and alloc_result.sleeve_allocations.get("sleeve_trend", 0.0) > WEIGHT_TOLERANCE:
         freed_weight += alloc_result.sleeve_allocations["sleeve_trend"]
         alloc_result.sleeve_allocations["sleeve_trend"] = 0.0
         patched = True
-
     if not s2_valid and alloc_result.sleeve_allocations.get("sleeve_2", 0.0) > WEIGHT_TOLERANCE:
         freed_weight += alloc_result.sleeve_allocations["sleeve_2"]
         alloc_result.sleeve_allocations["sleeve_2"] = 0.0
         patched = True
-
     if patched:
         alloc_result.cash_weight = alloc_result.cash_weight + freed_weight
         # Re-normalise total_weight (should be 1.0)
@@ -1166,20 +1259,17 @@ def main():
             sum(alloc_result.sleeve_allocations.values())
             + alloc_result.cash_weight
         )
-        print(f"[ALLOCATION] Freed {freed_weight:.1%} from inactive sleeve(s) -> CASH")
-
+        logger.info("[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH", freed_weight * 100)
     # ── Validate allocation ───────────────────────────────────────
     errors = validate_allocation_result(alloc_result)
     if errors:
-        print(f"[WARN] Allocation validation errors: {errors}")
-
+        logger.warning("[WARN] Allocation validation errors: %s", errors)
     # ── Log allocation summary ────────────────────────────────────
-    print(f"\n[ALLOCATION] Sleeve allocations:")
+    logger.info("\n[ALLOCATION] Sleeve allocations:")
     for sleeve, pct in alloc_result.sleeve_allocations.items():
-        print(f"  {sleeve}: {pct:.1%}")
-    print(f"  CASH: {alloc_result.cash_weight:.1%}")
-    print(f"  Total weight: {alloc_result.total_weight:.4f}")
-
+        logger.info("  %s: %.1f%%", sleeve, pct * 100)
+    logger.info("  CASH: %.1f%%", alloc_result.cash_weight * 100)
+    logger.info("  Total weight: %.4f", alloc_result.total_weight)
     # ── Portfolio stats for model equity ─────────────────────────
     sleeve_equity_map = {
         "sleeve_trend": st_equity,
@@ -1191,28 +1281,146 @@ def main():
         cash_weight=alloc_result.cash_weight,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
-
     # ── Build daily snapshot/email ────────────────────────────────
     report_date = s2_details.get("asof") if s2_details.get("asof") is not None else _asof_date_from_df(st_equity)
-    report_date = report_date or pd.Timestamp(dt.date.today())
-
-    daily_snapshot = build_daily_snapshot(
-        report_date=report_date,
+    report_date = report_date or pd.Timestamp(fixture_date if offline_fixture else dt.date.today())
+    if offline_fixture and not portfolio_fixture.empty:
+        portfolio_equity_series = portfolio_fixture
+        report_date = portfolio_fixture.index.max()
+    else:
+        portfolio_equity_series = resolve_portfolio_equity_series(
+            sleeve_equity_map=sleeve_equity_map,
+            alloc_result=alloc_result,
+            report_date=report_date,
+            portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+            offline_fixture=offline_fixture,
+            base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+        )
+    if offline_fixture and not portfolio_fixture.empty:
+        portfolio_equity_for_alpha = portfolio_fixture
+    else:
+        portfolio_equity_for_alpha = resolve_portfolio_equity_series(
+            sleeve_equity_map=sleeve_equity_map,
+            alloc_result=alloc_result,
+            report_date=report_date,
+            portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+            offline_fixture=offline_fixture,
+            base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+        )
+    portfolio_equity_series = resolve_portfolio_equity_series(
+        sleeve_equity_map=sleeve_equity_map,
         alloc_result=alloc_result,
+        report_date=report_date,
+        portfolio_equity=portfolio_stats.get("equity", DEFAULT_PORTFOLIO_BASE_EQUITY),
+        offline_fixture=offline_fixture,
+        base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
         portfolio_stats=portfolio_stats,
         st_equity=st_equity,
         s2_equity=s2_equity,
         st_signals=st_signals,
         s2_details=s2_details,
     )
-
+    bench_prices_for_alpha = load_benchmark_prices(
+        ticker="SPY",
+        start=portfolio_equity_for_alpha.index.min() if not portfolio_equity_for_alpha.empty else None,
+        end=portfolio_equity_for_alpha.index.max() if not portfolio_equity_for_alpha.empty else None,
+        offline_fixture=offline_fixture,
+    )
+    alpha_stats = None
+    logger.info(
+        "[ALPHA] Data readiness - portfolio_equity_for_alpha: %s rows (%s), bench_prices_for_alpha: %s rows (%s)",
+        len(portfolio_equity_for_alpha),
+        _series_date_range(portfolio_equity_for_alpha),
+        len(bench_prices_for_alpha),
+        _series_date_range(bench_prices_for_alpha),
+    )
+    if portfolio_equity_for_alpha.empty or bench_prices_for_alpha.empty:
+        logger.warning("[WARN] Alpha attribution skipped (missing portfolio or benchmark history).")
+    else:
+        alpha_stats = calc_alpha_stats(portfolio_equity_for_alpha, bench_prices_for_alpha, window=63)
+    try:
+        daily_snapshot = build_daily_snapshot(
+            report_date=report_date,
+            alloc_result=alloc_result,
+            portfolio_stats=portfolio_stats,
+            st_signals=st_signals,
+            s2_details=s2_details,
+        )
+    except RuntimeError as e:
+        logger.error("[ERROR] %s", e)
+        sys.exit(0)
+    daily_snapshot["alpha_attribution"] = alpha_stats
+    # --- Paper trading execution + report (real-world cadence) ---
+    # Signals are generated "after close" for report_date.
+    # Paper execution confirms trades for report_date using PRIOR business day's signals.
+    trade_date_str = report_date.strftime("%Y-%m-%d")
+    signal_date_str = prev_trading_day(trade_date_str)
+    signals_prev = os.path.join("signals", f"{signal_date_str}.json")
+    signals_today = os.path.join("signals", f"{trade_date_str}.json")
+    # Bootstrap: if we don't have prior-day signals yet, use same-day signals (DEV ONLY)
+    signals_path_exec = signals_prev if os.path.exists(signals_prev) else signals_today
+    if signals_path_exec == signals_today:
+        logger.info("[PAPER][BOOTSTRAP] Using same-day signals for execution: %s", signals_path_exec)
+    paper_summary = None
+    paper_html = ""
+    if os.path.exists(signals_path_exec):
+        try:
+            paper_summary = run_paper_day(
+                run_date=trade_date_str,
+                signals_path=signals_path_exec,
+                ledger_path="paper/ledger.csv",
+                trades_path="paper/trades.csv",
+                config_path="paper/config_paper.json",
+                force=False,
+            )
+            logger.info(
+                "[PAPER] Executed paper trading for %s using signals %s",
+                trade_date_str,
+                signals_path_exec,
+            )
+        except Exception as e:
+            msg = repr(e)
+            # If already executed, don't fail the email — just render from ledger/trades
+            if "Ledger already contains run_date" in msg:
+                logger.info(
+                    "[PAPER] Already executed for %s; rendering report from ledger.",
+                    trade_date_str,
+                )
+            else:
+                logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
+        # Always attempt to render the paper section if ledger/trades exist
+        try:
+            paper_html = build_paper_report_html(
+                run_date=trade_date_str,
+                ledger_path="paper/ledger.csv",
+                trades_path="paper/trades.csv",
+                benchmark_ticker="SPY",
+            )
+        except Exception as e:
+            logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
+    else:
+        logger.warning("[PAPER][WARN] Missing signals for execution: %s", signals_path_exec)
+    # ── Build daily snapshot/email ────────────────────────────────
     subject, email_body = create_trade_email(daily_snapshot)
+    # Append paper trading summary to plain-text email (if available)
+    if paper_summary:
+        email_body += (
+            f"\n\n---\nPaper Trading Execution ({paper_summary['date']}): "
+            f"equity=${paper_summary['total_equity']:.2f}, "
+            f"cash=${paper_summary['cash']:.2f}, "
+            f"trades={paper_summary['num_trades']}, "
+            f"turnover=${paper_summary['turnover_notional']:.2f}\n"
+        )
+    # Write the plain-text email body to disk
     email_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
     with open(email_path, "w", encoding="utf-8") as f:
         f.write(email_body)
-    print(f"[OK] Daily trade email written: {email_path}")
-
+    logger.info("[OK] Daily trade email written: %s", email_path)
     # ── Build report ──────────────────────────────────────────────
+    html = build_html_report(today, st_equity, st_trades, s2_equity, s2_trades, alloc_result, alpha_stats)
+    # Append paper trading HTML section (if available)
+    if paper_html:
+        html = html + "<hr/>" + paper_html
     html = build_html_report(
         report_date=report_date,
         st_equity=st_equity,
@@ -1228,20 +1436,16 @@ def main():
     out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"[OK] HTML report written: {out_path}")
-
-    print("\n[EMAIL PREVIEW]\n")
-    print(email_body)
-
+    logger.info("[OK] HTML report written: %s", out_path)
+    logger.info("\n[EMAIL PREVIEW]\n")
+    logger.info("%s", email_body)
     if send_email:
         try:
             send_email(subject=subject, body_html=html, body_text=email_body)
-            print("[OK] Email sent")
+            logger.info("[OK] Email sent")
         except Exception as e:
-            print(f"[WARN] Email not sent: {e}")
+            logger.warning("[WARN] Email not sent: %s", e)
     else:
-        print("[WARN] send_email not found — HTML generated only")
-
-
+        logger.warning("[WARN] send_email not found — HTML generated only")
 if __name__ == "__main__":
     main()
