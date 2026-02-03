@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -166,7 +169,11 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
     # Drop any still-missing tickers (degrade gracefully)
     missing = [t for t in tickers if t not in s.index or pd.isna(s.loc[t])]
     if missing:
-        print(f"[PAPER][WARN] Missing open prices on {run_date}: {missing} — dropping from execution.")
+        logger.warning(
+            "[PAPER][WARN] Missing open prices on %s: %s — dropping from execution.",
+            run_date,
+            missing,
+        )
         s = s.drop(labels=[t for t in missing if t in s.index], errors="ignore")
 
     return s

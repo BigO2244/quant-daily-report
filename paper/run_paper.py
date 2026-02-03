@@ -4,13 +4,17 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import logging
 from pathlib import Path
 
 from paper.paper_broker import run_paper_day
 from paper.trading_calendar import next_trading_day
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="Run paper trading execution for a given signal date.")
     parser.add_argument("signal_date", help="Signal date (YYYY-MM-DD). Executes next business day open.")
     parser.add_argument(
@@ -27,9 +31,9 @@ def main() -> None:
     if not signals_path.exists():
         raise FileNotFoundError(f"Missing signals file: {signals_path}")
 
-    print(f"[PAPER] Signal date: {signal_date}")
-    print(f"[PAPER] Trade (execution) date: {trade_date}")
-    print(f"[PAPER] Signals file: {signals_path}")
+    logger.info("[PAPER] Signal date: %s", signal_date)
+    logger.info("[PAPER] Trade (execution) date: %s", trade_date)
+    logger.info("[PAPER] Signals file: %s", signals_path)
 
     # Guard: avoid trying to fetch bars for a future date (Yahoo daily bars won't exist yet)
     today_str = dt.date.today().strftime("%Y-%m-%d")
@@ -48,7 +52,7 @@ def main() -> None:
         force=args.force,
     )
 
-    print(json.dumps(result, indent=2))
+    logger.info("%s", json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
