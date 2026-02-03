@@ -4,7 +4,7 @@ import tempfile
 import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,8 @@ TICKERS = []  # optional override; if empty, load from data/universe.csv
 
 MAX_RISK_PCT_PER_TRADE = float(os.environ.get("MAX_RISK_PCT_PER_TRADE", "0.01"))  # 1% equity risk per trade
 MAX_POSITION_PCT = float(os.environ.get("MAX_POSITION_PCT", "0.10"))              # 10% max notional per position
+DATE_FORMAT = os.environ.get("DATE_FORMAT", "US")
+DISPLAY_DECIMALS = int(os.environ.get("DISPLAY_DECIMALS", "2"))
 
 # =========================
 # Universe helpers
@@ -156,13 +158,16 @@ def fetch_factor_data(prices: pd.DataFrame) -> pd.DataFrame:
     out["ret"] = out.groupby("ticker")["close"].pct_change(fill_method=None)
     return out
 
+
 def build_factor_scores(factor_df: pd.DataFrame) -> pd.DataFrame:
     """Stub – keep your existing factor scoring logic here."""
     return factor_df
 
+
 def compute_full_signals(scored_df: pd.DataFrame) -> pd.DataFrame:
     """Stub – keep your existing signal combining logic here."""
     return scored_df
+
 
 def add_atr(prices: pd.DataFrame, window: int = 14) -> pd.DataFrame:
     """Compute ATR on long-form OHLC data."""
@@ -180,8 +185,188 @@ def add_atr(prices: pd.DataFrame, window: int = 14) -> pd.DataFrame:
 # Email
 # =========================
 
-def send_email(subject: str, body_html: str) -> None:
-    """Send HTML email using SMTP credentials from env vars."""
+
+def _fmt_money(value: Optional[float]) -> str:
+    if isinstance(value, str) and value.strip().startswith("$"):
+        return value
+    try:
+        return f"${float(value):,.{DISPLAY_DECIMALS}f}"
+    except Exception:
+        return "n/a"
+
+
+def _fmt_pct(value: Optional[float]) -> str:
+    if isinstance(value, str) and "%" in value:
+        return value
+    try:
+        return f"{float(value) * 100:.{DISPLAY_DECIMALS}f}%"
+    except Exception:
+        return "n/a"
+
+
+def _fmt_date(value: Optional[object]) -> str:
+    try:
+        dt_value = pd.to_datetime(value)
+        if DATE_FORMAT.upper() == "US":
+            return dt_value.strftime("%m/%d/%Y")
+        return dt_value.strftime("%Y-%m-%d")
+    except Exception:
+        return "n/a"
+
+
+def _format_table(headers: List[str], rows: List[List[str]]) -> str:
+    if not rows:
+        return "(none)"
+
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(str(cell)))
+
+    def _fmt_row(cells: List[str]) -> str:
+        return " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(cells))
+
+    lines = [_fmt_row(headers), "-+-".join("-" * w for w in col_widths)]
+    for row in rows:
+        lines.append(_fmt_row(row))
+    return "\n".join(lines)
+
+
+def create_trade_email(snapshot: dict) -> Tuple[str, str]:
+    """
+    Create the plain-text Daily Trade Rundown email body.
+
+    snapshot keys:
+        asof, allocations, orders, risk_levels, holdings, watchlist, reconciliation
+    """
+    asof = snapshot.get("asof")
+    asof_str = _fmt_date(asof) if asof is not None else "n/a"
+    subject = f"Daily Trade Rundown — {asof_str}"
+
+    allocations = snapshot.get("allocations", {})
+    cash_pct = allocations.get("cash", 0.0)
+    risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
+    sleeve_splits = allocations.get("sleeves", {})
+
+    lines = []
+    lines.append(subject)
+    lines.append("")
+    lines.append("0) Summary / allocation")
+    lines.append(f"   - Risk-on: {_fmt_pct(risk_on_pct)}")
+    lines.append(f"   - Cash: {_fmt_pct(cash_pct)}")
+    for sleeve, pct in sleeve_splits.items():
+        lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
+
+    lines.append("")
+    lines.append("1) Performance Summary (Portfolio)")
+    perf = snapshot.get("performance_summary", {})
+    if not perf:
+        lines.append("   - None")
+    else:
+        lines.append(f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}")
+        lines.append(f"   - Week-to-Date: {_fmt_pct(perf.get('wtd'))}")
+        lines.append(f"   - Month-to-Date: {_fmt_pct(perf.get('mtd'))}")
+        lines.append(f"   - Year-to-Date: {_fmt_pct(perf.get('ytd'))}")
+
+    lines.append("")
+    lines.append("2) Proposed Trades / Next Rebalance")
+    proposed = snapshot.get("proposed_trades", [])
+    if not proposed:
+        lines.append("   - No proposed trades.")
+    else:
+        for trade in proposed:
+            line = (
+                f"   - {trade.get('action', '')} {trade.get('ticker', '')} | sleeve={trade.get('sleeve', '')} "
+                f"| current={_fmt_pct(trade.get('current_weight'))} | target={_fmt_pct(trade.get('target_weight'))} "
+                f"| delta={_fmt_pct(trade.get('delta_weight'))}"
+            )
+            if trade.get("est_shares") is not None:
+                line += f" | est_shares={trade.get('est_shares')}"
+            if trade.get("est_notional") is not None:
+                line += f" | est_notional={_fmt_money(trade.get('est_notional'))}"
+            lines.append(line)
+
+    lines.append("")
+    lines.append("3) Trades for Today (NEW ORDERS)")
+    orders = snapshot.get("orders", [])
+    if not orders:
+        lines.append("   - None")
+    else:
+        for order in orders:
+            action = order.get("action", "")
+            ticker = order.get("ticker", "")
+            weight = order.get("target_weight", 0.0)
+            exec_px = order.get("execution_price")
+            reason = order.get("reason")
+            notional = order.get("notional")
+            shares = order.get("shares")
+            line = f"   - {action} {ticker} | target={_fmt_pct(weight)} | exp_px={_fmt_money(exec_px)}"
+            if shares is not None:
+                line += f" | est_shares={shares}"
+            if notional is not None:
+                line += f" | est_notional={_fmt_money(notional)}"
+            if reason:
+                line += f" | reason={reason}"
+            lines.append(line)
+
+    lines.append("")
+    lines.append("4) Risk & Exit Levels (ACTIVE POSITIONS)")
+    risk_levels = snapshot.get("risk_levels", [])
+    if not risk_levels:
+        lines.append("   - None")
+    else:
+        for level in risk_levels:
+            lines.append(
+                "   - {ticker} | entry={entry} | stop={stop} | take={take}".format(
+                    ticker=level.get("ticker", ""),
+                    entry=_fmt_money(level.get("entry_price")),
+                    stop=_fmt_money(level.get("stop_loss")),
+                    take=_fmt_money(level.get("take_profit")),
+                )
+            )
+
+    lines.append("")
+    lines.append("5) Current Holdings (LIVE BOOK)")
+    holdings = snapshot.get("holdings", [])
+    headers = ["Ticker", "Dir", "Entry Date", "Entry Px", "Last Px", "P&L $", "P&L %", "Days Held"]
+    rows = []
+    for h in holdings:
+        rows.append([
+            h.get("ticker", ""),
+            h.get("direction", ""),
+            _fmt_date(h.get("entry_date", "")),
+            _fmt_money(h.get("entry_price")),
+            _fmt_money(h.get("last_price")),
+            _fmt_money(h.get("pnl_dollars")),
+            _fmt_pct(h.get("pnl_pct")),
+            str(h.get("days_held", "")),
+        ])
+    lines.append(_format_table(headers, rows))
+
+    lines.append("")
+    lines.append("6) Watchlist (NO TRADES YET)")
+    watchlist = snapshot.get("watchlist", [])
+    if not watchlist:
+        lines.append("   - None")
+    else:
+        for item in watchlist:
+            lines.append(f"   - {item.get('ticker', '')}: {item.get('reason', '')}")
+
+    lines.append("")
+    lines.append("7) Account Reconciliation (MODEL vs BROKER)")
+    recon = snapshot.get("reconciliation", {})
+    lines.append(f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}")
+    lines.append(f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}")
+    lines.append(f"   - Broker Current Equity: {_fmt_money(recon.get('broker_equity'))}")
+    lines.append(f"   - Difference: {_fmt_money(recon.get('difference'))}")
+    if recon.get("note"):
+        lines.append(f"   - Note: {recon.get('note')}")
+
+    return subject, "\n".join(lines)
+
+
+def send_email(subject: str, body_html: Optional[str] = None, body_text: Optional[str] = None) -> None:
+    """Send HTML/email using SMTP credentials from env vars."""
     host = os.environ.get("SMTP_HOST", "")
     port = int(os.environ.get("SMTP_PORT", "587"))
     user = os.environ.get("SMTP_USER", "")
@@ -191,11 +376,18 @@ def send_email(subject: str, body_html: str) -> None:
     if not (host and user and password and to_addr):
         raise RuntimeError("Missing SMTP env vars (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/REPORT_TO_EMAIL).")
 
+    if body_html is None and body_text is None:
+        raise ValueError("send_email requires body_html or body_text")
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to_addr
-    msg.attach(MIMEText(body_html, "html"))
+
+    if body_text:
+        msg.attach(MIMEText(body_text, "plain"))
+    if body_html:
+        msg.attach(MIMEText(body_html, "html"))
 
     with smtplib.SMTP(host, port) as server:
         server.starttls()
@@ -203,6 +395,5 @@ def send_email(subject: str, body_html: str) -> None:
         refused = server.sendmail(user, [to_addr], msg.as_string())
         print(f"[EMAIL DEBUG] refused={refused}")
         if refused:
-          raise RuntimeError(f"SMTP refused recipients: {refused}")
+            raise RuntimeError(f"SMTP refused recipients: {refused}")
         print("[OK] Email accepted by SMTP server")
-
