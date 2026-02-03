@@ -9,7 +9,11 @@ Validates the allocation logic against the spec requirements:
 4. Portfolio weights (including CASH) sum to 1.00 daily
 """
 import sys
-sys.path.insert(0, '/home/claude')
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.portfolio_alloc import (
     PortfolioAllocator,
@@ -34,9 +38,9 @@ def test_trend_only_100pct():
     trend_alloc = result.sleeve_allocations.get("sleeve_trend", 0)
     val_alloc = result.sleeve_allocations.get("sleeve_2", 0)
     
-    assert abs(trend_alloc - 1.0) < WEIGHT_TOLERANCE, f"Trend should be 100%, got {trend_alloc:.1%}"
+    assert abs(trend_alloc - 0.95) < WEIGHT_TOLERANCE, f"Trend should be 95%, got {trend_alloc:.1%}"
     assert abs(val_alloc - 0.0) < WEIGHT_TOLERANCE, f"Valuation should be 0%, got {val_alloc:.1%}"
-    print("✓ PASS: Only trend active → 100% trend allocation")
+    print("✓ PASS: Only trend active → 95% trend allocation")
 
 
 def test_both_active_equal_strength():
@@ -56,9 +60,9 @@ def test_both_active_equal_strength():
     trend_alloc = result.sleeve_allocations.get("sleeve_trend", 0)
     val_alloc = result.sleeve_allocations.get("sleeve_2", 0)
     
-    assert abs(trend_alloc - 0.5) < WEIGHT_TOLERANCE, f"Trend should be 50%, got {trend_alloc:.1%}"
-    assert abs(val_alloc - 0.5) < WEIGHT_TOLERANCE, f"Valuation should be 50%, got {val_alloc:.1%}"
-    print("✓ PASS: Both active with equal strength → 50/50 split")
+    assert abs(trend_alloc - 0.475) < WEIGHT_TOLERANCE, f"Trend should be 47.5%, got {trend_alloc:.1%}"
+    assert abs(val_alloc - 0.475) < WEIGHT_TOLERANCE, f"Valuation should be 47.5%, got {val_alloc:.1%}"
+    print("✓ PASS: Both active with equal strength → 47.5/47.5 split")
 
 
 def test_no_sleeves_100_cash():
@@ -160,11 +164,47 @@ def test_strength_proportional_allocation():
     trend_alloc = result.sleeve_allocations.get("sleeve_trend", 0)
     val_alloc = result.sleeve_allocations.get("sleeve_2", 0)
     
-    # 0.75 / (0.75 + 0.25) = 0.75, 0.25 / (0.75 + 0.25) = 0.25
-    assert abs(trend_alloc - 0.75) < WEIGHT_TOLERANCE, f"Trend should be 75%, got {trend_alloc:.1%}"
-    assert abs(val_alloc - 0.25) < WEIGHT_TOLERANCE, f"Valuation should be 25%, got {val_alloc:.1%}"
+    # 0.75 / (0.75 + 0.25) = 0.75, scaled by 95% allocation
+    assert abs(trend_alloc - 0.7125) < WEIGHT_TOLERANCE, f"Trend should be 71.25%, got {trend_alloc:.1%}"
+    assert abs(val_alloc - 0.2375) < WEIGHT_TOLERANCE, f"Valuation should be 23.75%, got {val_alloc:.1%}"
     
     print("✓ PASS: Strength-proportional allocation works correctly")
+
+
+def test_cash_residual_with_tight_caps():
+    """Scenario: 50/50 target, 4 names per sleeve, 10% cap leaves cash residual."""
+    trend = create_sleeve_output(
+        [{"ticker": f"T{i}", "target_weight": 1.0} for i in range(4)],
+        "sleeve_trend",
+        strength=1.0,
+    )
+    val = create_sleeve_output(
+        [{"ticker": f"V{i}", "target_weight": 1.0} for i in range(4)],
+        "sleeve_2",
+        strength=1.0,
+    )
+    allocator = PortfolioAllocator(max_position_pct=0.10, normal_max_cash_pct=0.05)
+    result = allocator.allocate([trend, val])
+    assert result.cash_weight > 0.15, f"Expected elevated cash with tight caps, got {result.cash_weight:.1%}"
+    print("✓ PASS: Tight caps leave elevated cash residual")
+
+
+def test_cash_drops_with_more_breadth_and_higher_caps():
+    """Scenario: broader candidate set + 15% cap keeps cash near normal levels."""
+    trend = create_sleeve_output(
+        [{"ticker": f"T{i}", "target_weight": 1.0} for i in range(10)],
+        "sleeve_trend",
+        strength=1.0,
+    )
+    val = create_sleeve_output(
+        [{"ticker": f"V{i}", "target_weight": 1.0} for i in range(10)],
+        "sleeve_2",
+        strength=1.0,
+    )
+    allocator = PortfolioAllocator(max_position_pct=0.15, normal_max_cash_pct=0.05)
+    result = allocator.allocate([trend, val])
+    assert result.cash_weight <= 0.05 + WEIGHT_TOLERANCE, f"Expected cash near normal levels, got {result.cash_weight:.1%}"
+    print("✓ PASS: Broader sleeves + higher caps reduce cash")
 
 
 def main():
@@ -181,6 +221,8 @@ def main():
         test_position_cap_no_renormalize,
         test_validation_function,
         test_strength_proportional_allocation,
+        test_cash_residual_with_tight_caps,
+        test_cash_drops_with_more_breadth_and_higher_caps,
     ]
     
     passed = 0
