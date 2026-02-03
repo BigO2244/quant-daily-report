@@ -24,6 +24,8 @@ TICKERS = []  # optional override; if empty, load from data/universe.csv
 
 MAX_RISK_PCT_PER_TRADE = float(os.environ.get("MAX_RISK_PCT_PER_TRADE", "0.01"))  # 1% equity risk per trade
 MAX_POSITION_PCT = float(os.environ.get("MAX_POSITION_PCT", "0.10"))              # 10% max notional per position
+DATE_FORMAT = os.environ.get("DATE_FORMAT", "US")
+DISPLAY_DECIMALS = int(os.environ.get("DISPLAY_DECIMALS", "2"))
 
 # =========================
 # Universe helpers
@@ -185,15 +187,29 @@ def add_atr(prices: pd.DataFrame, window: int = 14) -> pd.DataFrame:
 
 
 def _fmt_money(value: Optional[float]) -> str:
+    if isinstance(value, str) and value.strip().startswith("$"):
+        return value
     try:
-        return f"${float(value):,.2f}"
+        return f"${float(value):,.{DISPLAY_DECIMALS}f}"
     except Exception:
         return "n/a"
 
 
 def _fmt_pct(value: Optional[float]) -> str:
+    if isinstance(value, str) and "%" in value:
+        return value
     try:
-        return f"{float(value) * 100:.2f}%"
+        return f"{float(value) * 100:.{DISPLAY_DECIMALS}f}%"
+    except Exception:
+        return "n/a"
+
+
+def _fmt_date(value: Optional[object]) -> str:
+    try:
+        dt_value = pd.to_datetime(value)
+        if DATE_FORMAT.upper() == "US":
+            return dt_value.strftime("%m/%d/%Y")
+        return dt_value.strftime("%Y-%m-%d")
     except Exception:
         return "n/a"
 
@@ -224,7 +240,7 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
         asof, allocations, orders, risk_levels, holdings, watchlist, reconciliation
     """
     asof = snapshot.get("asof")
-    asof_str = pd.to_datetime(asof).strftime("%Y-%m-%d") if asof is not None else "n/a"
+    asof_str = _fmt_date(asof) if asof is not None else "n/a"
     subject = f"Daily Trade Rundown — {asof_str}"
 
     allocations = snapshot.get("allocations", {})
@@ -242,7 +258,36 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
         lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
 
     lines.append("")
-    lines.append("1) Trades for Today (NEW ORDERS)")
+    lines.append("1) Performance Summary (Portfolio)")
+    perf = snapshot.get("performance_summary", {})
+    if not perf:
+        lines.append("   - None")
+    else:
+        lines.append(f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}")
+        lines.append(f"   - Week-to-Date: {_fmt_pct(perf.get('wtd'))}")
+        lines.append(f"   - Month-to-Date: {_fmt_pct(perf.get('mtd'))}")
+        lines.append(f"   - Year-to-Date: {_fmt_pct(perf.get('ytd'))}")
+
+    lines.append("")
+    lines.append("2) Proposed Trades / Next Rebalance")
+    proposed = snapshot.get("proposed_trades", [])
+    if not proposed:
+        lines.append("   - No proposed trades.")
+    else:
+        for trade in proposed:
+            line = (
+                f"   - {trade.get('action', '')} {trade.get('ticker', '')} | sleeve={trade.get('sleeve', '')} "
+                f"| current={_fmt_pct(trade.get('current_weight'))} | target={_fmt_pct(trade.get('target_weight'))} "
+                f"| delta={_fmt_pct(trade.get('delta_weight'))}"
+            )
+            if trade.get("est_shares") is not None:
+                line += f" | est_shares={trade.get('est_shares')}"
+            if trade.get("est_notional") is not None:
+                line += f" | est_notional={_fmt_money(trade.get('est_notional'))}"
+            lines.append(line)
+
+    lines.append("")
+    lines.append("3) Trades for Today (NEW ORDERS)")
     orders = snapshot.get("orders", [])
     if not orders:
         lines.append("   - None")
@@ -265,7 +310,7 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
             lines.append(line)
 
     lines.append("")
-    lines.append("2) Risk & Exit Levels (ACTIVE POSITIONS)")
+    lines.append("4) Risk & Exit Levels (ACTIVE POSITIONS)")
     risk_levels = snapshot.get("risk_levels", [])
     if not risk_levels:
         lines.append("   - None")
@@ -281,7 +326,7 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
             )
 
     lines.append("")
-    lines.append("3) Current Holdings (LIVE BOOK)")
+    lines.append("5) Current Holdings (LIVE BOOK)")
     holdings = snapshot.get("holdings", [])
     headers = ["Ticker", "Dir", "Entry Date", "Entry Px", "Last Px", "P&L $", "P&L %", "Days Held"]
     rows = []
@@ -289,7 +334,7 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
         rows.append([
             h.get("ticker", ""),
             h.get("direction", ""),
-            h.get("entry_date", ""),
+            _fmt_date(h.get("entry_date", "")),
             _fmt_money(h.get("entry_price")),
             _fmt_money(h.get("last_price")),
             _fmt_money(h.get("pnl_dollars")),
@@ -299,7 +344,7 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     lines.append(_format_table(headers, rows))
 
     lines.append("")
-    lines.append("4) Watchlist (NO TRADES YET)")
+    lines.append("6) Watchlist (NO TRADES YET)")
     watchlist = snapshot.get("watchlist", [])
     if not watchlist:
         lines.append("   - None")
@@ -308,7 +353,7 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
             lines.append(f"   - {item.get('ticker', '')}: {item.get('reason', '')}")
 
     lines.append("")
-    lines.append("5) Account Reconciliation (MODEL vs BROKER)")
+    lines.append("7) Account Reconciliation (MODEL vs BROKER)")
     recon = snapshot.get("reconciliation", {})
     lines.append(f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}")
     lines.append(f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}")
