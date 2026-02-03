@@ -32,7 +32,9 @@ def regress_alpha_beta(port_ret: pd.Series, bench_ret: pd.Series) -> dict:
     aligned = pd.concat([port_ret, bench_ret], axis=1, join="inner").dropna()
     if aligned.shape[0] < 2:
         return {"beta": None, "alpha_daily": None, "alpha_annual": None}
-    slope, intercept = np.polyfit(aligned.iloc[:, 1].values, aligned.iloc[:, 0].values, 1)
+    slope, intercept = np.polyfit(
+        aligned.iloc[:, 1].values, aligned.iloc[:, 0].values, 1
+    )
     alpha_daily = float(intercept)
     beta = float(slope)
     return {
@@ -165,7 +167,9 @@ def load_benchmark_prices(
 
     series = pd.Series(df["close"].values, index=df["date"], name=ticker)
     if series.dropna().empty:
-        logger.warning("[WARN] Benchmark series is empty after filtering for %s", ticker)
+        logger.warning(
+            "[WARN] Benchmark series is empty after filtering for %s", ticker
+        )
         return pd.Series(dtype=float)
 
     return series.dropna()

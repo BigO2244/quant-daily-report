@@ -34,14 +34,18 @@ def backtest(start: str = "2023-01-01") -> pd.DataFrame:
     weights = build_target_weights(selected)
 
     if not weights:
-        raise RuntimeError("No positions selected (empty weights). Check filters / data availability.")
+        raise RuntimeError(
+            "No positions selected (empty weights). Check filters / data availability."
+        )
 
     ret = close[selected].pct_change(fill_method=None).fillna(0.0)
     w = pd.Series(weights)
     port_ret = ret.mul(w, axis=1).sum(axis=1)
     equity = (1.0 + port_ret).cumprod()
 
-    out = pd.DataFrame({"date": equity.index, "equity": equity.values}).set_index("date")
+    out = pd.DataFrame({"date": equity.index, "equity": equity.values}).set_index(
+        "date"
+    )
     return out
 
 

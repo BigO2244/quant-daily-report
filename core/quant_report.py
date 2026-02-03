@@ -25,14 +25,19 @@ if IN_CI:
 
 TICKERS = []  # optional override; if empty, load from data/universe.csv
 
-MAX_RISK_PCT_PER_TRADE = float(os.environ.get("MAX_RISK_PCT_PER_TRADE", "0.01"))  # 1% equity risk per trade
-MAX_POSITION_PCT = float(os.environ.get("MAX_POSITION_PCT", "0.10"))              # 10% max notional per position
+MAX_RISK_PCT_PER_TRADE = float(
+    os.environ.get("MAX_RISK_PCT_PER_TRADE", "0.01")
+)  # 1% equity risk per trade
+MAX_POSITION_PCT = float(
+    os.environ.get("MAX_POSITION_PCT", "0.10")
+)  # 10% max notional per position
 DATE_FORMAT = os.environ.get("DATE_FORMAT", "US")
 DISPLAY_DECIMALS = int(os.environ.get("DISPLAY_DECIMALS", "2"))
 
 # =========================
 # Universe helpers
 # =========================
+
 
 def load_universe_df(path: str = "data/universe.csv") -> pd.DataFrame:
     """Load data/universe.csv with at least a 'ticker' column and (optional) 'sector' column."""
@@ -47,20 +52,26 @@ def load_universe_df(path: str = "data/universe.csv") -> pd.DataFrame:
     u = u.dropna(subset=["ticker"]).drop_duplicates(subset=["ticker"])
     return u.reset_index(drop=True)
 
+
 # Auto-load tickers from universe if not explicitly overridden above
 if not TICKERS:
     _u = load_universe_df()
-    TICKERS = _u['ticker'].tolist()
+    TICKERS = _u["ticker"].tolist()
+
 
 def _yahoo_symbol(t: str) -> str:
     """Hook to map internal symbols to Yahoo symbols if needed."""
     return str(t).strip().upper()
 
+
 # =========================
 # Market data
 # =========================
 
-def download_prices(tickers: List[str], period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+
+def download_prices(
+    tickers: List[str], period: str = "1y", interval: str = "1d"
+) -> pd.DataFrame:
     """
     Download OHLCV data per ticker from yfinance and return a long-form table:
     columns: date, ticker, open, high, low, close, volume
@@ -139,20 +150,26 @@ def download_prices(tickers: List[str], period: str = "1y", interval: str = "1d"
             continue
 
     if not data:
-        raise RuntimeError("No price data downloaded. Check data/universe.csv and yfinance availability.")
+        raise RuntimeError(
+            "No price data downloaded. Check data/universe.csv and yfinance availability."
+        )
 
     if failed:
         logger.warning("⚠️ Skipped %s tickers with no/invalid price data:", len(failed))
         failed_unique = sorted(set(failed))
-        logger.warning("%s %s", failed_unique[:50], "..." if len(failed_unique) > 50 else "")
+        logger.warning(
+            "%s %s", failed_unique[:50], "..." if len(failed_unique) > 50 else ""
+        )
 
     prices = pd.concat(data, ignore_index=True)
     prices["date"] = pd.to_datetime(prices["date"])
     return prices
 
+
 # =========================
 # Factors / signals (placeholders for your existing pipeline)
 # =========================
+
 
 def fetch_factor_data(prices: pd.DataFrame) -> pd.DataFrame:
     """Stub – keep your existing factor pipeline here if you already have one."""
@@ -181,8 +198,11 @@ def add_atr(prices: pd.DataFrame, window: int = 14) -> pd.DataFrame:
     close = df.groupby("ticker")["close"].shift(1)
 
     tr = np.maximum(high - low, np.maximum((high - close).abs(), (low - close).abs()))
-    df["atr"] = tr.groupby(df["ticker"]).rolling(window).mean().reset_index(level=0, drop=True)
+    df["atr"] = (
+        tr.groupby(df["ticker"]).rolling(window).mean().reset_index(level=0, drop=True)
+    )
     return df
+
 
 # =========================
 # Email
@@ -216,6 +236,7 @@ def _fmt_date(value: Optional[object]) -> str:
     except Exception:
         return "n/a"
 
+
 def _fmt_float(value: Optional[float]) -> str:
     try:
         return f"{float(value):.2f}"
@@ -233,7 +254,9 @@ def _format_table(headers: List[str], rows: List[List[str]]) -> str:
             col_widths[i] = max(col_widths[i], len(str(cell)))
 
     def _fmt_row(cells: List[str]) -> str:
-        return " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(cells))
+        return " | ".join(
+            str(cell).ljust(col_widths[i]) for i, cell in enumerate(cells)
+        )
 
     lines = [_fmt_row(headers), "-+-".join("-" * w for w in col_widths)]
     for row in rows:
@@ -272,7 +295,9 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     if not perf:
         lines.append("   - None")
     else:
-        lines.append(f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}")
+        lines.append(
+            f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}"
+        )
         lines.append(f"   - Week-to-Date: {_fmt_pct(perf.get('wtd'))}")
         lines.append(f"   - Month-to-Date: {_fmt_pct(perf.get('mtd'))}")
         lines.append(f"   - Year-to-Date: {_fmt_pct(perf.get('ytd'))}")
@@ -337,19 +362,30 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     lines.append("")
     lines.append("5) Current Holdings (LIVE BOOK)")
     holdings = snapshot.get("holdings", [])
-    headers = ["Ticker", "Dir", "Entry Date", "Entry Px", "Last Px", "P&L $", "P&L %", "Days Held"]
+    headers = [
+        "Ticker",
+        "Dir",
+        "Entry Date",
+        "Entry Px",
+        "Last Px",
+        "P&L $",
+        "P&L %",
+        "Days Held",
+    ]
     rows = []
     for h in holdings:
-        rows.append([
-            h.get("ticker", ""),
-            h.get("direction", ""),
-            _fmt_date(h.get("entry_date", "")),
-            _fmt_money(h.get("entry_price")),
-            _fmt_money(h.get("last_price")),
-            _fmt_money(h.get("pnl_dollars")),
-            _fmt_pct(h.get("pnl_pct")),
-            str(h.get("days_held", "")),
-        ])
+        rows.append(
+            [
+                h.get("ticker", ""),
+                h.get("direction", ""),
+                _fmt_date(h.get("entry_date", "")),
+                _fmt_money(h.get("entry_price")),
+                _fmt_money(h.get("last_price")),
+                _fmt_money(h.get("pnl_dollars")),
+                _fmt_pct(h.get("pnl_pct")),
+                str(h.get("days_held", "")),
+            ]
+        )
     lines.append(_format_table(headers, rows))
 
     lines.append("")
@@ -364,9 +400,15 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     lines.append("")
     lines.append("7) Account Reconciliation (MODEL vs BROKER)")
     recon = snapshot.get("reconciliation", {})
-    lines.append(f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}")
-    lines.append(f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}")
-    lines.append(f"   - Broker Current Equity: {_fmt_money(recon.get('broker_equity'))}")
+    lines.append(
+        f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}"
+    )
+    lines.append(
+        f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}"
+    )
+    lines.append(
+        f"   - Broker Current Equity: {_fmt_money(recon.get('broker_equity'))}"
+    )
     lines.append(f"   - Difference: {_fmt_money(recon.get('difference'))}")
     if recon.get("note"):
         lines.append(f"   - Note: {recon.get('note')}")
@@ -382,7 +424,9 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     lines.append("7) Alpha Attribution vs SPY")
     alpha = snapshot.get("alpha_attribution")
     if not alpha or alpha.get("n_days", 0) < 20:
-        lines.append("   - Alpha attribution unavailable (insufficient data or benchmark fetch failed).")
+        lines.append(
+            "   - Alpha attribution unavailable (insufficient data or benchmark fetch failed)."
+        )
     else:
         lines.append(
             "   - Since inception: Port {port}, SPY {bench}, Excess {excess}".format(
@@ -414,7 +458,9 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     return subject, "\n".join(lines)
 
 
-def send_email(subject: str, body_html: Optional[str] = None, body_text: Optional[str] = None) -> None:
+def send_email(
+    subject: str, body_html: Optional[str] = None, body_text: Optional[str] = None
+) -> None:
     """Send HTML/email using SMTP credentials from env vars."""
     host = os.environ.get("SMTP_HOST", "")
     port = int(os.environ.get("SMTP_PORT", "587"))
@@ -423,7 +469,9 @@ def send_email(subject: str, body_html: Optional[str] = None, body_text: Optiona
     to_addr = os.environ.get("REPORT_TO_EMAIL", "")
 
     if not (host and user and password and to_addr):
-        raise RuntimeError("Missing SMTP env vars (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/REPORT_TO_EMAIL).")
+        raise RuntimeError(
+            "Missing SMTP env vars (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/REPORT_TO_EMAIL)."
+        )
 
     if body_html is None and body_text is None:
         raise ValueError("send_email requires body_html or body_text")

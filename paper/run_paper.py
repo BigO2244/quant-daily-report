@@ -15,8 +15,12 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    parser = argparse.ArgumentParser(description="Run paper trading execution for a given signal date.")
-    parser.add_argument("signal_date", help="Signal date (YYYY-MM-DD). Executes next business day open.")
+    parser = argparse.ArgumentParser(
+        description="Run paper trading execution for a given signal date."
+    )
+    parser.add_argument(
+        "signal_date", help="Signal date (YYYY-MM-DD). Executes next business day open."
+    )
     parser.add_argument(
         "--force",
         action="store_true",

@@ -11,7 +11,9 @@ def _read_csv_if_exists(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def build_paper_report_html(run_date: str, ledger_path: str, trades_path: str, benchmark_ticker: str = "SPY") -> str:
+def build_paper_report_html(
+    run_date: str, ledger_path: str, trades_path: str, benchmark_ticker: str = "SPY"
+) -> str:
     led = _read_csv_if_exists(ledger_path)
     day = led[led["date"] == run_date].copy() if not led.empty else pd.DataFrame()
 
@@ -21,18 +23,37 @@ def build_paper_report_html(run_date: str, ledger_path: str, trades_path: str, b
     exposure = invested / equity if equity > 0 else 0.0
 
     trades = _read_csv_if_exists(trades_path)
-    trades = trades[trades["date"] == run_date].copy() if not trades.empty else pd.DataFrame()
+    trades = (
+        trades[trades["date"] == run_date].copy()
+        if not trades.empty
+        else pd.DataFrame()
+    )
 
     if not trades.empty:
-        trades_view = trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]].copy()
+        trades_view = trades[
+            ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
+        ].copy()
     else:
-        trades_view = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
+        trades_view = pd.DataFrame(
+            columns=[
+                "ticker",
+                "side",
+                "shares",
+                "price",
+                "slippage_cost",
+                "notional",
+                "reason",
+            ]
+        )
 
     holdings = (
-        day.sort_values("market_value", ascending=False)[["ticker", "sleeve", "shares", "price", "market_value"]]
-        .head(15)
+        day.sort_values("market_value", ascending=False)[
+            ["ticker", "sleeve", "shares", "price", "market_value"]
+        ].head(15)
         if not day.empty
-        else pd.DataFrame(columns=["ticker", "sleeve", "shares", "price", "market_value"])
+        else pd.DataFrame(
+            columns=["ticker", "sleeve", "shares", "price", "market_value"]
+        )
     )
 
     def df_to_html(df: pd.DataFrame) -> str:
