@@ -33,12 +33,22 @@ DEFAULT_MAX_POSITION_PCT = 0.10
 DEFAULT_MAX_SLEEVE_EXPOSURE = 1.00
 DEFAULT_MAX_TURNOVER = 0.50
 DEFAULT_MIN_GROSS_EXPOSURE = float(os.getenv("MIN_GROSS_EXPOSURE", "0.90"))
+
 DEFAULT_CASH_LAST_RESORT = os.getenv("CASH_LAST_RESORT", "true").lower() in (
     "1",
     "true",
     "yes",
     "y",
 )
+
+PREPARE_FOR_BUY_NEXT_DAY = os.getenv("PREPARE_FOR_BUY_NEXT_DAY", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+
+
 CASH_LAST_RESORT_REASON = "Unallocated capital"
 CASH_TICKER = "CASH"
 WEIGHT_TOLERANCE = 1e-8
@@ -89,6 +99,8 @@ class AllocationResult:
     sleeve_allocations: dict[str, float]
     skipped_trades: list[dict] = field(default_factory=list)
     exit_log: list[dict] = field(default_factory=list)
+    cash_reason: Optional[str] = None
+
 
     @property
     def total_weight(self) -> float:
@@ -152,7 +164,9 @@ class PortfolioAllocator:
         min_gross_exposure: float = DEFAULT_MIN_GROSS_EXPOSURE,
         cash_last_resort: bool = DEFAULT_CASH_LAST_RESORT,
         risk_off: bool = False,
+        prepare_for_buy_next_day: bool = PREPARE_FOR_BUY_NEXT_DAY,
     ):
+
         self.base_equity = base_equity
         self.max_position_pct = max_position_pct
         self.max_sleeve_exposure = max_sleeve_exposure
@@ -162,6 +176,9 @@ class PortfolioAllocator:
         self.risk_off = bool(risk_off)
         self._skipped_trades: list[dict] = []
         self._exit_log: list[dict] = []
+        self.prepare_for_buy_next_day = bool(prepare_for_buy_next_day)
+        self._cash_reason: Optional[str] = None
+
 
     def allocate(
         self,
@@ -171,6 +188,8 @@ class PortfolioAllocator:
         """Perform dynamic allocation across sleeves."""
         self._skipped_trades = []
         self._exit_log = []
+        self._cash_reason = None
+
 
         sleeve_allocations = self._compute_sleeve_allocations(sleeve_outputs)
         combined = self._combine_sleeve_weights(sleeve_outputs, sleeve_allocations)
@@ -193,7 +212,9 @@ class PortfolioAllocator:
             sleeve_allocations=sleeve_allocations,
             skipped_trades=self._skipped_trades,
             exit_log=self._exit_log,
+            cash_reason=self._cash_reason,
         )
+
 
     def _compute_sleeve_allocations(
         self, sleeve_outputs: list[SleeveOutput]
@@ -362,24 +383,133 @@ class PortfolioAllocator:
         return df.drop(columns=["prev_weight", "weight_change"], errors="ignore")
 
     def _add_cash_allocation(self, combined: pd.DataFrame) -> pd.DataFrame:
-        """Add explicit CASH row for remaining allocation."""
-        current_total = combined["target_weight"].sum() if not combined.empty else 0.0
-        cash_weight = max(0.0, 1.0 - current_total)
+        """
+        Enforce conditional cash.
 
-        if cash_weight > WEIGHT_TOLERANCE:
+        Cash is held ONLY if:
+          1) No eligible assets exist (nothing to hold), OR
+          2) PREPARE_FOR_BUY_NEXT_DAY is true (dry powder for next session), OR
+          3) Constraints prevent full deployment (e.g., position caps). In this case,
+             we do NOT renormalize and break risk limits — residual stays as CASH.
+        """
+        # Strip any existing CASH rows defensively
+        if not combined.empty and "ticker" in combined.columns:
+            combined = combined[combined["ticker"] != CASH_TICKER].copy()
+
+        # Default
+        self._cash_reason = None
+
+        # If nothing to hold => 100% cash
+        if combined.empty:
+            self._cash_reason = "NO_ELIGIBLE_ASSETS"
+            return pd.DataFrame(
+                [
+                    {
+                        "ticker": CASH_TICKER,
+                        "target_weight": 1.0,
+                        "reason": CASH_LAST_RESORT_REASON,
+                        "signal_strength": 0.0,
+                    }
+                ]
+            )
+
+        current_total = float(combined["target_weight"].sum())
+        residual_cash = max(0.0, 1.0 - current_total)
+
+        # Condition (2): prepare for next-day buy -> keep residual as cash with that reason
+        if self.prepare_for_buy_next_day:
+            if residual_cash > WEIGHT_TOLERANCE:
+                self._cash_reason = "PREPARE_FOR_BUY_NEXT_DAY"
+                cash_row = pd.DataFrame(
+                    [
+                        {
+                            "ticker": CASH_TICKER,
+                            "target_weight": residual_cash,
+                            "reason": CASH_LAST_RESORT_REASON,
+                            "signal_strength": 0.0,
+                        }
+                    ]
+                )
+                combined = pd.concat([combined, cash_row], ignore_index=True)
+            else:
+                # Even if residual is 0, still store the reason so email can explain "why cash isn't present"
+                # (optional; remove if you only want rationale when cash > 0)
+                self._cash_reason = "PREPARE_FOR_BUY_NEXT_DAY"
+            return combined
+
+        # Condition (3): constraints created residual cash (caps/turnover/min gross, etc.)
+        if residual_cash > WEIGHT_TOLERANCE:
+            self._cash_reason = "CONSTRAINTS"
             cash_row = pd.DataFrame(
                 [
                     {
                         "ticker": CASH_TICKER,
-                        "target_weight": cash_weight,
-                        "sleeve_name": "CASH",
+                        "target_weight": residual_cash,
                         "reason": CASH_LAST_RESORT_REASON,
                         "signal_strength": 0.0,
                     }
                 ]
             )
             combined = pd.concat([combined, cash_row], ignore_index=True)
+
         return combined
+
+        # Determine if we have anything worth holding
+        if combined.empty:
+            has_eligible_assets = False
+            current_total = 0.0
+        else:
+            current_total = float(combined["target_weight"].sum())
+            has_eligible_assets = current_total > WEIGHT_TOLERANCE
+
+        hold_cash = (not has_eligible_assets) or self.prepare_for_buy_next_day
+
+        if hold_cash:
+            # Decide why
+            if not has_eligible_assets:
+                self._cash_reason = "NO_ELIGIBLE_ASSETS"
+            else:
+                self._cash_reason = "PREPARE_FOR_BUY_NEXT_DAY"
+
+            # If we have assets but we're deliberately holding cash, keep existing weights
+            # and put the remainder into CASH.
+            cash_weight = max(0.0, 1.0 - current_total)
+
+            # If nothing eligible, go 100% cash
+            if not has_eligible_assets:
+                cash_weight = 1.0
+                combined = pd.DataFrame(columns=combined.columns)
+
+            if cash_weight > WEIGHT_TOLERANCE:
+                cash_row = pd.DataFrame(
+                    [
+                        {
+                            "ticker": CASH_TICKER,
+                            "target_weight": cash_weight,
+                            "reason": CASH_LAST_RESORT_REASON,
+                            "signal_strength": 0.0,
+                        }
+                    ]
+                )
+                combined = pd.concat([combined, cash_row], ignore_index=True)
+
+            # If weights were >1 (shouldn't happen, but guard)
+            total = float(combined["target_weight"].sum()) if not combined.empty else 0.0
+            if total > 0 and abs(total - 1.0) > WEIGHT_TOLERANCE:
+                combined["target_weight"] = combined["target_weight"] / total
+
+            return combined
+
+        # Otherwise: NO cash; renormalize weights to sum to 1.0
+        self._cash_reason = None
+
+        if not combined.empty:
+            total = float(combined["target_weight"].sum())
+            if total > WEIGHT_TOLERANCE and abs(total - 1.0) > WEIGHT_TOLERANCE:
+                combined["target_weight"] = combined["target_weight"] / total
+
+        return combined
+
 
     def _boost_to_min_gross_exposure(self, combined: pd.DataFrame) -> pd.DataFrame:
         """Scale weights up to meet minimum gross exposure if possible."""
