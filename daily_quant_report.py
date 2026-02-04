@@ -172,6 +172,8 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
     cash_pct = allocations.get("cash", 0.0)
     risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
     sleeve_splits = allocations.get("sleeves", {})
+    cash_reason = allocations.get("cash_reason")
+
 
     lines = []
     lines.append(subject)
@@ -275,8 +277,16 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
     lines.append("5) Summary / allocation")
     lines.append(f"   - Risk-on: {_fmt_pct(risk_on_pct)}")
     lines.append(f"   - Cash: {_fmt_pct(cash_pct)}")
+
+    if cash_pct > WEIGHT_TOLERANCE and cash_reason:
+        lines.append(f"   - Cash rationale: {cash_reason}")
+
     for sleeve, pct in sleeve_splits.items():
         lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
+    
+    # Map risk levels by ticker so Proposed Trades can show entry/stop/take
+    risk_levels = snapshot.get("risk_levels", []) or []
+    risk_map = {r.get("ticker"): r for r in risk_levels if r.get("ticker")}
 
     lines.append("")
     lines.append("6) Proposed Trades / Next Rebalance")
@@ -284,17 +294,25 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
     if not proposed:
         lines.append("   - No proposed trades.")
     else:
-        for trade in proposed:
-            line = (
-                f"   - {trade.get('action', '')} {trade.get('ticker', '')} | sleeve={trade.get('sleeve', '')} "
-                f"| current={_fmt_pct(trade.get('current_weight'))} | target={_fmt_pct(trade.get('target_weight'))} "
-                f"| delta={_fmt_pct(trade.get('delta_weight'))}"
-            )
-            if trade.get("est_shares") is not None:
-                line += f" | est_shares={trade.get('est_shares')}"
-            if trade.get("est_notional") is not None:
-                line += f" | est_notional={_fmt_money(trade.get('est_notional'))}"
-            lines.append(line)
+            for trade in proposed:
+              line = (
+                  f"   - {trade.get('action', '')} {trade.get('ticker', '')} | sleeve={trade.get('sleeve', '')} "
+                  f"| current={_fmt_pct(trade.get('current_weight'))} | target={_fmt_pct(trade.get('target_weight'))} "
+                  f"| delta={_fmt_pct(trade.get('delta_weight'))}"
+              )
+              if trade.get("est_shares") is not None:
+                  line += f" | est_shares={trade.get('est_shares')}"
+              if trade.get("est_notional") is not None:
+                  line += f" | est_notional={_fmt_money(trade.get('est_notional'))}"
+
+              r = risk_map.get(trade.get("ticker", ""), {}) if risk_map else {}
+              line += (
+                  f" | entry={_fmt_money(r.get('entry_price'))}"
+                  f" | target={_fmt_money(r.get('take_profit'))}"
+                  f" | exit={_fmt_money(r.get('stop_loss'))}"
+              )
+
+              lines.append(line)
 
     lines.append("")
     lines.append("7) Sleeve allocation summary")
@@ -1306,6 +1324,7 @@ def build_daily_snapshot(
         "risk_on": 1.0 - alloc_result.cash_weight,
         "cash": alloc_result.cash_weight,
         "sleeves": alloc_result.sleeve_allocations,
+        "cash_reason": getattr(alloc_result, "cash_reason", None),
     }
     performance_diagnostics = {
         "current_equity": portfolio_stats.get("equity"),
