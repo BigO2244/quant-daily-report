@@ -64,7 +64,6 @@ from core.portfolio_alloc import (  # noqa: E402
 from core.quant_report import (  # noqa: E402
     download_prices,
     add_atr,
-    create_trade_email,
 )
 from core.alpha_attribution import (  # noqa: E402
     calc_alpha_stats,
@@ -142,6 +141,256 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
+
+
+def _format_text_table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return "(none)"
+
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(str(cell)))
+
+    def _fmt_row(cells: list[str]) -> str:
+        return " | ".join(
+            str(cell).ljust(col_widths[i]) for i, cell in enumerate(cells)
+        )
+
+    lines = [_fmt_row(headers), "-+-".join("-" * w for w in col_widths)]
+    for row in rows:
+        lines.append(_fmt_row(row))
+    return "\n".join(lines)
+
+
+def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
+    asof = snapshot.get("asof")
+    asof_str = _fmt_date(asof) if asof is not None else "n/a"
+    subject = f"Daily Trade Rundown — {asof_str}"
+
+    allocations = snapshot.get("allocations", {})
+    cash_pct = allocations.get("cash", 0.0)
+    risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
+    sleeve_splits = allocations.get("sleeves", {})
+
+    lines = []
+    lines.append(subject)
+
+    lines.append("")
+    lines.append("1) Trades for Today (NEW ORDERS)")
+    orders = snapshot.get("orders", [])
+    if not orders:
+        lines.append("   - None")
+    else:
+        for order in orders:
+            action = order.get("action", "")
+            ticker = order.get("ticker", "")
+            weight = order.get("target_weight", 0.0)
+            exec_px = order.get("execution_price")
+            reason = order.get("reason")
+            notional = order.get("notional")
+            shares = order.get("shares")
+            line = f"   - {action} {ticker} | target={_fmt_pct(weight)} | exp_px={_fmt_money(exec_px)}"
+            if shares is not None:
+                line += f" | est_shares={shares}"
+            if notional is not None:
+                line += f" | est_notional={_fmt_money(notional)}"
+            if reason:
+                line += f" | reason={reason}"
+            lines.append(line)
+
+    lines.append("")
+    lines.append("2) Performance Summary (Portfolio)")
+    perf = snapshot.get("performance_summary", {})
+    if not perf:
+        lines.append("   - None")
+    else:
+        lines.append(
+            f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}"
+        )
+        lines.append(f"   - Week-to-Date: {_fmt_pct(perf.get('wtd'))}")
+        lines.append(f"   - Month-to-Date: {_fmt_pct(perf.get('mtd'))}")
+        lines.append(f"   - Year-to-Date: {_fmt_pct(perf.get('ytd'))}")
+
+    lines.append("")
+    lines.append("3) Current Holdings (LIVE BOOK)")
+    holdings = snapshot.get("holdings", [])
+    headers = [
+        "Ticker",
+        "Direction",
+        "Entry Date",
+        "Entry Price",
+        "Last Price",
+        "P&L ($)",
+        "P&L (%)",
+        "Days Held",
+    ]
+    rows = []
+    for h in holdings:
+        rows.append(
+            [
+                h.get("ticker", ""),
+                h.get("direction", ""),
+                _fmt_date(h.get("entry_date", "")),
+                _fmt_money(h.get("entry_price")),
+                _fmt_money(h.get("last_price")),
+                _fmt_money(h.get("pnl_dollars")),
+                _fmt_pct(h.get("pnl_pct")),
+                str(h.get("days_held", "")),
+            ]
+        )
+    lines.append(_format_text_table(headers, rows))
+
+    lines.append("")
+    lines.append("4) Trades Not Taken (Skipped Trades / Constraints)")
+    skipped = snapshot.get("skipped_trades", [])
+    if not skipped:
+        lines.append("   - None")
+    else:
+        for skipped_trade in skipped:
+            ticker = skipped_trade.get("ticker", "")
+            action = skipped_trade.get("action", "")
+            reason = skipped_trade.get("reason", "")
+            details = []
+            if "original_weight" in skipped_trade:
+                details.append(
+                    f"original={_fmt_pct(skipped_trade.get('original_weight'))}"
+                )
+            if "capped_weight" in skipped_trade:
+                details.append(
+                    f"capped={_fmt_pct(skipped_trade.get('capped_weight'))}"
+                )
+            if "limited_weight" in skipped_trade:
+                details.append(
+                    f"limited={_fmt_pct(skipped_trade.get('limited_weight'))}"
+                )
+            if "excess" in skipped_trade:
+                details.append(f"excess={_fmt_pct(skipped_trade.get('excess'))}")
+            detail_str = f" | {' | '.join(details)}" if details else ""
+            lines.append(
+                f"   - {ticker} | action={action}{detail_str} | reason={reason}"
+            )
+
+    lines.append("")
+    lines.append("5) Summary / allocation")
+    lines.append(f"   - Risk-on: {_fmt_pct(risk_on_pct)}")
+    lines.append(f"   - Cash: {_fmt_pct(cash_pct)}")
+    for sleeve, pct in sleeve_splits.items():
+        lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
+
+    lines.append("")
+    lines.append("6) Proposed Trades / Next Rebalance")
+    proposed = snapshot.get("proposed_trades", [])
+    if not proposed:
+        lines.append("   - No proposed trades.")
+    else:
+        for trade in proposed:
+            line = (
+                f"   - {trade.get('action', '')} {trade.get('ticker', '')} | sleeve={trade.get('sleeve', '')} "
+                f"| current={_fmt_pct(trade.get('current_weight'))} | target={_fmt_pct(trade.get('target_weight'))} "
+                f"| delta={_fmt_pct(trade.get('delta_weight'))}"
+            )
+            if trade.get("est_shares") is not None:
+                line += f" | est_shares={trade.get('est_shares')}"
+            if trade.get("est_notional") is not None:
+                line += f" | est_notional={_fmt_money(trade.get('est_notional'))}"
+            lines.append(line)
+
+    lines.append("")
+    lines.append("7) Sleeve allocation summary")
+    lines.append(f"   - Risk-on: {_fmt_pct(risk_on_pct)}")
+    lines.append(f"   - Cash: {_fmt_pct(cash_pct)}")
+    for sleeve, pct in sleeve_splits.items():
+        lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
+
+    lines.append("")
+    lines.append("8) Risk & exit levels")
+    risk_levels = snapshot.get("risk_levels", [])
+    if not risk_levels:
+        lines.append("   - None")
+    else:
+        for level in risk_levels:
+            lines.append(
+                "   - {ticker} | entry={entry} | stop={stop} | take={take}".format(
+                    ticker=level.get("ticker", ""),
+                    entry=_fmt_money(level.get("entry_price")),
+                    stop=_fmt_money(level.get("stop_loss")),
+                    take=_fmt_money(level.get("take_profit")),
+                )
+            )
+
+    lines.append("")
+    lines.append("9) Alpha attribution vs benchmark")
+    alpha = snapshot.get("alpha_attribution")
+
+    def _fmt_float(value: float | None) -> str:
+        try:
+            return f"{float(value):.2f}"
+        except Exception:
+            return "n/a"
+
+    if not alpha or alpha.get("n_days", 0) < 20:
+        lines.append(
+            "   - Alpha attribution unavailable (insufficient data or benchmark fetch failed)."
+        )
+    else:
+        lines.append(
+            "   - Since inception: Port {port}, SPY {bench}, Excess {excess}".format(
+                port=_fmt_pct(alpha.get("port_cum_return")),
+                bench=_fmt_pct(alpha.get("bench_cum_return")),
+                excess=_fmt_pct(alpha.get("excess_cum_return")),
+            )
+        )
+        lines.append(
+            "   - Beta (63d): {beta}, Alpha (ann., 63d): {alpha}".format(
+                beta=_fmt_float(alpha.get("beta_63d")),
+                alpha=_fmt_pct(alpha.get("alpha_ann_63d")),
+            )
+        )
+        lines.append(
+            "   - Tracking Error (ann.): {te}, Information Ratio: {ir}".format(
+                te=_fmt_pct(alpha.get("tracking_error_ann")),
+                ir=_fmt_float(alpha.get("info_ratio")),
+            )
+        )
+        lines.append(
+            "   - Max Drawdown: Port {port}, SPY {bench}".format(
+                port=_fmt_pct(alpha.get("mdd_port")),
+                bench=_fmt_pct(alpha.get("mdd_bench")),
+            )
+        )
+        lines.append(f"   - n_days used: {alpha.get('n_days', 0)}")
+
+    lines.append("")
+    lines.append("10) Recent trades history")
+    lines.append("   - See Proposed Trades / Next Rebalance above.")
+
+    lines.append("")
+    lines.append("11) Equity curves and diagnostics")
+    recon = snapshot.get("reconciliation", {})
+    lines.append("   Account Reconciliation (MODEL vs BROKER)")
+    lines.append(
+        f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}"
+    )
+    lines.append(
+        f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}"
+    )
+    lines.append(
+        f"   - Broker Current Equity: {_fmt_money(recon.get('broker_equity'))}"
+    )
+    lines.append(f"   - Difference: {_fmt_money(recon.get('difference'))}")
+    if recon.get("note"):
+        lines.append(f"   - Note: {recon.get('note')}")
+
+    watchlist = snapshot.get("watchlist", [])
+    lines.append("   Watchlist (NO TRADES YET)")
+    if not watchlist:
+        lines.append("   - None")
+    else:
+        for item in watchlist:
+            lines.append(f"   - {item.get('ticker', '')}: {item.get('reason', '')}")
+
+    return subject, "\n".join(lines)
 
 
 def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
@@ -1058,7 +1307,7 @@ def build_daily_snapshot(
         "cash": alloc_result.cash_weight,
         "sleeves": alloc_result.sleeve_allocations,
     }
-    performance_summary = {
+    performance_diagnostics = {
         "current_equity": portfolio_stats.get("equity"),
         "day_return": portfolio_stats.get("day_return"),
         "cumulative_return": portfolio_stats.get("cumulative_return"),
@@ -1116,6 +1365,8 @@ def build_daily_snapshot(
         "reconciliation": reconciliation,
         "proposed_trades": proposed_trades,
         "performance_summary": performance_summary,
+        "performance_diagnostics": performance_diagnostics,
+        "skipped_trades": alloc_result.skipped_trades if alloc_result else [],
         "s2_no_picks": s2_no_picks,
     }
 
@@ -1845,7 +2096,7 @@ def main():
             "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
         )
     # ── Build daily snapshot/email ────────────────────────────────
-    subject, email_body = create_trade_email(daily_snapshot)
+    subject, email_body = create_pm_first_trade_email(daily_snapshot)
     # Append paper trading summary to plain-text email (if available)
     if paper_summary:
         email_body += (
