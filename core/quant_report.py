@@ -268,43 +268,125 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
     """
     Create the plain-text Daily Trade Rundown email body.
 
-    snapshot keys:
-        asof, allocations, orders, risk_levels, holdings, watchlist, reconciliation
+    Expected snapshot keys (best-effort, may be missing):
+      asof, orders, performance_summary, holdings, skipped_trades/skipped_orders,
+      allocations, proposed_trades, risk_levels, watchlist, reconciliation, alpha_attribution
     """
     asof = snapshot.get("asof")
     asof_str = _fmt_date(asof) if asof is not None else "n/a"
     subject = f"Daily Trade Rundown — {asof_str}"
 
-    allocations = snapshot.get("allocations", {})
-    cash_pct = allocations.get("cash", 0.0)
-    risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
-    sleeve_splits = allocations.get("sleeves", {})
-
-    lines = []
+    lines: list[str] = []
     lines.append(subject)
     lines.append("")
-    lines.append("0) Summary / allocation")
+
+    # 1) TODAY'S TRADES (EXECUTION QUEUE)
+    lines.append("1) Trades for Today (NEW ORDERS)")
+    orders = snapshot.get("orders", []) or []
+    if not orders:
+        lines.append("   - None")
+    else:
+        for order in orders:
+            action = order.get("action", "")
+            ticker = order.get("ticker", "")
+            weight = order.get("target_weight", 0.0)
+            exec_px = order.get("execution_price")
+            reason = order.get("reason")
+            notional = order.get("notional")
+            shares = order.get("shares")
+
+            line = f"   - {action} {ticker} | target={_fmt_pct(weight)} | exp_px={_fmt_money(exec_px)}"
+            if shares is not None:
+                line += f" | est_shares={shares}"
+            if notional is not None:
+                line += f" | est_notional={_fmt_money(notional)}"
+            if reason:
+                line += f" | reason={reason}"
+            lines.append(line)
+
+    # 2) PERFORMANCE SNAPSHOT
+    lines.append("")
+    lines.append("2) Performance Summary (Portfolio)")
+    perf = snapshot.get("performance_summary", {}) or {}
+    if not perf:
+        lines.append("   - None")
+    else:
+        lines.append(f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}")
+        lines.append(f"   - Week-to-Date: {_fmt_pct(perf.get('wtd'))}")
+        lines.append(f"   - Month-to-Date: {_fmt_pct(perf.get('mtd'))}")
+        lines.append(f"   - Year-to-Date: {_fmt_pct(perf.get('ytd'))}")
+
+    # 3) HOLDINGS
+    lines.append("")
+    lines.append("3) Current Holdings (LIVE BOOK)")
+    holdings = snapshot.get("holdings", []) or []
+    if not holdings:
+        lines.append("   - None")
+    else:
+        headers = [
+            "Ticker",
+            "Dir",
+            "Entry Date",
+            "Entry Px",
+            "Last Px",
+            "P&L $",
+            "P&L %",
+            "Days Held",
+        ]
+        rows = []
+        for h in holdings:
+            rows.append(
+                [
+                    h.get("ticker", ""),
+                    h.get("direction", ""),
+                    _fmt_date(h.get("entry_date", "")),
+                    _fmt_money(h.get("entry_price")),
+                    _fmt_money(h.get("last_price")),
+                    _fmt_money(h.get("pnl_dollars")),
+                    _fmt_pct(h.get("pnl_pct")),
+                    str(h.get("days_held", "")),
+                ]
+            )
+        lines.append(_format_table(headers, rows))
+
+    # 4) TRADES NOT TAKEN / SKIPPED
+    lines.append("")
+    lines.append("4) Trades Not Taken (SKIPPED / CONSTRAINTS)")
+    skipped = snapshot.get("skipped_trades", None)
+    if skipped is None:
+        skipped = snapshot.get("skipped_orders", None)
+    skipped = skipped or []
+    if not skipped:
+        lines.append("   - None")
+    else:
+        for item in skipped:
+            ticker = item.get("ticker", "")
+            action = item.get("action", "SKIP")
+            reason = item.get("reason", "")
+            extra = item.get("detail") or item.get("notes") or ""
+            line = f"   - {action} {ticker}"
+            if reason:
+                line += f" | reason={reason}"
+            if extra:
+                line += f" | {extra}"
+            lines.append(line)
+
+    # 5) SUMMARY / ALLOCATION
+    lines.append("")
+    lines.append("5) Summary / allocation")
+    allocations = snapshot.get("allocations", {}) or {}
+    cash_pct = allocations.get("cash", 0.0)
+    risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
+    sleeve_splits = allocations.get("sleeves", {}) or {}
     lines.append(f"   - Risk-on: {_fmt_pct(risk_on_pct)}")
     lines.append(f"   - Cash: {_fmt_pct(cash_pct)}")
     for sleeve, pct in sleeve_splits.items():
         lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
 
+    # 6) PROPOSED TRADES / NEXT REBALANCE
     lines.append("")
-    lines.append("1) Performance Summary (Portfolio)")
-    perf = snapshot.get("performance_summary", {})
-    if not perf:
-        lines.append("   - None")
-    else:
-        lines.append(
-            f"   - Total Return (Since Inception): {_fmt_pct(perf.get('total_return'))}"
-        )
-        lines.append(f"   - Week-to-Date: {_fmt_pct(perf.get('wtd'))}")
-        lines.append(f"   - Month-to-Date: {_fmt_pct(perf.get('mtd'))}")
-        lines.append(f"   - Year-to-Date: {_fmt_pct(perf.get('ytd'))}")
-
-    lines.append("")
-    lines.append("2) Proposed Trades / Next Rebalance")
-    proposed = snapshot.get("proposed_trades", [])
+    lines.append("6) Proposed Trades / Next Rebalance")
+    proposed = snapshot.get("proposed_trades", []) or []
     if not proposed:
         lines.append("   - No proposed trades.")
     else:
@@ -320,32 +402,10 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
                 line += f" | est_notional={_fmt_money(trade.get('est_notional'))}"
             lines.append(line)
 
+    # 7) RISK & EXITS
     lines.append("")
-    lines.append("3) Trades for Today (NEW ORDERS)")
-    orders = snapshot.get("orders", [])
-    if not orders:
-        lines.append("   - None")
-    else:
-        for order in orders:
-            action = order.get("action", "")
-            ticker = order.get("ticker", "")
-            weight = order.get("target_weight", 0.0)
-            exec_px = order.get("execution_price")
-            reason = order.get("reason")
-            notional = order.get("notional")
-            shares = order.get("shares")
-            line = f"   - {action} {ticker} | target={_fmt_pct(weight)} | exp_px={_fmt_money(exec_px)}"
-            if shares is not None:
-                line += f" | est_shares={shares}"
-            if notional is not None:
-                line += f" | est_notional={_fmt_money(notional)}"
-            if reason:
-                line += f" | reason={reason}"
-            lines.append(line)
-
-    lines.append("")
-    lines.append("4) Risk & Exit Levels (ACTIVE POSITIONS)")
-    risk_levels = snapshot.get("risk_levels", [])
+    lines.append("7) Risk & Exit Levels (ACTIVE POSITIONS)")
+    risk_levels = snapshot.get("risk_levels", []) or []
     if not risk_levels:
         lines.append("   - None")
     else:
@@ -359,101 +419,61 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
                 )
             )
 
+    # 8) WATCHLIST
     lines.append("")
-    lines.append("5) Current Holdings (LIVE BOOK)")
-    holdings = snapshot.get("holdings", [])
-    headers = [
-        "Ticker",
-        "Dir",
-        "Entry Date",
-        "Entry Px",
-        "Last Px",
-        "P&L $",
-        "P&L %",
-        "Days Held",
-    ]
-    rows = []
-    for h in holdings:
-        rows.append(
-            [
-                h.get("ticker", ""),
-                h.get("direction", ""),
-                _fmt_date(h.get("entry_date", "")),
-                _fmt_money(h.get("entry_price")),
-                _fmt_money(h.get("last_price")),
-                _fmt_money(h.get("pnl_dollars")),
-                _fmt_pct(h.get("pnl_pct")),
-                str(h.get("days_held", "")),
-            ]
-        )
-    lines.append(_format_table(headers, rows))
-
-    lines.append("")
-    lines.append("6) Watchlist (NO TRADES YET)")
-    watchlist = snapshot.get("watchlist", [])
+    lines.append("8) Watchlist (NO TRADES YET)")
+    watchlist = snapshot.get("watchlist", []) or []
     if not watchlist:
         lines.append("   - None")
     else:
         for item in watchlist:
             lines.append(f"   - {item.get('ticker', '')}: {item.get('reason', '')}")
 
+    # 9) RECONCILIATION
     lines.append("")
-    lines.append("7) Account Reconciliation (MODEL vs BROKER)")
-    recon = snapshot.get("reconciliation", {})
-    lines.append(
-        f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}"
-    )
-    lines.append(
-        f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}"
-    )
-    lines.append(
-        f"   - Broker Current Equity: {_fmt_money(recon.get('broker_equity'))}"
-    )
+    lines.append("9) Account Reconciliation (MODEL vs BROKER)")
+    recon = snapshot.get("reconciliation", {}) or {}
+    lines.append(f"   - Model Starting Equity: {_fmt_money(recon.get('model_start_equity'))}")
+    lines.append(f"   - Model Current Equity: {_fmt_money(recon.get('model_current_equity'))}")
+    lines.append(f"   - Broker Current Equity: {_fmt_money(recon.get('broker_equity'))}")
     lines.append(f"   - Difference: {_fmt_money(recon.get('difference'))}")
     if recon.get("note"):
         lines.append(f"   - Note: {recon.get('note')}")
 
-    lines.append("")
-    lines.append("6) Performance Summary (Portfolio)")
-    perf = snapshot.get("performance_summary", {})
-    lines.append(f"   - Current Equity: {_fmt_money(perf.get('current_equity'))}")
-    lines.append(f"   - Day Return: {_fmt_pct(perf.get('day_return'))}")
-    lines.append(f"   - Cumulative Return: {_fmt_pct(perf.get('cumulative_return'))}")
-
-    lines.append("")
-    lines.append("7) Alpha Attribution vs SPY")
+    # 10) ALPHA (OPTIONAL)
     alpha = snapshot.get("alpha_attribution")
-    if not alpha or alpha.get("n_days", 0) < 20:
-        lines.append(
-            "   - Alpha attribution unavailable (insufficient data or benchmark fetch failed)."
-        )
-    else:
-        lines.append(
-            "   - Since inception: Port {port}, SPY {bench}, Excess {excess}".format(
-                port=_fmt_pct(alpha.get("port_cum_return")),
-                bench=_fmt_pct(alpha.get("bench_cum_return")),
-                excess=_fmt_pct(alpha.get("excess_cum_return")),
+    if alpha is not None:
+        lines.append("")
+        lines.append("10) Alpha Attribution vs SPY")
+        if alpha.get("n_days", 0) < 20:
+            lines.append("   - Alpha attribution unavailable (insufficient data or benchmark fetch failed).")
+        else:
+            lines.append(
+                "   - Since inception: Port {port}, SPY {bench}, Excess {excess}".format(
+                    port=_fmt_pct(alpha.get("port_cum_return")),
+                    bench=_fmt_pct(alpha.get("bench_cum_return")),
+                    excess=_fmt_pct(alpha.get("excess_cum_return")),
+                )
             )
-        )
-        lines.append(
-            "   - Beta (63d): {beta}, Alpha (ann., 63d): {alpha}".format(
-                beta=_fmt_float(alpha.get("beta_63d")),
-                alpha=_fmt_pct(alpha.get("alpha_ann_63d")),
+            lines.append(
+                "   - Beta (63d): {beta}, Alpha (ann., 63d): {alpha}".format(
+                    beta=_fmt_float(alpha.get("beta_63d")),
+                    alpha=_fmt_pct(alpha.get("alpha_ann_63d")),
+                )
             )
-        )
-        lines.append(
-            "   - Tracking Error (ann.): {te}, Information Ratio: {ir}".format(
-                te=_fmt_pct(alpha.get("tracking_error_ann")),
-                ir=_fmt_float(alpha.get("info_ratio")),
+            lines.append(
+                "   - Tracking Error (ann.): {te}, Information Ratio: {ir}".format(
+                    te=_fmt_pct(alpha.get("tracking_error_ann")),
+                    ir=_fmt_float(alpha.get("info_ratio")),
+                )
             )
-        )
-        lines.append(
-            "   - Max Drawdown: Port {port}, SPY {bench}".format(
-                port=_fmt_pct(alpha.get("mdd_port")),
-                bench=_fmt_pct(alpha.get("mdd_bench")),
+            lines.append(
+                "   - Max Drawdown: Port {port}, SPY {bench}".format(
+                    port=_fmt_pct(alpha.get("mdd_port")),
+                    bench=_fmt_pct(alpha.get("mdd_bench")),
+                )
             )
-        )
-        lines.append(f"   - n_days used: {alpha.get('n_days', 0)}")
+            lines.append(f"   - n_days used: {alpha.get('n_days', 0)}")
 
     return subject, "\n".join(lines)
 
