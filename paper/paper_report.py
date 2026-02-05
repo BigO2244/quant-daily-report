@@ -12,7 +12,11 @@ def _read_csv_if_exists(path: str) -> pd.DataFrame:
 
 
 def build_paper_report_html(
-    run_date: str, ledger_path: str, trades_path: str, benchmark_ticker: str = "SPY"
+    run_date: str,
+    ledger_path: str,
+    trades_path: str,
+    benchmark_ticker: str = "SPY",
+    reconciliation: dict | None = None,
 ) -> str:
     led = _read_csv_if_exists(ledger_path)
     day = led[led["date"] == run_date].copy() if not led.empty else pd.DataFrame()
@@ -61,6 +65,30 @@ def build_paper_report_html(
             return "<p><em>None</em></p>"
         return df.to_html(index=False, border=0)
 
+    recon_html = ""
+    if reconciliation:
+        rows = reconciliation.get("position_reconciliation", []) or []
+        recon_df = pd.DataFrame(rows)
+        if not recon_df.empty:
+            recon_df = recon_df[["ticker", "target_weight", "achieved_weight", "delta_weight", "cash_limited"]].copy()
+            recon_df["target_weight"] = (100.0 * recon_df["target_weight"]).map(lambda x: f"{x:.2f}%")
+            recon_df["achieved_weight"] = (100.0 * recon_df["achieved_weight"]).map(lambda x: f"{x:.2f}%")
+            recon_df["delta_weight"] = (100.0 * recon_df["delta_weight"]).map(lambda x: f"{x:+.2f}%")
+            recon_df["cash_limited"] = recon_df["cash_limited"].map(lambda x: "YES" if bool(x) else "")
+        else:
+            recon_df = pd.DataFrame(columns=["ticker", "target_weight", "achieved_weight", "delta_weight", "cash_limited"])
+
+        scaled = reconciliation.get("scaled_tickers", []) or []
+        recon_html = f"""
+  <h3>Post-Trade Reconciliation</h3>
+  <ul>
+    <li><b>Target Cash Weight:</b> {100.0 * float(reconciliation.get('target_cash_weight', 0.0)):.2f}%</li>
+    <li><b>Achieved Cash Weight:</b> {100.0 * float(reconciliation.get('achieved_cash_weight', 0.0)):.2f}%</li>
+    <li><b>Cash-constrained tickers:</b> {', '.join(scaled) if scaled else 'None'}</li>
+  </ul>
+  {df_to_html(recon_df)}
+""".rstrip()
+
     return f"""
 <div style="font-family: Arial, sans-serif;">
   <h2>Paper Trading Execution — {run_date}</h2>
@@ -77,6 +105,8 @@ def build_paper_report_html(
 
   <h3>Holdings (Top 15)</h3>
   {df_to_html(holdings)}
+
+  {recon_html}
 
   <p style="color:#666; margin-top:16px;">
     Execution model: next-open fills with slippage + cash buffer. Ledger is append-only.

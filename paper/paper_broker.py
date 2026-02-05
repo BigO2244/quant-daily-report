@@ -82,7 +82,7 @@ def read_latest_holdings_from_ledger(
     return holdings, cash, total_equity, last_date
 
 
-def load_targets(signals_path: str) -> pd.DataFrame:
+def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float]:
     with open(signals_path, "r") as f:
         obj = json.load(f)
 
@@ -96,12 +96,32 @@ def load_targets(signals_path: str) -> pd.DataFrame:
     df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
     df["target_weight"] = df["target_weight"].astype(float)
 
-    wsum = float(df["target_weight"].sum())
-    if wsum <= 0:
-        raise ValueError("Signals target_weight sum <= 0")
-    df["target_weight"] = df["target_weight"] / wsum
+    cash_rows = df[df["ticker"] == "CASH"].copy()
+    target_cash_weight = (
+        float(cash_rows["target_weight"].iloc[-1]) if not cash_rows.empty else 0.0
+    )
+    target_cash_weight = max(0.0, min(1.0, target_cash_weight))
 
-    return df[["ticker", "sleeve", "target_weight"]]
+    non_cash = df[df["ticker"] != "CASH"].copy()
+    non_cash_sum = float(non_cash["target_weight"].sum())
+    if non_cash_sum <= 0:
+        raise ValueError("Signals non-cash target_weight sum <= 0")
+
+    investable_weight_target = 1.0 - target_cash_weight
+    # Handle mixed conventions safely:
+    # - if sleeves already sum to investable (e.g. 0.70), keep as-is
+    # - if sleeves sum to 1.0 while CASH is explicit, scale to investable
+    # - if no CASH is provided and sleeves sum to 1.0, cash target is 0%
+    if abs(non_cash_sum - investable_weight_target) <= 1e-6:
+        pass
+    elif abs(non_cash_sum - 1.0) <= 1e-6:
+        non_cash["target_weight"] = non_cash["target_weight"] * investable_weight_target
+    elif non_cash_sum > 0:
+        non_cash["target_weight"] = (
+            non_cash["target_weight"] / non_cash_sum * investable_weight_target
+        )
+
+    return non_cash[["ticker", "sleeve", "target_weight"]], target_cash_weight
 
 
 def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
@@ -197,18 +217,22 @@ def build_rebalance_trades(
     targets: pd.DataFrame,
     prices: pd.Series,
     total_equity: float,
+    starting_cash: float,
+    target_cash_weight: float,
     cfg: PaperConfig,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
     h = holdings.set_index("ticker")["shares"].to_dict()
 
-    targets = targets.copy()
+    targets = targets.copy().sort_values(["target_weight", "ticker"], ascending=[False, True])
 
     # Leave cash buffer to avoid negative cash due to slippage
     cash_buffer = 1.0 - (cfg.cash_buffer_bps / 10000.0)
     cash_buffer = max(0.0, min(1.0, cash_buffer))
+    target_investable_dollars = total_equity * (1.0 - target_cash_weight) * cash_buffer
     targets["target_dollars"] = targets["target_weight"] * total_equity * cash_buffer
 
     trades: List[Dict[str, object]] = []
+    buy_candidates: List[Dict[str, object]] = []
 
     # Buy/sell to reach targets
     for _, row in targets.iterrows():
@@ -233,17 +257,28 @@ def build_rebalance_trades(
         side = "BUY" if delta > 0 else "SELL"
         slipped_px, slip_cost_per_share = apply_slippage(px, side, cfg.slippage_bps)
 
-        trades.append(
-            {
-                "ticker": tkr,
-                "side": side,
-                "shares": float(abs(delta)),
-                "price": float(slipped_px),
-                "slippage_cost": float(slip_cost_per_share * abs(delta)),
-                "notional": float(abs(delta) * slipped_px),
-                "reason": "rebalance_to_target",
-            }
-        )
+        if side == "SELL":
+            trades.append(
+                {
+                    "ticker": tkr,
+                    "side": side,
+                    "shares": float(abs(delta)),
+                    "price": float(slipped_px),
+                    "slippage_cost": float(slip_cost_per_share * abs(delta)),
+                    "notional": float(abs(delta) * slipped_px),
+                    "reason": "rebalance_to_target",
+                }
+            )
+        else:
+            buy_candidates.append(
+                {
+                    "ticker": tkr,
+                    "desired_shares": float(abs(delta)),
+                    "price": float(slipped_px),
+                    "slippage_cost_per_share": float(slip_cost_per_share),
+                    "target_weight": float(row["target_weight"]),
+                }
+            )
 
     # Liquidate positions not in targets
     target_set = set(targets["ticker"].tolist())
@@ -267,7 +302,64 @@ def build_rebalance_trades(
                 }
             )
 
-    return pd.DataFrame(trades)
+    cash_after_sells = float(starting_cash)
+    for tr in trades:
+        if tr["side"] == "SELL":
+            cash_after_sells += float(tr["notional"])
+
+    buy_candidates = sorted(
+        buy_candidates,
+        key=lambda x: (-float(x["target_weight"]), str(x["ticker"])),
+    )
+
+    scaled_tickers: List[str] = []
+    invested_buys = 0.0
+    for buy in buy_candidates:
+        tkr = str(buy["ticker"])
+        desired = float(buy["desired_shares"])
+        px = float(buy["price"])
+
+        if px <= 0:
+            continue
+
+        cash_remaining = cash_after_sells - invested_buys
+        if cfg.allow_fractional:
+            max_affordable = max(0.0, cash_remaining / px)
+        else:
+            max_affordable = max(0.0, int(cash_remaining // px))
+        exec_shares = min(desired, max_affordable)
+
+        if exec_shares <= 1e-12:
+            if desired > 1e-12:
+                scaled_tickers.append(tkr)
+            continue
+
+        exec_notional = exec_shares * px
+        if exec_notional < cfg.min_trade_dollars:
+            continue
+        if exec_shares + 1e-12 < desired:
+            scaled_tickers.append(tkr)
+
+        invested_buys += exec_notional
+        trades.append(
+            {
+                "ticker": tkr,
+                "side": "BUY",
+                "shares": float(exec_shares),
+                "price": float(px),
+                "slippage_cost": float(buy["slippage_cost_per_share"] * exec_shares),
+                "notional": float(exec_notional),
+                "reason": "rebalance_to_target" if exec_shares >= desired else "cash_limited",
+            }
+        )
+
+    overspend_prevented = len(scaled_tickers) > 0
+    return pd.DataFrame(trades), {
+        "target_cash_weight": float(target_cash_weight),
+        "target_investable_dollars": float(target_investable_dollars),
+        "scaled_tickers": sorted(set(scaled_tickers)),
+        "overspend_prevented": overspend_prevented,
+    }
 
 
 def apply_trades_to_holdings(
@@ -307,17 +399,17 @@ def apply_trades_to_holdings(
             if tkr in sleeve_map_from_targets:
                 sleeve_map[tkr] = sleeve_map_from_targets[tkr]
 
-    out = (
-        pd.DataFrame(
-            [
-                {"ticker": k, "sleeve": sleeve_map.get(k, "core"), "shares": v}
-                for k, v in shares_map.items()
-                if abs(v) > 1e-12
-            ]
-        )
-        .sort_values("ticker")
-        .reset_index(drop=True)
+    out = pd.DataFrame(
+        [
+            {"ticker": k, "sleeve": sleeve_map.get(k, "core"), "shares": v}
+            for k, v in shares_map.items()
+            if abs(v) > 1e-12
+        ]
     )
+    if out.empty:
+        out = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    else:
+        out = out.sort_values("ticker").reset_index(drop=True)
 
     return out, cash
 
@@ -357,7 +449,7 @@ def run_paper_day(
         cash_prev = cfg.initial_equity
         equity_prev = cfg.initial_equity
 
-    targets = load_targets(signals_path)
+    targets, target_cash_weight = load_targets(signals_path)
 
     # Universe for pricing: targets + benchmark + existing holdings
     tickers = sorted(set(targets["ticker"].tolist() + [cfg.benchmark_ticker]))
@@ -366,19 +458,22 @@ def run_paper_day(
 
     prices_open = fetch_open_prices_yfinance(tickers, run_date=run_date)
 
-    # If any tickers missing prices, drop them from targets and renormalize
+    # If any tickers missing prices, drop them and scale remaining to investable bucket.
     priced = set(prices_open.index.tolist())
     targets = targets[targets["ticker"].isin(priced)].copy()
     wsum = float(targets["target_weight"].sum())
     if wsum <= 0:
         raise RuntimeError("After dropping missing-priced tickers, no targets remain.")
-    targets["target_weight"] = targets["target_weight"] / wsum
+    investable_weight = max(0.0, 1.0 - target_cash_weight)
+    targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
-    trades = build_rebalance_trades(
+    trades, trade_meta = build_rebalance_trades(
         holdings=holdings_prev,
         targets=targets,
         prices=prices_open,
         total_equity=equity_prev,
+        starting_cash=cash_prev,
+        target_cash_weight=target_cash_weight,
         cfg=cfg,
     )
 
@@ -411,6 +506,31 @@ def run_paper_day(
     m2m = mark_to_market(holdings_new, prices_open)
     total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
     total_equity = float(cash_new + total_mv)
+    achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
+
+    achieved_weights = {}
+    if total_equity > 0 and not m2m.empty:
+        achieved_weights = {
+            str(r["ticker"]): float(r["market_value"]) / total_equity
+            for _, r in m2m.iterrows()
+        }
+    target_weights = {
+        str(r["ticker"]): float(r["target_weight"]) for _, r in targets.iterrows()
+    }
+    all_tickers = sorted(set(target_weights.keys()) | set(achieved_weights.keys()))
+    position_recon = []
+    for tkr in all_tickers:
+        tw = float(target_weights.get(tkr, 0.0))
+        aw = float(achieved_weights.get(tkr, 0.0))
+        position_recon.append(
+            {
+                "ticker": tkr,
+                "target_weight": tw,
+                "achieved_weight": aw,
+                "delta_weight": aw - tw,
+                "cash_limited": tkr in set(trade_meta.get("scaled_tickers", [])),
+            }
+        )
 
     ledger_day = m2m[["ticker", "sleeve", "shares", "price", "market_value"]].copy()
     ledger_day.insert(0, "date", run_date)
@@ -425,6 +545,15 @@ def run_paper_day(
         else 0.0
     )
 
+    logger.info(
+        "[PAPER][RECON] target_cash=%.2f%% achieved_cash=%.2f%% cash=$%.2f min_cash=$0.00 overspend_prevented=%s tickers_scaled=%d",
+        100.0 * target_cash_weight,
+        100.0 * achieved_cash_weight,
+        cash_new,
+        "YES" if trade_meta.get("overspend_prevented") else "NO",
+        len(trade_meta.get("scaled_tickers", [])),
+    )
+
     return {
         "date": run_date,
         "total_equity": total_equity,
@@ -432,4 +561,9 @@ def run_paper_day(
         "num_trades": executed_trades,
         "turnover_notional": turnover,
         "benchmark": cfg.benchmark_ticker,
+        "target_cash_weight": float(target_cash_weight),
+        "achieved_cash_weight": float(achieved_cash_weight),
+        "overspend_prevented": bool(trade_meta.get("overspend_prevented")),
+        "scaled_tickers": list(trade_meta.get("scaled_tickers", [])),
+        "position_reconciliation": position_recon,
     }

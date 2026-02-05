@@ -7,7 +7,6 @@ import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day
 from paper.paper_report import build_paper_report_html
-from paper.trading_calendar import prev_trading_day
 
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
@@ -2059,20 +2058,11 @@ def main():
         logger.error("[ERROR] %s", e)
         sys.exit(0)
     daily_snapshot["alpha_attribution"] = alpha_stats
-    # --- Paper trading execution + report (real-world cadence) ---
-    # Signals are generated "after close" for report_date.
-    # Paper execution confirms trades for report_date using PRIOR business day's signals.
+
+    # --- Paper trading execution + report ---
+    # Execute using the same immutable daily snapshot written for this report date.
     trade_date_str = report_date.strftime("%Y-%m-%d")
-    signal_date_str = prev_trading_day(trade_date_str)
-    signals_prev = os.path.join("signals", f"{signal_date_str}.json")
-    signals_today = os.path.join("signals", f"{trade_date_str}.json")
-    # Bootstrap: if we don't have prior-day signals yet, use same-day signals (DEV ONLY)
-    signals_path_exec = signals_prev if os.path.exists(signals_prev) else signals_today
-    if signals_path_exec == signals_today:
-        logger.info(
-            "[PAPER][BOOTSTRAP] Using same-day signals for execution: %s",
-            signals_path_exec,
-        )
+    signals_path_exec = os.path.join("signals", f"{trade_date_str}.json")
     paper_summary = None
     paper_html = ""
     if os.path.exists(signals_path_exec):
@@ -2107,6 +2097,7 @@ def main():
                 ledger_path="paper/ledger.csv",
                 trades_path="paper/trades.csv",
                 benchmark_ticker="SPY",
+                reconciliation=paper_summary,
             )
         except Exception as e:
             logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
@@ -2125,18 +2116,33 @@ def main():
             f"trades={paper_summary['num_trades']}, "
             f"turnover=${paper_summary['turnover_notional']:.2f}\n"
         )
+        email_body += "\nPost-Trade Reconciliation\n"
+        email_body += (
+            f"   - Equity: ${paper_summary['total_equity']:.2f} | "
+            f"Cash: ${paper_summary['cash']:.2f} | "
+            f"Cash Weight: {100.0 * paper_summary.get('achieved_cash_weight', 0.0):.2f}% | "
+            f"Target Cash Weight: {100.0 * paper_summary.get('target_cash_weight', 0.0):.2f}%\n"
+        )
+        scaled = paper_summary.get("scaled_tickers", []) or []
+        if scaled:
+            email_body += f"   - Cash-constrained tickers: {', '.join(scaled)}\n"
+        else:
+            email_body += "   - Cash-constrained tickers: None\n"
+        for row in paper_summary.get("position_reconciliation", []) or []:
+            flag = " [CASH LIMITED]" if row.get("cash_limited") else ""
+            email_body += (
+                f"   - {row.get('ticker','')}: "
+                f"target={100.0 * float(row.get('target_weight', 0.0)):.2f}% "
+                f"achieved={100.0 * float(row.get('achieved_weight', 0.0)):.2f}% "
+                f"delta={100.0 * float(row.get('delta_weight', 0.0)):+.2f}%"
+                f"{flag}\n"
+            )
     # Write the plain-text email body to disk
     email_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
     with open(email_path, "w", encoding="utf-8") as f:
         f.write(email_body)
     logger.info("[OK] Daily trade email written: %s", email_path)
     # ── Build report ──────────────────────────────────────────────
-    html = build_html_report(
-        today, st_equity, st_trades, s2_equity, s2_trades, alloc_result, alpha_stats
-    )
-    # Append paper trading HTML section (if available)
-    if paper_html:
-        html = html + "<hr/>" + paper_html
     html = build_html_report(
         report_date=report_date,
         st_equity=st_equity,
@@ -2148,6 +2154,9 @@ def main():
         performance_summary=daily_snapshot.get("performance_summary"),
         s2_no_picks=daily_snapshot.get("s2_no_picks", False),
     )
+    # Append paper trading HTML section (if available)
+    if paper_html:
+        html = html + "<hr/>" + paper_html
 
     out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")
     with open(out_path, "w", encoding="utf-8") as f:
