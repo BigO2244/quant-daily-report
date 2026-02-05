@@ -2217,6 +2217,11 @@ def main(argv: list[str] | None = None):
                 trades_path="paper/trades.csv",
                 config_path="paper/config_paper.json",
                 force=False,
+                constraints={
+                    "cash_target_weight": float(
+                        alloc_result.sleeve_allocations.get("CASH", alloc_result.cash_weight)
+                    )
+                },
             )
             logger.info(
                 "[PAPER] Executed paper trading for %s using signals %s",
