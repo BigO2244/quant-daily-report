@@ -20,9 +20,18 @@ def _resolve_trade_date() -> str:
     return dt.date.today().strftime("%Y-%m-%d")
 
 
-def _load_payload(path: Path) -> dict:
+def _load_payload(path: Path, trade_date: str, mode: str) -> dict:
     if not path.exists():
-        raise FileNotFoundError(f"Execution payload not found: {path}")
+        logger.warning("[EXECUTION_EMAIL] payload missing, writing HALTED artifact: %s", path)
+        return {
+            "trade_date": trade_date,
+            "mode": mode.upper(),
+            "execution_status": "HALTED",
+            "halt_reason": "MISSING EXECUTION PAYLOAD",
+            "trades": [],
+            "run_id": "",
+            "order_ids": [],
+        }
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -39,7 +48,7 @@ def main() -> None:
 
     trade_date = _resolve_trade_date()
     payload_path = Path("outputs") / "execution_email" / f"{trade_date}.json"
-    payload = _load_payload(payload_path)
+    payload = _load_payload(payload_path, trade_date=trade_date, mode=mode)
 
     payload["mode"] = str(payload.get("mode") or mode).upper()
     if payload["mode"] == "LIVE":
@@ -48,9 +57,10 @@ def main() -> None:
 
     subject, body_text = build_execution_email_text(payload)
 
-    out_txt = Path("outputs") / "execution_email" / f"trade_execution_{trade_date}.txt"
+    out_txt = Path("outputs") / "daily" / f"trade_execution_{trade_date}.txt"
     out_txt.parent.mkdir(parents=True, exist_ok=True)
     out_txt.write_text(body_text, encoding="utf-8")
+    logger.info("[EXECUTION_EMAIL] wrote artifact: %s", out_txt)
 
     send_execution_email(subject=subject, body_text=body_text, payload=payload)
 

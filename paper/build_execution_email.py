@@ -13,7 +13,7 @@ def _fmt_price(value: Any) -> str:
 
 def _fmt_shares(value: Any) -> str:
     try:
-        return f"{float(value):.2f}"
+        return str(int(value))
     except Exception:
         return "n/a"
 
@@ -71,8 +71,14 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         )
         return subject, "\n".join(lines)
 
-    buys = [t for t in trades if str(t.get("side", "")).upper() == "BUY"]
-    sells = [t for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE"}]
+    buys = sorted(
+        [t for t in trades if str(t.get("side", "")).upper() == "BUY"],
+        key=lambda t: str(t.get("ticker", "")),
+    )
+    sells = sorted(
+        [t for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"}],
+        key=lambda t: str(t.get("ticker", "")),
+    )
 
     lines.extend(
         [
@@ -82,7 +88,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
             "========================",
             "",
             "BUY ORDERS",
-            "Ticker | Side | Est. Shares | Entry (X) | Stop-Loss (Y) | Take Profit (Z) | Est. Notional",
+            "Ticker | Side | Shares | Entry (X) | Stop-Loss (Y) | Take Profit (Z) | Est. Notional",
             "------ | ---- | ---------- | --------- | ------------- | --------------- | ------------",
         ]
     )
@@ -105,17 +111,20 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         [
             "",
             "SELL / CLOSE ORDERS",
-            "Ticker | Side | Shares | Notes",
-            "------ | ---- | ------ | -----",
+            "Ticker | Side | Shares | Entry (X) | Stop-Loss (Y) | Take Profit (Z) | Notes",
+            "------ | ---- | ------ | --------- | ------------- | --------------- | -----",
         ]
     )
     if sells:
         for tr in sells:
             lines.append(
-                "{ticker} | {side} | {shares} | {notes}".format(
+                "{ticker} | {side} | {shares} | {entry} | {stop} | {take} | {notes}".format(
                     ticker=tr.get("ticker", ""),
                     side=str(tr.get("side", "SELL")).upper(),
                     shares=_fmt_shares(tr.get("shares")),
+                    entry=_fmt_price(tr.get("entry_price")),
+                    stop=_fmt_price(tr.get("stop_loss")),
+                    take=_fmt_price(tr.get("take_profit")),
                     notes=tr.get("notes") or tr.get("reason") or "Rebalance",
                 )
             )
@@ -124,6 +133,10 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
 
     run_id = str(payload.get("run_id", ""))
     order_ids = payload.get("order_ids", []) or []
+    order_ids = sorted(
+        order_ids,
+        key=lambda oid: tuple((str(oid).split(":"))[-2:]) if ":" in str(oid) else ("", str(oid)),
+    )
 
     lines.extend(
         [
@@ -156,4 +169,3 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     )
 
     return subject, "\n".join(lines)
-
