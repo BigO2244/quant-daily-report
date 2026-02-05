@@ -2205,6 +2205,14 @@ def main(argv: list[str] | None = None):
     paper_html = ""
     if os.path.exists(signals_path_exec):
         try:
+            shadow_constraints = {
+                "cash_target_weight": float(
+                    {
+                        **alloc_result.sleeve_allocations,
+                        "CASH": alloc_result.cash_weight,
+                    }.get("CASH", 0.0)
+                )
+            }
             if args.reset_ledger_date:
                 reset_orders_sent_ledger_for_date(
                     "outputs/shadow_orders/orders_sent.csv",
@@ -2217,11 +2225,7 @@ def main(argv: list[str] | None = None):
                 trades_path="paper/trades.csv",
                 config_path="paper/config_paper.json",
                 force=False,
-                constraints={
-                    "cash_target_weight": float(
-                        alloc_result.sleeve_allocations.get("CASH", alloc_result.cash_weight)
-                    )
-                },
+                constraints=shadow_constraints,
             )
             logger.info(
                 "[PAPER] Executed paper trading for %s using signals %s",
