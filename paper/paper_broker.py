@@ -1,15 +1,19 @@
 # paper/paper_broker.py
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import pandas as pd
 import yfinance as yf
+
+from paper.trading_calendar import market_session_status
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +25,19 @@ class PaperConfig:
     slippage_bps: float
     allow_fractional: bool
     min_trade_dollars: float
-    cash_buffer_bps: float = 0.0  # keep small cash buffer to avoid negative cash
+    cash_buffer_bps: float = 0.0
+    trading_mode: str = "paper"
+    portfolio_id: str = "main"
+    strategy_version: str = "v1"
+    market_cutoff_time_et: str = "15:45"
+    reconciliation_abs_tolerance_dollars: float = 1.0
+    reconciliation_bps_tolerance: float = 1.0
+    max_turnover_pct: float = 0.30
+    max_trades_per_day: int = 10
+    max_position_change_pct: float = 0.15
+    risk_action: str = "hard_stop"
+    halt_on_data_error: bool = True
+    require_benchmark_price: bool = True
 
 
 def load_config(path: str) -> PaperConfig:
@@ -30,6 +46,11 @@ def load_config(path: str) -> PaperConfig:
 
     execution = cfg.get("execution", {})
     constraints = cfg.get("constraints", {})
+    mode_cfg = cfg.get("mode", {})
+    safety_cfg = cfg.get("safety", {})
+    risk_cfg = cfg.get("risk", {})
+
+    trading_mode = os.getenv("TRADING_MODE", str(mode_cfg.get("trading_mode", "paper"))).strip().lower()
 
     return PaperConfig(
         initial_equity=float(cfg["initial_equity"]),
@@ -38,6 +59,18 @@ def load_config(path: str) -> PaperConfig:
         allow_fractional=bool(constraints.get("allow_fractional_shares", True)),
         min_trade_dollars=float(constraints.get("min_trade_dollars", 5.0)),
         cash_buffer_bps=float(constraints.get("cash_buffer_bps", 0.0)),
+        trading_mode=trading_mode,
+        portfolio_id=str(mode_cfg.get("portfolio_id", "main")),
+        strategy_version=str(mode_cfg.get("strategy_version", "v1")),
+        market_cutoff_time_et=str(safety_cfg.get("market_cutoff_time_et", "15:45")),
+        reconciliation_abs_tolerance_dollars=float(safety_cfg.get("reconciliation_abs_tolerance_dollars", 1.0)),
+        reconciliation_bps_tolerance=float(safety_cfg.get("reconciliation_bps_tolerance", 1.0)),
+        max_turnover_pct=float(risk_cfg.get("max_turnover_pct", 0.30)),
+        max_trades_per_day=int(risk_cfg.get("max_trades_per_day", 10)),
+        max_position_change_pct=float(risk_cfg.get("max_position_change_pct", 0.15)),
+        risk_action=str(risk_cfg.get("action", "hard_stop")).strip().lower(),
+        halt_on_data_error=bool(safety_cfg.get("halt_on_data_error", True)),
+        require_benchmark_price=bool(safety_cfg.get("require_benchmark_price", True)),
     )
 
 
@@ -53,16 +86,15 @@ def append_csv(df: pd.DataFrame, path: str) -> None:
     df.to_csv(path, mode="a", header=header, index=False)
 
 
+def _read_csv(path: str) -> pd.DataFrame:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
 def read_latest_holdings_from_ledger(
     ledger_path: str,
 ) -> Tuple[pd.DataFrame, float, float, str]:
-    """
-    Returns:
-      holdings_df: columns [ticker, sleeve, shares]
-      cash: float
-      total_equity: float
-      last_date: str (YYYY-MM-DD)
-    """
     if not os.path.exists(ledger_path) or os.path.getsize(ledger_path) == 0:
         return pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 0.0, 0.0, ""
 
@@ -82,11 +114,18 @@ def read_latest_holdings_from_ledger(
     return holdings, cash, total_equity, last_date
 
 
-def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float]:
+def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float, str | None]:
     with open(signals_path, "r") as f:
         obj = json.load(f)
 
-    df = pd.DataFrame(obj)
+    snapshot_date = None
+    if isinstance(obj, dict):
+        snapshot_date = obj.get("snapshot_date")
+        rows = obj.get("signals")
+    else:
+        rows = obj
+
+    df = pd.DataFrame(rows)
     if df.empty:
         raise ValueError(f"Signals file is empty: {signals_path}")
 
@@ -108,10 +147,6 @@ def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float]:
         raise ValueError("Signals non-cash target_weight sum <= 0")
 
     investable_weight_target = 1.0 - target_cash_weight
-    # Handle mixed conventions safely:
-    # - if sleeves already sum to investable (e.g. 0.70), keep as-is
-    # - if sleeves sum to 1.0 while CASH is explicit, scale to investable
-    # - if no CASH is provided and sleeves sum to 1.0, cash target is 0%
     if abs(non_cash_sum - investable_weight_target) <= 1e-6:
         pass
     elif abs(non_cash_sum - 1.0) <= 1e-6:
@@ -121,21 +156,16 @@ def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float]:
             non_cash["target_weight"] / non_cash_sum * investable_weight_target
         )
 
-    return non_cash[["ticker", "sleeve", "target_weight"]], target_cash_weight
+    return non_cash[["ticker", "sleeve", "target_weight"]], target_cash_weight, snapshot_date
 
 
-def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
-    """
-    Fetch the 'Open' price for each ticker for run_date (YYYY-MM-DD).
-    Uses per-run yfinance tz cache folder. Uses threads=False and retries per-ticker.
-    """
+def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.DataFrame:
     if not tickers:
-        return pd.Series(dtype=float)
+        return pd.DataFrame(columns=["ticker", "open", "price_date"])
 
     start = pd.Timestamp(run_date)
-    end = start + pd.Timedelta(days=1)  # yfinance end is exclusive
+    end = start + pd.Timedelta(days=1)
 
-    # Avoid tz-cache sqlite lock issues
     yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
 
     px = yf.download(
@@ -152,22 +182,21 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
     if px is None or len(px) == 0:
         raise RuntimeError(f"No price data returned from yfinance for {run_date}")
 
-    # Build a Series of opens
+    rows: List[Dict[str, object]] = []
     if isinstance(px.columns, pd.MultiIndex):
-        opens = {}
         for t in tickers:
-            if ("Open", t) in px.columns and len(px[("Open", t)]) > 0:
-                opens[t] = float(px[("Open", t)].iloc[0])
-        s = pd.Series(opens, dtype=float)
+            col = ("Open", t)
+            if col in px.columns and len(px[col]) > 0:
+                rows.append({"ticker": t, "open": float(px[col].iloc[0]), "price_date": str(px.index[0].date())})
     else:
         if "Open" not in px.columns:
             raise RuntimeError("Open column not found in yfinance response.")
-        s = pd.Series({tickers[0]: float(px["Open"].iloc[0])}, dtype=float)
+        rows.append({"ticker": tickers[0], "open": float(px["Open"].iloc[0]), "price_date": str(px.index[0].date())})
 
-    # Retry missing tickers one by one
-    missing_pre = [t for t in tickers if t not in s.index or pd.isna(s.loc[t])]
+    df = pd.DataFrame(rows)
+    missing_pre = [t for t in tickers if t not in set(df["ticker"].tolist())]
     if missing_pre:
-        retries = {}
+        retries = []
         for t in missing_pre:
             try:
                 yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
@@ -182,23 +211,15 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.Series:
                     threads=False,
                 )
                 if px1 is not None and len(px1) > 0 and "Open" in px1.columns:
-                    retries[t] = float(px1["Open"].iloc[0])
+                    retries.append({"ticker": t, "open": float(px1["Open"].iloc[0]), "price_date": str(px1.index[0].date())})
             except Exception:
                 continue
         if retries:
-            s = pd.concat([s, pd.Series(retries, dtype=float)])
+            df = pd.concat([df, pd.DataFrame(retries)], ignore_index=True)
 
-    # Drop any still-missing tickers (degrade gracefully)
-    missing = [t for t in tickers if t not in s.index or pd.isna(s.loc[t])]
-    if missing:
-        logger.warning(
-            "[PAPER][WARN] Missing open prices on %s: %s — dropping from execution.",
-            run_date,
-            missing,
-        )
-        s = s.drop(labels=[t for t in missing if t in s.index], errors="ignore")
-
-    return s
+    if df.empty:
+        raise RuntimeError(f"No usable open prices for run_date={run_date}")
+    return df.drop_duplicates(subset=["ticker"], keep="last")
 
 
 def apply_slippage(price: float, side: str, slippage_bps: float) -> Tuple[float, float]:
@@ -225,7 +246,6 @@ def build_rebalance_trades(
 
     targets = targets.copy().sort_values(["target_weight", "ticker"], ascending=[False, True])
 
-    # Leave cash buffer to avoid negative cash due to slippage
     cash_buffer = 1.0 - (cfg.cash_buffer_bps / 10000.0)
     cash_buffer = max(0.0, min(1.0, cash_buffer))
     target_investable_dollars = total_equity * (1.0 - target_cash_weight) * cash_buffer
@@ -234,7 +254,6 @@ def build_rebalance_trades(
     trades: List[Dict[str, object]] = []
     buy_candidates: List[Dict[str, object]] = []
 
-    # Buy/sell to reach targets
     for _, row in targets.iterrows():
         tkr = row["ticker"]
         if tkr not in prices.index:
@@ -280,7 +299,6 @@ def build_rebalance_trades(
                 }
             )
 
-    # Liquidate positions not in targets
     target_set = set(targets["ticker"].tolist())
     for tkr, sh in h.items():
         if tkr not in target_set and abs(sh) > 1e-12:
@@ -362,6 +380,73 @@ def build_rebalance_trades(
     }
 
 
+def apply_risk_guards(
+    trades: pd.DataFrame,
+    equity: float,
+    cfg: PaperConfig,
+) -> Tuple[pd.DataFrame, List[str], bool]:
+    if trades is None or trades.empty:
+        return trades, [], False
+
+    blocked: List[str] = []
+    hard_stop = False
+    out = trades.copy()
+
+    max_turnover_notional = equity * cfg.max_turnover_pct
+    current_turnover = float(out["notional"].sum())
+    if current_turnover > max_turnover_notional + 1e-9:
+        msg = f"max_turnover_pct exceeded ({current_turnover:.2f} > {max_turnover_notional:.2f})"
+        if cfg.risk_action == "hard_stop":
+            return pd.DataFrame(columns=trades.columns), [msg], True
+        out = out.sort_values("notional", ascending=False).copy()
+        running = 0.0
+        kept_rows = []
+        for _, row in out.iterrows():
+            n = float(row["notional"])
+            if running + n <= max_turnover_notional + 1e-9:
+                kept_rows.append(row.to_dict())
+                running += n
+            else:
+                blocked.append(f"{msg}; clipped ticker={row['ticker']}")
+        out = pd.DataFrame(kept_rows, columns=trades.columns)
+
+    if len(out) > cfg.max_trades_per_day:
+        msg = f"max_trades_per_day exceeded ({len(out)} > {cfg.max_trades_per_day})"
+        if cfg.risk_action == "hard_stop":
+            return pd.DataFrame(columns=trades.columns), [msg], True
+        out = out.sort_values("notional", ascending=False).head(cfg.max_trades_per_day).copy()
+        blocked.append(msg)
+
+    if out.empty:
+        return out, blocked, hard_stop
+
+    per_trade_limit = equity * cfg.max_position_change_pct
+    if per_trade_limit >= 0:
+        clipped_rows = []
+        clipped_any = False
+        for _, row in out.iterrows():
+            r = row.to_dict()
+            n = float(r["notional"])
+            if n <= per_trade_limit + 1e-9:
+                clipped_rows.append(r)
+                continue
+            msg = f"max_position_change_pct exceeded ticker={r['ticker']} ({n:.2f} > {per_trade_limit:.2f})"
+            if cfg.risk_action == "hard_stop":
+                return pd.DataFrame(columns=trades.columns), [msg], True
+            ratio = per_trade_limit / n if n > 0 else 0.0
+            r["shares"] = float(r["shares"]) * ratio
+            r["notional"] = float(r["notional"]) * ratio
+            r["slippage_cost"] = float(r["slippage_cost"]) * ratio
+            r["reason"] = f"{r['reason']}_risk_clipped"
+            clipped_rows.append(r)
+            blocked.append(msg)
+            clipped_any = True
+        if clipped_any:
+            out = pd.DataFrame(clipped_rows, columns=trades.columns)
+
+    return out, blocked, hard_stop
+
+
 def apply_trades_to_holdings(
     holdings: pd.DataFrame,
     targets: pd.DataFrame,
@@ -424,6 +509,97 @@ def mark_to_market(holdings: pd.DataFrame, prices: pd.Series) -> pd.DataFrame:
     return h
 
 
+def _run_id(run_date: str, cfg: PaperConfig) -> str:
+    return f"{run_date}:{cfg.portfolio_id}:{cfg.strategy_version}"
+
+
+def _build_shadow_orders(trades: pd.DataFrame, run_id: str) -> List[Dict[str, object]]:
+    orders: List[Dict[str, object]] = []
+    if trades is None or trades.empty:
+        return orders
+    for _, tr in trades.iterrows():
+        ticker = str(tr["ticker"])
+        side = str(tr["side"]).upper()
+        order_id = f"{run_id}:{ticker}:{side}"
+        orders.append(
+            {
+                "order_id": order_id,
+                "ticker": ticker,
+                "side": side,
+                "quantity": float(tr["shares"]),
+                "order_type": "MKT",
+                "time_in_force": "DAY",
+                "notional": float(tr["notional"]),
+                "reason": str(tr.get("reason", "rebalance")),
+            }
+        )
+    return orders
+
+
+def _filter_idempotent_orders(orders: List[Dict[str, object]], sent_ledger_path: str) -> Tuple[List[Dict[str, object]], List[str]]:
+    sent = _read_csv(sent_ledger_path)
+    existing = set(sent["order_id"].astype(str).tolist()) if not sent.empty else set()
+    out: List[Dict[str, object]] = []
+    skipped: List[str] = []
+    for o in orders:
+        if o["order_id"] in existing:
+            logger.info("[ORDER][IDEMPOTENT] skipped order_id=%s", o["order_id"])
+            skipped.append(o["order_id"])
+            continue
+        out.append(o)
+    return out, skipped
+
+
+def _persist_sent_orders(orders: List[Dict[str, object]], sent_ledger_path: str, run_date: str, run_id: str) -> None:
+    if not orders:
+        return
+    rows = [{"date": run_date, "run_id": run_id, "order_id": o["order_id"], "ticker": o["ticker"], "side": o["side"]} for o in orders]
+    append_csv(pd.DataFrame(rows), sent_ledger_path)
+
+
+def _write_shadow_orders(run_date: str, orders: List[Dict[str, object]]) -> str:
+    out_path = Path("outputs") / "shadow_orders" / f"{run_date}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump(orders, f, indent=2)
+    return str(out_path)
+
+
+def _broker_reconciliation(
+    model_cash: float,
+    model_positions: pd.DataFrame,
+    model_equity: float,
+    broker_cash: float,
+    broker_positions: pd.DataFrame,
+    broker_equity: float,
+    cfg: PaperConfig,
+) -> Dict[str, object]:
+    model_map = {str(r["ticker"]): float(r["shares"]) for _, r in model_positions.iterrows()} if not model_positions.empty else {}
+    broker_map = {str(r["ticker"]): float(r["shares"]) for _, r in broker_positions.iterrows()} if not broker_positions.empty else {}
+    tickers = sorted(set(model_map.keys()) | set(broker_map.keys()))
+    deltas = [{"ticker": t, "model_shares": model_map.get(t, 0.0), "broker_shares": broker_map.get(t, 0.0), "delta_shares": model_map.get(t, 0.0)-broker_map.get(t, 0.0)} for t in tickers]
+
+    equity_tol = max(cfg.reconciliation_abs_tolerance_dollars, model_equity * (cfg.reconciliation_bps_tolerance / 10000.0))
+    cash_delta = model_cash - broker_cash
+    equity_delta = model_equity - broker_equity
+    ok = abs(equity_delta) <= equity_tol
+    logger.info("[BROKER][RECON] model_equity=%.2f broker_equity=%.2f delta=%.2f", model_equity, broker_equity, equity_delta)
+
+    return {
+        "status": "PASS" if ok else "FAIL",
+        "cash_delta": cash_delta,
+        "equity_delta": equity_delta,
+        "equity_tolerance": equity_tol,
+        "position_deltas": deltas,
+    }
+
+
+def _current_et(now_utc: dt.datetime | None = None) -> dt.datetime:
+    if now_utc is None:
+        now_utc = dt.datetime.now(dt.timezone.utc)
+    return now_utc.astimezone(dt.timezone(dt.timedelta(hours=-5)))
+
+
 def run_paper_day(
     run_date: str,
     signals_path: str,
@@ -431,34 +607,50 @@ def run_paper_day(
     trades_path: str,
     config_path: str,
     force: bool = False,
+    now_et: dt.datetime | None = None,
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
-    holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(
-        ledger_path
-    )
+    mode = cfg.trading_mode
+    if mode == "live":
+        raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
+    if mode not in {"paper", "shadow"}:
+        raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
 
-    # Guardrail: prevent accidental double execution
-    if last_date == run_date and not force:
+    holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
+
+    if last_date == run_date and not force and mode == "paper":
         raise RuntimeError(
             f"Ledger already contains run_date={run_date}. Refusing to run twice."
         )
 
-    # Bootstrap day 1
     if last_date == "":
         cash_prev = cfg.initial_equity
         equity_prev = cfg.initial_equity
 
-    targets, target_cash_weight = load_targets(signals_path)
+    if now_et is None:
+        now_et = _current_et()
 
-    # Universe for pricing: targets + benchmark + existing holdings
+    mkt = market_session_status(run_date=run_date, now_et=now_et, cutoff_time_et=cfg.market_cutoff_time_et)
+
+    targets, target_cash_weight, snapshot_date = load_targets(signals_path)
+    if snapshot_date and snapshot_date != run_date:
+        raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")
+
     tickers = sorted(set(targets["ticker"].tolist() + [cfg.benchmark_ticker]))
     if not holdings_prev.empty:
         tickers = sorted(set(tickers + holdings_prev["ticker"].tolist()))
 
-    prices_open = fetch_open_prices_yfinance(tickers, run_date=run_date)
+    prices_df = fetch_open_prices_yfinance(tickers, run_date=run_date)
+    stale_rows = prices_df[prices_df["price_date"].astype(str) < run_date]
+    if not stale_rows.empty:
+        last_px_date = str(stale_rows["price_date"].min())
+        raise RuntimeError(f"[HALT] stale_prices detected (last_price_date={last_px_date})")
 
-    # If any tickers missing prices, drop them and scale remaining to investable bucket.
+    prices_open = prices_df.set_index("ticker")["open"].astype(float)
+    if cfg.require_benchmark_price and cfg.benchmark_ticker not in prices_open.index:
+        raise RuntimeError(f"[HALT] benchmark_missing ticker={cfg.benchmark_ticker}")
+
     priced = set(prices_open.index.tolist())
     targets = targets[targets["ticker"].isin(priced)].copy()
     wsum = float(targets["target_weight"].sum())
@@ -467,31 +659,37 @@ def run_paper_day(
     investable_weight = max(0.0, 1.0 - target_cash_weight)
     targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
-    trades, trade_meta = build_rebalance_trades(
-        holdings=holdings_prev,
-        targets=targets,
-        prices=prices_open,
-        total_equity=equity_prev,
-        starting_cash=cash_prev,
-        target_cash_weight=target_cash_weight,
-        cfg=cfg,
-    )
-
-    if trades is None or trades.empty:
-        trades_out = pd.DataFrame(
-            columns=[
-                "date",
-                "ticker",
-                "side",
-                "shares",
-                "price",
-                "slippage_cost",
-                "notional",
-                "reason",
-            ]
-        )
+    blocked_reasons: List[str] = []
+    if mode == "shadow" and not mkt.is_open_now:
+        logger.info("NO TRADES — MARKET CLOSED (%s)", mkt.reason)
+        trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
+        trade_meta = {
+            "target_cash_weight": float(target_cash_weight),
+            "target_investable_dollars": float(equity_prev * investable_weight),
+            "scaled_tickers": [],
+            "overspend_prevented": False,
+        }
+        blocked_reasons.append(f"market_guard:{mkt.reason}")
     else:
-        trades_out = trades.copy()
+        trades, trade_meta = build_rebalance_trades(
+            holdings=holdings_prev,
+            targets=targets,
+            prices=prices_open,
+            total_equity=equity_prev,
+            starting_cash=cash_prev,
+            target_cash_weight=target_cash_weight,
+            cfg=cfg,
+        )
+
+    trades, risk_blocked, hard_stop = apply_risk_guards(trades, equity_prev, cfg)
+    blocked_reasons.extend(risk_blocked)
+    if hard_stop:
+        logger.error("[HALT] risk guard hard stop: %s", "; ".join(risk_blocked))
+
+    trades_out = trades.copy() if trades is not None else pd.DataFrame()
+    if trades_out.empty:
+        trades_out = pd.DataFrame(columns=["date", "ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
+    else:
         trades_out.insert(0, "date", run_date)
 
     append_csv(trades_out, trades_path)
@@ -538,6 +736,37 @@ def run_paper_day(
     ledger_day["total_equity"] = total_equity
     append_csv(ledger_day, ledger_path)
 
+    run_id = _run_id(run_date, cfg)
+    shadow_orders_path = None
+    idempotent_skips: List[str] = []
+    orders: List[Dict[str, object]] = []
+    sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
+
+    if mode == "shadow":
+        orders = _build_shadow_orders(trades, run_id)
+        orders, idempotent_skips = _filter_idempotent_orders(orders, sent_ledger_path)
+        _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
+        shadow_orders_path = _write_shadow_orders(run_date, orders)
+
+    broker_state = {
+        "cash": cash_new,
+        "positions": holdings_new,
+        "equity": total_equity,
+    }
+    recon = _broker_reconciliation(
+        model_cash=cash_new,
+        model_positions=holdings_new,
+        model_equity=total_equity,
+        broker_cash=float(broker_state["cash"]),
+        broker_positions=broker_state["positions"],
+        broker_equity=float(broker_state["equity"]),
+        cfg=cfg,
+    )
+    if recon["status"] != "PASS":
+        raise RuntimeError(
+            f"Broker reconciliation failed equity_delta={recon['equity_delta']:.2f} tol={recon['equity_tolerance']:.2f}"
+        )
+
     executed_trades = int(len(trades_out)) if trades_out is not None else 0
     turnover = (
         float(trades_out["notional"].sum())
@@ -546,16 +775,19 @@ def run_paper_day(
     )
 
     logger.info(
-        "[PAPER][RECON] target_cash=%.2f%% achieved_cash=%.2f%% cash=$%.2f min_cash=$0.00 overspend_prevented=%s tickers_scaled=%d",
-        100.0 * target_cash_weight,
-        100.0 * achieved_cash_weight,
-        cash_new,
-        "YES" if trade_meta.get("overspend_prevented") else "NO",
-        len(trade_meta.get("scaled_tickers", [])),
+        "[SHADOW] mode=%s market=%s orders=%d blocked=%d recon=%s",
+        mode,
+        "OPEN" if mkt.is_open_now else "CLOSED",
+        len(orders) if mode == "shadow" else executed_trades,
+        len(blocked_reasons) + len(idempotent_skips),
+        recon["status"],
     )
 
     return {
         "date": run_date,
+        "trading_mode": mode,
+        "market_status": "OPEN" if mkt.is_open_now else "CLOSED",
+        "market_reason": mkt.reason,
         "total_equity": total_equity,
         "cash": cash_new,
         "num_trades": executed_trades,
@@ -566,4 +798,10 @@ def run_paper_day(
         "overspend_prevented": bool(trade_meta.get("overspend_prevented")),
         "scaled_tickers": list(trade_meta.get("scaled_tickers", [])),
         "position_reconciliation": position_recon,
+        "blocked_reasons": blocked_reasons,
+        "idempotent_skips": idempotent_skips,
+        "shadow_orders": orders,
+        "shadow_orders_path": shadow_orders_path,
+        "run_id": run_id,
+        "broker_reconciliation": recon,
     }
