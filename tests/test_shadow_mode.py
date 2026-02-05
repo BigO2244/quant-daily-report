@@ -39,7 +39,7 @@ def _write_config(path: Path, mode: str = "shadow", risk_action: str = "hard_sto
     )
 
 
-def _write_signals(path: Path, snapshot_date: str = "2025-01-06") -> None:
+def _write_signals(path: Path, snapshot_date: str = "2025-01-06", cash_weight: float = 0.0) -> None:
     path.write_text(
         json.dumps(
             {
@@ -47,6 +47,7 @@ def _write_signals(path: Path, snapshot_date: str = "2025-01-06") -> None:
                 "signals": [
                     {"ticker": "AAA", "sleeve": "core", "target_weight": 0.6},
                     {"ticker": "BBB", "sleeve": "core", "target_weight": 0.4},
+                    {"ticker": "CASH", "sleeve": "core", "target_weight": cash_weight},
                 ],
             }
         )
@@ -197,3 +198,31 @@ def test_shadow_vs_paper_consistency_on_same_signals(tmp_path: Path, monkeypatch
     cols = ["ticker", "side", "shares"]
     assert shadow_trades[cols].to_dict("records") == paper_trades[cols].to_dict("records")
     assert out_shadow["num_trades"] == out_paper["num_trades"]
+
+
+def test_shadow_enforces_cash_target_and_reports_recon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+
+    cfg = tmp_path / "config.json"
+    sig = tmp_path / "signals.json"
+    _write_config(cfg, mode="shadow")
+    _write_signals(sig, cash_weight=0.30)
+
+    out = paper_broker.run_paper_day(
+        run_date="2025-01-06",
+        signals_path=str(sig),
+        ledger_path=str(tmp_path / "ledger.csv"),
+        trades_path=str(tmp_path / "trades.csv"),
+        config_path=str(cfg),
+        now_et=dt.datetime(2025, 1, 6, 10, 0),
+    )
+
+    investable = 10000.0 * (1.0 - 0.30)
+    target_cash = 10000.0 * 0.30
+    buys = [o for o in out["shadow_orders"] if str(o.get("side", "")).upper() == "BUY"]
+    buy_notional = sum(float(o.get("notional", 0.0)) for o in buys)
+
+    assert out["target_cash_weight"] == pytest.approx(0.30)
+    assert buy_notional <= investable + 1e-6
+    assert out["cash"] >= target_cash - 100.0

@@ -17,6 +17,10 @@ def test_build_execution_payload_whole_shares_sorting_and_holdings_cap():
         },
         paper_summary={
             "trading_mode": "shadow",
+            "target_cash_weight": 0.30,
+            "investable_dollars": 7000.0,
+            "sizing_equity": 10000.0,
+            "target_cash_dollars": 3000.0,
             "shadow_orders": [
                 {"ticker": "MSFT", "side": "SELL", "quantity": 9.9, "reason": "reduce", "order_id": "rid:MSFT:SELL"},
                 {"ticker": "AAPL", "side": "BUY", "quantity": 1.9, "reason": "rebalance", "order_id": "rid:AAPL:BUY"},
@@ -33,3 +37,9 @@ def test_build_execution_payload_whole_shares_sorting_and_holdings_cap():
     assert payload["trades"][1]["shares"] == 3
     assert payload["trades"][1]["notional"] == 3 * 430.0
     assert payload["order_ids"] == ["rid:AAPL:BUY", "rid:MSFT:SELL"]
+
+
+    assert payload["cash_target_weight"] == 0.30
+    assert payload["investable_dollars"] == 7000.0
+    assert payload["equity"] == 10000.0
+    assert payload["cash_target_dollars"] == 3000.0

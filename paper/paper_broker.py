@@ -38,6 +38,7 @@ class PaperConfig:
     risk_action: str = "hard_stop"
     halt_on_data_error: bool = True
     require_benchmark_price: bool = True
+    cash_target_weight_default: float = 0.0
 
 
 def load_config(path: str) -> PaperConfig:
@@ -71,6 +72,9 @@ def load_config(path: str) -> PaperConfig:
         risk_action=str(risk_cfg.get("action", "hard_stop")).strip().lower(),
         halt_on_data_error=bool(safety_cfg.get("halt_on_data_error", True)),
         require_benchmark_price=bool(safety_cfg.get("require_benchmark_price", True)),
+        cash_target_weight_default=float(
+            constraints.get("cash_target_weight", constraints.get("target_cash_weight", 0.0))
+        ),
     )
 
 
@@ -114,13 +118,19 @@ def read_latest_holdings_from_ledger(
     return holdings, cash, total_equity, last_date
 
 
-def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float, str | None]:
+def load_targets(
+    signals_path: str,
+    cash_target_weight_default: float = 0.0,
+) -> Tuple[pd.DataFrame, float, str | None]:
     with open(signals_path, "r") as f:
         obj = json.load(f)
 
     snapshot_date = None
+    payload_cash_target_weight = None
     if isinstance(obj, dict):
         snapshot_date = obj.get("snapshot_date")
+        if obj.get("cash_target_weight") is not None:
+            payload_cash_target_weight = float(obj.get("cash_target_weight"))
         rows = obj.get("signals")
     else:
         rows = obj
@@ -136,9 +146,12 @@ def load_targets(signals_path: str) -> Tuple[pd.DataFrame, float, str | None]:
     df["target_weight"] = df["target_weight"].astype(float)
 
     cash_rows = df[df["ticker"] == "CASH"].copy()
-    target_cash_weight = (
-        float(cash_rows["target_weight"].iloc[-1]) if not cash_rows.empty else 0.0
-    )
+    if not cash_rows.empty:
+        target_cash_weight = float(cash_rows["target_weight"].iloc[-1])
+    elif payload_cash_target_weight is not None:
+        target_cash_weight = payload_cash_target_weight
+    else:
+        target_cash_weight = float(cash_target_weight_default)
     target_cash_weight = max(0.0, min(1.0, target_cash_weight))
 
     non_cash = df[df["ticker"] != "CASH"].copy()
@@ -633,7 +646,10 @@ def run_paper_day(
 
     mkt = market_session_status(run_date=run_date, now_et=now_et, cutoff_time_et=cfg.market_cutoff_time_et)
 
-    targets, target_cash_weight, snapshot_date = load_targets(signals_path)
+    targets, target_cash_weight, snapshot_date = load_targets(
+        signals_path,
+        cash_target_weight_default=cfg.cash_target_weight_default,
+    )
     if snapshot_date and snapshot_date != run_date:
         raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")
 
@@ -681,6 +697,13 @@ def run_paper_day(
             cfg=cfg,
         )
 
+    logger.info(
+        "[SHADOW] cash_target=%.2f%% investable=$%.2f equity=$%.2f",
+        100.0 * float(target_cash_weight),
+        float(trade_meta.get("target_investable_dollars", equity_prev * investable_weight)),
+        float(equity_prev),
+    )
+
     trades, risk_blocked, hard_stop = apply_risk_guards(trades, equity_prev, cfg)
     blocked_reasons.extend(risk_blocked)
     if hard_stop:
@@ -705,6 +728,9 @@ def run_paper_day(
     total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
     total_equity = float(cash_new + total_mv)
     achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
+    invested_dollars = total_mv
+    investable_dollars = float(trade_meta.get("target_investable_dollars", equity_prev * investable_weight))
+    target_cash_dollars = float(equity_prev * target_cash_weight)
 
     achieved_weights = {}
     if total_equity > 0 and not m2m.empty:
@@ -789,12 +815,17 @@ def run_paper_day(
         "market_status": "OPEN" if mkt.is_open_now else "CLOSED",
         "market_reason": mkt.reason,
         "total_equity": total_equity,
+        "sizing_equity": float(equity_prev),
         "cash": cash_new,
         "num_trades": executed_trades,
         "turnover_notional": turnover,
         "benchmark": cfg.benchmark_ticker,
         "target_cash_weight": float(target_cash_weight),
         "achieved_cash_weight": float(achieved_cash_weight),
+        "investable_dollars": float(investable_dollars),
+        "invested_dollars": float(invested_dollars),
+        "target_cash_dollars": float(target_cash_dollars),
+        "cash_dollars": float(cash_new),
         "overspend_prevented": bool(trade_meta.get("overspend_prevented")),
         "scaled_tickers": list(trade_meta.get("scaled_tickers", [])),
         "position_reconciliation": position_recon,
