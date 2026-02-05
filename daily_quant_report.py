@@ -9,6 +9,7 @@ import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date
 from paper.paper_report import build_paper_report_html
+from paper.trading_calendar import prev_trading_day
 
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
@@ -1223,9 +1224,11 @@ def build_daily_snapshot(
         )
     else:
         run_date_str = report_date.strftime("%Y-%m-%d")
+        cutoff_date = prev_trading_day(run_date_str)
         signals_path = write_signals_snapshot(
             df_targets=weights_df,
             run_date=run_date_str,
+            asof_date=cutoff_date,
             out_dir="signals",
             cash_target_weight=float(alloc_result.cash_weight),
             sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
@@ -1512,6 +1515,7 @@ def build_daily_snapshot(
         "performance_diagnostics": performance_diagnostics,
         "skipped_trades": alloc_result.skipped_trades if alloc_result else [],
         "s2_no_picks": s2_no_picks,
+        "signals_snapshot_path": signals_path,
     }
 
 
@@ -2200,7 +2204,9 @@ def main(argv: list[str] | None = None):
     # --- Paper trading execution + report ---
     # Execute using the same immutable daily snapshot written for this report date.
     trade_date_str = report_date.strftime("%Y-%m-%d")
-    signals_path_exec = os.path.join("signals", f"{trade_date_str}.json")
+    signals_path_exec = daily_snapshot.get("signals_snapshot_path") or os.path.join(
+        "signals", f"{trade_date_str}.json"
+    )
     paper_summary = None
     paper_html = ""
     if os.path.exists(signals_path_exec):
@@ -2294,6 +2300,18 @@ def main(argv: list[str] | None = None):
                 f"delta={100.0 * float(row.get('delta_weight', 0.0)):+.2f}%"
                 f"{flag}\n"
             )
+        validation = paper_summary.get("open_window_validation") or {}
+        email_body += "\nOpen-Window Validation\n"
+        email_body += (
+            f"   - trade_date={validation.get('trade_date', trade_date_str)} | "
+            f"signals={validation.get('signals_path', signals_path_exec)} | "
+            f"asof={validation.get('asof_date', 'n/a')} | "
+            f"cutoff={validation.get('cutoff_date', 'n/a')} | "
+            f"result={validation.get('result', 'UNKNOWN')}\n"
+        )
+        reasons = validation.get("reasons") or []
+        for reason in reasons:
+            email_body += f"   - {reason}\n"
     execution_payload = build_execution_email_payload(
         trade_date=trade_date_str,
         daily_snapshot=daily_snapshot,

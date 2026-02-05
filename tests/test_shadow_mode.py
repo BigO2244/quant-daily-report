@@ -40,10 +40,16 @@ def _write_config(path: Path, mode: str = "shadow", risk_action: str = "hard_sto
 
 
 def _write_signals(path: Path, snapshot_date: str = "2025-01-06", cash_weight: float = 0.0) -> None:
+    asof_date = str((pd.Timestamp(snapshot_date) - pd.Timedelta(days=3)).date())
     path.write_text(
         json.dumps(
             {
                 "snapshot_date": snapshot_date,
+                "meta": {
+                    "trade_date": snapshot_date,
+                    "asof_date": asof_date,
+                    "generated_at": "2025-01-05T00:00:00+00:00",
+                },
                 "signals": [
                     {"ticker": "AAA", "sleeve": "core", "target_weight": 0.6},
                     {"ticker": "BBB", "sleeve": "core", "target_weight": 0.4},
@@ -64,9 +70,19 @@ def _mock_prices(run_date: str) -> pd.DataFrame:
     )
 
 
+def _mock_prev_closes(asof_date: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"ticker": "AAA", "prev_close": 99.0, "price_date": asof_date},
+            {"ticker": "BBB", "prev_close": 49.0, "price_date": asof_date},
+        ]
+    )
+
+
 def test_idempotent_rerun_same_day_skips_duplicate_orders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -96,6 +112,7 @@ def test_idempotent_rerun_same_day_skips_duplicate_orders(tmp_path: Path, monkey
 def test_market_closed_day_generates_no_orders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -124,6 +141,7 @@ def test_stale_price_day_hard_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         return df
 
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", stale_prices)
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -144,6 +162,7 @@ def test_stale_price_day_hard_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_turnover_limit_breach_hard_stops_orders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -166,6 +185,7 @@ def test_turnover_limit_breach_hard_stops_orders(tmp_path: Path, monkeypatch: py
 def test_shadow_vs_paper_consistency_on_same_signals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     sig = tmp_path / "signals.json"
     _write_signals(sig)
@@ -203,6 +223,7 @@ def test_shadow_vs_paper_consistency_on_same_signals(tmp_path: Path, monkeypatch
 def test_shadow_enforces_cash_target_and_reports_recon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -232,6 +253,7 @@ def test_shadow_enforces_cash_target_and_reports_recon(tmp_path: Path, monkeypat
 def test_reset_orders_sent_ledger_removes_date_and_allows_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -267,6 +289,7 @@ def test_reset_orders_sent_ledger_removes_date_and_allows_rerun(tmp_path: Path, 
 def test_shadow_constraints_cash_target_weight_is_used_without_cash_signal_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
 
     cfg = tmp_path / "config.json"
     sig = tmp_path / "signals.json"
@@ -275,6 +298,11 @@ def test_shadow_constraints_cash_target_weight_is_used_without_cash_signal_row(t
         json.dumps(
             {
                 "snapshot_date": "2025-01-06",
+                "meta": {
+                    "trade_date": "2025-01-06",
+                    "asof_date": "2025-01-03",
+                    "generated_at": "2025-01-05T00:00:00+00:00",
+                },
                 "signals": [
                     {"ticker": "AAA", "sleeve": "core", "target_weight": 0.6},
                     {"ticker": "BBB", "sleeve": "core", "target_weight": 0.4},
