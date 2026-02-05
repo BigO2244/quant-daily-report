@@ -256,6 +256,10 @@ def build_execution_email_payload(
         "trades": trades,
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
+        "cash_target_weight": float((paper_summary or {}).get("target_cash_weight", 0.0)),
+        "investable_dollars": float((paper_summary or {}).get("investable_dollars", 0.0)),
+        "equity": float((paper_summary or {}).get("sizing_equity", (paper_summary or {}).get("total_equity", 0.0))),
+        "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
     }
 
 
@@ -2241,6 +2245,11 @@ def main():
             f"Cash: ${paper_summary['cash']:.2f} | "
             f"Cash Weight: {100.0 * paper_summary.get('achieved_cash_weight', 0.0):.2f}% | "
             f"Target Cash Weight: {100.0 * paper_summary.get('target_cash_weight', 0.0):.2f}%\n"
+        )
+        email_body += (
+            f"   - Invested: ${float(paper_summary.get('invested_dollars', 0.0)):.2f} | "
+            f"Investable: ${float(paper_summary.get('investable_dollars', 0.0)):.2f} | "
+            f"Target Cash $: ${float(paper_summary.get('target_cash_dollars', 0.0)):.2f}\n"
         )
         scaled = paper_summary.get("scaled_tickers", []) or []
         if scaled:

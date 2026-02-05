@@ -86,6 +86,8 @@ def build_paper_report_html(
   <ul>
     <li><b>Target Cash Weight:</b> {100.0 * float(reconciliation.get('target_cash_weight', 0.0)):.2f}%</li>
     <li><b>Achieved Cash Weight:</b> {100.0 * float(reconciliation.get('achieved_cash_weight', 0.0)):.2f}%</li>
+    <li><b>Invested Dollars:</b> ${float(reconciliation.get('invested_dollars', 0.0)):,.2f} / ${float(reconciliation.get('investable_dollars', 0.0)):,.2f} investable</li>
+    <li><b>Cash Dollars:</b> ${float(reconciliation.get('cash_dollars', 0.0)):,.2f} / ${float(reconciliation.get('target_cash_dollars', 0.0)):,.2f} target</li>
     <li><b>Cash-constrained tickers:</b> {', '.join(scaled) if scaled else 'None'}</li>
   </ul>
   {df_to_html(recon_df)}
