@@ -17,6 +17,7 @@ def build_paper_report_html(
     trades_path: str,
     benchmark_ticker: str = "SPY",
     reconciliation: dict | None = None,
+    shadow_status: dict | None = None,
 ) -> str:
     led = _read_csv_if_exists(ledger_path)
     day = led[led["date"] == run_date].copy() if not led.empty else pd.DataFrame()
@@ -66,6 +67,7 @@ def build_paper_report_html(
         return df.to_html(index=False, border=0)
 
     recon_html = ""
+    shadow_html = ""
     if reconciliation:
         rows = reconciliation.get("position_reconciliation", []) or []
         recon_df = pd.DataFrame(rows)
@@ -89,6 +91,19 @@ def build_paper_report_html(
   {df_to_html(recon_df)}
 """.rstrip()
 
+
+    if shadow_status:
+        shadow_html = f"""
+  <h3>Quasi-Live / Shadow Trading Status</h3>
+  <ul>
+    <li><b>Trading mode:</b> {shadow_status.get('trading_mode', 'paper')}</li>
+    <li><b>Market open/closed:</b> {shadow_status.get('market_status', 'UNKNOWN')}</li>
+    <li><b>Orders generated:</b> {int(shadow_status.get('orders_generated', 0))}</li>
+    <li><b>Orders blocked:</b> {int(shadow_status.get('orders_blocked', 0))}</li>
+    <li><b>Broker recon status:</b> {shadow_status.get('broker_recon_status', 'UNKNOWN')}</li>
+  </ul>
+""".rstrip()
+
     return f"""
 <div style="font-family: Arial, sans-serif;">
   <h2>Paper Trading Execution — {run_date}</h2>
@@ -107,6 +122,8 @@ def build_paper_report_html(
   {df_to_html(holdings)}
 
   {recon_html}
+
+  {shadow_html}
 
   <p style="color:#666; margin-top:16px;">
     Execution model: next-open fills with slippage + cash buffer. Ledger is append-only.

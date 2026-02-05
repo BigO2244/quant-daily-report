@@ -9,5 +9,23 @@
     "allow_fractional_shares": true,
     "min_trade_dollars": 5.0,
     "cash_buffer_bps": 10.0
+  },
+  "mode": {
+    "trading_mode": "shadow",
+    "portfolio_id": "main",
+    "strategy_version": "v2"
+  },
+  "safety": {
+    "market_cutoff_time_et": "15:45",
+    "reconciliation_abs_tolerance_dollars": 1.0,
+    "reconciliation_bps_tolerance": 1.0,
+    "halt_on_data_error": true,
+    "require_benchmark_price": true
+  },
+  "risk": {
+    "max_turnover_pct": 0.30,
+    "max_trades_per_day": 10,
+    "max_position_change_pct": 0.15,
+    "action": "hard_stop"
   }
 }
