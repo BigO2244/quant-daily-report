@@ -103,7 +103,25 @@ def test_execution_email_no_trade_block_present():
         }
     )
 
+    assert "1) TODAY’S ACTION — EXECUTE THESE ORDERS" in body
     assert "NO TRADES TODAY" in body
+    assert "2) ORDER META (FOR TRACKING / IDEMPOTENCY)" not in body
+    assert "3) EXECUTION NOTES" in body
     assert "- Market OPEN" in body
     assert "- Signals evaluated" in body
     assert "- No assets met entry criteria" in body
+    assert "CASH is not the same thing as SGOV" in body
+
+
+def test_execution_email_no_trailing_percent_or_whitespace():
+    _, body = build_execution_email_text(
+        {
+            "trade_date": "2026-02-05",
+            "mode": "SHADOW",
+            "execution_status": "READY",
+            "trades": [],
+        }
+    )
+
+    assert not body.endswith("%")
+    assert body.rstrip("\n") == body
