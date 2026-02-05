@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
@@ -27,11 +28,13 @@ def normalize_weights(
 def write_signals_snapshot(
     df_targets: pd.DataFrame,
     run_date: str,
+    asof_date: str | None = None,
     out_dir: str = "signals",
     cash_target_weight: Optional[float] = None,
     sleeve_col: Optional[str] = "sleeve",
     ticker_col: str = "ticker",
     weight_col: str = "target_weight",
+    model_version: str | None = None,
 ) -> str:
     """
     Writes signals/YYYY-MM-DD.json
@@ -83,8 +86,15 @@ def write_signals_snapshot(
 
     payload = {
         "snapshot_date": run_date,
+        "meta": {
+            "trade_date": run_date,
+            "asof_date": asof_date or run_date,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
         "signals": signals,
     }
+    if model_version:
+        payload["meta"]["model_version"] = model_version
     if cash_target_weight is not None:
         payload["cash_target_weight"] = float(cash_target_weight)
 

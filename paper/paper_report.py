@@ -67,6 +67,7 @@ def build_paper_report_html(
         return df.to_html(index=False, border=0)
 
     recon_html = ""
+    validation_html = ""
     shadow_html = ""
     if reconciliation:
         rows = reconciliation.get("position_reconciliation", []) or []
@@ -91,6 +92,22 @@ def build_paper_report_html(
     <li><b>Cash-constrained tickers:</b> {', '.join(scaled) if scaled else 'None'}</li>
   </ul>
   {df_to_html(recon_df)}
+""".rstrip()
+
+        validation = reconciliation.get("open_window_validation") or {}
+        reasons = validation.get("reasons") or []
+        reason_items = "".join([f"<li>{r}</li>" for r in reasons]) or "<li>None</li>"
+        validation_html = f"""
+  <h3>Open-Window Validation</h3>
+  <ul>
+    <li><b>Trade Date:</b> {validation.get('trade_date', run_date)}</li>
+    <li><b>Signals File:</b> {validation.get('signals_path', 'n/a')}</li>
+    <li><b>Asof Date:</b> {validation.get('asof_date', 'n/a')}</li>
+    <li><b>Cutoff Date:</b> {validation.get('cutoff_date', 'n/a')}</li>
+    <li><b>Result:</b> {validation.get('result', 'UNKNOWN')}</li>
+  </ul>
+  <p><b>Reasons</b></p>
+  <ul>{reason_items}</ul>
 """.rstrip()
 
 
@@ -124,6 +141,8 @@ def build_paper_report_html(
   {df_to_html(holdings)}
 
   {recon_html}
+
+  {validation_html}
 
   {shadow_html}
 
