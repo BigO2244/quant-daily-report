@@ -79,6 +79,23 @@ def _mock_prev_closes(asof_date: str) -> pd.DataFrame:
     )
 
 
+def _seed_ledger(path: Path, date: str = "2025-01-03") -> None:
+    pd.DataFrame(
+        [
+            {
+                "date": date,
+                "ticker": "AAA",
+                "sleeve": "core",
+                "shares": 10.0,
+                "price": 100.0,
+                "market_value": 1000.0,
+                "cash": 500.0,
+                "total_equity": 1500.0,
+            }
+        ]
+    ).to_csv(path, index=False)
+
+
 def test_idempotent_rerun_same_day_skips_duplicate_orders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
@@ -130,6 +147,109 @@ def test_market_closed_day_generates_no_orders(tmp_path: Path, monkeypatch: pyte
 
     assert out["market_status"] == "CLOSED"
     assert len(out["shadow_orders"]) == 0
+
+
+def test_blocked_market_closed_is_fail_closed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
+
+    cfg = tmp_path / "config.json"
+    sig = tmp_path / "signals.json"
+    ledger = tmp_path / "ledger.csv"
+    _write_config(cfg, mode="shadow")
+    _write_signals(sig, snapshot_date="2025-01-11")
+    _seed_ledger(ledger)
+
+    out = paper_broker.run_paper_day(
+        run_date="2025-01-11",
+        signals_path=str(sig),
+        ledger_path=str(ledger),
+        trades_path=str(tmp_path / "trades.csv"),
+        config_path=str(cfg),
+        now_et=dt.datetime(2025, 1, 11, 10, 0),
+    )
+
+    assert out["execution_status"] == "HALTED"
+    assert out["num_trades"] == 0
+    assert out["cash"] == 500.0
+    assert out["total_equity"] == 1500.0
+    assert len(out["shadow_orders"]) == 0
+    assert any("market_guard" in r for r in out["blocked_reasons"])
+
+
+def test_blocked_same_day_asof_is_fail_closed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
+
+    cfg = tmp_path / "config.json"
+    sig = tmp_path / "signals.json"
+    ledger = tmp_path / "ledger.csv"
+    _write_config(cfg, mode="shadow")
+    _write_signals(sig, snapshot_date="2025-01-06")
+    _seed_ledger(ledger)
+    payload = json.loads(sig.read_text())
+    payload["meta"]["asof_date"] = "2025-01-06"
+    sig.write_text(json.dumps(payload))
+
+    out = paper_broker.run_paper_day(
+        run_date="2025-01-06",
+        signals_path=str(sig),
+        ledger_path=str(ledger),
+        trades_path=str(tmp_path / "trades.csv"),
+        config_path=str(cfg),
+        now_et=dt.datetime(2025, 1, 6, 10, 0),
+    )
+
+    assert out["execution_status"] == "HALTED"
+    assert out["num_trades"] == 0
+    assert out["cash"] == 500.0
+    assert out["total_equity"] == 1500.0
+    assert len(out["shadow_orders"]) == 0
+    assert any("signals_asof_after_cutoff" in r for r in out["blocked_reasons"])
+
+
+def test_blocked_missing_open_price_is_fail_closed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+
+    def missing_open_prices(run_date: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"ticker": "AAA", "open": 100.0, "price_date": run_date},
+                {"ticker": "SPY", "open": 500.0, "price_date": run_date},
+            ]
+        )
+
+    monkeypatch.setattr(
+        paper_broker,
+        "fetch_open_prices_yfinance",
+        lambda tickers, run_date: missing_open_prices(run_date),
+    )
+    monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: _mock_prev_closes(asof_date))
+
+    cfg = tmp_path / "config.json"
+    sig = tmp_path / "signals.json"
+    ledger = tmp_path / "ledger.csv"
+    _write_config(cfg, mode="shadow")
+    _write_signals(sig, snapshot_date="2025-01-06")
+    _seed_ledger(ledger)
+
+    out = paper_broker.run_paper_day(
+        run_date="2025-01-06",
+        signals_path=str(sig),
+        ledger_path=str(ledger),
+        trades_path=str(tmp_path / "trades.csv"),
+        config_path=str(cfg),
+        now_et=dt.datetime(2025, 1, 6, 10, 0),
+    )
+
+    assert out["execution_status"] == "HALTED"
+    assert out["num_trades"] == 0
+    assert out["cash"] == 500.0
+    assert out["total_equity"] == 1500.0
+    assert len(out["shadow_orders"]) == 0
+    assert any("missing_open_prices" in r for r in out["blocked_reasons"])
 
 
 def test_stale_price_day_hard_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
