@@ -46,9 +46,21 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     lines.append("Execution Status: READY")
 
     trades = payload.get("trades", []) or []
+    notes_lines = [
+        "- Entry (X) is the model’s expected execution price.",
+        "- Stop-Loss (Y) and Take Profit (Z) are the model’s current exit levels.",
+        "- CASH is not the same thing as SGOV: CASH is uninvested cash, SGOV is a Treasury ETF position.",
+        "- If Execution Status is HALTED, do not place trades.",
+        "- Refer to the Daily Quant / Trade Rundown for diagnostics and attribution.",
+    ]
+
     if not trades:
         lines.extend(
             [
+                "",
+                "========================",
+                "1) TODAY’S ACTION — EXECUTE THESE ORDERS",
+                "========================",
                 "",
                 "========================",
                 "NO TRADES TODAY",
@@ -63,12 +75,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                 "3) EXECUTION NOTES",
                 "========================",
                 "",
-                "- Entry (X) is the model’s expected execution price.",
-                "- Stop-Loss (Y) and Take Profit (Z) are the model’s current exit levels.",
-                "- If Execution Status is HALTED, do not place trades.",
-                "- Refer to the Daily Quant / Trade Rundown for diagnostics and attribution.",
             ]
         )
+        lines.extend(notes_lines)
         return subject, "\n".join(lines)
 
     buys = sorted(
@@ -161,11 +170,8 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
             "3) EXECUTION NOTES",
             "========================",
             "",
-            "- Entry (X) is the model’s expected execution price.",
-            "- Stop-Loss (Y) and Take Profit (Z) are the model’s current exit levels.",
-            "- If Execution Status is HALTED, do not place trades.",
-            "- Refer to the Daily Quant / Trade Rundown for diagnostics and attribution.",
         ]
     )
+    lines.extend(notes_lines)
 
     return subject, "\n".join(lines)
