@@ -1,4 +1,6 @@
-from daily_quant_report import build_execution_email_payload
+from pathlib import Path
+
+from daily_quant_report import build_execution_email_payload, _write_execution_email_payload
 
 
 def test_build_execution_payload_whole_shares_sorting_and_holdings_cap():
@@ -43,3 +45,10 @@ def test_build_execution_payload_whole_shares_sorting_and_holdings_cap():
     assert payload["investable_dollars"] == 7000.0
     assert payload["equity"] == 10000.0
     assert payload["cash_target_dollars"] == 3000.0
+
+
+def test_execution_payload_json_ends_with_newline(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out_path = _write_execution_email_payload({"trade_date": "2026-02-05", "trades": []}, "2026-02-05")
+    data = Path(out_path).read_bytes()
+    assert data.endswith(b"\n")

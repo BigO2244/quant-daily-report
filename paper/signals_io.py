@@ -28,6 +28,7 @@ def write_signals_snapshot(
     df_targets: pd.DataFrame,
     run_date: str,
     out_dir: str = "signals",
+    cash_target_weight: Optional[float] = None,
     sleeve_col: Optional[str] = "sleeve",
     ticker_col: str = "ticker",
     weight_col: str = "target_weight",
@@ -72,7 +73,7 @@ def write_signals_snapshot(
     ensure_dir(out_dir)
     out_path = os.path.join(out_dir, f"{run_date}.json")
 
-    payload = df.rename(
+    signals = df.rename(
         columns={
             ticker_col: "ticker",
             weight_col: "target_weight",
@@ -80,7 +81,15 @@ def write_signals_snapshot(
         }
     )[["ticker", "target_weight", "sleeve"]].to_dict(orient="records")
 
-    with open(out_path, "w") as f:
+    payload = {
+        "snapshot_date": run_date,
+        "signals": signals,
+    }
+    if cash_target_weight is not None:
+        payload["cash_target_weight"] = float(cash_target_weight)
+
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
+        f.write("\n")
 
     return out_path

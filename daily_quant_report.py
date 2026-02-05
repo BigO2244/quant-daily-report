@@ -1,12 +1,13 @@
 import datetime as dt
 import json
+import argparse
 import logging
 import os
 import sys
 
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
-from paper.paper_broker import run_paper_day
+from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date
 from paper.paper_report import build_paper_report_html
 
 # ============================================================
@@ -149,6 +150,7 @@ def _write_execution_email_payload(payload: dict, run_date: str) -> str:
     out_path = os.path.join(out_dir, f"{run_date}.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
+        f.write("\n")
     logger.info("[EXECUTION_EMAIL] payload written: %s", out_path)
     return out_path
 
@@ -1225,6 +1227,7 @@ def build_daily_snapshot(
             df_targets=weights_df,
             run_date=run_date_str,
             out_dir="signals",
+            cash_target_weight=float(alloc_result.cash_weight),
             sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
         )
         logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
@@ -1964,8 +1967,20 @@ def build_html_report(
 # ============================================================
 # Main
 # ============================================================
-def main():
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run daily quant report workflow")
+    parser.add_argument(
+        "--reset-ledger-date",
+        dest="reset_ledger_date",
+        default=None,
+        help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    args = _parse_args(argv)
     offline_fixture = os.getenv("OFFLINE_FIXTURE", "").lower() in {"1", "true", "yes"}
     fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -2190,6 +2205,11 @@ def main():
     paper_html = ""
     if os.path.exists(signals_path_exec):
         try:
+            if args.reset_ledger_date:
+                reset_orders_sent_ledger_for_date(
+                    "outputs/shadow_orders/orders_sent.csv",
+                    args.reset_ledger_date,
+                )
             paper_summary = run_paper_day(
                 run_date=trade_date_str,
                 signals_path=signals_path_exec,

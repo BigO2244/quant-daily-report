@@ -570,11 +570,35 @@ def _persist_sent_orders(orders: List[Dict[str, object]], sent_ledger_path: str,
     append_csv(pd.DataFrame(rows), sent_ledger_path)
 
 
+def reset_orders_sent_ledger_for_date(sent_ledger_path: str, trade_date: str) -> int:
+    path = Path(sent_ledger_path)
+    if not path.exists() or path.stat().st_size == 0:
+        logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, 0)
+        return 0
+
+    sent = pd.read_csv(path)
+    if sent.empty:
+        logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, 0)
+        return 0
+
+    if "date" not in sent.columns:
+        logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, 0)
+        return 0
+
+    mask = sent["date"].astype(str) == str(trade_date)
+    removed = int(mask.sum())
+    kept = sent.loc[~mask].copy()
+    _ensure_parent_dir(sent_ledger_path)
+    kept.to_csv(path, index=False)
+    logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, removed)
+    return removed
+
 def _write_shadow_orders(run_date: str, orders: List[Dict[str, object]]) -> str:
     out_path = Path("outputs") / "shadow_orders" / f"{run_date}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(orders, f, indent=2)
+        f.write("\n")
     return str(out_path)
 
 

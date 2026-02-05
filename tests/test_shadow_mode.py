@@ -224,5 +224,41 @@ def test_shadow_enforces_cash_target_and_reports_recon(tmp_path: Path, monkeypat
     buy_notional = sum(float(o.get("notional", 0.0)) for o in buys)
 
     assert out["target_cash_weight"] == pytest.approx(0.30)
+    assert out["investable_dollars"] == pytest.approx(investable)
     assert buy_notional <= investable + 1e-6
     assert out["cash"] >= target_cash - 100.0
+
+
+def test_reset_orders_sent_ledger_removes_date_and_allows_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+
+    cfg = tmp_path / "config.json"
+    sig = tmp_path / "signals.json"
+    _write_config(cfg, mode="shadow")
+    _write_signals(sig)
+
+    kwargs = dict(
+        run_date="2025-01-06",
+        signals_path=str(sig),
+        ledger_path=str(tmp_path / "ledger.csv"),
+        trades_path=str(tmp_path / "trades.csv"),
+        config_path=str(cfg),
+        now_et=dt.datetime(2025, 1, 6, 10, 0),
+    )
+
+    first = paper_broker.run_paper_day(**kwargs)
+    assert len(first["shadow_orders"]) > 0
+
+    (tmp_path / "ledger.csv").unlink(missing_ok=True)
+    (tmp_path / "trades.csv").unlink(missing_ok=True)
+    second = paper_broker.run_paper_day(**kwargs)
+    assert len(second["shadow_orders"]) == 0
+
+    removed = paper_broker.reset_orders_sent_ledger_for_date("outputs/shadow_orders/orders_sent.csv", "2025-01-06")
+    assert removed > 0
+
+    (tmp_path / "ledger.csv").unlink(missing_ok=True)
+    (tmp_path / "trades.csv").unlink(missing_ok=True)
+    third = paper_broker.run_paper_day(**kwargs)
+    assert len(third["shadow_orders"]) > 0
