@@ -3,8 +3,8 @@ name: Daily Quant Report
 on:
   workflow_dispatch: {}
   schedule:
-    # 9:30am ET = 14:30 UTC (Mon–Fri)
-    - cron: "30 14 * * 1-5"
+    # 5:30am ET = 10:30 UTC (Mon–Fri) during Standard Time (EST)
+    - cron: "30 10 * * 1-5"
 
 jobs:
   run-report:
