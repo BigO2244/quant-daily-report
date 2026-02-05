@@ -153,6 +153,13 @@ def _write_execution_email_payload(payload: dict, run_date: str) -> str:
     return out_path
 
 
+def _coerce_whole_shares(value: object) -> int:
+    try:
+        return max(0, int(float(value)))
+    except Exception:
+        return 0
+
+
 def build_execution_email_payload(
     trade_date: str,
     daily_snapshot: dict,
@@ -187,27 +194,60 @@ def build_execution_email_payload(
             halted_reason = "SIGNAL DATE MISMATCH"
 
     risk_map = {r.get("ticker"): r for r in (daily_snapshot.get("risk_levels", []) or []) if r.get("ticker")}
+    holdings_shares = {
+        str(h.get("ticker")): _coerce_whole_shares(h.get("shares"))
+        for h in (daily_snapshot.get("holdings", []) or [])
+        if h.get("ticker")
+    }
     orders = (paper_summary or {}).get("shadow_orders", []) or []
     trades = []
+    dropped_zero_shares = 0
     for order in orders:
         ticker = order.get("ticker")
+        side = str(order.get("side", "")).upper()
         risk = risk_map.get(ticker, {})
+
+        shares = _coerce_whole_shares(order.get("quantity"))
+        if side in {"SELL", "CLOSE", "REDUCE"}:
+            available = holdings_shares.get(str(ticker))
+            if available is not None:
+                shares = min(shares, available)
+        if shares < 1:
+            dropped_zero_shares += 1
+            continue
+
+        entry_price = risk.get("entry_price")
+        notional = None
+        try:
+            if entry_price is not None:
+                notional = shares * float(entry_price)
+        except Exception:
+            notional = None
+
         trades.append(
             {
                 "ticker": ticker,
-                "side": str(order.get("side", "")).upper(),
-                "shares": order.get("quantity"),
-                "entry_price": risk.get("entry_price"),
+                "side": side,
+                "shares": shares,
+                "entry_price": entry_price,
                 "stop_loss": risk.get("stop_loss"),
                 "take_profit": risk.get("take_profit"),
-                "notional": order.get("notional"),
+                "notional": notional,
                 "reason": order.get("reason"),
                 "notes": order.get("reason"),
                 "order_id": order.get("order_id"),
             }
         )
 
+    logger.info(
+        "[EXECUTION_EMAIL] rounded_to_whole_shares dropped_zero_shares=%d",
+        dropped_zero_shares,
+    )
     trades = sorted(trades, key=lambda x: (x.get("ticker") or "", x.get("side") or ""))
+    order_ids = sorted(
+        [t.get("order_id") for t in trades if t.get("order_id")],
+        key=lambda oid: tuple((str(oid).split(":"))[-2:]) if ":" in str(oid) else ("", str(oid)),
+    )
     return {
         "trade_date": trade_date,
         "mode": mode,
@@ -215,7 +255,7 @@ def build_execution_email_payload(
         "halt_reason": halted_reason,
         "trades": trades,
         "run_id": (paper_summary or {}).get("run_id", ""),
-        "order_ids": [t.get("order_id") for t in trades if t.get("order_id")],
+        "order_ids": order_ids,
     }
 
 
@@ -1247,10 +1287,12 @@ def build_daily_snapshot(
             else None
         )
 
+        current_shares = abs(weight) * model_equity / last_px if (last_px and last_px > 0) else None
         holdings.append(
             {
                 "ticker": ticker,
                 "direction": direction,
+                "shares": current_shares,
                 "entry_date": entry_date,
                 "entry_price": entry_px,
                 "last_price": last_px,
