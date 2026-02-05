@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import logging
 import os
 import sys
@@ -140,6 +141,82 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
+
+
+def _write_execution_email_payload(payload: dict, run_date: str) -> str:
+    out_dir = os.path.join("outputs", "execution_email")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{run_date}.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    logger.info("[EXECUTION_EMAIL] payload written: %s", out_path)
+    return out_path
+
+
+def build_execution_email_payload(
+    trade_date: str,
+    daily_snapshot: dict,
+    paper_summary: dict | None,
+) -> dict:
+    mode = (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")
+    mode = str(mode).upper()
+
+    if mode == "LIVE":
+        return {
+            "trade_date": trade_date,
+            "mode": mode,
+            "execution_status": "HALTED",
+            "halt_reason": "LIVE MODE BLOCKED",
+            "trades": [],
+            "run_id": (paper_summary or {}).get("run_id", ""),
+            "order_ids": [],
+        }
+
+    halted_reason = None
+    status = "READY"
+    if paper_summary:
+        if str(paper_summary.get("market_status", "")).upper() != "OPEN":
+            status = "HALTED"
+            halted_reason = "MARKET CLOSED"
+        blocked = paper_summary.get("blocked_reasons", []) or []
+        if any("stale_prices" in str(r) for r in blocked):
+            status = "HALTED"
+            halted_reason = "STALE PRICES"
+        if any("signal_date_mismatch" in str(r) for r in blocked):
+            status = "HALTED"
+            halted_reason = "SIGNAL DATE MISMATCH"
+
+    risk_map = {r.get("ticker"): r for r in (daily_snapshot.get("risk_levels", []) or []) if r.get("ticker")}
+    orders = (paper_summary or {}).get("shadow_orders", []) or []
+    trades = []
+    for order in orders:
+        ticker = order.get("ticker")
+        risk = risk_map.get(ticker, {})
+        trades.append(
+            {
+                "ticker": ticker,
+                "side": str(order.get("side", "")).upper(),
+                "shares": order.get("quantity"),
+                "entry_price": risk.get("entry_price"),
+                "stop_loss": risk.get("stop_loss"),
+                "take_profit": risk.get("take_profit"),
+                "notional": order.get("notional"),
+                "reason": order.get("reason"),
+                "notes": order.get("reason"),
+                "order_id": order.get("order_id"),
+            }
+        )
+
+    trades = sorted(trades, key=lambda x: (x.get("ticker") or "", x.get("side") or ""))
+    return {
+        "trade_date": trade_date,
+        "mode": mode,
+        "execution_status": status,
+        "halt_reason": halted_reason,
+        "trades": trades,
+        "run_id": (paper_summary or {}).get("run_id", ""),
+        "order_ids": [t.get("order_id") for t in trades if t.get("order_id")],
+    }
 
 
 def _format_text_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -2137,6 +2214,28 @@ def main():
                 f"delta={100.0 * float(row.get('delta_weight', 0.0)):+.2f}%"
                 f"{flag}\n"
             )
+    execution_payload = build_execution_email_payload(
+        trade_date=trade_date_str,
+        daily_snapshot=daily_snapshot,
+        paper_summary=paper_summary,
+    )
+    if execution_payload.get("execution_status") == "HALTED":
+        logger.info(
+            "[EXECUTION_EMAIL] status=HALTED reason=%s",
+            execution_payload.get("halt_reason", "UNKNOWN"),
+        )
+    else:
+        exec_trades = execution_payload.get("trades", [])
+        buy_count = sum(1 for t in exec_trades if str(t.get("side", "")).upper() == "BUY")
+        sell_count = sum(1 for t in exec_trades if str(t.get("side", "")).upper() != "BUY")
+        logger.info(
+            "[EXECUTION_EMAIL] built trades=%d buys=%d sells=%d",
+            len(exec_trades),
+            buy_count,
+            sell_count,
+        )
+    _write_execution_email_payload(execution_payload, trade_date_str)
+
     # Write the plain-text email body to disk
     email_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
     with open(email_path, "w", encoding="utf-8") as f:
