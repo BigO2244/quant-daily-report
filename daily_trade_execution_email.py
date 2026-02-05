@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 
 from paper.build_execution_email import build_execution_email_text
-from paper.paper_broker import load_config
+from paper.paper_broker import load_config, reset_orders_sent_ledger_for_date
 from paper.send_execution_email import send_execution_email
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ def _load_payload(path: Path, trade_date: str, mode: str) -> dict:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build and optionally send execution email artifact")
     parser.add_argument("--dry-run", action="store_true", help="write artifact only; skip SMTP send")
+    parser.add_argument("--reset-ledger-date", default=None, help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution")
     return parser.parse_args(argv)
 
 
@@ -55,6 +56,8 @@ def main(argv: list[str] | None = None) -> None:
         raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
 
     trade_date = _resolve_trade_date()
+    if args.reset_ledger_date:
+        reset_orders_sent_ledger_for_date("outputs/shadow_orders/orders_sent.csv", args.reset_ledger_date)
     payload_path = Path("outputs") / "execution_email" / f"{trade_date}.json"
     payload = _load_payload(payload_path, trade_date=trade_date, mode=mode)
 

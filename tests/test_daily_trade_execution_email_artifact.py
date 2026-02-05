@@ -55,7 +55,9 @@ def test_writes_artifact_for_halted_and_no_trades(monkeypatch, tmp_path):
     mod.main([])
     trade_artifact = Path("outputs") / "daily" / "trade_execution_2026-02-07.txt"
     assert trade_artifact.exists()
-    assert "AAPL | BUY | 2" in trade_artifact.read_text(encoding="utf-8")
+    trade_text = trade_artifact.read_text(encoding="utf-8")
+    assert "AAPL | BUY | 2" in trade_text
+    assert trade_text.endswith("\n")
 
     assert sent["count"] == 3
 
@@ -96,3 +98,31 @@ def test_dry_run_writes_artifact_and_skips_send_without_smtp(monkeypatch, tmp_pa
     assert text.endswith("\n")
     assert not text.rstrip("\n").endswith("%")
     assert called["count"] == 0
+
+
+def test_reset_ledger_date_flag_invokes_reset(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    class Cfg:
+        trading_mode = "shadow"
+
+    monkeypatch.setattr(mod, "load_config", lambda *_: Cfg())
+    monkeypatch.setattr(mod, "send_execution_email", lambda **_: None)
+
+    called = {"args": None}
+
+    def _fake_reset(path, date):
+        called["args"] = (path, date)
+        return 2
+
+    monkeypatch.setattr(mod, "reset_orders_sent_ledger_for_date", _fake_reset)
+
+    payload_dir = Path("outputs") / "execution_email"
+    payload_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"trade_date": "2026-02-09", "mode": "SHADOW", "execution_status": "READY", "trades": []}
+    (payload_dir / "2026-02-09.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setenv("REPORT_DATE", "2026-02-09")
+    mod.main(["--dry-run", "--reset-ledger-date", "2026-02-09"])
+
+    assert called["args"] == ("outputs/shadow_orders/orders_sent.csv", "2026-02-09")
