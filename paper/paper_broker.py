@@ -645,6 +645,7 @@ def run_paper_day(
     config_path: str,
     force: bool = False,
     now_et: dt.datetime | None = None,
+    constraints: Dict[str, float] | None = None,
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
@@ -670,9 +671,14 @@ def run_paper_day(
 
     mkt = market_session_status(run_date=run_date, now_et=now_et, cutoff_time_et=cfg.market_cutoff_time_et)
 
+    runtime_constraints = constraints or {}
+    cash_target_weight_default = float(
+        runtime_constraints.get("cash_target_weight", cfg.cash_target_weight_default)
+    )
+
     targets, target_cash_weight, snapshot_date = load_targets(
         signals_path,
-        cash_target_weight_default=cfg.cash_target_weight_default,
+        cash_target_weight_default=cash_target_weight_default,
     )
     if snapshot_date and snapshot_date != run_date:
         raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")

@@ -262,3 +262,37 @@ def test_reset_orders_sent_ledger_removes_date_and_allows_rerun(tmp_path: Path, 
     (tmp_path / "trades.csv").unlink(missing_ok=True)
     third = paper_broker.run_paper_day(**kwargs)
     assert len(third["shadow_orders"]) > 0
+
+
+def test_shadow_constraints_cash_target_weight_is_used_without_cash_signal_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paper_broker, "fetch_open_prices_yfinance", lambda tickers, run_date: _mock_prices(run_date))
+
+    cfg = tmp_path / "config.json"
+    sig = tmp_path / "signals.json"
+    _write_config(cfg, mode="shadow")
+    sig.write_text(
+        json.dumps(
+            {
+                "snapshot_date": "2025-01-06",
+                "signals": [
+                    {"ticker": "AAA", "sleeve": "core", "target_weight": 0.6},
+                    {"ticker": "BBB", "sleeve": "core", "target_weight": 0.4},
+                ],
+            }
+        )
+    )
+
+    out = paper_broker.run_paper_day(
+        run_date="2025-01-06",
+        signals_path=str(sig),
+        ledger_path=str(tmp_path / "ledger.csv"),
+        trades_path=str(tmp_path / "trades.csv"),
+        config_path=str(cfg),
+        now_et=dt.datetime(2025, 1, 6, 10, 0),
+        constraints={"cash_target_weight": 0.30},
+    )
+
+    expected_investable = 10000.0 * (1.0 - 0.30)
+    assert out["target_cash_weight"] == pytest.approx(0.30)
+    assert out["investable_dollars"] == pytest.approx(expected_investable)
