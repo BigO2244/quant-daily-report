@@ -911,6 +911,17 @@ def run_paper_day(
         logger.info("NO TRADES — MARKET CLOSED (%s)", mkt.reason)
         blocked = True
         blocked_reasons.append(f"market_guard:{mkt.reason}")
+        logger.info(
+            "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
+            run_date,
+            f"market_closed:{mkt.reason}",
+        )
+    else:
+        logger.info(
+            "[PAPER][VALIDATION] PASS trade_date=%s reason=%s",
+            run_date,
+            "market_open",
+        )
 
     trade_meta = {
         "target_cash_weight": float(target_cash_weight),
@@ -943,6 +954,11 @@ def run_paper_day(
         blocked_reasons.extend(risk_blocked)
         if hard_stop:
             logger.error("[HALT] risk guard hard stop: %s", "; ".join(risk_blocked))
+            logger.info(
+                "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
+                run_date,
+                "risk_guard_hard_stop",
+            )
             blocked = True
             trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
 
