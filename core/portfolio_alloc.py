@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 DEFAULT_PORTFOLIO_BASE_EQUITY = 10_000.0
-DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 0.80, "sleeve_2": 0.20}
+DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 0.70, "sleeve_2": 0.20, "charlie_munger": 0.10}
 DEFAULT_MAX_POSITION_PCT = 0.10
 DEFAULT_MAX_SLEEVE_EXPOSURE = 1.00
 DEFAULT_MAX_TURNOVER = 0.50

@@ -41,6 +41,14 @@ s2_run_backtest_details = (
 )
 s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
 s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
+
+try:
+    import sleeves.sleeve_charlie_munger as cm_mod
+except Exception:
+    cm_mod = None
+cm_run_backtest_details = (
+    getattr(cm_mod, "run_backtest_with_details", None) if cm_mod else None
+)
 # ============================================================
 # Email sender (exact repo-aware lookup)
 # ============================================================
@@ -461,7 +469,22 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
             )
 
     lines.append("")
-    lines.append("9) Alpha attribution vs benchmark")
+    lines.append("9) Charlie Munger Sleeve (200W MA + Quality)")
+    cm_sig = snapshot.get("charlie_munger", {}) or {}
+    cm_bench = snapshot.get("charlie_munger_benchmark", {}) or {}
+    cm_selected = cm_sig.get("selected", []) or []
+    lines.append(f"   - Near-200W candidates: {cm_sig.get('meta', {}).get('near_ma_candidates', 0)}")
+    lines.append(f"   - New buys: {len(cm_selected)} | Sells: {len(cm_sig.get('sell', []) or [])}")
+    lines.append(
+        "   - Sleeve cumret: {sleeve} | SPY cumret: {spy} | SPY maxDD: {mdd}".format(
+            sleeve=_fmt_pct((snapshot.get('charlie_munger_benchmark') or {}).get('sleeve_cumulative_return')),
+            spy=_fmt_pct(cm_bench.get('cumulative_return')),
+            mdd=_fmt_pct(cm_bench.get('max_drawdown')),
+        )
+    )
+
+    lines.append("")
+    lines.append("10) Alpha attribution vs benchmark")
     alpha = snapshot.get("alpha_attribution")
 
     def _fmt_float(value: float | None) -> str:
@@ -503,11 +526,11 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
         lines.append(f"   - n_days used: {alpha.get('n_days', 0)}")
 
     lines.append("")
-    lines.append("10) Recent trades history")
+    lines.append("11) Recent trades history")
     lines.append("   - See Proposed Trades / Next Rebalance above.")
 
     lines.append("")
-    lines.append("11) Equity curves and diagnostics")
+    lines.append("12) Equity curves and diagnostics")
     recon = snapshot.get("reconciliation", {})
     lines.append("   Account Reconciliation (MODEL vs BROKER)")
     lines.append(
@@ -788,6 +811,13 @@ def run_sleeve_2():
         equity_df, trades_df = s2_backtest(signals)
         return {"equity_df": equity_df, "trades_df": trades_df}
     raise RuntimeError("No valid Sleeve 2 runner found")
+
+
+def run_sleeve_charlie_munger():
+    if cm_run_backtest_details is None:
+        raise RuntimeError("No valid Charlie Munger sleeve runner found")
+    logger.info("[SLEEVE CHARLIE] Running run_backtest_with_details()...")
+    return cm_run_backtest_details(period="15y", interval="1d")
 
 
 # ============================================================
@@ -1197,6 +1227,7 @@ def build_daily_snapshot(
     s2_equity: pd.DataFrame,
     st_signals: pd.DataFrame,
     s2_details: dict,
+    cm_details: dict | None = None,
 ) -> dict:
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
@@ -1218,6 +1249,9 @@ def build_daily_snapshot(
     # Prefer a YYYY-MM-DD string you already use in the report.
     # If you already have something like report_date_str / asof_date_str / today_str, use that here.
     signals_path = None
+    if "sleeve" not in weights_df.columns and "sleeve_name" in weights_df.columns:
+        weights_df["sleeve"] = weights_df["sleeve_name"]
+
     if weights_df.empty:
         logger.warning(
             "[PAPER] No target weights available; skipping signals snapshot."
@@ -1496,6 +1530,7 @@ def build_daily_snapshot(
         sleeve_equity_map={
             "sleeve_trend": st_equity,
             "sleeve_2": s2_equity,
+            "charlie_munger": (cm_details or {}).get("equity_df", pd.DataFrame()),
         },
         sleeve_allocations=alloc_result.sleeve_allocations,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
@@ -1516,6 +1551,8 @@ def build_daily_snapshot(
         "skipped_trades": alloc_result.skipped_trades if alloc_result else [],
         "s2_no_picks": s2_no_picks,
         "signals_snapshot_path": signals_path,
+        "charlie_munger": (cm_details or {}).get("signals", {}),
+        "charlie_munger_benchmark": {**((cm_details or {}).get("benchmark", {}) or {}), "sleeve_cumulative_return": ((cm_details or {}).get("sleeve_stats", {}) or {}).get("cumulative_return")},
     }
 
 
@@ -1533,6 +1570,7 @@ def build_html_report(
     proposed_trades: list[dict] | None = None,
     performance_summary: dict | None = None,
     s2_no_picks: bool = False,
+    cm_details: dict | None = None,
 ) -> str:
     """
     Build HTML report with CORRECT portfolio math.
@@ -1555,6 +1593,7 @@ def build_html_report(
         sleeve_equity_map = {
             "sleeve_trend": st_equity,
             "sleeve_2": s2_equity,
+            "charlie_munger": (cm_details or {}).get("equity_df", pd.DataFrame()),
         }
         # Compute TRUE portfolio equity (the only correct total)
         portfolio_stats = compute_portfolio_equity(
@@ -1710,7 +1749,7 @@ def build_html_report(
         # Legacy static allocation fallback
         # Still compute correctly using weighted returns
         sleeve_equity_map = {"sleeve_trend": st_equity, "sleeve_2": s2_equity}
-        static_allocs = {"sleeve_trend": 0.80, "sleeve_2": 0.20}
+        static_allocs = {"sleeve_trend": 0.70, "sleeve_2": 0.20, "charlie_munger": 0.10}
         portfolio_stats = compute_portfolio_equity(
             sleeve_equity_map=sleeve_equity_map,
             sleeve_allocations=static_allocs,
@@ -1933,6 +1972,29 @@ def build_html_report(
     s2_equity_html = html_table(
         _safe_df(s2_equity).tail(10), "Equity — Sleeve 2 (last 10 days)", 10
     )
+    cm_trades_html = html_table(
+        _safe_df((cm_details or {}).get("trades_df", pd.DataFrame())),
+        "Recent Trades — Charlie Munger",
+        15,
+        "No Charlie Munger trades.",
+    )
+    cm_equity_html = html_table(
+        _safe_df((cm_details or {}).get("equity_df", pd.DataFrame())).tail(10),
+        "Equity — Charlie Munger (last 10 weeks)",
+        10,
+    )
+    cm_signal = (cm_details or {}).get("signals", {}) or {}
+    cm_meta = cm_signal.get("meta", {}) if isinstance(cm_signal, dict) else {}
+    cm_selected = cm_signal.get("selected", []) if isinstance(cm_signal, dict) else []
+    cm_rows = [
+        {"Metric": "Near-200W candidates", "Value": cm_meta.get("near_ma_candidates", 0)},
+        {"Metric": "New buys", "Value": len(cm_selected or [])},
+        {"Metric": "Sells", "Value": len(cm_signal.get("sell", []) if isinstance(cm_signal, dict) else [])},
+        {"Metric": "Benchmark", "Value": ((cm_details or {}).get("benchmark", {}) or {}).get("ticker", "SPY")},
+        {"Metric": "SPY cumulative return", "Value": _fmt_pct(((cm_details or {}).get("benchmark", {}) or {}).get("cumulative_return"))},
+        {"Metric": "SPY max drawdown", "Value": _fmt_pct(((cm_details or {}).get("benchmark", {}) or {}).get("max_drawdown"))},
+    ]
+    cm_section = f'<div class="card">{html_table(pd.DataFrame(cm_rows), "Charlie Munger Sleeve")}</div>'
 
     return f"""
     <html>
@@ -1947,16 +2009,19 @@ def build_html_report(
         {performance_section}
         {alpha_section}
         {alloc_section}
+        {cm_section}
         {holdings_section}
         <div class="card">
           {st_trades_html}
           {s2_trades_html}
+          {cm_trades_html}
         </div>
         {exit_section}
         {skipped_section}
         <div class="card">
           {st_equity_html}
           {s2_equity_html}
+          {cm_equity_html}
         </div>
         <div class="muted">
           Automated daily report. Portfolio TOTAL computed from weighted sleeve returns
@@ -2009,6 +2074,8 @@ def main(argv: list[str] | None = None):
         )
         s2_details = {}
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
+        cm_details = {}
+        cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
     else:
         try:
             _, _ = run_sleeve_1()
@@ -2032,15 +2099,26 @@ def main(argv: list[str] | None = None):
             logger.warning("[WARN] Sleeve 2 failed: %s", e)
             s2_details = {}
             s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
+        try:
+            cm_details = run_sleeve_charlie_munger()
+            cm_equity = cm_details.get("equity_df", pd.DataFrame())
+            cm_trades = cm_details.get("trades_df", pd.DataFrame())
+        except Exception as e:
+            logger.warning("[WARN] Sleeve Charlie Munger failed: %s", e)
+            cm_details = {}
+            cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
     # ── Sleeve health checks ─────────────────────────────────────
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
     trend_valid, trend_reason = _sleeve_is_valid(st_equity)
     s2_valid, s2_reason = _sleeve_is_valid(s2_equity)
+    cm_valid, cm_reason = _sleeve_is_valid(cm_equity)
     if not trend_valid:
         logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
     if not s2_valid:
         logger.warning("sleeve_2 inactive: %s -> routed to CASH", s2_reason)
+    if not cm_valid:
+        logger.warning("charlie_munger inactive: %s -> routed to CASH", cm_reason)
     # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
@@ -2051,11 +2129,18 @@ def main(argv: list[str] | None = None):
         1.0,
         target_weights=s2_details.get("target_weights") if s2_details else None,
     )
+    cm_output = extract_sleeve_output(
+        cm_equity,
+        cm_trades,
+        "charlie_munger",
+        1.0,
+        target_weights=cm_details.get("target_weights") if cm_details else None,
+    )
 
     # ── Run dynamic allocation ────────────────────────────────────
     risk_off = os.getenv("RISK_OFF", "").lower() in ("1", "true", "yes", "y")
     allocator = PortfolioAllocator(risk_off=risk_off)
-    alloc_result = allocator.allocate([trend_output, val_output])
+    alloc_result = allocator.allocate([trend_output, val_output, cm_output])
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
 
     # ── SAFE ALLOCATION POLICY ────────────────────────────────────
@@ -2076,6 +2161,13 @@ def main(argv: list[str] | None = None):
     ):
         freed_weight += alloc_result.sleeve_allocations["sleeve_2"]
         alloc_result.sleeve_allocations["sleeve_2"] = 0.0
+        patched = True
+    if (
+        not cm_valid
+        and alloc_result.sleeve_allocations.get("charlie_munger", 0.0) > WEIGHT_TOLERANCE
+    ):
+        freed_weight += alloc_result.sleeve_allocations["charlie_munger"]
+        alloc_result.sleeve_allocations["charlie_munger"] = 0.0
         patched = True
     if patched:
         alloc_result.cash_weight = alloc_result.cash_weight + freed_weight
@@ -2101,6 +2193,7 @@ def main(argv: list[str] | None = None):
     sleeve_equity_map = {
         "sleeve_trend": st_equity,
         "sleeve_2": s2_equity,
+        "charlie_munger": cm_equity,
     }
     portfolio_stats = compute_portfolio_equity(
         sleeve_equity_map=sleeve_equity_map,
@@ -2112,7 +2205,7 @@ def main(argv: list[str] | None = None):
     report_date = (
         s2_details.get("asof")
         if s2_details.get("asof") is not None
-        else _asof_date_from_df(st_equity)
+        else (cm_details.get("asof") if cm_details.get("asof") is not None else _asof_date_from_df(st_equity))
     )
     report_date = report_date or pd.Timestamp(
         fixture_date if offline_fixture else dt.date.today()
@@ -2195,6 +2288,7 @@ def main(argv: list[str] | None = None):
             s2_equity=s2_equity,
             st_signals=st_signals,
             s2_details=s2_details,
+            cm_details=cm_details,
         )
     except RuntimeError as e:
         logger.error("[ERROR] %s", e)
