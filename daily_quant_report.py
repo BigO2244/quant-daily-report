@@ -44,7 +44,7 @@ s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
 s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
 
 try:
-    import sleeves.sleeve_charlie_munger as cm_mod
+    import sleeves.charlie_munger.backtest as cm_mod
 except Exception:
     cm_mod = None
 cm_run_backtest_details = (
@@ -822,11 +822,16 @@ def run_sleeve_2():
     raise RuntimeError("No valid Sleeve 2 runner found")
 
 
-def run_sleeve_charlie_munger():
+def run_charlie_munger():
     if cm_run_backtest_details is None:
         raise RuntimeError("No valid Charlie Munger sleeve runner found")
     logger.info("[SLEEVE CHARLIE] Running run_backtest_with_details()...")
     return cm_run_backtest_details(period="15y", interval="1d")
+
+
+def run_sleeve_charlie_munger():
+    """Backward-compatible alias."""
+    return run_charlie_munger()
 
 
 # ============================================================
@@ -2129,7 +2134,7 @@ def main(argv: list[str] | None = None):
             s2_details = {}
             s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
         try:
-            cm_details = run_sleeve_charlie_munger()
+            cm_details = run_charlie_munger()
             cm_equity = cm_details.get("equity_df", pd.DataFrame())
             cm_trades = cm_details.get("trades_df", pd.DataFrame())
         except Exception as e:
