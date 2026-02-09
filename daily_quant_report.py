@@ -825,11 +825,16 @@ def run_sleeve_2():
     raise RuntimeError("No valid Sleeve 2 runner found")
 
 
-def run_sleeve_charlie_munger():
+def run_charlie_munger():
     if cm_run_backtest_details is None:
         raise RuntimeError("No valid Charlie Munger sleeve runner found")
     logger.info("[SLEEVE CHARLIE] Running run_backtest_with_details()...")
     return cm_run_backtest_details(period="15y", interval="1d")
+
+
+def run_sleeve_charlie_munger():
+    """Backward-compatible alias."""
+    return run_charlie_munger()
 
 
 # ============================================================
@@ -2132,7 +2137,7 @@ def main(argv: list[str] | None = None):
             s2_details = {}
             s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
         try:
-            cm_details = run_sleeve_charlie_munger()
+            cm_details = run_charlie_munger()
             cm_equity = cm_details.get("equity_df", pd.DataFrame())
             cm_trades = cm_details.get("trades_df", pd.DataFrame())
         except Exception as e:

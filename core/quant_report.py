@@ -281,6 +281,22 @@ def create_trade_email(snapshot: dict, execution_payload: Optional[dict] = None)
     lines.append("")
 
     # 1) TODAY'S TRADES (EXECUTION QUEUE)
+    lines.append("1) Trades for Today (NEW ORDERS)")
+    executable_trades = (execution_payload or {}).get("trades", []) or []
+    if not executable_trades:
+        reason = (execution_payload or {}).get("halt_reason") or "No executable orders in execution payload"
+        lines.append("   - NO TRADES")
+        lines.append(f"   - reason={reason}")
+    else:
+        for trade in executable_trades:
+            action = str(trade.get("side") or trade.get("action") or "").upper()
+            ticker = trade.get("ticker", "")
+            exec_px = trade.get("entry_price")
+            reason = trade.get("reason") or trade.get("notes")
+            notional = trade.get("notional")
+            shares = trade.get("shares")
+
+            line = f"   - {action} {ticker} | exp_px={_fmt_money(exec_px)}"
     lines.append("1) Trades for Today (NEW ORDERS — EXECUTION PAYLOAD)")
     exec_trades = (execution_payload or {}).get("trades", []) or []
     if not exec_trades:
