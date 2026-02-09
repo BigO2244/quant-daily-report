@@ -116,7 +116,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                     "SYSTEM STATUS",
                     f"• Signals: {str(signals_status or 'VALID').upper()}",
                     f"• Constraints: {str(constraints_status or 'ENFORCED').upper()}",
-                    f"• Execution Payload: {str(execution_payload_status or 'NOT GENERATED (EXPECTED IN SHADOW)').upper()}",
+                    f"• Execution Payload: {str(execution_payload_status or f'GENERATED ({len(trades)} executable trades)').upper()}",
                 ]
             )
 
@@ -135,7 +135,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                 "Reason:",
                 "- Market OPEN",
                 "- Signals evaluated",
-                "- No assets met entry criteria",
+                f"- {payload.get('no_trades_reason') or 'No executable trades after validation/constraints'}",
                 "",
                 "========================",
                 "3) EXECUTION NOTES",
@@ -146,6 +146,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         if shadow_action_lines:
             lines.extend(shadow_action_lines)
             lines.append("")
+        blocked_tickers = payload.get("blocked_tickers", []) or []
+        if blocked_tickers:
+            lines.extend(["", f"Blocked tickers: {', '.join(str(item) for item in blocked_tickers)}"])
         lines.extend(notes_lines)
         return subject, "\n".join(lines)
 
