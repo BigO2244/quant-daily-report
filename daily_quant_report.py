@@ -9,6 +9,7 @@ import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date
 from paper.paper_report import build_paper_report_html
+from paper.build_execution_email import build_execution_email_text
 from paper.trading_calendar import prev_trading_day
 
 # ============================================================
@@ -99,6 +100,8 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = "outputs/daily"
 DATE_FORMAT = os.getenv("DATE_FORMAT", "US")
 DISPLAY_DECIMALS = int(os.getenv("DISPLAY_DECIMALS", "2"))
+CHARLIE_MIN = 0.20
+CHARLIE_MAX = 0.30
 
 
 # ============================================================
@@ -320,10 +323,10 @@ def _format_text_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
+def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None) -> tuple[str, str]:
     asof = snapshot.get("asof")
     asof_str = _fmt_date(asof) if asof is not None else "n/a"
-    subject = f"Daily Trade Rundown — {asof_str}"
+    subject = f"MODEL & PERFORMANCE SNAPSHOT — {asof_str}"
 
     allocations = snapshot.get("allocations", {}) or {}
     sleeve_splits = allocations.get("sleeves", {}) or {}
@@ -345,8 +348,11 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
         count = len([o for o in orders if o.get("sleeve") == sleeve_name])
         return "NONE" if count == 0 else str(count)
 
+    raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", "SHADOW")).upper()
+    env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
+
     lines = [
-        "ENVIRONMENT: SHADOW (NO CAPITAL AT RISK)",
+        f"ENVIRONMENT: {env_mode}",
         "",
         "PORTFOLIO AT A GLANCE",
         f"• Total Equity: {_fmt_money(total_equity)}",
@@ -417,10 +423,13 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
             "",
             "---",
             "",
-            "WHAT THE MODELS ARE “SEEING”",
+            "PROPOSED / NEXT REBALANCE (NOT EXECUTED TODAY)",
             "• Momentum breadth remains narrow",
             "• Valuation signals concentrated in capped names",
             "• Long-term quality names not yet at accumulation thresholds",
+            "",
+            f"• Proposed Trades (Intent): {len(snapshot.get('proposed_trades', []) or [])}",
+            "• Note: These are model-intent recommendations only; execution is governed by the separate TRADE EXECUTION email.",
             "",
             "SYSTEM HEALTH",
             "• Signals: VALID",
@@ -432,6 +441,130 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
     )
 
     return subject, "\n".join(lines)
+
+
+
+def _normalize_weights(sleeve_allocations: dict[str, float], cash_weight: float) -> tuple[dict[str, float], float]:
+    sleeves = {k: max(0.0, float(v)) for k, v in (sleeve_allocations or {}).items()}
+    cash = max(0.0, float(cash_weight))
+    total = sum(sleeves.values()) + cash
+    if total <= WEIGHT_TOLERANCE:
+        return sleeves, 1.0
+    if abs(total - 1.0) <= WEIGHT_TOLERANCE:
+        return sleeves, cash
+    factor = 1.0 / total
+    sleeves = {k: v * factor for k, v in sleeves.items()}
+    cash = cash * factor
+    return sleeves, cash
+
+
+def enforce_charlie_bounds(
+    sleeve_allocations: dict[str, float],
+    cash_weight: float,
+    *,
+    charlie_active: bool = True,
+) -> tuple[dict[str, float], float]:
+    """Clamp Charlie allocation to configured bounds and rebalance other sleeves first."""
+    sleeves, cash = _normalize_weights(sleeve_allocations, cash_weight)
+    if not charlie_active:
+        return sleeves, cash
+
+    sleeves.setdefault("sleeve_trend", 0.0)
+    sleeves.setdefault("sleeve_2", 0.0)
+    sleeves.setdefault("charlie_munger", 0.0)
+
+    orig_charlie = float(sleeves.get("charlie_munger", 0.0))
+    target_charlie = min(max(orig_charlie, CHARLIE_MIN), CHARLIE_MAX)
+    delta = target_charlie - orig_charlie
+    if abs(delta) <= WEIGHT_TOLERANCE:
+        return sleeves, cash
+
+    other_keys = ["sleeve_trend", "sleeve_2"]
+    others_total = sum(float(sleeves.get(k, 0.0)) for k in other_keys)
+
+    if delta > 0:
+        if others_total > WEIGHT_TOLERANCE:
+            for key in other_keys:
+                share = float(sleeves.get(key, 0.0)) / others_total
+                sleeves[key] = max(0.0, float(sleeves.get(key, 0.0)) - delta * share)
+        else:
+            draw = min(delta, cash)
+            if draw > WEIGHT_TOLERANCE:
+                cash -= draw
+                logger.warning(
+                    "[ALLOCATION] Charlie min floor used CASH funding: %.2f%%",
+                    draw * 100.0,
+                )
+            shortfall = delta - draw
+            if shortfall > WEIGHT_TOLERANCE:
+                logger.warning(
+                    "[ALLOCATION] Charlie floor shortfall %.2f%% due to fully allocated risk budget",
+                    shortfall * 100.0,
+                )
+                target_charlie = orig_charlie + draw
+    else:
+        give = -delta
+        if others_total > WEIGHT_TOLERANCE:
+            for key in other_keys:
+                share = float(sleeves.get(key, 0.0)) / others_total
+                sleeves[key] = max(0.0, float(sleeves.get(key, 0.0)) + give * share)
+        else:
+            cash += give
+
+    sleeves["charlie_munger"] = max(0.0, target_charlie)
+    sleeves, cash = _normalize_weights(sleeves, cash)
+    return sleeves, cash
+
+
+
+def _apply_enforced_allocations_to_result(
+    alloc_result: AllocationResult,
+    old_allocations: dict[str, float],
+    new_allocations: dict[str, float],
+    new_cash_weight: float,
+) -> None:
+    alloc_result.sleeve_allocations = dict(new_allocations)
+    combined = _safe_df(alloc_result.combined_weights).copy()
+    if combined.empty:
+        alloc_result.combined_weights = pd.DataFrame([
+            {"ticker": CASH_TICKER, "target_weight": float(new_cash_weight), "sleeve_name": CASH_TICKER, "reason": "post_enforce", "signal_strength": 1.0}
+        ])
+        return
+
+    if "sleeve_name" not in combined.columns:
+        combined["sleeve_name"] = combined.get("ticker", pd.Series(dtype=str)).apply(
+            lambda t: CASH_TICKER if str(t) == CASH_TICKER else ""
+        )
+
+    if "target_weight" in combined.columns:
+        def _scale_row(row):
+            names = [n.strip() for n in str(row.get("sleeve_name", "")).split(",") if n.strip()]
+            ratios = []
+            for name in names:
+                old = float(old_allocations.get(name, 0.0))
+                new = float(new_allocations.get(name, 0.0))
+                if old > WEIGHT_TOLERANCE:
+                    ratios.append(new / old)
+                elif new <= WEIGHT_TOLERANCE:
+                    ratios.append(0.0)
+            scale = sum(ratios) / len(ratios) if ratios else 1.0
+            return float(row.get("target_weight", 0.0)) * scale
+
+        mask_cash = combined.get("ticker", pd.Series(dtype=str)) == CASH_TICKER
+        non_cash = combined[~mask_cash].copy()
+        if not non_cash.empty:
+            non_cash["target_weight"] = non_cash.apply(_scale_row, axis=1)
+            non_cash = non_cash[non_cash["target_weight"].abs() > WEIGHT_TOLERANCE]
+        cash_row = pd.DataFrame([
+            {
+                "ticker": CASH_TICKER,
+                "target_weight": float(new_cash_weight),
+                "sleeve_name": CASH_TICKER,
+                "reason": "post_enforce",
+                "signal_strength": 1.0,
+            }
+        ])
+        alloc_result.combined_weights = pd.concat([non_cash, cash_row], ignore_index=True)
 
 def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
     df = _safe_df(df)
@@ -1624,28 +1757,48 @@ def build_html_report(
     else:
         # Legacy static allocation fallback
         # Still compute correctly using weighted returns
-        sleeve_equity_map = {"sleeve_trend": st_equity, "sleeve_2": s2_equity}
-        static_allocs = {"sleeve_trend": 0.70, "sleeve_2": 0.20, "charlie_munger": 0.10}
+        sleeve_equity_map = {
+            "sleeve_trend": st_equity,
+            "sleeve_2": s2_equity,
+            "charlie_munger": (cm_details or {}).get("equity_df", pd.DataFrame()),
+        }
+        static_allocs = {"sleeve_trend": 0.60, "sleeve_2": 0.20, "charlie_munger": 0.20}
+        static_allocs, static_cash = enforce_charlie_bounds(static_allocs, 0.0, charlie_active=True)
         portfolio_stats = compute_portfolio_equity(
             sleeve_equity_map=sleeve_equity_map,
             sleeve_allocations=static_allocs,
-            cash_weight=0.0,
+            cash_weight=static_cash,
             base_equity=BASE_EQUITY,
         )
         rows = [
             {
-                "Sleeve": "Sleeve Trend — Momentum (80%)",
-                "Allocated": _fmt_money(BASE_EQUITY * 0.80),
+                "Sleeve": f"Sleeve Trend — Momentum ({static_allocs.get('sleeve_trend', 0.0):.0%})",
+                "Allocated": _fmt_money(BASE_EQUITY * static_allocs.get("sleeve_trend", 0.0)),
                 "Equity": "—",
                 "Day Return": "—",
             },
             {
-                "Sleeve": "Sleeve 2 — Valuation (20%)",
-                "Allocated": _fmt_money(BASE_EQUITY * 0.20),
+                "Sleeve": f"Sleeve 2 — Valuation ({static_allocs.get('sleeve_2', 0.0):.0%})",
+                "Allocated": _fmt_money(BASE_EQUITY * static_allocs.get("sleeve_2", 0.0)),
+                "Equity": "—",
+                "Day Return": "—",
+            },
+            {
+                "Sleeve": f"Charlie Munger — Long Hold ({static_allocs.get('charlie_munger', 0.0):.0%})",
+                "Allocated": _fmt_money(BASE_EQUITY * static_allocs.get("charlie_munger", 0.0)),
                 "Equity": "—",
                 "Day Return": "—",
             },
         ]
+        if static_cash > WEIGHT_TOLERANCE:
+            rows.append(
+                {
+                    "Sleeve": f"CASH ({static_cash:.0%})",
+                    "Allocated": _fmt_money(BASE_EQUITY * static_cash),
+                    "Equity": _fmt_money(BASE_EQUITY * static_cash),
+                    "Day Return": _fmt_pct(0),
+                }
+            )
         total_row = {
             "Sleeve": f"TOTAL — Portfolio ({_fmt_money(BASE_EQUITY)})",
             "Allocated": _fmt_money(BASE_EQUITY),
@@ -2018,6 +2171,18 @@ def main(argv: list[str] | None = None):
     allocator = PortfolioAllocator(risk_off=risk_off)
     alloc_result = allocator.allocate([trend_output, val_output, cm_output])
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
+    _old_allocs = dict(alloc_result.sleeve_allocations)
+    _new_allocs, _new_cash = enforce_charlie_bounds(
+        alloc_result.sleeve_allocations,
+        alloc_result.cash_weight,
+        charlie_active=cm_valid,
+    )
+    _apply_enforced_allocations_to_result(
+        alloc_result,
+        old_allocations=_old_allocs,
+        new_allocations=_new_allocs,
+        new_cash_weight=_new_cash,
+    )
 
     # ── SAFE ALLOCATION POLICY ────────────────────────────────────
     # If a sleeve is invalid, force its allocation to 0 and route
@@ -2046,10 +2211,17 @@ def main(argv: list[str] | None = None):
         alloc_result.sleeve_allocations["charlie_munger"] = 0.0
         patched = True
     if patched:
-        alloc_result.cash_weight = alloc_result.cash_weight + freed_weight
-        # Re-normalise total_weight (should be 1.0)
-        alloc_result.total_weight = (
-            sum(alloc_result.sleeve_allocations.values()) + alloc_result.cash_weight
+        _old_allocs = dict(alloc_result.sleeve_allocations)
+        _new_allocs, _new_cash = enforce_charlie_bounds(
+            alloc_result.sleeve_allocations,
+            alloc_result.cash_weight + freed_weight,
+            charlie_active=cm_valid,
+        )
+        _apply_enforced_allocations_to_result(
+            alloc_result,
+            old_allocations=_old_allocs,
+            new_allocations=_new_allocs,
+            new_cash_weight=_new_cash,
         )
         logger.info(
             "[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH",
@@ -2077,7 +2249,7 @@ def main(argv: list[str] | None = None):
         cash_weight=alloc_result.cash_weight,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
-    # ── Build daily snapshot/email ────────────────────────────────
+    # ── Build daily snapshot context ───────────────────────────────
     report_date = (
         s2_details.get("asof")
         if s2_details.get("asof") is not None
@@ -2164,15 +2336,13 @@ def main(argv: list[str] | None = None):
             s2_equity=s2_equity,
             st_signals=st_signals,
             s2_details=s2_details,
-            cm_details=cm_details,
-        )
+            )
     except RuntimeError as e:
         logger.error("[ERROR] %s", e)
         sys.exit(0)
     daily_snapshot["alpha_attribution"] = alpha_stats
 
     # --- Paper trading execution + report ---
-    # Execute using the same immutable daily snapshot written for this report date.
     trade_date_str = report_date.strftime("%Y-%m-%d")
     signals_path_exec = daily_snapshot.get("signals_snapshot_path") or os.path.join(
         "signals", f"{trade_date_str}.json"
@@ -2210,7 +2380,6 @@ def main(argv: list[str] | None = None):
             )
         except Exception as e:
             msg = repr(e)
-            # If already executed, don't fail the email — just render from ledger/trades
             if "Ledger already contains run_date" in msg:
                 logger.info(
                     "[PAPER] Already executed for %s; rendering report from ledger.",
@@ -2218,7 +2387,6 @@ def main(argv: list[str] | None = None):
                 )
             else:
                 logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
-        # Always attempt to render the paper section if ledger/trades exist
         try:
             paper_html = build_paper_report_html(
                 run_date=trade_date_str,
@@ -2233,55 +2401,8 @@ def main(argv: list[str] | None = None):
         logger.warning(
             "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
         )
-    # ── Build daily snapshot/email ────────────────────────────────
-    subject, email_body = create_pm_first_trade_email(daily_snapshot)
-    # Append paper trading summary to plain-text email (if available)
-    if paper_summary:
-        email_body += (
-            f"\n\n---\nPaper Trading Execution ({paper_summary['date']}): "
-            f"equity=${paper_summary['total_equity']:.2f}, "
-            f"cash=${paper_summary['cash']:.2f}, "
-            f"trades={paper_summary['num_trades']}, "
-            f"turnover=${paper_summary['turnover_notional']:.2f}\n"
-        )
-        email_body += "\nPost-Trade Reconciliation\n"
-        email_body += (
-            f"   - Equity: ${paper_summary['total_equity']:.2f} | "
-            f"Cash: ${paper_summary['cash']:.2f} | "
-            f"Cash Weight: {100.0 * paper_summary.get('achieved_cash_weight', 0.0):.2f}% | "
-            f"Target Cash Weight: {100.0 * paper_summary.get('target_cash_weight', 0.0):.2f}%\n"
-        )
-        email_body += (
-            f"   - Invested: ${float(paper_summary.get('invested_dollars', 0.0)):.2f} | "
-            f"Investable: ${float(paper_summary.get('investable_dollars', 0.0)):.2f} | "
-            f"Target Cash $: ${float(paper_summary.get('target_cash_dollars', 0.0)):.2f}\n"
-        )
-        scaled = paper_summary.get("scaled_tickers", []) or []
-        if scaled:
-            email_body += f"   - Cash-constrained tickers: {', '.join(scaled)}\n"
-        else:
-            email_body += "   - Cash-constrained tickers: None\n"
-        for row in paper_summary.get("position_reconciliation", []) or []:
-            flag = " [CASH LIMITED]" if row.get("cash_limited") else ""
-            email_body += (
-                f"   - {row.get('ticker','')}: "
-                f"target={100.0 * float(row.get('target_weight', 0.0)):.2f}% "
-                f"achieved={100.0 * float(row.get('achieved_weight', 0.0)):.2f}% "
-                f"delta={100.0 * float(row.get('delta_weight', 0.0)):+.2f}%"
-                f"{flag}\n"
-            )
-        validation = paper_summary.get("open_window_validation") or {}
-        email_body += "\nOpen-Window Validation\n"
-        email_body += (
-            f"   - trade_date={validation.get('trade_date', trade_date_str)} | "
-            f"signals={validation.get('signals_path', signals_path_exec)} | "
-            f"asof={validation.get('asof_date', 'n/a')} | "
-            f"cutoff={validation.get('cutoff_date', 'n/a')} | "
-            f"result={validation.get('result', 'UNKNOWN')}\n"
-        )
-        reasons = validation.get("reasons") or []
-        for reason in reasons:
-            email_body += f"   - {reason}\n"
+
+    # ── Build execution + snapshot email artifacts ──────────────────
     execution_payload = build_execution_email_payload(
         trade_date=trade_date_str,
         daily_snapshot=daily_snapshot,
@@ -2304,11 +2425,28 @@ def main(argv: list[str] | None = None):
         )
     _write_execution_email_payload(execution_payload, trade_date_str)
 
-    # Write the plain-text email body to disk
-    email_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
-    with open(email_path, "w", encoding="utf-8") as f:
-        f.write(email_body)
-    logger.info("[OK] Daily trade email written: %s", email_path)
+    exec_subject, exec_body = build_execution_email_text(execution_payload)
+    execution_path = os.path.join(OUTPUT_DIR, f"trade_execution_{today}.txt")
+    with open(execution_path, "w", encoding="utf-8") as f:
+        f.write(exec_body.rstrip() + "\n")
+    logger.info("[OK] Execution trade email written: %s", execution_path)
+
+    snapshot_subject, snapshot_body = create_snapshot_email(
+        daily_snapshot,
+        execution_payload=execution_payload,
+    )
+
+    snapshot_path = os.path.join(OUTPUT_DIR, f"trade_snapshot_{today}.txt")
+    with open(snapshot_path, "w", encoding="utf-8") as f:
+        f.write(snapshot_body.rstrip() + "\n")
+    logger.info("[OK] Model snapshot email written: %s", snapshot_path)
+
+    # Backward-compatibility alias (deprecated)
+    rundown_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
+    with open(rundown_path, "w", encoding="utf-8") as f:
+        f.write(snapshot_body.rstrip() + "\n")
+    logger.info("[OK] Legacy trade rundown alias written: %s", rundown_path)
+
     # ── Build report ──────────────────────────────────────────────
     html = build_html_report(
         report_date=report_date,
@@ -2330,10 +2468,10 @@ def main(argv: list[str] | None = None):
         f.write(html)
     logger.info("[OK] HTML report written: %s", out_path)
     logger.info("\n[EMAIL PREVIEW]\n")
-    logger.info("%s", email_body)
+    logger.info("%s", snapshot_body)
     if send_email:
         try:
-            send_email(subject=subject, body_html=html, body_text=email_body)
+            send_email(subject=snapshot_subject, body_html=html, body_text=snapshot_body)
             logger.info("[OK] Email sent")
         except Exception as e:
             logger.warning("[WARN] Email not sent: %s", e)
