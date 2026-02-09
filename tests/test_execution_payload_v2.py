@@ -52,3 +52,22 @@ def test_execution_payload_json_ends_with_newline(tmp_path, monkeypatch):
     out_path = _write_execution_email_payload({"trade_date": "2026-02-05", "trades": []}, "2026-02-05")
     data = Path(out_path).read_bytes()
     assert data.endswith(b"\n")
+
+
+def test_build_execution_payload_shadow_no_trades_includes_recommendation_block():
+    payload = build_execution_email_payload(
+        trade_date="2026-02-05",
+        daily_snapshot={"risk_levels": [], "holdings": []},
+        paper_summary={
+            "trading_mode": "shadow",
+            "shadow_orders": [],
+            "blocked_reasons": ["max_position_change_pct exceeded ticker=ADBE"],
+            "run_id": "rid",
+        },
+    )
+
+    assert payload["recommended_action"] == "NO"
+    assert payload["confidence_level"] == "HIGH"
+    assert payload["human_override_required"] == "NO"
+    assert payload["blocked_by_constraints"] == ["max position change pct exceeded ticker=ADBE"]
+    assert payload["execution_payload_status"] == "NOT GENERATED (Expected in SHADOW)"

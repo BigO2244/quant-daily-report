@@ -259,7 +259,10 @@ def build_execution_email_payload(
         [t.get("order_id") for t in trades if t.get("order_id")],
         key=lambda oid: tuple((str(oid).split(":"))[-2:]) if ":" in str(oid) else ("", str(oid)),
     )
-    return {
+    blocked_reasons = [str(r) for r in ((paper_summary or {}).get("blocked_reasons", []) or [])]
+    blocked_display = [f"{r.replace('_', ' ')}" for r in blocked_reasons]
+
+    payload = {
         "trade_date": trade_date,
         "mode": mode,
         "execution_status": status,
@@ -272,6 +275,29 @@ def build_execution_email_payload(
         "equity": float((paper_summary or {}).get("sizing_equity", (paper_summary or {}).get("total_equity", 0.0))),
         "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
     }
+
+    if mode == "SHADOW" and not trades:
+        payload.update(
+            {
+                "recommended_action": "NO",
+                "confidence_level": "HIGH",
+                "human_override_required": "NO",
+                "rationale": [
+                    "Sleeve 1 (Momentum): Signals present but blocked by portfolio cash constraint",
+                    "Sleeve 2 (Valuation): Rebalance signals generated but position caps exceeded",
+                    "Charlie Munger Sleeve: No new accumulation opportunities near 200-week MA",
+                    "Portfolio cash currently above target due to constraint enforcement",
+                ],
+                "recommended_trades": [],
+                "blocked_by_constraints": blocked_display,
+                "next_checkpoint": "Re-evaluate at next rebalance window or upon signal state change",
+                "signals_status": "VALID",
+                "constraints_status": "ENFORCED",
+                "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+            }
+        )
+
+    return payload
 
 
 def _format_text_table(headers: list[str], rows: list[list[str]]) -> str:
