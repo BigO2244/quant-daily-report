@@ -145,7 +145,7 @@ def test_execution_email_shadow_recommended_action_block_present():
             "next_checkpoint": "Re-evaluate at next rebalance window or upon signal state change",
             "signals_status": "VALID",
             "constraints_status": "ENFORCED",
-            "execution_payload_status": "GENERATED (0 executable trades)",
+            "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
         }
     )
 
@@ -159,7 +159,23 @@ def test_execution_email_shadow_recommended_action_block_present():
 
 
 def test_execution_email_includes_blocked_tickers_section_when_partial_validation():
+    _, body = build_execution_email_text(
+        {
+            "trade_date": "2026-02-05",
+            "mode": "SHADOW",
+            "execution_status": "READY",
+            "trades": [],
+            "recommended_action": "NO",
+            "confidence_level": "HIGH",
+            "human_override_required": "NO",
+            "execution_payload_status": "GENERATED (0 executable trades)",
+            "blocked_tickers": {"MMC": ["missing_open_prices"]},
+        }
+    )
+
     assert "• Execution Payload: GENERATED (0 EXECUTABLE TRADES)" in body
+    assert "BLOCKED TICKERS (VALIDATION)" in body
+    assert "- MMC: missing_open_prices" in body
 
 
 def test_execution_email_includes_blocked_tickers_line():
@@ -177,6 +193,12 @@ def test_execution_email_includes_blocked_tickers_line():
 
     assert "BLOCKED TICKERS (VALIDATION)" in body
     assert "- MMC: missing_open_prices" in body
+
+    _, body = build_execution_email_text(
+        {
+            "trade_date": "2026-02-05",
+            "mode": "SHADOW",
+            "execution_status": "READY",
             "trades": [],
             "blocked_tickers": ["MMC (missing_open_prices)"],
         }

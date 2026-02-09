@@ -45,14 +45,25 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
 
     lines.append("Execution Status: READY")
 
-    blocked_tickers = payload.get("blocked_tickers", {}) or {}
+    raw_blocked_tickers = payload.get("blocked_tickers", {}) or {}
     blocked_ticker_lines: list[str] = []
-    if blocked_tickers:
+    blocked_ticker_summary_items: list[str] = []
+    blocked_tickers_map: dict[str, list[str]] = {}
+    if isinstance(raw_blocked_tickers, dict):
+        blocked_tickers_map = {
+            str(ticker): [str(reason) for reason in (reasons or [])]
+            for ticker, reasons in raw_blocked_tickers.items()
+        }
+    elif isinstance(raw_blocked_tickers, list):
+        blocked_ticker_summary_items = [str(item) for item in raw_blocked_tickers]
+
+    if blocked_tickers_map:
         blocked_ticker_lines.extend(["", "BLOCKED TICKERS (VALIDATION)"])
-        for ticker in sorted(blocked_tickers.keys()):
-            reasons = blocked_tickers.get(ticker, []) or []
+        for ticker in sorted(blocked_tickers_map.keys()):
+            reasons = blocked_tickers_map.get(ticker, []) or []
             reason_txt = ", ".join(str(r) for r in reasons) if reasons else "validation_failed"
             blocked_ticker_lines.append(f"- {ticker}: {reason_txt}")
+            blocked_ticker_summary_items.append(f"{ticker} ({reason_txt})")
 
     trades = payload.get("trades", []) or []
     notes_lines = [
@@ -158,9 +169,8 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         if blocked_ticker_lines:
             lines.extend(blocked_ticker_lines)
             lines.append("")
-        blocked_tickers = payload.get("blocked_tickers", []) or []
-        if blocked_tickers:
-            lines.extend(["", f"Blocked tickers: {', '.join(str(item) for item in blocked_tickers)}"])
+        if blocked_ticker_summary_items:
+            lines.extend(["", f"Blocked tickers: {', '.join(blocked_ticker_summary_items)}"])
         lines.extend(notes_lines)
         return subject, "\n".join(lines)
 
