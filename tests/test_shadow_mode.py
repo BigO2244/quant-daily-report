@@ -207,10 +207,10 @@ def test_blocked_same_day_asof_is_fail_closed_state(tmp_path: Path, monkeypatch:
     assert out["cash"] == 500.0
     assert out["total_equity"] == 1500.0
     assert len(out["shadow_orders"]) == 0
-    assert any("signals_asof_after_cutoff" in r for r in out["blocked_reasons"])
+    assert any("asof_after_cutoff" in r for r in out["blocked_reasons"])
 
 
-def test_blocked_missing_open_price_is_fail_closed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_missing_open_price_blocks_ticker_but_keeps_other_orders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
 
     def missing_open_prices(run_date: str) -> pd.DataFrame:
@@ -244,12 +244,14 @@ def test_blocked_missing_open_price_is_fail_closed_state(tmp_path: Path, monkeyp
         now_et=dt.datetime(2025, 1, 6, 10, 0),
     )
 
-    assert out["execution_status"] == "HALTED"
-    assert out["num_trades"] == 0
-    assert out["cash"] == 500.0
-    assert out["total_equity"] == 1500.0
-    assert len(out["shadow_orders"]) == 0
-    assert any("missing_open_prices" in r for r in out["blocked_reasons"])
+    assert out["execution_status"] == "READY"
+    assert out["num_trades"] == 1
+    assert out["cash"] < 500.0
+    assert out["total_equity"] > 0
+    assert len(out["shadow_orders"]) == 1
+    assert out["shadow_orders"][0]["ticker"] == "AAA"
+    assert out["blocked_tickers"] == {"BBB": ["missing_open_prices"]}
+    assert any("validation:missing_open_prices:BBB" in r for r in out["blocked_reasons"])
 
 
 def test_stale_price_day_hard_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

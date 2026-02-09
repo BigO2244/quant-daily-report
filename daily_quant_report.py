@@ -262,6 +262,10 @@ def build_execution_email_payload(
     )
     blocked_reasons = [str(r) for r in ((paper_summary or {}).get("blocked_reasons", []) or [])]
     blocked_display = [f"{r.replace('_', ' ')}" for r in blocked_reasons]
+    blocked_tickers = {
+        str(ticker): [str(reason) for reason in reasons]
+        for ticker, reasons in (((paper_summary or {}).get("blocked_tickers") or {}).items())
+    }
 
     payload = {
         "trade_date": trade_date,
@@ -275,6 +279,7 @@ def build_execution_email_payload(
         "investable_dollars": float((paper_summary or {}).get("investable_dollars", 0.0)),
         "equity": float((paper_summary or {}).get("sizing_equity", (paper_summary or {}).get("total_equity", 0.0))),
         "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
+        "blocked_tickers": blocked_tickers,
     }
 
     if mode == "SHADOW" and not trades:

@@ -45,6 +45,15 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
 
     lines.append("Execution Status: READY")
 
+    blocked_tickers = payload.get("blocked_tickers", {}) or {}
+    blocked_ticker_lines: list[str] = []
+    if blocked_tickers:
+        blocked_ticker_lines.extend(["", "BLOCKED TICKERS (VALIDATION)"])
+        for ticker in sorted(blocked_tickers.keys()):
+            reasons = blocked_tickers.get(ticker, []) or []
+            reason_txt = ", ".join(str(r) for r in reasons) if reasons else "validation_failed"
+            blocked_ticker_lines.append(f"- {ticker}: {reason_txt}")
+
     trades = payload.get("trades", []) or []
     notes_lines = [
         "- Entry (X) is the model’s expected execution price.",
@@ -146,6 +155,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         if shadow_action_lines:
             lines.extend(shadow_action_lines)
             lines.append("")
+        if blocked_ticker_lines:
+            lines.extend(blocked_ticker_lines)
+            lines.append("")
         lines.extend(notes_lines)
         return subject, "\n".join(lines)
 
@@ -215,6 +227,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         order_ids,
         key=lambda oid: tuple((str(oid).split(":"))[-2:]) if ":" in str(oid) else ("", str(oid)),
     )
+
+    if blocked_ticker_lines:
+        lines.extend(blocked_ticker_lines)
 
     lines.extend(
         [
