@@ -154,6 +154,38 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     return None
 
 
+def _infer_report_date(
+    *,
+    s2_details: dict | None,
+    cm_details: dict | None,
+    st_equity: pd.DataFrame,
+    fallback: pd.Timestamp,
+) -> pd.Timestamp:
+    report_date_env = os.getenv("REPORT_DATE", "").strip()
+    if report_date_env:
+        return pd.to_datetime(report_date_env).normalize()
+
+    candidates: list[pd.Timestamp] = []
+    for details in (s2_details or {}, cm_details or {}):
+        asof = details.get("asof")
+        if asof is not None:
+            candidates.append(pd.to_datetime(asof).normalize())
+        target_weights = details.get("target_weights")
+        if target_weights is not None and not target_weights.empty:
+            try:
+                candidates.append(pd.to_datetime(target_weights.index).max().normalize())
+            except Exception:
+                pass
+
+    st_asof = _asof_date_from_df(st_equity)
+    if st_asof is not None:
+        candidates.append(pd.to_datetime(st_asof).normalize())
+
+    if candidates:
+        return max(candidates)
+    return pd.to_datetime(fallback).normalize()
+
+
 def _write_execution_email_payload(payload: dict, run_date: str) -> str:
     out_dir = os.path.join("outputs", "execution_email")
     os.makedirs(out_dir, exist_ok=True)
@@ -334,6 +366,49 @@ def _format_text_table(headers: list[str], rows: list[list[str]]) -> str:
     for row in rows:
         lines.append(_fmt_row(row))
     return "\n".join(lines)
+
+
+def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
+    """Backward-compatible PM-first digest email formatter."""
+    asof = snapshot.get("asof")
+    asof_str = _fmt_date(asof) if asof is not None else "n/a"
+    subject = f"Daily Trade Rundown — {asof_str}"
+
+    allocations = (snapshot.get("allocations") or {})
+    sleeve_splits = (allocations.get("sleeves") or {})
+    diagnostics = snapshot.get("performance_diagnostics") or {}
+    perf = snapshot.get("performance_summary") or {}
+    cm_sig = snapshot.get("charlie_munger") or {}
+
+    near_ma = (cm_sig.get("meta") or {}).get("near_ma_candidates")
+    if near_ma in (None, ""):
+        charlie_status = "Pending"
+    elif int(near_ma) <= 0:
+        charlie_status = "Pending (insufficient lookback window)"
+    else:
+        charlie_status = f"Active ({int(near_ma)} near-MA candidates)"
+
+    lines = [
+        "ENVIRONMENT: SHADOW (NO CAPITAL AT RISK)",
+        "",
+        "PORTFOLIO AT A GLANCE",
+        f"• Total Equity: {_fmt_money(diagnostics.get('current_equity'))}",
+        f"• Day Move: {_fmt_pct(diagnostics.get('day_return'))}",
+        f"• WTD: {_fmt_pct(perf.get('wtd'))}",
+        f"• MTD: {_fmt_pct(perf.get('mtd'))}",
+        f"• Total Return: {_fmt_pct(perf.get('total_return'))}",
+        "",
+        "SLEEVE ALLOCATION (DYNAMIC)",
+        f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",
+        f"• Sleeve 2 — Valuation: {_fmt_pct(sleeve_splits.get('sleeve_2', 0.0))}",
+        "• Charlie Munger — Long Hold",
+        f"  • Allocation: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
+        f"  • Status: {charlie_status}",
+        "",
+        "— Automated Portfolio Engine",
+    ]
+    return subject, "\n".join(lines)
+
 
 
 def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None) -> tuple[str, str]:
@@ -2152,7 +2227,11 @@ def main(argv: list[str] | None = None):
             s2_details = {}
             s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
         try:
-            cm_details = run_charlie_munger()
+            cm_runner = globals().get("run_sleeve_charlie_munger")
+            if callable(cm_runner):
+                cm_details = cm_runner()
+            else:
+                cm_details = run_charlie_munger()
             cm_equity = cm_details.get("equity_df", pd.DataFrame())
             cm_trades = cm_details.get("trades_df", pd.DataFrame())
         except Exception as e:
@@ -2273,13 +2352,11 @@ def main(argv: list[str] | None = None):
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
     # ── Build daily snapshot context ───────────────────────────────
-    report_date = (
-        s2_details.get("asof")
-        if s2_details.get("asof") is not None
-        else (cm_details.get("asof") if cm_details.get("asof") is not None else _asof_date_from_df(st_equity))
-    )
-    report_date = report_date or pd.Timestamp(
-        fixture_date if offline_fixture else dt.date.today()
+    report_date = _infer_report_date(
+        s2_details=s2_details,
+        cm_details=cm_details,
+        st_equity=st_equity,
+        fallback=pd.Timestamp(fixture_date if offline_fixture else dt.date.today()),
     )
     if offline_fixture and not portfolio_fixture.empty:
         report_date = portfolio_fixture.index.max()
