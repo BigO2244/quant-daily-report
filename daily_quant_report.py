@@ -156,8 +156,7 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
 
 def _infer_report_date(
     *,
-    s2_details: dict | None,
-    cm_details: dict | None,
+    sleeve_details: list[dict | None] | None,
     st_equity: pd.DataFrame,
     fallback: pd.Timestamp,
 ) -> pd.Timestamp:
@@ -166,12 +165,14 @@ def _infer_report_date(
         return pd.to_datetime(report_date_env).normalize()
 
     candidates: list[pd.Timestamp] = []
-    for details in (s2_details or {}, cm_details or {}):
+    for details in (sleeve_details or []):
+        if not isinstance(details, dict):
+            continue
         asof = details.get("asof")
         if asof is not None:
             candidates.append(pd.to_datetime(asof).normalize())
         target_weights = details.get("target_weights")
-        if target_weights is not None and not target_weights.empty:
+        if isinstance(target_weights, pd.DataFrame) and not target_weights.empty:
             try:
                 candidates.append(pd.to_datetime(target_weights.index).max().normalize())
             except Exception:
@@ -340,7 +341,7 @@ def build_execution_email_payload(
                 "next_checkpoint": "Re-evaluate at next rebalance window or upon signal state change",
                 "signals_status": "VALID",
                 "constraints_status": "ENFORCED",
-                "execution_payload_status": f"GENERATED ({len(trades)} executable trades)",
+                "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
                 "no_trades_reason": "No executable trades after validation/constraints",
             }
         )
@@ -1360,6 +1361,30 @@ def build_daily_snapshot(
         weights_df["sleeve"] = weights_df["sleeve_name"]
 
     if weights_df.empty:
+        fallback_rows: list[dict[str, object]] = []
+        for sleeve_name, details in (("sleeve_2", s2_details), ("charlie_munger", cm_details or {})):
+            target_weights = (details or {}).get("target_weights")
+            if not isinstance(target_weights, pd.DataFrame) or target_weights.empty:
+                continue
+            latest_weights = target_weights.iloc[-1]
+            for ticker, target_weight in latest_weights.items():
+                try:
+                    weight_value = float(target_weight)
+                except Exception:
+                    continue
+                if abs(weight_value) <= WEIGHT_TOLERANCE:
+                    continue
+                fallback_rows.append(
+                    {
+                        "ticker": str(ticker).upper(),
+                        "target_weight": weight_value,
+                        "sleeve": sleeve_name,
+                    }
+                )
+        if fallback_rows:
+            weights_df = pd.DataFrame(fallback_rows)
+
+    if weights_df.empty:
         logger.warning(
             "[PAPER] No target weights available; skipping signals snapshot."
         )
@@ -2353,8 +2378,7 @@ def main(argv: list[str] | None = None):
     )
     # ── Build daily snapshot context ───────────────────────────────
     report_date = _infer_report_date(
-        s2_details=s2_details,
-        cm_details=cm_details,
+        sleeve_details=[s2_details, cm_details],
         st_equity=st_equity,
         fallback=pd.Timestamp(fixture_date if offline_fixture else dt.date.today()),
     )
@@ -2436,7 +2460,8 @@ def main(argv: list[str] | None = None):
             s2_equity=s2_equity,
             st_signals=st_signals,
             s2_details=s2_details,
-            )
+            cm_details=cm_details,
+        )
     except RuntimeError as e:
         logger.error("[ERROR] %s", e)
         sys.exit(0)
