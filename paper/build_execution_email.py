@@ -54,6 +54,72 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         "- Refer to the Daily Quant / Trade Rundown for diagnostics and attribution.",
     ]
 
+    shadow_action_lines = []
+    if not trades:
+        recommended_action = payload.get("recommended_action")
+        confidence_level = payload.get("confidence_level")
+        human_override_required = payload.get("human_override_required")
+        rationale_items = payload.get("rationale", []) or []
+        recommended_trades = payload.get("recommended_trades", []) or []
+        blocked_by_constraints = payload.get("blocked_by_constraints", []) or []
+        next_checkpoint = payload.get("next_checkpoint")
+        signals_status = payload.get("signals_status")
+        constraints_status = payload.get("constraints_status")
+        execution_payload_status = payload.get("execution_payload_status")
+
+        if any(
+            value is not None
+            for value in [
+                recommended_action,
+                confidence_level,
+                human_override_required,
+                next_checkpoint,
+                signals_status,
+                constraints_status,
+                execution_payload_status,
+            ]
+        ) or rationale_items or blocked_by_constraints or recommended_trades:
+            shadow_action_lines.extend(
+                [
+                    "",
+                    "RECOMMENDED ACTION",
+                    f"• Execute Trades Today: {str(recommended_action or 'NO').upper()}",
+                    f"• Confidence Level: {str(confidence_level or 'HIGH').upper()}",
+                    f"• Human Override Required: {str(human_override_required or 'NO').upper()}",
+                    "",
+                    "RATIONALE (1–2 MIN READ)",
+                ]
+            )
+            if rationale_items:
+                shadow_action_lines.extend([f"• {item}" for item in rationale_items])
+            else:
+                shadow_action_lines.append("• No additional rationale provided")
+
+            shadow_action_lines.extend(["", "RECOMMENDED TRADES (IF OVERRIDDEN)"])
+            if recommended_trades:
+                shadow_action_lines.extend([f"• {item}" for item in recommended_trades])
+            else:
+                shadow_action_lines.append("None")
+
+            shadow_action_lines.extend(["", "TRADES BLOCKED BY CONSTRAINTS"])
+            if blocked_by_constraints:
+                shadow_action_lines.extend([f"• {item}" for item in blocked_by_constraints])
+            else:
+                shadow_action_lines.append("None")
+
+            shadow_action_lines.extend(
+                [
+                    "",
+                    "NEXT CHECKPOINT",
+                    f"• {next_checkpoint or 'Re-evaluate at next rebalance window or upon signal state change'}",
+                    "",
+                    "SYSTEM STATUS",
+                    f"• Signals: {str(signals_status or 'VALID').upper()}",
+                    f"• Constraints: {str(constraints_status or 'ENFORCED').upper()}",
+                    f"• Execution Payload: {str(execution_payload_status or 'NOT GENERATED (EXPECTED IN SHADOW)').upper()}",
+                ]
+            )
+
     if not trades:
         lines.extend(
             [
@@ -77,6 +143,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                 "",
             ]
         )
+        if shadow_action_lines:
+            lines.extend(shadow_action_lines)
+            lines.append("")
         lines.extend(notes_lines)
         return subject, "\n".join(lines)
 

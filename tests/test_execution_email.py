@@ -125,3 +125,34 @@ def test_execution_email_no_trailing_percent_or_whitespace():
 
     assert not body.endswith("%")
     assert body.rstrip("\n") == body
+
+
+def test_execution_email_shadow_recommended_action_block_present():
+    _, body = build_execution_email_text(
+        {
+            "trade_date": "2026-02-05",
+            "mode": "SHADOW",
+            "execution_status": "READY",
+            "trades": [],
+            "recommended_action": "NO",
+            "confidence_level": "HIGH",
+            "human_override_required": "NO",
+            "rationale": [
+                "Sleeve 1 (Momentum): Signals present but blocked by portfolio cash constraint",
+            ],
+            "recommended_trades": [],
+            "blocked_by_constraints": ["ADBE — Max position size exceeded"],
+            "next_checkpoint": "Re-evaluate at next rebalance window or upon signal state change",
+            "signals_status": "VALID",
+            "constraints_status": "ENFORCED",
+            "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+        }
+    )
+
+    assert "RECOMMENDED ACTION" in body
+    assert "• Execute Trades Today: NO" in body
+    assert "• Confidence Level: HIGH" in body
+    assert "• Human Override Required: NO" in body
+    assert "TRADES BLOCKED BY CONSTRAINTS" in body
+    assert "• ADBE — Max position size exceeded" in body
+    assert "• Execution Payload: NOT GENERATED (EXPECTED IN SHADOW)" in body
