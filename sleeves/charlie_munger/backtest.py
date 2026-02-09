@@ -31,3 +31,7 @@ __all__ = [
     "run_backtest_with_details",
     "score_quality",
 ]
+from sleeves.sleeve_charlie_munger import run_backtest_with_details
+
+__all__ = ["run_backtest_with_details"]
+

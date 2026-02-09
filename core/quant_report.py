@@ -297,10 +297,25 @@ def create_trade_email(snapshot: dict, execution_payload: Optional[dict] = None)
             shares = trade.get("shares")
 
             line = f"   - {action} {ticker} | exp_px={_fmt_money(exec_px)}"
+    lines.append("1) Trades for Today (NEW ORDERS — EXECUTION PAYLOAD)")
+    exec_trades = (execution_payload or {}).get("trades", []) or []
+    if not exec_trades:
+        reason = (execution_payload or {}).get("halt_reason") or "No executable trades in execution payload"
+        lines.append("   - NO TRADES")
+        lines.append(f"   - reason={reason}")
+    else:
+        for trade in exec_trades:
+            side = trade.get("side", "")
+            ticker = trade.get("ticker", "")
+            shares = trade.get("shares")
+            entry_px = trade.get("entry_price")
+            reason = trade.get("reason")
+            notional = trade.get("notional")
+            line = f"   - {side} {ticker} | exp_px={_fmt_money(entry_px)}"
             if shares is not None:
                 line += f" | shares={shares}"
             if notional is not None:
-                line += f" | est_notional={_fmt_money(notional)}"
+                line += f" | notional={_fmt_money(notional)}"
             if reason:
                 line += f" | reason={reason}"
             lines.append(line)
