@@ -264,7 +264,7 @@ def _format_table(headers: List[str], rows: List[List[str]]) -> str:
     return "\n".join(lines)
 
 
-def create_trade_email(snapshot: dict) -> Tuple[str, str]:
+def create_trade_email(snapshot: dict, execution_payload: Optional[dict] = None) -> Tuple[str, str]:
     """
     Create the plain-text Daily Trade Rundown email body.
 
@@ -282,22 +282,23 @@ def create_trade_email(snapshot: dict) -> Tuple[str, str]:
 
     # 1) TODAY'S TRADES (EXECUTION QUEUE)
     lines.append("1) Trades for Today (NEW ORDERS)")
-    orders = snapshot.get("orders", []) or []
-    if not orders:
-        lines.append("   - None")
+    executable_trades = (execution_payload or {}).get("trades", []) or []
+    if not executable_trades:
+        reason = (execution_payload or {}).get("halt_reason") or "No executable orders in execution payload"
+        lines.append("   - NO TRADES")
+        lines.append(f"   - reason={reason}")
     else:
-        for order in orders:
-            action = order.get("action", "")
-            ticker = order.get("ticker", "")
-            weight = order.get("target_weight", 0.0)
-            exec_px = order.get("execution_price")
-            reason = order.get("reason")
-            notional = order.get("notional")
-            shares = order.get("shares")
+        for trade in executable_trades:
+            action = str(trade.get("side") or trade.get("action") or "").upper()
+            ticker = trade.get("ticker", "")
+            exec_px = trade.get("entry_price")
+            reason = trade.get("reason") or trade.get("notes")
+            notional = trade.get("notional")
+            shares = trade.get("shares")
 
-            line = f"   - {action} {ticker} | target={_fmt_pct(weight)} | exp_px={_fmt_money(exec_px)}"
+            line = f"   - {action} {ticker} | exp_px={_fmt_money(exec_px)}"
             if shares is not None:
-                line += f" | est_shares={shares}"
+                line += f" | shares={shares}"
             if notional is not None:
                 line += f" | est_notional={_fmt_money(notional)}"
             if reason:
