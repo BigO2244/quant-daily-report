@@ -267,6 +267,15 @@ def build_execution_email_payload(
         for ticker, reasons in (((paper_summary or {}).get("blocked_tickers") or {}).items())
     }
 
+    blocked_tickers: list[str] = []
+    for reason in blocked_reasons:
+        if "missing_open_prices:" not in reason:
+            continue
+        _, _, raw_tickers = reason.partition("missing_open_prices:")
+        for ticker in [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]:
+            blocked_tickers.append(f"{ticker} (missing_open_prices)")
+    blocked_tickers = sorted(set(blocked_tickers))
+
     payload = {
         "trade_date": trade_date,
         "mode": mode,
@@ -299,7 +308,8 @@ def build_execution_email_payload(
                 "next_checkpoint": "Re-evaluate at next rebalance window or upon signal state change",
                 "signals_status": "VALID",
                 "constraints_status": "ENFORCED",
-                "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+                "execution_payload_status": f"GENERATED ({len(trades)} executable trades)",
+                "no_trades_reason": "No executable trades after validation/constraints",
             }
         )
 

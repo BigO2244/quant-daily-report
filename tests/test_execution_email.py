@@ -109,7 +109,7 @@ def test_execution_email_no_trade_block_present():
     assert "3) EXECUTION NOTES" in body
     assert "- Market OPEN" in body
     assert "- Signals evaluated" in body
-    assert "- No assets met entry criteria" in body
+    assert "- No executable trades after validation/constraints" in body
     assert "CASH is not the same thing as SGOV" in body
 
 
@@ -145,7 +145,7 @@ def test_execution_email_shadow_recommended_action_block_present():
             "next_checkpoint": "Re-evaluate at next rebalance window or upon signal state change",
             "signals_status": "VALID",
             "constraints_status": "ENFORCED",
-            "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+            "execution_payload_status": "GENERATED (0 executable trades)",
         }
     )
 
@@ -159,6 +159,10 @@ def test_execution_email_shadow_recommended_action_block_present():
 
 
 def test_execution_email_includes_blocked_tickers_section_when_partial_validation():
+    assert "• Execution Payload: GENERATED (0 EXECUTABLE TRADES)" in body
+
+
+def test_execution_email_includes_blocked_tickers_line():
     _, body = build_execution_email_text(
         {
             "trade_date": "2026-02-05",
@@ -173,3 +177,9 @@ def test_execution_email_includes_blocked_tickers_section_when_partial_validatio
 
     assert "BLOCKED TICKERS (VALIDATION)" in body
     assert "- MMC: missing_open_prices" in body
+            "trades": [],
+            "blocked_tickers": ["MMC (missing_open_prices)"],
+        }
+    )
+
+    assert "Blocked tickers: MMC (missing_open_prices)" in body
