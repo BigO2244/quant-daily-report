@@ -44,12 +44,10 @@ s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
 s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
 
 try:
-    import sleeves.sleeve_charlie_munger as cm_mod
+    import sleeves.charlie_munger.backtest as cm_mod
 except Exception:
     cm_mod = None
-cm_run_backtest_details = (
-    getattr(cm_mod, "run_backtest_with_details", None) if cm_mod else None
-)
+cm_run_backtest_details = getattr(cm_mod, "run_backtest_with_details", None) if cm_mod else None
 # ============================================================
 # Email sender (exact repo-aware lookup)
 # ============================================================
@@ -350,6 +348,11 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
 
     raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", "SHADOW")).upper()
     env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
+    exec_trades = (execution_payload or {}).get("trades", []) or []
+    exec_no_trade_reason = (
+        (execution_payload or {}).get("halt_reason")
+        or "No executable trades in execution payload"
+    )
 
     lines = [
         f"ENVIRONMENT: {env_mode}",
@@ -423,6 +426,11 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
             "",
             "---",
             "",
+            "TRADES FOR TODAY (NEW ORDERS — EXECUTION PAYLOAD)",
+            f"• Executable Trades: {len(exec_trades)}",
+            f"• Status: {'NO TRADES' if not exec_trades else 'TRADES READY'}",
+            f"• Reason: {exec_no_trade_reason if not exec_trades else 'See execution recommendation email for order details'}",
+            "",
             "PROPOSED / NEXT REBALANCE (NOT EXECUTED TODAY)",
             "• Momentum breadth remains narrow",
             "• Valuation signals concentrated in capped names",
@@ -488,20 +496,10 @@ def enforce_charlie_bounds(
                 share = float(sleeves.get(key, 0.0)) / others_total
                 sleeves[key] = max(0.0, float(sleeves.get(key, 0.0)) - delta * share)
         else:
-            draw = min(delta, cash)
-            if draw > WEIGHT_TOLERANCE:
-                cash -= draw
-                logger.warning(
-                    "[ALLOCATION] Charlie min floor used CASH funding: %.2f%%",
-                    draw * 100.0,
-                )
-            shortfall = delta - draw
-            if shortfall > WEIGHT_TOLERANCE:
-                logger.warning(
-                    "[ALLOCATION] Charlie floor shortfall %.2f%% due to fully allocated risk budget",
-                    shortfall * 100.0,
-                )
-                target_charlie = orig_charlie + draw
+            logger.warning(
+                "[ALLOCATION] Unable to increase Charlie allocation without adjusting CASH or active sleeves."
+            )
+            target_charlie = orig_charlie
     else:
         give = -delta
         if others_total > WEIGHT_TOLERANCE:
@@ -509,7 +507,12 @@ def enforce_charlie_bounds(
                 share = float(sleeves.get(key, 0.0)) / others_total
                 sleeves[key] = max(0.0, float(sleeves.get(key, 0.0)) + give * share)
         else:
-            cash += give
+            logger.warning(
+                "[ALLOCATION] Unable to reduce Charlie allocation because non-Charlie sleeves are inactive."
+            )
+            sleeves["charlie_munger"] = max(0.0, orig_charlie)
+            sleeves, cash = _normalize_weights(sleeves, cash)
+            return sleeves, cash
 
     sleeves["charlie_munger"] = max(0.0, target_charlie)
     sleeves, cash = _normalize_weights(sleeves, cash)
@@ -2471,8 +2474,9 @@ def main(argv: list[str] | None = None):
     logger.info("%s", snapshot_body)
     if send_email:
         try:
+            send_email(subject=exec_subject, body_html=f"<pre>{exec_body}</pre>", body_text=exec_body)
             send_email(subject=snapshot_subject, body_html=html, body_text=snapshot_body)
-            logger.info("[OK] Email sent")
+            logger.info("[OK] Emails sent (execution + snapshot)")
         except Exception as e:
             logger.warning("[WARN] Email not sent: %s", e)
     else:
