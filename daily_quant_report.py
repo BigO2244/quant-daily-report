@@ -262,6 +262,10 @@ def build_execution_email_payload(
     )
     blocked_reasons = [str(r) for r in ((paper_summary or {}).get("blocked_reasons", []) or [])]
     blocked_display = [f"{r.replace('_', ' ')}" for r in blocked_reasons]
+    blocked_tickers = {
+        str(ticker): [str(reason) for reason in reasons]
+        for ticker, reasons in (((paper_summary or {}).get("blocked_tickers") or {}).items())
+    }
 
     blocked_tickers: list[str] = []
     for reason in blocked_reasons:

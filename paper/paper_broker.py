@@ -302,7 +302,7 @@ def validate_open_window(
     signals_path: str,
 ) -> tuple[bool, list[str], dict]:
     cutoff_date = prev_trading_day(trade_date)
-    reasons: list[str] = []
+    global_reasons: list[str] = []
     meta = signals_meta or {}
 
     asof_date = meta.get("asof_date")
@@ -316,46 +316,61 @@ def validate_open_window(
         file_trade_date_is_iso = False
 
     if not asof_date:
-        reasons.append("missing_asof_date")
+        global_reasons.append("missing_asof_date")
     elif str(asof_date) > cutoff_date:
-        reasons.append(f"asof_after_cutoff asof={asof_date} cutoff={cutoff_date}")
+        global_reasons.append(f"asof_after_cutoff asof={asof_date} cutoff={cutoff_date}")
 
     if file_trade_date_is_iso and file_trade_date != trade_date:
-        reasons.append(
+        global_reasons.append(
             f"signal_file_trade_date_mismatch file_trade_date={file_trade_date} trade_date={trade_date}"
         )
     if str(meta_trade_date or "") != trade_date:
-        reasons.append(
+        global_reasons.append(
             f"meta_trade_date_mismatch meta_trade_date={meta_trade_date} trade_date={trade_date}"
         )
 
     required_tickers = sorted(
         t for t in weights[weights["target_weight"].abs() > 0]["ticker"].astype(str).tolist()
     )
-    missing_opens = sorted(
-        t
-        for t in required_tickers
-        if t not in prices_open.index or not pd.notna(prices_open.get(t))
-    )
-    missing_prev_closes = sorted(
-        t
-        for t in required_tickers
-        if t not in prev_closes.index or not pd.notna(prev_closes.get(t))
-    )
-    if missing_opens:
-        reasons.append(f"missing_open_prices:{','.join(missing_opens)}")
-    if missing_prev_closes:
-        reasons.append(f"missing_prev_closes:{','.join(missing_prev_closes)}")
+    blocked_tickers: Dict[str, List[str]] = {}
+    ticker_validation: Dict[str, Dict[str, object]] = {}
+    missing_opens: List[str] = []
+    missing_prev_closes: List[str] = []
+    for ticker in required_tickers:
+        ticker_reasons: List[str] = []
+        if ticker not in prices_open.index or not pd.notna(prices_open.get(ticker)):
+            missing_opens.append(ticker)
+            ticker_reasons.append("missing_open_prices")
+        if ticker not in prev_closes.index or not pd.notna(prev_closes.get(ticker)):
+            missing_prev_closes.append(ticker)
+            ticker_reasons.append("missing_prev_closes")
+        ticker_validation[ticker] = {
+            "pass": len(ticker_reasons) == 0,
+            "reasons": ticker_reasons,
+        }
+        if ticker_reasons:
+            blocked_tickers[ticker] = ticker_reasons
 
-    ok = len(reasons) == 0
+    reasons = list(global_reasons)
+    if missing_opens:
+        reasons.append(f"missing_open_prices:{','.join(sorted(missing_opens))}")
+    if missing_prev_closes:
+        reasons.append(f"missing_prev_closes:{','.join(sorted(missing_prev_closes))}")
+
+    hard_fail = len(global_reasons) > 0
+    ok = not hard_fail
     details = {
         "trade_date": trade_date,
         "signals_path": signals_path,
         "asof_date": asof_date,
         "cutoff_date": cutoff_date,
-        "missing_opens": missing_opens,
-        "missing_prev_closes": missing_prev_closes,
-        "result": "PASS" if ok else "FAIL",
+        "hard_fail": hard_fail,
+        "global_reasons": global_reasons,
+        "missing_opens": sorted(missing_opens),
+        "missing_prev_closes": sorted(missing_prev_closes),
+        "blocked_tickers": blocked_tickers,
+        "ticker_validation": ticker_validation,
+        "result": "FAIL" if hard_fail else "PASS",
         "reasons": reasons,
     }
     return ok, reasons, details
@@ -811,15 +826,6 @@ def run_paper_day(
 
     blocked = False
     blocked_reasons: List[str] = []
-    validation_reasons: List[str] = []
-    cutoff_date = prev_trading_day(run_date)
-
-    if asof_date is None:
-        blocked = True
-        validation_reasons.append("missing_asof_date")
-    elif str(asof_date) > cutoff_date:
-        blocked = True
-        validation_reasons.append(f"signals_asof_after_cutoff asof={asof_date} cutoff={cutoff_date}")
 
     prices_open = pd.Series(dtype=float)
     prev_closes = pd.Series(dtype=float)
@@ -827,84 +833,82 @@ def run_paper_day(
     if not holdings_prev.empty:
         tickers = sorted(set(tickers + holdings_prev["ticker"].tolist()))
 
-    if not blocked:
-        prices_df = fetch_open_prices_yfinance(tickers, run_date=run_date)
-        stale_rows = prices_df[prices_df["price_date"].astype(str) < run_date]
-        if not stale_rows.empty:
-            last_px_date = str(stale_rows["price_date"].min())
-            raise RuntimeError(f"[HALT] stale_prices detected (last_price_date={last_px_date})")
-        prices_open = prices_df.set_index("ticker")["open"].astype(float)
-        if cfg.require_benchmark_price and cfg.benchmark_ticker not in prices_open.index:
-            raise RuntimeError(f"[HALT] benchmark_missing ticker={cfg.benchmark_ticker}")
+    prices_df = fetch_open_prices_yfinance(tickers, run_date=run_date)
+    stale_rows = prices_df[prices_df["price_date"].astype(str) < run_date]
+    if not stale_rows.empty:
+        last_px_date = str(stale_rows["price_date"].min())
+        raise RuntimeError(f"[HALT] stale_prices detected (last_price_date={last_px_date})")
+    prices_open = prices_df.set_index("ticker")["open"].astype(float)
+    if cfg.require_benchmark_price and cfg.benchmark_ticker not in prices_open.index:
+        raise RuntimeError(f"[HALT] benchmark_missing ticker={cfg.benchmark_ticker}")
 
-        prev_close_df = fetch_prev_closes_yfinance(
-            sorted(targets["ticker"].astype(str).unique().tolist()),
-            asof_date=cutoff_date,
-        )
-        prev_closes = (
-            prev_close_df.set_index("ticker")["prev_close"].astype(float)
-            if not prev_close_df.empty
-            else pd.Series(dtype=float)
-        )
+    prev_close_df = fetch_prev_closes_yfinance(
+        sorted(targets["ticker"].astype(str).unique().tolist()),
+        asof_date=prev_trading_day(run_date),
+    )
+    prev_closes = (
+        prev_close_df.set_index("ticker")["prev_close"].astype(float)
+        if not prev_close_df.empty
+        else pd.Series(dtype=float)
+    )
 
-        required_tickers = sorted(
-            t for t in targets[targets["target_weight"].abs() > 0]["ticker"].astype(str).tolist()
-        )
-        missing_opens = sorted(
-            t
-            for t in required_tickers
-            if t not in prices_open.index
-            or not pd.notna(prices_open.get(t))
-            or not np.isfinite(float(prices_open.get(t)))
-        )
-        missing_prev_closes = sorted(
-            t
-            for t in required_tickers
-            if t not in prev_closes.index
-            or not pd.notna(prev_closes.get(t))
-            or not np.isfinite(float(prev_closes.get(t)))
-        )
-        if missing_opens:
-            blocked = True
-            validation_reasons.append(f"missing_open_prices:{','.join(missing_opens)}")
-        if missing_prev_closes:
-            blocked = True
-            validation_reasons.append(f"missing_prev_closes:{','.join(missing_prev_closes)}")
-
-    validation_details = {
-        "trade_date": run_date,
-        "signals_path": signals_path,
-        "asof_date": asof_date,
-        "cutoff_date": cutoff_date,
-        "result": "FAIL" if blocked else "PASS",
-        "reasons": validation_reasons,
+    validation_ok, validation_reasons, validation_details = validate_open_window(
+        trade_date=run_date,
+        signals_meta={"trade_date": snapshot_date, "asof_date": asof_date},
+        prices_open=prices_open,
+        prev_closes=prev_closes,
+        weights=targets,
+        signals_path=signals_path,
+    )
+    blocked_tickers = {
+        str(ticker): list(reasons)
+        for ticker, reasons in (validation_details.get("blocked_tickers") or {}).items()
     }
-    if blocked:
+
+    if not validation_ok:
+        blocked = True
         logger.error(
             '[PAPER][VALIDATION] FAIL trade_date=%s signals=%s asof=%s cutoff=%s reasons="%s"',
             run_date,
             signals_path,
-            asof_date,
-            cutoff_date,
+            validation_details.get("asof_date"),
+            validation_details.get("cutoff_date"),
             "; ".join(validation_reasons),
         )
         blocked_reasons.extend([f"validation:{reason}" for reason in validation_reasons])
     else:
-        logger.info(
-            "[PAPER][VALIDATION] PASS trade_date=%s signals=%s asof=%s cutoff=%s",
-            run_date,
-            signals_path,
-            asof_date,
-            cutoff_date,
-        )
+        if blocked_tickers:
+            logger.warning(
+                '[PAPER][VALIDATION] PARTIAL trade_date=%s signals=%s asof=%s cutoff=%s blocked_tickers="%s"',
+                run_date,
+                signals_path,
+                validation_details.get("asof_date"),
+                validation_details.get("cutoff_date"),
+                "; ".join(
+                    f"{ticker}:{','.join(reasons)}" for ticker, reasons in sorted(blocked_tickers.items())
+                ),
+            )
+            blocked_reasons.extend(
+                [f"validation:{reason}:{ticker}" for ticker, reasons in sorted(blocked_tickers.items()) for reason in reasons]
+            )
+        else:
+            logger.info(
+                "[PAPER][VALIDATION] PASS trade_date=%s signals=%s asof=%s cutoff=%s",
+                run_date,
+                signals_path,
+                validation_details.get("asof_date"),
+                validation_details.get("cutoff_date"),
+            )
 
     investable_weight = max(0.0, 1.0 - target_cash_weight)
     if not blocked:
         priced = set(prices_open.index.tolist())
         targets = targets[targets["ticker"].isin(priced)].copy()
+        if blocked_tickers:
+            targets = targets[~targets["ticker"].astype(str).isin(set(blocked_tickers.keys()))].copy()
         wsum = float(targets["target_weight"].sum())
         if wsum <= 0:
-            raise RuntimeError("After dropping missing-priced tickers, no targets remain.")
+            raise RuntimeError("After dropping missing-priced/blocked tickers, no targets remain.")
         targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
     if mode == "shadow" and not mkt.is_open_now:
@@ -1101,6 +1105,7 @@ def run_paper_day(
         "scaled_tickers": list(trade_meta.get("scaled_tickers", [])),
         "position_reconciliation": position_recon,
         "blocked_reasons": blocked_reasons,
+        "blocked_tickers": blocked_tickers,
         "execution_status": "HALTED" if blocked else "READY",
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,

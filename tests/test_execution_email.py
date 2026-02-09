@@ -155,6 +155,10 @@ def test_execution_email_shadow_recommended_action_block_present():
     assert "• Human Override Required: NO" in body
     assert "TRADES BLOCKED BY CONSTRAINTS" in body
     assert "• ADBE — Max position size exceeded" in body
+    assert "• Execution Payload: NOT GENERATED (EXPECTED IN SHADOW)" in body
+
+
+def test_execution_email_includes_blocked_tickers_section_when_partial_validation():
     assert "• Execution Payload: GENERATED (0 EXECUTABLE TRADES)" in body
 
 
@@ -164,6 +168,15 @@ def test_execution_email_includes_blocked_tickers_line():
             "trade_date": "2026-02-05",
             "mode": "SHADOW",
             "execution_status": "READY",
+            "trades": [
+                {"ticker": "AAA", "side": "BUY", "shares": 2, "entry_price": 100.0},
+            ],
+            "blocked_tickers": {"MMC": ["missing_open_prices"]},
+        }
+    )
+
+    assert "BLOCKED TICKERS (VALIDATION)" in body
+    assert "- MMC: missing_open_prices" in body
             "trades": [],
             "blocked_tickers": ["MMC (missing_open_prices)"],
         }

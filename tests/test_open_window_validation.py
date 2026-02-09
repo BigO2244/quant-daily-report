@@ -52,6 +52,9 @@ def test_open_window_validation_fail_missing_open_price():
         signals_path="signals/2025-01-06.json",
     )
 
-    assert ok is False
+    assert ok is True
     assert any("missing_open_prices" in reason for reason in reasons)
-    assert details["result"] == "FAIL"
+    assert details["result"] == "PASS"
+    assert details["blocked_tickers"] == {"BBB": ["missing_open_prices"]}
+    assert details["ticker_validation"]["AAA"]["pass"] is True
+    assert details["ticker_validation"]["BBB"]["pass"] is False
