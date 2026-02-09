@@ -157,33 +157,33 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
 def _infer_report_date(
     *,
     sleeve_details: list[dict | None] | None,
-    st_equity: pd.DataFrame,
     fallback: pd.Timestamp,
 ) -> pd.Timestamp:
     report_date_env = os.getenv("REPORT_DATE", "").strip()
     if report_date_env:
         return pd.to_datetime(report_date_env).normalize()
 
-    candidates: list[pd.Timestamp] = []
+    asof_candidates: list[pd.Timestamp] = []
+    target_weight_candidates: list[pd.Timestamp] = []
     for details in (sleeve_details or []):
         if not isinstance(details, dict):
             continue
         asof = details.get("asof")
         if asof is not None:
-            candidates.append(pd.to_datetime(asof).normalize())
+            asof_candidates.append(pd.to_datetime(asof).normalize())
         target_weights = details.get("target_weights")
         if isinstance(target_weights, pd.DataFrame) and not target_weights.empty:
             try:
-                candidates.append(pd.to_datetime(target_weights.index).max().normalize())
+                target_weight_candidates.append(
+                    pd.to_datetime(target_weights.index).max().normalize()
+                )
             except Exception:
                 pass
 
-    st_asof = _asof_date_from_df(st_equity)
-    if st_asof is not None:
-        candidates.append(pd.to_datetime(st_asof).normalize())
-
-    if candidates:
-        return max(candidates)
+    if asof_candidates:
+        return max(asof_candidates)
+    if target_weight_candidates:
+        return max(target_weight_candidates)
     return pd.to_datetime(fallback).normalize()
 
 
@@ -2379,7 +2379,6 @@ def main(argv: list[str] | None = None):
     # ── Build daily snapshot context ───────────────────────────────
     report_date = _infer_report_date(
         sleeve_details=[s2_details, cm_details],
-        st_equity=st_equity,
         fallback=pd.Timestamp(fixture_date if offline_fixture else dt.date.today()),
     )
     if offline_fixture and not portfolio_fixture.empty:
