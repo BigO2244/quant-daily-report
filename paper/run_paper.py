@@ -26,6 +26,11 @@ def main() -> None:
         action="store_true",
         help="DEV ONLY: allow re-running the same trade date (bypasses ledger date guard).",
     )
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Generate a plan only; do not generate/send orders even during open market hours.",
+    )
     args = parser.parse_args()
 
     signal_date = args.signal_date
@@ -54,6 +59,7 @@ def main() -> None:
         trades_path="paper/trades.csv",
         config_path="paper/config_paper.json",
         force=args.force,
+        plan_only=args.plan_only,
     )
 
     logger.info("%s", json.dumps(result, indent=2))
