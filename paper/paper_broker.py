@@ -590,6 +590,33 @@ def apply_risk_guards(
             out["notional"] = out["notional"].astype(float) * scale
         if "slippage_cost" in out.columns:
             out["slippage_cost"] = out["slippage_cost"].astype(float) * scale
+
+        scaled_rows: List[Dict[str, object]] = []
+        for _, row in out.iterrows():
+            r = row.to_dict()
+            shares = float(r.get("shares", 0.0))
+            price = float(r.get("price", 0.0))
+
+            rounded_shares = float(math.floor(abs(shares)))
+            if rounded_shares < 1.0:
+                continue
+
+            notional = rounded_shares * abs(price)
+            if notional < float(cfg.min_trade_dollars):
+                continue
+
+            r["shares"] = rounded_shares
+            r["notional"] = float(notional)
+            if "slippage_cost" in r:
+                prior_slippage = float(r.get("slippage_cost", 0.0))
+                prior_shares = abs(float(row.get("shares", 0.0)))
+                if prior_shares > 0:
+                    r["slippage_cost"] = float(prior_slippage * (rounded_shares / prior_shares))
+                else:
+                    r["slippage_cost"] = 0.0
+            scaled_rows.append(r)
+
+        out = pd.DataFrame(scaled_rows, columns=trades.columns) if scaled_rows else pd.DataFrame(columns=trades.columns)
         risk_meta["turnover_scaled"] = True
         risk_meta["turnover_scale"] = float(scale)
 
