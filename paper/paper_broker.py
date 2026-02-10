@@ -43,6 +43,7 @@ class PaperConfig:
     halt_on_data_error: bool = True
     require_benchmark_price: bool = True
     cash_target_weight_default: float = 0.0
+    sent_ledger_path: str = "outputs/shadow_orders/orders_sent.csv"
 
 
 def load_config(path: str) -> PaperConfig:
@@ -1202,7 +1203,7 @@ def run_paper_day(
     shadow_orders_path = None
     idempotent_skips: List[str] = []
     orders: List[Dict[str, object]] = []
-    sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
+    sent_ledger_path: str = cfg.sent_ledger_path
 
     if mode == "shadow" and mkt.is_open_now and not plan_only:
         orders = _build_shadow_orders(executable_trades, run_id)

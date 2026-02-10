@@ -1019,13 +1019,13 @@ def run_sleeve_2():
         return {"equity_df": equity_df, "trades_df": trades_df}
     raise RuntimeError("No valid Sleeve 2 runner found")
 
-
 def run_charlie_munger():
-    if cm_run_backtest_details is None:
-        raise RuntimeError("No valid Charlie Munger sleeve runner found")
-    logger.info("[SLEEVE CHARLIE] Running run_backtest_with_details()...")
-    return cm_run_backtest_details(period="15y", interval="1d")
-
+    """
+    Run Charlie Munger sleeve backtest and return details dict.
+    Keep this direct to avoid fragile "runner discovery" behavior.
+    """
+    from sleeves.charlie_munger.backtest import run_backtest_with_details
+    return run_backtest_with_details()
 
 def run_sleeve_charlie_munger():
     """Backward-compatible alias."""

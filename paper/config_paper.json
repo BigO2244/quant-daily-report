@@ -3,7 +3,8 @@
   "benchmark_ticker": "SPY",
   "execution": {
     "price": "next_open",
-    "slippage_bps": 5
+    "slippage_bps": 5,
+    "sent_ledger_path": "outputs/shadow_orders/orders_sent_TEST.csv"
   },
   "constraints": {
     "allow_fractional_shares": true,
