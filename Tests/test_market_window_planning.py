@@ -370,7 +370,7 @@ def test_normalize_and_filter_executable_trades_applies_rounding_and_min_notiona
     assert stats["kept"] == 1
 
 
-def test_apply_risk_guards_turnover_cap_scales_and_drops_dust_after_normalization():
+def test_apply_risk_guards_turnover_cap_scales_without_hard_stop_and_drops_dust():
     cfg = broker.PaperConfig(
         initial_equity=10000.0,
         benchmark_ticker="SPY",
@@ -397,13 +397,19 @@ def test_apply_risk_guards_turnover_cap_scales_and_drops_dust_after_normalizatio
     expected_scale = 3000.0 / 3400.0
     assert guarded.attrs["risk_meta"]["turnover_scaled"] is True
     assert guarded.attrs["risk_meta"]["turnover_scale"] == pytest.approx(expected_scale, rel=1e-6)
-    assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == pytest.approx(10.0 * expected_scale, rel=1e-6)
+
+    # Shares should be reduced by turnover scale, then rounded for executable orders.
+    assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == pytest.approx(10.0 * expected_scale, abs=1.0)
+    assert float(guarded.loc[guarded["ticker"] == "MSFT", "shares"].iloc[0]) == pytest.approx(5.0 * expected_scale, abs=1.0)
+
+    # Dust trade should be removed by min_trade_dollars after scaling + post-processing.
+    assert set(guarded["ticker"].tolist()) == {"AAPL", "MSFT"}
+    assert "TSLA" not in guarded["ticker"].tolist()
 
     normalized, stats = broker._normalize_and_filter_executable_trades(guarded, cfg)
     assert set(normalized["ticker"].tolist()) == {"AAPL", "MSFT"}
-    assert "TSLA" not in normalized["ticker"].tolist()
     assert stats["dropped_zero_shares"] == 0
-    assert stats["dropped_min_notional"] == 1
+    assert stats["dropped_min_notional"] == 0
 
 
 def test_run_paper_day_raises_on_signal_date_mismatch(monkeypatch):
