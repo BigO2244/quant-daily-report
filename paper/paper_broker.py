@@ -1007,6 +1007,14 @@ def run_paper_day(
     if not blocked:
         append_csv(trades_out, trades_path)
 
+    trade_plan = (
+        trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]]
+        .assign(quantity=lambda df: df["shares"])
+        .to_dict("records")
+        if trades is not None and not trades.empty
+        else []
+    )
+
     if not blocked:
         holdings_new, cash_new = apply_trades_to_holdings(
             holdings=holdings_prev,
@@ -1148,6 +1156,7 @@ def run_paper_day(
             if trades is not None and not trades.empty
             else []
         ),
+        "trade_plan": trade_plan,
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,

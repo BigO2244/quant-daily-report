@@ -254,11 +254,26 @@ def build_execution_email_payload(
     }
     orders = (paper_summary or {}).get("shadow_orders", []) or []
     execution_trades = (paper_summary or {}).get("execution_trades", []) or []
+    planned_trades = (paper_summary or {}).get("trade_plan", []) or []
     trades = []
     dropped_zero_shares = 0
 
     source_rows = []
-    if execution_trades:
+    if status == "PLANNED" and planned_trades:
+        for tr in planned_trades:
+            source_rows.append(
+                {
+                    "ticker": tr.get("ticker"),
+                    "side": str(tr.get("side", "")).upper(),
+                    "shares": tr.get("shares", tr.get("quantity")),
+                    "price": tr.get("price"),
+                    "reason": tr.get("reason"),
+                    "order_id": tr.get("order_id"),
+                    "notional": tr.get("notional"),
+                    "source": "trade_plan",
+                }
+            )
+    elif execution_trades:
         for tr in execution_trades:
             source_rows.append(
                 {
@@ -268,10 +283,11 @@ def build_execution_email_payload(
                     "price": tr.get("price"),
                     "reason": tr.get("reason"),
                     "order_id": tr.get("order_id"),
+                    "notional": tr.get("notional"),
                     "source": "execution_trades",
                 }
             )
-    else:
+    elif status == "READY":
         for order in orders:
             source_rows.append(
                 {
@@ -281,6 +297,7 @@ def build_execution_email_payload(
                     "price": None,
                     "reason": order.get("reason"),
                     "order_id": order.get("order_id"),
+                    "notional": order.get("notional"),
                     "source": "shadow_orders",
                 }
             )
@@ -396,7 +413,7 @@ def build_execution_email_payload(
     if status == "PLANNED":
         payload["planning_disclaimer"] = "Planning email only — no orders were sent."
         if str(pricing_source).upper() == "PREV_CLOSE":
-            payload["pricing_disclaimer"] = "Prices are estimated from prior close; final execution prices may differ."
+            payload["pricing_disclaimer"] = "Prices are estimated from prior close; actual execution may differ."
 
     return payload
 
