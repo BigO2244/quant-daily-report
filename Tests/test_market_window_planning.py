@@ -270,3 +270,100 @@ def test_build_rebalance_trades_non_fractional_drops_sub_share_delta_after_round
     )
 
     assert trades.empty
+
+
+def test_build_rebalance_trades_drops_below_min_trade_dollars():
+    holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}])
+    prices = pd.Series({"AAPL": 99.0})
+    cfg = broker.PaperConfig(
+        initial_equity=99.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=100.0,
+    )
+
+    trades, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=99.0,
+        starting_cash=99.0,
+        target_cash_weight=0.0,
+        cfg=cfg,
+    )
+
+    assert trades.empty
+
+
+def test_build_rebalance_trades_min_trade_dollars_is_configurable():
+    holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}])
+    prices = pd.Series({"AAPL": 99.0})
+
+    high_cfg = broker.PaperConfig(
+        initial_equity=99.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=100.0,
+    )
+    low_cfg = broker.PaperConfig(
+        initial_equity=99.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=90.0,
+    )
+
+    high_threshold_trades, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=99.0,
+        starting_cash=99.0,
+        target_cash_weight=0.0,
+        cfg=high_cfg,
+    )
+    low_threshold_trades, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=99.0,
+        starting_cash=99.0,
+        target_cash_weight=0.0,
+        cfg=low_cfg,
+    )
+
+    assert high_threshold_trades.empty
+    assert len(low_threshold_trades) == 1
+    assert low_threshold_trades.iloc[0]["notional"] == 99.0
+
+
+
+def test_normalize_and_filter_executable_trades_applies_rounding_and_min_notional():
+    trades = pd.DataFrame(
+        [
+            {"ticker": "AAPL", "side": "BUY", "shares": 0.8, "price": 200.0, "slippage_cost": 0.0, "notional": 160.0, "reason": "small"},
+            {"ticker": "MSFT", "side": "BUY", "shares": 1.2, "price": 90.0, "slippage_cost": 0.0, "notional": 108.0, "reason": "small_after_round"},
+            {"ticker": "NVDA", "side": "SELL", "shares": 2.9, "price": 60.0, "slippage_cost": 0.0, "notional": 174.0, "reason": "keep"},
+        ]
+    )
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=100.0,
+    )
+
+    out, stats = broker._normalize_and_filter_executable_trades(trades, cfg)
+
+    assert list(out["ticker"]) == ["NVDA"]
+    assert float(out.iloc[0]["shares"]) == 2.0
+    assert float(out.iloc[0]["notional"]) == 120.0
+    assert stats["raw"] == 3
+    assert stats["dropped_zero_shares"] == 1
+    assert stats["dropped_min_notional"] == 1
+    assert stats["kept"] == 1

@@ -62,7 +62,7 @@ def load_config(path: str) -> PaperConfig:
         benchmark_ticker=str(cfg["benchmark_ticker"]),
         slippage_bps=float(execution.get("slippage_bps", 0.0)),
         allow_fractional=bool(constraints.get("allow_fractional_shares", True)),
-        min_trade_dollars=float(constraints.get("min_trade_dollars", 5.0)),
+        min_trade_dollars=float(constraints.get("min_trade_dollars", 100.0)),
         cash_buffer_bps=float(constraints.get("cash_buffer_bps", 0.0)),
         trading_mode=trading_mode,
         portfolio_id=str(mode_cfg.get("portfolio_id", "main")),
@@ -694,6 +694,10 @@ def _build_shadow_orders(trades: pd.DataFrame, run_id: str) -> List[Dict[str, ob
     if trades is None or trades.empty:
         return orders
     for _, tr in trades.iterrows():
+        shares = abs(float(tr.get("shares", 0.0)))
+        notional = abs(float(tr.get("notional", 0.0)))
+        if shares < 1.0 or notional < 1.0:
+            continue
         ticker = str(tr["ticker"])
         side = str(tr["side"]).upper()
         order_id = f"{run_id}:{ticker}:{side}"
@@ -710,6 +714,68 @@ def _build_shadow_orders(trades: pd.DataFrame, run_id: str) -> List[Dict[str, ob
             }
         )
     return orders
+
+
+def _normalize_and_filter_executable_trades(
+    trades: pd.DataFrame,
+    cfg: PaperConfig,
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    cols = ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=cols), {
+            "raw": 0,
+            "rounded": 0,
+            "dropped_zero_shares": 0,
+            "dropped_min_notional": 0,
+            "kept": 0,
+        }
+
+    raw = int(len(trades))
+    rounded_rows: List[Dict[str, object]] = []
+    dropped_zero_shares = 0
+    dropped_min_notional = 0
+
+    for _, row in trades.iterrows():
+        rounded = row.to_dict()
+        shares = abs(float(rounded.get("shares", 0.0)))
+        price = float(rounded.get("price", 0.0))
+        rounded_shares = float(math.floor(shares))
+
+        if rounded_shares < 1.0:
+            dropped_zero_shares += 1
+            continue
+
+        notional = abs(rounded_shares * price)
+        if notional < float(cfg.min_trade_dollars):
+            dropped_min_notional += 1
+            continue
+
+        rounded["shares"] = rounded_shares
+        rounded["notional"] = float(notional)
+        rounded_rows.append(rounded)
+
+    out = pd.DataFrame(rounded_rows)
+    if out.empty:
+        out = pd.DataFrame(columns=cols)
+    else:
+        out = out.reindex(columns=cols)
+
+    stats = {
+        "raw": raw,
+        "rounded": raw,
+        "dropped_zero_shares": dropped_zero_shares,
+        "dropped_min_notional": dropped_min_notional,
+        "kept": int(len(out)),
+    }
+    logger.info(
+        "[EXECUTION_FILTER] raw=%d rounded=%d dropped_zero=%d dropped_min_notional=%d kept=%d",
+        stats["raw"],
+        stats["rounded"],
+        stats["dropped_zero_shares"],
+        stats["dropped_min_notional"],
+        stats["kept"],
+    )
+    return out, stats
 
 
 def _filter_idempotent_orders(orders: List[Dict[str, object]], sent_ledger_path: str) -> Tuple[List[Dict[str, object]], List[str]]:
@@ -1018,7 +1084,9 @@ def run_paper_day(
             blocked = True
             trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
 
-    trades_out = trades.copy() if trades is not None else pd.DataFrame()
+    executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(trades, cfg)
+
+    trades_out = executable_trades.copy()
     if trades_out.empty:
         trades_out = pd.DataFrame(columns=["date", "ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
     else:
@@ -1028,10 +1096,10 @@ def run_paper_day(
         append_csv(trades_out, trades_path)
 
     trade_plan = (
-        trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]]
+        executable_trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]]
         .assign(quantity=lambda df: df["shares"])
         .to_dict("records")
-        if trades is not None and not trades.empty
+        if executable_trades is not None and not executable_trades.empty
         else []
     )
 
@@ -1039,7 +1107,7 @@ def run_paper_day(
         holdings_new, cash_new = apply_trades_to_holdings(
             holdings=holdings_prev,
             targets=targets,
-            trades=trades,
+            trades=executable_trades,
             starting_cash=cash_prev,
         )
         m2m = mark_to_market(holdings_new, pricing_series)
@@ -1095,7 +1163,7 @@ def run_paper_day(
     sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
 
     if mode == "shadow" and mkt.is_open_now and not plan_only:
-        orders = _build_shadow_orders(trades, run_id)
+        orders = _build_shadow_orders(executable_trades, run_id)
         orders, idempotent_skips = _filter_idempotent_orders(orders, sent_ledger_path)
         _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
         shadow_orders_path = _write_shadow_orders(run_date, orders)
@@ -1159,6 +1227,7 @@ def run_paper_day(
         "num_trades": executed_trades,
         "turnover_notional": turnover,
         "benchmark": cfg.benchmark_ticker,
+        "min_trade_dollars": float(cfg.min_trade_dollars),
         "target_cash_weight": float(target_cash_weight),
         "achieved_cash_weight": float(achieved_cash_weight),
         "investable_dollars": float(investable_dollars),
@@ -1172,11 +1241,12 @@ def run_paper_day(
         "blocked_tickers": blocked_tickers,
         "execution_status": "HALTED" if blocked else ("PLANNED" if (plan_only or not mkt.is_open_now) else "READY"),
         "execution_trades": (
-            trades[["ticker", "side", "shares", "price", "notional", "reason"]].to_dict("records")
-            if trades is not None and not trades.empty
+            executable_trades[["ticker", "side", "shares", "price", "notional", "reason"]].to_dict("records")
+            if executable_trades is not None and not executable_trades.empty
             else []
         ),
         "trade_plan": trade_plan,
+        "execution_filter": execution_filter_stats,
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,

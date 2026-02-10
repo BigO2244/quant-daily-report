@@ -14,3 +14,22 @@ def test_execution_email_body_is_defined_and_formats_shadow_payload_status():
 
     assert subject == "TRADE EXECUTION — 2026-02-05 (SHADOW)"
     assert "• Execution Payload: NOT GENERATED (EXPECTED IN SHADOW)" in body
+
+
+
+def test_execution_email_no_trades_includes_min_trade_filter_reason_and_counts():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [],
+        "no_trades_reason": "No executable trades after rounding and $100 minimum trade filter",
+        "proposed_trades_intent": 3,
+        "executable_trades_count": 0,
+    }
+
+    _, body = build_execution_email_text(payload)
+
+    assert "No executable trades after rounding and $100 minimum trade filter" in body
+    assert "Proposed Trades (Intent): 3" in body
+    assert "Executable Trades: 0" in body
