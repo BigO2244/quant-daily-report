@@ -257,6 +257,11 @@ def build_execution_email_payload(
     planned_trades = (paper_summary or {}).get("trade_plan", []) or []
     execution_filter = (paper_summary or {}).get("execution_filter", {}) or {}
     min_trade_dollars = float((paper_summary or {}).get("min_trade_dollars", execution_filter.get("min_trade_dollars", 100.0)))
+    risk_meta = (paper_summary or {}).get("risk_meta", {}) or {}
+    turnover_scaled = bool(risk_meta.get("turnover_scaled", False))
+    turnover_scale = float(risk_meta.get("turnover_scale", 1.0))
+    turnover_requested = float(risk_meta.get("turnover_requested", 0.0))
+    turnover_cap = float(risk_meta.get("turnover_cap", 0.0))
     trades = []
     dropped_zero_shares = 0
     dropped_min_notional = 0
@@ -399,6 +404,12 @@ def build_execution_email_payload(
         "proposed_trades_intent": int((paper_summary or {}).get("execution_filter", {}).get("raw", len(source_rows))),
         "executable_trades_count": int(len(trades)),
         "min_trade_dollars": float(min_trade_dollars),
+        "risk_meta": {
+            "turnover_requested": turnover_requested,
+            "turnover_cap": turnover_cap,
+            "turnover_scaled": turnover_scaled,
+            "turnover_scale": turnover_scale,
+        },
     }
 
     if mode == "SHADOW" and not trades:
@@ -421,6 +432,17 @@ def build_execution_email_payload(
                 "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
                 "no_trades_reason": f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter",
             }
+        )
+        if turnover_scaled:
+            payload["no_trades_reason"] = (
+                f"Turnover cap scaling applied (requested ${turnover_requested:,.2f} vs cap ${turnover_cap:,.2f}, "
+                f"scale={turnover_scale:.4f}); no trades remained after rounding/minimum filters"
+            )
+
+    if turnover_scaled:
+        payload["turnover_note"] = (
+            f"Turnover cap applied: requested ${turnover_requested:,.2f}, "
+            f"cap ${turnover_cap:,.2f}, scale {turnover_scale:.4f}."
         )
 
     if status == "PLANNED":
