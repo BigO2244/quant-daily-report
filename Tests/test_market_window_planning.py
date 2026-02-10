@@ -2,6 +2,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pytest
 
 import daily_quant_report as dqr
 from paper.build_execution_email import build_execution_email_text
@@ -367,3 +368,77 @@ def test_normalize_and_filter_executable_trades_applies_rounding_and_min_notiona
     assert stats["dropped_zero_shares"] == 1
     assert stats["dropped_min_notional"] == 1
     assert stats["kept"] == 1
+
+
+def test_apply_risk_guards_turnover_cap_scales_and_drops_dust_after_normalization():
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=350.0,
+        max_turnover_pct=0.30,
+        max_position_change_pct=1.0,
+        risk_action="hard_stop",
+    )
+    trades = pd.DataFrame(
+        [
+            {"ticker": "AAPL", "side": "BUY", "shares": 10.0, "price": 200.0, "slippage_cost": 1.0, "notional": 2000.0, "reason": "rebalance"},
+            {"ticker": "MSFT", "side": "BUY", "shares": 5.0, "price": 200.0, "slippage_cost": 0.5, "notional": 1000.0, "reason": "rebalance"},
+            {"ticker": "TSLA", "side": "BUY", "shares": 4.0, "price": 100.0, "slippage_cost": 0.2, "notional": 400.0, "reason": "rebalance"},
+        ]
+    )
+
+    guarded, blocked, hard_stop = broker.apply_risk_guards(trades=trades, equity=10000.0, cfg=cfg)
+
+    assert hard_stop is False
+    assert blocked == []
+
+    expected_scale = 3000.0 / 3400.0
+    assert guarded.attrs["risk_meta"]["turnover_scaled"] is True
+    assert guarded.attrs["risk_meta"]["turnover_scale"] == pytest.approx(expected_scale, rel=1e-6)
+    assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == pytest.approx(10.0 * expected_scale, rel=1e-6)
+
+    normalized, stats = broker._normalize_and_filter_executable_trades(guarded, cfg)
+    assert set(normalized["ticker"].tolist()) == {"AAPL", "MSFT"}
+    assert "TSLA" not in normalized["ticker"].tolist()
+    assert stats["dropped_zero_shares"] == 0
+    assert stats["dropped_min_notional"] == 1
+
+
+def test_run_paper_day_raises_on_signal_date_mismatch(monkeypatch):
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=True,
+        min_trade_dollars=1.0,
+        trading_mode="shadow",
+    )
+    monkeypatch.setattr(broker, "load_config", lambda path: cfg)
+    monkeypatch.setattr(
+        broker,
+        "read_latest_holdings_from_ledger",
+        lambda path: (pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 10000.0, 10000.0, ""),
+    )
+    monkeypatch.setattr(
+        broker,
+        "load_targets",
+        lambda *args, **kwargs: (
+            pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}]),
+            0.0,
+            "2026-02-09",
+            "2026-02-09",
+        ),
+    )
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    with pytest.raises(RuntimeError, match="\\[HALT\\] signal_date_mismatch"):
+        broker.run_paper_day(
+            run_date="2026-02-10",
+            signals_path="signals/2026-02-10.json",
+            ledger_path="paper/ledger.csv",
+            trades_path="paper/trades.csv",
+            config_path="paper/config_paper.json",
+            now_et=now_et,
+        )

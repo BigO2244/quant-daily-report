@@ -570,21 +570,28 @@ def apply_risk_guards(
 
     max_turnover_notional = equity * cfg.max_turnover_pct
     current_turnover = float(out["notional"].sum())
+    risk_meta = {
+        "turnover_requested": float(current_turnover),
+        "turnover_cap": float(max_turnover_notional),
+        "turnover_scaled": False,
+        "turnover_scale": 1.0,
+    }
     if current_turnover > max_turnover_notional + 1e-9:
-        msg = f"max_turnover_pct exceeded ({current_turnover:.2f} > {max_turnover_notional:.2f})"
-        if cfg.risk_action == "hard_stop":
-            return pd.DataFrame(columns=trades.columns), [msg], True
-        out = out.sort_values("notional", ascending=False).copy()
-        running = 0.0
-        kept_rows = []
-        for _, row in out.iterrows():
-            n = float(row["notional"])
-            if running + n <= max_turnover_notional + 1e-9:
-                kept_rows.append(row.to_dict())
-                running += n
-            else:
-                blocked.append(f"{msg}; clipped ticker={row['ticker']}")
-        out = pd.DataFrame(kept_rows, columns=trades.columns)
+        scale = max_turnover_notional / current_turnover if current_turnover > 0 else 0.0
+        scale = max(0.0, min(1.0, float(scale)))
+        logger.warning(
+            "[RISK] turnover cap hit; scaling orders (requested=%.2f cap=%.2f scale=%.4f)",
+            current_turnover,
+            max_turnover_notional,
+            scale,
+        )
+        out["shares"] = out["shares"].astype(float) * scale
+        if "notional" in out.columns:
+            out["notional"] = out["notional"].astype(float) * scale
+        if "slippage_cost" in out.columns:
+            out["slippage_cost"] = out["slippage_cost"].astype(float) * scale
+        risk_meta["turnover_scaled"] = True
+        risk_meta["turnover_scale"] = float(scale)
 
     if len(out) > cfg.max_trades_per_day:
         msg = f"max_trades_per_day exceeded ({len(out)} > {cfg.max_trades_per_day})"
@@ -620,6 +627,7 @@ def apply_risk_guards(
         if clipped_any:
             out = pd.DataFrame(clipped_rows, columns=trades.columns)
 
+    out.attrs["risk_meta"] = risk_meta
     return out, blocked, hard_stop
 
 
@@ -1071,8 +1079,15 @@ def run_paper_day(
         float(equity_prev),
     )
 
+    risk_meta = {
+        "turnover_requested": float(trades["notional"].sum()) if trades is not None and not trades.empty else 0.0,
+        "turnover_cap": float(equity_prev * cfg.max_turnover_pct),
+        "turnover_scaled": False,
+        "turnover_scale": 1.0,
+    }
     if not blocked:
         trades, risk_blocked, hard_stop = apply_risk_guards(trades, equity_prev, cfg)
+        risk_meta.update((trades.attrs or {}).get("risk_meta", {}))
         blocked_reasons.extend(risk_blocked)
         if hard_stop:
             logger.error("[HALT] risk guard hard stop: %s", "; ".join(risk_blocked))
@@ -1247,6 +1262,7 @@ def run_paper_day(
         ),
         "trade_plan": trade_plan,
         "execution_filter": execution_filter_stats,
+        "risk_meta": risk_meta,
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,
