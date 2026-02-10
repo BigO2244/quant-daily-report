@@ -25,11 +25,34 @@ def _fmt_est_notional(value: Any) -> str:
         return "n/a"
 
 
+def _fmt_planned_for(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    raw = raw.replace("T", " ")
+    if raw.endswith("-05:00") or raw.endswith("-04:00"):
+        raw = raw[:-6]
+    try:
+        parsed = dt.datetime.fromisoformat(str(value))
+        return parsed.strftime("%Y-%m-%d %H:%M ET")
+    except Exception:
+        pass
+    try:
+        parsed = dt.datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+        return parsed.strftime("%Y-%m-%d %H:%M ET")
+    except Exception:
+        return raw
+
+
 def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     trade_date = str(payload.get("trade_date", dt.date.today().isoformat()))
     mode = str(payload.get("mode", "SHADOW")).upper()
     status = str(payload.get("execution_status", "READY")).upper()
     reason = payload.get("halt_reason")
+    planned_for = payload.get("planned_for")
+    plan_only = bool(payload.get("plan_only", False))
+    market_status = str(payload.get("market_status", "")).upper()
+    planning_disclaimer = payload.get("planning_disclaimer")
 
     subject = f"TRADE EXECUTION — {trade_date} ({mode})"
 
@@ -42,8 +65,20 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         suffix = f" — {reason}" if reason else ""
         lines.append(f"Execution Status: HALTED{suffix}")
         return subject, "\n".join(lines)
-
-    lines.append("Execution Status: READY")
+    if status == "PLANNED":
+        if plan_only and market_status == "OPEN":
+            lines.append("Execution Status: PLANNED — PLAN ONLY")
+        else:
+            lines.append("Execution Status: PLANNED — MARKET CLOSED (NEXT OPEN)")
+        if planned_for:
+            lines.append(f"Planned For: {_fmt_planned_for(planned_for)}")
+        lines.append(str(planning_disclaimer or "Planning email only — no orders were sent."))
+    else:
+        lines.append("Execution Status: READY")
+        if plan_only and planned_for:
+            lines.append(f"Planned For: {_fmt_planned_for(planned_for)}")
+        if plan_only:
+            lines.append("Planning email only — no orders were sent.")
 
     raw_blocked_tickers = payload.get("blocked_tickers", {}) or {}
     blocked_ticker_lines: list[str] = []

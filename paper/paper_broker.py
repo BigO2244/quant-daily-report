@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -775,7 +776,7 @@ def _broker_reconciliation(
 def _current_et(now_utc: dt.datetime | None = None) -> dt.datetime:
     if now_utc is None:
         now_utc = dt.datetime.now(dt.timezone.utc)
-    return now_utc.astimezone(dt.timezone(dt.timedelta(hours=-5)))
+    return now_utc.astimezone(ZoneInfo("America/New_York"))
 
 
 def run_paper_day(
@@ -787,6 +788,7 @@ def run_paper_day(
     force: bool = False,
     now_et: dt.datetime | None = None,
     constraints: Dict[str, float] | None = None,
+    plan_only: bool = False,
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
@@ -809,8 +811,23 @@ def run_paper_day(
 
     if now_et is None:
         now_et = _current_et()
+    elif now_et.tzinfo is None:
+        raise ValueError("now_et must be timezone-aware")
+
+    now_et = now_et.astimezone(ZoneInfo("America/New_York"))
+    plan_only = bool(plan_only or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"})
 
     mkt = market_session_status(run_date=run_date, now_et=now_et, cutoff_time_et=cfg.market_cutoff_time_et)
+    logger.info(
+        "[MARKET_GUARD] now_et=%s trade_date=%s calendar=%s is_trading_session=%s session_open_et=%s session_close_et=%s next_open_et=%s",
+        now_et.isoformat(),
+        run_date,
+        mkt.calendar_name,
+        mkt.is_trading_day,
+        mkt.session_open_et.isoformat() if mkt.session_open_et else "n/a",
+        mkt.session_close_et.isoformat() if mkt.session_close_et else "n/a",
+        mkt.next_open_et.isoformat() if mkt.next_open_et else "n/a",
+    )
 
     runtime_constraints = constraints or {}
     cash_target_weight_default = float(
@@ -911,8 +928,9 @@ def run_paper_day(
             raise RuntimeError("After dropping missing-priced/blocked tickers, no targets remain.")
         targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
-    if mode == "shadow" and not mkt.is_open_now:
-        logger.info("NO TRADES — MARKET CLOSED (%s)", mkt.reason)
+    should_halt_market_closed = (mode == "paper" and (not plan_only) and (not mkt.is_open_now))
+    if should_halt_market_closed:
+        logger.info("HALT — MARKET CLOSED (%s)", mkt.reason)
         blocked = True
         blocked_reasons.append(f"market_guard:{mkt.reason}")
         logger.info(
@@ -1034,7 +1052,7 @@ def run_paper_day(
     orders: List[Dict[str, object]] = []
     sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
 
-    if mode == "shadow":
+    if mode == "shadow" and mkt.is_open_now and not plan_only:
         orders = _build_shadow_orders(trades, run_id)
         orders, idempotent_skips = _filter_idempotent_orders(orders, sent_ledger_path)
         _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
@@ -1089,6 +1107,8 @@ def run_paper_day(
         "trading_mode": mode,
         "market_status": "OPEN" if mkt.is_open_now else "CLOSED",
         "market_reason": mkt.reason,
+        "planned_for": mkt.next_open_et.isoformat() if mkt.next_open_et else None,
+        "plan_only": plan_only,
         "total_equity": total_equity,
         "sizing_equity": float(equity_prev),
         "cash": cash_new,
@@ -1106,7 +1126,7 @@ def run_paper_day(
         "position_reconciliation": position_recon,
         "blocked_reasons": blocked_reasons,
         "blocked_tickers": blocked_tickers,
-        "execution_status": "HALTED" if blocked else "READY",
+        "execution_status": "HALTED" if blocked else ("PLANNED" if (plan_only or not mkt.is_open_now) else "READY"),
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,

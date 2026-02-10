@@ -226,10 +226,18 @@ def build_execution_email_payload(
 
     halted_reason = None
     status = "READY"
+    planned_for = (paper_summary or {}).get("planned_for")
+    plan_only = bool((paper_summary or {}).get("plan_only", False))
     if paper_summary:
-        if str(paper_summary.get("market_status", "")).upper() != "OPEN":
-            status = "HALTED"
-            halted_reason = "MARKET CLOSED"
+        market_open = str(paper_summary.get("market_status", "")).upper() == "OPEN"
+        if not market_open:
+            if mode == "SHADOW" or plan_only:
+                status = "PLANNED"
+            else:
+                status = "HALTED"
+                halted_reason = "MARKET CLOSED"
+        if plan_only:
+            status = "PLANNED"
         blocked = paper_summary.get("blocked_reasons", []) or []
         if any("stale_prices" in str(r) for r in blocked):
             status = "HALTED"
@@ -314,6 +322,10 @@ def build_execution_email_payload(
         "mode": mode,
         "execution_status": status,
         "halt_reason": halted_reason,
+        "market_status": (paper_summary or {}).get("market_status"),
+        "market_reason": (paper_summary or {}).get("market_reason"),
+        "planned_for": planned_for,
+        "plan_only": plan_only,
         "trades": trades,
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
@@ -345,6 +357,9 @@ def build_execution_email_payload(
                 "no_trades_reason": "No executable trades after validation/constraints",
             }
         )
+
+    if status == "PLANNED":
+        payload["planning_disclaimer"] = "Planning email only — no orders were sent."
 
     return payload
 
@@ -2196,6 +2211,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution",
     )
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Generate planning artifacts only; skip order generation even when market is open.",
+    )
     return parser.parse_args(argv)
 
 
@@ -2496,6 +2516,7 @@ def main(argv: list[str] | None = None):
                 config_path="paper/config_paper.json",
                 force=False,
                 constraints=shadow_constraints,
+                plan_only=args.plan_only,
             )
             logger.info(
                 "[PAPER] Executed paper trading for %s using signals %s",
