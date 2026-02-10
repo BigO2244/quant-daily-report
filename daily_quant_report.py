@@ -253,14 +253,44 @@ def build_execution_email_payload(
         if h.get("ticker")
     }
     orders = (paper_summary or {}).get("shadow_orders", []) or []
+    execution_trades = (paper_summary or {}).get("execution_trades", []) or []
     trades = []
     dropped_zero_shares = 0
-    for order in orders:
-        ticker = order.get("ticker")
-        side = str(order.get("side", "")).upper()
+
+    source_rows = []
+    if execution_trades:
+        for tr in execution_trades:
+            source_rows.append(
+                {
+                    "ticker": tr.get("ticker"),
+                    "side": str(tr.get("side", "")).upper(),
+                    "shares": tr.get("shares"),
+                    "price": tr.get("price"),
+                    "reason": tr.get("reason"),
+                    "order_id": tr.get("order_id"),
+                    "source": "execution_trades",
+                }
+            )
+    else:
+        for order in orders:
+            source_rows.append(
+                {
+                    "ticker": order.get("ticker"),
+                    "side": str(order.get("side", "")).upper(),
+                    "shares": order.get("quantity"),
+                    "price": None,
+                    "reason": order.get("reason"),
+                    "order_id": order.get("order_id"),
+                    "source": "shadow_orders",
+                }
+            )
+
+    for row in source_rows:
+        ticker = row.get("ticker")
+        side = str(row.get("side", "")).upper()
         risk = risk_map.get(ticker, {})
 
-        shares = _coerce_whole_shares(order.get("quantity"))
+        shares = _coerce_whole_shares(row.get("shares"))
         if side in {"SELL", "CLOSE", "REDUCE"}:
             available = holdings_shares.get(str(ticker))
             if available is not None:
@@ -282,13 +312,13 @@ def build_execution_email_payload(
                 "ticker": ticker,
                 "side": side,
                 "shares": shares,
-                "entry_price": entry_price,
+                "entry_price": entry_price if entry_price is not None else row.get("price"),
                 "stop_loss": risk.get("stop_loss"),
                 "take_profit": risk.get("take_profit"),
-                "notional": notional,
-                "reason": order.get("reason"),
-                "notes": order.get("reason"),
-                "order_id": order.get("order_id"),
+                "notional": notional if notional is not None else row.get("notional"),
+                "reason": row.get("reason"),
+                "notes": row.get("reason"),
+                "order_id": row.get("order_id"),
             }
         )
 
@@ -317,6 +347,9 @@ def build_execution_email_payload(
             blocked_tickers.append(f"{ticker} (missing_open_prices)")
     blocked_tickers = sorted(set(blocked_tickers))
 
+    pricing_source = (paper_summary or {}).get("pricing_source") or ("PREV_CLOSE" if status == "PLANNED" else "OPEN")
+    pricing_asof = (paper_summary or {}).get("pricing_asof") or trade_date
+
     payload = {
         "trade_date": trade_date,
         "mode": mode,
@@ -326,6 +359,8 @@ def build_execution_email_payload(
         "market_reason": (paper_summary or {}).get("market_reason"),
         "planned_for": planned_for,
         "plan_only": plan_only,
+        "pricing_source": pricing_source,
+        "pricing_asof": pricing_asof,
         "trades": trades,
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
@@ -360,6 +395,8 @@ def build_execution_email_payload(
 
     if status == "PLANNED":
         payload["planning_disclaimer"] = "Planning email only — no orders were sent."
+        if str(pricing_source).upper() == "PREV_CLOSE":
+            payload["pricing_disclaimer"] = "Prices are estimated from prior close; final execution prices may differ."
 
     return payload
 

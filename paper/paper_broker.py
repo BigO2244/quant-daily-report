@@ -301,6 +301,7 @@ def validate_open_window(
     prev_closes: pd.Series,
     weights: pd.DataFrame,
     signals_path: str,
+    planning_mode: bool = False,
 ) -> tuple[bool, list[str], dict]:
     cutoff_date = prev_trading_day(trade_date)
     global_reasons: list[str] = []
@@ -339,7 +340,7 @@ def validate_open_window(
     missing_prev_closes: List[str] = []
     for ticker in required_tickers:
         ticker_reasons: List[str] = []
-        if ticker not in prices_open.index or not pd.notna(prices_open.get(ticker)):
+        if (not planning_mode) and (ticker not in prices_open.index or not pd.notna(prices_open.get(ticker))):
             missing_opens.append(ticker)
             ticker_reasons.append("missing_open_prices")
         if ticker not in prev_closes.index or not pd.notna(prev_closes.get(ticker)):
@@ -841,33 +842,45 @@ def run_paper_day(
     if snapshot_date and snapshot_date != run_date:
         raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")
 
+    planning_mode = bool(plan_only or (not mkt.is_open_now))
+
     blocked = False
     blocked_reasons: List[str] = []
 
     prices_open = pd.Series(dtype=float)
     prev_closes = pd.Series(dtype=float)
+    pricing_source = "OPEN"
+    pricing_asof = run_date
+    pricing_series = pd.Series(dtype=float)
     tickers = sorted(set(targets["ticker"].tolist() + [cfg.benchmark_ticker]))
     if not holdings_prev.empty:
         tickers = sorted(set(tickers + holdings_prev["ticker"].tolist()))
 
-    prices_df = fetch_open_prices_yfinance(tickers, run_date=run_date)
-    stale_rows = prices_df[prices_df["price_date"].astype(str) < run_date]
-    if not stale_rows.empty:
-        last_px_date = str(stale_rows["price_date"].min())
-        raise RuntimeError(f"[HALT] stale_prices detected (last_price_date={last_px_date})")
-    prices_open = prices_df.set_index("ticker")["open"].astype(float)
-    if cfg.require_benchmark_price and cfg.benchmark_ticker not in prices_open.index:
-        raise RuntimeError(f"[HALT] benchmark_missing ticker={cfg.benchmark_ticker}")
+    if not planning_mode:
+        prices_df = fetch_open_prices_yfinance(tickers, run_date=run_date)
+        stale_rows = prices_df[prices_df["price_date"].astype(str) < run_date]
+        if not stale_rows.empty:
+            last_px_date = str(stale_rows["price_date"].min())
+            raise RuntimeError(f"[HALT] stale_prices detected (last_price_date={last_px_date})")
+        prices_open = prices_df.set_index("ticker")["open"].astype(float)
+        if cfg.require_benchmark_price and cfg.benchmark_ticker not in prices_open.index:
+            raise RuntimeError(f"[HALT] benchmark_missing ticker={cfg.benchmark_ticker}")
 
-    prev_close_df = fetch_prev_closes_yfinance(
-        sorted(targets["ticker"].astype(str).unique().tolist()),
-        asof_date=prev_trading_day(run_date),
-    )
+    prev_close_asof = prev_trading_day(run_date)
+    prev_close_df = fetch_prev_closes_yfinance(tickers, asof_date=prev_close_asof)
     prev_closes = (
         prev_close_df.set_index("ticker")["prev_close"].astype(float)
         if not prev_close_df.empty
         else pd.Series(dtype=float)
     )
+    if planning_mode:
+        pricing_source = "PREV_CLOSE"
+        pricing_series = prev_closes
+        pricing_asof = str(prev_close_df["price_date"].max()) if not prev_close_df.empty else prev_close_asof
+    else:
+        pricing_source = "OPEN"
+        pricing_series = prices_open
+        pricing_asof = run_date
 
     validation_ok, validation_reasons, validation_details = validate_open_window(
         trade_date=run_date,
@@ -876,6 +889,7 @@ def run_paper_day(
         prev_closes=prev_closes,
         weights=targets,
         signals_path=signals_path,
+        planning_mode=planning_mode,
     )
     blocked_tickers = {
         str(ticker): list(reasons)
@@ -919,7 +933,7 @@ def run_paper_day(
 
     investable_weight = max(0.0, 1.0 - target_cash_weight)
     if not blocked:
-        priced = set(prices_open.index.tolist())
+        priced = set(pricing_series.index.tolist())
         targets = targets[targets["ticker"].isin(priced)].copy()
         if blocked_tickers:
             targets = targets[~targets["ticker"].astype(str).isin(set(blocked_tickers.keys()))].copy()
@@ -928,7 +942,7 @@ def run_paper_day(
             raise RuntimeError("After dropping missing-priced/blocked tickers, no targets remain.")
         targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
-    should_halt_market_closed = (mode == "paper" and (not plan_only) and (not mkt.is_open_now))
+    should_halt_market_closed = False
     if should_halt_market_closed:
         logger.info("HALT — MARKET CLOSED (%s)", mkt.reason)
         blocked = True
@@ -955,7 +969,7 @@ def run_paper_day(
         trades, trade_meta = build_rebalance_trades(
             holdings=holdings_prev,
             targets=targets,
-            prices=prices_open,
+            prices=pricing_series,
             total_equity=equity_prev,
             starting_cash=cash_prev,
             target_cash_weight=target_cash_weight,
@@ -1000,7 +1014,7 @@ def run_paper_day(
             trades=trades,
             starting_cash=cash_prev,
         )
-        m2m = mark_to_market(holdings_new, prices_open)
+        m2m = mark_to_market(holdings_new, pricing_series)
         total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
         total_equity = float(cash_new + total_mv)
         achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
@@ -1109,6 +1123,8 @@ def run_paper_day(
         "market_reason": mkt.reason,
         "planned_for": mkt.next_open_et.isoformat() if mkt.next_open_et else None,
         "plan_only": plan_only,
+        "pricing_source": pricing_source,
+        "pricing_asof": pricing_asof,
         "total_equity": total_equity,
         "sizing_equity": float(equity_prev),
         "cash": cash_new,
@@ -1127,6 +1143,11 @@ def run_paper_day(
         "blocked_reasons": blocked_reasons,
         "blocked_tickers": blocked_tickers,
         "execution_status": "HALTED" if blocked else ("PLANNED" if (plan_only or not mkt.is_open_now) else "READY"),
+        "execution_trades": (
+            trades[["ticker", "side", "shares", "price", "notional", "reason"]].to_dict("records")
+            if trades is not None and not trades.empty
+            else []
+        ),
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,
