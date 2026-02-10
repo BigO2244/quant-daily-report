@@ -99,26 +99,26 @@ def _mock_open_market(monkeypatch):
             },
         ),
     )
-    monkeypatch.setattr(
-        broker,
-        "build_rebalance_trades",
-        lambda **kwargs: (
+    def _mock_build_rebalance_trades(**kwargs):
+        px = float(kwargs["prices"].get("AAPL"))
+        return (
             pd.DataFrame(
                 [
                     {
                         "ticker": "AAPL",
                         "side": "BUY",
                         "shares": 10,
-                        "price": 100.0,
+                        "price": px,
                         "slippage_cost": 0.0,
-                        "notional": 1000.0,
+                        "notional": px * 10,
                         "reason": "Rebalance",
                     }
                 ]
             ),
             {"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
-        ),
-    )
+        )
+
+    monkeypatch.setattr(broker, "build_rebalance_trades", _mock_build_rebalance_trades)
     monkeypatch.setattr(broker, "apply_risk_guards", lambda trades, equity_prev, cfg: (trades, [], False))
     monkeypatch.setattr(broker, "append_csv", lambda *args, **kwargs: None)
     monkeypatch.setattr(
@@ -158,6 +158,35 @@ def test_shadow_market_open_not_halted(monkeypatch):
     assert result["market_status"] == "OPEN"
 
 
+
+def test_shadow_market_closed_uses_prev_close_and_renders_trades(monkeypatch):
+    _mock_open_market(monkeypatch)
+
+    now_et = dt.datetime(2026, 2, 10, 8, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+    )
+
+    assert result["execution_status"] == "PLANNED"
+    assert result["pricing_source"] == "PREV_CLOSE"
+    assert result["shadow_orders"] == []
+
+    payload = dqr.build_execution_email_payload(
+        trade_date="2026-02-10",
+        daily_snapshot={"risk_levels": [], "holdings": []},
+        paper_summary=result,
+    )
+    _, body = build_execution_email_text(payload)
+    assert "Pricing Source: PREV_CLOSE" in body
+    assert "Pricing As-Of: 2026-02-09" in body
+    assert "AAPL | BUY | 10" in body
+
+
 def test_plan_only_open_generates_plan_without_orders(monkeypatch):
     _mock_open_market(monkeypatch)
 
@@ -174,6 +203,7 @@ def test_plan_only_open_generates_plan_without_orders(monkeypatch):
 
     assert result["plan_only"] is True
     assert result["execution_status"] == "PLANNED"
+    assert result["pricing_source"] == "PREV_CLOSE"
     assert result["shadow_orders"] == []
 
     payload = dqr.build_execution_email_payload(
@@ -184,4 +214,6 @@ def test_plan_only_open_generates_plan_without_orders(monkeypatch):
     _, body = build_execution_email_text(payload)
     assert "Planning email only — no orders were sent." in body
     assert "Execution Status: PLANNED — PLAN ONLY" in body
+    assert "Pricing Source: PREV_CLOSE" in body
+    assert "AAPL | BUY | 10" in body
     assert "MARKET CLOSED" not in body

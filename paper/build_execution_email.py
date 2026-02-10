@@ -53,6 +53,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     plan_only = bool(payload.get("plan_only", False))
     market_status = str(payload.get("market_status", "")).upper()
     planning_disclaimer = payload.get("planning_disclaimer")
+    pricing_source = str(payload.get("pricing_source", "OPEN")).upper()
+    pricing_asof = str(payload.get("pricing_asof", "") or "")
+    pricing_disclaimer = payload.get("pricing_disclaimer")
 
     subject = f"TRADE EXECUTION — {trade_date} ({mode})"
 
@@ -65,6 +68,11 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         suffix = f" — {reason}" if reason else ""
         lines.append(f"Execution Status: HALTED{suffix}")
         return subject, "\n".join(lines)
+
+    lines.append(f"Pricing Source: {pricing_source}")
+    if pricing_asof:
+        lines.append(f"Pricing As-Of: {pricing_asof}")
+
     if status == "PLANNED":
         if plan_only and market_status == "OPEN":
             lines.append("Execution Status: PLANNED — PLAN ONLY")
@@ -73,6 +81,8 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         if planned_for:
             lines.append(f"Planned For: {_fmt_planned_for(planned_for)}")
         lines.append(str(planning_disclaimer or "Planning email only — no orders were sent."))
+        if pricing_disclaimer:
+            lines.append(str(pricing_disclaimer))
     else:
         lines.append("Execution Status: READY")
         if plan_only and planned_for:
