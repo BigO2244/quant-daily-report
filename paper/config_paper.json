@@ -7,7 +7,7 @@
   },
   "constraints": {
     "allow_fractional_shares": true,
-    "min_trade_dollars": 5.0,
+    "min_trade_dollars": 100.0,
     "cash_buffer_bps": 10.0
   },
   "mode": {

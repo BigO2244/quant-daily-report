@@ -255,8 +255,11 @@ def build_execution_email_payload(
     orders = (paper_summary or {}).get("shadow_orders", []) or []
     execution_trades = (paper_summary or {}).get("execution_trades", []) or []
     planned_trades = (paper_summary or {}).get("trade_plan", []) or []
+    execution_filter = (paper_summary or {}).get("execution_filter", {}) or {}
+    min_trade_dollars = float((paper_summary or {}).get("min_trade_dollars", execution_filter.get("min_trade_dollars", 100.0)))
     trades = []
     dropped_zero_shares = 0
+    dropped_min_notional = 0
 
     source_rows = []
     if status == "PLANNED" and planned_trades:
@@ -321,8 +324,14 @@ def build_execution_email_payload(
         try:
             if entry_price is not None:
                 notional = shares * float(entry_price)
+            elif row.get("notional") is not None:
+                notional = abs(float(row.get("notional")))
         except Exception:
             notional = None
+
+        if notional is not None and abs(float(notional)) < float(min_trade_dollars):
+            dropped_min_notional += 1
+            continue
 
         trades.append(
             {
@@ -340,8 +349,9 @@ def build_execution_email_payload(
         )
 
     logger.info(
-        "[EXECUTION_EMAIL] rounded_to_whole_shares dropped_zero_shares=%d",
+        "[EXECUTION_EMAIL] rounded_to_whole_shares dropped_zero_shares=%d dropped_min_notional=%d",
         dropped_zero_shares,
+        dropped_min_notional,
     )
     trades = sorted(trades, key=lambda x: (x.get("ticker") or "", x.get("side") or ""))
     order_ids = sorted(
@@ -386,6 +396,9 @@ def build_execution_email_payload(
         "equity": float((paper_summary or {}).get("sizing_equity", (paper_summary or {}).get("total_equity", 0.0))),
         "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
         "blocked_tickers": blocked_tickers,
+        "proposed_trades_intent": int((paper_summary or {}).get("execution_filter", {}).get("raw", len(source_rows))),
+        "executable_trades_count": int(len(trades)),
+        "min_trade_dollars": float(min_trade_dollars),
     }
 
     if mode == "SHADOW" and not trades:
@@ -406,7 +419,7 @@ def build_execution_email_payload(
                 "signals_status": "VALID",
                 "constraints_status": "ENFORCED",
                 "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
-                "no_trades_reason": "No executable trades after validation/constraints",
+                "no_trades_reason": f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter",
             }
         )
 
