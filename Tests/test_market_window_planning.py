@@ -217,3 +217,56 @@ def test_plan_only_open_generates_plan_without_orders(monkeypatch):
     assert "Pricing Source: PREV_CLOSE" in body
     assert "AAPL | BUY | 10" in body
     assert "MARKET CLOSED" not in body
+
+
+def test_build_rebalance_trades_non_fractional_sell_rounds_toward_zero():
+    holdings = pd.DataFrame([{"ticker": "AAPL", "sleeve": "core", "shares": 10.0}])
+    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 0.55, "sleeve": "core"}])
+    prices = pd.Series({"AAPL": 100.0})
+    cfg = broker.PaperConfig(
+        initial_equity=1000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=1.0,
+    )
+
+    trades, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=1000.0,
+        starting_cash=0.0,
+        target_cash_weight=0.0,
+        cfg=cfg,
+    )
+
+    assert len(trades) == 1
+    assert trades.iloc[0]["side"] == "SELL"
+    assert trades.iloc[0]["shares"] == 5.0
+    assert trades.iloc[0]["notional"] == 500.0
+
+
+def test_build_rebalance_trades_non_fractional_drops_sub_share_delta_after_rounding():
+    holdings = pd.DataFrame([{"ticker": "AAPL", "sleeve": "core", "shares": 0.2}])
+    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 0.11, "sleeve": "core"}])
+    prices = pd.Series({"AAPL": 100.0})
+    cfg = broker.PaperConfig(
+        initial_equity=1000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=1.0,
+    )
+
+    trades, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=1000.0,
+        starting_cash=1000.0,
+        target_cash_weight=0.0,
+        cfg=cfg,
+    )
+
+    assert trades.empty
