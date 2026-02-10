@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import os
 import tempfile
 from dataclasses import dataclass
@@ -398,6 +399,13 @@ def build_rebalance_trades(
     target_cash_weight: float,
     cfg: PaperConfig,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    def _round_toward_zero(shares: float) -> float:
+        if shares > 0:
+            return float(math.floor(shares))
+        if shares < 0:
+            return float(math.ceil(shares))
+        return 0.0
+
     h = holdings.set_index("ticker")["shares"].to_dict()
 
     targets = targets.copy().sort_values(["target_weight", "ticker"], ascending=[False, True])
@@ -420,17 +428,22 @@ def build_rebalance_trades(
 
         target_shares = row["target_dollars"] / px
         if not cfg.allow_fractional:
-            target_shares = int(target_shares)
+            target_shares = _round_toward_zero(float(target_shares))
 
         current_shares = float(h.get(tkr, 0.0))
-        delta = target_shares - current_shares
-        trade_notional = abs(delta) * px
+        raw_delta = float(target_shares) - current_shares
+        delta = raw_delta if cfg.allow_fractional else _round_toward_zero(raw_delta)
 
-        if trade_notional < cfg.min_trade_dollars or abs(delta) < 1e-12:
+        if abs(delta) < 1e-12:
+            continue
+        if not cfg.allow_fractional and abs(delta) < 1.0:
             continue
 
         side = "BUY" if delta > 0 else "SELL"
         slipped_px, slip_cost_per_share = apply_slippage(px, side, cfg.slippage_bps)
+        trade_notional = abs(delta) * slipped_px
+        if trade_notional < cfg.min_trade_dollars:
+            continue
 
         if side == "SELL":
             trades.append(
@@ -502,8 +515,15 @@ def build_rebalance_trades(
         else:
             max_affordable = max(0.0, int(cash_remaining // px))
         exec_shares = min(desired, max_affordable)
+        if not cfg.allow_fractional:
+            exec_shares = _round_toward_zero(float(exec_shares))
 
         if exec_shares <= 1e-12:
+            if desired > 1e-12:
+                scaled_tickers.append(tkr)
+            continue
+
+        if not cfg.allow_fractional and exec_shares < 1.0:
             if desired > 1e-12:
                 scaled_tickers.append(tkr)
             continue
