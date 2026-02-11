@@ -24,20 +24,40 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Validate required SMTP/reporting secrets
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
+        run: |
+          missing=()
+          for var in SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD REPORT_TO_EMAIL; do
+            if [ -z "${!var}" ]; then
+              missing+=("$var")
+            fi
+          done
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required GitHub Actions secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: pytest -q
+
       - name: Run daily quant report (paper mode)
         env:
           PAPER_TRADING: "1"
           DATE_FORMAT: "US"
           DISPLAY_DECIMALS: "2"
 
-          # Disable SMTP in GitHub
-          SMTP_HOST: "smtp.gmail.com"
-          SMTP_PORT: "587"
-          SMTP_USER: ${{ secrets.EMAIL_SENDER }}
-          SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
-          REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
-
-
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
         run: |
           python daily_quant_report.py
 

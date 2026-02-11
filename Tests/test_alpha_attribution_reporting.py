@@ -1,5 +1,6 @@
 import pandas as pd
 
+from daily_quant_report import create_snapshot_email
 from paper.alpha import compute_alpha_attribution
 
 
@@ -32,4 +33,23 @@ def test_alpha_attribution_insufficient_overlap_returns_explicit_reason():
     result = compute_alpha_attribution(port_eq, spy_px, min_overlap_days=5)
 
     assert result["ok"] is False
-    assert result["reason"] == "Need >=5 overlapping days; have 1."
+    assert result["reason"] == "Need >=5 overlapping days; have 1 (2026-01-04 → 2026-01-04)"
+
+
+def test_snapshot_email_uses_explicit_alpha_reason_when_unavailable():
+    snapshot = {
+        "asof": "2026-02-11",
+        "allocations": {"cash": 0.2, "sleeves": {"sleeve_trend": 0.4, "sleeve_2": 0.3, "charlie_munger": 0.1}},
+        "performance_summary": {"wtd": 0.0, "mtd": 0.0, "total_return": 0.0},
+        "performance_diagnostics": {"current_equity": 10000, "day_return": 0.0},
+        "alpha_attribution": {
+            "ok": False,
+            "reason": "Need >=5 overlapping days; have 1 (2026-02-09 → 2026-02-09)",
+        },
+        "charlie_munger": {"meta": {"near_ma_candidates": 0}, "selected": []},
+    }
+
+    _, body = create_snapshot_email(snapshot, execution_payload={"trades": []})
+
+    assert "ALPHA ATTRIBUTION VS SPY" in body
+    assert "• Status: Pending — Need >=5 overlapping days; have 1 (2026-02-09 → 2026-02-09)" in body
