@@ -1,4 +1,4 @@
-from paper.build_execution_email import build_execution_email_text
+from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 
 
 def test_execution_email_body_is_defined_and_formats_shadow_payload_status():
@@ -14,7 +14,6 @@ def test_execution_email_body_is_defined_and_formats_shadow_payload_status():
 
     assert subject == "TRADE EXECUTION — 2026-02-05 (SHADOW)"
     assert "• Execution Payload: NOT GENERATED (EXPECTED IN SHADOW)" in body
-
 
 
 def test_execution_email_no_trades_includes_min_trade_filter_reason_and_counts():
@@ -47,3 +46,63 @@ def test_execution_email_includes_turnover_scaling_risk_note():
     _, body = build_execution_email_text(payload)
 
     assert "Risk Note: Turnover cap applied: requested $4,679.07, cap $3,023.97, scale 0.6463." in body
+
+
+def test_execution_email_html_contains_buy_sell_tables_and_headers():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 10,
+                "entry_price": 180.0,
+                "stop_loss": 170.0,
+                "take_profit": 200.0,
+                "notional": 1800.0,
+            },
+            {
+                "ticker": "MSFT",
+                "side": "SELL",
+                "shares": 5,
+                "entry_price": 400.0,
+                "stop_loss": 420.0,
+                "take_profit": 360.0,
+                "notional": 2000.0,
+                "reason": "removed_from_targets",
+            },
+        ],
+    }
+    _, html = build_execution_email_html(payload)
+
+    assert "<h3>Buy Orders</h3>" in html
+    assert "<h3>Sell / Close Orders</h3>" in html
+    assert "Entry (X)" in html
+    assert "Stop (Y)" in html
+    assert "Target (Z)" in html
+    assert "AAPL" in html
+    assert "MSFT" in html
+
+
+def test_execution_email_includes_portfolio_risk_summary_values():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [],
+        "risk_summary": {
+            "Turnover requested ($)": "$4,679.07",
+            "Turnover cap ($)": "$3,023.97",
+            "Turnover scale": "0.6463",
+        },
+    }
+
+    _, body = build_execution_email_text(payload)
+    _, html = build_execution_email_html(payload)
+
+    assert "PORTFOLIO RISK SUMMARY" in body
+    assert "Turnover requested ($): $4,679.07" in body
+    assert "Portfolio Risk Summary" in html
+    assert "Turnover cap ($)" in html
