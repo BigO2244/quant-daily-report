@@ -684,7 +684,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
             )
     else:
         reason = (alpha or {}).get("reason") or "Alpha attribution unavailable."
-        lines.extend([f"• Status: Unavailable — {reason}"])
+        lines.extend([f"• Status: Pending — {reason}"])
 
     lines.extend(
         [
@@ -2165,7 +2165,7 @@ def build_html_report(
         alpha_section = (
             '<div class="card">'
             "<h3>Alpha Attribution vs SPY</h3>"
-            f"<p><em>Unavailable — {reason}</em></p>"
+            f"<p><em>Pending — {reason}</em></p>"
             "</div>"
         )
 

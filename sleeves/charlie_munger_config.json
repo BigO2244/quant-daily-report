@@ -5,7 +5,7 @@
     "entry_band": 0.05,
     "use_cross_above": false,
     "ma_weeks": 200,
-    "rebalance_freq": "Q",
+    "rebalance_freq": "QE",
     "target_holdings": 15,
     "min_holdings": 10,
     "max_weight_per_name": 0.1,

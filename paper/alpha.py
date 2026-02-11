@@ -54,7 +54,10 @@ def compute_alpha_attribution(
     out["overlap_end"] = aligned.index.max().strftime("%Y-%m-%d")
 
     if overlap_days < int(min_overlap_days):
-        out["reason"] = f"Need >={int(min_overlap_days)} overlapping days; have {overlap_days}."
+        out["reason"] = (
+            f"Need >={int(min_overlap_days)} overlapping days; have {overlap_days} "
+            f"({out['overlap_start']} → {out['overlap_end']})"
+        )
         return out
 
     aligned["spread"] = aligned["port_ret"] - aligned["spy_ret"]

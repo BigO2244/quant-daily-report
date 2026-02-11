@@ -25,7 +25,7 @@ class CharlieMungerConfig:
     entry_band: float = 0.05
     use_cross_above: bool = False
     ma_weeks: int = 200
-    rebalance_freq: str = "Q"
+    rebalance_freq: str = "QE"
     target_holdings: int = 15
     min_holdings: int = 10
     max_weight_per_name: float = 0.10
@@ -319,7 +319,7 @@ def run_backtest_with_details(period: str = "15y", interval: str = "1d") -> dict
         target_w.loc[idx >= asof, :] = [s["target_weight"] for s in selected]
 
     # quarterly/monthly rebalancing approximation
-    rebal_rule = "Q" if str(cfg.rebalance_freq).upper().startswith("Q") else "M"
+    rebal_rule = "QE" if str(cfg.rebalance_freq).upper().startswith("Q") else "M"
     px_wide = weekly.pivot(index="date", columns="ticker", values="close")
     px_wide = px_wide[target_w.columns] if not target_w.empty else pd.DataFrame(index=idx)
 
