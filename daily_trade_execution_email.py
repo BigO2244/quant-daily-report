@@ -7,7 +7,7 @@ import os
 import argparse
 from pathlib import Path
 
-from paper.build_execution_email import build_execution_email_text
+from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.paper_broker import load_config, reset_orders_sent_ledger_for_date
 from paper.send_execution_email import send_execution_email
 
@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> None:
         payload["halt_reason"] = "LIVE MODE BLOCKED"
 
     subject, body_text = build_execution_email_text(payload)
+    _, body_html = build_execution_email_html(payload)
 
     out_txt = Path("outputs") / "daily" / f"trade_execution_{trade_date}.txt"
     out_txt.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("[EXECUTION_EMAIL] dry_run=1 — skipping send")
         return
 
-    send_execution_email(subject=subject, body_text=body_text, payload=payload)
+    send_execution_email(subject=subject, body_text=body_text, body_html=body_html, payload=payload)
 
 
 if __name__ == "__main__":

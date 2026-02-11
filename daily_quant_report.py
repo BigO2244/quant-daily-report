@@ -9,7 +9,9 @@ import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date
 from paper.paper_report import build_paper_report_html
-from paper.build_execution_email import build_execution_email_text
+from paper.build_execution_email import build_execution_email_html, build_execution_email_text
+from paper.alpha import compute_alpha_attribution
+from paper.email_styles import base_email_css
 from paper.trading_calendar import prev_trading_day
 
 # ============================================================
@@ -74,10 +76,7 @@ from core.quant_report import (  # noqa: E402
     download_prices,
     add_atr,
 )
-from core.alpha_attribution import (  # noqa: E402
-    calc_alpha_stats,
-    load_benchmark_prices,
-)
+from core.alpha_attribution import load_benchmark_prices  # noqa: E402
 from engine.backtest_engine import (  # noqa: E402
     infer_latest_entries,
     attach_entry_prices,
@@ -92,6 +91,8 @@ from sleeves.sleeve_2.config import (  # noqa: E402
 )
 
 logger = logging.getLogger(__name__)
+# Backward-compatible alias for tests/patch points
+calc_alpha_stats = compute_alpha_attribution
 # ============================================================
 # Output config
 # ============================================================
@@ -134,6 +135,22 @@ def _fmt_number(x):
         return f"{float(x):,.{DISPLAY_DECIMALS}f}"
     except Exception:
         return "n/a"
+
+def _alpha_min_overlap_days(default: int = 5) -> int:
+    env_val = os.getenv("ALPHA_MIN_OVERLAP_DAYS")
+    if env_val:
+        try:
+            return max(1, int(env_val))
+        except Exception:
+            pass
+    try:
+        with open("paper/config_paper.json", "r", encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+        return max(1, int((((cfg.get("reporting") or {}).get("alpha_min_overlap_days")) or default)))
+    except Exception:
+        return default
+
+
 
 
 def _fmt_date(value) -> str:
@@ -382,6 +399,48 @@ def build_execution_email_payload(
     pricing_source = (paper_summary or {}).get("pricing_source") or ("PREV_CLOSE" if status == "PLANNED" else "OPEN")
     pricing_asof = (paper_summary or {}).get("pricing_asof") or trade_date
 
+    total_equity = float((paper_summary or {}).get("total_equity", 0.0) or 0.0)
+    holdings = (daily_snapshot or {}).get("holdings", []) or []
+    position_weights: list[float] = []
+    for holding in holdings:
+        try:
+            shares = float(holding.get("shares"))
+            price = float(holding.get("last_price"))
+            mv = abs(shares * price)
+            if total_equity > 0:
+                position_weights.append(mv / total_equity)
+        except Exception:
+            continue
+
+    gross_exposure = sum(position_weights) if position_weights else None
+    net_exposure = None
+    if holdings and total_equity > 0:
+        try:
+            signed = []
+            for h in holdings:
+                shares = float(h.get("shares"))
+                px = float(h.get("last_price"))
+                direction = str(h.get("direction", "LONG")).upper()
+                sign = -1.0 if direction == "SHORT" else 1.0
+                signed.append(sign * abs(shares * px) / total_equity)
+            net_exposure = sum(signed)
+        except Exception:
+            net_exposure = None
+
+    target_cash_weight = float((paper_summary or {}).get("target_cash_weight", 0.0) or 0.0)
+    achieved_cash_weight = float((paper_summary or {}).get("achieved_cash_weight", 0.0) or 0.0)
+    risk_summary = {
+        "Turnover requested ($)": f"${turnover_requested:,.2f}",
+        "Turnover cap ($)": f"${turnover_cap:,.2f}",
+        "Turnover scale": f"{turnover_scale:.4f}",
+        "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%",
+        "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%",
+        "Gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "n/a",
+        "Net exposure (%)": f"{net_exposure * 100:.2f}%" if net_exposure is not None else "n/a",
+        "# positions": str(len(holdings)),
+        "Max position weight (%)": f"{max(position_weights) * 100:.2f}%" if position_weights else "n/a",
+    }
+
     payload = {
         "trade_date": trade_date,
         "mode": mode,
@@ -396,7 +455,7 @@ def build_execution_email_payload(
         "trades": trades,
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
-        "cash_target_weight": float((paper_summary or {}).get("target_cash_weight", 0.0)),
+        "cash_target_weight": target_cash_weight,
         "investable_dollars": float((paper_summary or {}).get("investable_dollars", 0.0)),
         "equity": float((paper_summary or {}).get("sizing_equity", (paper_summary or {}).get("total_equity", 0.0))),
         "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
@@ -410,6 +469,7 @@ def build_execution_email_payload(
             "turnover_scaled": turnover_scaled,
             "turnover_scale": turnover_scale,
         },
+        "risk_summary": risk_summary,
     }
 
     if mode == "SHADOW" and not trades:
@@ -601,20 +661,30 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "ALPHA ATTRIBUTION VS SPY",
     ]
 
-    if alpha and alpha.get("n_days", 0) >= 20:
+    if alpha and alpha.get("ok"):
+        summary = alpha.get("summary", {}) or {}
         lines.extend(
             [
                 "• Status: Available",
-                f"• Since inception excess return: {_fmt_pct(alpha.get('excess_cum_return'))}",
+                f"• Overlap: {alpha.get('overlap_start')} to {alpha.get('overlap_end')} ({alpha.get('overlap_days')} days)",
+                f"• Cumulative Portfolio Return: {_fmt_pct(summary.get('cumulative_port_return'))}",
+                f"• Cumulative SPY Return: {_fmt_pct(summary.get('cumulative_spy_return'))}",
+                f"• Cumulative Alpha: {_fmt_pct(summary.get('cumulative_alpha'))}",
+                "• Last 10 daily spreads:",
             ]
         )
+        for row in (alpha.get("rows") or [])[-10:]:
+            lines.append(
+                "  - {date}: Port {port}, SPY {spy}, Spread {spread}".format(
+                    date=row.get("date"),
+                    port=_fmt_pct(row.get("port_ret")),
+                    spy=_fmt_pct(row.get("spy_ret")),
+                    spread=_fmt_pct(row.get("spread")),
+                )
+            )
     else:
-        lines.extend(
-            [
-                "• Status: Pending (insufficient lookback window)",
-                "• Expected Availability: After minimum attribution window met",
-            ]
-        )
+        reason = (alpha or {}).get("reason") or "Alpha attribution unavailable."
+        lines.extend([f"• Status: Unavailable — {reason}"])
 
     lines.extend(
         [
@@ -2056,17 +2126,7 @@ def build_html_report(
                     }
                 )
     # CSS
-    css = (
-        "body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Arial; color:#111827; }\n"
-        " .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }\n"
-        " .card { background:#f9fafb; border:1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin: 12px 0; }\n"
-        " h2 { margin-bottom: 4px; }\n"
-        " h3 { margin-top: 16px; }\n"
-        " .tbl { width:100%; border-collapse: collapse; font-size: 13px; }\n"
-        " .tbl th { text-align:left; border-bottom:1px solid #e5e7eb; padding:6px; }\n"
-        " .tbl td { border-bottom:1px solid #f3f4f6; padding:6px; }\n"
-        " .muted { color:#6b7280; font-size:12px; }\n"
-    )
+    css = base_email_css() + " h2 { margin-bottom: 4px; } h3 { margin-top: 16px; }"
     performance_rows = [
         {"Metric": "Current Equity", "Value": _fmt_money(portfolio_stats["equity"])},
         {"Metric": "Day Return", "Value": _fmt_pct(portfolio_stats["day_return"])},
@@ -2086,48 +2146,26 @@ def build_html_report(
         except Exception:
             return "n/a"
 
-    if alpha_stats and alpha_stats.get("n_days", 0) >= 20:
+    if alpha_stats and alpha_stats.get("ok"):
+        alpha_summary = alpha_stats.get("summary", {}) or {}
         alpha_rows = [
-            {
-                "Metric": "Since inception",
-                "Value": "Port {port}, SPY {bench}, Excess {excess}".format(
-                    port=_fmt_pct(alpha_stats.get("port_cum_return")),
-                    bench=_fmt_pct(alpha_stats.get("bench_cum_return")),
-                    excess=_fmt_pct(alpha_stats.get("excess_cum_return")),
-                ),
-            },
-            {
-                "Metric": "Beta (63d), Alpha (ann., 63d)",
-                "Value": "{beta}, {alpha}".format(
-                    beta=_fmt_float(alpha_stats.get("beta_63d")),
-                    alpha=_fmt_pct(alpha_stats.get("alpha_ann_63d")),
-                ),
-            },
-            {
-                "Metric": "Tracking Error (ann.), Information Ratio",
-                "Value": "{te}, {ir}".format(
-                    te=_fmt_pct(alpha_stats.get("tracking_error_ann")),
-                    ir=_fmt_float(alpha_stats.get("info_ratio")),
-                ),
-            },
-            {
-                "Metric": "Max Drawdown: Port %, SPY %",
-                "Value": "Port {port}, SPY {bench}".format(
-                    port=_fmt_pct(alpha_stats.get("mdd_port")),
-                    bench=_fmt_pct(alpha_stats.get("mdd_bench")),
-                ),
-            },
-            {"Metric": "n_days used", "Value": str(alpha_stats.get("n_days", 0))},
+            {"Metric": "Overlap Window", "Value": f"{alpha_stats.get('overlap_start')} → {alpha_stats.get('overlap_end')} ({alpha_stats.get('overlap_days')} days)"},
+            {"Metric": "Cumulative Portfolio Return", "Value": _fmt_pct(alpha_summary.get("cumulative_port_return"))},
+            {"Metric": "Cumulative SPY Return", "Value": _fmt_pct(alpha_summary.get("cumulative_spy_return"))},
+            {"Metric": "Cumulative Alpha", "Value": _fmt_pct(alpha_summary.get("cumulative_alpha"))},
         ]
-        alpha_html = html_table(
-            pd.DataFrame(alpha_rows), "Alpha Attribution vs SPY", 10
+        alpha_tbl = html_table(pd.DataFrame(alpha_rows), "Alpha Attribution vs SPY", 10)
+        daily_rows = pd.DataFrame(alpha_stats.get("rows", []) or []).rename(
+            columns={"date": "Date", "port_ret": "Portfolio Return", "spy_ret": "SPY Return", "spread": "Spread"}
         )
-        alpha_section = f'<div class="card">{alpha_html}</div>'
+        alpha_daily_tbl = html_table(daily_rows, "Alpha Daily Spread (Last 10 Days)", 10, "No overlapping return rows.")
+        alpha_section = f'<div class="card">{alpha_tbl}{alpha_daily_tbl}</div>'
     else:
+        reason = (alpha_stats or {}).get("reason") or "Alpha attribution unavailable."
         alpha_section = (
             '<div class="card">'
             "<h3>Alpha Attribution vs SPY</h3>"
-            "<p><em>Alpha attribution unavailable (insufficient data or benchmark fetch failed).</em></p>"
+            f"<p><em>Unavailable — {reason}</em></p>"
             "</div>"
         )
 
@@ -2551,14 +2589,12 @@ def main(argv: list[str] | None = None):
         len(bench_prices_for_alpha),
         _series_date_range(bench_prices_for_alpha),
     )
-    if portfolio_equity_for_alpha.empty or bench_prices_for_alpha.empty:
-        logger.warning(
-            "[WARN] Alpha attribution skipped (missing portfolio or benchmark history)."
-        )
-    else:
-        alpha_stats = calc_alpha_stats(
-            portfolio_equity_for_alpha, bench_prices_for_alpha, window=63
-        )
+    alpha_stats = compute_alpha_attribution(
+        portfolio_equity_for_alpha,
+        bench_prices_for_alpha,
+        min_overlap_days=_alpha_min_overlap_days(5),
+        last_n=10,
+    )
     try:
         daily_snapshot = build_daily_snapshot(
             report_date=report_date,
@@ -2660,6 +2696,7 @@ def main(argv: list[str] | None = None):
     _write_execution_email_payload(execution_payload, trade_date_str)
 
     exec_subject, exec_body = build_execution_email_text(execution_payload)
+    _, exec_body_html = build_execution_email_html(execution_payload)
     execution_path = os.path.join(OUTPUT_DIR, f"trade_execution_{today}.txt")
     with open(execution_path, "w", encoding="utf-8") as f:
         f.write(exec_body.rstrip() + "\n")
@@ -2705,7 +2742,7 @@ def main(argv: list[str] | None = None):
     logger.info("%s", snapshot_body)
     if send_email:
         try:
-            send_email(subject=exec_subject, body_html=f"<pre>{exec_body}</pre>", body_text=exec_body)
+            send_email(subject=exec_subject, body_html=exec_body_html, body_text=exec_body)
             send_email(subject=snapshot_subject, body_html=html, body_text=snapshot_body)
             logger.info("[OK] Emails sent (execution + snapshot)")
         except Exception as e:

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
+from html import escape
 from typing import Any
+
+from paper.email_styles import wrap_email_html
+from paper.html_tables import render_card, render_html_table
 
 
 def _fmt_price(value: Any) -> str:
@@ -93,6 +97,12 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
 
     if turnover_note:
         lines.append(f"Risk Note: {turnover_note}")
+
+    risk_summary = payload.get("risk_summary", {}) or {}
+    if risk_summary:
+        lines.extend(["", "PORTFOLIO RISK SUMMARY"])
+        for metric, value in risk_summary.items():
+            lines.append(f"- {metric}: {value}")
 
     raw_blocked_tickers = payload.get("blocked_tickers", {}) or {}
     blocked_ticker_lines: list[str] = []
@@ -323,3 +333,84 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     lines.extend(notes_lines)
 
     return subject, "\n".join(lines)
+
+
+def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
+    subject, _ = build_execution_email_text(payload)
+
+    status = str(payload.get("execution_status", "READY")).upper()
+    mode = str(payload.get("mode", "SHADOW")).upper()
+    trade_date = str(payload.get("trade_date", dt.date.today().isoformat()))
+
+    header_items = [
+        f"<li><b>Mode:</b> {escape(mode)}</li>",
+        f"<li><b>Trade Date:</b> {escape(trade_date)}</li>",
+        f"<li><b>Execution Status:</b> {escape(status)}</li>",
+    ]
+    if payload.get("turnover_note"):
+        header_items.append(f"<li><b>Risk Note:</b> {escape(str(payload.get('turnover_note')))}</li>")
+
+    cards = [render_card("Run Context", f"<ul class='kvs'>{''.join(header_items)}</ul>")]
+
+    trades = payload.get("trades", []) or []
+    buys = sorted(
+        [t for t in trades if str(t.get("side", "")).upper() == "BUY"],
+        key=lambda t: str(t.get("ticker", "")),
+    )
+    sells = sorted(
+        [t for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"}],
+        key=lambda t: str(t.get("ticker", "")),
+    )
+
+    buy_headers = ["Ticker", "Side", "Shares", "Entry (X)", "Stop (Y)", "Target (Z)", "Est. Notional"]
+    buy_rows = [
+        [
+            tr.get("ticker", ""),
+            "BUY",
+            _fmt_shares(tr.get("shares")),
+            _fmt_price(tr.get("entry_price")),
+            _fmt_price(tr.get("stop_loss")),
+            _fmt_price(tr.get("take_profit")),
+            _fmt_est_notional(tr.get("notional")),
+        ]
+        for tr in buys
+    ]
+    cards.append(
+        render_card(
+            "Buy Orders",
+            render_html_table(buy_headers, buy_rows, numeric_cols={2, 3, 4, 5, 6}),
+        )
+    )
+
+    sell_headers = ["Ticker", "Side", "Shares", "Entry (X)", "Stop (Y)", "Target (Z)", "Notes / Reason"]
+    sell_rows = [
+        [
+            tr.get("ticker", ""),
+            str(tr.get("side", "SELL")).upper(),
+            _fmt_shares(tr.get("shares")),
+            _fmt_price(tr.get("entry_price")),
+            _fmt_price(tr.get("stop_loss")),
+            _fmt_price(tr.get("take_profit")),
+            tr.get("notes") or tr.get("reason") or "Rebalance",
+        ]
+        for tr in sells
+    ]
+    cards.append(
+        render_card(
+            "Sell / Close Orders",
+            render_html_table(sell_headers, sell_rows, numeric_cols={2, 3, 4, 5}),
+        )
+    )
+
+    risk_summary = payload.get("risk_summary", {}) or {}
+    if risk_summary:
+        risk_rows = [[k, v] for k, v in risk_summary.items()]
+        cards.append(
+            render_card(
+                "Portfolio Risk Summary",
+                render_html_table(["Metric", "Value"], risk_rows, numeric_cols=set()),
+            )
+        )
+
+    html = wrap_email_html("TRADE EXECUTION", "".join(cards))
+    return subject, html
