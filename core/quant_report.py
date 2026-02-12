@@ -497,17 +497,42 @@ def create_trade_email(snapshot: dict, execution_payload: Optional[dict] = None)
 def send_email(
     subject: str, body_html: Optional[str] = None, body_text: Optional[str] = None
 ) -> None:
-    """Send HTML/email using SMTP credentials from env vars."""
-    host = os.environ.get("SMTP_HOST", "")
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    user = os.environ.get("SMTP_USER", "")
-    password = os.environ.get("SMTP_PASSWORD", "")
-    to_addr = os.environ.get("REPORT_TO_EMAIL", "")
+    """Send HTML/email using normalized env vars with EMAIL_* as canonical input."""
 
-    if not (host and user and password and to_addr):
-        raise RuntimeError(
-            "Missing SMTP env vars (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/REPORT_TO_EMAIL)."
-        )
+    def _resolve_email_env() -> dict[str, str]:
+        required = {
+            "EMAIL_SENDER": os.environ.get("EMAIL_SENDER", "").strip(),
+            "EMAIL_APP_PASSWORD": os.environ.get("EMAIL_APP_PASSWORD", "").strip(),
+            "EMAIL_RECIPIENT": os.environ.get("EMAIL_RECIPIENT", "").strip(),
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise RuntimeError(
+                "Missing required email env vars "
+                "(EMAIL_SENDER/EMAIL_APP_PASSWORD/EMAIL_RECIPIENT). "
+                f"Missing: {', '.join(missing)}"
+            )
+
+        return {
+            "SMTP_HOST": os.environ.get("SMTP_HOST", "").strip() or "smtp.gmail.com",
+            "SMTP_PORT": os.environ.get("SMTP_PORT", "").strip() or "587",
+            "SMTP_USER": os.environ.get("SMTP_USER", "").strip() or required["EMAIL_SENDER"],
+            "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD", "").strip()
+            or required["EMAIL_APP_PASSWORD"],
+            "REPORT_TO_EMAIL": os.environ.get("REPORT_TO_EMAIL", "").strip()
+            or required["EMAIL_RECIPIENT"],
+        }
+
+    normalized = _resolve_email_env()
+
+    # Backward-compatibility: downstream code reads SMTP_* and REPORT_TO_EMAIL.
+    os.environ.update(normalized)
+
+    host = normalized["SMTP_HOST"]
+    port = int(normalized["SMTP_PORT"])
+    user = normalized["SMTP_USER"]
+    password = normalized["SMTP_PASSWORD"]
+    to_addr = normalized["REPORT_TO_EMAIL"]
 
     if body_html is None and body_text is None:
         raise ValueError("send_email requires body_html or body_text")
