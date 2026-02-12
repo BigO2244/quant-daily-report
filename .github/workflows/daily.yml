@@ -24,16 +24,14 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Validate required SMTP/reporting secrets
+      - name: Validate required email secrets
         env:
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
         run: |
           missing=()
-          for var in SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD REPORT_TO_EMAIL; do
+          for var in EMAIL_SENDER EMAIL_APP_PASSWORD EMAIL_RECIPIENT; do
             if [ -z "${!var}" ]; then
               missing+=("$var")
             fi
@@ -53,19 +51,29 @@ jobs:
           DATE_FORMAT: "US"
           DISPLAY_DECIMALS: "2"
 
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+
+          SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
         run: |
           python daily_quant_report.py
 
+      - name: Ensure artifact directories exist
+        if: always()
+        run: |
+          mkdir -p outputs/daily signals
+
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: daily-outputs
+          if-no-files-found: warn
           path: |
             outputs/daily/**
             signals/**
