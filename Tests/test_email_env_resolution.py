@@ -56,3 +56,24 @@ def test_send_email_normalizes_smtp_env_from_email_secrets(monkeypatch):
     assert quant_report.os.environ["SMTP_USER"] == "sender@example.com"
     assert quant_report.os.environ["SMTP_PASSWORD"] == "app-pass"
     assert quant_report.os.environ["REPORT_TO_EMAIL"] == "recipient@example.com"
+
+
+def test_send_email_accepts_legacy_smtp_env_without_email_vars(monkeypatch):
+    monkeypatch.delenv("EMAIL_SENDER", raising=False)
+    monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
+    monkeypatch.delenv("EMAIL_RECIPIENT", raising=False)
+    monkeypatch.setenv("SMTP_USER", "legacy-sender@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "legacy-pass")
+    monkeypatch.setenv("REPORT_TO_EMAIL", "legacy-recipient@example.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_PORT", "2525")
+
+    monkeypatch.setattr(quant_report.smtplib, "SMTP", _DummySMTP)
+
+    quant_report.send_email(subject="subj", body_text="hello")
+
+    assert quant_report.os.environ["SMTP_HOST"] == "smtp.example.com"
+    assert quant_report.os.environ["SMTP_PORT"] == "2525"
+    assert quant_report.os.environ["SMTP_USER"] == "legacy-sender@example.com"
+    assert quant_report.os.environ["SMTP_PASSWORD"] == "legacy-pass"
+    assert quant_report.os.environ["REPORT_TO_EMAIL"] == "legacy-recipient@example.com"
