@@ -66,6 +66,40 @@ def build_paper_report_html(
             return "<p><em>None</em></p>"
         return df.to_html(index=False, border=0)
 
+    nav_ts = _read_csv_if_exists("outputs/perf/nav_timeseries.csv")
+    nav_html = ""
+    if not nav_ts.empty and "date" in nav_ts.columns:
+        nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+        row = nav_ts[nav_ts["date"] == pd.to_datetime(run_date)]
+        if not row.empty:
+            eq = float(row["equity"].iloc[0])
+            r1d = float(row["return_1d"].iloc[0])
+            month_rows = nav_ts[nav_ts["date"].dt.to_period("M") == pd.to_datetime(run_date).to_period("M")]
+            week_rows = nav_ts[nav_ts["date"].dt.isocalendar().week == pd.to_datetime(run_date).isocalendar().week]
+            si_base = float(nav_ts["equity"].iloc[0])
+            wtd = (eq / float(week_rows["equity"].iloc[0]) - 1.0) if not week_rows.empty else 0.0
+            mtd = (eq / float(month_rows["equity"].iloc[0]) - 1.0) if not month_rows.empty else 0.0
+            si = (eq / si_base - 1.0) if si_base else 0.0
+            nav_html = f"""
+  <h3>Ledger-backed NAV</h3>
+  <ul>
+    <li><b>NAV Equity:</b> ${eq:,.2f}</li>
+    <li><b>1D Return:</b> {r1d:.2%}</li>
+    <li><b>WTD:</b> {wtd:.2%}</li>
+    <li><b>MTD:</b> {mtd:.2%}</li>
+    <li><b>Since Inception:</b> {si:.2%}</li>
+  </ul>
+""".rstrip()
+
+    contrib_t = _read_csv_if_exists(f"outputs/perf/contribution_tickers_{run_date}.csv")
+    contrib_s = _read_csv_if_exists(f"outputs/perf/contribution_sleeves_{run_date}.csv")
+    contrib_html = ""
+    if not contrib_t.empty:
+        top = contrib_t.sort_values("contribution", ascending=False).head(5)
+        contrib_html += f"<h3>Top Ticker Contributors</h3>{df_to_html(top)}"
+    if not contrib_s.empty:
+        contrib_html += f"<h3>Sleeve Contribution</h3>{df_to_html(contrib_s)}"
+
     recon_html = ""
     validation_html = ""
     shadow_html = ""
@@ -143,6 +177,10 @@ def build_paper_report_html(
   {recon_html}
 
   {validation_html}
+
+  {nav_html}
+
+  {contrib_html}
 
   {shadow_html}
 
