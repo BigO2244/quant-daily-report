@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import argparse
+import uuid
 import logging
 import os
 import sys
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
-from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date
+from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
 from paper.paper_report import build_paper_report_html
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.alpha import compute_alpha_attribution
@@ -17,8 +18,8 @@ from paper.trading_calendar import prev_trading_day
 from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, load_ledger, make_run_id
 from paper.positions import rebuild_positions_from_ledger, write_position_outputs
 from paper.mark_to_market import mark_holdings, update_nav_timeseries, write_perf_outputs
-from paper.ledger2 import append_ledger2_rows, ledger2_rows_from_execution_payload
-from paper.nav2 import update_nav_outputs
+from paper.ledger2 import append_rows as append_ledger2_rows, payload_to_rows as ledger2_payload_to_rows
+from paper.nav2 import update_nav
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 
@@ -247,6 +248,14 @@ def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, b
     logger.info("[EXECUTION_EMAIL] payload written: %s", write_path)
     return str(write_path), preserved, preserved_path
 
+
+
+
+def write_integrity_artifact(asof_date: str, payload: dict) -> str:
+    integrity_path = Path("outputs") / "daily" / f"integrity_{asof_date}.json"
+    integrity_path.parent.mkdir(parents=True, exist_ok=True)
+    integrity_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return str(integrity_path)
 
 def _payload_num_trades(payload: object) -> int:
     if isinstance(payload, list):
@@ -2761,6 +2770,11 @@ def main(argv: list[str] | None = None):
         "sent_ledger_path": sent_ledger_path,
         "sent_ledger_reset_removed": int(sent_ledger_removed),
         "missing_prices": [],
+        "ledger2_path": "outputs/ledger/trades.csv",
+        "ledger2_appended_rows": 0,
+        "ledger2_skipped_rows": 0,
+        "nav_path": None,
+        "nav_timeseries_path": None,
     }
 
     # legacy pipeline retained for backward compatibility
@@ -2814,26 +2828,45 @@ def main(argv: list[str] | None = None):
         logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
 
     try:
+        Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
+        Path("outputs/perf").mkdir(parents=True, exist_ok=True)
+        Path("outputs/daily").mkdir(parents=True, exist_ok=True)
+
         asof_date = integrity["asof_date"]
-        ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
-        ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
-        rows2, missing_prices = ledger2_rows_from_execution_payload(
-            payload=execution_payload,
+        ledger_run_id = str(uuid.uuid4())
+        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
+        signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
+
+        def _ledger_price_fn(ticker: str, req_asof_date: str):
+            px = fetch_prev_closes_yfinance([ticker], asof_date=req_asof_date)
+            if px.empty:
+                return None
+            return float(px.iloc[0]["prev_close"])
+
+        rows2, missing_prices = ledger2_payload_to_rows(
+            execution_payload=execution_payload,
             trade_date=trade_date_str,
             asof_date=asof_date,
             source=ledger_source,
             run_id=ledger_run_id,
-            execution_status=str(execution_payload.get("execution_status") or "UNKNOWN"),
+            signal_hash=signal_hash,
+            get_price_fn=_ledger_price_fn,
         )
-        appended2 = append_ledger2_rows(rows2)
-        nav_result = update_nav_outputs(asof_date=asof_date)
+        appended2, skipped2 = append_ledger2_rows("outputs/ledger/trades.csv", rows2)
+        nav_result = update_nav(
+            asof_date=asof_date,
+            trade_date=trade_date_str,
+            get_price_fn=_ledger_price_fn,
+            source=ledger_source,
+            run_id=ledger_run_id,
+        )
         integrity.update(
             {
                 "ledger2_path": "outputs/ledger/trades.csv",
                 "ledger2_appended_rows": int(appended2),
+                "ledger2_skipped_rows": int(skipped2),
                 "nav_path": nav_result.get("nav_path"),
                 "nav_timeseries_path": nav_result.get("nav_timeseries_path"),
-                "nav_equity": nav_result.get("equity"),
             }
         )
         integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
@@ -2841,9 +2874,7 @@ def main(argv: list[str] | None = None):
         logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
 
     try:
-        integrity_path = Path("outputs") / "daily" / f"integrity_{integrity['asof_date']}.json"
-        integrity_path.parent.mkdir(parents=True, exist_ok=True)
-        integrity_path.write_text(json.dumps(integrity, indent=2) + "\n", encoding="utf-8")
+        write_integrity_artifact(integrity["asof_date"], integrity)
     except Exception as e:
         logger.warning("[INTEGRITY][WARN] failed writing integrity artifact: %s", e)
 
