@@ -25,3 +25,9 @@ Key parameters:
 - Included in `daily_quant_report.py` run loop.
 - Included in dynamic allocation and signals snapshots.
 - Included in report output with candidate, buy/sell, and benchmark stats.
+
+## Paper trading state
+
+Paper broker runtime state (ledger/trades) is stored in `outputs/paper_state/` by default.
+Set `PAPER_STATE_DIR` to override this location.
+Legacy `paper/ledger.csv` and `paper/trades.csv` are treated only as one-time seed inputs when state files are first initialized.

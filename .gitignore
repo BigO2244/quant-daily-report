@@ -5,12 +5,11 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 outputs/
+outputs/paper_state/
 
 # Python
 __pycache__/
 *.pyc
-paper/ledger.csv
-paper/trades.csv
 paper/holdings_latest.csv
 signals/
 signals/*.json
