@@ -46,6 +46,16 @@ class CharlieMungerConfig:
 DEFAULT_CONFIG = CharlieMungerConfig()
 
 
+def normalize_rebalance_freq(freq: str | None) -> str:
+    """Map config rebalance frequency aliases to pandas-supported rules."""
+    raw = str(freq or "").strip().upper()
+    if raw in {"Q", "QE", "Q-DEC", "QE-DEC"} or raw.startswith("Q"):
+        return "Q"
+    if raw in {"M", "ME"} or raw.startswith("M"):
+        return "M"
+    return "M"
+
+
 def load_config() -> CharlieMungerConfig:
     cfg = CharlieMungerConfig()
     cfg_file = Path("sleeves/charlie_munger_config.json")
@@ -319,7 +329,7 @@ def run_backtest_with_details(period: str = "15y", interval: str = "1d") -> dict
         target_w.loc[idx >= asof, :] = [s["target_weight"] for s in selected]
 
     # quarterly/monthly rebalancing approximation
-    rebal_rule = "QE" if str(cfg.rebalance_freq).upper().startswith("Q") else "M"
+    rebal_rule = normalize_rebalance_freq(cfg.rebalance_freq)
     px_wide = weekly.pivot(index="date", columns="ticker", values="close")
     px_wide = px_wide[target_w.columns] if not target_w.empty else pd.DataFrame(index=idx)
 

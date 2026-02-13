@@ -66,11 +66,13 @@ def compute_alpha_attribution(
     alpha_cum = port_cum - spy_cum
 
     tail = aligned.tail(int(last_n)).reset_index()
+    date_col = "date" if "date" in tail.columns else ("index" if "index" in tail.columns else tail.columns[0])
+
     rows = []
     for _, r in tail.iterrows():
         rows.append(
             {
-                "date": pd.to_datetime(r["index"]).strftime("%Y-%m-%d"),
+                "date": pd.to_datetime(r[date_col]).strftime("%Y-%m-%d"),
                 "port_ret": float(r["port_ret"]),
                 "spy_ret": float(r["spy_ret"]),
                 "spread": float(r["spread"]),
