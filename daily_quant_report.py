@@ -13,6 +13,11 @@ from paper.build_execution_email import build_execution_email_html, build_execut
 from paper.alpha import compute_alpha_attribution
 from paper.email_styles import base_email_css
 from paper.trading_calendar import prev_trading_day
+from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, load_ledger, make_run_id
+from paper.positions import rebuild_positions_from_ledger, write_position_outputs
+from paper.mark_to_market import mark_holdings, update_nav_timeseries, write_perf_outputs
+from reporting.attribution import compute_daily_attribution, write_attribution_outputs
+from research.signal_store import persist_signal_snapshot
 
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
@@ -609,12 +614,13 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         or "No executable trades in execution payload"
     )
 
+    nav_metrics = snapshot.get("nav_metrics", {}) or {}
     lines = [
         f"ENVIRONMENT: {env_mode}",
         "",
         "PORTFOLIO AT A GLANCE",
-        f"• Total Equity: {_fmt_money(total_equity)}",
-        f"• Day Move: {_fmt_pct(day_return)}",
+        f"• Total Equity: {_fmt_money(nav_metrics.get('equity', total_equity))}",
+        f"• Day Move: {_fmt_pct(nav_metrics.get('return_1d', day_return))}",
         f"• Cash: {_fmt_pct(cash_pct)} (Target: {_fmt_pct(target_cash)})",
         f"• Active Sleeves: {len([k for k, v in sleeve_splits.items() if float(v) > WEIGHT_TOLERANCE])}",
         "",
@@ -654,9 +660,9 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "---",
         "",
         "PERFORMANCE SUMMARY",
-        f"• Week-to-Date: {_fmt_pct(perf.get('wtd'))}",
-        f"• Month-to-Date: {_fmt_pct(perf.get('mtd'))}",
-        f"• Since Inception: {_fmt_pct(perf.get('total_return'))}",
+        f"• Week-to-Date: {_fmt_pct(nav_metrics.get('wtd', perf.get('wtd')))}",
+        f"• Month-to-Date: {_fmt_pct(nav_metrics.get('mtd', perf.get('mtd')))}",
+        f"• Since Inception: {_fmt_pct(nav_metrics.get('si', perf.get('total_return')))}",
         "",
         "ALPHA ATTRIBUTION VS SPY",
     ]
@@ -1574,6 +1580,9 @@ def build_daily_snapshot(
             sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
         )
         logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
+        signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
+        signal_store_df["ticker"] = signal_store_df["ticker"].astype(str)
+        persist_signal_snapshot(signal_store_df, report_date.strftime("%Y-%m-%d"))
     price_map = _build_price_map(prices, report_date)
     atr_map = _build_atr_map(prices, report_date)
     entry_map = {}
@@ -2694,6 +2703,56 @@ def main(argv: list[str] | None = None):
             sell_count,
         )
     _write_execution_email_payload(execution_payload, trade_date_str)
+    execution_payload_path = os.path.join("outputs", "execution_email", f"{trade_date_str}.json")
+
+    try:
+        asof_date = str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str))
+        ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
+        ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
+        signal_hash = compute_signal_hash(signals_path_exec)
+        rows = ledger_rows_from_execution_payload(
+            payload_path=execution_payload_path,
+            trade_date=trade_date_str,
+            asof_date=asof_date,
+            source=ledger_source,
+            run_id=ledger_run_id,
+            signal_hash=signal_hash,
+        )
+        appended = append_ledger_rows(rows)
+        ledger_df = load_ledger()
+        rebuilt = rebuild_positions_from_ledger(ledger_df, asof_date)
+        write_position_outputs(rebuilt["positions"], rebuilt["cash"], asof_date)
+        holdings = rebuilt["positions"][["ticker", "shares", "avg_cost", "sleeve"]] if not rebuilt["positions"].empty else pd.DataFrame(columns=["ticker", "shares", "avg_cost", "sleeve"])
+        mtm, nav = mark_holdings(holdings, rebuilt["cash"], asof_date)
+        write_perf_outputs(mtm, nav, asof_date)
+        nav_ts_path = update_nav_timeseries(asof_date, nav, ledger_df)
+        nav_ts = pd.read_csv(nav_ts_path)
+        nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+        nav_ts = nav_ts.sort_values("date")
+        current = nav_ts[nav_ts["date"] == pd.to_datetime(asof_date)]
+        if not current.empty:
+            mtd_start = nav_ts[(nav_ts["date"].dt.to_period("M") == pd.to_datetime(asof_date).to_period("M"))]["equity"].iloc[0]
+            week_start = nav_ts[(nav_ts["date"].dt.isocalendar().week == pd.to_datetime(asof_date).isocalendar().week)]["equity"].iloc[0]
+            si_start = nav_ts["equity"].iloc[0]
+            eq = float(current["equity"].iloc[0])
+            daily_snapshot["nav_metrics"] = {
+                "equity": eq,
+                "return_1d": float(current["return_1d"].iloc[0]),
+                "wtd": (eq / float(week_start) - 1.0) if week_start else 0.0,
+                "mtd": (eq / float(mtd_start) - 1.0) if mtd_start else 0.0,
+                "si": (eq / float(si_start) - 1.0) if si_start else 0.0,
+            }
+        prev_dates = nav_ts[nav_ts["date"] < pd.to_datetime(asof_date)]["date"]
+        if not prev_dates.empty:
+            prev_date = prev_dates.max().strftime("%Y-%m-%d")
+            attr = compute_daily_attribution(asof_date, prev_date)
+            write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
+
+        with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
+            json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
+            f.write("\n")
+    except Exception as e:
+        logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
 
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)
