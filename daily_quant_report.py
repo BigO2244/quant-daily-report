@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
+from paper.state_paths import ensure_paper_state_files
 from paper.paper_report import build_paper_report_html
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.alpha import compute_alpha_attribution
@@ -1338,7 +1339,7 @@ def resolve_portfolio_equity_series(
     if not history_series.empty:
         return history_series
 
-    ledger_path = os.path.join("paper", "ledger.csv")
+    ledger_path, _ = ensure_paper_state_files()
     if os.path.exists(ledger_path) and os.path.getsize(ledger_path) > 0:
         ledger = pd.read_csv(ledger_path)
         if (
@@ -2675,6 +2676,7 @@ def main(argv: list[str] | None = None):
     paper_html = ""
     sent_ledger_removed = 0
     sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
+    paper_ledger_path, paper_trades_path = ensure_paper_state_files()
     if os.path.exists(signals_path_exec):
         try:
             shadow_constraints = {
@@ -2699,8 +2701,8 @@ def main(argv: list[str] | None = None):
             paper_summary = run_paper_day(
                 run_date=trade_date_str,
                 signals_path=signals_path_exec,
-                ledger_path="paper/ledger.csv",
-                trades_path="paper/trades.csv",
+                ledger_path=paper_ledger_path,
+                trades_path=paper_trades_path,
                 config_path="paper/config_paper.json",
                 force=False,
                 constraints=shadow_constraints,
@@ -2723,8 +2725,8 @@ def main(argv: list[str] | None = None):
         try:
             paper_html = build_paper_report_html(
                 run_date=trade_date_str,
-                ledger_path="paper/ledger.csv",
-                trades_path="paper/trades.csv",
+                ledger_path=paper_ledger_path,
+                trades_path=paper_trades_path,
                 benchmark_ticker="SPY",
                 reconciliation=paper_summary,
             )

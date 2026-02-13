@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 from paper.paper_broker import run_paper_day
+from paper.state_paths import ensure_paper_state_files
 from paper.trading_calendar import next_trading_day
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,13 @@ def main() -> None:
             "Run this on/after the trade date (or test with a past signal date)."
         )
 
+    ledger_path, trades_path = ensure_paper_state_files()
+
     result = run_paper_day(
         run_date=trade_date,
         signals_path=str(signals_path),
-        ledger_path="paper/ledger.csv",
-        trades_path="paper/trades.csv",
+        ledger_path=ledger_path,
+        trades_path=trades_path,
         config_path="paper/config_paper.json",
         force=args.force,
         plan_only=args.plan_only,
