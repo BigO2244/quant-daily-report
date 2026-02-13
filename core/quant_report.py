@@ -497,30 +497,39 @@ def create_trade_email(snapshot: dict, execution_payload: Optional[dict] = None)
 def send_email(
     subject: str, body_html: Optional[str] = None, body_text: Optional[str] = None
 ) -> None:
-    """Send HTML/email using normalized env vars with EMAIL_* as canonical input."""
+    """Send HTML/email using EMAIL_* as canonical env with legacy fallback."""
 
     def _resolve_email_env() -> dict[str, str]:
+        sender = os.environ.get("EMAIL_SENDER", "").strip() or os.environ.get("SMTP_USER", "").strip()
+        app_password = os.environ.get("EMAIL_APP_PASSWORD", "").strip() or os.environ.get(
+            "SMTP_PASSWORD", ""
+        ).strip()
+        recipient = os.environ.get("EMAIL_RECIPIENT", "").strip() or os.environ.get(
+            "REPORT_TO_EMAIL", ""
+        ).strip()
+
         required = {
-            "EMAIL_SENDER": os.environ.get("EMAIL_SENDER", "").strip(),
-            "EMAIL_APP_PASSWORD": os.environ.get("EMAIL_APP_PASSWORD", "").strip(),
-            "EMAIL_RECIPIENT": os.environ.get("EMAIL_RECIPIENT", "").strip(),
+            "EMAIL_SENDER": sender,
+            "EMAIL_APP_PASSWORD": app_password,
+            "EMAIL_RECIPIENT": recipient,
         }
         missing = [name for name, value in required.items() if not value]
         if missing:
             raise RuntimeError(
                 "Missing required email env vars "
-                "(EMAIL_SENDER/EMAIL_APP_PASSWORD/EMAIL_RECIPIENT). "
+                "(EMAIL_SENDER/EMAIL_APP_PASSWORD/EMAIL_RECIPIENT; "
+                "legacy aliases: SMTP_USER/SMTP_PASSWORD/REPORT_TO_EMAIL). "
                 f"Missing: {', '.join(missing)}"
             )
 
         return {
             "SMTP_HOST": os.environ.get("SMTP_HOST", "").strip() or "smtp.gmail.com",
             "SMTP_PORT": os.environ.get("SMTP_PORT", "").strip() or "587",
-            "SMTP_USER": os.environ.get("SMTP_USER", "").strip() or required["EMAIL_SENDER"],
+            "SMTP_USER": os.environ.get("SMTP_USER", "").strip() or sender,
             "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD", "").strip()
-            or required["EMAIL_APP_PASSWORD"],
+            or app_password,
             "REPORT_TO_EMAIL": os.environ.get("REPORT_TO_EMAIL", "").strip()
-            or required["EMAIL_RECIPIENT"],
+            or recipient,
         }
 
     normalized = _resolve_email_env()

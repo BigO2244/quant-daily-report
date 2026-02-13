@@ -57,9 +57,9 @@ jobs:
 
           SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
           SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
+          SMTP_USER: ${{ secrets.EMAIL_SENDER }}
+          SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
         run: |
           python daily_quant_report.py
 
