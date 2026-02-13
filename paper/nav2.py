@@ -1,95 +1,197 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
-from paper.ledger2 import ensure_ledger2_exists
+from paper.ledger2 import LEDGER2_PATH, load_ledger
 from paper.paper_broker import fetch_prev_closes_yfinance
 
+logger = logging.getLogger(__name__)
 
-def _load_ledger(path: str) -> pd.DataFrame:
-    ensure_ledger2_exists(path)
-    df = pd.read_csv(path)
-    return df if not df.empty else pd.DataFrame(columns=["ticker", "side", "quantity", "fill_price", "fees", "trade_date"])
+NAV_TS_COLUMNS = ["date", "equity", "cash", "return_1d"]
 
 
-def _asof_prices(tickers: list[str], asof_date: str) -> dict[str, float]:
-    if not tickers:
-        return {}
-    px = fetch_prev_closes_yfinance(sorted(set(tickers)), asof_date=asof_date)
+def _default_get_price_fn(ticker: str, asof_date: str) -> float | None:
+    px = fetch_prev_closes_yfinance([ticker], asof_date=asof_date)
     if px.empty:
-        return {}
-    return {str(r["ticker"]).upper(): float(r["prev_close"]) for _, r in px.iterrows()}
+        return None
+    return float(px.iloc[0]["prev_close"])
 
 
-def update_nav_outputs(
-    asof_date: str,
-    ledger_path: str = "outputs/ledger/trades.csv",
-    nav_path_tpl: str = "outputs/perf/nav_{asof}.json",
-    nav_timeseries_path: str = "outputs/perf/nav_timeseries.csv",
-) -> dict:
-    df = _load_ledger(ledger_path)
-    if not df.empty:
-        df = df[df["trade_date"].astype(str) <= str(asof_date)].copy()
+def _resolve_starting_cash() -> float:
+    cfg_path = Path("paper/config_paper.json")
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8")) or {}
+            for key in ("starting_equity", "starting_cash", "initial_equity"):
+                if key in cfg:
+                    return float(cfg[key])
+        except Exception:
+            pass
 
-    cash = 0.0
+    start_cash = 10000.0
+    logger.warning("[NAV2] starting cash not configured; defaulting to 10000.0")
+    marker = Path("outputs/ledger/cash_start.json")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    if not marker.exists():
+        marker.write_text(json.dumps({"starting_cash": start_cash}, indent=2) + "\n", encoding="utf-8")
+    return start_cash
+
+
+def _compute_portfolio_state(ledger_df: pd.DataFrame, asof_date: str, starting_cash: float) -> tuple[float, dict[str, dict[str, float]]]:
+    cash = float(starting_cash)
     holdings: dict[str, dict[str, float]] = {}
-    if not df.empty:
-        for _, row in df.sort_values(["trade_date", "timestamp_et"], na_position="last").iterrows():
-            ticker = str(row.get("ticker", "")).upper()
-            side = str(row.get("side", "")).upper()
-            qty = float(row.get("quantity", 0.0) or 0.0)
-            px = float(row.get("fill_price", 0.0) or 0.0)
-            fees = float(row.get("fees", 0.0) or 0.0)
-            if qty <= 0 or px <= 0:
-                continue
-            pos = holdings.setdefault(ticker, {"shares": 0.0, "avg_cost": 0.0})
-            if side == "BUY":
-                new_shares = pos["shares"] + qty
-                pos["avg_cost"] = ((pos["shares"] * pos["avg_cost"]) + (qty * px)) / new_shares if new_shares else 0.0
-                pos["shares"] = new_shares
-                cash -= qty * px + fees
-            else:
-                sell_qty = min(qty, pos["shares"])
-                pos["shares"] = max(0.0, pos["shares"] - sell_qty)
-                cash += sell_qty * px - fees
 
-    tickers = [t for t, p in holdings.items() if p["shares"] > 0]
-    px_map = _asof_prices(tickers, asof_date)
-    missing_prices = [t for t in tickers if t not in px_map]
+    if ledger_df.empty:
+        return cash, holdings
 
-    positions_value = 0.0
-    for ticker in tickers:
-        positions_value += holdings[ticker]["shares"] * float(px_map.get(ticker, holdings[ticker]["avg_cost"]))
+    usable = ledger_df[ledger_df["trade_date"].astype(str) <= str(asof_date)].copy()
+    if usable.empty:
+        return cash, holdings
 
-    equity = cash + positions_value
-    nav_payload = {"date": asof_date, "equity": equity, "cash": cash, "positions_value": positions_value}
+    for _, row in usable.sort_values(["trade_date", "timestamp_et"], na_position="last").iterrows():
+        ticker = str(row.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        side = str(row.get("side") or "").upper()
+        qty = float(row.get("quantity") or 0.0)
+        px = float(row.get("fill_price") or 0.0)
+        fees = float(row.get("fees") or 0.0)
+        if qty <= 0 or px <= 0:
+            continue
 
-    nav_path = Path(nav_path_tpl.format(asof=asof_date))
-    nav_path.parent.mkdir(parents=True, exist_ok=True)
-    nav_path.write_text(json.dumps(nav_payload, indent=2) + "\n", encoding="utf-8")
+        pos = holdings.setdefault(ticker, {"shares": 0.0, "avg_cost": 0.0, "realized_pnl": 0.0})
+        if side == "BUY":
+            new_shares = pos["shares"] + qty
+            pos["avg_cost"] = ((pos["shares"] * pos["avg_cost"]) + (qty * px)) / new_shares if new_shares else 0.0
+            pos["shares"] = new_shares
+            cash -= (qty * px) + fees
+        elif side == "SELL":
+            sell_qty = min(qty, pos["shares"])
+            pos["realized_pnl"] += sell_qty * (px - pos["avg_cost"])
+            pos["shares"] = max(0.0, pos["shares"] - sell_qty)
+            cash += (sell_qty * px) - fees
 
-    ts_path = Path(nav_timeseries_path)
+    return cash, holdings
+
+
+def _upsert_nav_timeseries(path: str, asof_date: str, equity: float, cash: float) -> str:
+    ts_path = Path(path)
     ts_path.parent.mkdir(parents=True, exist_ok=True)
     if ts_path.exists() and ts_path.stat().st_size > 0:
         ts = pd.read_csv(ts_path)
     else:
-        ts = pd.DataFrame(columns=["date", "equity", "cash", "positions_value", "return_1d"])
+        ts = pd.DataFrame(columns=NAV_TS_COLUMNS)
 
     ts = ts[ts["date"].astype(str) != str(asof_date)].copy() if not ts.empty else ts
-    new_row = pd.DataFrame([{"date": asof_date, "equity": equity, "cash": cash, "positions_value": positions_value, "return_1d": 0.0}])
-    ts = new_row if ts.empty else pd.concat([ts, new_row], ignore_index=True)
+    ts = pd.concat(
+        [ts, pd.DataFrame([{"date": str(asof_date), "equity": float(equity), "cash": float(cash), "return_1d": 0.0}])],
+        ignore_index=True,
+    )
     ts["date"] = pd.to_datetime(ts["date"])
     ts = ts.sort_values("date").reset_index(drop=True)
-    ts["return_1d"] = ts["equity"].pct_change().fillna(0.0)
+
+    returns: list[float | str] = []
+    prev_equity: float | None = None
+    for _, row in ts.iterrows():
+        eq = float(row["equity"])
+        if prev_equity is None or prev_equity == 0:
+            returns.append(0.0)
+        else:
+            returns.append((eq / prev_equity) - 1.0)
+        prev_equity = eq
+    ts["return_1d"] = returns
     ts["date"] = ts["date"].dt.strftime("%Y-%m-%d")
     ts.to_csv(ts_path, index=False)
+    return str(ts_path)
+
+
+def update_nav(
+    asof_date: str,
+    trade_date: str,
+    get_price_fn: Callable[[str, str], float | None] | None,
+    source: str,
+    run_id: str,
+    ledger_path: str = LEDGER2_PATH,
+) -> dict:
+    perf_dir = Path("outputs/perf")
+    perf_dir.mkdir(parents=True, exist_ok=True)
+
+    starting_cash = _resolve_starting_cash()
+    ledger_df = load_ledger(ledger_path)
+    cash, holdings = _compute_portfolio_state(ledger_df, asof_date, starting_cash)
+
+    resolved_price_fn = get_price_fn or _default_get_price_fn
+    holdings_rows = []
+    missing_prices: list[str] = []
+    market_value = 0.0
+
+    for ticker, pos in sorted(holdings.items()):
+        shares = float(pos["shares"])
+        if shares <= 0:
+            continue
+        mtm_price = resolved_price_fn(ticker, asof_date)
+        if mtm_price is None:
+            missing_prices.append(ticker)
+            continue
+        mtm_price = float(mtm_price)
+        mv = shares * mtm_price
+        market_value += mv
+        holdings_rows.append(
+            {
+                "date": asof_date,
+                "ticker": ticker,
+                "shares": shares,
+                "avg_cost": float(pos["avg_cost"]),
+                "mtm_price": mtm_price,
+                "market_value": mv,
+                "unrealized_pnl": shares * (mtm_price - float(pos["avg_cost"])),
+                "realized_pnl": float(pos["realized_pnl"]),
+            }
+        )
+
+    equity = float(cash + market_value)
+
+    nav_payload = {
+        "date": str(asof_date),
+        "trade_date": str(trade_date),
+        "source": str(source).upper(),
+        "run_id": str(run_id),
+        "equity": equity,
+        "cash": float(cash),
+        "market_value": float(market_value),
+        "missing_prices": sorted(set(missing_prices)),
+    }
+
+    nav_path = perf_dir / f"nav_{asof_date}.json"
+    nav_path.write_text(json.dumps(nav_payload, indent=2) + "\n", encoding="utf-8")
+
+    holdings_path = perf_dir / f"holdings_mtm_{asof_date}.csv"
+    pd.DataFrame(holdings_rows).to_csv(holdings_path, index=False)
+
+    nav_ts_path = _upsert_nav_timeseries(str(perf_dir / "nav_timeseries.csv"), asof_date, equity, float(cash))
 
     return {
         "nav_path": str(nav_path),
-        "nav_timeseries_path": str(ts_path),
-        "equity": float(equity),
+        "nav_timeseries_path": nav_ts_path,
+        "holdings_mtm_path": str(holdings_path),
+        "equity": equity,
+        "cash": float(cash),
         "missing_prices": sorted(set(missing_prices)),
     }
+
+
+# backward-compatible adapter
+
+def update_nav_outputs(
+    asof_date: str,
+    ledger_path: str = LEDGER2_PATH,
+    nav_path_tpl: str = "outputs/perf/nav_{asof}.json",
+    nav_timeseries_path: str = "outputs/perf/nav_timeseries.csv",
+) -> dict:
+    _ = nav_path_tpl, nav_timeseries_path
+    return update_nav(asof_date=asof_date, trade_date=asof_date, get_price_fn=None, source="SHADOW", run_id="legacy", ledger_path=ledger_path)
