@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
@@ -16,6 +17,8 @@ from paper.trading_calendar import prev_trading_day
 from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, load_ledger, make_run_id
 from paper.positions import rebuild_positions_from_ledger, write_position_outputs
 from paper.mark_to_market import mark_holdings, update_nav_timeseries, write_perf_outputs
+from paper.ledger2 import append_ledger2_rows, ledger2_rows_from_execution_payload
+from paper.nav2 import update_nav_outputs
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 
@@ -209,15 +212,49 @@ def _infer_report_date(
     return pd.to_datetime(fallback).normalize()
 
 
-def _write_execution_email_payload(payload: dict, run_date: str) -> str:
-    out_dir = os.path.join("outputs", "execution_email")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{run_date}.json")
-    with open(out_path, "w", encoding="utf-8") as f:
+def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, bool, str | None]:
+    out_dir = Path("outputs") / "execution_email"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{run_date}.json"
+
+    preserved = False
+    preserved_path = None
+    write_path = out_path
+    if out_path.exists():
+        try:
+            existing_payload = json.loads(out_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing_payload = {}
+        existing_num = _payload_num_trades(existing_payload)
+        incoming_num = _payload_num_trades(payload)
+        incoming_status = str((payload or {}).get("execution_status", "")).upper() if isinstance(payload, dict) else ""
+        if existing_num > 0 and incoming_num == 0:
+            suffix = "halted" if incoming_status == "HALTED" else "empty"
+            ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            write_path = out_dir / f"{run_date}.{suffix}.{ts}.json"
+            preserved = True
+            preserved_path = str(out_path)
+            logger.warning(
+                "[EXECUTION_EMAIL] preserving non-empty payload=%s; writing new %s payload to %s",
+                out_path,
+                suffix,
+                write_path,
+            )
+
+    with open(write_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
         f.write("\n")
-    logger.info("[EXECUTION_EMAIL] payload written: %s", out_path)
-    return out_path
+    logger.info("[EXECUTION_EMAIL] payload written: %s", write_path)
+    return str(write_path), preserved, preserved_path
+
+
+def _payload_num_trades(payload: object) -> int:
+    if isinstance(payload, list):
+        return len(payload)
+    if isinstance(payload, dict):
+        trades = payload.get("trades", [])
+        return len(trades) if isinstance(trades, list) else 0
+    return 0
 
 
 def _coerce_whole_shares(value: object) -> int:
@@ -2627,6 +2664,8 @@ def main(argv: list[str] | None = None):
     )
     paper_summary = None
     paper_html = ""
+    sent_ledger_removed = 0
+    sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
     if os.path.exists(signals_path_exec):
         try:
             shadow_constraints = {
@@ -2637,9 +2676,15 @@ def main(argv: list[str] | None = None):
                     }.get("CASH", 0.0)
                 )
             }
+            trading_mode = str(os.getenv("TRADING_MODE", "shadow")).strip().lower()
+            if trading_mode == "shadow" and os.getenv("ALLOW_RERUN_RESET", "1") == "1":
+                sent_ledger_removed += reset_orders_sent_ledger_for_date(
+                    sent_ledger_path,
+                    trade_date_str,
+                )
             if args.reset_ledger_date:
-                reset_orders_sent_ledger_for_date(
-                    "outputs/shadow_orders/orders_sent.csv",
+                sent_ledger_removed += reset_orders_sent_ledger_for_date(
+                    sent_ledger_path,
                     args.reset_ledger_date,
                 )
             paper_summary = run_paper_day(
@@ -2702,9 +2747,23 @@ def main(argv: list[str] | None = None):
             buy_count,
             sell_count,
         )
-    _write_execution_email_payload(execution_payload, trade_date_str)
-    execution_payload_path = os.path.join("outputs", "execution_email", f"{trade_date_str}.json")
+    execution_payload_path, payload_preserved, preserved_path = _write_execution_email_payload(execution_payload, trade_date_str)
 
+    integrity = {
+        "trade_date": trade_date_str,
+        "asof_date": str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str)),
+        "mode": str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper(),
+        "execution_status": execution_payload.get("execution_status"),
+        "halt_reason": execution_payload.get("halt_reason"),
+        "payload_path_written": execution_payload_path,
+        "payload_preserved": payload_preserved,
+        "preserved_path": preserved_path,
+        "sent_ledger_path": sent_ledger_path,
+        "sent_ledger_reset_removed": int(sent_ledger_removed),
+        "missing_prices": [],
+    }
+
+    # legacy pipeline retained for backward compatibility
     try:
         asof_date = str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str))
         ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
@@ -2753,6 +2812,40 @@ def main(argv: list[str] | None = None):
             f.write("\n")
     except Exception as e:
         logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
+
+    try:
+        asof_date = integrity["asof_date"]
+        ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
+        ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
+        rows2, missing_prices = ledger2_rows_from_execution_payload(
+            payload=execution_payload,
+            trade_date=trade_date_str,
+            asof_date=asof_date,
+            source=ledger_source,
+            run_id=ledger_run_id,
+            execution_status=str(execution_payload.get("execution_status") or "UNKNOWN"),
+        )
+        appended2 = append_ledger2_rows(rows2)
+        nav_result = update_nav_outputs(asof_date=asof_date)
+        integrity.update(
+            {
+                "ledger2_path": "outputs/ledger/trades.csv",
+                "ledger2_appended_rows": int(appended2),
+                "nav_path": nav_result.get("nav_path"),
+                "nav_timeseries_path": nav_result.get("nav_timeseries_path"),
+                "nav_equity": nav_result.get("equity"),
+            }
+        )
+        integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
+    except Exception as e:
+        logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
+
+    try:
+        integrity_path = Path("outputs") / "daily" / f"integrity_{integrity['asof_date']}.json"
+        integrity_path.parent.mkdir(parents=True, exist_ok=True)
+        integrity_path.write_text(json.dumps(integrity, indent=2) + "\n", encoding="utf-8")
+    except Exception as e:
+        logger.warning("[INTEGRITY][WARN] failed writing integrity artifact: %s", e)
 
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)
