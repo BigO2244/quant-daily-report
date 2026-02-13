@@ -41,7 +41,7 @@ def test_daily_report_smoke_includes_charlie(monkeypatch, tmp_path: Path):
     assert "charlie_munger" in sleeves
 
 
-def test_charlie_quarterly_rebalance_uses_pandas_supported_qe(monkeypatch):
+def test_charlie_quarterly_rebalance_qe_alias_maps_to_supported_rule(monkeypatch):
     import sleeves.sleeve_charlie_munger as cm
 
     captured = {}
@@ -58,7 +58,7 @@ def test_charlie_quarterly_rebalance_uses_pandas_supported_qe(monkeypatch):
         max_weight_per_name = 1.0
         quality_min_score = 0.0
         allow_missing_fundamentals = True
-        rebalance_freq = "Q"
+        rebalance_freq = "QE"
 
     dates = pd.to_datetime(["2026-01-02", "2026-01-09", "2026-01-16"])
     rows = []
@@ -82,4 +82,4 @@ def test_charlie_quarterly_rebalance_uses_pandas_supported_qe(monkeypatch):
 
     cm.run_backtest_with_details()
 
-    assert captured["rebal_rule"] == "QE"
+    assert captured["rebal_rule"] == "Q"

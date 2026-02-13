@@ -53,3 +53,25 @@ def test_snapshot_email_uses_explicit_alpha_reason_when_unavailable():
 
     assert "ALPHA ATTRIBUTION VS SPY" in body
     assert "• Status: Pending — Need >=5 overlapping days; have 1 (2026-02-09 → 2026-02-09)" in body
+
+
+def test_alpha_attribution_rows_use_date_column_when_present():
+    dates = pd.date_range("2026-01-01", periods=6, freq="D", name="date")
+    port_eq = pd.Series([100, 101, 102, 103, 104, 105], index=dates)
+    spy_px = pd.Series([500, 501, 502, 503, 504, 505], index=dates)
+
+    result = compute_alpha_attribution(port_eq, spy_px, min_overlap_days=3, last_n=3)
+
+    assert result["ok"] is True
+    assert [r["date"] for r in result["rows"]] == ["2026-01-04", "2026-01-05", "2026-01-06"]
+
+
+def test_alpha_attribution_rows_fall_back_to_first_reset_index_column():
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    port_eq = pd.Series([100, 102, 101, 104, 103, 106], index=dates)
+    spy_px = pd.Series([500, 501, 500, 503, 504, 506], index=dates)
+
+    result = compute_alpha_attribution(port_eq, spy_px, min_overlap_days=3, last_n=2)
+
+    assert result["ok"] is True
+    assert result["rows"][-1]["date"] == "2026-01-06"
