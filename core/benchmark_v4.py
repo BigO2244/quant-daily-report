@@ -60,6 +60,6 @@ def update_inception_nav_series(asof_date: str, model_nav: float, output_path: s
     ts["spy_mdd_since_inception"] = _max_drawdown(ts["spy_nav"])
 
     out = ts.copy()
-    out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+    out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
     out.to_csv(path, index=False)
     return out
