@@ -37,25 +37,26 @@ def build_paper_report_html(
     reconciliation: dict | None = None,
     shadow_status: dict | None = None,
 ) -> str:
+    canonical_trades_path = "outputs/ledger/trades.csv"
+    canonical_nav_path = "outputs/perf/nav_timeseries.csv"
     led = _read_csv_if_exists(ledger_path)
     day = led[led["date"] == run_date].copy() if (not led.empty and "date" in led.columns) else pd.DataFrame()
 
     trades = _read_csv_if_exists(trades_path)
     trades = trades[trades["date"] == run_date].copy() if (not trades.empty and "date" in trades.columns) else pd.DataFrame()
 
-    nav_ts = _read_csv_if_exists("outputs/perf/nav_timeseries.csv")
+    nav_ts = _read_csv_if_exists(canonical_nav_path)
     nav_row = pd.DataFrame()
     if not nav_ts.empty and "date" in nav_ts.columns:
         nav_ts["date"] = pd.to_datetime(nav_ts["date"])
         nav_row = nav_ts[nav_ts["date"] == pd.to_datetime(run_date)]
 
     mode = str((shadow_status or {}).get("trading_mode") or "").upper()
-    missing_inputs = list((shadow_status or {}).get("missing_inputs") or [])
-    if day.empty:
-        missing_inputs.append(ledger_path)
-    if nav_row.empty:
-        missing_inputs.append("outputs/perf/nav_timeseries.csv")
-    missing_inputs = sorted(set(missing_inputs))
+    missing_inputs = []
+    if not os.path.exists(canonical_trades_path):
+        missing_inputs.append(canonical_trades_path)
+    if not os.path.exists(canonical_nav_path):
+        missing_inputs.append(canonical_nav_path)
 
     summary_unavailable = mode == "SHADOW" and bool(missing_inputs)
 
@@ -146,12 +147,13 @@ def build_paper_report_html(
   {df_to_html(recon_df)}
 """.rstrip()
 
+    market_status = str((shadow_status or {}).get("market_status") or "").strip().upper() or "UNKNOWN"
     if shadow_status:
         shadow_html = f"""
   <h3>Quasi-Live / Shadow Trading Status</h3>
   <ul>
     <li><b>Trading mode:</b> {shadow_status.get('trading_mode', 'paper')}</li>
-    <li><b>Market open/closed:</b> {shadow_status.get('market_status', 'UNKNOWN')}</li>
+    <li><b>Market open/closed:</b> {market_status}</li>
     <li><b>Orders generated:</b> {int(shadow_status.get('orders_generated', 0))}</li>
     <li><b>Orders blocked:</b> {int(shadow_status.get('orders_blocked', 0))}</li>
     <li><b>Broker recon status:</b> {shadow_status.get('broker_recon_status', 'UNKNOWN')}</li>
