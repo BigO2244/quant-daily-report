@@ -115,3 +115,90 @@ def test_build_execution_payload_turnover_metrics_unavailable_when_missing():
     assert payload["risk_summary"]["Turnover requested ($)"] == "unavailable"
     assert payload["risk_summary"]["Turnover cap ($)"] == "unavailable"
     assert payload["risk_summary"]["Turnover scale"] == "unavailable"
+    assert payload["risk_summary"]["Target cash weight (%)"] == "unavailable"
+    assert payload["risk_summary"]["Achieved cash weight (%)"] == "unavailable"
+    assert payload["investable_dollars"] is None
+    assert payload["equity"] is None
+    assert payload["cash_target_dollars"] is None
+
+
+def test_build_execution_payload_uses_execution_filter_stats_and_intent_count():
+    payload = build_execution_email_payload(
+        trade_date="2026-02-17",
+        daily_snapshot={
+            "risk_levels": [{"ticker": "AAPL", "entry_price": 200.0}],
+            "holdings": [],
+            "proposed_trades": [{"ticker": "AAPL"}, {"ticker": "MSFT"}],
+        },
+        paper_summary={
+            "trading_mode": "SHADOW",
+            "market_status": "OPEN",
+            "execution_trades": [{"ticker": "AAPL", "side": "BUY", "shares": 2, "notional": 400.0}],
+            "execution_filter": {
+                "raw": 2,
+                "rounded": 2,
+                "kept": 1,
+                "dropped_zero_shares": 1,
+                "dropped_min_notional": 0,
+            },
+            "min_trade_dollars": 100.0,
+            "risk_meta": {},
+        },
+    )
+
+    assert payload["filter_stats"]["dropped_zero_shares"] == 1
+    assert payload["proposed_trades_intent_count"] == 2
+    assert payload["executable_trades_count"] == len(payload["trades"])
+
+
+def test_execution_email_no_trades_with_missing_filter_stats_and_intent_shows_unavailable():
+    payload = {
+        "trade_date": "2026-02-17",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [],
+        "executable_trades_count": 0,
+        "filter_stats": None,
+        "min_trade_dollars": None,
+    }
+
+    _, body = build_execution_email_text(payload)
+
+    assert "Proposed Trades (Intent): unavailable" in body
+    assert "Dropped Zero Shares: unavailable" in body
+    assert "Dropped Min Notional: unavailable" in body
+    assert "Min Trade Dollars: unavailable" in body
+
+
+def test_execution_email_turnover_none_renders_unavailable_not_zero():
+    payload = build_execution_email_payload(
+        trade_date="2026-02-17",
+        daily_snapshot={"risk_levels": [], "holdings": [], "proposed_trades": []},
+        paper_summary={
+            "trading_mode": "SHADOW",
+            "market_status": "OPEN",
+            "risk_meta": {
+                "turnover_requested": None,
+                "turnover_cap": None,
+                "turnover_scale": None,
+            },
+        },
+    )
+
+    assert payload["risk_summary"]["Turnover requested ($)"] == "unavailable"
+    assert payload["risk_summary"]["Turnover cap ($)"] == "unavailable"
+    assert payload["risk_summary"]["Turnover scale"] == "unavailable"
+
+
+def test_execution_email_missing_paper_summary_does_not_emit_zero_placeholders():
+    payload = build_execution_email_payload(
+        trade_date="2026-02-17",
+        daily_snapshot={"risk_levels": [], "holdings": []},
+        paper_summary=None,
+    )
+
+    _, body = build_execution_email_text(payload)
+
+    assert "Target cash weight (%): unavailable" in body
+    assert "Achieved cash weight (%): unavailable" in body
+    assert "$0.00" not in body

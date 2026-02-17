@@ -23,7 +23,7 @@ def test_execution_email_no_trades_includes_min_trade_filter_reason_and_counts()
         "execution_status": "READY",
         "trades": [],
         "no_trades_reason": "No executable trades after rounding and $100 minimum trade filter",
-        "proposed_trades_intent": 3,
+        "proposed_trades_intent_count": 3,
         "executable_trades_count": 0,
     }
 
@@ -115,11 +115,14 @@ def test_execution_email_no_trades_includes_drop_diagnostics_when_present():
         "mode": "SHADOW",
         "execution_status": "READY",
         "trades": [],
-        "proposed_trades_intent": 4,
+        "proposed_trades_intent_count": 4,
         "executable_trades_count": 0,
         "min_trade_dollars": 125.0,
-        "risk_meta": {
-            "dropped_zero": 2,
+        "filter_stats": {
+            "raw": 4,
+            "rounded": 4,
+            "kept": 0,
+            "dropped_zero_shares": 2,
             "dropped_min_notional": 1,
         },
     }

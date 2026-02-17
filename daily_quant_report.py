@@ -237,6 +237,33 @@ def _coerce_whole_shares(value: object) -> int:
         return max(0, int(float(value)))
     except Exception:
         return 0
+
+
+def _coerce_filter_stats(execution_filter: object) -> dict | None:
+    if not isinstance(execution_filter, dict):
+        return None
+    required_keys = ["raw", "rounded", "kept", "dropped_zero_shares", "dropped_min_notional"]
+    coerced: dict[str, int] = {}
+    for key in required_keys:
+        value = execution_filter.get(key)
+        if value is None:
+            return None
+        try:
+            coerced[key] = int(value)
+        except Exception:
+            return None
+    return coerced
+
+
+def _coerce_float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
 def build_execution_email_payload(
     trade_date: str,
     daily_snapshot: dict,
@@ -285,7 +312,9 @@ def build_execution_email_payload(
     execution_trades = (paper_summary or {}).get("execution_trades", []) or []
     planned_trades = (paper_summary or {}).get("trade_plan", []) or []
     execution_filter = (paper_summary or {}).get("execution_filter", {}) or {}
-    min_trade_dollars = float((paper_summary or {}).get("min_trade_dollars", execution_filter.get("min_trade_dollars", 100.0)))
+    min_trade_dollars_raw = (paper_summary or {}).get("min_trade_dollars")
+    min_trade_dollars = float(min_trade_dollars_raw) if min_trade_dollars_raw is not None else None
+    filter_stats = _coerce_filter_stats(execution_filter)
     risk_meta = (paper_summary or {}).get("risk_meta", {}) or {}
     turnover_scaled = bool(risk_meta.get("turnover_scaled", False))
     turnover_requested_raw = risk_meta.get("turnover_requested")
@@ -295,8 +324,6 @@ def build_execution_email_payload(
     turnover_cap = float(turnover_cap_raw) if turnover_cap_raw is not None else None
     turnover_scale = float(turnover_scale_raw) if turnover_scale_raw is not None else None
     trades = []
-    dropped_zero_shares = 0
-    dropped_min_notional = 0
     source_rows = []
     if status == "PLANNED" and planned_trades:
         for tr in planned_trades:
@@ -350,7 +377,6 @@ def build_execution_email_payload(
             if available is not None:
                 shares = min(shares, available)
         if shares < 1:
-            dropped_zero_shares += 1
             continue
         entry_price = risk.get("entry_price")
         notional = None
@@ -361,8 +387,7 @@ def build_execution_email_payload(
                 notional = abs(float(row.get("notional")))
         except Exception:
             notional = None
-        if notional is not None and abs(float(notional)) < float(min_trade_dollars):
-            dropped_min_notional += 1
+        if min_trade_dollars is not None and notional is not None and abs(float(notional)) < float(min_trade_dollars):
             continue
         trades.append(
             {
@@ -378,11 +403,6 @@ def build_execution_email_payload(
                 "order_id": row.get("order_id"),
             }
         )
-    logger.info(
-        "[EXECUTION_EMAIL] rounded_to_whole_shares dropped_zero_shares=%d dropped_min_notional=%d",
-        dropped_zero_shares,
-        dropped_min_notional,
-    )
     trades = sorted(trades, key=lambda x: (x.get("ticker") or "", x.get("side") or ""))
     order_ids = sorted(
         [t.get("order_id") for t in trades if t.get("order_id")],
@@ -404,7 +424,7 @@ def build_execution_email_payload(
     blocked_tickers = sorted(set(blocked_tickers))
     pricing_source = (paper_summary or {}).get("pricing_source") or ("PREV_CLOSE" if status == "PLANNED" else "OPEN")
     pricing_asof = (paper_summary or {}).get("pricing_asof") or trade_date
-    total_equity = float((paper_summary or {}).get("total_equity", 0.0) or 0.0)
+    total_equity = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
     holdings = (daily_snapshot or {}).get("holdings", []) or []
     position_weights: list[float] = []
     for holding in holdings:
@@ -412,13 +432,13 @@ def build_execution_email_payload(
             shares = float(holding.get("shares"))
             price = float(holding.get("last_price"))
             mv = abs(shares * price)
-            if total_equity > 0:
+            if total_equity is not None and total_equity > 0:
                 position_weights.append(mv / total_equity)
         except Exception:
             continue
     gross_exposure = sum(position_weights) if position_weights else None
     net_exposure = None
-    if holdings and total_equity > 0:
+    if holdings and total_equity is not None and total_equity > 0:
         try:
             signed = []
             for h in holdings:
@@ -432,8 +452,8 @@ def build_execution_email_payload(
             net_exposure = None
     target_cash_weight_raw = (paper_summary or {}).get("target_cash_weight")
     achieved_cash_weight_raw = (paper_summary or {}).get("achieved_cash_weight")
-    target_cash_weight = float(target_cash_weight_raw) if target_cash_weight_raw is not None else None
-    achieved_cash_weight = float(achieved_cash_weight_raw) if achieved_cash_weight_raw is not None else None
+    target_cash_weight = _coerce_float_or_none(target_cash_weight_raw)
+    achieved_cash_weight = _coerce_float_or_none(achieved_cash_weight_raw)
     risk_summary = {
         "Turnover requested ($)": f"${turnover_requested:,.2f}" if turnover_requested is not None else "unavailable",
         "Turnover cap ($)": f"${turnover_cap:,.2f}" if turnover_cap is not None else "unavailable",
@@ -445,6 +465,11 @@ def build_execution_email_payload(
         "# positions": str(len(holdings)) if holdings else "unavailable",
         "Max position weight (%)": f"{max(position_weights) * 100:.2f}%" if position_weights else "unavailable",
     }
+    intent_list = (daily_snapshot or {}).get("proposed_trades") if isinstance(daily_snapshot, dict) else None
+    proposed_trades_intent_count = len(intent_list) if isinstance(intent_list, list) else None
+    sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
+    total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
+
     payload = {
         "trade_date": trade_date,
         "mode": mode,
@@ -460,20 +485,20 @@ def build_execution_email_payload(
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
         "cash_target_weight": target_cash_weight,
-        "investable_dollars": float((paper_summary or {}).get("investable_dollars", 0.0)),
-        "equity": float((paper_summary or {}).get("sizing_equity", (paper_summary or {}).get("total_equity", 0.0))),
-        "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
+        "investable_dollars": _coerce_float_or_none((paper_summary or {}).get("investable_dollars")),
+        "equity": sizing_equity if sizing_equity is not None else total_equity_fallback,
+        "cash_target_dollars": _coerce_float_or_none((paper_summary or {}).get("target_cash_dollars")),
         "blocked_tickers": blocked_tickers,
-        "proposed_trades_intent": int((paper_summary or {}).get("execution_filter", {}).get("raw", len(source_rows))),
+        "proposed_trades_intent_count": proposed_trades_intent_count,
+        "proposed_trades_intent": proposed_trades_intent_count,
         "executable_trades_count": int(len(trades)),
-        "min_trade_dollars": float(min_trade_dollars),
+        "min_trade_dollars": min_trade_dollars,
+        "filter_stats": filter_stats,
         "risk_meta": {
             "turnover_requested": turnover_requested,
             "turnover_cap": turnover_cap,
             "turnover_scaled": turnover_scaled,
             "turnover_scale": turnover_scale,
-            "dropped_zero": int(dropped_zero_shares),
-            "dropped_min_notional": int(dropped_min_notional),
         },
         "risk_summary": risk_summary,
     }
@@ -495,7 +520,11 @@ def build_execution_email_payload(
                 "signals_status": "VALID",
                 "constraints_status": "ENFORCED",
                 "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
-                "no_trades_reason": f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter",
+                "no_trades_reason": (
+                    f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter"
+                    if min_trade_dollars is not None
+                    else "No executable trades after rounding and minimum trade filter"
+                ),
             }
         )
         if turnover_scaled and turnover_requested is not None and turnover_cap is not None and turnover_scale is not None:
@@ -589,7 +618,9 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", "SHADOW")).upper()
     env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
     exec_trades = (execution_payload or {}).get("trades", []) or []
-    intent_from_payload = (execution_payload or {}).get("proposed_trades_intent") if execution_payload else None
+    intent_from_payload = (execution_payload or {}).get("proposed_trades_intent_count") if execution_payload else None
+    if intent_from_payload is None:
+        intent_from_payload = (execution_payload or {}).get("proposed_trades_intent") if execution_payload else None
     if intent_from_payload is None:
         intent_from_payload = len(snapshot.get("proposed_trades", []) or [])
     executable_count = (execution_payload or {}).get("executable_trades_count") if execution_payload else None
