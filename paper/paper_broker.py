@@ -18,6 +18,8 @@ import yfinance as yf
 
 from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
+from core.growth_engine_v4 import is_monday_rebalance
+from core.universe_v4 import is_allowed_etf_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,10 @@ def load_targets(
 
     df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
     df["target_weight"] = df["target_weight"].astype(float)
+
+    banned = [t for t in df["ticker"].tolist() if t != "CASH" and not is_allowed_etf_symbol(t)]
+    if banned:
+        raise ValueError(f"Disallowed leveraged/inverse ETF symbols in signals: {sorted(set(banned))}")
 
     cash_rows = df[df["ticker"] == "CASH"].copy()
     if not cash_rows.empty:
@@ -577,7 +583,7 @@ def apply_risk_guards(
         "turnover_scaled": False,
         "turnover_scale": 1.0,
     }
-    if current_turnover > max_turnover_notional + 1e-9:
+    if cfg.max_turnover_pct > 0 and current_turnover > max_turnover_notional + 1e-9:
         scale = max_turnover_notional / current_turnover if current_turnover > 0 else 0.0
         scale = max(0.0, min(1.0, float(scale)))
         logger.warning(
@@ -961,6 +967,13 @@ def run_paper_day(
         signals_path,
         cash_target_weight_default=cash_target_weight_default,
     )
+
+    if not is_monday_rebalance(run_date):
+        logger.info("[SCHEDULE] Non-Monday run_date=%s -> exit-only execution", run_date)
+        if not holdings_prev.empty:
+            held = set(holdings_prev["ticker"].astype(str).str.upper())
+            targets = targets[targets["ticker"].astype(str).str.upper().isin(held)].copy()
+        target_cash_weight = 0.0
     if snapshot_date and snapshot_date != run_date:
         raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")
 
@@ -1109,7 +1122,7 @@ def run_paper_day(
 
     risk_meta = {
         "turnover_requested": float(trades["notional"].sum()) if trades is not None and not trades.empty else 0.0,
-        "turnover_cap": float(equity_prev * cfg.max_turnover_pct),
+        "turnover_cap": float(equity_prev * cfg.max_turnover_pct) if cfg.max_turnover_pct > 0 else float("inf"),
         "turnover_scaled": False,
         "turnover_scale": 1.0,
     }
