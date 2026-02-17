@@ -13,3 +13,4 @@ __pycache__/
 paper/holdings_latest.csv
 signals/
 signals/*.json
+signals_store/
