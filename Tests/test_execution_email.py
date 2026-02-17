@@ -106,3 +106,46 @@ def test_execution_email_includes_portfolio_risk_summary_values():
     assert "Turnover requested ($): $4,679.07" in body
     assert "Portfolio Risk Summary" in html
     assert "Turnover cap ($)" in html
+
+
+
+def test_execution_email_no_trades_includes_drop_diagnostics_when_present():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [],
+        "proposed_trades_intent": 4,
+        "executable_trades_count": 0,
+        "min_trade_dollars": 125.0,
+        "risk_meta": {
+            "dropped_zero": 2,
+            "dropped_min_notional": 1,
+        },
+    }
+
+    _, body = build_execution_email_text(payload)
+    _, html = build_execution_email_html(payload)
+
+    assert "Dropped Zero Shares: 2" in body
+    assert "Dropped Min Notional: 1" in body
+    assert "Min Trade Dollars: $125.00" in body
+    assert "Dropped Zero Shares" in html
+    assert "Dropped Min Notional" in html
+
+
+def test_execution_email_no_trades_uses_unavailable_for_missing_diagnostics():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [],
+    }
+
+    _, body = build_execution_email_text(payload)
+
+    assert "Proposed Trades (Intent): unavailable" in body
+    assert "Executable Trades: unavailable" in body
+    assert "Dropped Zero Shares: unavailable" in body
+    assert "Dropped Min Notional: unavailable" in body
+    assert "Min Trade Dollars: unavailable" in body

@@ -288,9 +288,12 @@ def build_execution_email_payload(
     min_trade_dollars = float((paper_summary or {}).get("min_trade_dollars", execution_filter.get("min_trade_dollars", 100.0)))
     risk_meta = (paper_summary or {}).get("risk_meta", {}) or {}
     turnover_scaled = bool(risk_meta.get("turnover_scaled", False))
-    turnover_scale = float(risk_meta.get("turnover_scale", 1.0))
-    turnover_requested = float(risk_meta.get("turnover_requested", 0.0))
-    turnover_cap = float(risk_meta.get("turnover_cap", 0.0))
+    turnover_requested_raw = risk_meta.get("turnover_requested")
+    turnover_cap_raw = risk_meta.get("turnover_cap")
+    turnover_scale_raw = risk_meta.get("turnover_scale")
+    turnover_requested = float(turnover_requested_raw) if turnover_requested_raw is not None else None
+    turnover_cap = float(turnover_cap_raw) if turnover_cap_raw is not None else None
+    turnover_scale = float(turnover_scale_raw) if turnover_scale_raw is not None else None
     trades = []
     dropped_zero_shares = 0
     dropped_min_notional = 0
@@ -432,9 +435,9 @@ def build_execution_email_payload(
     target_cash_weight = float(target_cash_weight_raw) if target_cash_weight_raw is not None else None
     achieved_cash_weight = float(achieved_cash_weight_raw) if achieved_cash_weight_raw is not None else None
     risk_summary = {
-        "Turnover requested ($)": f"${turnover_requested:,.2f}",
-        "Turnover cap ($)": f"${turnover_cap:,.2f}",
-        "Turnover scale": f"{turnover_scale:.4f}",
+        "Turnover requested ($)": f"${turnover_requested:,.2f}" if turnover_requested is not None else "unavailable",
+        "Turnover cap ($)": f"${turnover_cap:,.2f}" if turnover_cap is not None else "unavailable",
+        "Turnover scale": f"{turnover_scale:.4f}" if turnover_scale is not None else "unavailable",
         "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%" if target_cash_weight is not None else "unavailable",
         "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%" if achieved_cash_weight is not None else "unavailable",
         "Gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "unavailable",
@@ -495,12 +498,12 @@ def build_execution_email_payload(
                 "no_trades_reason": f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter",
             }
         )
-        if turnover_scaled:
+        if turnover_scaled and turnover_requested is not None and turnover_cap is not None and turnover_scale is not None:
             payload["no_trades_reason"] = (
                 f"Turnover cap scaling applied (requested ${turnover_requested:,.2f} vs cap ${turnover_cap:,.2f}, "
                 f"scale={turnover_scale:.4f}); no trades remained after rounding/minimum filters"
             )
-    if turnover_scaled:
+    if turnover_scaled and turnover_requested is not None and turnover_cap is not None and turnover_scale is not None:
         payload["turnover_note"] = (
             f"Turnover cap applied: requested ${turnover_requested:,.2f}, "
             f"cap ${turnover_cap:,.2f}, scale {turnover_scale:.4f}."
@@ -2550,16 +2553,10 @@ def main(argv: list[str] | None = None):
                 reconciliation=paper_summary,
                 shadow_status={
                     "trading_mode": (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow").upper(),
-                    "market_status": (paper_summary or {}).get("market_status", "UNKNOWN"),
+                    "market_status": (paper_summary or {}).get("market_status"),
                     "orders_generated": len((paper_summary or {}).get("shadow_orders", []) or []),
                     "orders_blocked": len((paper_summary or {}).get("blocked_reasons", []) or []),
                     "broker_recon_status": (paper_summary or {}).get("broker_recon_status", "UNKNOWN"),
-                    "missing_inputs": [
-                        p for p in [
-                            paper_ledger_path if not os.path.exists(paper_ledger_path) else None,
-                            "outputs/perf/nav_timeseries.csv" if not os.path.exists("outputs/perf/nav_timeseries.csv") else None,
-                        ] if p
-                    ],
                 },
             )
         except Exception as e:

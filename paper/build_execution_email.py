@@ -60,6 +60,25 @@ def _no_order_reasons(payload: dict[str, Any], limit: int = 3) -> list[str]:
         reasons.append("no executable trades after constraints and filters")
     return reasons[:limit]
 
+
+
+def _fmt_diag_count(value: Any) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return str(int(value))
+    except Exception:
+        return "unavailable"
+
+
+def _fmt_diag_money(value: Any) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return f"${float(value):,.2f}"
+    except Exception:
+        return "unavailable"
+
 def _fmt_planned_for(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -249,8 +268,11 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         lines.extend([f"- {reason}" for reason in reasons])
         lines.extend(
             [
-                f"- Proposed Trades (Intent): {int(payload.get('proposed_trades_intent', len(payload.get('trades', []) or [])))}",
-                f"- Executable Trades: {int(payload.get('executable_trades_count', len(payload.get('trades', []) or [])))}",
+                f"- Proposed Trades (Intent): {_fmt_diag_count(payload.get('proposed_trades_intent'))}",
+                f"- Executable Trades: {_fmt_diag_count(payload.get('executable_trades_count'))}",
+                f"- Dropped Zero Shares: {_fmt_diag_count((payload.get('risk_meta') or {}).get('dropped_zero'))}",
+                f"- Dropped Min Notional: {_fmt_diag_count((payload.get('risk_meta') or {}).get('dropped_min_notional'))}",
+                f"- Min Trade Dollars: {_fmt_diag_money(payload.get('min_trade_dollars'))}",
                 "",
                 "========================",
                 "3) EXECUTION NOTES",
@@ -389,6 +411,15 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     trades = payload.get("trades", []) or []
     if not trades:
         why_rows = [["Reason", r] for r in _no_order_reasons(payload)]
+        why_rows.extend(
+            [
+                ["Proposed Trades (Intent)", _fmt_diag_count(payload.get("proposed_trades_intent"))],
+                ["Executable Trades", _fmt_diag_count(payload.get("executable_trades_count"))],
+                ["Dropped Zero Shares", _fmt_diag_count((payload.get("risk_meta") or {}).get("dropped_zero"))],
+                ["Dropped Min Notional", _fmt_diag_count((payload.get("risk_meta") or {}).get("dropped_min_notional"))],
+                ["Min Trade Dollars", _fmt_diag_money(payload.get("min_trade_dollars"))],
+            ]
+        )
         cards.append(
             render_card(
                 "Why no orders?",
