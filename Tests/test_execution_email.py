@@ -30,8 +30,8 @@ def test_execution_email_no_trades_includes_min_trade_filter_reason_and_counts()
     _, body = build_execution_email_text(payload)
 
     assert "No executable trades after rounding and $100 minimum trade filter" in body
-    assert "Proposed Trades (Intent): 3" in body
-    assert "Executable Trades: 0" in body
+    assert "Proposed Trades (Intent) | 3" in body
+    assert "Executable Trades | 0" in body
 
 
 def test_execution_email_includes_turnover_scaling_risk_note():
@@ -130,9 +130,9 @@ def test_execution_email_no_trades_includes_drop_diagnostics_when_present():
     _, body = build_execution_email_text(payload)
     _, html = build_execution_email_html(payload)
 
-    assert "Dropped Zero Shares: 2" in body
-    assert "Dropped Min Notional: 1" in body
-    assert "Min Trade Dollars: $125.00" in body
+    assert "Dropped Zero Shares | 2" in body
+    assert "Dropped Min Notional | 1" in body
+    assert "Min Trade Dollars | $125.00" in body
     assert "Dropped Zero Shares" in html
     assert "Dropped Min Notional" in html
 
@@ -147,8 +147,32 @@ def test_execution_email_no_trades_uses_unavailable_for_missing_diagnostics():
 
     _, body = build_execution_email_text(payload)
 
-    assert "Proposed Trades (Intent): unavailable" in body
-    assert "Executable Trades: unavailable" in body
-    assert "Dropped Zero Shares: unavailable" in body
-    assert "Dropped Min Notional: unavailable" in body
-    assert "Min Trade Dollars: unavailable" in body
+    assert "Proposed Trades (Intent) | unavailable" in body
+    assert "Executable Trades | unavailable" in body
+    assert "Dropped Zero Shares | unavailable" in body
+    assert "Dropped Min Notional | unavailable" in body
+    assert "Min Trade Dollars | unavailable" in body
+
+
+def test_execution_email_no_trades_supports_alternate_dropped_zero_key():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "SHADOW",
+        "execution_status": "READY",
+        "trades": [],
+        "proposed_intent_count": 6,
+        "executable_trades_count": 0,
+        "min_trade_dollars": 150.0,
+        "filter_stats": {
+            "dropped_zero": 4,
+            "dropped_min_notional": 2,
+        },
+    }
+
+    _, body = build_execution_email_text(payload)
+    _, html = build_execution_email_html(payload)
+
+    assert "Proposed Trades (Intent) | 6" in body
+    assert "Dropped Zero Shares | 4" in body
+    assert "Dropped Min Notional | 2" in body
+    assert "$150.00" in html

@@ -164,10 +164,10 @@ def test_execution_email_no_trades_with_missing_filter_stats_and_intent_shows_un
 
     _, body = build_execution_email_text(payload)
 
-    assert "Proposed Trades (Intent): unavailable" in body
-    assert "Dropped Zero Shares: unavailable" in body
-    assert "Dropped Min Notional: unavailable" in body
-    assert "Min Trade Dollars: unavailable" in body
+    assert "Proposed Trades (Intent) | unavailable" in body
+    assert "Dropped Zero Shares | unavailable" in body
+    assert "Dropped Min Notional | unavailable" in body
+    assert "Min Trade Dollars | unavailable" in body
 
 
 def test_execution_email_turnover_none_renders_unavailable_not_zero():
@@ -202,3 +202,50 @@ def test_execution_email_missing_paper_summary_does_not_emit_zero_placeholders()
     assert "Target cash weight (%): unavailable" in body
     assert "Achieved cash weight (%): unavailable" in body
     assert "$0.00" not in body
+
+
+def test_snapshot_market_status_uses_market_guard_when_status_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    trades_path = tmp_path / "outputs" / "ledger" / "trades.csv"
+    nav_path = tmp_path / "outputs" / "perf" / "nav_timeseries.csv"
+    paper_ledger_path = tmp_path / "outputs" / "paper_state" / "ledger.csv"
+    state_trades_path = tmp_path / "outputs" / "paper_state" / "trades.csv"
+
+    trades_path.parent.mkdir(parents=True, exist_ok=True)
+    nav_path.parent.mkdir(parents=True, exist_ok=True)
+    paper_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame([
+        {"date": "2026-02-17", "ticker": "AAPL", "total_equity": 10123.45, "cash": 1200.0, "market_value": 8923.45, "sleeve": "sleeve_2", "shares": 10, "price": 892.345}
+    ]).to_csv(paper_ledger_path, index=False)
+    pd.DataFrame([{"date": "2026-02-17", "ticker": "AAPL", "side": "BUY", "shares": 1, "price": 100.0, "slippage_cost": 0.0, "notional": 100.0, "reason": "rebalance"}]).to_csv(state_trades_path, index=False)
+    pd.DataFrame([{"date": "2026-02-17", "ticker": "AAPL", "side": "BUY"}]).to_csv(trades_path, index=False)
+    pd.DataFrame([{"date": "2026-02-17", "equity": 10123.45, "return_1d": 0.0}]).to_csv(nav_path, index=False)
+
+    html = build_paper_report_html(
+        run_date="2026-02-17",
+        ledger_path=str(paper_ledger_path),
+        trades_path=str(state_trades_path),
+        shadow_status={"trading_mode": "SHADOW", "market_status": None, "market_guard": {"status": "OPEN"}},
+    )
+
+    assert "Market open/closed:</b> OPEN" in html
+
+
+def test_turnover_note_not_set_when_turnover_metrics_missing():
+    payload = build_execution_email_payload(
+        trade_date="2026-02-17",
+        daily_snapshot={"risk_levels": [], "holdings": []},
+        paper_summary={
+            "trading_mode": "SHADOW",
+            "market_status": "OPEN",
+            "risk_meta": {
+                "turnover_scaled": True,
+                "turnover_requested": 1000.0,
+                "turnover_cap": None,
+                "turnover_scale": 0.5,
+            },
+        },
+    )
+
+    assert payload.get("turnover_note") is None
