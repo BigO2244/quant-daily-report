@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
@@ -24,7 +23,6 @@ from paper.nav2 import update_nav
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
-
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
 # ============================================================
@@ -32,7 +30,6 @@ from sleeves.sleeve_1.backtest import (
     prepare_data as s1_prepare_data,
     backtest as s1_backtest,
 )
-
 # ============================================================
 # Sleeve Trend — structured access
 # ============================================================
@@ -41,7 +38,6 @@ from sleeves.sleeve_trend.backtest import (
     backtest as st_backtest,
 )
 from sleeves.sleeve_trend import config as trend_cfg
-
 # ============================================================
 # Sleeve 2 — import module once; resolve symbols dynamically
 # ============================================================
@@ -55,7 +51,6 @@ s2_run_backtest_details = (
 )
 s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
 s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
-
 try:
     import sleeves.charlie_munger.backtest as cm_mod
 except Exception:
@@ -100,7 +95,6 @@ from sleeves.sleeve_2.config import (  # noqa: E402
     LONG_THRESHOLD as S2_LONG_THRESHOLD,
     Z_EXTREME_SHORT,
 )
-
 logger = logging.getLogger(__name__)
 # Backward-compatible alias for tests/patch points
 calc_alpha_stats = compute_alpha_attribution
@@ -112,15 +106,11 @@ DATE_FORMAT = os.getenv("DATE_FORMAT", "US")
 DISPLAY_DECIMALS = int(os.getenv("DISPLAY_DECIMALS", "2"))
 CHARLIE_MIN = 0.20
 CHARLIE_MAX = 0.30
-
-
 # ============================================================
 # Helpers
 # ============================================================
 def _safe_df(df):
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
-
-
 def _fmt_money(x):
     if isinstance(x, str) and x.strip().startswith("$"):
         return x
@@ -128,8 +118,6 @@ def _fmt_money(x):
         return f"${float(x):,.2f}"
     except Exception:
         return "n/a"
-
-
 def _fmt_pct(x):
     if isinstance(x, str) and "%" in x:
         return x
@@ -137,8 +125,6 @@ def _fmt_pct(x):
         return f"{100 * float(x):.{DISPLAY_DECIMALS}f}%"
     except Exception:
         return "n/a"
-
-
 def _fmt_number(x):
     if isinstance(x, str):
         return x
@@ -146,7 +132,6 @@ def _fmt_number(x):
         return f"{float(x):,.{DISPLAY_DECIMALS}f}"
     except Exception:
         return "n/a"
-
 def _alpha_min_overlap_days(default: int = 5) -> int:
     env_val = os.getenv("ALPHA_MIN_OVERLAP_DAYS")
     if env_val:
@@ -160,10 +145,6 @@ def _alpha_min_overlap_days(default: int = 5) -> int:
         return max(1, int((((cfg.get("reporting") or {}).get("alpha_min_overlap_days")) or default)))
     except Exception:
         return default
-
-
-
-
 def _fmt_date(value) -> str:
     try:
         dt_value = pd.to_datetime(value)
@@ -172,16 +153,12 @@ def _fmt_date(value) -> str:
         return dt_value.strftime("%Y-%m-%d")
     except Exception:
         return "n/a"
-
-
 def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if df is None or df.empty:
         return None
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
-
-
 def _infer_report_date(
     *,
     sleeve_details: list[dict | None] | None,
@@ -190,7 +167,6 @@ def _infer_report_date(
     report_date_env = os.getenv("REPORT_DATE", "").strip()
     if report_date_env:
         return pd.to_datetime(report_date_env).normalize()
-
     asof_candidates: list[pd.Timestamp] = []
     target_weight_candidates: list[pd.Timestamp] = []
     for details in (sleeve_details or []):
@@ -207,19 +183,15 @@ def _infer_report_date(
                 )
             except Exception:
                 pass
-
     if asof_candidates:
         return max(asof_candidates)
     if target_weight_candidates:
         return max(target_weight_candidates)
     return pd.to_datetime(fallback).normalize()
-
-
 def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, bool, str | None]:
     out_dir = Path("outputs") / "execution_email"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{run_date}.json"
-
     preserved = False
     preserved_path = None
     write_path = out_path
@@ -243,22 +215,16 @@ def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, b
                 suffix,
                 write_path,
             )
-
     with open(write_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
         f.write("\n")
     logger.info("[EXECUTION_EMAIL] payload written: %s", write_path)
     return str(write_path), preserved, preserved_path
-
-
-
-
 def write_integrity_artifact(asof_date: str, payload: dict) -> str:
     integrity_path = Path("outputs") / "daily" / f"integrity_{asof_date}.json"
     integrity_path.parent.mkdir(parents=True, exist_ok=True)
     integrity_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return str(integrity_path)
-
 def _payload_num_trades(payload: object) -> int:
     if isinstance(payload, list):
         return len(payload)
@@ -266,15 +232,11 @@ def _payload_num_trades(payload: object) -> int:
         trades = payload.get("trades", [])
         return len(trades) if isinstance(trades, list) else 0
     return 0
-
-
 def _coerce_whole_shares(value: object) -> int:
     try:
         return max(0, int(float(value)))
     except Exception:
         return 0
-
-
 def build_execution_email_payload(
     trade_date: str,
     daily_snapshot: dict,
@@ -282,7 +244,6 @@ def build_execution_email_payload(
 ) -> dict:
     mode = (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")
     mode = str(mode).upper()
-
     if mode == "LIVE":
         return {
             "trade_date": trade_date,
@@ -293,7 +254,6 @@ def build_execution_email_payload(
             "run_id": (paper_summary or {}).get("run_id", ""),
             "order_ids": [],
         }
-
     halted_reason = None
     status = "READY"
     planned_for = (paper_summary or {}).get("planned_for")
@@ -315,7 +275,6 @@ def build_execution_email_payload(
         if any("signal_date_mismatch" in str(r) for r in blocked):
             status = "HALTED"
             halted_reason = "SIGNAL DATE MISMATCH"
-
     risk_map = {r.get("ticker"): r for r in (daily_snapshot.get("risk_levels", []) or []) if r.get("ticker")}
     holdings_shares = {
         str(h.get("ticker")): _coerce_whole_shares(h.get("shares"))
@@ -335,7 +294,6 @@ def build_execution_email_payload(
     trades = []
     dropped_zero_shares = 0
     dropped_min_notional = 0
-
     source_rows = []
     if status == "PLANNED" and planned_trades:
         for tr in planned_trades:
@@ -379,12 +337,10 @@ def build_execution_email_payload(
                     "source": "shadow_orders",
                 }
             )
-
     for row in source_rows:
         ticker = row.get("ticker")
         side = str(row.get("side", "")).upper()
         risk = risk_map.get(ticker, {})
-
         shares = _coerce_whole_shares(row.get("shares"))
         if side in {"SELL", "CLOSE", "REDUCE"}:
             available = holdings_shares.get(str(ticker))
@@ -393,7 +349,6 @@ def build_execution_email_payload(
         if shares < 1:
             dropped_zero_shares += 1
             continue
-
         entry_price = risk.get("entry_price")
         notional = None
         try:
@@ -403,11 +358,9 @@ def build_execution_email_payload(
                 notional = abs(float(row.get("notional")))
         except Exception:
             notional = None
-
         if notional is not None and abs(float(notional)) < float(min_trade_dollars):
             dropped_min_notional += 1
             continue
-
         trades.append(
             {
                 "ticker": ticker,
@@ -422,7 +375,6 @@ def build_execution_email_payload(
                 "order_id": row.get("order_id"),
             }
         )
-
     logger.info(
         "[EXECUTION_EMAIL] rounded_to_whole_shares dropped_zero_shares=%d dropped_min_notional=%d",
         dropped_zero_shares,
@@ -439,7 +391,6 @@ def build_execution_email_payload(
         str(ticker): [str(reason) for reason in reasons]
         for ticker, reasons in (((paper_summary or {}).get("blocked_tickers") or {}).items())
     }
-
     blocked_tickers: list[str] = []
     for reason in blocked_reasons:
         if "missing_open_prices:" not in reason:
@@ -448,10 +399,8 @@ def build_execution_email_payload(
         for ticker in [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]:
             blocked_tickers.append(f"{ticker} (missing_open_prices)")
     blocked_tickers = sorted(set(blocked_tickers))
-
     pricing_source = (paper_summary or {}).get("pricing_source") or ("PREV_CLOSE" if status == "PLANNED" else "OPEN")
     pricing_asof = (paper_summary or {}).get("pricing_asof") or trade_date
-
     total_equity = float((paper_summary or {}).get("total_equity", 0.0) or 0.0)
     holdings = (daily_snapshot or {}).get("holdings", []) or []
     position_weights: list[float] = []
@@ -464,7 +413,6 @@ def build_execution_email_payload(
                 position_weights.append(mv / total_equity)
         except Exception:
             continue
-
     gross_exposure = sum(position_weights) if position_weights else None
     net_exposure = None
     if holdings and total_equity > 0:
@@ -479,21 +427,21 @@ def build_execution_email_payload(
             net_exposure = sum(signed)
         except Exception:
             net_exposure = None
-
-    target_cash_weight = float((paper_summary or {}).get("target_cash_weight", 0.0) or 0.0)
-    achieved_cash_weight = float((paper_summary or {}).get("achieved_cash_weight", 0.0) or 0.0)
+    target_cash_weight_raw = (paper_summary or {}).get("target_cash_weight")
+    achieved_cash_weight_raw = (paper_summary or {}).get("achieved_cash_weight")
+    target_cash_weight = float(target_cash_weight_raw) if target_cash_weight_raw is not None else None
+    achieved_cash_weight = float(achieved_cash_weight_raw) if achieved_cash_weight_raw is not None else None
     risk_summary = {
         "Turnover requested ($)": f"${turnover_requested:,.2f}",
         "Turnover cap ($)": f"${turnover_cap:,.2f}",
         "Turnover scale": f"{turnover_scale:.4f}",
-        "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%",
-        "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%",
-        "Gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "n/a",
-        "Net exposure (%)": f"{net_exposure * 100:.2f}%" if net_exposure is not None else "n/a",
-        "# positions": str(len(holdings)),
-        "Max position weight (%)": f"{max(position_weights) * 100:.2f}%" if position_weights else "n/a",
+        "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%" if target_cash_weight is not None else "unavailable",
+        "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%" if achieved_cash_weight is not None else "unavailable",
+        "Gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "unavailable",
+        "Net exposure (%)": f"{net_exposure * 100:.2f}%" if net_exposure is not None else "unavailable",
+        "# positions": str(len(holdings)) if holdings else "unavailable",
+        "Max position weight (%)": f"{max(position_weights) * 100:.2f}%" if position_weights else "unavailable",
     }
-
     payload = {
         "trade_date": trade_date,
         "mode": mode,
@@ -521,10 +469,11 @@ def build_execution_email_payload(
             "turnover_cap": turnover_cap,
             "turnover_scaled": turnover_scaled,
             "turnover_scale": turnover_scale,
+            "dropped_zero": int(dropped_zero_shares),
+            "dropped_min_notional": int(dropped_min_notional),
         },
         "risk_summary": risk_summary,
     }
-
     if mode == "SHADOW" and not trades:
         payload.update(
             {
@@ -551,53 +500,41 @@ def build_execution_email_payload(
                 f"Turnover cap scaling applied (requested ${turnover_requested:,.2f} vs cap ${turnover_cap:,.2f}, "
                 f"scale={turnover_scale:.4f}); no trades remained after rounding/minimum filters"
             )
-
     if turnover_scaled:
         payload["turnover_note"] = (
             f"Turnover cap applied: requested ${turnover_requested:,.2f}, "
             f"cap ${turnover_cap:,.2f}, scale {turnover_scale:.4f}."
         )
-
     if status == "PLANNED":
         payload["planning_disclaimer"] = "Planning email only — no orders were sent."
         if str(pricing_source).upper() == "PREV_CLOSE":
             payload["pricing_disclaimer"] = "Prices are estimated from prior close; actual execution may differ."
-
     return payload
-
-
 def _format_text_table(headers: list[str], rows: list[list[str]]) -> str:
     if not rows:
         return "(none)"
-
     col_widths = [len(h) for h in headers]
     for row in rows:
         for i, cell in enumerate(row):
             col_widths[i] = max(col_widths[i], len(str(cell)))
-
     def _fmt_row(cells: list[str]) -> str:
         return " | ".join(
             str(cell).ljust(col_widths[i]) for i, cell in enumerate(cells)
         )
-
     lines = [_fmt_row(headers), "-+-".join("-" * w for w in col_widths)]
     for row in rows:
         lines.append(_fmt_row(row))
     return "\n".join(lines)
-
-
 def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
     """Backward-compatible PM-first digest email formatter."""
     asof = snapshot.get("asof")
     asof_str = _fmt_date(asof) if asof is not None else "n/a"
     subject = f"Daily Trade Rundown — {asof_str}"
-
     allocations = (snapshot.get("allocations") or {})
     sleeve_splits = (allocations.get("sleeves") or {})
     diagnostics = snapshot.get("performance_diagnostics") or {}
     perf = snapshot.get("performance_summary") or {}
     cm_sig = snapshot.get("charlie_munger") or {}
-
     near_ma = (cm_sig.get("meta") or {}).get("near_ma_candidates")
     if near_ma in (None, ""):
         charlie_status = "Pending"
@@ -605,7 +542,6 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
         charlie_status = "Pending (insufficient lookback window)"
     else:
         charlie_status = f"Active ({int(near_ma)} near-MA candidates)"
-
     lines = [
         "ENVIRONMENT: SHADOW (NO CAPITAL AT RISK)",
         "",
@@ -626,14 +562,10 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
         "— Automated Portfolio Engine",
     ]
     return subject, "\n".join(lines)
-
-
-
 def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None) -> tuple[str, str]:
     asof = snapshot.get("asof")
     asof_str = _fmt_date(asof) if asof is not None else "n/a"
     subject = f"MODEL & PERFORMANCE SNAPSHOT — {asof_str}"
-
     allocations = snapshot.get("allocations", {}) or {}
     sleeve_splits = allocations.get("sleeves", {}) or {}
     cash_pct = allocations.get("cash", 0.0)
@@ -644,24 +576,39 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     cm_sig = snapshot.get("charlie_munger", {}) or {}
     cm_near_ma = (cm_sig.get("meta") or {}).get("near_ma_candidates", 0)
     cm_selected = cm_sig.get("selected", []) or []
-
     total_equity = diagnostics.get("current_equity")
     day_return = diagnostics.get("day_return")
     orders = snapshot.get("orders", []) or []
     skipped = snapshot.get("skipped_trades", []) or []
-
     def _trades_today(sleeve_name: str) -> str:
         count = len([o for o in orders if o.get("sleeve") == sleeve_name])
         return "NONE" if count == 0 else str(count)
-
     raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", "SHADOW")).upper()
     env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
     exec_trades = (execution_payload or {}).get("trades", []) or []
-    exec_no_trade_reason = (
-        (execution_payload or {}).get("halt_reason")
-        or "No executable trades in execution payload"
-    )
-
+    intent_from_payload = (execution_payload or {}).get("proposed_trades_intent") if execution_payload else None
+    if intent_from_payload is None:
+        intent_from_payload = len(snapshot.get("proposed_trades", []) or [])
+    executable_count = (execution_payload or {}).get("executable_trades_count") if execution_payload else None
+    if executable_count is None:
+        executable_count = len(exec_trades)
+    def _primary_no_trade_reason() -> str:
+        payload = execution_payload or {}
+        if not payload:
+            return "execution payload missing"
+        if int(executable_count or 0) > 0:
+            return "executable trades available"
+        for key in ["halt_reason", "market_reason", "no_trades_reason"]:
+            if payload.get(key):
+                return str(payload.get(key))
+        risk_meta = payload.get("risk_meta", {}) or {}
+        if bool(risk_meta.get("turnover_scaled")) and float(risk_meta.get("turnover_scale", 1.0)) <= 0.0001:
+            return "turnover cap scaled to ~0"
+        min_trade = payload.get("min_trade_dollars")
+        if min_trade is not None:
+            return f"minimum notional filter (${float(min_trade):,.0f})"
+        return "already at target / rounded to zero shares"
+    exec_no_trade_reason = _primary_no_trade_reason()
     nav_metrics = snapshot.get("nav_metrics", {}) or {}
     lines = [
         f"ENVIRONMENT: {env_mode}",
@@ -714,7 +661,6 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "",
         "ALPHA ATTRIBUTION VS SPY",
     ]
-
     if alpha and alpha.get("ok"):
         summary = alpha.get("summary", {}) or {}
         lines.extend(
@@ -739,24 +685,21 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     else:
         reason = (alpha or {}).get("reason") or "Alpha attribution unavailable."
         lines.extend([f"• Status: Pending — {reason}"])
-
     lines.extend(
         [
             "",
             "---",
             "",
             "TRADES FOR TODAY (NEW ORDERS — EXECUTION PAYLOAD)",
-            f"• Executable Trades: {len(exec_trades)}",
-            f"• Status: {'NO TRADES' if not exec_trades else 'TRADES READY'}",
-            f"• Reason: {exec_no_trade_reason if not exec_trades else 'See execution recommendation email for order details'}",
+            f"• Executable Trades: {int(executable_count or 0)}" if execution_payload else "• Executable Trades: unavailable (execution payload missing)",
+            f"• Status: {'NO TRADES' if not exec_trades else 'TRADES READY'}" if execution_payload else "• Status: unavailable (execution payload missing)",
+            f"• Reason: {exec_no_trade_reason}" if execution_payload else "• Reason: execution payload missing",
             "",
-            "PROPOSED / NEXT REBALANCE (NOT EXECUTED TODAY)",
-            "• Momentum breadth remains narrow",
-            "• Valuation signals concentrated in capped names",
-            "• Long-term quality names not yet at accumulation thresholds",
-            "",
-            f"• Proposed Trades (Intent): {len(snapshot.get('proposed_trades', []) or [])}",
-            "• Note: These are model-intent recommendations only; execution is governed by the separate TRADE EXECUTION email.",
+            "MODEL INTENT (PRE-CONSTRAINTS)",
+            f"• Proposed Intent Count: {int(intent_from_payload)}" if intent_from_payload is not None else "• Proposed Intent Count: unavailable (execution payload missing)",
+            f"• Executable Trades Count: {int(executable_count or 0)}" if execution_payload else "• Executable Trades Count: unavailable (execution payload missing)",
+            f"• Primary Non-Execution Reason: {exec_no_trade_reason}" if execution_payload and int(executable_count or 0) == 0 else "• Primary Non-Execution Reason: n/a (orders are executable)",
+            "• Note: Model intent is pre-constraints; executable orders reflect market/constraint filters.",
             "",
             "SYSTEM HEALTH",
             "• Signals: VALID",
@@ -766,11 +709,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
             "— Automated Portfolio Engine",
         ]
     )
-
     return subject, "\n".join(lines)
-
-
-
 def _normalize_weights(sleeve_allocations: dict[str, float], cash_weight: float) -> tuple[dict[str, float], float]:
     sleeves = {k: max(0.0, float(v)) for k, v in (sleeve_allocations or {}).items()}
     cash = max(0.0, float(cash_weight))
@@ -783,8 +722,6 @@ def _normalize_weights(sleeve_allocations: dict[str, float], cash_weight: float)
     sleeves = {k: v * factor for k, v in sleeves.items()}
     cash = cash * factor
     return sleeves, cash
-
-
 def enforce_charlie_bounds(
     sleeve_allocations: dict[str, float],
     cash_weight: float,
@@ -795,20 +732,16 @@ def enforce_charlie_bounds(
     sleeves, cash = _normalize_weights(sleeve_allocations, cash_weight)
     if not charlie_active:
         return sleeves, cash
-
     sleeves.setdefault("sleeve_trend", 0.0)
     sleeves.setdefault("sleeve_2", 0.0)
     sleeves.setdefault("charlie_munger", 0.0)
-
     orig_charlie = float(sleeves.get("charlie_munger", 0.0))
     target_charlie = min(max(orig_charlie, CHARLIE_MIN), CHARLIE_MAX)
     delta = target_charlie - orig_charlie
     if abs(delta) <= WEIGHT_TOLERANCE:
         return sleeves, cash
-
     other_keys = ["sleeve_trend", "sleeve_2"]
     others_total = sum(float(sleeves.get(k, 0.0)) for k in other_keys)
-
     if delta > 0:
         if others_total > WEIGHT_TOLERANCE:
             for key in other_keys:
@@ -832,13 +765,9 @@ def enforce_charlie_bounds(
             sleeves["charlie_munger"] = max(0.0, orig_charlie)
             sleeves, cash = _normalize_weights(sleeves, cash)
             return sleeves, cash
-
     sleeves["charlie_munger"] = max(0.0, target_charlie)
     sleeves, cash = _normalize_weights(sleeves, cash)
     return sleeves, cash
-
-
-
 def _apply_enforced_allocations_to_result(
     alloc_result: AllocationResult,
     old_allocations: dict[str, float],
@@ -852,12 +781,10 @@ def _apply_enforced_allocations_to_result(
             {"ticker": CASH_TICKER, "target_weight": float(new_cash_weight), "sleeve_name": CASH_TICKER, "reason": "post_enforce", "signal_strength": 1.0}
         ])
         return
-
     if "sleeve_name" not in combined.columns:
         combined["sleeve_name"] = combined.get("ticker", pd.Series(dtype=str)).apply(
             lambda t: CASH_TICKER if str(t) == CASH_TICKER else ""
         )
-
     if "target_weight" in combined.columns:
         def _scale_row(row):
             names = [n.strip() for n in str(row.get("sleeve_name", "")).split(",") if n.strip()]
@@ -871,7 +798,6 @@ def _apply_enforced_allocations_to_result(
                     ratios.append(0.0)
             scale = sum(ratios) / len(ratios) if ratios else 1.0
             return float(row.get("target_weight", 0.0)) * scale
-
         mask_cash = combined.get("ticker", pd.Series(dtype=str)) == CASH_TICKER
         non_cash = combined[~mask_cash].copy()
         if not non_cash.empty:
@@ -887,7 +813,6 @@ def _apply_enforced_allocations_to_result(
             }
         ])
         alloc_result.combined_weights = pd.concat([non_cash, cash_row], ignore_index=True)
-
 def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
     df = _safe_df(df)
     if df.empty or "equity" not in df.columns:
@@ -897,16 +822,12 @@ def _equity_series_from_df(df: pd.DataFrame) -> pd.Series:
         index=pd.to_datetime(df["date"]) if "date" in df.columns else df.index,
     )
     return series.dropna().sort_index()
-
-
 def _series_date_range(series: pd.Series) -> str:
     series = pd.Series(series).dropna()
     if series.empty:
         return "empty"
     idx = pd.to_datetime(series.index)
     return f"{idx.min().date()} -> {idx.max().date()}"
-
-
 def _load_equity_history(path: str) -> pd.Series:
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return pd.Series(dtype=float)
@@ -915,8 +836,6 @@ def _load_equity_history(path: str) -> pd.Series:
         return pd.Series(dtype=float)
     df["date"] = pd.to_datetime(df["date"])
     return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
-
-
 def _load_portfolio_fixture(path: str) -> pd.Series:
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return pd.Series(dtype=float)
@@ -925,8 +844,6 @@ def _load_portfolio_fixture(path: str) -> pd.Series:
         return pd.Series(dtype=float)
     df["date"] = pd.to_datetime(df["date"])
     return pd.Series(df["equity"].values, index=df["date"]).dropna().sort_index()
-
-
 def _append_equity_history(
     path: str, report_date: pd.Timestamp, equity: float
 ) -> pd.Series:
@@ -951,8 +868,6 @@ def _append_equity_history(
     return (
         pd.Series(out_df["equity"].values, index=out_df["date"]).dropna().sort_index()
     )
-
-
 def compute_portfolio_equity_series(
     sleeve_equity_map: dict[str, pd.DataFrame],
     sleeve_allocations: dict[str, float],
@@ -980,13 +895,9 @@ def compute_portfolio_equity_series(
     if cash_weight > WEIGHT_TOLERANCE:
         portfolio_equity = portfolio_equity * (1.0 + 0.0)
     return portfolio_equity
-
-
 def _compute_execution_price(price_map: dict, ticker: str) -> float | None:
     entry = price_map.get(ticker, {})
     return entry.get("next_open") or entry.get("last_close")
-
-
 def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     price_map = {}
     if prices.empty:
@@ -1004,8 +915,6 @@ def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
             "next_open": float(next_open) if next_open is not None else None,
         }
     return price_map
-
-
 def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     if prices.empty:
         return {}
@@ -1021,12 +930,13 @@ def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
                 float(past["atr"].iloc[-1]) if pd.notna(past["atr"].iloc[-1]) else None
             )
     return atr_map
-
-
 def _format_df_for_email(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for col in df.columns:
         col_lower = str(col).lower()
+        if "shares" in col_lower:
+            df[col] = df[col].apply(_fmt_number)
+            continue
         if "%" in col_lower or "pct" in col_lower or "percent" in col_lower:
             df[col] = df[col].apply(_fmt_pct)
         elif "date" in col_lower:
@@ -1055,11 +965,7 @@ def _format_df_for_email(df: pd.DataFrame) -> pd.DataFrame:
             for key in ["return", "weight", "delta", "change", "gross", "net"]
         ):
             df[col] = df[col].apply(_fmt_pct)
-        elif "shares" in col_lower:
-            df[col] = df[col].apply(_fmt_number)
     return df
-
-
 def html_table(
     df: pd.DataFrame, title: str, max_rows: int = 25, empty_message: str = "No data"
 ) -> str:
@@ -1071,8 +977,6 @@ def html_table(
     return f"<h3>{title}</h3>" + df.head(max_rows).to_html(
         index=False, border=0, classes="tbl", justify="left"
     )
-
-
 def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
     """Remove SGOV 'cash_proxy_fund_entries' rows from trades."""
     trades = _safe_df(trades).copy()
@@ -1086,8 +990,6 @@ def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
             )
         ].copy()
     return trades
-
-
 # ============================================================
 # Sleeve health check
 # ============================================================
@@ -1107,8 +1009,6 @@ def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
     if pd.isna(last_eq) or last_eq <= 0:
         return False, f"invalid terminal equity ({last_eq})"
     return True, ""
-
-
 # ============================================================
 # Sleeve runners
 # ============================================================
@@ -1117,16 +1017,12 @@ def run_sleeve_1():
     signals = s1_prepare_data()
     logger.info("[SLEEVE 1] Running backtest...")
     return s1_backtest(signals)
-
-
 def run_sleeve_trend():
     logger.info("[SLEEVE TREND] Preparing data...")
     signals = st_prepare_data()
     logger.info("[SLEEVE TREND] Running backtest...")
     equity_df, trades_df = st_backtest(signals)
     return equity_df, trades_df, signals
-
-
 def run_sleeve_2():
     if s2_run_backtest_details is not None:
         logger.info("[SLEEVE 2] Running run_backtest_with_details()...")
@@ -1142,7 +1038,6 @@ def run_sleeve_2():
         equity_df, trades_df = s2_backtest(signals)
         return {"equity_df": equity_df, "trades_df": trades_df}
     raise RuntimeError("No valid Sleeve 2 runner found")
-
 def run_charlie_munger():
     """
     Run Charlie Munger sleeve backtest and return details dict.
@@ -1150,12 +1045,9 @@ def run_charlie_munger():
     """
     from sleeves.charlie_munger.backtest import run_backtest_with_details
     return run_backtest_with_details()
-
 def run_sleeve_charlie_munger():
     """Backward-compatible alias."""
     return run_charlie_munger()
-
-
 # ============================================================
 # Sleeve output extraction (for dynamic allocation)
 # ============================================================
@@ -1241,7 +1133,6 @@ def extract_sleeve_output(
                             "signal_strength": 1.0,
                         }
                     )
-
     if not positions and target_weights is not None and not target_weights.empty:
         target_last = target_weights.iloc[-1]
         for ticker, weight in target_last.items():
@@ -1254,7 +1145,6 @@ def extract_sleeve_output(
                         "signal_strength": 1.0,
                     }
                 )
-
     is_active = len(positions) > 0
     if is_active and start_equity > 0:
         sleeve_return = (latest_equity / start_equity) - 1.0
@@ -1267,8 +1157,6 @@ def extract_sleeve_output(
         else "Inactive"
     )
     return create_sleeve_output(positions, sleeve_name, strength, notes)
-
-
 # ============================================================
 # Portfolio equity computation (FIXED)
 # ============================================================
@@ -1320,8 +1208,6 @@ def compute_portfolio_equity(
         "day_return": day_return,
         "cumulative_return": portfolio_return,
     }
-
-
 def resolve_portfolio_equity_series(
     sleeve_equity_map: dict[str, pd.DataFrame],
     alloc_result: AllocationResult,
@@ -1339,7 +1225,6 @@ def resolve_portfolio_equity_series(
     history_series = _load_equity_history(history_path)
     if not history_series.empty:
         return history_series
-
     ledger_path, _ = ensure_paper_state_files()
     if os.path.exists(ledger_path) and os.path.getsize(ledger_path) > 0:
         ledger = pd.read_csv(ledger_path)
@@ -1354,7 +1239,6 @@ def resolve_portfolio_equity_series(
             ledger_series = ledger_daily.dropna().sort_index()
             if not ledger_series.empty:
                 return ledger_series
-
     derived = compute_portfolio_equity_series(
         sleeve_equity_map=sleeve_equity_map,
         sleeve_allocations=alloc_result.sleeve_allocations,
@@ -1363,13 +1247,9 @@ def resolve_portfolio_equity_series(
     )
     if not derived.empty:
         return derived
-
     if offline_fixture:
         return pd.Series(dtype=float)
-
     return _append_equity_history(history_path, report_date, portfolio_equity)
-
-
 def compute_portfolio_equity_df(
     sleeve_equity_map: dict[str, pd.DataFrame],
     sleeve_allocations: dict[str, float],
@@ -1393,29 +1273,22 @@ def compute_portfolio_equity_df(
         series.append(
             df[["date", "return"]].rename(columns={"return": f"{sleeve_name}_return"})
         )
-
     if not series:
         return pd.DataFrame(columns=["date", "portfolio_equity"])
-
     merged = series[0]
     for s in series[1:]:
         merged = merged.merge(s, on="date", how="outer")
-
     merged = merged.sort_values("date").reset_index(drop=True)
     for col in merged.columns:
         if col.endswith("_return"):
             merged[col] = merged[col].ffill().fillna(0.0)
-
     merged["portfolio_return"] = 0.0
     for sleeve_name, alloc in sleeve_allocations.items():
         col = f"{sleeve_name}_return"
         if col in merged.columns:
             merged["portfolio_return"] += alloc * merged[col]
-
     merged["portfolio_equity"] = base_equity * (1.0 + merged["portfolio_return"])
     return merged[["date", "portfolio_equity"]]
-
-
 def compute_performance_summary(
     report_date: pd.Timestamp,
     sleeve_equity_map: dict[str, pd.DataFrame],
@@ -1434,28 +1307,22 @@ def compute_performance_summary(
             "mtd": None,
             "ytd": None,
         }
-
     series["date"] = pd.to_datetime(series["date"])
     series = series.sort_values("date")
-
     def _equity_asof(target_date: pd.Timestamp) -> float:
         eligible = series[series["date"] <= target_date]
         if eligible.empty:
             return float(series["portfolio_equity"].iloc[0])
         return float(eligible["portfolio_equity"].iloc[-1])
-
     asof_date = pd.to_datetime(report_date)
     asof_equity = _equity_asof(asof_date)
     inception_equity = float(series["portfolio_equity"].iloc[0])
-
     week_start = (asof_date - pd.Timedelta(days=asof_date.weekday())).normalize()
     month_start = asof_date.replace(day=1).normalize()
     year_start = asof_date.replace(month=1, day=1).normalize()
-
     wtd_equity = _equity_asof(week_start)
     mtd_equity = _equity_asof(month_start)
     ytd_equity = _equity_asof(year_start)
-
     return {
         "total_return": (
             (asof_equity / inception_equity) - 1.0 if inception_equity > 0 else None
@@ -1464,8 +1331,6 @@ def compute_performance_summary(
         "mtd": (asof_equity / mtd_equity) - 1.0 if mtd_equity > 0 else None,
         "ytd": (asof_equity / ytd_equity) - 1.0 if ytd_equity > 0 else None,
     }
-
-
 def build_proposed_trades(
     alloc_result: AllocationResult,
     previous_weights: pd.DataFrame | None,
@@ -1476,21 +1341,17 @@ def build_proposed_trades(
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     if weights_df.empty:
         return []
-
     prev_map = {}
     if previous_weights is not None and not previous_weights.empty:
         prev_map = previous_weights.set_index("ticker")["target_weight"].to_dict()
-
     proposed = []
     for _, row in weights_df.iterrows():
         ticker = row["ticker"]
         target_weight = float(row["target_weight"])
         current_weight = float(prev_map.get(ticker, target_weight))
         delta_weight = target_weight - current_weight
-
         if abs(delta_weight) <= WEIGHT_TOLERANCE:
             continue
-
         action = "HOLD"
         if (
             abs(current_weight) <= WEIGHT_TOLERANCE
@@ -1508,14 +1369,12 @@ def build_proposed_trades(
             )
         else:
             action = "SELL"
-
         exec_px = _compute_execution_price(price_map, ticker)
         shares = None
         notional = None
         if exec_px and model_equity > 0:
             notional = abs(delta_weight) * model_equity
             shares = round(notional / exec_px, 2) if exec_px > 0 else None
-
         proposed.append(
             {
                 "ticker": ticker,
@@ -1528,10 +1387,7 @@ def build_proposed_trades(
                 "est_notional": notional,
             }
         )
-
     return proposed
-
-
 def derive_actual_sleeve_allocations(
     alloc_result: AllocationResult,
 ) -> dict[str, float]:
@@ -1539,7 +1395,6 @@ def derive_actual_sleeve_allocations(
     weights_df = _safe_df(alloc_result.combined_weights)
     if weights_df.empty:
         return allocations
-
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     for _, row in weights_df.iterrows():
         sleeve_names = str(row.get("sleeve_name", "")).split(",")
@@ -1550,8 +1405,6 @@ def derive_actual_sleeve_allocations(
         for name in sleeve_names:
             allocations[name] = allocations.get(name, 0.0) + share
     return allocations
-
-
 # ============================================================
 # Daily snapshot builder
 # ============================================================
@@ -1587,7 +1440,6 @@ def build_daily_snapshot(
     signals_path = None
     if "sleeve" not in weights_df.columns and "sleeve_name" in weights_df.columns:
         weights_df["sleeve"] = weights_df["sleeve_name"]
-
     if weights_df.empty:
         fallback_rows: list[dict[str, object]] = []
         for sleeve_name, details in (("sleeve_2", s2_details), ("charlie_munger", cm_details or {})):
@@ -1611,7 +1463,6 @@ def build_daily_snapshot(
                 )
         if fallback_rows:
             weights_df = pd.DataFrame(fallback_rows)
-
     if weights_df.empty:
         logger.warning(
             "[PAPER] No target weights available; skipping signals snapshot."
@@ -1664,7 +1515,6 @@ def build_daily_snapshot(
             if entry_info
             else report_date.strftime("%Y-%m-%d")
         )
-
         entry_date = (
             entry_info.get("entry_date") if entry_info else _fmt_date(report_date)
         )
@@ -1687,13 +1537,11 @@ def build_daily_snapshot(
         days_held = (
             (report_date - pd.to_datetime(entry_date)).days if entry_date else None
         )
-
         days_held = (
             (report_date - pd.to_datetime(entry_date)).days
             if entry_date and entry_date != "n/a"
             else None
         )
-
         current_shares = abs(weight) * model_equity / last_px if (last_px and last_px > 0) else None
         holdings.append(
             {
@@ -1757,7 +1605,6 @@ def build_daily_snapshot(
         new_w = float(new_weights.get(ticker, 0.0))
         if abs(prev_w) <= WEIGHT_TOLERANCE and abs(new_w) <= WEIGHT_TOLERANCE:
             continue
-
         def _append_order(action, weight):
             exec_px = _compute_execution_price(price_map, ticker)
             shares = None
@@ -1775,7 +1622,6 @@ def build_daily_snapshot(
                     "notional": notional,
                 }
             )
-
         if abs(prev_w) <= WEIGHT_TOLERANCE and abs(new_w) > WEIGHT_TOLERANCE:
             _append_order("BUY" if new_w > 0 else "SHORT", new_w)
         elif abs(prev_w) > WEIGHT_TOLERANCE and abs(new_w) <= WEIGHT_TOLERANCE:
@@ -1856,7 +1702,6 @@ def build_daily_snapshot(
         "day_return": portfolio_stats.get("day_return"),
         "cumulative_return": portfolio_stats.get("cumulative_return"),
     }
-
     previous_weights_df = None
     if (
         s2_details
@@ -1871,7 +1716,6 @@ def build_daily_snapshot(
                 "target_weight": prev_row.values,
             }
         )
-
     s2_no_picks = False
     if (
         s2_details
@@ -1880,14 +1724,12 @@ def build_daily_snapshot(
     ):
         s2_last_weights = s2_details.get("target_weights").iloc[-1]
         s2_no_picks = s2_last_weights.abs().sum() <= WEIGHT_TOLERANCE
-
     proposed_trades = build_proposed_trades(
         alloc_result=alloc_result,
         previous_weights=previous_weights_df,
         price_map=price_map,
         model_equity=model_equity,
     )
-
     performance_summary = compute_performance_summary(
         report_date=report_date,
         sleeve_equity_map={
@@ -1898,7 +1740,6 @@ def build_daily_snapshot(
         sleeve_allocations=alloc_result.sleeve_allocations,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
-
     return {
         "asof": report_date,
         "allocations": allocations,
@@ -1917,8 +1758,6 @@ def build_daily_snapshot(
         "charlie_munger": (cm_details or {}).get("signals", {}),
         "charlie_munger_benchmark": {**((cm_details or {}).get("benchmark", {}) or {}), "sleeve_cumulative_return": ((cm_details or {}).get("sleeve_stats", {}) or {}).get("cumulative_return")},
     }
-
-
 # ============================================================
 # Report builder (FIXED)
 # ============================================================
@@ -1944,9 +1783,7 @@ def build_html_report(
     The TOTAL is the ONLY authoritative equity figure.
     """
     BASE_EQUITY = DEFAULT_PORTFOLIO_BASE_EQUITY
-
     report_date_fmt = _fmt_date(report_date)
-
     # Build summary with dynamic allocation
     if alloc_result is not None:
         trend_alloc = alloc_result.sleeve_allocations.get("sleeve_trend", 0.0)
@@ -2075,7 +1912,6 @@ def build_html_report(
                     "Day Return": "—",
                 }
             )
-
         # CASH row
         if cash_alloc > WEIGHT_TOLERANCE:
             cash_notional = BASE_EQUITY * cash_alloc
@@ -2196,13 +2032,11 @@ def build_html_report(
         pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10
     )
     performance_section = f'<div class="card">{performance_html}</div>'
-
     def _fmt_float(value: float | None) -> str:
         try:
             return f"{float(value):.2f}"
         except Exception:
             return "n/a"
-
     if alpha_stats and alpha_stats.get("ok"):
         alpha_summary = alpha_stats.get("summary", {}) or {}
         alpha_rows = [
@@ -2225,7 +2059,6 @@ def build_html_report(
             f"<p><em>Pending — {reason}</em></p>"
             "</div>"
         )
-
     # Build sections
     perf_rows = []
     if performance_summary:
@@ -2252,7 +2085,6 @@ def build_html_report(
         if perf_rows
         else ""
     )
-
     proposed_df = pd.DataFrame(proposed_trades or [])
     if not proposed_df.empty:
         proposed_df = proposed_df.rename(
@@ -2269,12 +2101,11 @@ def build_html_report(
         )
     proposed_html = html_table(
         proposed_df,
-        "Proposed Trades / Next Rebalance",
+        "Model Intent (Pre-Constraints)",
         25,
         "No proposed trades.",
     )
     proposed_section = f'<div class="card">{proposed_html}</div>'
-
     alloc_html = (
         alloc_summary.to_html(index=False, border=0, classes="tbl", justify="left")
         if alloc_summary is not None
@@ -2285,7 +2116,6 @@ def build_html_report(
         if alloc_html
         else ""
     )
-
     holdings_html = (
         html_table(holdings, "Holdings Snapshot", 20)
         if holdings is not None and not holdings.empty
@@ -2294,19 +2124,16 @@ def build_html_report(
     holdings_section = (
         f'<div class="card">{holdings_html}</div>' if holdings_html else ""
     )
-
     skipped_html = (
         html_table(skipped_df, "Skipped Trades (Constraint Hits)", 10)
         if not skipped_df.empty
         else ""
     )
     skipped_section = f'<div class="card">{skipped_html}</div>' if skipped_html else ""
-
     exit_html = (
         html_table(pd.DataFrame(exit_log_rows), "Exit Log", 15) if exit_log_rows else ""
     )
     exit_section = f'<div class="card">{exit_html}</div>' if exit_html else ""
-
     st_trades_html = html_table(
         filter_sleeve2_cash_proxy(st_trades), "Recent Trades — Sleeve Trend", 15
     )
@@ -2316,7 +2143,6 @@ def build_html_report(
         15,
         "No eligible picks for Sleeve 2.",
     )
-
     st_equity_html = html_table(
         _safe_df(st_equity).tail(10), "Equity — Sleeve Trend (last 10 days)", 10
     )
@@ -2346,7 +2172,6 @@ def build_html_report(
         {"Metric": "SPY max drawdown", "Value": _fmt_pct(((cm_details or {}).get("benchmark", {}) or {}).get("max_drawdown"))},
     ]
     cm_section = f'<div class="card">{html_table(pd.DataFrame(cm_rows), "Charlie Munger Sleeve")}</div>'
-
     return f"""
     <html>
     <head><style>{css}</style></head>
@@ -2382,8 +2207,6 @@ def build_html_report(
     </body>
     </html>
     """
-
-
 # ============================================================
 # Main
 # ============================================================
@@ -2401,8 +2224,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Generate planning artifacts only; skip order generation even when market is open.",
     )
     return parser.parse_args(argv)
-
-
 def main(argv: list[str] | None = None):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
@@ -2496,7 +2317,6 @@ def main(argv: list[str] | None = None):
         1.0,
         target_weights=cm_details.get("target_weights") if cm_details else None,
     )
-
     # ── Run dynamic allocation ────────────────────────────────────
     risk_off = os.getenv("RISK_OFF", "").lower() in ("1", "true", "yes", "y")
     allocator = PortfolioAllocator(risk_off=risk_off)
@@ -2514,7 +2334,6 @@ def main(argv: list[str] | None = None):
         new_allocations=_new_allocs,
         new_cash_weight=_new_cash,
     )
-
     # ── SAFE ALLOCATION POLICY ────────────────────────────────────
     # If a sleeve is invalid, force its allocation to 0 and route
     # the freed weight to CASH (never to another sleeve).
@@ -2667,7 +2486,6 @@ def main(argv: list[str] | None = None):
         logger.error("[ERROR] %s", e)
         sys.exit(0)
     daily_snapshot["alpha_attribution"] = alpha_stats
-
     # --- Paper trading execution + report ---
     trade_date_str = report_date.strftime("%Y-%m-%d")
     signals_path_exec = daily_snapshot.get("signals_snapshot_path") or os.path.join(
@@ -2730,6 +2548,19 @@ def main(argv: list[str] | None = None):
                 trades_path=paper_trades_path,
                 benchmark_ticker="SPY",
                 reconciliation=paper_summary,
+                shadow_status={
+                    "trading_mode": (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow").upper(),
+                    "market_status": (paper_summary or {}).get("market_status", "UNKNOWN"),
+                    "orders_generated": len((paper_summary or {}).get("shadow_orders", []) or []),
+                    "orders_blocked": len((paper_summary or {}).get("blocked_reasons", []) or []),
+                    "broker_recon_status": (paper_summary or {}).get("broker_recon_status", "UNKNOWN"),
+                    "missing_inputs": [
+                        p for p in [
+                            paper_ledger_path if not os.path.exists(paper_ledger_path) else None,
+                            "outputs/perf/nav_timeseries.csv" if not os.path.exists("outputs/perf/nav_timeseries.csv") else None,
+                        ] if p
+                    ],
+                },
             )
         except Exception as e:
             logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
@@ -2737,7 +2568,6 @@ def main(argv: list[str] | None = None):
         logger.warning(
             "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
         )
-
     # ── Build execution + snapshot email artifacts ──────────────────
     execution_payload = build_execution_email_payload(
         trade_date=trade_date_str,
@@ -2760,7 +2590,6 @@ def main(argv: list[str] | None = None):
             sell_count,
         )
     execution_payload_path, payload_preserved, preserved_path = _write_execution_email_payload(execution_payload, trade_date_str)
-
     integrity = {
         "trade_date": trade_date_str,
         "asof_date": str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str)),
@@ -2779,7 +2608,6 @@ def main(argv: list[str] | None = None):
         "nav_path": None,
         "nav_timeseries_path": None,
     }
-
     # legacy pipeline retained for backward compatibility
     try:
         asof_date = str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str))
@@ -2823,29 +2651,24 @@ def main(argv: list[str] | None = None):
             prev_date = prev_dates.max().strftime("%Y-%m-%d")
             attr = compute_daily_attribution(asof_date, prev_date)
             write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
-
         with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
             json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
             f.write("\n")
     except Exception as e:
         logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
-
     try:
         Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
         Path("outputs/perf").mkdir(parents=True, exist_ok=True)
         Path("outputs/daily").mkdir(parents=True, exist_ok=True)
-
         asof_date = integrity["asof_date"]
         ledger_run_id = str(uuid.uuid4())
         ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
         signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
-
         def _ledger_price_fn(ticker: str, req_asof_date: str):
             px = fetch_prev_closes_yfinance([ticker], asof_date=req_asof_date)
             if px.empty:
                 return None
             return float(px.iloc[0]["prev_close"])
-
         rows2, missing_prices = ledger2_payload_to_rows(
             execution_payload=execution_payload,
             trade_date=trade_date_str,
@@ -2888,35 +2711,29 @@ def main(argv: list[str] | None = None):
         integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
     except Exception as e:
         logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
-
     try:
         write_integrity_artifact(integrity["asof_date"], integrity)
     except Exception as e:
         logger.warning("[INTEGRITY][WARN] failed writing integrity artifact: %s", e)
-
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)
     execution_path = os.path.join(OUTPUT_DIR, f"trade_execution_{today}.txt")
     with open(execution_path, "w", encoding="utf-8") as f:
         f.write(exec_body.rstrip() + "\n")
     logger.info("[OK] Execution trade email written: %s", execution_path)
-
     snapshot_subject, snapshot_body = create_snapshot_email(
         daily_snapshot,
         execution_payload=execution_payload,
     )
-
     snapshot_path = os.path.join(OUTPUT_DIR, f"trade_snapshot_{today}.txt")
     with open(snapshot_path, "w", encoding="utf-8") as f:
         f.write(snapshot_body.rstrip() + "\n")
     logger.info("[OK] Model snapshot email written: %s", snapshot_path)
-
     # Backward-compatibility alias (deprecated)
     rundown_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
     with open(rundown_path, "w", encoding="utf-8") as f:
         f.write(snapshot_body.rstrip() + "\n")
     logger.info("[OK] Legacy trade rundown alias written: %s", rundown_path)
-
     # ── Build report ──────────────────────────────────────────────
     html = build_html_report(
         report_date=report_date,
@@ -2932,7 +2749,6 @@ def main(argv: list[str] | None = None):
     # Append paper trading HTML section (if available)
     if paper_html:
         html = html + "<hr/>" + paper_html
-
     out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -2948,7 +2764,5 @@ def main(argv: list[str] | None = None):
             logger.warning("[WARN] Email not sent: %s", e)
     else:
         logger.warning("[WARN] send_email not found — HTML generated only")
-
-
 if __name__ == "__main__":
     main()
