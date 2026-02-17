@@ -29,6 +29,37 @@ def _fmt_est_notional(value: Any) -> str:
         return "n/a"
 
 
+
+
+def _no_order_reasons(payload: dict[str, Any], limit: int = 3) -> list[str]:
+    reasons: list[str] = []
+    if payload.get("execution_status") == "HALTED" and payload.get("halt_reason"):
+        reasons.append(f"execution halted: {payload.get('halt_reason')}")
+    if payload.get("market_status") and str(payload.get("market_status")).upper() != "OPEN":
+        reason = payload.get("market_reason") or payload.get("market_status")
+        reasons.append(f"market status: {reason}")
+    if payload.get("no_trades_reason"):
+        reasons.append(str(payload.get("no_trades_reason")))
+
+    risk_meta = payload.get("risk_meta", {}) or {}
+    if bool(risk_meta.get("turnover_scaled")):
+        reasons.append(
+            "turnover scaling applied"
+            f" (scale={float(risk_meta.get('turnover_scale', 1.0)):.4f})"
+        )
+
+    dropped_zero = risk_meta.get("dropped_zero")
+    if dropped_zero not in (None, 0):
+        reasons.append(f"dropped zero-share orders: {int(dropped_zero)}")
+
+    dropped_min_notional = risk_meta.get("dropped_min_notional")
+    if dropped_min_notional not in (None, 0):
+        reasons.append(f"dropped below min-notional orders: {int(dropped_min_notional)}")
+
+    if not reasons:
+        reasons.append("no executable trades after constraints and filters")
+    return reasons[:limit]
+
 def _fmt_planned_for(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -200,6 +231,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
             )
 
     if not trades:
+        reasons = _no_order_reasons(payload)
         lines.extend(
             [
                 "",
@@ -211,10 +243,12 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                 "NO TRADES TODAY",
                 "========================",
                 "",
-                "Reason:",
-                "- Market OPEN",
-                "- Signals evaluated",
-                f"- {payload.get('no_trades_reason') or 'No executable trades after rounding and minimum trade filter'}",
+                "WHY NO ORDERS?",
+            ]
+        )
+        lines.extend([f"- {reason}" for reason in reasons])
+        lines.extend(
+            [
                 f"- Proposed Trades (Intent): {int(payload.get('proposed_trades_intent', len(payload.get('trades', []) or [])))}",
                 f"- Executable Trades: {int(payload.get('executable_trades_count', len(payload.get('trades', []) or [])))}",
                 "",
@@ -353,6 +387,14 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     cards = [render_card("Run Context", f"<ul class='kvs'>{''.join(header_items)}</ul>")]
 
     trades = payload.get("trades", []) or []
+    if not trades:
+        why_rows = [["Reason", r] for r in _no_order_reasons(payload)]
+        cards.append(
+            render_card(
+                "Why no orders?",
+                render_html_table(["Type", "Detail"], why_rows, numeric_cols=set()),
+            )
+        )
     buys = sorted(
         [t for t in trades if str(t.get("side", "")).upper() == "BUY"],
         key=lambda t: str(t.get("ticker", "")),

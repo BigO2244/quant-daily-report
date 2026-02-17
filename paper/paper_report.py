@@ -11,6 +11,24 @@ def _read_csv_if_exists(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def _fmt_money(value: float | int | None) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return f"${float(value):,.2f}"
+    except Exception:
+        return "unavailable"
+
+
+def _fmt_pct(value: float | int | None) -> str:
+    if value is None:
+        return "unavailable"
+    try:
+        return f"{float(value):.1%}"
+    except Exception:
+        return "unavailable"
+
+
 def build_paper_report_html(
     run_date: str,
     ledger_path: str,
@@ -20,45 +38,49 @@ def build_paper_report_html(
     shadow_status: dict | None = None,
 ) -> str:
     led = _read_csv_if_exists(ledger_path)
-    day = led[led["date"] == run_date].copy() if not led.empty else pd.DataFrame()
-
-    equity = float(day["total_equity"].iloc[0]) if not day.empty else 0.0
-    cash = float(day["cash"].iloc[0]) if not day.empty else 0.0
-    invested = float(day["market_value"].sum()) if not day.empty else 0.0
-    exposure = invested / equity if equity > 0 else 0.0
+    day = led[led["date"] == run_date].copy() if (not led.empty and "date" in led.columns) else pd.DataFrame()
 
     trades = _read_csv_if_exists(trades_path)
-    trades = (
-        trades[trades["date"] == run_date].copy()
-        if not trades.empty
-        else pd.DataFrame()
-    )
+    trades = trades[trades["date"] == run_date].copy() if (not trades.empty and "date" in trades.columns) else pd.DataFrame()
+
+    nav_ts = _read_csv_if_exists("outputs/perf/nav_timeseries.csv")
+    nav_row = pd.DataFrame()
+    if not nav_ts.empty and "date" in nav_ts.columns:
+        nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+        nav_row = nav_ts[nav_ts["date"] == pd.to_datetime(run_date)]
+
+    mode = str((shadow_status or {}).get("trading_mode") or "").upper()
+    missing_inputs = list((shadow_status or {}).get("missing_inputs") or [])
+    if day.empty:
+        missing_inputs.append(ledger_path)
+    if nav_row.empty:
+        missing_inputs.append("outputs/perf/nav_timeseries.csv")
+    missing_inputs = sorted(set(missing_inputs))
+
+    summary_unavailable = mode == "SHADOW" and bool(missing_inputs)
+
+    equity = None
+    cash = None
+    invested = None
+    exposure = None
+    if not summary_unavailable and not day.empty:
+        try:
+            equity = float(day["total_equity"].iloc[0]) if "total_equity" in day.columns else None
+            cash = float(day["cash"].iloc[0]) if "cash" in day.columns else None
+            invested = float(day["market_value"].sum()) if "market_value" in day.columns else None
+            exposure = (invested / equity) if (equity and invested is not None) else None
+        except Exception:
+            equity, cash, invested, exposure = None, None, None, None
 
     if not trades.empty:
-        trades_view = trades[
-            ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
-        ].copy()
+        trades_view = trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]].copy()
     else:
-        trades_view = pd.DataFrame(
-            columns=[
-                "ticker",
-                "side",
-                "shares",
-                "price",
-                "slippage_cost",
-                "notional",
-                "reason",
-            ]
-        )
+        trades_view = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
 
     holdings = (
-        day.sort_values("market_value", ascending=False)[
-            ["ticker", "sleeve", "shares", "price", "market_value"]
-        ].head(15)
-        if not day.empty
-        else pd.DataFrame(
-            columns=["ticker", "sleeve", "shares", "price", "market_value"]
-        )
+        day.sort_values("market_value", ascending=False)[["ticker", "sleeve", "shares", "price", "market_value"]].head(15)
+        if (not day.empty and "market_value" in day.columns)
+        else pd.DataFrame(columns=["ticker", "sleeve", "shares", "price", "market_value"])
     )
 
     def df_to_html(df: pd.DataFrame) -> str:
@@ -66,28 +88,24 @@ def build_paper_report_html(
             return "<p><em>None</em></p>"
         return df.to_html(index=False, border=0)
 
-    nav_ts = _read_csv_if_exists("outputs/perf/nav_timeseries.csv")
     nav_html = ""
-    if not nav_ts.empty and "date" in nav_ts.columns:
-        nav_ts["date"] = pd.to_datetime(nav_ts["date"])
-        row = nav_ts[nav_ts["date"] == pd.to_datetime(run_date)]
-        if not row.empty:
-            eq = float(row["equity"].iloc[0])
-            r1d = float(row["return_1d"].iloc[0])
-            month_rows = nav_ts[nav_ts["date"].dt.to_period("M") == pd.to_datetime(run_date).to_period("M")]
-            week_rows = nav_ts[nav_ts["date"].dt.isocalendar().week == pd.to_datetime(run_date).isocalendar().week]
-            si_base = float(nav_ts["equity"].iloc[0])
-            wtd = (eq / float(week_rows["equity"].iloc[0]) - 1.0) if not week_rows.empty else 0.0
-            mtd = (eq / float(month_rows["equity"].iloc[0]) - 1.0) if not month_rows.empty else 0.0
-            si = (eq / si_base - 1.0) if si_base else 0.0
-            nav_html = f"""
+    if not nav_row.empty:
+        eq = float(nav_row["equity"].iloc[0]) if "equity" in nav_row.columns else None
+        r1d = float(nav_row["return_1d"].iloc[0]) if "return_1d" in nav_row.columns else None
+        month_rows = nav_ts[nav_ts["date"].dt.to_period("M") == pd.to_datetime(run_date).to_period("M")]
+        week_rows = nav_ts[nav_ts["date"].dt.isocalendar().week == pd.to_datetime(run_date).isocalendar().week]
+        si_base = float(nav_ts["equity"].iloc[0]) if "equity" in nav_ts.columns and len(nav_ts) else None
+        wtd = (eq / float(week_rows["equity"].iloc[0]) - 1.0) if (eq is not None and not week_rows.empty) else None
+        mtd = (eq / float(month_rows["equity"].iloc[0]) - 1.0) if (eq is not None and not month_rows.empty) else None
+        si = (eq / si_base - 1.0) if (eq is not None and si_base) else None
+        nav_html = f"""
   <h3>Ledger-backed NAV</h3>
   <ul>
-    <li><b>NAV Equity:</b> ${eq:,.2f}</li>
-    <li><b>1D Return:</b> {r1d:.2%}</li>
-    <li><b>WTD:</b> {wtd:.2%}</li>
-    <li><b>MTD:</b> {mtd:.2%}</li>
-    <li><b>Since Inception:</b> {si:.2%}</li>
+    <li><b>NAV Equity:</b> {_fmt_money(eq)}</li>
+    <li><b>1D Return:</b> {_fmt_pct(r1d)}</li>
+    <li><b>WTD:</b> {_fmt_pct(wtd)}</li>
+    <li><b>MTD:</b> {_fmt_pct(mtd)}</li>
+    <li><b>Since Inception:</b> {_fmt_pct(si)}</li>
   </ul>
 """.rstrip()
 
@@ -128,23 +146,6 @@ def build_paper_report_html(
   {df_to_html(recon_df)}
 """.rstrip()
 
-        validation = reconciliation.get("open_window_validation") or {}
-        reasons = validation.get("reasons") or []
-        reason_items = "".join([f"<li>{r}</li>" for r in reasons]) or "<li>None</li>"
-        validation_html = f"""
-  <h3>Open-Window Validation</h3>
-  <ul>
-    <li><b>Trade Date:</b> {validation.get('trade_date', run_date)}</li>
-    <li><b>Signals File:</b> {validation.get('signals_path', 'n/a')}</li>
-    <li><b>Asof Date:</b> {validation.get('asof_date', 'n/a')}</li>
-    <li><b>Cutoff Date:</b> {validation.get('cutoff_date', 'n/a')}</li>
-    <li><b>Result:</b> {validation.get('result', 'UNKNOWN')}</li>
-  </ul>
-  <p><b>Reasons</b></p>
-  <ul>{reason_items}</ul>
-""".rstrip()
-
-
     if shadow_status:
         shadow_html = f"""
   <h3>Quasi-Live / Shadow Trading Status</h3>
@@ -157,16 +158,22 @@ def build_paper_report_html(
   </ul>
 """.rstrip()
 
+    unavailable_html = ""
+    if summary_unavailable:
+        reason = "Paper execution summary unavailable (SHADOW run)"
+        detail = "".join(f"<li>{p}</li>" for p in missing_inputs) or "<li>Unknown reason</li>"
+        unavailable_html = f"<p><em>{reason}</em></p><ul><li><b>Missing inputs:</b></li>{detail}</ul>"
+
     return f"""
 <div style="font-family: Arial, sans-serif;">
   <h2>Paper Trading Execution — {run_date}</h2>
-  <ul>
-    <li><b>Total Equity:</b> ${equity:,.2f}</li>
-    <li><b>Cash:</b> ${cash:,.2f}</li>
-    <li><b>Invested:</b> ${invested:,.2f}</li>
-    <li><b>Exposure:</b> {exposure:.1%}</li>
+  {unavailable_html if summary_unavailable else f'''<ul>
+    <li><b>Total Equity:</b> {_fmt_money(equity)}</li>
+    <li><b>Cash:</b> {_fmt_money(cash)}</li>
+    <li><b>Invested:</b> {_fmt_money(invested)}</li>
+    <li><b>Exposure:</b> {_fmt_pct(exposure)}</li>
     <li><b>Benchmark:</b> {benchmark_ticker}</li>
-  </ul>
+  </ul>'''}
 
   <h3>Trades Executed</h3>
   {df_to_html(trades_view)}
