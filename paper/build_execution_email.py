@@ -43,16 +43,24 @@ def _no_order_reasons(payload: dict[str, Any], limit: int = 3) -> list[str]:
 
     risk_meta = payload.get("risk_meta", {}) or {}
     if bool(risk_meta.get("turnover_scaled")):
+        turnover_scale = risk_meta.get("turnover_scale")
+        scale_text = "unavailable"
+        try:
+            if turnover_scale is not None:
+                scale_text = f"{float(turnover_scale):.4f}"
+        except Exception:
+            scale_text = "unavailable"
         reasons.append(
             "turnover scaling applied"
-            f" (scale={float(risk_meta.get('turnover_scale', 1.0)):.4f})"
+            f" (scale={scale_text})"
         )
 
-    dropped_zero = risk_meta.get("dropped_zero")
+    filter_stats = payload.get("filter_stats") if isinstance(payload.get("filter_stats"), dict) else {}
+    dropped_zero = filter_stats.get("dropped_zero_shares")
     if dropped_zero not in (None, 0):
         reasons.append(f"dropped zero-share orders: {int(dropped_zero)}")
 
-    dropped_min_notional = risk_meta.get("dropped_min_notional")
+    dropped_min_notional = filter_stats.get("dropped_min_notional")
     if dropped_min_notional not in (None, 0):
         reasons.append(f"dropped below min-notional orders: {int(dropped_min_notional)}")
 
@@ -268,10 +276,10 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         lines.extend([f"- {reason}" for reason in reasons])
         lines.extend(
             [
-                f"- Proposed Trades (Intent): {_fmt_diag_count(payload.get('proposed_trades_intent'))}",
+                f"- Proposed Trades (Intent): {_fmt_diag_count(payload.get('proposed_trades_intent_count'))}",
                 f"- Executable Trades: {_fmt_diag_count(payload.get('executable_trades_count'))}",
-                f"- Dropped Zero Shares: {_fmt_diag_count((payload.get('risk_meta') or {}).get('dropped_zero'))}",
-                f"- Dropped Min Notional: {_fmt_diag_count((payload.get('risk_meta') or {}).get('dropped_min_notional'))}",
+                f"- Dropped Zero Shares: {_fmt_diag_count((payload.get('filter_stats') or {}).get('dropped_zero_shares'))}",
+                f"- Dropped Min Notional: {_fmt_diag_count((payload.get('filter_stats') or {}).get('dropped_min_notional'))}",
                 f"- Min Trade Dollars: {_fmt_diag_money(payload.get('min_trade_dollars'))}",
                 "",
                 "========================",
@@ -413,10 +421,10 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
         why_rows = [["Reason", r] for r in _no_order_reasons(payload)]
         why_rows.extend(
             [
-                ["Proposed Trades (Intent)", _fmt_diag_count(payload.get("proposed_trades_intent"))],
+                ["Proposed Trades (Intent)", _fmt_diag_count(payload.get("proposed_trades_intent_count"))],
                 ["Executable Trades", _fmt_diag_count(payload.get("executable_trades_count"))],
-                ["Dropped Zero Shares", _fmt_diag_count((payload.get("risk_meta") or {}).get("dropped_zero"))],
-                ["Dropped Min Notional", _fmt_diag_count((payload.get("risk_meta") or {}).get("dropped_min_notional"))],
+                ["Dropped Zero Shares", _fmt_diag_count((payload.get("filter_stats") or {}).get("dropped_zero_shares"))],
+                ["Dropped Min Notional", _fmt_diag_count((payload.get("filter_stats") or {}).get("dropped_min_notional"))],
                 ["Min Trade Dollars", _fmt_diag_money(payload.get("min_trade_dollars"))],
             ]
         )
