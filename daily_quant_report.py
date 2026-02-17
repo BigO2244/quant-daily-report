@@ -21,6 +21,7 @@ from paper.positions import rebuild_positions_from_ledger, write_position_output
 from paper.mark_to_market import mark_holdings, update_nav_timeseries, write_perf_outputs
 from paper.ledger2 import append_rows as append_ledger2_rows, payload_to_rows as ledger2_payload_to_rows
 from paper.nav2 import update_nav
+from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 
@@ -2862,6 +2863,19 @@ def main(argv: list[str] | None = None):
             source=ledger_source,
             run_id=ledger_run_id,
         )
+        inception_ts = update_inception_nav_series(asof_date=asof_date, model_nav=float(nav_result.get("equity", 0.0)))
+        if not inception_ts.empty:
+            last = inception_ts.iloc[-1].to_dict()
+            daily_snapshot["inception_metrics"] = {
+                "inception_date": INCEPTION_DATE,
+                "model_nav": float(last.get("model_nav", 0.0)),
+                "spy_nav": float(last.get("spy_nav", 0.0)),
+                "model_return_since_inception": float(last.get("model_return_since_inception", 0.0)),
+                "spy_return_since_inception": float(last.get("spy_return_since_inception", 0.0)),
+                "alpha_since_inception": float(last.get("alpha_since_inception", 0.0)),
+                "model_mdd_since_inception": float(last.get("model_mdd_since_inception", 0.0)),
+                "spy_mdd_since_inception": float(last.get("spy_mdd_since_inception", 0.0)),
+            }
         integrity.update(
             {
                 "ledger2_path": "outputs/ledger/trades.csv",

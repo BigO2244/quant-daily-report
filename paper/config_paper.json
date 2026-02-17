@@ -14,7 +14,7 @@
   "mode": {
     "trading_mode": "shadow",
     "portfolio_id": "main",
-    "strategy_version": "v2"
+    "strategy_version": "growth_engine_v4"
   },
   "safety": {
     "market_cutoff_time_et": "15:45",
@@ -24,7 +24,7 @@
     "require_benchmark_price": true
   },
   "risk": {
-    "max_turnover_pct": 0.3,
+    "max_turnover_pct": 0.0,
     "max_trades_per_day": 10,
     "max_position_change_pct": 0.15,
     "action": "hard_stop"
