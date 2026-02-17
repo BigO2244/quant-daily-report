@@ -147,7 +147,15 @@ def build_paper_report_html(
   {df_to_html(recon_df)}
 """.rstrip()
 
-    market_status = str((shadow_status or {}).get("market_status") or "").strip().upper() or "UNKNOWN"
+    market_status_raw = (shadow_status or {}).get("market_status")
+    market_guard = (shadow_status or {}).get("market_guard") if isinstance(shadow_status, dict) else None
+    if not market_status_raw and isinstance(market_guard, dict):
+        guard_status = market_guard.get("status")
+        if guard_status is None and market_guard.get("is_open_now") is not None:
+            market_status_raw = "OPEN" if bool(market_guard.get("is_open_now")) else "CLOSED"
+        else:
+            market_status_raw = guard_status
+    market_status = str(market_status_raw or "").strip().upper() or "UNKNOWN"
     if shadow_status:
         shadow_html = f"""
   <h3>Quasi-Live / Shadow Trading Status</h3>

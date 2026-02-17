@@ -1272,6 +1272,7 @@ def run_paper_day(
         "date": run_date,
         "trading_mode": mode,
         "market_status": "OPEN" if mkt.is_open_now else "CLOSED",
+        "market_guard": {"status": "OPEN" if mkt.is_open_now else "CLOSED", "reason": mkt.reason, "is_open_now": bool(mkt.is_open_now)},
         "market_reason": mkt.reason,
         "planned_for": mkt.next_open_et.isoformat() if mkt.next_open_et else None,
         "plan_only": plan_only,

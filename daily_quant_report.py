@@ -243,9 +243,18 @@ def _coerce_filter_stats(execution_filter: object) -> dict | None:
     if not isinstance(execution_filter, dict):
         return None
     required_keys = ["raw", "rounded", "kept", "dropped_zero_shares", "dropped_min_notional"]
+    alias_map = {
+        "dropped_zero_shares": ("dropped_zero_shares", "dropped_zero"),
+        "dropped_min_notional": ("dropped_min_notional",),
+    }
     coerced: dict[str, int] = {}
     for key in required_keys:
-        value = execution_filter.get(key)
+        keys_to_try = alias_map.get(key, (key,))
+        value = None
+        for alias in keys_to_try:
+            if execution_filter.get(alias) is not None:
+                value = execution_filter.get(alias)
+                break
         if value is None:
             return None
         try:
@@ -320,9 +329,9 @@ def build_execution_email_payload(
     turnover_requested_raw = risk_meta.get("turnover_requested")
     turnover_cap_raw = risk_meta.get("turnover_cap")
     turnover_scale_raw = risk_meta.get("turnover_scale")
-    turnover_requested = float(turnover_requested_raw) if turnover_requested_raw is not None else None
-    turnover_cap = float(turnover_cap_raw) if turnover_cap_raw is not None else None
-    turnover_scale = float(turnover_scale_raw) if turnover_scale_raw is not None else None
+    turnover_requested = _coerce_float_or_none(turnover_requested_raw)
+    turnover_cap = _coerce_float_or_none(turnover_cap_raw)
+    turnover_scale = _coerce_float_or_none(turnover_scale_raw)
     trades = []
     source_rows = []
     if status == "PLANNED" and planned_trades:
@@ -2575,6 +2584,20 @@ def main(argv: list[str] | None = None):
                 )
             else:
                 logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
+        market_guard = (paper_summary or {}).get("market_guard") if isinstance(paper_summary, dict) else None
+        market_status_from_guard = None
+        if isinstance(market_guard, dict):
+            raw_guard_status = market_guard.get("status")
+            if raw_guard_status is None and market_guard.get("is_open_now") is not None:
+                market_status_from_guard = "OPEN" if bool(market_guard.get("is_open_now")) else "CLOSED"
+            elif raw_guard_status is not None:
+                market_status_from_guard = str(raw_guard_status).strip().upper() or None
+
+        market_status = (
+            (paper_summary or {}).get("market_status")
+            or market_status_from_guard
+        )
+
         try:
             paper_html = build_paper_report_html(
                 run_date=trade_date_str,
@@ -2584,7 +2607,8 @@ def main(argv: list[str] | None = None):
                 reconciliation=paper_summary,
                 shadow_status={
                     "trading_mode": (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow").upper(),
-                    "market_status": (paper_summary or {}).get("market_status"),
+                    "market_status": market_status,
+                    "market_guard": (paper_summary or {}).get("market_guard"),
                     "orders_generated": len((paper_summary or {}).get("shadow_orders", []) or []),
                     "orders_blocked": len((paper_summary or {}).get("blocked_reasons", []) or []),
                     "broker_recon_status": (paper_summary or {}).get("broker_recon_status", "UNKNOWN"),
