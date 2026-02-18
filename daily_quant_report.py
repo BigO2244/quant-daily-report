@@ -2361,22 +2361,29 @@ def main(argv: list[str] | None = None):
         target_weights=cm_details.get("target_weights") if cm_details else None,
     )
     # ── Run dynamic allocation ────────────────────────────────────
-    risk_off = os.getenv("RISK_OFF", "").lower() in ("1", "true", "yes", "y")
-    allocator = PortfolioAllocator(risk_off=risk_off)
+    risk_off = os.getenv("RISK_OFF", "0").lower() in ("1", "true", "yes", "y")
+
+    allocator = PortfolioAllocator(
+        risk_off=risk_off,
+        stash_sleeve_name=os.getenv("STASH_SLEEVE_NAME", "charlie_munger"),
+        risk_off_stash_pct=float(os.getenv("RISK_OFF_STASH_PCT", "1.0")),
+    )
+
     alloc_result = allocator.allocate([trend_output, val_output, cm_output])
+    print("[DEBUG] sleeve_allocations keys:", list(alloc_result.sleeve_allocations.keys()))
+    print("[DEBUG] sleeve_allocations:", alloc_result.sleeve_allocations)
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
     _old_allocs = dict(alloc_result.sleeve_allocations)
-    _new_allocs, _new_cash = enforce_charlie_bounds(
-        alloc_result.sleeve_allocations,
-        alloc_result.cash_weight,
-        charlie_active=cm_valid,
-    )
-    _apply_enforced_allocations_to_result(
-        alloc_result,
-        old_allocations=_old_allocs,
-        new_allocations=_new_allocs,
-        new_cash_weight=_new_cash,
-    )
+
+    if not risk_off:
+        _new_allocs, _new_cash = enforce_charlie_bounds(
+            alloc_result.sleeve_allocations,
+            alloc_result.cash_weight,
+            charlie_active=cm_valid,
+        )
+    else:
+        _new_allocs = dict(alloc_result.sleeve_allocations)
+        _new_cash = float(alloc_result.cash_weight)
     # ── SAFE ALLOCATION POLICY ────────────────────────────────────
     # If a sleeve is invalid, force its allocation to 0 and route
     # the freed weight to CASH (never to another sleeve).

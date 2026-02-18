@@ -47,7 +47,13 @@ PREPARE_FOR_BUY_NEXT_DAY = os.getenv("PREPARE_FOR_BUY_NEXT_DAY", "0").lower() in
     "yes",
     "y",
 )
-
+# Risk-off stash routing (flight to safety)
+STASH_SLEEVE_NAME = os.getenv("STASH_SLEEVE_NAME", "charlie_munger").strip() or "charlie_munger"
+try:
+    RISK_OFF_STASH_PCT = float(os.getenv("RISK_OFF_STASH_PCT", "1.0"))
+except Exception:
+    RISK_OFF_STASH_PCT = 1.0
+RISK_OFF_STASH_PCT = max(0.0, min(1.0, RISK_OFF_STASH_PCT))
 
 CASH_LAST_RESORT_REASON = "Unallocated capital"
 CASH_TICKER = "CASH"
@@ -155,6 +161,7 @@ def create_sleeve_output(
 class PortfolioAllocator:
     """Dynamic portfolio allocator that combines sleeve outputs."""
 
+    
     def __init__(
         self,
         base_equity: float = DEFAULT_PORTFOLIO_BASE_EQUITY,
@@ -165,6 +172,8 @@ class PortfolioAllocator:
         cash_last_resort: bool = DEFAULT_CASH_LAST_RESORT,
         risk_off: bool = False,
         prepare_for_buy_next_day: bool = PREPARE_FOR_BUY_NEXT_DAY,
+        stash_sleeve_name: str = STASH_SLEEVE_NAME,
+        risk_off_stash_pct: float = RISK_OFF_STASH_PCT,
     ):
 
         self.base_equity = base_equity
@@ -174,6 +183,12 @@ class PortfolioAllocator:
         self.min_gross_exposure = max(0.0, min(1.0, float(min_gross_exposure)))
         self.cash_last_resort = bool(cash_last_resort)
         self.risk_off = bool(risk_off)
+        self.stash_sleeve_name = str(stash_sleeve_name).strip() or "charlie_munger"
+        try:
+            self.risk_off_stash_pct = float(risk_off_stash_pct)
+        except Exception:
+            self.risk_off_stash_pct = 1.0
+        self.risk_off_stash_pct = max(0.0, min(1.0, self.risk_off_stash_pct))
         self._skipped_trades: list[dict] = []
         self._exit_log: list[dict] = []
         self.prepare_for_buy_next_day = bool(prepare_for_buy_next_day)
@@ -190,6 +205,8 @@ class PortfolioAllocator:
         self._exit_log = []
         self._cash_reason = None
 
+        if self.risk_off:
+            return self._allocate_risk_off_stash(sleeve_outputs, previous_weights)
 
         sleeve_allocations = self._compute_sleeve_allocations(sleeve_outputs)
         combined = self._combine_sleeve_weights(sleeve_outputs, sleeve_allocations)
@@ -206,6 +223,84 @@ class PortfolioAllocator:
             logger.warning(
                 "[WARN] Portfolio weights sum to %s, expected 1.0", f"{total:.6f}"
             )
+
+        return AllocationResult(
+            combined_weights=combined,
+            sleeve_allocations=sleeve_allocations,
+            skipped_trades=self._skipped_trades,
+            exit_log=self._exit_log,
+            cash_reason=self._cash_reason,
+        )
+    def _allocate_risk_off_stash(
+        self,
+        sleeve_outputs: list[SleeveOutput],
+        previous_weights: Optional[pd.DataFrame] = None,
+    ) -> AllocationResult:
+        """
+        Risk-off = flight to safety.
+        Route capital to stash sleeve (default: charlie_munger) and only hold CASH
+        if stash has no eligible assets or caps prevent full deployment.
+        """
+        self._skipped_trades = []
+        self._exit_log = []
+        self._cash_reason = None
+
+        stash_name = self.stash_sleeve_name
+        stash_pct = float(self.risk_off_stash_pct)
+
+        # Build allocations: stash only
+        sleeve_allocations: dict[str, float] = {so.meta.sleeve_name: 0.0 for so in sleeve_outputs}
+        sleeve_allocations[stash_name] = stash_pct
+
+        # Combine ONLY stash sleeve holdings (others alloc=0 => ignored)
+        combined = self._combine_sleeve_weights(sleeve_outputs, sleeve_allocations)
+
+        # If stash missing/empty => 100% CASH
+        if combined.empty:
+            self._cash_reason = "RISK_OFF_RESERVE"
+            combined = pd.DataFrame([{
+                "ticker": CASH_TICKER,
+                "target_weight": 1.0,
+                "reason": CASH_LAST_RESORT_REASON,
+                "signal_strength": 0.0,
+                "sleeve_name": "CASH",
+            }])
+            sleeve_allocations = {stash_name: 0.0, "CASH": 1.0}
+            return AllocationResult(
+                combined_weights=combined,
+                sleeve_allocations=sleeve_allocations,
+                skipped_trades=self._skipped_trades,
+                exit_log=self._exit_log,
+                cash_reason=self._cash_reason,
+            )
+
+        # Apply existing constraints (position caps, etc.)
+        combined = self._apply_position_constraints(combined)
+
+        # Optional turnover constraints (if enabled)
+        if previous_weights is not None and self.max_turnover is not None:
+            combined = self._apply_turnover_constraints(combined, previous_weights)
+
+        # Add residual CASH (risk-off reserve)
+        total = float(combined["target_weight"].sum()) if not combined.empty else 0.0
+        residual = max(0.0, 1.0 - total)
+
+        if residual > WEIGHT_TOLERANCE:
+            self._cash_reason = "RISK_OFF_RESERVE"
+            cash_row = pd.DataFrame([{
+                "ticker": CASH_TICKER,
+                "target_weight": residual,
+                "reason": CASH_LAST_RESORT_REASON,
+                "signal_strength": 0.0,
+                "sleeve_name": "CASH",
+            }])
+            combined = pd.concat([combined, cash_row], ignore_index=True)
+
+        # Recompute allocations from realized weights
+        by_sleeve = combined.groupby("sleeve_name")["target_weight"].sum().to_dict()
+        sleeve_allocations = {k: float(v) for k, v in by_sleeve.items()}
+        if "CASH" not in sleeve_allocations:
+            sleeve_allocations["CASH"] = 0.0
 
         return AllocationResult(
             combined_weights=combined,
