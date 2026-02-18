@@ -952,7 +952,7 @@ def run_paper_day(
         now_et.isoformat(),
         run_date,
         mkt.calendar_name,
-        mkt.is_trading_day,
+        mkt.is_open_now,
         mkt.session_open_et.isoformat() if mkt.session_open_et else "n/a",
         mkt.session_close_et.isoformat() if mkt.session_close_et else "n/a",
         mkt.next_open_et.isoformat() if mkt.next_open_et else "n/a",
@@ -1077,15 +1077,14 @@ def run_paper_day(
             raise RuntimeError("After dropping missing-priced/blocked tickers, no targets remain.")
         targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
-    should_halt_market_closed = False
-    if should_halt_market_closed:
+    market_closed_or_not_session = not bool(mkt.is_open_now)
+    if market_closed_or_not_session:
         logger.info("HALT — MARKET CLOSED (%s)", mkt.reason)
-        blocked = True
         blocked_reasons.append(f"market_guard:{mkt.reason}")
         logger.info(
             "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
             run_date,
-            f"market_closed:{mkt.reason}",
+            f"market_closed_or_not_session:{mkt.reason}",
         )
     else:
         logger.info(
@@ -1272,7 +1271,13 @@ def run_paper_day(
         "date": run_date,
         "trading_mode": mode,
         "market_status": "OPEN" if mkt.is_open_now else "CLOSED",
-        "market_guard": {"status": "OPEN" if mkt.is_open_now else "CLOSED", "reason": mkt.reason, "is_open_now": bool(mkt.is_open_now)},
+        "market_guard": {
+            "status": "OPEN" if mkt.is_open_now else "CLOSED",
+            "reason": mkt.reason,
+            "is_open_now": bool(mkt.is_open_now),
+            "is_trading_session": bool(mkt.is_open_now),
+            "is_trading_day": bool(mkt.is_trading_day),
+        },
         "market_reason": mkt.reason,
         "planned_for": mkt.next_open_et.isoformat() if mkt.next_open_et else None,
         "plan_only": plan_only,

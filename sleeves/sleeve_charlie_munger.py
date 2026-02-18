@@ -50,16 +50,17 @@ def normalize_rebalance_freq(freq: str | None) -> str:
     """Map config rebalance frequency aliases to pandas-supported rules."""
     raw = str(freq or "").strip().upper()
     if not raw:
-        return "QE"  # sensible default for Charlie
+        return "Q"  # sensible default for Charlie
 
     # Quarterly: normalize to pandas-supported quarter-end aliases
     if raw == "Q":
-        return "QE"
+        return "Q"
     if raw.startswith("Q-"):
-        # e.g. Q-DEC -> QE-DEC
-        return "QE-" + raw.split("-", 1)[1]
-    if raw == "QE" or raw.startswith("QE-"):
         return raw
+    if raw == "QE":
+        return "Q"
+    if raw.startswith("QE-"):
+        return "Q-" + raw.split("-", 1)[1]
 
     # Monthly: normalize to month-end (pandas supports "ME")
     if raw == "M":
