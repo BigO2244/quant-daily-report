@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
@@ -271,6 +272,28 @@ def _coerce_float_or_none(value: object) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _today_et_str() -> str:
+    return dt.datetime.now(ZoneInfo("America/New_York")).date().strftime("%Y-%m-%d")
+
+
+def _market_is_open_for_trade_date(paper_summary: dict | None) -> bool:
+    market_guard = (paper_summary or {}).get("market_guard") if isinstance(paper_summary, dict) else None
+    if isinstance(market_guard, dict):
+        if market_guard.get("is_trading_session") is not None:
+            return bool(market_guard.get("is_trading_session"))
+        if market_guard.get("is_trading_day") is not None:
+            return bool(market_guard.get("is_trading_day"))
+    market_status = str((paper_summary or {}).get("market_status", "")).upper()
+    return market_status == "OPEN"
+
+
+def _should_execute_run(*, trade_date_str: str, today_et_str: str, paper_summary: dict | None) -> tuple[bool, bool, bool]:
+    is_planning_run = trade_date_str != today_et_str
+    market_is_open_for_trade_date = _market_is_open_for_trade_date(paper_summary)
+    should_execute = (not is_planning_run) and market_is_open_for_trade_date
+    return should_execute, is_planning_run, market_is_open_for_trade_date
 
 
 def build_execution_email_payload(
@@ -668,7 +691,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         f"• Charlie Munger — Long Hold: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
         f"• Cash: {_fmt_pct(cash_pct)}",
         "",
-        "NOTE: Charlie Munger sleeve allocation is dynamically maintained between 20–30% by design.",
+        "Charlie allocation is policy-driven and may vary by risk regime / constraints.",
         "",
         "---",
         "",
@@ -2370,8 +2393,6 @@ def main(argv: list[str] | None = None):
     )
 
     alloc_result = allocator.allocate([trend_output, val_output, cm_output])
-    print("[DEBUG] sleeve_allocations keys:", list(alloc_result.sleeve_allocations.keys()))
-    print("[DEBUG] sleeve_allocations:", alloc_result.sleeve_allocations)
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
     _old_allocs = dict(alloc_result.sleeve_allocations)
 
@@ -2628,11 +2649,35 @@ def main(argv: list[str] | None = None):
             "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
         )
     # ── Build execution + snapshot email artifacts ──────────────────
+    today_et_str = _today_et_str()
+    should_execute, is_planning_run, market_is_open_for_trade_date = _should_execute_run(
+        trade_date_str=trade_date_str,
+        today_et_str=today_et_str,
+        paper_summary=paper_summary,
+    )
+    if is_planning_run:
+        logger.info(
+            "[SCHEDULE] Planning run for future trade_date=%s -> skipping execution + ledger/nav/attribution updates",
+            trade_date_str,
+        )
+    elif not market_is_open_for_trade_date:
+        logger.info(
+            "[SCHEDULE] Non-execution run for trade_date=%s (market_closed_or_not_session) -> skipping execution + ledger/nav/attribution updates",
+            trade_date_str,
+        )
+
     execution_payload = build_execution_email_payload(
         trade_date=trade_date_str,
         daily_snapshot=daily_snapshot,
         paper_summary=paper_summary,
     )
+    if not should_execute:
+        execution_payload["execution_status"] = "PLANNED"
+        execution_payload["halt_reason"] = None
+        execution_payload["planning_disclaimer"] = "Planning email only — no orders were sent."
+        execution_payload["validation_reason"] = (
+            "planning_run_future_date" if is_planning_run else "market_closed_or_not_session"
+        )
     if execution_payload.get("execution_status") == "HALTED":
         logger.info(
             "[EXECUTION_EMAIL] status=HALTED reason=%s",
@@ -2668,115 +2713,117 @@ def main(argv: list[str] | None = None):
         "nav_timeseries_path": None,
     }
     # legacy pipeline retained for backward compatibility
-    try:
-        asof_date = str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str))
-        ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
-        ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
-        signal_hash = compute_signal_hash(signals_path_exec)
-        rows = ledger_rows_from_execution_payload(
-            payload_path=execution_payload_path,
-            trade_date=trade_date_str,
-            asof_date=asof_date,
-            source=ledger_source,
-            run_id=ledger_run_id,
-            signal_hash=signal_hash,
-        )
-        appended = append_ledger_rows(rows)
-        ledger_df = load_ledger()
-        rebuilt = rebuild_positions_from_ledger(ledger_df, asof_date)
-        write_position_outputs(rebuilt["positions"], rebuilt["cash"], asof_date)
-        holdings = rebuilt["positions"][["ticker", "shares", "avg_cost", "sleeve"]] if not rebuilt["positions"].empty else pd.DataFrame(columns=["ticker", "shares", "avg_cost", "sleeve"])
-        mtm, nav = mark_holdings(holdings, rebuilt["cash"], asof_date)
-        write_perf_outputs(mtm, nav, asof_date)
-        nav_ts_path = update_nav_timeseries(asof_date, nav, ledger_df)
-        nav_ts = pd.read_csv(nav_ts_path)
-        nav_ts["date"] = pd.to_datetime(nav_ts["date"])
-        nav_ts = nav_ts.sort_values("date")
-        current = nav_ts[nav_ts["date"] == pd.to_datetime(asof_date)]
-        if not current.empty:
-            mtd_start = nav_ts[(nav_ts["date"].dt.to_period("M") == pd.to_datetime(asof_date).to_period("M"))]["equity"].iloc[0]
-            week_start = nav_ts[(nav_ts["date"].dt.isocalendar().week == pd.to_datetime(asof_date).isocalendar().week)]["equity"].iloc[0]
-            si_start = nav_ts["equity"].iloc[0]
-            eq = float(current["equity"].iloc[0])
-            daily_snapshot["nav_metrics"] = {
-                "equity": eq,
-                "return_1d": float(current["return_1d"].iloc[0]),
-                "wtd": (eq / float(week_start) - 1.0) if week_start else 0.0,
-                "mtd": (eq / float(mtd_start) - 1.0) if mtd_start else 0.0,
-                "si": (eq / float(si_start) - 1.0) if si_start else 0.0,
-            }
-        prev_dates = nav_ts[nav_ts["date"] < pd.to_datetime(asof_date)]["date"]
-        if not prev_dates.empty:
-            prev_date = prev_dates.max().strftime("%Y-%m-%d")
-            attr = compute_daily_attribution(asof_date, prev_date)
-            write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
-        with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
-            json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
-            f.write("\n")
-    except Exception as e:
-        logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
-    try:
-        Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
-        Path("outputs/perf").mkdir(parents=True, exist_ok=True)
-        Path("outputs/daily").mkdir(parents=True, exist_ok=True)
-        asof_date = integrity["asof_date"]
-        ledger_run_id = str(uuid.uuid4())
-        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
-        signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
-        def _ledger_price_fn(ticker: str, req_asof_date: str):
-            px = fetch_prev_closes_yfinance([ticker], asof_date=req_asof_date)
-            if px.empty:
-                return None
-            return float(px.iloc[0]["prev_close"])
-        rows2, missing_prices = ledger2_payload_to_rows(
-            execution_payload=execution_payload,
-            trade_date=trade_date_str,
-            asof_date=asof_date,
-            source=ledger_source,
-            run_id=ledger_run_id,
-            signal_hash=signal_hash,
-            get_price_fn=_ledger_price_fn,
-        )
-        appended2, skipped2 = append_ledger2_rows("outputs/ledger/trades.csv", rows2)
-        nav_result = update_nav(
-            asof_date=asof_date,
-            trade_date=trade_date_str,
-            get_price_fn=_ledger_price_fn,
-            source=ledger_source,
-            run_id=ledger_run_id,
-        )
-        inception_ts = update_inception_nav_series(asof_date=asof_date, model_nav=float(nav_result.get("equity", 0.0)))
-        if not inception_ts.empty:
-            last = inception_ts.iloc[-1].to_dict()
-            daily_snapshot["inception_metrics"] = {
-                "inception_date": INCEPTION_DATE,
-                "model_nav": float(last.get("model_nav", 0.0)),
-                "spy_nav": float(last.get("spy_nav", 0.0)),
-                "model_return_since_inception": float(last.get("model_return_since_inception", 0.0)),
-                "spy_return_since_inception": float(last.get("spy_return_since_inception", 0.0)),
-                "alpha_since_inception": float(last.get("alpha_since_inception", 0.0)),
-                "model_mdd_since_inception": float(last.get("model_mdd_since_inception", 0.0)),
-                "spy_mdd_since_inception": float(last.get("spy_mdd_since_inception", 0.0)),
-            }
-        integrity.update(
-            {
-                "ledger2_path": "outputs/ledger/trades.csv",
-                "ledger2_appended_rows": int(appended2),
-                "ledger2_skipped_rows": int(skipped2),
-                "nav_path": nav_result.get("nav_path"),
-                "nav_timeseries_path": nav_result.get("nav_timeseries_path"),
-            }
-        )
-        integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
-    except Exception as e:
-        logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
+    if should_execute:
+        try:
+            asof_date = str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str))
+            ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
+            ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
+            signal_hash = compute_signal_hash(signals_path_exec)
+            rows = ledger_rows_from_execution_payload(
+                payload_path=execution_payload_path,
+                trade_date=trade_date_str,
+                asof_date=asof_date,
+                source=ledger_source,
+                run_id=ledger_run_id,
+                signal_hash=signal_hash,
+            )
+            appended = append_ledger_rows(rows)
+            ledger_df = load_ledger()
+            rebuilt = rebuild_positions_from_ledger(ledger_df, asof_date)
+            write_position_outputs(rebuilt["positions"], rebuilt["cash"], asof_date)
+            holdings = rebuilt["positions"][["ticker", "shares", "avg_cost", "sleeve"]] if not rebuilt["positions"].empty else pd.DataFrame(columns=["ticker", "shares", "avg_cost", "sleeve"])
+            mtm, nav = mark_holdings(holdings, rebuilt["cash"], asof_date)
+            write_perf_outputs(mtm, nav, asof_date)
+            nav_ts_path = update_nav_timeseries(asof_date, nav, ledger_df)
+            nav_ts = pd.read_csv(nav_ts_path)
+            nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+            nav_ts = nav_ts.sort_values("date")
+            current = nav_ts[nav_ts["date"] == pd.to_datetime(asof_date)]
+            if not current.empty:
+                mtd_start = nav_ts[(nav_ts["date"].dt.to_period("M") == pd.to_datetime(asof_date).to_period("M"))]["equity"].iloc[0]
+                week_start = nav_ts[(nav_ts["date"].dt.isocalendar().week == pd.to_datetime(asof_date).isocalendar().week)]["equity"].iloc[0]
+                si_start = nav_ts["equity"].iloc[0]
+                eq = float(current["equity"].iloc[0])
+                daily_snapshot["nav_metrics"] = {
+                    "equity": eq,
+                    "return_1d": float(current["return_1d"].iloc[0]),
+                    "wtd": (eq / float(week_start) - 1.0) if week_start else 0.0,
+                    "mtd": (eq / float(mtd_start) - 1.0) if mtd_start else 0.0,
+                    "si": (eq / float(si_start) - 1.0) if si_start else 0.0,
+                }
+            prev_dates = nav_ts[nav_ts["date"] < pd.to_datetime(asof_date)]["date"]
+            if not prev_dates.empty:
+                prev_date = prev_dates.max().strftime("%Y-%m-%d")
+                attr = compute_daily_attribution(asof_date, prev_date)
+                write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
+            with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
+                json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
+                f.write("\n")
+        except Exception as e:
+            logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
+    if should_execute:
+        try:
+            Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
+            Path("outputs/perf").mkdir(parents=True, exist_ok=True)
+            Path("outputs/daily").mkdir(parents=True, exist_ok=True)
+            asof_date = integrity["asof_date"]
+            ledger_run_id = str(uuid.uuid4())
+            ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
+            signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
+            def _ledger_price_fn(ticker: str, req_asof_date: str):
+                px = fetch_prev_closes_yfinance([ticker], asof_date=req_asof_date)
+                if px.empty:
+                    return None
+                return float(px.iloc[0]["prev_close"])
+            rows2, missing_prices = ledger2_payload_to_rows(
+                execution_payload=execution_payload,
+                trade_date=trade_date_str,
+                asof_date=asof_date,
+                source=ledger_source,
+                run_id=ledger_run_id,
+                signal_hash=signal_hash,
+                get_price_fn=_ledger_price_fn,
+            )
+            appended2, skipped2 = append_ledger2_rows("outputs/ledger/trades.csv", rows2)
+            nav_result = update_nav(
+                asof_date=asof_date,
+                trade_date=trade_date_str,
+                get_price_fn=_ledger_price_fn,
+                source=ledger_source,
+                run_id=ledger_run_id,
+            )
+            inception_ts = update_inception_nav_series(asof_date=asof_date, model_nav=float(nav_result.get("equity", 0.0)))
+            if not inception_ts.empty:
+                last = inception_ts.iloc[-1].to_dict()
+                daily_snapshot["inception_metrics"] = {
+                    "inception_date": INCEPTION_DATE,
+                    "model_nav": float(last.get("model_nav", 0.0)),
+                    "spy_nav": float(last.get("spy_nav", 0.0)),
+                    "model_return_since_inception": float(last.get("model_return_since_inception", 0.0)),
+                    "spy_return_since_inception": float(last.get("spy_return_since_inception", 0.0)),
+                    "alpha_since_inception": float(last.get("alpha_since_inception", 0.0)),
+                    "model_mdd_since_inception": float(last.get("model_mdd_since_inception", 0.0)),
+                    "spy_mdd_since_inception": float(last.get("spy_mdd_since_inception", 0.0)),
+                }
+            integrity.update(
+                {
+                    "ledger2_path": "outputs/ledger/trades.csv",
+                    "ledger2_appended_rows": int(appended2),
+                    "ledger2_skipped_rows": int(skipped2),
+                    "nav_path": nav_result.get("nav_path"),
+                    "nav_timeseries_path": nav_result.get("nav_timeseries_path"),
+                }
+            )
+            integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
+        except Exception as e:
+            logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
     try:
         write_integrity_artifact(integrity["asof_date"], integrity)
     except Exception as e:
         logger.warning("[INTEGRITY][WARN] failed writing integrity artifact: %s", e)
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)
-    execution_path = os.path.join(OUTPUT_DIR, f"trade_execution_{today}.txt")
+    execution_path = os.path.join(OUTPUT_DIR, f"trade_execution_{trade_date_str}.txt")
     with open(execution_path, "w", encoding="utf-8") as f:
         f.write(exec_body.rstrip() + "\n")
     logger.info("[OK] Execution trade email written: %s", execution_path)
@@ -2784,12 +2831,12 @@ def main(argv: list[str] | None = None):
         daily_snapshot,
         execution_payload=execution_payload,
     )
-    snapshot_path = os.path.join(OUTPUT_DIR, f"trade_snapshot_{today}.txt")
+    snapshot_path = os.path.join(OUTPUT_DIR, f"trade_snapshot_{trade_date_str}.txt")
     with open(snapshot_path, "w", encoding="utf-8") as f:
         f.write(snapshot_body.rstrip() + "\n")
     logger.info("[OK] Model snapshot email written: %s", snapshot_path)
     # Backward-compatibility alias (deprecated)
-    rundown_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{today}.txt")
+    rundown_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{trade_date_str}.txt")
     with open(rundown_path, "w", encoding="utf-8") as f:
         f.write(snapshot_body.rstrip() + "\n")
     logger.info("[OK] Legacy trade rundown alias written: %s", rundown_path)
@@ -2808,7 +2855,7 @@ def main(argv: list[str] | None = None):
     # Append paper trading HTML section (if available)
     if paper_html:
         html = html + "<hr/>" + paper_html
-    out_path = os.path.join(OUTPUT_DIR, f"quant_report_{today}.html")
+    out_path = os.path.join(OUTPUT_DIR, f"quant_report_{trade_date_str}.html")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     logger.info("[OK] HTML report written: %s", out_path)

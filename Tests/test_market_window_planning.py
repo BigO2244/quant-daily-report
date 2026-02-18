@@ -160,6 +160,26 @@ def test_shadow_market_open_not_halted(monkeypatch):
 
 
 
+
+
+def test_market_closed_validation_does_not_log_market_open(monkeypatch, caplog):
+    _mock_open_market(monkeypatch)
+    caplog.set_level("INFO")
+
+    now_et = dt.datetime(2026, 2, 10, 8, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+    )
+
+    assert result["market_guard"]["is_trading_session"] is False
+    assert any("market_guard:" in reason for reason in result["blocked_reasons"])
+    assert "reason=market_open" not in caplog.text
+    assert "market_closed_or_not_session" in caplog.text
 def test_shadow_market_closed_uses_prev_close_and_renders_trades(monkeypatch):
     _mock_open_market(monkeypatch)
 
