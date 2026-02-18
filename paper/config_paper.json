@@ -27,7 +27,7 @@
     "max_turnover_pct": 0.0,
     "max_trades_per_day": 10,
     "max_position_change_pct": 0.15,
-    "action": "hard_stop"
+    "action": "scale_down"
   },
   "reporting": {
     "alpha_min_overlap_days": 5
