@@ -49,11 +49,29 @@ DEFAULT_CONFIG = CharlieMungerConfig()
 def normalize_rebalance_freq(freq: str | None) -> str:
     """Map config rebalance frequency aliases to pandas-supported rules."""
     raw = str(freq or "").strip().upper()
-    if raw in {"Q", "QE", "Q-DEC", "QE-DEC"} or raw.startswith("Q"):
-        return "Q"
-    if raw in {"M", "ME"} or raw.startswith("M"):
-        return "M"
-    return "M"
+    if not raw:
+        return "QE"  # sensible default for Charlie
+
+    # Quarterly: normalize to pandas-supported quarter-end aliases
+    if raw == "Q":
+        return "QE"
+    if raw.startswith("Q-"):
+        # e.g. Q-DEC -> QE-DEC
+        return "QE-" + raw.split("-", 1)[1]
+    if raw == "QE" or raw.startswith("QE-"):
+        return raw
+
+    # Monthly: normalize to month-end (pandas supports "ME")
+    if raw == "M":
+        return "ME"
+    if raw == "ME" or raw.startswith("ME-"):
+        return raw
+    if raw.startswith("M-"):
+        # e.g. M-DEC -> ME-DEC (rare, but safe)
+        return "ME-" + raw.split("-", 1)[1]
+
+    # Fallback: leave as-is if it's some other supported offset string
+    return raw
 
 
 def load_config() -> CharlieMungerConfig:
