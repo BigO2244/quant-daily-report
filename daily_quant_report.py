@@ -1535,6 +1535,12 @@ def build_daily_snapshot(
         logger.warning(
             "[PAPER] No target weights available; skipping signals snapshot."
         )
+        logger.info(
+            "[PAPER] inactivity hints: trend=%s | sleeve_2=%s | charlie_munger=%s",
+            _inactive_input_hint(st_signals if isinstance(st_signals, dict) else None),
+            _inactive_input_hint(s2_details),
+            _inactive_input_hint(cm_details),
+        )
     else:
         run_date_str = report_date.strftime("%Y-%m-%d")
         cutoff_date = prev_trading_day(run_date_str)
