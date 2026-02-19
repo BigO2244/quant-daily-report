@@ -3,6 +3,7 @@ import json
 import argparse
 import uuid
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -151,6 +152,88 @@ def _fmt_date(value) -> str:
         return dt_value.strftime("%Y-%m-%d")
     except Exception:
         return "n/a"
+
+
+def _ranked_signal_tickers(signals_df: pd.DataFrame | None) -> list[str]:
+    signals_df = _safe_df(signals_df)
+    if signals_df.empty:
+        return []
+    if "ticker" in signals_df.columns:
+        ranked = signals_df.copy()
+        if "rank" in ranked.columns:
+            ranked = ranked.sort_values("rank", ascending=True)
+        elif "score" in ranked.columns:
+            ranked = ranked.sort_values("score", ascending=False)
+        return [str(t).strip().upper() for t in ranked["ticker"].tolist() if str(t).strip()]
+    latest = signals_df.iloc[-1]
+    if isinstance(latest, pd.Series):
+        ranked = latest.sort_values(ascending=False)
+        return [str(t).strip().upper() for t in ranked.index.tolist() if str(t).strip()]
+    return []
+
+
+def _expand_sleeve_holdings_for_cap(
+    sleeve_output: SleeveOutput,
+    max_position_weight: float,
+    target_cash_weight: float,
+    ranked_candidates: list[str] | None,
+) -> tuple[SleeveOutput, dict]:
+    cap = float(max_position_weight or 0.0)
+    target_cash = float(target_cash_weight or 0.0)
+    positions_df = _safe_df(sleeve_output.positions_df).copy()
+    diagnostics = {
+        "selected_names": int(len(positions_df)),
+        "min_required_names": None,
+        "constraint": f"max_position_weight={cap:.0%}" if cap > 0 else "none",
+    }
+    if cap <= WEIGHT_TOLERANCE or target_cash > WEIGHT_TOLERANCE:
+        return sleeve_output, diagnostics
+    min_required = max(1, int(math.ceil(1.0 / cap)))
+    diagnostics["min_required_names"] = min_required
+    if len(positions_df) >= min_required:
+        return sleeve_output, diagnostics
+    existing = set(positions_df.get("ticker", pd.Series(dtype=str)).astype(str).str.upper().tolist())
+    additions: list[dict] = []
+    for ticker in (ranked_candidates or []):
+        t = str(ticker).strip().upper()
+        if not t or t in existing:
+            continue
+        additions.append({"ticker": t, "target_weight": 0.0, "reason": "cap_fill", "signal_strength": 1.0})
+        existing.add(t)
+        if len(existing) >= min_required:
+            break
+    if additions:
+        positions_df = pd.concat([positions_df, pd.DataFrame(additions)], ignore_index=True)
+    if len(positions_df) > 0:
+        positions_df["target_weight"] = 1.0 / len(positions_df)
+    diagnostics["selected_names"] = int(len(positions_df))
+    return create_sleeve_output(
+        positions_df,
+        sleeve_output.meta.sleeve_name,
+        strength=sleeve_output.meta.strength,
+        notes=sleeve_output.meta.notes,
+    ), diagnostics
+
+
+def _benchmark_since_inception_stats(bench_prices: pd.Series | pd.DataFrame | None) -> dict:
+    if isinstance(bench_prices, pd.DataFrame):
+        series = bench_prices["close"] if "close" in bench_prices.columns else pd.Series(dtype=float)
+    elif isinstance(bench_prices, pd.Series):
+        series = bench_prices
+    else:
+        series = pd.Series(dtype=float)
+    series = series.dropna()
+    if series.empty:
+        return {"cumulative_return": None, "max_drawdown": None, "start": None, "end": None}
+    equity = series / float(series.iloc[0])
+    peak = equity.cummax()
+    drawdown = (equity / peak) - 1.0
+    return {
+        "cumulative_return": float((series.iloc[-1] / series.iloc[0]) - 1.0),
+        "max_drawdown": float(drawdown.min()),
+        "start": pd.to_datetime(series.index.min()).strftime("%Y-%m-%d"),
+        "end": pd.to_datetime(series.index.max()).strftime("%Y-%m-%d"),
+    }
 def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if df is None or df.empty:
         return None
@@ -673,6 +756,9 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         return "already at target / rounded to zero shares"
     exec_no_trade_reason = _primary_no_trade_reason()
     nav_metrics = snapshot.get("nav_metrics", {}) or {}
+    inception_metrics = snapshot.get("inception_metrics", {}) or {}
+    alloc_diag = snapshot.get("allocation_diagnostics", {}) or {}
+    sleeve1_diag = alloc_diag.get("sleeve_1", {}) or {}
     lines = [
         f"ENVIRONMENT: {env_mode}",
         "",
@@ -681,6 +767,9 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         f"• Day Move: {_fmt_pct(nav_metrics.get('return_1d', day_return))}",
         f"• Cash: {_fmt_pct(cash_pct)} (Target: {_fmt_pct(target_cash)})",
         f"• Active Sleeves: {len([k for k, v in sleeve_splits.items() if float(v) > WEIGHT_TOLERANCE])}",
+        "",
+        "RUN CONTEXT",
+        f"• Inception: {_fmt_date(inception_metrics.get('inception_date'))}",
         "",
         "SLEEVE ALLOCATION (DYNAMIC)",
         f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",
@@ -721,6 +810,14 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         f"• Week-to-Date: {_fmt_pct(nav_metrics.get('wtd', perf.get('wtd')))}",
         f"• Month-to-Date: {_fmt_pct(nav_metrics.get('mtd', perf.get('mtd')))}",
         f"• Since Inception: {_fmt_pct(nav_metrics.get('si', perf.get('total_return')))}",
+        f"• SPY Since Inception: {_fmt_pct(inception_metrics.get('spy_return_since_inception'))}",
+        "",
+        "ALLOCATION DIAGNOSTICS",
+        f"• Sleeve 1 desired allocation: {_fmt_pct(sleeve1_diag.get('desired_allocation'))}",
+        f"• Sleeve 1 achieved invested: {_fmt_pct(sleeve1_diag.get('achieved_invested'))}",
+        f"• Sleeve 1 forced cash: {_fmt_pct(sleeve1_diag.get('forced_cash'))}",
+        f"• Sleeve 1 cap names: {sleeve1_diag.get('selected_names', 'n/a')} selected / {sleeve1_diag.get('min_required_names', 'n/a')} required",
+        f"• Limiting constraint: {sleeve1_diag.get('limiting_constraint', 'n/a')}",
         "",
         "ALPHA ATTRIBUTION VS SPY",
     ]
@@ -1853,6 +1950,8 @@ def build_html_report(
     performance_summary: dict | None = None,
     s2_no_picks: bool = False,
     cm_details: dict | None = None,
+    inception_metrics: dict | None = None,
+    allocation_diagnostics: dict | None = None,
 ) -> str:
     """
     Build HTML report with CORRECT portfolio math.
@@ -1864,6 +1963,9 @@ def build_html_report(
     """
     BASE_EQUITY = DEFAULT_PORTFOLIO_BASE_EQUITY
     report_date_fmt = _fmt_date(report_date)
+    inception_metrics = inception_metrics or {}
+    allocation_diagnostics = allocation_diagnostics or {}
+    sleeve1_diag = allocation_diagnostics.get("sleeve_1", {}) or {}
     # Build summary with dynamic allocation
     if alloc_result is not None:
         trend_alloc = alloc_result.sleeve_allocations.get("sleeve_trend", 0.0)
@@ -2107,6 +2209,8 @@ def build_html_report(
             "Metric": "Cumulative Return",
             "Value": _fmt_pct(portfolio_stats["cumulative_return"]),
         },
+        {"Metric": "Inception Date", "Value": _fmt_date(inception_metrics.get("inception_date"))},
+        {"Metric": "SPY Return (Since Inception)", "Value": _fmt_pct(inception_metrics.get("spy_return_since_inception"))},
     ]
     performance_html = html_table(
         pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10
@@ -2196,6 +2300,17 @@ def build_html_report(
         if alloc_html
         else ""
     )
+    alloc_diag_rows = pd.DataFrame([
+        {"Metric": "Sleeve 1 desired allocation", "Value": _fmt_pct(sleeve1_diag.get("desired_allocation"))},
+        {"Metric": "Sleeve 1 achieved invested", "Value": _fmt_pct(sleeve1_diag.get("achieved_invested"))},
+        {"Metric": "Sleeve 1 forced cash", "Value": _fmt_pct(sleeve1_diag.get("forced_cash"))},
+        {
+            "Metric": "Sleeve 1 names selected / required",
+            "Value": f"{sleeve1_diag.get('selected_names', 'n/a')} / {sleeve1_diag.get('min_required_names', 'n/a')}",
+        },
+        {"Metric": "Limiting constraint", "Value": sleeve1_diag.get("limiting_constraint", "n/a")},
+    ])
+    alloc_diag_section = f'<div class="card">{html_table(alloc_diag_rows, "Allocation Diagnostics")}</div>'
     holdings_html = (
         html_table(holdings, "Holdings Snapshot", 20)
         if holdings is not None and not holdings.empty
@@ -2265,6 +2380,7 @@ def build_html_report(
         {performance_section}
         {alpha_section}
         {alloc_section}
+        {alloc_diag_section}
         {cm_section}
         {holdings_section}
         <div class="card">
@@ -2398,6 +2514,12 @@ def main(argv: list[str] | None = None):
         risk_off_stash_pct=0.0,
     )
 
+    trend_output, cap_fill_diag = _expand_sleeve_holdings_for_cap(
+        trend_output,
+        max_position_weight=allocator.max_position_pct,
+        target_cash_weight=0.0,
+        ranked_candidates=_ranked_signal_tickers(st_signals),
+    )
     alloc_result = allocator.allocate([trend_output])
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
     _old_allocs = dict(alloc_result.sleeve_allocations)
@@ -2476,6 +2598,21 @@ def main(argv: list[str] | None = None):
         cash_weight=alloc_result.cash_weight,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
     )
+    sleeve1_desired = float(alloc_result.sleeve_allocations.get("sleeve_trend", 0.0))
+    sleeve1_rows = _safe_df(alloc_result.combined_weights)
+    if not sleeve1_rows.empty and "sleeve_name" in sleeve1_rows.columns:
+        sleeve1_rows = sleeve1_rows[sleeve1_rows["sleeve_name"] == "sleeve_trend"]
+    sleeve1_achieved = float(sleeve1_rows.get("target_weight", pd.Series(dtype=float)).sum()) if not sleeve1_rows.empty else 0.0
+    allocation_diagnostics = {
+        "sleeve_1": {
+            "desired_allocation": sleeve1_desired,
+            "achieved_invested": sleeve1_achieved,
+            "forced_cash": max(0.0, sleeve1_desired - sleeve1_achieved),
+            "selected_names": int(cap_fill_diag.get("selected_names", 0)),
+            "min_required_names": cap_fill_diag.get("min_required_names"),
+            "limiting_constraint": cap_fill_diag.get("constraint", "none"),
+        }
+    }
     # ── Build daily snapshot context ───────────────────────────────
     report_date = _infer_report_date(
         sleeve_details=[s2_details, cm_details],
@@ -2520,20 +2657,30 @@ def main(argv: list[str] | None = None):
         st_signals=st_signals,
         s2_details=s2_details,
     )
+    inception_start = (
+        portfolio_equity_for_alpha.index.min()
+        if not portfolio_equity_for_alpha.empty
+        else None
+    )
+    inception_end = (
+        portfolio_equity_for_alpha.index.max()
+        if not portfolio_equity_for_alpha.empty
+        else None
+    )
     bench_prices_for_alpha = load_benchmark_prices(
         ticker="SPY",
-        start=(
-            portfolio_equity_for_alpha.index.min()
-            if not portfolio_equity_for_alpha.empty
-            else None
-        ),
-        end=(
-            portfolio_equity_for_alpha.index.max()
-            if not portfolio_equity_for_alpha.empty
-            else None
-        ),
+        start=inception_start,
+        end=inception_end,
         offline_fixture=offline_fixture,
     )
+    inception_metrics = {
+        "inception_date": pd.to_datetime(inception_start).strftime("%Y-%m-%d")
+        if inception_start is not None
+        else None
+    }
+    spy_stats = _benchmark_since_inception_stats(bench_prices_for_alpha)
+    inception_metrics["spy_return_since_inception"] = spy_stats.get("cumulative_return")
+    inception_metrics["spy_mdd_since_inception"] = spy_stats.get("max_drawdown")
     alpha_stats = None
     logger.info(
         "[ALPHA] Data readiness - portfolio_equity_for_alpha: %s rows (%s), bench_prices_for_alpha: %s rows (%s)",
@@ -2563,6 +2710,11 @@ def main(argv: list[str] | None = None):
         logger.error("[ERROR] %s", e)
         sys.exit(0)
     daily_snapshot["alpha_attribution"] = alpha_stats
+    daily_snapshot["allocation_diagnostics"] = allocation_diagnostics
+    daily_snapshot["inception_metrics"] = {
+        **(daily_snapshot.get("inception_metrics") or {}),
+        **inception_metrics,
+    }
     # --- Paper trading execution + report ---
     trade_date_str = report_date.strftime("%Y-%m-%d")
     signals_path_exec = daily_snapshot.get("signals_snapshot_path") or os.path.join(
@@ -2854,9 +3006,13 @@ def main(argv: list[str] | None = None):
         s2_equity=s2_equity,
         s2_trades=s2_trades,
         alloc_result=alloc_result,
+        alpha_stats=alpha_stats,
         proposed_trades=daily_snapshot.get("proposed_trades"),
         performance_summary=daily_snapshot.get("performance_summary"),
         s2_no_picks=daily_snapshot.get("s2_no_picks", False),
+        cm_details=cm_details,
+        inception_metrics=daily_snapshot.get("inception_metrics"),
+        allocation_diagnostics=daily_snapshot.get("allocation_diagnostics"),
     )
     # Append paper trading HTML section (if available)
     if paper_html:
