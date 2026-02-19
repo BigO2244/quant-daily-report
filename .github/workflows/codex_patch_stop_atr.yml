@@ -1,15 +1,16 @@
 name: codex patch stop atr
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   patch-and-pr:
     runs-on: ubuntu-latest
+    env:
+      BRANCH_NAME: fix/snapshot-stop-atr-mult-and-robustness-${{ github.run_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
       - name: Create branch from origin/main
         run: |
           git fetch origin main --prune
-          git checkout -B fix/snapshot-stop-atr-mult-and-robustness origin/main
+          git checkout -B "${BRANCH_NAME}" origin/main
 
       - name: Apply patch in-place
         run: |
@@ -255,13 +256,8 @@ jobs:
           git add daily_quant_report.py tests/test_snapshot_stop_atr_mult_regression.py .github/workflows/codex_patch_stop_atr.yml
           git commit -m "Fix STOP_ATR_MULT NameError and harden snapshot robustness" || echo "No changes to commit"
 
-      - name: Push branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push branch + PR link
         run: |
-          git push -u origin fix/snapshot-stop-atr-mult-and-robustness
-
-      - name: Next steps (manual PR)
-        run: |
-          echo "Branch pushed: fix/snapshot-stop-atr-mult-and-robustness"
-          echo "Create PR: https://github.com/${{ github.repository }}/compare/main...fix/snapshot-stop-atr-mult-and-robustness?expand=1"
+          git push -u origin "${BRANCH_NAME}"
+          echo "Branch pushed: ${BRANCH_NAME}"
+          echo "Create PR: https://github.com/${{ github.repository }}/compare/main...${BRANCH_NAME}?expand=1"
