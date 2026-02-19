@@ -1,0 +1,1795 @@
+==================================================
+REPO INFO
+==================================================
+/Users/brettolson/documents/caerus/quant-daily-report-main
+/Users/brettolson/Documents/Caerus/quant-daily-report-main
+main
+c53c2f3 Ignore signals_store runtime artifacts
+
+==================================================
+FILE TREE SNAPSHOT
+==================================================
+total 368
+drwxr-xr-x@ 32 brettolson  staff    1024 Feb 18 09:20 .
+drwxr-xr-x@ 11 brettolson  staff     352 Feb 18 09:14 ..
+-rw-r--r--@  1 brettolson  staff   22532 Feb 12 11:17 .DS_Store
+drwxr-xr-x  15 brettolson  staff     480 Feb 18 09:20 .git
+drwxr-xr-x@  3 brettolson  staff      96 Feb 17 12:24 .github
+-rw-r--r--@  1 brettolson  staff     200 Feb 17 12:58 .gitignore
+drwxr-xr-x@  6 brettolson  staff     192 Feb 17 12:45 .pytest_cache
+drwxr-xr-x@  7 brettolson  staff     224 Feb 11 10:39 .venv
+-rw-r--r--@  1 brettolson  staff    1635 Feb 13 12:26 README.md
+drwxr-xr-x@ 18 brettolson  staff     576 Feb 17 10:58 Tests
+drwxr-xr-x   8 brettolson  staff     256 Feb 17 10:56 __pycache__
+drwxr-xr-x  11 brettolson  staff     352 Feb 17 12:45 core
+-rw-r--r--@  1 brettolson  staff  120401 Feb 17 10:37 daily_quant_report.py
+-rw-r--r--@  1 brettolson  staff    3210 Feb 13 12:26 daily_trade_execution_email.py
+drwxr-xr-x@  4 brettolson  staff     128 Jan 26 16:50 data
+drwxr-xr-x@  3 brettolson  staff      96 Feb 13 12:26 docs
+drwxr-xr-x@  4 brettolson  staff     128 Feb  3 18:47 engine
+-rw-r--r--@  1 brettolson  staff     404 Feb 18 09:20 full_debug_dump.txt
+drwxr-xr-x@  9 brettolson  staff     288 Feb 18 09:14 outputs
+drwxr-xr-x@ 24 brettolson  staff     768 Feb 17 10:56 paper
+-rw-r--r--@  1 brettolson  staff     115 Feb  3 16:58 portfolio_alloc.py
+-rw-r--r--@  1 brettolson  staff      56 Feb  5 13:11 pytest.ini
+drwxr-xr-x@  4 brettolson  staff     128 Feb 13 12:27 reporting
+-rw-r--r--   1 brettolson  staff      39 Dec 16 13:34 requirements.txt
+drwxr-xr-x@  6 brettolson  staff     192 Feb 13 12:27 research
+-rw-r--r--   1 brettolson  staff      82 Dec 18 14:45 run.py
+-rw-r--r--   1 brettolson  staff      82 Dec 18 14:45 run_backtest.py
+-rw-r--r--   1 brettolson  staff      82 Dec 18 14:45 run_sleeve2.py
+drwxr-xr-x@  4 brettolson  staff     128 Feb 13 12:26 scripts
+drwxr-xr-x@ 11 brettolson  staff     352 Feb 17 12:51 signals
+drwxr-xr-x@  3 brettolson  staff      96 Feb 17 12:51 signals_store
+drwxr-xr-x@ 11 brettolson  staff     352 Feb 13 13:28 sleeves
+
+./.DS_Store
+./.git/.DS_Store
+./.git/COMMIT_EDITMSG
+./.git/FETCH_HEAD
+./.git/HEAD
+./.git/ORIG_HEAD
+./.git/config
+./.git/description
+./.git/index
+./.gitignore
+./.pytest_cache/.gitignore
+./.pytest_cache/CACHEDIR.TAG
+./.pytest_cache/README.md
+./.venv/.gitignore
+./.venv/pyvenv.cfg
+./README.md
+./Tests/test_allocation.py
+./Tests/test_alpha_attribution_reporting.py
+./Tests/test_attribution.py
+./Tests/test_charlie_munger.py
+./Tests/test_email_env_resolution.py
+./Tests/test_execution_email.py
+./Tests/test_growth_engine_v4.py
+./Tests/test_ledger.py
+./Tests/test_ledger2_nav2_integrity.py
+./Tests/test_market_window_planning.py
+./Tests/test_nav_series.py
+./Tests/test_pm_first_email_format.py
+./Tests/test_positions.py
+./Tests/test_rerun_safety_ledger_nav.py
+./Tests/test_stability_regressions.py
+./__pycache__/daily_quant_report.cpython-311.pyc
+./__pycache__/daily_trade_execution_email.cpython-311.pyc
+./__pycache__/portfolio_alloc.cpython-311.pyc
+./__pycache__/run.cpython-311.pyc
+./__pycache__/run_backtest.cpython-311.pyc
+./__pycache__/run_sleeve2.cpython-311.pyc
+./core/__init__.py
+./core/alpha_attribution.py
+./core/benchmark_v4.py
+./core/earnings_signal.py
+./core/growth_engine_v4.py
+./core/portfolio_alloc.py
+./core/quant_report.py
+./core/universe_v4.py
+./daily_quant_report.py
+./daily_trade_execution_email.py
+./data/universe.csv
+./docs/performance_reporting.md
+./engine/backtest_engine.py
+./full_debug_dump.txt
+./paper/__init__.py
+./paper/alpha.py
+./paper/build_execution_email.py
+./paper/config_paper.json
+./paper/email_styles.py
+./paper/holdings_latest.csv
+./paper/html_tables.py
+./paper/ledger.py
+./paper/ledger.template.csv
+./paper/ledger2.py
+./paper/mark_to_market.py
+./paper/nav2.py
+./paper/paper_broker.py
+./paper/paper_report.py
+./paper/positions.py
+./paper/run_paper.py
+./paper/send_execution_email.py
+./paper/signals_io.py
+./paper/state_paths.py
+./paper/trades.template.csv
+./paper/trading_calendar.py
+./portfolio_alloc.py
+./pytest.ini
+./reporting/attribution.py
+./requirements.txt
+./research/signal_diagnostics.py
+./research/signal_store.py
+./research/weight_sweep.py
+./run.py
+./run_backtest.py
+./run_sleeve2.py
+./scripts/rebuild_portfolio_from_ledger.py
+./scripts/smoke_reporting.sh
+./signals/2026-02-03.json
+./signals/2026-02-04.json
+./signals/2026-02-05.json
+./signals/2026-02-09.json
+./signals/2026-02-10.json
+./signals/2026-02-12.json
+./signals/2026-02-13.json
+./signals/2026-02-17.json
+./signals/2026-02-24.json
+./signals_store/2026-02-17.csv
+./sleeves/.DS_Store
+./sleeves/__init__.py
+./sleeves/charlie_munger_config.json
+./sleeves/sleeve_charlie_munger.py
+
+==================================================
+MODE SEARCH
+==================================================
+./daily_trade_execution_email.py:54:        raise RuntimeError("TRADING_MODE=live is blocked for execution email.")
+./daily_trade_execution_email.py:56:        raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
+./daily_trade_execution_email.py:67:        payload["halt_reason"] = "LIVE MODE BLOCKED"
+./README.md:32:Set `PAPER_STATE_DIR` to override this location.
+./paper/ledger.py:156:        status = "FILLED_ESTIMATE" if source.upper() == "SHADOW" else "FILLED"
+./daily_quant_report.py:283:    mode = (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")
+./daily_quant_report.py:291:            "halt_reason": "LIVE MODE BLOCKED",
+./daily_quant_report.py:304:            if mode == "SHADOW" or plan_only:
+./daily_quant_report.py:528:    if mode == "SHADOW" and not trades:
+./daily_quant_report.py:545:                "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+./daily_quant_report.py:610:        "ENVIRONMENT: SHADOW (NO CAPITAL AT RISK)",
+./daily_quant_report.py:635:    subject = f"MODEL & PERFORMANCE SNAPSHOT — {asof_str}"
+./daily_quant_report.py:657:    raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", "SHADOW")).upper()
+./daily_quant_report.py:658:    env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
+./daily_quant_report.py:1617:            "[PAPER] No target weights available; skipping signals snapshot."
+./daily_quant_report.py:1630:        logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
+./daily_quant_report.py:2691:            trading_mode = str(os.getenv("TRADING_MODE", "shadow")).strip().lower()
+./daily_quant_report.py:2713:                "[PAPER] Executed paper trading for %s using signals %s",
+./daily_quant_report.py:2721:                    "[PAPER] Already executed for %s; rendering report from ledger.",
+./daily_quant_report.py:2725:                logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
+./daily_quant_report.py:2735:            logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
+./daily_quant_report.py:2738:            "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
+./daily_quant_report.py:2767:        "mode": str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper(),
+./daily_quant_report.py:2787:        ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
+./daily_quant_report.py:2840:        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
+./paper/state_paths.py:7:DEFAULT_PAPER_STATE_DIR = Path("outputs/paper_state")
+./paper/state_paths.py:34:    raw = os.getenv("PAPER_STATE_DIR", "").strip()
+./paper/state_paths.py:35:    return Path(raw) if raw else DEFAULT_PAPER_STATE_DIR
+./paper/build_execution_email.py:53:    mode = str(payload.get("mode", "SHADOW")).upper()
+./paper/build_execution_email.py:342:    mode = str(payload.get("mode", "SHADOW")).upper()
+./paper/nav2.py:197:    return update_nav(asof_date=asof_date, trade_date=asof_date, get_price_fn=None, source="SHADOW", run_id="legacy", ledger_path=ledger_path)
+./core/quant_report.py:450:    lines.append("9) Account Reconciliation (MODEL vs BROKER)")
+./paper/paper_broker.py:61:    trading_mode = os.getenv("TRADING_MODE", str(mode_cfg.get("trading_mode", "paper"))).strip().lower()
+./paper/paper_broker.py:926:        raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
+./paper/paper_broker.py:928:        raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
+./paper/paper_broker.py:1037:            '[PAPER][VALIDATION] FAIL trade_date=%s signals=%s asof=%s cutoff=%s reasons="%s"',
+./paper/paper_broker.py:1048:                '[PAPER][VALIDATION] PARTIAL trade_date=%s signals=%s asof=%s cutoff=%s blocked_tickers="%s"',
+./paper/paper_broker.py:1062:                "[PAPER][VALIDATION] PASS trade_date=%s signals=%s asof=%s cutoff=%s",
+./paper/paper_broker.py:1086:            "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
+./paper/paper_broker.py:1092:            "[PAPER][VALIDATION] PASS trade_date=%s reason=%s",
+./paper/paper_broker.py:1117:        "[SHADOW] cash_target=%.2f%% investable=$%.2f equity=$%.2f",
+./paper/paper_broker.py:1136:                "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
+./paper/paper_broker.py:1263:        "[SHADOW] mode=%s market=%s orders=%d blocked=%d recon=%s",
+./paper/run_paper.py:44:    logger.info("[PAPER] Signal date: %s", signal_date)
+./paper/run_paper.py:45:    logger.info("[PAPER] Trade (execution) date: %s", trade_date)
+./paper/run_paper.py:46:    logger.info("[PAPER] Signals file: %s", signals_path)
+./Tests/test_charlie_munger.py:33:    monkeypatch.setattr(dqr, "run_paper_day", lambda **kwargs: {"date": "2026-01-16", "trading_mode": "SHADOW", "shadow_orders": [], "run_id": "r1", "blocked_reasons": ["market_guard_closed"], "market_status": "CLOSED", "total_equity": 10000.0, "cash": 10000.0, "num_trades": 0, "turnover_notional": 0.0})
+./Tests/test_ledger.py:18:        "timestamp_et": "2026-01-01T00:00:00-05:00", "run_id": "r1", "source": "SHADOW", "trade_date": "2026-01-01", "asof_date": "2025-12-31", "order_id": "o1", "ticker": "AAPL", "sleeve": "s", "side": "BUY", "quantity": 1.0, "fill_price": 100.0, "notional": 100.0, "fees": 0.0, "reason": "x", "signal_hash": "h", "status": "FILLED_ESTIMATE"
+./Tests/test_ledger.py:29:    rows = ledger_rows_from_execution_payload(str(payload_path), "2026-01-02", "2026-01-01", "SHADOW", "run", "sig")
+./Tests/test_ledger2_nav2_integrity.py:16:        "source": "SHADOW",
+./Tests/test_ledger2_nav2_integrity.py:49:                "source": "SHADOW",
+./Tests/test_ledger2_nav2_integrity.py:72:    update_nav("2026-01-02", "2026-01-02", get_price_fn, "SHADOW", "run-1", ledger_path=str(ledger_path))
+./Tests/test_ledger2_nav2_integrity.py:73:    update_nav("2026-01-02", "2026-01-02", get_price_fn, "SHADOW", "run-2", ledger_path=str(ledger_path))
+./Tests/test_ledger2_nav2_integrity.py:81:    payload = {"trade_date": "2026-01-02", "asof_date": "2026-01-01", "mode": "SHADOW"}
+./Tests/test_ledger2_nav2_integrity.py:85:    assert written["mode"] == "SHADOW"
+./Tests/test_rerun_safety_ledger_nav.py:52:            "source": "SHADOW",
+./Tests/test_market_window_planning.py:51:    assert payload["halt_reason"] == "LIVE MODE BLOCKED"
+./Tests/test_pm_first_email_format.py:34:    assert "ENVIRONMENT: SHADOW (NO CAPITAL AT RISK)" in body
+./Tests/test_execution_email.py:7:        "mode": "SHADOW",
+./Tests/test_execution_email.py:10:        "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+./Tests/test_execution_email.py:15:    assert subject == "TRADE EXECUTION — 2026-02-05 (SHADOW)"
+./Tests/test_execution_email.py:16:    assert "• Execution Payload: NOT GENERATED (EXPECTED IN SHADOW)" in body
+./Tests/test_execution_email.py:22:        "mode": "SHADOW",
+./Tests/test_execution_email.py:40:        "mode": "SHADOW",
+./Tests/test_execution_email.py:54:        "mode": "SHADOW",
+./Tests/test_execution_email.py:92:        "mode": "SHADOW",
+./Tests/test_stability_regressions.py:70:            "trading_mode": "SHADOW",
+./Tests/test_stability_regressions.py:103:    assert payload["execution_payload_status"] == "NOT GENERATED (Expected in SHADOW)"
+./Tests/test_stability_regressions.py:110:            "mode": "SHADOW",
+./Tests/test_stability_regressions.py:114:            "execution_payload_status": "NOT GENERATED (Expected in SHADOW)",
+./Tests/test_stability_regressions.py:118:    assert "• Execution Payload: NOT GENERATED (EXPECTED IN SHADOW)" in body
+
+==================================================
+TRADE EXECUTION SEARCH
+==================================================
+./core/quant_report.py:303:        reason = (execution_payload or {}).get("halt_reason") or "No executable trades in execution payload"
+./Tests/test_execution_email.py:15:    assert subject == "TRADE EXECUTION — 2026-02-05 (SHADOW)"
+./Tests/test_execution_email.py:25:        "no_trades_reason": "No executable trades after rounding and $100 minimum trade filter",
+./Tests/test_execution_email.py:32:    assert "No executable trades after rounding and $100 minimum trade filter" in body
+./Tests/test_execution_email.py:34:    assert "Executable Trades: 0" in body
+./daily_quant_report.py:546:                "no_trades_reason": f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter",
+./daily_quant_report.py:662:        or "No executable trades in execution payload"
+./daily_quant_report.py:749:            f"• Executable Trades: {len(exec_trades)}",
+./daily_quant_report.py:759:            "• Note: These are model-intent recommendations only; execution is governed by the separate TRADE EXECUTION email.",
+./paper/paper_report.py:150:  <h3>Quasi-Live / Shadow Trading Status</h3>
+./paper/paper_report.py:162:  <h2>Paper Trading Execution — {run_date}</h2>
+./paper/build_execution_email.py:65:    subject = f"TRADE EXECUTION — {trade_date} ({mode})"
+./paper/build_execution_email.py:217:                f"- {payload.get('no_trades_reason') or 'No executable trades after rounding and minimum trade filter'}",
+./paper/build_execution_email.py:219:                f"- Executable Trades: {int(payload.get('executable_trades_count', len(payload.get('trades', []) or [])))}",
+./paper/build_execution_email.py:415:    html = wrap_email_html("TRADE EXECUTION", "".join(cards))
+
+==================================================
+CASH / ALLOCATION SEARCH
+==================================================
+./run_backtest.py:1:from sleeves.sleeve_1.backtest import main
+./scripts/rebuild_portfolio_from_ledger.py:2:"""CLI to rebuild holdings/cash from ledger for a given asof date."""
+./scripts/rebuild_portfolio_from_ledger.py:18:    paths = write_position_outputs(rebuilt["positions"], rebuilt["cash"], args.asof)
+./paper/ledger2.py:23:    "sleeve",
+./paper/ledger2.py:96:def _derived_order_id(trade_date: str, ticker: str, side: str, sleeve: str) -> str:
+./paper/ledger2.py:97:    return f"{trade_date}:{ticker}:{side}:{sleeve or 'main'}"
+./paper/ledger2.py:126:        sleeve = str(trade.get("sleeve") or "main")
+./paper/ledger2.py:135:        order_id = str(trade.get("order_id") or _derived_order_id(trade_date, ticker, side, sleeve))
+./paper/ledger2.py:162:                "sleeve": sleeve,
+./README.md:5:This repo now includes a third sleeve focused on long-hold quality accumulation near the 200-week moving average.
+./README.md:13:- **Benchmark:** SPY sleeve-relative tracking (cumulative return and max drawdown).
+./README.md:16:Default config lives in `sleeves/charlie_munger_config.json` and is loaded by `sleeves/sleeve_charlie_munger.py`.
+./README.md:26:- Included in dynamic allocation and signals snapshots.
+./sleeves/charlie_munger/backtest.py:3:"""Backtest interface for the Charlie Munger sleeve."""
+./sleeves/charlie_munger/backtest.py:5:from sleeves.sleeve_charlie_munger import (
+./sleeves/charlie_munger/backtest.py:15:    """Interface parity with other sleeves; data prep is internal to backtest."""
+./sleeves/charlie_munger/backtest.py:20:    """Interface parity with other sleeves; returns (equity_df, trades_df)."""
+./sleeves/charlie_munger/backtest.py:34:from sleeves.sleeve_charlie_munger import run_backtest_with_details
+./core/quant_report.py:273:      allocations, proposed_trades, risk_levels, watchlist, reconciliation, alpha_attribution
+./core/quant_report.py:392:    lines.append("5) Summary / allocation")
+./core/quant_report.py:393:    allocations = snapshot.get("allocations", {}) or {}
+./core/quant_report.py:394:    cash_pct = allocations.get("cash", 0.0)
+./core/quant_report.py:395:    risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
+./core/quant_report.py:396:    sleeve_splits = allocations.get("sleeves", {}) or {}
+./core/quant_report.py:398:    lines.append(f"   - Cash: {_fmt_pct(cash_pct)}")
+./core/quant_report.py:399:    for sleeve, pct in sleeve_splits.items():
+./core/quant_report.py:400:        lines.append(f"   - {sleeve}: {_fmt_pct(pct)}")
+./core/quant_report.py:411:                f"   - {trade.get('action', '')} {trade.get('ticker', '')} | sleeve={trade.get('sleeve', '')} "
+./paper/config_paper.json:12:    "cash_buffer_bps": 10.0
+./paper/ledger.template.csv:1:date,ticker,sleeve,shares,price,market_value,cash,total_equity
+./sleeves/charlie_munger/config.py:3:"""Config surface for the Charlie Munger sleeve."""
+./sleeves/charlie_munger/config.py:5:from sleeves.sleeve_charlie_munger import (  # backward-compatible source of truth
+./sleeves/charlie_munger/config.py:12:from sleeves.sleeve_charlie_munger import CharlieMungerConfig, load_config
+./docs/performance_reporting.md:7:`timestamp_et, run_id, source, trade_date, asof_date, order_id, ticker, sleeve, side, quantity, fill_price, notional, fees, reason, signal_hash, status`.
+./docs/performance_reporting.md:9:## Positions / cash computation
+./docs/performance_reporting.md:18:- `outputs/ledger/cash_{asof}.json`
+./docs/performance_reporting.md:23:Fields: `date, equity, cash, gross_exposure, net_exposure, return_1d, turnover`.
+./docs/performance_reporting.md:30:- `outputs/perf/contribution_sleeves_{asof}.csv`
+./run.py:1:from sleeves.sleeve_1.backtest import main
+./paper/positions.py:1:"""Rebuild positions and cash deterministically from the trade ledger."""
+./paper/positions.py:14:def _resolve_starting_cash(default_cash: float = 100000.0) -> float:
+./paper/positions.py:18:        for key in ("initial_equity", "starting_equity", "starting_cash"):
+./paper/positions.py:21:    out = Path("outputs/ledger/cash_start.csv")
+./paper/positions.py:24:        logger.warning("[POSITIONS] using fallback cash_start=%s", default_cash)
+./paper/positions.py:25:        pd.DataFrame([{"date": "", "starting_cash": default_cash}]).to_csv(out, index=False)
+./paper/positions.py:26:    return float(pd.read_csv(out)["starting_cash"].iloc[0])
+./paper/positions.py:32:        return {"positions": pd.DataFrame(columns=["ticker", "shares", "avg_cost", "realized_pnl", "sleeve"]), "cash": _resolve_starting_cash()}
+./paper/positions.py:40:    cash = _resolve_starting_cash()
+./paper/positions.py:48:        sleeve = str(row.get("sleeve", ""))
+./paper/positions.py:49:        item = pos.setdefault(t, {"ticker": t, "shares": 0.0, "avg_cost": 0.0, "realized_pnl": 0.0, "sleeve": sleeve})
+./paper/positions.py:50:        item["sleeve"] = sleeve or item.get("sleeve", "")
+./paper/positions.py:57:            cash -= (qty * px) + fee
+./paper/positions.py:65:            cash += (sell_qty * px) - fee
+./paper/positions.py:69:        positions = pd.DataFrame(columns=["ticker", "shares", "avg_cost", "realized_pnl", "sleeve"])
+./paper/positions.py:72:    return {"positions": positions, "cash": float(cash)}
+./paper/positions.py:75:def write_position_outputs(positions: pd.DataFrame, cash: float, asof_date: str) -> dict[str, str]:
+./paper/positions.py:80:    cash_path = out_dir / f"cash_{asof_date}.json"
+./paper/positions.py:83:    holdings = positions[["ticker", "shares", "avg_cost", "sleeve"]].copy() if not positions.empty else pd.DataFrame(columns=["ticker", "shares", "avg_cost", "sleeve"])
+./paper/positions.py:86:    cash_path.write_text(json.dumps({"date": asof_date, "cash_end": float(cash), "num_positions": int(len(holdings))}, indent=2) + "\n", encoding="utf-8")
+./paper/positions.py:88:    return {"positions": str(pos_path), "holdings": str(holdings_path), "cash": str(cash_path)}
+./core/portfolio_alloc.py:5:Implements dynamic portfolio allocation across sleeves based on signal activity.
+./core/portfolio_alloc.py:6:Does NOT modify any sleeve signal logic, thresholds, indicators, or valuation rules.
+./core/portfolio_alloc.py:9:1. Each sleeve exposes: positions_df (ticker, target_weight, reason, signal_strength)
+./core/portfolio_alloc.py:10:   and meta (sleeve_name, is_active, strength 0-1, notes)
+./core/portfolio_alloc.py:11:2. Dynamic allocation: alloc_i = strength_i / sum(strength over active sleeves)
+./core/portfolio_alloc.py:12:3. Portfolio constraints applied WITHOUT renormalization - excess becomes CASH
+./core/portfolio_alloc.py:13:4. Final output: combined weights + CASH row, sum = 1.00
+./core/portfolio_alloc.py:31:DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 0.70, "sleeve_2": 0.20, "charlie_munger": 0.10}
+./core/portfolio_alloc.py:37:DEFAULT_CASH_LAST_RESORT = os.getenv("CASH_LAST_RESORT", "true").lower() in (
+./core/portfolio_alloc.py:52:CASH_LAST_RESORT_REASON = "Unallocated capital"
+./core/portfolio_alloc.py:53:CASH_TICKER = "CASH"
+./core/portfolio_alloc.py:62:    """Metadata for a sleeve's current state."""
+./core/portfolio_alloc.py:64:    sleeve_name: str
+./core/portfolio_alloc.py:75:    """Standardized output from a sleeve for portfolio allocation."""
+./core/portfolio_alloc.py:96:    """Result of portfolio allocation across sleeves."""
+./core/portfolio_alloc.py:99:    sleeve_allocations: dict[str, float]
+./core/portfolio_alloc.py:102:    cash_reason: Optional[str] = None
+./core/portfolio_alloc.py:112:    def cash_weight(self) -> float:
+./core/portfolio_alloc.py:115:        cash_row = self.combined_weights[self.combined_weights["ticker"] == CASH_TICKER]
+./core/portfolio_alloc.py:116:        return float(cash_row["target_weight"].iloc[0]) if not cash_row.empty else 0.0
+./core/portfolio_alloc.py:122:def create_sleeve_output(
+./core/portfolio_alloc.py:124:    sleeve_name: str,
+./core/portfolio_alloc.py:147:        sleeve_name=sleeve_name, is_active=is_active, strength=strength, notes=notes
+./core/portfolio_alloc.py:156:    """Dynamic portfolio allocator that combines sleeve outputs."""
+./core/portfolio_alloc.py:162:        max_sleeve_exposure: float = DEFAULT_MAX_SLEEVE_EXPOSURE,
+./core/portfolio_alloc.py:165:        cash_last_resort: bool = DEFAULT_CASH_LAST_RESORT,
+./core/portfolio_alloc.py:172:        self.max_sleeve_exposure = max_sleeve_exposure
+./core/portfolio_alloc.py:175:        self.cash_last_resort = bool(cash_last_resort)
+./core/portfolio_alloc.py:180:        self._cash_reason: Optional[str] = None
+./core/portfolio_alloc.py:185:        sleeve_outputs: list[SleeveOutput],
+./core/portfolio_alloc.py:188:        """Perform dynamic allocation across sleeves."""
+./core/portfolio_alloc.py:191:        self._cash_reason = None
+./core/portfolio_alloc.py:194:        sleeve_allocations = self._compute_sleeve_allocations(sleeve_outputs)
+./core/portfolio_alloc.py:195:        combined = self._combine_sleeve_weights(sleeve_outputs, sleeve_allocations)
+./core/portfolio_alloc.py:202:        combined = self._add_cash_allocation(combined)
+./core/portfolio_alloc.py:212:            sleeve_allocations=sleeve_allocations,
+./core/portfolio_alloc.py:215:            cash_reason=self._cash_reason,
+./core/portfolio_alloc.py:219:    def _compute_sleeve_allocations(
+./core/portfolio_alloc.py:220:        self, sleeve_outputs: list[SleeveOutput]
+./core/portfolio_alloc.py:222:        """Compute allocation percentage for each sleeve based on activity and strength."""
+./core/portfolio_alloc.py:223:        active_sleeves = []
+./core/portfolio_alloc.py:224:        for s in sleeve_outputs:
+./core/portfolio_alloc.py:234:                active_sleeves.append(s)
+./core/portfolio_alloc.py:236:        if not active_sleeves:
+./core/portfolio_alloc.py:237:            return {s.meta.sleeve_name: 0.0 for s in sleeve_outputs}
+./core/portfolio_alloc.py:239:        total_strength = sum(s.meta.strength for s in active_sleeves)
+./core/portfolio_alloc.py:242:            equal_weight = 1.0 / len(active_sleeves)
+./core/portfolio_alloc.py:244:                s.meta.sleeve_name: equal_weight if s.meta.is_active else 0.0
+./core/portfolio_alloc.py:245:                for s in sleeve_outputs
+./core/portfolio_alloc.py:249:            s.meta.sleeve_name: (
+./core/portfolio_alloc.py:252:            for s in sleeve_outputs
+./core/portfolio_alloc.py:255:    def _combine_sleeve_weights(
+./core/portfolio_alloc.py:257:        sleeve_outputs: list[SleeveOutput],
+./core/portfolio_alloc.py:258:        sleeve_allocations: dict[str, float],
+./core/portfolio_alloc.py:260:        """Combine sleeve weights, scaling each by its allocation percentage."""
+./core/portfolio_alloc.py:263:        for sleeve in sleeve_outputs:
+./core/portfolio_alloc.py:264:            alloc_pct = sleeve_allocations.get(sleeve.meta.sleeve_name, 0.0)
+./core/portfolio_alloc.py:267:                or sleeve.positions_df is None
+./core/portfolio_alloc.py:268:                or sleeve.positions_df.empty
+./core/portfolio_alloc.py:272:            for _, row in sleeve.positions_df.iterrows():
+./core/portfolio_alloc.py:278:                        "sleeve_name": sleeve.meta.sleeve_name,
+./core/portfolio_alloc.py:289:                    "sleeve_name",
+./core/portfolio_alloc.py:299:                "sleeve_name": lambda x: ", ".join(sorted(set(x))),
+./core/portfolio_alloc.py:385:    def _add_cash_allocation(self, combined: pd.DataFrame) -> pd.DataFrame:
+./core/portfolio_alloc.py:387:        Enforce conditional cash.
+./core/portfolio_alloc.py:393:             we do NOT renormalize and break risk limits — residual stays as CASH.
+./core/portfolio_alloc.py:395:        # Strip any existing CASH rows defensively
+./core/portfolio_alloc.py:397:            combined = combined[combined["ticker"] != CASH_TICKER].copy()
+./core/portfolio_alloc.py:400:        self._cash_reason = None
+./core/portfolio_alloc.py:402:        # If nothing to hold => 100% cash
+./core/portfolio_alloc.py:404:            self._cash_reason = "NO_ELIGIBLE_ASSETS"
+./core/portfolio_alloc.py:408:                        "ticker": CASH_TICKER,
+./core/portfolio_alloc.py:410:                        "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:417:        residual_cash = max(0.0, 1.0 - current_total)
+./core/portfolio_alloc.py:419:        # Condition (2): prepare for next-day buy -> keep residual as cash with that reason
+./core/portfolio_alloc.py:421:            if residual_cash > WEIGHT_TOLERANCE:
+./core/portfolio_alloc.py:422:                self._cash_reason = "PREPARE_FOR_BUY_NEXT_DAY"
+./core/portfolio_alloc.py:423:                cash_row = pd.DataFrame(
+./core/portfolio_alloc.py:426:                            "ticker": CASH_TICKER,
+./core/portfolio_alloc.py:427:                            "target_weight": residual_cash,
+./core/portfolio_alloc.py:428:                            "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:433:                combined = pd.concat([combined, cash_row], ignore_index=True)
+./core/portfolio_alloc.py:435:                # Even if residual is 0, still store the reason so email can explain "why cash isn't present"
+./core/portfolio_alloc.py:436:                # (optional; remove if you only want rationale when cash > 0)
+./core/portfolio_alloc.py:437:                self._cash_reason = "PREPARE_FOR_BUY_NEXT_DAY"
+./core/portfolio_alloc.py:440:        # Condition (3): constraints created residual cash (caps/turnover/min gross, etc.)
+./core/portfolio_alloc.py:441:        if residual_cash > WEIGHT_TOLERANCE:
+./core/portfolio_alloc.py:442:            self._cash_reason = "CONSTRAINTS"
+./core/portfolio_alloc.py:443:            cash_row = pd.DataFrame(
+./core/portfolio_alloc.py:446:                        "ticker": CASH_TICKER,
+./core/portfolio_alloc.py:447:                        "target_weight": residual_cash,
+./core/portfolio_alloc.py:448:                        "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:453:            combined = pd.concat([combined, cash_row], ignore_index=True)
+./core/portfolio_alloc.py:465:        hold_cash = (not has_eligible_assets) or self.prepare_for_buy_next_day
+./core/portfolio_alloc.py:467:        if hold_cash:
+./core/portfolio_alloc.py:470:                self._cash_reason = "NO_ELIGIBLE_ASSETS"
+./core/portfolio_alloc.py:472:                self._cash_reason = "PREPARE_FOR_BUY_NEXT_DAY"
+./core/portfolio_alloc.py:474:            # If we have assets but we're deliberately holding cash, keep existing weights
+./core/portfolio_alloc.py:475:            # and put the remainder into CASH.
+./core/portfolio_alloc.py:476:            cash_weight = max(0.0, 1.0 - current_total)
+./core/portfolio_alloc.py:478:            # If nothing eligible, go 100% cash
+./core/portfolio_alloc.py:480:                cash_weight = 1.0
+./core/portfolio_alloc.py:483:            if cash_weight > WEIGHT_TOLERANCE:
+./core/portfolio_alloc.py:484:                cash_row = pd.DataFrame(
+./core/portfolio_alloc.py:487:                            "ticker": CASH_TICKER,
+./core/portfolio_alloc.py:488:                            "target_weight": cash_weight,
+./core/portfolio_alloc.py:489:                            "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:494:                combined = pd.concat([combined, cash_row], ignore_index=True)
+./core/portfolio_alloc.py:503:        # Otherwise: NO cash; renormalize weights to sum to 1.0
+./core/portfolio_alloc.py:504:        self._cash_reason = None
+./core/portfolio_alloc.py:516:        if combined.empty or not self.cash_last_resort or self.risk_off:
+./core/portfolio_alloc.py:546:    def _derive_sleeve_allocations(
+./core/portfolio_alloc.py:548:        sleeve_outputs: list[SleeveOutput],
+./core/portfolio_alloc.py:551:        """Derive sleeve allocations from combined weights for reporting."""
+./core/portfolio_alloc.py:552:        allocations = {s.meta.sleeve_name: 0.0 for s in sleeve_outputs}
+./core/portfolio_alloc.py:554:            return allocations
+./core/portfolio_alloc.py:557:            sleeve_names = str(row.get("sleeve_name", "")).split(",")
+./core/portfolio_alloc.py:558:            sleeve_names = [
+./core/portfolio_alloc.py:560:                for name in sleeve_names
+./core/portfolio_alloc.py:561:                if name.strip() and name.strip().upper() != "CASH"
+./core/portfolio_alloc.py:563:            if not sleeve_names:
+./core/portfolio_alloc.py:565:            share = float(row.get("target_weight", 0.0)) / len(sleeve_names)
+./core/portfolio_alloc.py:566:            for name in sleeve_names:
+./core/portfolio_alloc.py:567:                allocations[name] = allocations.get(name, 0.0) + share
+./core/portfolio_alloc.py:568:        return allocations
+./core/portfolio_alloc.py:574:def scale_sleeve_daily(
+./core/portfolio_alloc.py:576:    sleeve_name: str,
+./core/portfolio_alloc.py:581:    """Scale a sleeve's daily equity series to its allocated capital (legacy)."""
+./core/portfolio_alloc.py:587:    w = float(weights.get(sleeve_name, 0.0))
+./core/portfolio_alloc.py:593:        raise ValueError(f"{sleeve_name}: start equity must be > 0, got {start_equity}")
+./core/portfolio_alloc.py:604:    sleeve_daily_scaled: dict[str, pd.DataFrame], date_col: str = "date"
+./core/portfolio_alloc.py:606:    """Combine scaled sleeve frames into a single portfolio daily series (legacy)."""
+./core/portfolio_alloc.py:608:    for name, df in sleeve_daily_scaled.items():
+./core/portfolio_alloc.py:647:def compute_dynamic_allocation(
+./core/portfolio_alloc.py:648:    sleeve_outputs: list[SleeveOutput],
+./core/portfolio_alloc.py:653:    """Convenience function to compute dynamic allocation."""
+./core/portfolio_alloc.py:657:    return allocator.allocate(sleeve_outputs, previous_weights)
+./core/portfolio_alloc.py:660:def allocation_summary_df(result: AllocationResult) -> pd.DataFrame:
+./core/portfolio_alloc.py:661:    """Create a summary DataFrame of sleeve allocations for reporting."""
+./core/portfolio_alloc.py:663:    for sleeve_name, alloc_pct in result.sleeve_allocations.items():
+./core/portfolio_alloc.py:666:                "Sleeve": sleeve_name,
+./core/portfolio_alloc.py:668:                "Allocated %": f"{alloc_pct:.2%}",
+./core/portfolio_alloc.py:673:            "Sleeve": "CASH",
+./core/portfolio_alloc.py:674:            "Active": "Yes" if result.cash_weight > WEIGHT_TOLERANCE else "No",
+./core/portfolio_alloc.py:675:            "Allocated %": f"{result.cash_weight:.2%}",
+./core/portfolio_alloc.py:690:            "sleeve_name": "Sleeve",
+./core/portfolio_alloc.py:695:        "Ticker", key=lambda x: x != CASH_TICKER
+./core/portfolio_alloc.py:735:def validate_allocation_result(result: AllocationResult) -> list[str]:
+./core/portfolio_alloc.py:736:    """Validate an allocation result and return any issues found."""
+./core/portfolio_alloc.py:746:    if sum(result.sleeve_allocations.values()) > 1.0 + WEIGHT_TOLERANCE:
+./core/portfolio_alloc.py:747:        errors.append("Sleeve allocations exceed 1.0")
+./core/portfolio_alloc.py:751:def test_allocation_scenarios() -> dict[str, bool]:
+./core/portfolio_alloc.py:757:    trend_only = create_sleeve_output(
+./core/portfolio_alloc.py:762:        "sleeve_trend",
+./core/portfolio_alloc.py:765:    val_inactive = create_sleeve_output([], "sleeve_2", 0.0)
+./core/portfolio_alloc.py:768:        abs(result.sleeve_allocations.get("sleeve_trend", 0) - 1.0) < WEIGHT_TOLERANCE
+./core/portfolio_alloc.py:772:    trend_active = create_sleeve_output(
+./core/portfolio_alloc.py:773:        [{"ticker": "AAPL", "target_weight": 1.0}], "sleeve_trend", 1.0
+./core/portfolio_alloc.py:775:    val_active = create_sleeve_output(
+./core/portfolio_alloc.py:776:        [{"ticker": "IBM", "target_weight": 1.0}], "sleeve_2", 1.0
+./core/portfolio_alloc.py:780:        abs(result.sleeve_allocations.get("sleeve_trend", 0) - 0.5) < WEIGHT_TOLERANCE
+./core/portfolio_alloc.py:781:        and abs(result.sleeve_allocations.get("sleeve_2", 0) - 0.5) < WEIGHT_TOLERANCE
+./core/portfolio_alloc.py:784:    # Scenario 3: No sleeves active -> 100% CASH
+./core/portfolio_alloc.py:787:            create_sleeve_output([], "sleeve_trend", 0.0),
+./core/portfolio_alloc.py:788:            create_sleeve_output([], "sleeve_2", 0.0),
+./core/portfolio_alloc.py:791:    results["no_sleeves_100_cash"] = abs(result.cash_weight - 1.0) < WEIGHT_TOLERANCE
+./core/portfolio_alloc.py:802:    logger.info("Running allocation acceptance tests...")
+./core/portfolio_alloc.py:803:    for scenario, passed in test_allocation_scenarios().items():
+./sleeves/sleeve_2/backtest.py:2:sleeves/sleeve_2/backtest.py — Valuation (P/E vs Industry + Trend) sleeve.
+./sleeves/sleeve_2/backtest.py:6:This sleeve is SIGNAL-ONLY.  It produces a target_weights DataFrame
+./sleeves/sleeve_2/backtest.py:8:portfolio accounting (cash, shares, MTM, costs, turnover, equity curve)
+./sleeves/sleeve_2/backtest.py:24:  • On most runs, the sleeve will have non-zero exposure at asof because
+./sleeves/sleeve_2/backtest.py:29:so on weekends the sleeve runs against Friday's bar and still contributes.
+./sleeves/sleeve_2/backtest.py:52:from sleeves.sleeve_2.signals import build_signals
+./sleeves/sleeve_2/backtest.py:53:from sleeves.sleeve_2.valuation import fetch_valuation_snapshot
+./sleeves/sleeve_2/backtest.py:54:from sleeves.sleeve_2.config import (  # noqa: F401
+./sleeves/sleeve_2/backtest.py:68:    CASH_PROXY_TICKER,
+./sleeves/sleeve_2/backtest.py:127:    # Ensure cash proxy is in the download list (needed for parking)
+./sleeves/sleeve_2/backtest.py:128:    dl_tickers = sorted(set(tickers) | {CASH_PROXY_TICKER})
+./sleeves/sleeve_2/backtest.py:402:    If no positions: allocate 100% to CASH_PROXY_TICKER.
+./sleeves/sleeve_2/backtest.py:409:        # park in cash proxy
+./sleeves/sleeve_2/backtest.py:411:        if CASH_PROXY_TICKER in w:
+./sleeves/sleeve_2/backtest.py:412:            w[CASH_PROXY_TICKER] = 1.0
+./sleeves/sleeve_2/backtest.py:540:    """All-cash target weights (single row of zeros)."""
+./reporting/attribution.py:18:        return {"tickers": pd.DataFrame(), "sleeves": pd.DataFrame()}
+./reporting/attribution.py:24:        return {"tickers": pd.DataFrame(), "sleeves": pd.DataFrame()}
+./reporting/attribution.py:41:        rows.append({"ticker": t, "weight_start": weight, "return": ret, "contribution": contrib, "sleeve": row.get("sleeve", "")})
+./reporting/attribution.py:44:    sleeves_df = pd.DataFrame(columns=["sleeve", "weight_start", "sleeve_return", "contribution"])
+./reporting/attribution.py:46:        grp = tickers_df.groupby("sleeve", as_index=False)
+./reporting/attribution.py:47:        sleeves_df = grp.apply(
+./reporting/attribution.py:51:                    "sleeve_return": (g["contribution"].sum() / g["weight_start"].sum()) if g["weight_start"].sum() else 0.0,
+./reporting/attribution.py:57:    return {"tickers": tickers_df, "sleeves": sleeves_df}
+./reporting/attribution.py:60:def write_attribution_outputs(asof_date: str, tickers_df: pd.DataFrame, sleeves_df: pd.DataFrame) -> dict[str, str]:
+./reporting/attribution.py:64:    s_path = out / f"contribution_sleeves_{asof_date}.csv"
+./reporting/attribution.py:66:    sleeves_df.to_csv(s_path, index=False)
+./reporting/attribution.py:68:    return {"tickers": str(t_path), "sleeves": str(s_path)}
+./paper/signals_io.py:33:    cash_target_weight: Optional[float] = None,
+./paper/signals_io.py:34:    sleeve_col: Optional[str] = "sleeve",
+./paper/signals_io.py:45:      - optional sleeve
+./paper/signals_io.py:59:            for c in [ticker_col, weight_col, sleeve_col]
+./paper/signals_io.py:64:    if sleeve_col is None or sleeve_col not in df.columns:
+./paper/signals_io.py:65:        df["sleeve"] = "core"
+./paper/signals_io.py:66:        sleeve_col = "sleeve"
+./paper/signals_io.py:83:            sleeve_col: "sleeve",
+./paper/signals_io.py:85:    )[["ticker", "target_weight", "sleeve"]].to_dict(orient="records")
+./paper/signals_io.py:98:    if cash_target_weight is not None:
+./paper/signals_io.py:99:        payload["cash_target_weight"] = float(cash_target_weight)
+./run_sleeve2.py:1:from sleeves.sleeve_2.backtest import main
+./sleeves/sleeve_2/valuation.py:39:    # Import lazily so sleeve_1 never depends on it
+./paper/nav2.py:15:NAV_TS_COLUMNS = ["date", "equity", "cash", "return_1d"]
+./paper/nav2.py:25:def _resolve_starting_cash() -> float:
+./paper/nav2.py:30:            for key in ("starting_equity", "starting_cash", "initial_equity"):
+./paper/nav2.py:36:    start_cash = 10000.0
+./paper/nav2.py:37:    logger.warning("[NAV2] starting cash not configured; defaulting to 10000.0")
+./paper/nav2.py:38:    marker = Path("outputs/ledger/cash_start.json")
+./paper/nav2.py:41:        marker.write_text(json.dumps({"starting_cash": start_cash}, indent=2) + "\n", encoding="utf-8")
+./paper/nav2.py:42:    return start_cash
+./paper/nav2.py:45:def _compute_portfolio_state(ledger_df: pd.DataFrame, asof_date: str, starting_cash: float) -> tuple[float, dict[str, dict[str, float]]]:
+./paper/nav2.py:46:    cash = float(starting_cash)
+./paper/nav2.py:50:        return cash, holdings
+./paper/nav2.py:54:        return cash, holdings
+./paper/nav2.py:72:            cash -= (qty * px) + fees
+./paper/nav2.py:77:            cash += (sell_qty * px) - fees
+./paper/nav2.py:79:    return cash, holdings
+./paper/nav2.py:82:def _upsert_nav_timeseries(path: str, asof_date: str, equity: float, cash: float) -> str:
+./paper/nav2.py:92:        [ts, pd.DataFrame([{"date": str(asof_date), "equity": float(equity), "cash": float(cash), "return_1d": 0.0}])],
+./paper/nav2.py:124:    starting_cash = _resolve_starting_cash()
+./paper/nav2.py:126:    cash, holdings = _compute_portfolio_state(ledger_df, asof_date, starting_cash)
+./paper/nav2.py:157:    equity = float(cash + market_value)
+./paper/nav2.py:165:        "cash": float(cash),
+./paper/nav2.py:176:    nav_ts_path = _upsert_nav_timeseries(str(perf_dir / "nav_timeseries.csv"), asof_date, equity, float(cash))
+./paper/nav2.py:183:        "cash": float(cash),
+./paper/ledger.py:27:    "sleeve",
+./paper/ledger.py:143:        sleeve = str(trade.get("sleeve") or "")
+./paper/ledger.py:168:                "sleeve": sleeve,
+./paper/paper_report.py:26:    cash = float(day["cash"].iloc[0]) if not day.empty else 0.0
+./paper/paper_report.py:56:            ["ticker", "sleeve", "shares", "price", "market_value"]
+./paper/paper_report.py:60:            columns=["ticker", "sleeve", "shares", "price", "market_value"]
+./paper/paper_report.py:95:    contrib_s = _read_csv_if_exists(f"outputs/perf/contribution_sleeves_{run_date}.csv")
+./paper/paper_report.py:110:            recon_df = recon_df[["ticker", "target_weight", "achieved_weight", "delta_weight", "cash_limited"]].copy()
+./paper/paper_report.py:114:            recon_df["cash_limited"] = recon_df["cash_limited"].map(lambda x: "YES" if bool(x) else "")
+./paper/paper_report.py:116:            recon_df = pd.DataFrame(columns=["ticker", "target_weight", "achieved_weight", "delta_weight", "cash_limited"])
+./paper/paper_report.py:122:    <li><b>Target Cash Weight:</b> {100.0 * float(reconciliation.get('target_cash_weight', 0.0)):.2f}%</li>
+./paper/paper_report.py:123:    <li><b>Achieved Cash Weight:</b> {100.0 * float(reconciliation.get('achieved_cash_weight', 0.0)):.2f}%</li>
+./paper/paper_report.py:125:    <li><b>Cash Dollars:</b> ${float(reconciliation.get('cash_dollars', 0.0)):,.2f} / ${float(reconciliation.get('target_cash_dollars', 0.0)):,.2f} target</li>
+./paper/paper_report.py:165:    <li><b>Cash:</b> ${cash:,.2f}</li>
+./paper/paper_report.py:188:    Execution model: next-open fills with slippage + cash buffer. Ledger is append-only.
+./paper/mark_to_market.py:16:def mark_holdings(holdings: pd.DataFrame, cash: float, asof_date: str) -> tuple[pd.DataFrame, dict]:
+./paper/mark_to_market.py:31:        rows.append({"ticker": tkr, "shares": shares, "price": px, "market_value": mv, "avg_cost": avg_cost, "unrealized_pnl": upnl, "sleeve": r.get("sleeve", "")})
+./paper/mark_to_market.py:34:    equity = float(cash + (mtm["market_value"].sum() if not mtm.empty else 0.0))
+./paper/mark_to_market.py:40:        "cash": float(cash),
+./paper/mark_to_market.py:64:    cols = ["date", "equity", "cash", "gross_exposure", "net_exposure", "return_1d", "turnover"]
+./paper/mark_to_market.py:71:        "cash": float(nav["cash"]),
+./sleeves/sleeve_trend/backtest.py:7:# 2. Added sleeve-level volatility targeting
+./sleeves/sleeve_trend/backtest.py:27:assert __name__.startswith("sleeves.sleeve_trend"), "Invalid import context for Sleeve Trend"
+./sleeves/sleeve_trend/backtest.py:98:    Manages sleeve-level risk including:
+./sleeves/sleeve_trend/backtest.py:577:            # Check cash availability (keep MIN_CASH_PCT buffer)
+./sleeves/sleeve_trend/backtest.py:579:            available_cash = equity * (1 - cfg.MIN_CASH_PCT)
+./sleeves/sleeve_trend/backtest.py:580:            if cost > available_cash:
+./sleeves/sleeve_trend/backtest.py:582:                shares = int(available_cash / entry_price) - 1
+./sleeves/sleeve_trend/backtest.py:640:        # Total equity = cash (after realized P&L) + positions mark-to-market
+./sleeves/sleeve_trend/backtest.py:641:        # Simplified: we track equity as cash + sum of notional at entry
+./sleeves/sleeve_trend/backtest.py:655:                "cash": equity - entry_notional_sum,
+./sleeves/sleeve_trend/backtest.py:745:def build_daily_sleeve_output(
+./sleeves/sleeve_trend/backtest.py:746:    equity_df: pd.DataFrame, trades_df: pd.DataFrame, sleeve_name: str
+./sleeves/sleeve_trend/backtest.py:749:    Canonical daily sleeve output for reporting/aggregation.
+./sleeves/sleeve_trend/backtest.py:753:    df["sleeve"] = sleeve_name
+./sleeves/sleeve_trend/backtest.py:767:            "sleeve",
+./sleeves/sleeve_trend/backtest.py:853:            {"sleeve": returns, "benchmark": benchmark_returns}
+./sleeves/sleeve_trend/backtest.py:856:            cov = aligned["sleeve"].cov(aligned["benchmark"])
+./sleeves/sleeve_trend/backtest.py:859:            corr = aligned["sleeve"].corr(aligned["benchmark"])
+./paper/state_paths.py:14:    "sleeve",
+./paper/state_paths.py:18:    "cash",
+./sleeves/sleeve_2/config.py:5:SLEEVE_NAME = "sleeve_2"
+./sleeves/sleeve_2/config.py:43:CASH_PROXY_TICKER = "SGOV"
+./paper/build_execution_email.py:131:        "- CASH is not the same thing as SGOV: CASH is uninvested cash, SGOV is a Treasury ETF position.",
+./research/signal_store.py:19:    "sleeve_source",
+./sleeves/sleeve_charlie_munger.py:61:    cfg_file = Path("sleeves/charlie_munger_config.json")
+./sleeves/sleeve_charlie_munger.py:352:        eq["sleeve_return"] = eq["equity"].pct_change().fillna(0.0)
+./sleeves/sleeve_charlie_munger.py:353:        sleeve_stats = _compute_stats(eq["sleeve_return"])
+./sleeves/sleeve_charlie_munger.py:355:        sleeve_stats = {"cumulative_return": None, "max_drawdown": None}
+./sleeves/sleeve_charlie_munger.py:366:        "sleeve_stats": sleeve_stats,
+./sleeves/sleeve_charlie_munger.py:387:        "sleeve": "charlie_munger",
+./sleeves/sleeve_2/signals.py:4:from sleeves.sleeve_2.config import (
+./sleeves/sleeve_1/backtest.py:4:#   1) creating a new versioned sleeve folder, OR
+./sleeves/sleeve_1/backtest.py:10:assert __name__.startswith("sleeves.sleeve_1"), "Invalid import context for Sleeve 1"
+./sleeves/sleeve_1/backtest.py:192:def build_daily_sleeve_output(
+./sleeves/sleeve_1/backtest.py:195:    sleeve_name: str,
+./sleeves/sleeve_1/backtest.py:198:    Canonical daily sleeve output for reporting / aggregation.
+./sleeves/sleeve_1/backtest.py:202:    df["sleeve"] = sleeve_name
+./sleeves/sleeve_1/backtest.py:214:                "sleeve",
+./sleeves/sleeve_1/backtest.py:254:            "sleeve",
+./sleeves/sleeve_2/legacy/sleeve2/sleeve2_engine.py:1:# sleeve2/sleeve2_engine.py
+./sleeves/sleeve_trend/__init__.py:12:    from sleeves.sleeve_trend.backtest import prepare_data, backtest, build_daily_sleeve_output
+./sleeves/sleeve_trend/__init__.py:23:    build_daily_sleeve_output,
+./sleeves/sleeve_trend/__init__.py:48:    "build_daily_sleeve_output",
+./paper/paper_broker.py:34:    cash_buffer_bps: float = 0.0
+./paper/paper_broker.py:47:    cash_target_weight_default: float = 0.0
+./paper/paper_broker.py:69:        cash_buffer_bps=float(constraints.get("cash_buffer_bps", 0.0)),
+./paper/paper_broker.py:82:        cash_target_weight_default=float(
+./paper/paper_broker.py:83:            constraints.get("cash_target_weight", constraints.get("target_cash_weight", 0.0))
+./paper/paper_broker.py:110:        return pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 0.0, 0.0, ""
+./paper/paper_broker.py:114:        return pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 0.0, 0.0, ""
+./paper/paper_broker.py:119:    cash = float(last["cash"].iloc[0])
+./paper/paper_broker.py:122:    holdings = last[["ticker", "sleeve", "shares"]].copy()
+./paper/paper_broker.py:125:    return holdings, cash, total_equity, last_date
+./paper/paper_broker.py:130:    cash_target_weight_default: float = 0.0,
+./paper/paper_broker.py:137:    payload_cash_target_weight = None
+./paper/paper_broker.py:141:        if obj.get("cash_target_weight") is not None:
+./paper/paper_broker.py:142:            payload_cash_target_weight = float(obj.get("cash_target_weight"))
+./paper/paper_broker.py:151:    if "sleeve" not in df.columns:
+./paper/paper_broker.py:152:        df["sleeve"] = "core"
+./paper/paper_broker.py:157:    banned = [t for t in df["ticker"].tolist() if t != "CASH" and not is_allowed_etf_symbol(t)]
+./paper/paper_broker.py:161:    cash_rows = df[df["ticker"] == "CASH"].copy()
+./paper/paper_broker.py:162:    if not cash_rows.empty:
+./paper/paper_broker.py:163:        target_cash_weight = float(cash_rows["target_weight"].iloc[-1])
+./paper/paper_broker.py:164:    elif payload_cash_target_weight is not None:
+./paper/paper_broker.py:165:        target_cash_weight = payload_cash_target_weight
+./paper/paper_broker.py:167:        target_cash_weight = float(cash_target_weight_default)
+./paper/paper_broker.py:168:    target_cash_weight = max(0.0, min(1.0, target_cash_weight))
+./paper/paper_broker.py:170:    non_cash = df[df["ticker"] != "CASH"].copy()
+./paper/paper_broker.py:171:    non_cash_sum = float(non_cash["target_weight"].sum())
+./paper/paper_broker.py:172:    if non_cash_sum <= 0:
+./paper/paper_broker.py:173:        raise ValueError("Signals non-cash target_weight sum <= 0")
+./paper/paper_broker.py:175:    investable_weight_target = 1.0 - target_cash_weight
+./paper/paper_broker.py:176:    if abs(non_cash_sum - investable_weight_target) <= 1e-6:
+./paper/paper_broker.py:178:    elif abs(non_cash_sum - 1.0) <= 1e-6:
+./paper/paper_broker.py:179:        non_cash["target_weight"] = non_cash["target_weight"] * investable_weight_target
+./paper/paper_broker.py:180:    elif non_cash_sum > 0:
+./paper/paper_broker.py:181:        non_cash["target_weight"] = (
+./paper/paper_broker.py:182:            non_cash["target_weight"] / non_cash_sum * investable_weight_target
+./paper/paper_broker.py:186:        non_cash[["ticker", "sleeve", "target_weight"]],
+./paper/paper_broker.py:187:        target_cash_weight,
+./paper/paper_broker.py:405:    starting_cash: float,
+./paper/paper_broker.py:406:    target_cash_weight: float,
+./paper/paper_broker.py:420:    cash_buffer = 1.0 - (cfg.cash_buffer_bps / 10000.0)
+./paper/paper_broker.py:421:    cash_buffer = max(0.0, min(1.0, cash_buffer))
+./paper/paper_broker.py:422:    target_investable_dollars = total_equity * (1.0 - target_cash_weight) * cash_buffer
+./paper/paper_broker.py:423:    targets["target_dollars"] = targets["target_weight"] * total_equity * cash_buffer
+./paper/paper_broker.py:499:    cash_after_sells = float(starting_cash)
+./paper/paper_broker.py:502:            cash_after_sells += float(tr["notional"])
+./paper/paper_broker.py:519:        cash_remaining = cash_after_sells - invested_buys
+./paper/paper_broker.py:521:            max_affordable = max(0.0, cash_remaining / px)
+./paper/paper_broker.py:523:            max_affordable = max(0.0, int(cash_remaining // px))
+./paper/paper_broker.py:553:                "reason": "rebalance_to_target" if exec_shares >= desired else "cash_limited",
+./paper/paper_broker.py:559:        "target_cash_weight": float(target_cash_weight),
+./paper/paper_broker.py:672:    starting_cash: float,
+./paper/paper_broker.py:674:    sleeve_map_from_targets = targets.set_index("ticker")["sleeve"].to_dict()
+./paper/paper_broker.py:677:    sleeve_map: Dict[str, str] = {}
+./paper/paper_broker.py:683:            sleeve_map[tkr] = str(r.get("sleeve", "core"))
+./paper/paper_broker.py:685:    cash = float(starting_cash)
+./paper/paper_broker.py:697:                cash -= notional
+./paper/paper_broker.py:700:                cash += notional
+./paper/paper_broker.py:702:            if tkr in sleeve_map_from_targets:
+./paper/paper_broker.py:703:                sleeve_map[tkr] = sleeve_map_from_targets[tkr]
+./paper/paper_broker.py:707:            {"ticker": k, "sleeve": sleeve_map.get(k, "core"), "shares": v}
+./paper/paper_broker.py:713:        out = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+./paper/paper_broker.py:717:    return out, cash
+./paper/paper_broker.py:877:    model_cash: float,
+./paper/paper_broker.py:880:    broker_cash: float,
+./paper/paper_broker.py:891:    cash_delta = model_cash - broker_cash
+./paper/paper_broker.py:898:        "cash_delta": cash_delta,
+./paper/paper_broker.py:930:    holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
+./paper/paper_broker.py:938:        cash_prev = cfg.initial_equity
+./paper/paper_broker.py:962:    cash_target_weight_default = float(
+./paper/paper_broker.py:963:        runtime_constraints.get("cash_target_weight", cfg.cash_target_weight_default)
+./paper/paper_broker.py:966:    targets, target_cash_weight, snapshot_date, asof_date = load_targets(
+./paper/paper_broker.py:968:        cash_target_weight_default=cash_target_weight_default,
+./paper/paper_broker.py:976:        target_cash_weight = 0.0
+./paper/paper_broker.py:1069:    investable_weight = max(0.0, 1.0 - target_cash_weight)
+./paper/paper_broker.py:1098:        "target_cash_weight": float(target_cash_weight),
+./paper/paper_broker.py:1109:            starting_cash=cash_prev,
+./paper/paper_broker.py:1110:            target_cash_weight=target_cash_weight,
+./paper/paper_broker.py:1117:        "[SHADOW] cash_target=%.2f%% investable=$%.2f equity=$%.2f",
+./paper/paper_broker.py:1118:        100.0 * float(target_cash_weight),
+./paper/paper_broker.py:1163:        holdings_new, cash_new = apply_trades_to_holdings(
+./paper/paper_broker.py:1167:            starting_cash=cash_prev,
+./paper/paper_broker.py:1171:        total_equity = float(cash_new + total_mv)
+./paper/paper_broker.py:1172:        achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
+./paper/paper_broker.py:1175:        cash_new = float(cash_prev)
+./paper/paper_broker.py:1177:        achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
+./paper/paper_broker.py:1178:        m2m = pd.DataFrame(columns=["ticker", "sleeve", "shares", "price", "market_value"])
+./paper/paper_broker.py:1182:    target_cash_dollars = float(equity_prev * target_cash_weight)
+./paper/paper_broker.py:1204:                "cash_limited": tkr in set(trade_meta.get("scaled_tickers", [])),
+./paper/paper_broker.py:1209:        ledger_day = m2m[["ticker", "sleeve", "shares", "price", "market_value"]].copy()
+./paper/paper_broker.py:1211:        ledger_day["cash"] = cash_new
+./paper/paper_broker.py:1228:        "cash": cash_new,
+./paper/paper_broker.py:1234:            model_cash=cash_new,
+./paper/paper_broker.py:1237:            broker_cash=float(broker_state["cash"]),
+./paper/paper_broker.py:1249:            "cash_delta": 0.0,
+./paper/paper_broker.py:1282:        "cash": cash_new,
+./paper/paper_broker.py:1287:        "target_cash_weight": float(target_cash_weight),
+./paper/paper_broker.py:1288:        "achieved_cash_weight": float(achieved_cash_weight),
+./paper/paper_broker.py:1291:        "target_cash_dollars": float(target_cash_dollars),
+./paper/paper_broker.py:1292:        "cash_dollars": float(cash_new),
+./sleeves/sleeve_trend/config.py:3:# Trend-following sleeve using EMA crossover + ADX filter
+./sleeves/sleeve_trend/config.py:6:# - Added explicit sleeve-level volatility targeting
+./sleeves/sleeve_trend/config.py:74:# Target annualized volatility for the sleeve
+./sleeves/sleeve_trend/config.py:107:MIN_CASH_PCT = 0.05  # Always keep 5% cash
+./sleeves/sleeve_trend/config.py:141:# CASH PROXY & DATA
+./sleeves/sleeve_trend/config.py:144:CASH_PROXY_TICKER = "SGOV"  # Short-term treasury ETF for idle cash
+./sleeves/sleeve_2/legacy/sleeve2/sleeve2_backtest.py:1:# sleeve2/sleeve2_backtest.py
+./sleeves/sleeve_2/legacy/sleeve2/sleeve2_backtest.py:6:from sleeve2.sleeve2_engine import (
+./Tests/test_ledger2_nav2_integrity.py:21:        "sleeve": "main",
+./Tests/test_ledger2_nav2_integrity.py:54:                "sleeve": "main",
+./Tests/test_rerun_safety_ledger_nav.py:57:            "sleeve": "core",
+./daily_quant_report.py:31:from sleeves.sleeve_1.backtest import (
+./daily_quant_report.py:39:from sleeves.sleeve_trend.backtest import (
+./daily_quant_report.py:43:from sleeves.sleeve_trend import config as trend_cfg
+./daily_quant_report.py:49:    import sleeves.sleeve_2.backtest as s2_mod
+./daily_quant_report.py:60:    import sleeves.charlie_munger.backtest as cm_mod
+./daily_quant_report.py:72:# Portfolio allocation (dynamic)
+./daily_quant_report.py:78:    create_sleeve_output,
+./daily_quant_report.py:79:    allocation_summary_df,
+./daily_quant_report.py:81:    validate_allocation_result,
+./daily_quant_report.py:82:    CASH_TICKER,
+./daily_quant_report.py:95:from sleeves.sleeve_2.config import (  # noqa: E402
+./daily_quant_report.py:187:    sleeve_details: list[dict | None] | None,
+./daily_quant_report.py:196:    for details in (sleeve_details or []):
+./daily_quant_report.py:483:    target_cash_weight = float((paper_summary or {}).get("target_cash_weight", 0.0) or 0.0)
+./daily_quant_report.py:484:    achieved_cash_weight = float((paper_summary or {}).get("achieved_cash_weight", 0.0) or 0.0)
+./daily_quant_report.py:489:        "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%",
+./daily_quant_report.py:490:        "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%",
+./daily_quant_report.py:511:        "cash_target_weight": target_cash_weight,
+./daily_quant_report.py:514:        "cash_target_dollars": float((paper_summary or {}).get("target_cash_dollars", 0.0)),
+./daily_quant_report.py:535:                    "Sleeve 1 (Momentum): Signals present but blocked by portfolio cash constraint",
+./daily_quant_report.py:538:                    "Portfolio cash currently above target due to constraint enforcement",
+./daily_quant_report.py:595:    allocations = (snapshot.get("allocations") or {})
+./daily_quant_report.py:596:    sleeve_splits = (allocations.get("sleeves") or {})
+./daily_quant_report.py:620:        f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",
+./daily_quant_report.py:621:        f"• Sleeve 2 — Valuation: {_fmt_pct(sleeve_splits.get('sleeve_2', 0.0))}",
+./daily_quant_report.py:623:        f"  • Allocation: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
+./daily_quant_report.py:637:    allocations = snapshot.get("allocations", {}) or {}
+./daily_quant_report.py:638:    sleeve_splits = allocations.get("sleeves", {}) or {}
+./daily_quant_report.py:639:    cash_pct = allocations.get("cash", 0.0)
+./daily_quant_report.py:640:    target_cash = snapshot.get("target_cash_weight", cash_pct)
+./daily_quant_report.py:653:    def _trades_today(sleeve_name: str) -> str:
+./daily_quant_report.py:654:        count = len([o for o in orders if o.get("sleeve") == sleeve_name])
+./daily_quant_report.py:672:        f"• Cash: {_fmt_pct(cash_pct)} (Target: {_fmt_pct(target_cash)})",
+./daily_quant_report.py:673:        f"• Active Sleeves: {len([k for k, v in sleeve_splits.items() if float(v) > WEIGHT_TOLERANCE])}",
+./daily_quant_report.py:676:        f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",
+./daily_quant_report.py:677:        f"• Sleeve 2 — Valuation: {_fmt_pct(sleeve_splits.get('sleeve_2', 0.0))}",
+./daily_quant_report.py:678:        f"• Charlie Munger — Long Hold: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
+./daily_quant_report.py:679:        f"• Cash: {_fmt_pct(cash_pct)}",
+./daily_quant_report.py:681:        "NOTE: Charlie Munger sleeve allocation is dynamically maintained between 20–30% by design.",
+./daily_quant_report.py:688:        f"• Trades Today: {_trades_today('sleeve_trend')}",
+./daily_quant_report.py:689:        f"• Constraint Impact: {'Position caps + cash target' if skipped else 'None'}",
+./daily_quant_report.py:695:        f"• Trades Today: {_trades_today('sleeve_2')}",
+./daily_quant_report.py:701:        f"• Allocation: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
+./daily_quant_report.py:706:        "This sleeve acts as a stabilizer against higher-velocity trading in Sleeves 1 & 2.",
+./daily_quant_report.py:774:def _normalize_weights(sleeve_allocations: dict[str, float], cash_weight: float) -> tuple[dict[str, float], float]:
+./daily_quant_report.py:775:    sleeves = {k: max(0.0, float(v)) for k, v in (sleeve_allocations or {}).items()}
+./daily_quant_report.py:776:    cash = max(0.0, float(cash_weight))
+./daily_quant_report.py:777:    total = sum(sleeves.values()) + cash
+./daily_quant_report.py:779:        return sleeves, 1.0
+./daily_quant_report.py:781:        return sleeves, cash
+./daily_quant_report.py:783:    sleeves = {k: v * factor for k, v in sleeves.items()}
+./daily_quant_report.py:784:    cash = cash * factor
+./daily_quant_report.py:785:    return sleeves, cash
+./daily_quant_report.py:789:    sleeve_allocations: dict[str, float],
+./daily_quant_report.py:790:    cash_weight: float,
+./daily_quant_report.py:794:    """Clamp Charlie allocation to configured bounds and rebalance other sleeves first."""
+./daily_quant_report.py:795:    sleeves, cash = _normalize_weights(sleeve_allocations, cash_weight)
+./daily_quant_report.py:797:        return sleeves, cash
+./daily_quant_report.py:799:    sleeves.setdefault("sleeve_trend", 0.0)
+./daily_quant_report.py:800:    sleeves.setdefault("sleeve_2", 0.0)
+./daily_quant_report.py:801:    sleeves.setdefault("charlie_munger", 0.0)
+./daily_quant_report.py:803:    orig_charlie = float(sleeves.get("charlie_munger", 0.0))
+./daily_quant_report.py:807:        return sleeves, cash
+./daily_quant_report.py:809:    other_keys = ["sleeve_trend", "sleeve_2"]
+./daily_quant_report.py:810:    others_total = sum(float(sleeves.get(k, 0.0)) for k in other_keys)
+./daily_quant_report.py:815:                share = float(sleeves.get(key, 0.0)) / others_total
+./daily_quant_report.py:816:                sleeves[key] = max(0.0, float(sleeves.get(key, 0.0)) - delta * share)
+./daily_quant_report.py:819:                "[ALLOCATION] Unable to increase Charlie allocation without adjusting CASH or active sleeves."
+./daily_quant_report.py:826:                share = float(sleeves.get(key, 0.0)) / others_total
+./daily_quant_report.py:827:                sleeves[key] = max(0.0, float(sleeves.get(key, 0.0)) + give * share)
+./daily_quant_report.py:830:                "[ALLOCATION] Unable to reduce Charlie allocation because non-Charlie sleeves are inactive."
+./daily_quant_report.py:832:            sleeves["charlie_munger"] = max(0.0, orig_charlie)
+./daily_quant_report.py:833:            sleeves, cash = _normalize_weights(sleeves, cash)
+./daily_quant_report.py:834:            return sleeves, cash
+./daily_quant_report.py:836:    sleeves["charlie_munger"] = max(0.0, target_charlie)
+./daily_quant_report.py:837:    sleeves, cash = _normalize_weights(sleeves, cash)
+./daily_quant_report.py:838:    return sleeves, cash
+./daily_quant_report.py:842:def _apply_enforced_allocations_to_result(
+./daily_quant_report.py:844:    old_allocations: dict[str, float],
+./daily_quant_report.py:845:    new_allocations: dict[str, float],
+./daily_quant_report.py:846:    new_cash_weight: float,
+./daily_quant_report.py:848:    alloc_result.sleeve_allocations = dict(new_allocations)
+./daily_quant_report.py:852:            {"ticker": CASH_TICKER, "target_weight": float(new_cash_weight), "sleeve_name": CASH_TICKER, "reason": "post_enforce", "signal_strength": 1.0}
+./daily_quant_report.py:856:    if "sleeve_name" not in combined.columns:
+./daily_quant_report.py:857:        combined["sleeve_name"] = combined.get("ticker", pd.Series(dtype=str)).apply(
+./daily_quant_report.py:858:            lambda t: CASH_TICKER if str(t) == CASH_TICKER else ""
+./daily_quant_report.py:863:            names = [n.strip() for n in str(row.get("sleeve_name", "")).split(",") if n.strip()]
+./daily_quant_report.py:866:                old = float(old_allocations.get(name, 0.0))
+./daily_quant_report.py:867:                new = float(new_allocations.get(name, 0.0))
+./daily_quant_report.py:875:        mask_cash = combined.get("ticker", pd.Series(dtype=str)) == CASH_TICKER
+./daily_quant_report.py:876:        non_cash = combined[~mask_cash].copy()
+./daily_quant_report.py:877:        if not non_cash.empty:
+./daily_quant_report.py:878:            non_cash["target_weight"] = non_cash.apply(_scale_row, axis=1)
+./daily_quant_report.py:879:            non_cash = non_cash[non_cash["target_weight"].abs() > WEIGHT_TOLERANCE]
+./daily_quant_report.py:880:        cash_row = pd.DataFrame([
+./daily_quant_report.py:882:                "ticker": CASH_TICKER,
+./daily_quant_report.py:883:                "target_weight": float(new_cash_weight),
+./daily_quant_report.py:884:                "sleeve_name": CASH_TICKER,
+./daily_quant_report.py:889:        alloc_result.combined_weights = pd.concat([non_cash, cash_row], ignore_index=True)
+./daily_quant_report.py:957:    sleeve_equity_map: dict[str, pd.DataFrame],
+./daily_quant_report.py:958:    sleeve_allocations: dict[str, float],
+./daily_quant_report.py:959:    cash_weight: float,
+./daily_quant_report.py:963:    for sleeve_name, alloc in sleeve_allocations.items():
+./daily_quant_report.py:967:            sleeve_equity_map.get(sleeve_name, pd.DataFrame())
+./daily_quant_report.py:971:        returns_map[sleeve_name] = series.pct_change(fill_method=None).dropna()
+./daily_quant_report.py:977:    weights = pd.Series({k: sleeve_allocations.get(k, 0.0) for k in aligned.columns})
+./daily_quant_report.py:980:    if cash_weight > WEIGHT_TOLERANCE:
+./daily_quant_report.py:1045:                "cash",
+./daily_quant_report.py:1076:def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
+./daily_quant_report.py:1077:    """Remove SGOV 'cash_proxy_fund_entries' rows from trades."""
+./daily_quant_report.py:1085:                & (trades["reason_exit"] == "cash_proxy_fund_entries")
+./daily_quant_report.py:1094:def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
+./daily_quant_report.py:1096:    Check whether a sleeve produced valid results.
+./daily_quant_report.py:1115:def run_sleeve_1():
+./daily_quant_report.py:1122:def run_sleeve_trend():
+./daily_quant_report.py:1130:def run_sleeve_2():
+./daily_quant_report.py:1148:    Run Charlie Munger sleeve backtest and return details dict.
+./daily_quant_report.py:1151:    from sleeves.charlie_munger.backtest import run_backtest_with_details
+./daily_quant_report.py:1154:def run_sleeve_charlie_munger():
+./daily_quant_report.py:1160:# Sleeve output extraction (for dynamic allocation)
+./daily_quant_report.py:1162:def extract_sleeve_output(
+./daily_quant_report.py:1165:    sleeve_name: str,
+./daily_quant_report.py:1177:        return create_sleeve_output([], sleeve_name, 0.0, "No equity data")
+./daily_quant_report.py:1192:                    & (real_trades.get("reason_exit", "") == "cash_proxy_fund_entries")
+./daily_quant_report.py:1217:        # register as active positions for allocation purposes.
+./daily_quant_report.py:1260:        sleeve_return = (latest_equity / start_equity) - 1.0
+./daily_quant_report.py:1261:        strength = min(1.0, base_strength * max(0.5, min(1.5, 1.0 + sleeve_return)))
+./daily_quant_report.py:1269:    return create_sleeve_output(positions, sleeve_name, strength, notes)
+./daily_quant_report.py:1276:    sleeve_equity_map: dict[str, pd.DataFrame],
+./daily_quant_report.py:1277:    sleeve_allocations: dict[str, float],
+./daily_quant_report.py:1278:    cash_weight: float,
+./daily_quant_report.py:1282:    Compute TRUE portfolio equity from sleeve returns and allocations.
+./daily_quant_report.py:1284:        portfolio_return = sum(sleeve_alloc_i * sleeve_return_i) + cash_weight * 0
+./daily_quant_report.py:1288:    Do NOT sum sleeve equities - they are independent backtests on their own base.
+./daily_quant_report.py:1292:    for sleeve_name, alloc in sleeve_allocations.items():
+./daily_quant_report.py:1295:        equity_df = _safe_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
+./daily_quant_report.py:1305:        sleeve_cum_return = (last / start) - 1.0
+./daily_quant_report.py:1306:        sleeve_prev_return = (prev / start) - 1.0
+./daily_quant_report.py:1308:        portfolio_return += alloc * sleeve_cum_return
+./daily_quant_report.py:1309:        portfolio_prev_return += alloc * sleeve_prev_return
+./daily_quant_report.py:1326:    sleeve_equity_map: dict[str, pd.DataFrame],
+./daily_quant_report.py:1359:        sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:1360:        sleeve_allocations=alloc_result.sleeve_allocations,
+./daily_quant_report.py:1361:        cash_weight=alloc_result.cash_weight,
+./daily_quant_report.py:1374:    sleeve_equity_map: dict[str, pd.DataFrame],
+./daily_quant_report.py:1375:    sleeve_allocations: dict[str, float],
+./daily_quant_report.py:1378:    """Compute portfolio equity series from sleeve equity curves and allocations."""
+./daily_quant_report.py:1380:    for sleeve_name, alloc in sleeve_allocations.items():
+./daily_quant_report.py:1383:        equity_df = _safe_df(sleeve_equity_map.get(sleeve_name, pd.DataFrame()))
+./daily_quant_report.py:1394:            df[["date", "return"]].rename(columns={"return": f"{sleeve_name}_return"})
+./daily_quant_report.py:1410:    for sleeve_name, alloc in sleeve_allocations.items():
+./daily_quant_report.py:1411:        col = f"{sleeve_name}_return"
+./daily_quant_report.py:1421:    sleeve_equity_map: dict[str, pd.DataFrame],
+./daily_quant_report.py:1422:    sleeve_allocations: dict[str, float],
+./daily_quant_report.py:1426:        sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:1427:        sleeve_allocations=sleeve_allocations,
+./daily_quant_report.py:1476:    weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
+./daily_quant_report.py:1523:                "sleeve": row.get("sleeve_name", ""),
+./daily_quant_report.py:1535:def derive_actual_sleeve_allocations(
+./daily_quant_report.py:1538:    allocations = {name: 0.0 for name in alloc_result.sleeve_allocations.keys()}
+./daily_quant_report.py:1541:        return allocations
+./daily_quant_report.py:1543:    weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
+./daily_quant_report.py:1545:        sleeve_names = str(row.get("sleeve_name", "")).split(",")
+./daily_quant_report.py:1546:        sleeve_names = [name.strip() for name in sleeve_names if name.strip()]
+./daily_quant_report.py:1547:        if not sleeve_names:
+./daily_quant_report.py:1549:        share = float(row.get("target_weight", 0.0)) / len(sleeve_names)
+./daily_quant_report.py:1550:        for name in sleeve_names:
+./daily_quant_report.py:1551:            allocations[name] = allocations.get(name, 0.0) + share
+./daily_quant_report.py:1552:    return allocations
+./daily_quant_report.py:1569:    weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
+./daily_quant_report.py:1588:    if "sleeve" not in weights_df.columns and "sleeve_name" in weights_df.columns:
+./daily_quant_report.py:1589:        weights_df["sleeve"] = weights_df["sleeve_name"]
+./daily_quant_report.py:1593:        for sleeve_name, details in (("sleeve_2", s2_details), ("charlie_munger", cm_details or {})):
+./daily_quant_report.py:1609:                        "sleeve": sleeve_name,
+./daily_quant_report.py:1627:            cash_target_weight=float(alloc_result.cash_weight),
+./daily_quant_report.py:1628:            sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
+./daily_quant_report.py:1631:        signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
+./daily_quant_report.py:1754:        if ticker == CASH_TICKER:
+./daily_quant_report.py:1848:    allocations = {
+./daily_quant_report.py:1849:        "risk_on": 1.0 - alloc_result.cash_weight,
+./daily_quant_report.py:1850:        "cash": alloc_result.cash_weight,
+./daily_quant_report.py:1851:        "sleeves": alloc_result.sleeve_allocations,
+./daily_quant_report.py:1852:        "cash_reason": getattr(alloc_result, "cash_reason", None),
+./daily_quant_report.py:1893:        sleeve_equity_map={
+./daily_quant_report.py:1894:            "sleeve_trend": st_equity,
+./daily_quant_report.py:1895:            "sleeve_2": s2_equity,
+./daily_quant_report.py:1898:        sleeve_allocations=alloc_result.sleeve_allocations,
+./daily_quant_report.py:1904:        "allocations": allocations,
+./daily_quant_report.py:1918:        "charlie_munger_benchmark": {**((cm_details or {}).get("benchmark", {}) or {}), "sleeve_cumulative_return": ((cm_details or {}).get("sleeve_stats", {}) or {}).get("cumulative_return")},
+./daily_quant_report.py:1942:    - CASH row: allocated notional with 0 return
+./daily_quant_report.py:1943:    - TOTAL row: TRUE portfolio equity computed from weighted sleeve returns
+./daily_quant_report.py:1950:    # Build summary with dynamic allocation
+./daily_quant_report.py:1952:        trend_alloc = alloc_result.sleeve_allocations.get("sleeve_trend", 0.0)
+./daily_quant_report.py:1953:        val_alloc = alloc_result.sleeve_allocations.get("sleeve_2", 0.0)
+./daily_quant_report.py:1954:        cash_alloc = alloc_result.cash_weight
+./daily_quant_report.py:1955:        # Build sleeve equity map for portfolio computation
+./daily_quant_report.py:1956:        sleeve_equity_map = {
+./daily_quant_report.py:1957:            "sleeve_trend": st_equity,
+./daily_quant_report.py:1958:            "sleeve_2": s2_equity,
+./daily_quant_report.py:1963:            sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:1964:            sleeve_allocations=alloc_result.sleeve_allocations,
+./daily_quant_report.py:1965:            cash_weight=cash_alloc,
+./daily_quant_report.py:1968:        # Build sleeve rows - show ALLOCATED NOTIONAL only (attribution)
+./daily_quant_report.py:1969:        # Do NOT show sleeve backtest equity as it's not additive
+./daily_quant_report.py:1973:            # Compute sleeve-level return for display (attribution only)
+./daily_quant_report.py:1982:                    # Attribution: this sleeve's contribution to portfolio
+./daily_quant_report.py:2065:            sleeve2_label = (
+./daily_quant_report.py:2072:                    "Sleeve": sleeve2_label,
+./daily_quant_report.py:2079:        # CASH row
+./daily_quant_report.py:2080:        if cash_alloc > WEIGHT_TOLERANCE:
+./daily_quant_report.py:2081:            cash_notional = BASE_EQUITY * cash_alloc
+./daily_quant_report.py:2084:                    "Sleeve": f"CASH ({cash_alloc:.2%})",
+./daily_quant_report.py:2085:                    "Allocated": _fmt_money(cash_notional),
+./daily_quant_report.py:2086:                    "Equity": _fmt_money(cash_notional),  # Cash doesn't grow
+./daily_quant_report.py:2092:        # Computed from weighted sleeve returns, NOT by summing rows above
+./daily_quant_report.py:2104:        alloc_summary = allocation_summary_df(alloc_result)
+./daily_quant_report.py:2112:        # Legacy static allocation fallback
+./daily_quant_report.py:2114:        sleeve_equity_map = {
+./daily_quant_report.py:2115:            "sleeve_trend": st_equity,
+./daily_quant_report.py:2116:            "sleeve_2": s2_equity,
+./daily_quant_report.py:2119:        static_allocs = {"sleeve_trend": 0.60, "sleeve_2": 0.20, "charlie_munger": 0.20}
+./daily_quant_report.py:2120:        static_allocs, static_cash = enforce_charlie_bounds(static_allocs, 0.0, charlie_active=True)
+./daily_quant_report.py:2122:            sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:2123:            sleeve_allocations=static_allocs,
+./daily_quant_report.py:2124:            cash_weight=static_cash,
+./daily_quant_report.py:2129:                "Sleeve": f"Sleeve Trend — Momentum ({static_allocs.get('sleeve_trend', 0.0):.0%})",
+./daily_quant_report.py:2130:                "Allocated": _fmt_money(BASE_EQUITY * static_allocs.get("sleeve_trend", 0.0)),
+./daily_quant_report.py:2135:                "Sleeve": f"Sleeve 2 — Valuation ({static_allocs.get('sleeve_2', 0.0):.0%})",
+./daily_quant_report.py:2136:                "Allocated": _fmt_money(BASE_EQUITY * static_allocs.get("sleeve_2", 0.0)),
+./daily_quant_report.py:2147:        if static_cash > WEIGHT_TOLERANCE:
+./daily_quant_report.py:2150:                    "Sleeve": f"CASH ({static_cash:.0%})",
+./daily_quant_report.py:2151:                    "Allocated": _fmt_money(BASE_EQUITY * static_cash),
+./daily_quant_report.py:2152:                    "Equity": _fmt_money(BASE_EQUITY * static_cash),
+./daily_quant_report.py:2168:    for trades_df, sleeve_name in [(st_trades, "Trend"), (s2_trades, "Valuation")]:
+./daily_quant_report.py:2170:            filter_sleeve2_cash_proxy(_safe_df(trades_df))
+./daily_quant_report.py:2171:            if sleeve_name == "Valuation"
+./daily_quant_report.py:2179:                        "Sleeve": sleeve_name,
+./daily_quant_report.py:2262:                "sleeve": "Sleeve",
+./daily_quant_report.py:2311:        filter_sleeve2_cash_proxy(st_trades), "Recent Trades — Sleeve Trend", 15
+./daily_quant_report.py:2314:        filter_sleeve2_cash_proxy(s2_trades),
+./daily_quant_report.py:2378:          Automated daily report. Portfolio TOTAL computed from weighted sleeve returns
+./daily_quant_report.py:2420:    # ── Run sleeves ───────────────────────────────────────────────
+./daily_quant_report.py:2423:            "[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches."
+./daily_quant_report.py:2437:            _, _ = run_sleeve_1()
+./daily_quant_report.py:2442:            st_equity, st_trades, st_signals = run_sleeve_trend()
+./daily_quant_report.py:2451:            s2_details = run_sleeve_2()
+./daily_quant_report.py:2459:            cm_runner = globals().get("run_sleeve_charlie_munger")
+./daily_quant_report.py:2471:    # Validate each sleeve BEFORE allocation.  Invalid sleeves get
+./daily_quant_report.py:2472:    # their weight routed to CASH, never to another sleeve.
+./daily_quant_report.py:2473:    trend_valid, trend_reason = _sleeve_is_valid(st_equity)
+./daily_quant_report.py:2474:    s2_valid, s2_reason = _sleeve_is_valid(s2_equity)
+./daily_quant_report.py:2475:    cm_valid, cm_reason = _sleeve_is_valid(cm_equity)
+./daily_quant_report.py:2477:        logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
+./daily_quant_report.py:2479:        logger.warning("sleeve_2 inactive: %s -> routed to CASH", s2_reason)
+./daily_quant_report.py:2481:        logger.warning("charlie_munger inactive: %s -> routed to CASH", cm_reason)
+./daily_quant_report.py:2482:    # ── Extract sleeve outputs for dynamic allocation ─────────────
+./daily_quant_report.py:2483:    trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
+./daily_quant_report.py:2484:    val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
+./daily_quant_report.py:2485:    val_output = extract_sleeve_output(
+./daily_quant_report.py:2488:        "sleeve_2",
+./daily_quant_report.py:2492:    cm_output = extract_sleeve_output(
+./daily_quant_report.py:2500:    # ── Run dynamic allocation ────────────────────────────────────
+./daily_quant_report.py:2504:    alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
+./daily_quant_report.py:2505:    _old_allocs = dict(alloc_result.sleeve_allocations)
+./daily_quant_report.py:2506:    _new_allocs, _new_cash = enforce_charlie_bounds(
+./daily_quant_report.py:2507:        alloc_result.sleeve_allocations,
+./daily_quant_report.py:2508:        alloc_result.cash_weight,
+./daily_quant_report.py:2511:    _apply_enforced_allocations_to_result(
+./daily_quant_report.py:2513:        old_allocations=_old_allocs,
+./daily_quant_report.py:2514:        new_allocations=_new_allocs,
+./daily_quant_report.py:2515:        new_cash_weight=_new_cash,
+./daily_quant_report.py:2519:    # If a sleeve is invalid, force its allocation to 0 and route
+./daily_quant_report.py:2520:    # the freed weight to CASH (never to another sleeve).
+./daily_quant_report.py:2525:        and alloc_result.sleeve_allocations.get("sleeve_trend", 0.0) > WEIGHT_TOLERANCE
+./daily_quant_report.py:2527:        freed_weight += alloc_result.sleeve_allocations["sleeve_trend"]
+./daily_quant_report.py:2528:        alloc_result.sleeve_allocations["sleeve_trend"] = 0.0
+./daily_quant_report.py:2532:        and alloc_result.sleeve_allocations.get("sleeve_2", 0.0) > WEIGHT_TOLERANCE
+./daily_quant_report.py:2534:        freed_weight += alloc_result.sleeve_allocations["sleeve_2"]
+./daily_quant_report.py:2535:        alloc_result.sleeve_allocations["sleeve_2"] = 0.0
+./daily_quant_report.py:2539:        and alloc_result.sleeve_allocations.get("charlie_munger", 0.0) > WEIGHT_TOLERANCE
+./daily_quant_report.py:2541:        freed_weight += alloc_result.sleeve_allocations["charlie_munger"]
+./daily_quant_report.py:2542:        alloc_result.sleeve_allocations["charlie_munger"] = 0.0
+./daily_quant_report.py:2545:        _old_allocs = dict(alloc_result.sleeve_allocations)
+./daily_quant_report.py:2546:        _new_allocs, _new_cash = enforce_charlie_bounds(
+./daily_quant_report.py:2547:            alloc_result.sleeve_allocations,
+./daily_quant_report.py:2548:            alloc_result.cash_weight + freed_weight,
+./daily_quant_report.py:2551:        _apply_enforced_allocations_to_result(
+./daily_quant_report.py:2553:            old_allocations=_old_allocs,
+./daily_quant_report.py:2554:            new_allocations=_new_allocs,
+./daily_quant_report.py:2555:            new_cash_weight=_new_cash,
+./daily_quant_report.py:2558:            "[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH",
+./daily_quant_report.py:2561:    # ── Validate allocation ───────────────────────────────────────
+./daily_quant_report.py:2562:    errors = validate_allocation_result(alloc_result)
+./daily_quant_report.py:2565:    # ── Log allocation summary ────────────────────────────────────
+./daily_quant_report.py:2566:    logger.info("\n[ALLOCATION] Sleeve allocations:")
+./daily_quant_report.py:2567:    for sleeve, pct in alloc_result.sleeve_allocations.items():
+./daily_quant_report.py:2568:        logger.info("  %s: %.1f%%", sleeve, pct * 100)
+./daily_quant_report.py:2569:    logger.info("  CASH: %.1f%%", alloc_result.cash_weight * 100)
+./daily_quant_report.py:2572:    sleeve_equity_map = {
+./daily_quant_report.py:2573:        "sleeve_trend": st_equity,
+./daily_quant_report.py:2574:        "sleeve_2": s2_equity,
+./daily_quant_report.py:2578:        sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:2579:        sleeve_allocations=alloc_result.sleeve_allocations,
+./daily_quant_report.py:2580:        cash_weight=alloc_result.cash_weight,
+./daily_quant_report.py:2585:        sleeve_details=[s2_details, cm_details],
+./daily_quant_report.py:2592:            sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:2605:            sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:2615:        sleeve_equity_map=sleeve_equity_map,
+./daily_quant_report.py:2684:                "cash_target_weight": float(
+./daily_quant_report.py:2686:                        **alloc_result.sleeve_allocations,
+./daily_quant_report.py:2687:                        "CASH": alloc_result.cash_weight,
+./daily_quant_report.py:2688:                    }.get("CASH", 0.0)
+./daily_quant_report.py:2800:        write_position_outputs(rebuilt["positions"], rebuilt["cash"], asof_date)
+./daily_quant_report.py:2801:        holdings = rebuilt["positions"][["ticker", "shares", "avg_cost", "sleeve"]] if not rebuilt["positions"].empty else pd.DataFrame(columns=["ticker", "shares", "avg_cost", "sleeve"])
+./daily_quant_report.py:2802:        mtm, nav = mark_holdings(holdings, rebuilt["cash"], asof_date)
+./daily_quant_report.py:2825:            write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
+./Tests/test_allocation.py:5:Validates the allocation logic against the spec requirements:
+./Tests/test_allocation.py:6:1. Only trend active → trend allocation = 100%
+./Tests/test_allocation.py:8:3. No sleeves active → CASH = 100%
+./Tests/test_allocation.py:9:4. Portfolio weights (including CASH) sum to 1.00 daily
+./Tests/test_allocation.py:21:    create_sleeve_output,
+./Tests/test_allocation.py:22:    validate_allocation_result,
+./Tests/test_allocation.py:28:    """Test: Only trend active → trend allocation = 100%"""
+./Tests/test_allocation.py:29:    trend = create_sleeve_output(
+./Tests/test_allocation.py:34:        "sleeve_trend",
+./Tests/test_allocation.py:37:    val = create_sleeve_output([], "sleeve_2", strength=0.0)
+./Tests/test_allocation.py:42:    trend_alloc = result.sleeve_allocations.get("sleeve_trend", 0)
+./Tests/test_allocation.py:43:    val_alloc = result.sleeve_allocations.get("sleeve_2", 0)
+./Tests/test_allocation.py:51:    print("✓ PASS: Only trend active → 100% trend allocation")
+./Tests/test_allocation.py:56:    trend = create_sleeve_output(
+./Tests/test_allocation.py:57:        [{"ticker": "AAPL", "target_weight": 1.0}], "sleeve_trend", strength=1.0
+./Tests/test_allocation.py:59:    val = create_sleeve_output(
+./Tests/test_allocation.py:60:        [{"ticker": "IBM", "target_weight": 1.0}], "sleeve_2", strength=1.0
+./Tests/test_allocation.py:66:    trend_alloc = result.sleeve_allocations.get("sleeve_trend", 0)
+./Tests/test_allocation.py:67:    val_alloc = result.sleeve_allocations.get("sleeve_2", 0)
+./Tests/test_allocation.py:78:def test_no_sleeves_100_cash():
+./Tests/test_allocation.py:79:    """Test: No sleeves active → CASH = 100%"""
+./Tests/test_allocation.py:80:    trend = create_sleeve_output([], "sleeve_trend", strength=0.0)
+./Tests/test_allocation.py:81:    val = create_sleeve_output([], "sleeve_2", strength=0.0)
+./Tests/test_allocation.py:86:    cash_weight = result.cash_weight
+./Tests/test_allocation.py:89:        abs(cash_weight - 1.0) < WEIGHT_TOLERANCE
+./Tests/test_allocation.py:90:    ), f"CASH should be 100%, got {cash_weight:.1%}"
+./Tests/test_allocation.py:91:    print("✓ PASS: No sleeves active → 100% CASH")
+./Tests/test_allocation.py:95:    """Test: Portfolio weights (including CASH) sum to 1.00"""
+./Tests/test_allocation.py:113:        ([], [], 0.0, 0.0),  # All cash
+./Tests/test_allocation.py:119:        trend = create_sleeve_output(trend_pos, "sleeve_trend", strength=trend_str)
+./Tests/test_allocation.py:120:        val = create_sleeve_output(val_pos, "sleeve_2", strength=val_str)
+./Tests/test_allocation.py:132:    """Test: Position caps don't renormalize - excess goes to CASH"""
+./Tests/test_allocation.py:134:    trend = create_sleeve_output(
+./Tests/test_allocation.py:136:        "sleeve_trend",
+./Tests/test_allocation.py:139:    val = create_sleeve_output([], "sleeve_2", strength=0.0)
+./Tests/test_allocation.py:152:    # Remaining 90% should be CASH
+./Tests/test_allocation.py:153:    cash_weight = result.cash_weight
+./Tests/test_allocation.py:155:        abs(cash_weight - 0.90) < WEIGHT_TOLERANCE
+./Tests/test_allocation.py:156:    ), f"CASH should be 90%, got {cash_weight:.1%}"
+./Tests/test_allocation.py:163:    print("✓ PASS: Position cap excess goes to CASH (no renormalization)")
+./Tests/test_allocation.py:167:    """Test: validate_allocation_result catches errors"""
+./Tests/test_allocation.py:168:    trend = create_sleeve_output(
+./Tests/test_allocation.py:173:        "sleeve_trend",
+./Tests/test_allocation.py:176:    val = create_sleeve_output([], "sleeve_2", strength=0.0)
+./Tests/test_allocation.py:181:    errors = validate_allocation_result(result)
+./Tests/test_allocation.py:182:    assert len(errors) == 0, f"Valid allocation should have no errors, got: {errors}"
+./Tests/test_allocation.py:187:def test_strength_proportional_allocation():
+./Tests/test_allocation.py:188:    """Test: Different strengths produce proportional allocation"""
+./Tests/test_allocation.py:189:    trend = create_sleeve_output(
+./Tests/test_allocation.py:191:        "sleeve_trend",
+./Tests/test_allocation.py:194:    val = create_sleeve_output(
+./Tests/test_allocation.py:196:        "sleeve_2",
+./Tests/test_allocation.py:203:    trend_alloc = result.sleeve_allocations.get("sleeve_trend", 0)
+./Tests/test_allocation.py:204:    val_alloc = result.sleeve_allocations.get("sleeve_2", 0)
+./Tests/test_allocation.py:214:    print("✓ PASS: Strength-proportional allocation works correctly")
+./Tests/test_allocation.py:226:        test_no_sleeves_100_cash,
+./Tests/test_allocation.py:230:        test_strength_proportional_allocation,
+./Tests/test_alpha_attribution_reporting.py:42:        "allocations": {"cash": 0.2, "sleeves": {"sleeve_trend": 0.4, "sleeve_2": 0.3, "charlie_munger": 0.1}},
+./Tests/test_positions.py:11:    monkeypatch.setattr("paper.positions._resolve_starting_cash", lambda default_cash=100000.0: 1000.0)
+./Tests/test_positions.py:13:        {"trade_date": "2026-01-01", "timestamp_et": "1", "order_id": "1", "ticker": "AAPL", "side": "BUY", "quantity": 1.0, "fill_price": 100.0, "fees": 0.0, "sleeve": "s"},
+./Tests/test_positions.py:14:        {"trade_date": "2026-01-02", "timestamp_et": "2", "order_id": "2", "ticker": "AAPL", "side": "BUY", "quantity": 1.0, "fill_price": 200.0, "fees": 0.0, "sleeve": "s"},
+./Tests/test_positions.py:23:    monkeypatch.setattr("paper.positions._resolve_starting_cash", lambda default_cash=100000.0: 1000.0)
+./Tests/test_positions.py:25:        {"trade_date": "2026-01-01", "timestamp_et": "1", "order_id": "1", "ticker": "AAPL", "side": "BUY", "quantity": 2.0, "fill_price": 100.0, "fees": 0.0, "sleeve": "s"},
+./Tests/test_positions.py:26:        {"trade_date": "2026-01-02", "timestamp_et": "2", "order_id": "2", "ticker": "AAPL", "side": "SELL", "quantity": 1.0, "fill_price": 130.0, "fees": 0.0, "sleeve": "s"},
+./Tests/test_positions.py:34:    monkeypatch.setattr("paper.positions._resolve_starting_cash", lambda default_cash=100000.0: 1000.0)
+./Tests/test_positions.py:36:        {"trade_date": "2026-01-01", "timestamp_et": "1", "order_id": "1", "ticker": "AAPL", "side": "BUY", "quantity": 1.0, "fill_price": 100.0, "fees": 0.0, "sleeve": "s"},
+./Tests/test_positions.py:37:        {"trade_date": "2026-01-02", "timestamp_et": "2", "order_id": "2", "ticker": "AAPL", "side": "SELL", "quantity": 1.0, "fill_price": 100.0, "fees": 0.0, "sleeve": "s"},
+./Tests/test_pm_first_email_format.py:7:        "allocations": {
+./Tests/test_pm_first_email_format.py:8:            "cash": 0.30,
+./Tests/test_pm_first_email_format.py:9:            "sleeves": {
+./Tests/test_pm_first_email_format.py:10:                "sleeve_trend": 0.45,
+./Tests/test_pm_first_email_format.py:11:                "sleeve_2": 0.25,
+./Tests/test_ledger.py:18:        "timestamp_et": "2026-01-01T00:00:00-05:00", "run_id": "r1", "source": "SHADOW", "trade_date": "2026-01-01", "asof_date": "2025-12-31", "order_id": "o1", "ticker": "AAPL", "sleeve": "s", "side": "BUY", "quantity": 1.0, "fill_price": 100.0, "notional": 100.0, "fees": 0.0, "reason": "x", "signal_hash": "h", "status": "FILLED_ESTIMATE"
+./Tests/test_market_window_planning.py:68:        lambda path: (pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 10000.0, 10000.0, ""),
+./Tests/test_market_window_planning.py:73:        lambda *args, **kwargs: (pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}]), 0.0, "2026-02-10", "2026-02-09"),
+./Tests/test_market_window_planning.py:128:        lambda **kwargs: (pd.DataFrame([{"ticker": "AAPL", "sleeve": "core", "shares": 10.0}]), 9000.0),
+./Tests/test_market_window_planning.py:133:        lambda holdings, prices: pd.DataFrame([{"ticker": "AAPL", "sleeve": "core", "shares": 10.0, "price": 100.0, "market_value": 1000.0}]),
+./Tests/test_market_window_planning.py:138:        lambda **kwargs: {"status": "PASS", "cash_delta": 0.0, "equity_delta": 0.0, "equity_tolerance": 1.0, "position_deltas": []},
+./Tests/test_market_window_planning.py:224:    holdings = pd.DataFrame([{"ticker": "AAPL", "sleeve": "core", "shares": 10.0}])
+./Tests/test_market_window_planning.py:225:    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 0.55, "sleeve": "core"}])
+./Tests/test_market_window_planning.py:240:        starting_cash=0.0,
+./Tests/test_market_window_planning.py:241:        target_cash_weight=0.0,
+./Tests/test_market_window_planning.py:252:    holdings = pd.DataFrame([{"ticker": "AAPL", "sleeve": "core", "shares": 0.2}])
+./Tests/test_market_window_planning.py:253:    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 0.11, "sleeve": "core"}])
+./Tests/test_market_window_planning.py:268:        starting_cash=1000.0,
+./Tests/test_market_window_planning.py:269:        target_cash_weight=0.0,
+./Tests/test_market_window_planning.py:277:    holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+./Tests/test_market_window_planning.py:278:    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}])
+./Tests/test_market_window_planning.py:293:        starting_cash=99.0,
+./Tests/test_market_window_planning.py:294:        target_cash_weight=0.0,
+./Tests/test_market_window_planning.py:302:    holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+./Tests/test_market_window_planning.py:303:    targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}])
+./Tests/test_market_window_planning.py:326:        starting_cash=99.0,
+./Tests/test_market_window_planning.py:327:        target_cash_weight=0.0,
+./Tests/test_market_window_planning.py:335:        starting_cash=99.0,
+./Tests/test_market_window_planning.py:336:        target_cash_weight=0.0,
+./Tests/test_market_window_planning.py:428:        lambda path: (pd.DataFrame(columns=["ticker", "sleeve", "shares"]), 10000.0, 10000.0, ""),
+./Tests/test_market_window_planning.py:434:            pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}]),
+./Tests/test_stability_regressions.py:14:    monkeypatch.setattr(dqr, "run_sleeve_1", lambda: (pd.DataFrame(), pd.DataFrame()))
+./Tests/test_stability_regressions.py:15:    monkeypatch.setattr(dqr, "run_sleeve_trend", lambda: (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
+./Tests/test_stability_regressions.py:18:        "run_sleeve_2",
+./Tests/test_stability_regressions.py:28:        "run_sleeve_charlie_munger",
+./Tests/test_stability_regressions.py:36:            "sleeve_stats": {"cumulative_return": 0.2},
+./Tests/test_stability_regressions.py:76:            "cash": 10000.0,
+./Tests/test_stability_regressions.py:87:    sleeves = {row.get("sleeve") for row in payload.get("signals", [])}
+./Tests/test_stability_regressions.py:88:    assert "charlie_munger" in sleeves
+./Tests/test_charlie_munger.py:12:    monkeypatch.setattr(dqr, "run_sleeve_1", lambda: (pd.DataFrame(), pd.DataFrame()))
+./Tests/test_charlie_munger.py:13:    monkeypatch.setattr(dqr, "run_sleeve_trend", lambda: (pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
+./Tests/test_charlie_munger.py:14:    monkeypatch.setattr(dqr, "run_sleeve_2", lambda: {"equity_df": pd.DataFrame(), "trades_df": pd.DataFrame(), "target_weights": pd.DataFrame()})
+./Tests/test_charlie_munger.py:21:        "run_sleeve_charlie_munger",
+./Tests/test_charlie_munger.py:33:    monkeypatch.setattr(dqr, "run_paper_day", lambda **kwargs: {"date": "2026-01-16", "trading_mode": "SHADOW", "shadow_orders": [], "run_id": "r1", "blocked_reasons": ["market_guard_closed"], "market_status": "CLOSED", "total_equity": 10000.0, "cash": 10000.0, "num_trades": 0, "turnover_notional": 0.0})
+./Tests/test_charlie_munger.py:40:    sleeves = {row.get("sleeve") for row in payload.get("signals", [])}
+./Tests/test_charlie_munger.py:41:    assert "charlie_munger" in sleeves
+./Tests/test_charlie_munger.py:45:    import sleeves.sleeve_charlie_munger as cm
+./Tests/test_nav_series.py:9:    nav = {"equity": 1000.0, "cash": 100.0, "gross_exposure": 0.9, "net_exposure": 0.9}
+./Tests/test_nav_series.py:11:    nav2 = {"equity": 1100.0, "cash": 100.0, "gross_exposure": 0.9, "net_exposure": 0.9}
+./Tests/test_nav_series.py:21:    update_nav_timeseries("2026-01-02", {"equity": 100.0, "cash": 10.0, "gross_exposure": 0.9, "net_exposure": 0.9}, ledger)
+./Tests/test_nav_series.py:22:    update_nav_timeseries("2026-01-03", {"equity": 110.0, "cash": 10.0, "gross_exposure": 0.9, "net_exposure": 0.9}, ledger)
+./Tests/test_attribution.py:12:        {"ticker": "AAA", "market_value": 50.0, "sleeve": "s1"},
+./Tests/test_attribution.py:13:        {"ticker": "BBB", "market_value": 50.0, "sleeve": "s2"},
+./Tests/test_growth_engine_v4.py:46:            {"ticker": "SPXL", "sleeve": "core", "target_weight": 0.5},
+./Tests/test_growth_engine_v4.py:47:            {"ticker": "AAPL", "sleeve": "core", "target_weight": 0.5},
+
+==================================================
+RISK SEARCH
+==================================================
+./engine/backtest_engine.py:131:        # else: leave weights as-is (extreme case guard)
+./engine/backtest_engine.py:216:            "max_drawdown": 0.0,
+./engine/backtest_engine.py:291:            "max_drawdown": 0.0,
+./engine/backtest_engine.py:310:    # max drawdown
+./engine/backtest_engine.py:322:        "max_drawdown": round(max_dd, 6),
+./README.md:13:- **Benchmark:** SPY sleeve-relative tracking (cumulative return and max drawdown).
+./core/quant_report.py:30:)  # 1% equity risk per trade
+./core/quant_report.py:273:      allocations, proposed_trades, risk_levels, watchlist, reconciliation, alpha_attribution
+./core/quant_report.py:395:    risk_on_pct = allocations.get("risk_on", 1.0 - cash_pct)
+./core/quant_report.py:397:    lines.append(f"   - Risk-on: {_fmt_pct(risk_on_pct)}")
+./core/quant_report.py:424:    risk_levels = snapshot.get("risk_levels", []) or []
+./core/quant_report.py:425:    if not risk_levels:
+./core/quant_report.py:428:        for level in risk_levels:
+./daily_quant_report.py:319:    risk_map = {r.get("ticker"): r for r in (daily_snapshot.get("risk_levels", []) or []) if r.get("ticker")}
+./daily_quant_report.py:330:    risk_meta = (paper_summary or {}).get("risk_meta", {}) or {}
+./daily_quant_report.py:331:    turnover_scaled = bool(risk_meta.get("turnover_scaled", False))
+./daily_quant_report.py:332:    turnover_scale = float(risk_meta.get("turnover_scale", 1.0))
+./daily_quant_report.py:333:    turnover_requested = float(risk_meta.get("turnover_requested", 0.0))
+./daily_quant_report.py:334:    turnover_cap = float(risk_meta.get("turnover_cap", 0.0))
+./daily_quant_report.py:386:        risk = risk_map.get(ticker, {})
+./daily_quant_report.py:397:        entry_price = risk.get("entry_price")
+./daily_quant_report.py:417:                "stop_loss": risk.get("stop_loss"),
+./daily_quant_report.py:418:                "take_profit": risk.get("take_profit"),
+./daily_quant_report.py:485:    risk_summary = {
+./daily_quant_report.py:519:        "risk_meta": {
+./daily_quant_report.py:525:        "risk_summary": risk_summary,
+./daily_quant_report.py:1653:    risk_levels = []
+./daily_quant_report.py:1729:        risk_levels.append(
+./daily_quant_report.py:1849:        "risk_on": 1.0 - alloc_result.cash_weight,
+./daily_quant_report.py:1907:        "risk_levels": risk_levels,
+./daily_quant_report.py:2346:        {"Metric": "SPY max drawdown", "Value": _fmt_pct(((cm_details or {}).get("benchmark", {}) or {}).get("max_drawdown"))},
+./daily_quant_report.py:2501:    risk_off = os.getenv("RISK_OFF", "").lower() in ("1", "true", "yes", "y")
+./daily_quant_report.py:2502:    allocator = PortfolioAllocator(risk_off=risk_off)
+./sleeves/sleeve_charlie_munger.py:246:        return {"cumulative_return": None, "max_drawdown": None}
+./sleeves/sleeve_charlie_munger.py:252:        "max_drawdown": float(dd.min()),
+./sleeves/sleeve_charlie_munger.py:355:        sleeve_stats = {"cumulative_return": None, "max_drawdown": None}
+./core/portfolio_alloc.py:37:DEFAULT_CASH_LAST_RESORT = os.getenv("CASH_LAST_RESORT", "true").lower() in (
+./core/portfolio_alloc.py:52:CASH_LAST_RESORT_REASON = "Unallocated capital"
+./core/portfolio_alloc.py:165:        cash_last_resort: bool = DEFAULT_CASH_LAST_RESORT,
+./core/portfolio_alloc.py:166:        risk_off: bool = False,
+./core/portfolio_alloc.py:176:        self.risk_off = bool(risk_off)
+./core/portfolio_alloc.py:393:             we do NOT renormalize and break risk limits — residual stays as CASH.
+./core/portfolio_alloc.py:410:                        "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:428:                            "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:448:                        "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:489:                            "reason": CASH_LAST_RESORT_REASON,
+./core/portfolio_alloc.py:496:            # If weights were >1 (shouldn't happen, but guard)
+./core/portfolio_alloc.py:516:        if combined.empty or not self.cash_last_resort or self.risk_off:
+./Tests/test_market_window_planning.py:15:        daily_snapshot={"risk_levels": [], "holdings": []},
+./Tests/test_market_window_planning.py:39:        daily_snapshot={"risk_levels": [], "holdings": []},
+./Tests/test_market_window_planning.py:123:    monkeypatch.setattr(broker, "apply_risk_guards", lambda trades, equity_prev, cfg: (trades, [], False))
+./Tests/test_market_window_planning.py:182:        daily_snapshot={"risk_levels": [], "holdings": []},
+./Tests/test_market_window_planning.py:212:        daily_snapshot={"risk_levels": [], "holdings": []},
+./Tests/test_market_window_planning.py:373:def test_apply_risk_guards_turnover_cap_scales_without_hard_stop_and_drops_dust():
+./Tests/test_market_window_planning.py:382:        risk_action="hard_stop",
+./Tests/test_market_window_planning.py:392:    guarded, blocked, hard_stop = broker.apply_risk_guards(trades=trades, equity=10000.0, cfg=cfg)
+./Tests/test_market_window_planning.py:398:    assert guarded.attrs["risk_meta"]["turnover_scaled"] is True
+./Tests/test_market_window_planning.py:399:    assert guarded.attrs["risk_meta"]["turnover_scale"] == pytest.approx(expected_scale, rel=1e-6)
+./Tests/test_market_window_planning.py:402:    assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == pytest.approx(10.0 * expected_scale, abs=1.0)
+./Tests/test_market_window_planning.py:403:    assert float(guarded.loc[guarded["ticker"] == "MSFT", "shares"].iloc[0]) == pytest.approx(5.0 * expected_scale, abs=1.0)
+./Tests/test_market_window_planning.py:406:    assert set(guarded["ticker"].tolist()) == {"AAPL", "MSFT"}
+./Tests/test_market_window_planning.py:407:    assert "TSLA" not in guarded["ticker"].tolist()
+./Tests/test_market_window_planning.py:409:    normalized, stats = broker._normalize_and_filter_executable_trades(guarded, cfg)
+./Tests/test_charlie_munger.py:33:    monkeypatch.setattr(dqr, "run_paper_day", lambda **kwargs: {"date": "2026-01-16", "trading_mode": "SHADOW", "shadow_orders": [], "run_id": "r1", "blocked_reasons": ["market_guard_closed"], "market_status": "CLOSED", "total_equity": 10000.0, "cash": 10000.0, "num_trades": 0, "turnover_notional": 0.0})
+./core/alpha_attribution.py:21:def max_drawdown(equity: pd.Series) -> float:
+./core/alpha_attribution.py:27:    drawdown = (series / peak) - 1.0
+./core/alpha_attribution.py:28:    return float(drawdown.min())
+./core/alpha_attribution.py:123:    out["mdd_port"] = max_drawdown(port_series)
+./core/alpha_attribution.py:124:    out["mdd_bench"] = max_drawdown(bench_series)
+./sleeves/sleeve_trend/backtest.py:8:# 3. Added drawdown circuit breaker
+./sleeves/sleeve_trend/backtest.py:98:    Manages sleeve-level risk including:
+./sleeves/sleeve_trend/backtest.py:107:        self.in_drawdown_mode = False
+./sleeves/sleeve_trend/backtest.py:111:        """Update risk state after each day."""
+./sleeves/sleeve_trend/backtest.py:112:        # Track peak for drawdown
+./sleeves/sleeve_trend/backtest.py:121:    def current_drawdown(self) -> float:
+./sleeves/sleeve_trend/backtest.py:122:        """Current drawdown from peak (as positive number)."""
+./sleeves/sleeve_trend/backtest.py:125:        return 0.0  # Deprecated; use get_drawdown(current_equity)
+./sleeves/sleeve_trend/backtest.py:127:    def get_drawdown(self, current_equity: float) -> float:
+./sleeves/sleeve_trend/backtest.py:128:        """Calculate drawdown from peak."""
+./sleeves/sleeve_trend/backtest.py:152:    def check_drawdown_circuit_breaker(
+./sleeves/sleeve_trend/backtest.py:156:        Check if drawdown circuit breaker is triggered.
+./sleeves/sleeve_trend/backtest.py:161:        dd = self.get_drawdown(current_equity)
+./sleeves/sleeve_trend/backtest.py:165:            self.in_drawdown_mode = True
+./sleeves/sleeve_trend/backtest.py:170:            self.in_drawdown_mode = True
+./sleeves/sleeve_trend/backtest.py:174:        if self.in_drawdown_mode and dd <= cfg.DRAWDOWN_RECOVERY_PCT:
+./sleeves/sleeve_trend/backtest.py:175:            self.in_drawdown_mode = False
+./sleeves/sleeve_trend/backtest.py:297:    ATR-based position sizing with volatility and drawdown scaling.
+./sleeves/sleeve_trend/backtest.py:312:    # Base risk sizing: risk RISK_PER_TRADE of equity
+./sleeves/sleeve_trend/backtest.py:313:    risk_amount = equity * cfg.RISK_PER_TRADE
+./sleeves/sleeve_trend/backtest.py:319:    shares_by_risk = risk_amount / stop_distance
+./sleeves/sleeve_trend/backtest.py:321:    # Apply vol and drawdown scaling
+./sleeves/sleeve_trend/backtest.py:322:    shares_scaled = shares_by_risk * vol_scale * dd_scale
+./sleeves/sleeve_trend/backtest.py:448:    risk_mgr = RiskManager(cfg.INITIAL_EQUITY)
+./sleeves/sleeve_trend/backtest.py:521:        # Check risk limits
+./sleeves/sleeve_trend/backtest.py:522:        allow_entries, dd_scale = risk_mgr.check_drawdown_circuit_breaker(equity)
+./sleeves/sleeve_trend/backtest.py:523:        vol_scale = risk_mgr.get_vol_scale_factor()
+./sleeves/sleeve_trend/backtest.py:524:        gross_exp, net_exp = risk_mgr.check_exposure_limits(positions, equity)
+./sleeves/sleeve_trend/backtest.py:536:            # Check if entries allowed (drawdown circuit breaker)
+./sleeves/sleeve_trend/backtest.py:609:            gross_exp, net_exp = risk_mgr.check_exposure_limits(positions, equity)
+./sleeves/sleeve_trend/backtest.py:646:        # Update risk manager
+./sleeves/sleeve_trend/backtest.py:648:        risk_mgr.update(mtm_equity, daily_return)
+./sleeves/sleeve_trend/backtest.py:660:                "drawdown": risk_mgr.get_drawdown(mtm_equity),
+./sleeves/sleeve_trend/backtest.py:817:    # Sharpe Ratio (assuming 5% risk-free rate)
+./sleeves/sleeve_trend/backtest.py:836:    drawdowns = (cumulative - rolling_max) / rolling_max
+./sleeves/sleeve_trend/backtest.py:837:    max_dd = drawdowns.min()
+./sleeves/sleeve_trend/backtest.py:927:        "max_drawdown": max_dd,
+./Tests/test_stability_regressions.py:35:            "benchmark": {"ticker": "SPY", "cumulative_return": 0.1, "max_drawdown": -0.2},
+./Tests/test_stability_regressions.py:73:            "blocked_reasons": ["market_guard_closed"],
+./Tests/test_stability_regressions.py:94:        daily_snapshot={"risk_levels": [], "holdings": []},
+./sleeves/sleeve_2/backtest.py:7:(date × ticker) across a rolling lookback window and delegates all
+./sleeves/sleeve_2/backtest.py:20:    this is the forward-only guard that respects the snapshot nature
+./Tests/test_execution_email.py:37:def test_execution_email_includes_turnover_scaling_risk_note():
+./Tests/test_execution_email.py:89:def test_execution_email_includes_portfolio_risk_summary_values():
+./Tests/test_execution_email.py:95:        "risk_summary": {
+./core/benchmark_v4.py:13:def _max_drawdown(nav: pd.Series) -> float:
+./core/benchmark_v4.py:59:    ts["model_mdd_since_inception"] = _max_drawdown(ts["model_nav"])
+./core/benchmark_v4.py:60:    ts["spy_mdd_since_inception"] = _max_drawdown(ts["spy_nav"])
+./sleeves/sleeve_trend/__init__.py:17:- Sizing: 1% risk per trade, ATR-based, with vol targeting adjustment
+./sleeves/sleeve_trend/config.py:7:# - Added drawdown circuit breaker
+./sleeves/sleeve_trend/config.py:9:# - Clarified all risk parameters
+./sleeves/sleeve_trend/config.py:60:# Per-trade risk (ATR-based sizing)
+./sleeves/sleeve_trend/config.py:63:)  # 1% risk per trade
+./sleeves/sleeve_trend/config.py:88:# Max drawdown before reducing exposure
+./paper/config_paper.json:26:  "risk": {
+./paper/paper_broker.py:44:    risk_action: str = "hard_stop"
+./paper/paper_broker.py:59:    risk_cfg = cfg.get("risk", {})
+./paper/paper_broker.py:76:        max_turnover_pct=float(risk_cfg.get("max_turnover_pct", 0.30)),
+./paper/paper_broker.py:77:        max_trades_per_day=int(risk_cfg.get("max_trades_per_day", 10)),
+./paper/paper_broker.py:78:        max_position_change_pct=float(risk_cfg.get("max_position_change_pct", 0.15)),
+./paper/paper_broker.py:79:        risk_action=str(risk_cfg.get("action", "hard_stop")).strip().lower(),
+./paper/paper_broker.py:566:def apply_risk_guards(
+./paper/paper_broker.py:580:    risk_meta = {
+./paper/paper_broker.py:627:        risk_meta["turnover_scaled"] = True
+./paper/paper_broker.py:628:        risk_meta["turnover_scale"] = float(scale)
+./paper/paper_broker.py:632:        if cfg.risk_action == "hard_stop":
+./paper/paper_broker.py:651:            if cfg.risk_action == "hard_stop":
+./paper/paper_broker.py:657:            r["reason"] = f"{r['reason']}_risk_clipped"
+./paper/paper_broker.py:664:    out.attrs["risk_meta"] = risk_meta
+./paper/paper_broker.py:1084:        blocked_reasons.append(f"market_guard:{mkt.reason}")
+./paper/paper_broker.py:1123:    risk_meta = {
+./paper/paper_broker.py:1130:        trades, risk_blocked, hard_stop = apply_risk_guards(trades, equity_prev, cfg)
+./paper/paper_broker.py:1131:        risk_meta.update((trades.attrs or {}).get("risk_meta", {}))
+./paper/paper_broker.py:1132:        blocked_reasons.extend(risk_blocked)
+./paper/paper_broker.py:1134:            logger.error("[HALT] risk guard hard stop: %s", "; ".join(risk_blocked))
+./paper/paper_broker.py:1138:                "risk_guard_hard_stop",
+./paper/paper_broker.py:1306:        "risk_meta": risk_meta,
+./paper/build_execution_email.py:101:    risk_summary = payload.get("risk_summary", {}) or {}
+./paper/build_execution_email.py:102:    if risk_summary:
+./paper/build_execution_email.py:104:        for metric, value in risk_summary.items():
+./paper/build_execution_email.py:405:    risk_summary = payload.get("risk_summary", {}) or {}
+./paper/build_execution_email.py:406:    if risk_summary:
+./paper/build_execution_email.py:407:        risk_rows = [[k, v] for k, v in risk_summary.items()]
+./paper/build_execution_email.py:411:                render_html_table(["Metric", "Value"], risk_rows, numeric_cols=set()),
+./research/weight_sweep.py:27:        drawdown = eq / eq.cummax() - 1.0
+./research/weight_sweep.py:35:            "max_drawdown": float(drawdown.min()) if not drawdown.empty else 0.0,
+./paper/run_paper.py:28:        help="DEV ONLY: allow re-running the same trade date (bypasses ledger date guard).",
+./sleeves/sleeve_2/config.py:30:# Long entry valuation gate
+./sleeves/sleeve_2/config.py:33:# Avoid runaway P/E expansion on long entries (v1 guard)
+./sleeves/sleeve_2/config.py:59:# ATR-based risk levels (preferred)
+
+==================================================
+==================================================
+MARKET CLOSED / CUTOFF SEARCH
+==================================================
+./daily_quant_report.py:308:                halted_reason = "MARKET CLOSED"
+./paper/paper_broker.py:980:    planning_mode = bool(plan_only or (not mkt.is_open_now))
+./paper/paper_broker.py:1080:    should_halt_market_closed = False
+./paper/paper_broker.py:1081:    if should_halt_market_closed:
+./paper/paper_broker.py:1082:        logger.info("HALT — MARKET CLOSED (%s)", mkt.reason)
+./paper/paper_broker.py:1088:            f"market_closed:{mkt.reason}",
+./paper/paper_broker.py:1221:    if mode == "shadow" and mkt.is_open_now and not plan_only:
+./paper/paper_broker.py:1265:        "OPEN" if mkt.is_open_now else "CLOSED",
+./paper/paper_broker.py:1274:        "market_status": "OPEN" if mkt.is_open_now else "CLOSED",
+./paper/paper_broker.py:1298:        "execution_status": "HALTED" if blocked else ("PLANNED" if (plan_only or not mkt.is_open_now) else "READY"),
+./paper/build_execution_email.py:85:            lines.append("Execution Status: PLANNED — MARKET CLOSED (NEXT OPEN)")
+./Tests/test_charlie_munger.py:33:    monkeypatch.setattr(dqr, "run_paper_day", lambda **kwargs: {"date": "2026-01-16", "trading_mode": "SHADOW", "shadow_orders": [], "run_id": "r1", "blocked_reasons": ["market_guard_closed"], "market_status": "CLOSED", "total_equity": 10000.0, "cash": 10000.0, "num_trades": 0, "turnover_notional": 0.0})
+./Tests/test_rerun_safety_ledger_nav.py:14:    halted = {"execution_status": "HALTED", "halt_reason": "MARKET CLOSED", "trades": []}
+./paper/trading_calendar.py:27:    is_open_now: bool
+./paper/trading_calendar.py:149:            "AFTER_MARKET_CUTOFF",
+./Tests/test_market_window_planning.py:12:def test_shadow_market_closed_generates_planning_email():
+./Tests/test_market_window_planning.py:18:            "market_status": "CLOSED",
+./Tests/test_market_window_planning.py:31:    assert "Execution Status: PLANNED — MARKET CLOSED (NEXT OPEN)" in body
+./Tests/test_market_window_planning.py:36:def test_live_market_closed_halts_and_generates_no_plan():
+./Tests/test_market_window_planning.py:42:            "market_status": "CLOSED",
+./Tests/test_market_window_planning.py:163:def test_shadow_market_closed_uses_prev_close_and_renders_trades(monkeypatch):
+./Tests/test_market_window_planning.py:220:    assert "MARKET CLOSED" not in body
+./Tests/test_stability_regressions.py:73:            "blocked_reasons": ["market_guard_closed"],
+./Tests/test_stability_regressions.py:74:            "market_status": "CLOSED",
+
+==================================================
+ROUNDING / MIN TRADE SEARCH
+==================================================
+./engine/backtest_engine.py:262:                "weight_from": round(old_w[t], 6),
+./engine/backtest_engine.py:263:                "weight_to": round(new_w[t], 6),
+./engine/backtest_engine.py:264:                "notional": round(abs(delta) * prev_equity, 2),
+./engine/backtest_engine.py:279:    return shares.fillna(0.0).round(2)
+./engine/backtest_engine.py:319:        "total_return": round(total_ret, 6),
+./engine/backtest_engine.py:320:        "cagr": round(cagr, 6),
+./engine/backtest_engine.py:321:        "sharpe": round(sharpe, 4),
+./engine/backtest_engine.py:322:        "max_drawdown": round(max_dd, 6),
+./engine/backtest_engine.py:323:        "avg_daily_turnover": round(avg_turnover, 6),
+./daily_quant_report.py:232:        incoming_num = _payload_num_trades(payload)
+./daily_quant_report.py:329:    min_trade_dollars = float((paper_summary or {}).get("min_trade_dollars", execution_filter.get("min_trade_dollars", 100.0)))
+./daily_quant_report.py:337:    dropped_min_notional = 0
+./daily_quant_report.py:407:        if notional is not None and abs(float(notional)) < float(min_trade_dollars):
+./daily_quant_report.py:408:            dropped_min_notional += 1
+./daily_quant_report.py:427:        "[EXECUTION_EMAIL] rounded_to_whole_shares dropped_zero_shares=%d dropped_min_notional=%d",
+./daily_quant_report.py:429:        dropped_min_notional,
+./daily_quant_report.py:518:        "min_trade_dollars": float(min_trade_dollars),
+./daily_quant_report.py:546:                "no_trades_reason": f"No executable trades after rounding and ${min_trade_dollars:.0f} minimum trade filter",
+./daily_quant_report.py:552:                f"scale={turnover_scale:.4f}); no trades remained after rounding/minimum filters"
+./daily_quant_report.py:1517:            shares = round(notional / exec_px, 2) if exec_px > 0 else None
+./daily_quant_report.py:1767:                shares = round(notional / exec_px, 2) if exec_px > 0 else None
+./research/weight_sweep.py:20:    for w_mom in np.round(np.arange(0.0, 1.0001, 0.05), 2):
+./research/weight_sweep.py:21:        w_val = round(1.0 - w_mom, 2)
+./paper/paper_broker.py:32:    allow_fractional: bool
+./paper/paper_broker.py:33:    min_trade_dollars: float
+./paper/paper_broker.py:67:        allow_fractional=bool(constraints.get("allow_fractional_shares", True)),
+./paper/paper_broker.py:68:        min_trade_dollars=float(constraints.get("min_trade_dollars", 100.0)),
+./paper/paper_broker.py:409:    def _round_toward_zero(shares: float) -> float:
+./paper/paper_broker.py:437:        if not cfg.allow_fractional:
+./paper/paper_broker.py:438:            target_shares = _round_toward_zero(float(target_shares))
+./paper/paper_broker.py:442:        delta = raw_delta if cfg.allow_fractional else _round_toward_zero(raw_delta)
+./paper/paper_broker.py:446:        if not cfg.allow_fractional and abs(delta) < 1.0:
+./paper/paper_broker.py:452:        if trade_notional < cfg.min_trade_dollars:
+./paper/paper_broker.py:520:        if cfg.allow_fractional:
+./paper/paper_broker.py:525:        if not cfg.allow_fractional:
+./paper/paper_broker.py:526:            exec_shares = _round_toward_zero(float(exec_shares))
+./paper/paper_broker.py:533:        if not cfg.allow_fractional and exec_shares < 1.0:
+./paper/paper_broker.py:539:        if exec_notional < cfg.min_trade_dollars:
+./paper/paper_broker.py:607:            rounded_shares = float(math.floor(abs(shares)))
+./paper/paper_broker.py:608:            if rounded_shares < 1.0:
+./paper/paper_broker.py:611:            notional = rounded_shares * abs(price)
+./paper/paper_broker.py:612:            if notional < float(cfg.min_trade_dollars):
+./paper/paper_broker.py:615:            r["shares"] = rounded_shares
+./paper/paper_broker.py:621:                    r["slippage_cost"] = float(prior_slippage * (rounded_shares / prior_shares))
+./paper/paper_broker.py:769:            "rounded": 0,
+./paper/paper_broker.py:771:            "dropped_min_notional": 0,
+./paper/paper_broker.py:776:    rounded_rows: List[Dict[str, object]] = []
+./paper/paper_broker.py:778:    dropped_min_notional = 0
+./paper/paper_broker.py:781:        rounded = row.to_dict()
+./paper/paper_broker.py:782:        shares = abs(float(rounded.get("shares", 0.0)))
+./paper/paper_broker.py:783:        price = float(rounded.get("price", 0.0))
+./paper/paper_broker.py:784:        rounded_shares = float(math.floor(shares))
+./paper/paper_broker.py:786:        if rounded_shares < 1.0:
+./paper/paper_broker.py:790:        notional = abs(rounded_shares * price)
+./paper/paper_broker.py:791:        if notional < float(cfg.min_trade_dollars):
+./paper/paper_broker.py:792:            dropped_min_notional += 1
+./paper/paper_broker.py:795:        rounded["shares"] = rounded_shares
+./paper/paper_broker.py:796:        rounded["notional"] = float(notional)
+./paper/paper_broker.py:797:        rounded_rows.append(rounded)
+./paper/paper_broker.py:799:    out = pd.DataFrame(rounded_rows)
+./paper/paper_broker.py:807:        "rounded": raw,
+./paper/paper_broker.py:809:        "dropped_min_notional": dropped_min_notional,
+./paper/paper_broker.py:813:        "[EXECUTION_FILTER] raw=%d rounded=%d dropped_zero=%d dropped_min_notional=%d kept=%d",
+./paper/paper_broker.py:815:        stats["rounded"],
+./paper/paper_broker.py:817:        stats["dropped_min_notional"],
+./paper/paper_broker.py:1286:        "min_trade_dollars": float(cfg.min_trade_dollars),
+./paper/config_paper.json:10:    "allow_fractional_shares": true,
+./paper/config_paper.json:11:    "min_trade_dollars": 100.0,
+./paper/positions.py:1:"""Rebuild positions and cash deterministically from the trade ledger."""
+./paper/build_execution_email.py:217:                f"- {payload.get('no_trades_reason') or 'No executable trades after rounding and minimum trade filter'}",
+./Tests/test_execution_email.py:19:def test_execution_email_no_trades_includes_min_trade_filter_reason_and_counts():
+./Tests/test_execution_email.py:25:        "no_trades_reason": "No executable trades after rounding and $100 minimum trade filter",
+./Tests/test_execution_email.py:32:    assert "No executable trades after rounding and $100 minimum trade filter" in body
+./paper/email_styles.py:9:        ".card { background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:12px 0; }"
+./paper/email_styles.py:14:        ".tbl th { text-align:left; border-bottom:1px solid #d1d5db; padding:6px; background:#f3f4f6; }"
+./Tests/test_market_window_planning.py:60:        allow_fractional=True,
+./Tests/test_market_window_planning.py:61:        min_trade_dollars=1.0,
+./Tests/test_market_window_planning.py:223:def test_build_rebalance_trades_non_fractional_sell_rounds_toward_zero():
+./Tests/test_market_window_planning.py:231:        allow_fractional=False,
+./Tests/test_market_window_planning.py:232:        min_trade_dollars=1.0,
+./Tests/test_market_window_planning.py:251:def test_build_rebalance_trades_non_fractional_drops_sub_share_delta_after_rounding():
+./Tests/test_market_window_planning.py:259:        allow_fractional=False,
+./Tests/test_market_window_planning.py:260:        min_trade_dollars=1.0,
+./Tests/test_market_window_planning.py:276:def test_build_rebalance_trades_drops_below_min_trade_dollars():
+./Tests/test_market_window_planning.py:284:        allow_fractional=False,
+./Tests/test_market_window_planning.py:285:        min_trade_dollars=100.0,
+./Tests/test_market_window_planning.py:301:def test_build_rebalance_trades_min_trade_dollars_is_configurable():
+./Tests/test_market_window_planning.py:310:        allow_fractional=False,
+./Tests/test_market_window_planning.py:311:        min_trade_dollars=100.0,
+./Tests/test_market_window_planning.py:317:        allow_fractional=False,
+./Tests/test_market_window_planning.py:318:        min_trade_dollars=90.0,
+./Tests/test_market_window_planning.py:346:def test_normalize_and_filter_executable_trades_applies_rounding_and_min_notional():
+./Tests/test_market_window_planning.py:350:            {"ticker": "MSFT", "side": "BUY", "shares": 1.2, "price": 90.0, "slippage_cost": 0.0, "notional": 108.0, "reason": "small_after_round"},
+./Tests/test_market_window_planning.py:358:        allow_fractional=False,
+./Tests/test_market_window_planning.py:359:        min_trade_dollars=100.0,
+./Tests/test_market_window_planning.py:369:    assert stats["dropped_min_notional"] == 1
+./Tests/test_market_window_planning.py:378:        allow_fractional=False,
+./Tests/test_market_window_planning.py:379:        min_trade_dollars=350.0,
+./Tests/test_market_window_planning.py:401:    # Shares should be reduced by turnover scale, then rounded for executable orders.
+./Tests/test_market_window_planning.py:405:    # Dust trade should be removed by min_trade_dollars after scaling + post-processing.
+./Tests/test_market_window_planning.py:412:    assert stats["dropped_min_notional"] == 0
+./Tests/test_market_window_planning.py:420:        allow_fractional=True,
+./Tests/test_market_window_planning.py:421:        min_trade_dollars=1.0,
+./sleeves/sleeve_trend/backtest.py:326:    min_notional = equity * cfg.MIN_POSITION_PCT
+./sleeves/sleeve_trend/backtest.py:329:    shares_by_min = min_notional / price
+./sleeves/sleeve_trend/backtest.py:486:            # Deduct round-trip transaction cost
+
+==================================================
+LEDGER / NAV SEARCH
+==================================================
+./daily_trade_execution_email.py:11:from paper.paper_broker import load_config, reset_orders_sent_ledger_for_date
+./daily_trade_execution_email.py:43:    parser.add_argument("--reset-ledger-date", default=None, help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution")
+./daily_trade_execution_email.py:59:    if args.reset_ledger_date:
+./daily_trade_execution_email.py:60:        reset_orders_sent_ledger_for_date("outputs/shadow_orders/orders_sent.csv", args.reset_ledger_date)
+./scripts/smoke_reporting.sh:7:test -f outputs/ledger/trades.csv
+./scripts/smoke_reporting.sh:8:test -f outputs/perf/nav_timeseries.csv
+./scripts/smoke_reporting.sh:10:test -f "outputs/ledger/positions_${latest_date}.csv" || true
+./scripts/smoke_reporting.sh:11:test -f "outputs/perf/holdings_mtm_${latest_date}.csv" || true
+./scripts/rebuild_portfolio_from_ledger.py:2:"""CLI to rebuild holdings/cash from ledger for a given asof date."""
+./scripts/rebuild_portfolio_from_ledger.py:7:from paper.ledger import load_ledger
+./scripts/rebuild_portfolio_from_ledger.py:8:from paper.positions import rebuild_positions_from_ledger, write_position_outputs
+./scripts/rebuild_portfolio_from_ledger.py:16:    ledger = load_ledger()
+./scripts/rebuild_portfolio_from_ledger.py:17:    rebuilt = rebuild_positions_from_ledger(ledger, args.asof)
+./README.md:8:- **Universe:** S&P 500 constituents (cached at `outputs/cache/charlie_munger/sp500_universe.csv`).
+./README.md:31:Paper broker runtime state (ledger/trades) is stored in `outputs/paper_state/` by default.
+./README.md:33:Legacy `paper/ledger.csv` and `paper/trades.csv` are treated only as one-time seed inputs when state files are first initialized.
+./docs/performance_reporting.md:3:## Ledger schema
+./docs/performance_reporting.md:4:Trades are recorded in `outputs/ledger/trades.csv` with append-only semantics and idempotency key `(trade_date, order_id, source)`.
+./docs/performance_reporting.md:10:`paper/positions.py` rebuilds portfolio state from ledger with average-cost accounting:
+./docs/performance_reporting.md:16:- `outputs/ledger/positions_{asof}.csv`
+./docs/performance_reporting.md:17:- `outputs/ledger/holdings_{asof}.csv`
+./docs/performance_reporting.md:18:- `outputs/ledger/cash_{asof}.json`
+./docs/performance_reporting.md:21:`paper/mark_to_market.py` marks holdings to as-of prices, writes daily NAV JSON, and updates `outputs/perf/nav_timeseries.csv` idempotently per date.
+./docs/performance_reporting.md:25:Turnover is defined as daily ledger notional divided by prior-day equity.
+./docs/performance_reporting.md:29:- `outputs/perf/contribution_tickers_{asof}.csv`
+./docs/performance_reporting.md:30:- `outputs/perf/contribution_sleeves_{asof}.csv`
+./docs/performance_reporting.md:33:- Rebuild from ledger: `python3 scripts/rebuild_portfolio_from_ledger.py --asof YYYY-MM-DD`
+./daily_quant_report.py:12:from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
+./daily_quant_report.py:19:from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, load_ledger, make_run_id
+./daily_quant_report.py:20:from paper.positions import rebuild_positions_from_ledger, write_position_outputs
+./daily_quant_report.py:21:from paper.mark_to_market import mark_holdings, update_nav_timeseries, write_perf_outputs
+./daily_quant_report.py:22:from paper.ledger2 import append_rows as append_ledger2_rows, payload_to_rows as ledger2_payload_to_rows
+./daily_quant_report.py:110:OUTPUT_DIR = "outputs/daily"
+./daily_quant_report.py:1343:    ledger_path, _ = ensure_paper_state_files()
+./daily_quant_report.py:1344:    if os.path.exists(ledger_path) and os.path.getsize(ledger_path) > 0:
+./daily_quant_report.py:1345:        ledger = pd.read_csv(ledger_path)
+./daily_quant_report.py:1347:            not ledger.empty
+./daily_quant_report.py:1348:            and "date" in ledger.columns
+./daily_quant_report.py:1349:            and "total_equity" in ledger.columns
+./daily_quant_report.py:1351:            ledger["date"] = pd.to_datetime(ledger["date"])
+./daily_quant_report.py:1352:            ledger = ledger.sort_values("date")
+./daily_quant_report.py:1353:            ledger_daily = ledger.groupby("date", as_index=True)["total_equity"].last()
+./daily_quant_report.py:1354:            ledger_series = ledger_daily.dropna().sort_index()
+./daily_quant_report.py:1355:            if not ledger_series.empty:
+./daily_quant_report.py:1356:                return ledger_series
+./daily_quant_report.py:2393:        "--reset-ledger-date",
+./daily_quant_report.py:2394:        dest="reset_ledger_date",
+./daily_quant_report.py:2396:        help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution",
+./daily_quant_report.py:2678:    sent_ledger_removed = 0
+./daily_quant_report.py:2679:    sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
+./daily_quant_report.py:2680:    paper_ledger_path, paper_trades_path = ensure_paper_state_files()
+./daily_quant_report.py:2693:                sent_ledger_removed += reset_orders_sent_ledger_for_date(
+./daily_quant_report.py:2694:                    sent_ledger_path,
+./daily_quant_report.py:2697:            if args.reset_ledger_date:
+./daily_quant_report.py:2698:                sent_ledger_removed += reset_orders_sent_ledger_for_date(
+./daily_quant_report.py:2699:                    sent_ledger_path,
+./daily_quant_report.py:2700:                    args.reset_ledger_date,
+./daily_quant_report.py:2705:                ledger_path=paper_ledger_path,
+./daily_quant_report.py:2719:            if "Ledger already contains run_date" in msg:
+./daily_quant_report.py:2721:                    "[PAPER] Already executed for %s; rendering report from ledger.",
+./daily_quant_report.py:2729:                ledger_path=paper_ledger_path,
+./daily_quant_report.py:2773:        "sent_ledger_path": sent_ledger_path,
+./daily_quant_report.py:2774:        "sent_ledger_reset_removed": int(sent_ledger_removed),
+./daily_quant_report.py:2776:        "ledger2_path": "outputs/ledger/trades.csv",
+./daily_quant_report.py:2777:        "ledger2_appended_rows": 0,
+./daily_quant_report.py:2778:        "ledger2_skipped_rows": 0,
+./daily_quant_report.py:2780:        "nav_timeseries_path": None,
+./daily_quant_report.py:2786:        ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
+./daily_quant_report.py:2787:        ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
+./daily_quant_report.py:2789:        rows = ledger_rows_from_execution_payload(
+./daily_quant_report.py:2793:            source=ledger_source,
+./daily_quant_report.py:2794:            run_id=ledger_run_id,
+./daily_quant_report.py:2797:        appended = append_ledger_rows(rows)
+./daily_quant_report.py:2798:        ledger_df = load_ledger()
+./daily_quant_report.py:2799:        rebuilt = rebuild_positions_from_ledger(ledger_df, asof_date)
+./daily_quant_report.py:2804:        nav_ts_path = update_nav_timeseries(asof_date, nav, ledger_df)
+./daily_quant_report.py:2827:        with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
+./daily_quant_report.py:2828:            json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
+./daily_quant_report.py:2831:        logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
+./daily_quant_report.py:2834:        Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
+./daily_quant_report.py:2835:        Path("outputs/perf").mkdir(parents=True, exist_ok=True)
+./daily_quant_report.py:2836:        Path("outputs/daily").mkdir(parents=True, exist_ok=True)
+./daily_quant_report.py:2839:        ledger_run_id = str(uuid.uuid4())
+./daily_quant_report.py:2840:        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
+./daily_quant_report.py:2843:        def _ledger_price_fn(ticker: str, req_asof_date: str):
+./daily_quant_report.py:2849:        rows2, missing_prices = ledger2_payload_to_rows(
+./daily_quant_report.py:2853:            source=ledger_source,
+./daily_quant_report.py:2854:            run_id=ledger_run_id,
+./daily_quant_report.py:2856:            get_price_fn=_ledger_price_fn,
+./daily_quant_report.py:2858:        appended2, skipped2 = append_ledger2_rows("outputs/ledger/trades.csv", rows2)
+./daily_quant_report.py:2862:            get_price_fn=_ledger_price_fn,
+./daily_quant_report.py:2863:            source=ledger_source,
+./daily_quant_report.py:2864:            run_id=ledger_run_id,
+./daily_quant_report.py:2881:                "ledger2_path": "outputs/ledger/trades.csv",
+./daily_quant_report.py:2882:                "ledger2_appended_rows": int(appended2),
+./daily_quant_report.py:2883:                "ledger2_skipped_rows": int(skipped2),
+./daily_quant_report.py:2885:                "nav_timeseries_path": nav_result.get("nav_timeseries_path"),
+./daily_quant_report.py:2890:        logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
+./Tests/test_ledger.py:3:from paper.ledger import append_ledger_rows, ensure_ledger_exists, ledger_rows_from_execution_payload, load_ledger
+./Tests/test_ledger.py:6:def test_create_ledger_headers(tmp_path):
+./Tests/test_ledger.py:7:    p = tmp_path / "trades.csv"
+./Tests/test_ledger.py:8:    ensure_ledger_exists(str(p))
+./Tests/test_ledger.py:9:    df = load_ledger(str(p))
+./Tests/test_ledger.py:15:    p = tmp_path / "trades.csv"
+./Tests/test_ledger.py:16:    ensure_ledger_exists(str(p))
+./Tests/test_ledger.py:20:    assert append_ledger_rows(rows, str(p)) == 1
+./Tests/test_ledger.py:21:    assert append_ledger_rows(rows, str(p)) == 0
+./Tests/test_ledger.py:22:    assert len(load_ledger(str(p))) == 1
+./Tests/test_ledger.py:29:    rows = ledger_rows_from_execution_payload(str(payload_path), "2026-01-02", "2026-01-01", "SHADOW", "run", "sig")
+./Tests/test_ledger.py:30:    p = tmp_path / "trades.csv"
+./Tests/test_ledger.py:31:    ensure_ledger_exists(str(p))
+./Tests/test_ledger.py:32:    append_ledger_rows(rows, str(p))
+./Tests/test_ledger.py:33:    append_ledger_rows(rows, str(p))
+./Tests/test_ledger.py:34:    assert len(load_ledger(str(p))) == 1
+./core/benchmark_v4.py:10:DEFAULT_PATH = "outputs/perf/inception_nav_2026-02-23.csv"
+./Tests/test_attribution.py:10:    (tmp_path / "outputs/perf").mkdir(parents=True, exist_ok=True)
+./Tests/test_attribution.py:15:    holdings.to_csv("outputs/perf/holdings_mtm_2026-01-01.csv", index=False)
+./Tests/test_attribution.py:16:    with open("outputs/perf/nav_2026-01-01.json", "w", encoding="utf-8") as f:
+./sleeves/sleeve_charlie_munger.py:18:_CACHE_ROOT = Path("outputs/cache/charlie_munger")
+./reporting/attribution.py:15:    prev_holdings_path = Path(f"outputs/perf/holdings_mtm_{prev_date}.csv")
+./reporting/attribution.py:16:    prev_nav_path = Path(f"outputs/perf/nav_{prev_date}.json")
+./reporting/attribution.py:61:    out = Path("outputs/perf")
+./Tests/test_nav_series.py:3:from paper.mark_to_market import update_nav_timeseries
+./Tests/test_nav_series.py:8:    ledger = pd.DataFrame([{"trade_date": "2026-01-02", "notional": 100.0}])
+./Tests/test_nav_series.py:10:    update_nav_timeseries("2026-01-02", nav, ledger)
+./Tests/test_nav_series.py:12:    update_nav_timeseries("2026-01-02", nav2, ledger)
+./Tests/test_nav_series.py:13:    ts = pd.read_csv("outputs/perf/nav_timeseries.csv")
+./Tests/test_nav_series.py:20:    ledger = pd.DataFrame([{"trade_date": "2026-01-02", "notional": 50.0}, {"trade_date": "2026-01-03", "notional": 50.0}])
+./Tests/test_nav_series.py:21:    update_nav_timeseries("2026-01-02", {"equity": 100.0, "cash": 10.0, "gross_exposure": 0.9, "net_exposure": 0.9}, ledger)
+./Tests/test_nav_series.py:22:    update_nav_timeseries("2026-01-03", {"equity": 110.0, "cash": 10.0, "gross_exposure": 0.9, "net_exposure": 0.9}, ledger)
+./Tests/test_nav_series.py:23:    ts = pd.read_csv("outputs/perf/nav_timeseries.csv")
+./Tests/test_ledger2_nav2_integrity.py:6:from paper.ledger2 import append_rows, ensure_dirs
+./Tests/test_ledger2_nav2_integrity.py:10:def test_ledger2_idempotent_append(tmp_path):
+./Tests/test_ledger2_nav2_integrity.py:11:    ledger_path = tmp_path / "outputs" / "ledger" / "trades.csv"
+./Tests/test_ledger2_nav2_integrity.py:12:    ensure_dirs(str(ledger_path))
+./Tests/test_ledger2_nav2_integrity.py:30:    appended_first, skipped_first = append_rows(str(ledger_path), [row])
+./Tests/test_ledger2_nav2_integrity.py:31:    appended_second, skipped_second = append_rows(str(ledger_path), [row])
+./Tests/test_ledger2_nav2_integrity.py:41:    ledger_path = tmp_path / "outputs" / "ledger" / "trades.csv"
+./Tests/test_ledger2_nav2_integrity.py:42:    ensure_dirs(str(ledger_path))
+./Tests/test_ledger2_nav2_integrity.py:44:        str(ledger_path),
+./Tests/test_ledger2_nav2_integrity.py:72:    update_nav("2026-01-02", "2026-01-02", get_price_fn, "SHADOW", "run-1", ledger_path=str(ledger_path))
+./Tests/test_ledger2_nav2_integrity.py:73:    update_nav("2026-01-02", "2026-01-02", get_price_fn, "SHADOW", "run-2", ledger_path=str(ledger_path))
+./Tests/test_ledger2_nav2_integrity.py:75:    ts = pd.read_csv("outputs/perf/nav_timeseries.csv")
+./Tests/test_positions.py:3:from paper.positions import rebuild_positions_from_ledger
+./Tests/test_positions.py:6:def _ledger(rows):
+./Tests/test_positions.py:12:    led = _ledger([
+./Tests/test_positions.py:16:    out = rebuild_positions_from_ledger(led, "2026-01-02")
+./Tests/test_positions.py:24:    led = _ledger([
+./Tests/test_positions.py:28:    out = rebuild_positions_from_ledger(led, "2026-01-02")
+./Tests/test_positions.py:35:    led = _ledger([
+./Tests/test_positions.py:39:    out = rebuild_positions_from_ledger(led, "2026-01-02")
+./Tests/test_rerun_safety_ledger_nav.py:6:from paper.ledger2 import append_ledger2_rows, ensure_ledger2_exists
+./Tests/test_rerun_safety_ledger_nav.py:7:from paper.paper_broker import reset_orders_sent_ledger_for_date
+./Tests/test_rerun_safety_ledger_nav.py:38:    removed = reset_orders_sent_ledger_for_date(str(sent_path), "2026-02-02")
+./Tests/test_rerun_safety_ledger_nav.py:45:def test_ledger2_idempotent_append(tmp_path):
+./Tests/test_rerun_safety_ledger_nav.py:46:    ledger_path = tmp_path / "trades.csv"
+./Tests/test_rerun_safety_ledger_nav.py:47:    ensure_ledger2_exists(str(ledger_path))
+./Tests/test_rerun_safety_ledger_nav.py:67:    assert append_ledger2_rows(rows, str(ledger_path)) == 1
+./Tests/test_rerun_safety_ledger_nav.py:68:    assert append_ledger2_rows(rows, str(ledger_path)) == 0
+./Tests/test_rerun_safety_ledger_nav.py:69:    assert len(pd.read_csv(ledger_path)) == 1
+./paper/ledger2.py:14:LEDGER2_PATH = "outputs/ledger/trades.csv"
+./paper/ledger2.py:15:LEDGER2_COLUMNS = [
+./paper/ledger2.py:35:def ensure_dirs(path: str = LEDGER2_PATH) -> None:
+./paper/ledger2.py:39:def load_ledger(path: str = LEDGER2_PATH) -> pd.DataFrame:
+./paper/ledger2.py:41:    ledger_path = Path(path)
+./paper/ledger2.py:42:    if not ledger_path.exists() or ledger_path.stat().st_size == 0:
+./paper/ledger2.py:43:        return pd.DataFrame(columns=LEDGER2_COLUMNS)
+./paper/ledger2.py:44:    df = pd.read_csv(ledger_path)
+./paper/ledger2.py:45:    return df.reindex(columns=LEDGER2_COLUMNS)
+./paper/ledger2.py:49:    ledger_df = load_ledger(path)
+./paper/ledger2.py:50:    incoming = pd.DataFrame(rows or []).reindex(columns=LEDGER2_COLUMNS)
+./paper/ledger2.py:52:        if ledger_df.empty and not Path(path).exists():
+./paper/ledger2.py:54:        elif ledger_df.empty and Path(path).exists() and Path(path).stat().st_size == 0:
+./paper/ledger2.py:55:            pd.DataFrame(columns=LEDGER2_COLUMNS).to_csv(path, index=False)
+./paper/ledger2.py:59:    if not ledger_df.empty:
+./paper/ledger2.py:60:        existing_keys = set(ledger_df[UNIQUE_KEY_COLS].astype(str).apply(tuple, axis=1).tolist())
+./paper/ledger2.py:68:    ledger_path = Path(path)
+./paper/ledger2.py:69:    if not ledger_path.exists() or ledger_path.stat().st_size == 0:
+./paper/ledger2.py:70:        pd.DataFrame(columns=LEDGER2_COLUMNS).to_csv(ledger_path, index=False)
+./paper/ledger2.py:75:    to_append.to_csv(ledger_path, mode="a", header=False, index=False)
+./paper/ledger2.py:146:            logger.warning("[LEDGER2] missing price for ticker=%s asof=%s", ticker, asof_date)
+./paper/ledger2.py:177:ensure_ledger2_exists = ensure_dirs
+./paper/ledger2.py:180:def append_ledger2_rows(rows: list[dict[str, Any]], path: str = LEDGER2_PATH) -> int:
+./paper/ledger2.py:185:def ledger2_rows_from_execution_payload(
+./Tests/test_market_window_planning.py:67:        "read_latest_holdings_from_ledger",
+./Tests/test_market_window_planning.py:142:    monkeypatch.setattr(broker, "_write_shadow_orders", lambda run_date, orders: f"outputs/shadow_orders/{run_date}.json")
+./Tests/test_market_window_planning.py:152:        ledger_path="paper/ledger.csv",
+./Tests/test_market_window_planning.py:153:        trades_path="paper/trades.csv",
+./Tests/test_market_window_planning.py:170:        ledger_path="paper/ledger.csv",
+./Tests/test_market_window_planning.py:171:        trades_path="paper/trades.csv",
+./Tests/test_market_window_planning.py:198:        ledger_path="paper/ledger.csv",
+./Tests/test_market_window_planning.py:199:        trades_path="paper/trades.csv",
+./Tests/test_market_window_planning.py:427:        "read_latest_holdings_from_ledger",
+./Tests/test_market_window_planning.py:446:            ledger_path="paper/ledger.csv",
+./Tests/test_market_window_planning.py:447:            trades_path="paper/trades.csv",
+./paper/nav2.py:10:from paper.ledger2 import LEDGER2_PATH, load_ledger
+./paper/nav2.py:38:    marker = Path("outputs/ledger/cash_start.json")
+./paper/nav2.py:45:def _compute_portfolio_state(ledger_df: pd.DataFrame, asof_date: str, starting_cash: float) -> tuple[float, dict[str, dict[str, float]]]:
+./paper/nav2.py:49:    if ledger_df.empty:
+./paper/nav2.py:52:    usable = ledger_df[ledger_df["trade_date"].astype(str) <= str(asof_date)].copy()
+./paper/nav2.py:82:def _upsert_nav_timeseries(path: str, asof_date: str, equity: float, cash: float) -> str:
+./paper/nav2.py:119:    ledger_path: str = LEDGER2_PATH,
+./paper/nav2.py:121:    perf_dir = Path("outputs/perf")
+./paper/nav2.py:125:    ledger_df = load_ledger(ledger_path)
+./paper/nav2.py:126:    cash, holdings = _compute_portfolio_state(ledger_df, asof_date, starting_cash)
+./paper/nav2.py:176:    nav_ts_path = _upsert_nav_timeseries(str(perf_dir / "nav_timeseries.csv"), asof_date, equity, float(cash))
+./paper/nav2.py:180:        "nav_timeseries_path": nav_ts_path,
+./paper/nav2.py:192:    ledger_path: str = LEDGER2_PATH,
+./paper/nav2.py:193:    nav_path_tpl: str = "outputs/perf/nav_{asof}.json",
+./paper/nav2.py:194:    nav_timeseries_path: str = "outputs/perf/nav_timeseries.csv",
+./paper/nav2.py:196:    _ = nav_path_tpl, nav_timeseries_path
+./paper/nav2.py:197:    return update_nav(asof_date=asof_date, trade_date=asof_date, get_price_fn=None, source="SHADOW", run_id="legacy", ledger_path=ledger_path)
+./paper/paper_report.py:16:    ledger_path: str,
+./paper/paper_report.py:22:    led = _read_csv_if_exists(ledger_path)
+./paper/paper_report.py:69:    nav_ts = _read_csv_if_exists("outputs/perf/nav_timeseries.csv")
+./paper/paper_report.py:84:  <h3>Ledger-backed NAV</h3>
+./paper/paper_report.py:94:    contrib_t = _read_csv_if_exists(f"outputs/perf/contribution_tickers_{run_date}.csv")
+./paper/paper_report.py:95:    contrib_s = _read_csv_if_exists(f"outputs/perf/contribution_sleeves_{run_date}.csv")
+./paper/paper_report.py:188:    Execution model: next-open fills with slippage + cash buffer. Ledger is append-only.
+./paper/positions.py:1:"""Rebuild positions and cash deterministically from the trade ledger."""
+./paper/positions.py:21:    out = Path("outputs/ledger/cash_start.csv")
+./paper/positions.py:29:def rebuild_positions_from_ledger(ledger: pd.DataFrame, asof_date: str) -> dict[str, Any]:
+./paper/positions.py:31:    if ledger.empty:
+./paper/positions.py:34:    led = ledger.copy()
+./paper/positions.py:76:    out_dir = Path("outputs/ledger")
+./research/signal_diagnostics.py:22:    out_dir = Path("outputs/research")
+./paper/config_paper.json:7:    "sent_ledger_path": "outputs/shadow_orders/orders_sent_TEST.csv"
+./paper/state_paths.py:7:DEFAULT_PAPER_STATE_DIR = Path("outputs/paper_state")
+./paper/state_paths.py:8:LEDGER_FILENAME = "ledger.csv"
+./paper/state_paths.py:9:TRADES_FILENAME = "trades.csv"
+./paper/state_paths.py:11:LEDGER_HEADERS = [
+./paper/state_paths.py:56:    ledger_path = state_dir / LEDGER_FILENAME
+./paper/state_paths.py:60:        ledger_path,
+./paper/state_paths.py:61:        LEDGER_HEADERS,
+./paper/state_paths.py:63:            Path("paper/ledger.csv"),
+./paper/state_paths.py:64:            Path("paper/ledger.template.csv"),
+./paper/state_paths.py:71:            Path("paper/trades.csv"),
+./paper/state_paths.py:76:    return str(ledger_path), str(trades_path)
+./research/weight_sweep.py:49:    out_dir = Path("outputs/research")
+./paper/ledger.py:1:"""Ledger utilities for append-only execution tracking."""
+./paper/ledger.py:19:LEDGER_COLUMNS = [
+./paper/ledger.py:41:    """Create ledger output directories if they are missing."""
+./paper/ledger.py:42:    Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
+./paper/ledger.py:46:def ensure_ledger_exists(path: str) -> None:
+./paper/ledger.py:47:    """Create an empty ledger with the expected schema."""
+./paper/ledger.py:49:    ledger_path = Path(path)
+./paper/ledger.py:50:    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+./paper/ledger.py:51:    if ledger_path.exists() and ledger_path.stat().st_size > 0:
+./paper/ledger.py:53:    pd.DataFrame(columns=LEDGER_COLUMNS).to_csv(ledger_path, index=False)
+./paper/ledger.py:54:    logger.info("[LEDGER] initialized ledger file: %s", ledger_path)
+./paper/ledger.py:74:def load_ledger(path: str = "outputs/ledger/trades.csv") -> pd.DataFrame:
+./paper/ledger.py:75:    """Load the execution ledger."""
+./paper/ledger.py:76:    ensure_ledger_exists(path)
+./paper/ledger.py:81:def append_ledger_rows(rows: list[dict[str, Any]], path: str = "outputs/ledger/trades.csv") -> int:
+./paper/ledger.py:83:    ensure_ledger_exists(path)
+./paper/ledger.py:89:    incoming = incoming[LEDGER_COLUMNS]
+./paper/ledger.py:101:        logger.info("[LEDGER] no new rows to append")
+./paper/ledger.py:104:    to_write.to_csv(path, mode="a", header=False, index=False)
+./paper/ledger.py:105:    logger.info("[LEDGER] appended rows=%d path=%s", len(to_write), path)
+./paper/ledger.py:118:def ledger_rows_from_execution_payload(
+./paper/ledger.py:126:    """Build normalized ledger rows from an execution payload JSON file."""
+./paper/run_paper.py:28:        help="DEV ONLY: allow re-running the same trade date (bypasses ledger date guard).",
+./paper/run_paper.py:56:    ledger_path, trades_path = ensure_paper_state_files()
+./paper/run_paper.py:61:        ledger_path=ledger_path,
+./paper/paper_broker.py:48:    sent_ledger_path: str = "outputs/shadow_orders/orders_sent.csv"
+./paper/paper_broker.py:106:def read_latest_holdings_from_ledger(
+./paper/paper_broker.py:107:    ledger_path: str,
+./paper/paper_broker.py:109:    if not os.path.exists(ledger_path) or os.path.getsize(ledger_path) == 0:
+./paper/paper_broker.py:112:    led = pd.read_csv(ledger_path)
+./paper/paper_broker.py:823:def _filter_idempotent_orders(orders: List[Dict[str, object]], sent_ledger_path: str) -> Tuple[List[Dict[str, object]], List[str]]:
+./paper/paper_broker.py:824:    sent = _read_csv(sent_ledger_path)
+./paper/paper_broker.py:837:def _persist_sent_orders(orders: List[Dict[str, object]], sent_ledger_path: str, run_date: str, run_id: str) -> None:
+./paper/paper_broker.py:841:    append_csv(pd.DataFrame(rows), sent_ledger_path)
+./paper/paper_broker.py:844:def reset_orders_sent_ledger_for_date(sent_ledger_path: str, trade_date: str) -> int:
+./paper/paper_broker.py:845:    path = Path(sent_ledger_path)
+./paper/paper_broker.py:847:        logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, 0)
+./paper/paper_broker.py:852:        logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, 0)
+./paper/paper_broker.py:856:        logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, 0)
+./paper/paper_broker.py:862:    _ensure_parent_dir(sent_ledger_path)
+./paper/paper_broker.py:864:    logger.info("[ORDER][LEDGER_RESET] path=%s date=%s removed=%d", sent_ledger_path, trade_date, removed)
+./paper/paper_broker.py:914:    ledger_path: str,
+./paper/paper_broker.py:930:    holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
+./paper/paper_broker.py:934:            f"Ledger already contains run_date={run_date}. Refusing to run twice."
+./paper/paper_broker.py:1209:        ledger_day = m2m[["ticker", "sleeve", "shares", "price", "market_value"]].copy()
+./paper/paper_broker.py:1210:        ledger_day.insert(0, "date", run_date)
+./paper/paper_broker.py:1211:        ledger_day["cash"] = cash_new
+./paper/paper_broker.py:1212:        ledger_day["total_equity"] = total_equity
+./paper/paper_broker.py:1213:        append_csv(ledger_day, ledger_path)
+./paper/paper_broker.py:1219:    sent_ledger_path: str = cfg.sent_ledger_path
+./paper/paper_broker.py:1223:        orders, idempotent_skips = _filter_idempotent_orders(orders, sent_ledger_path)
+./paper/paper_broker.py:1224:        _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
+./paper/mark_to_market.py:52:    out_dir = Path("outputs/perf")
+./paper/mark_to_market.py:61:def update_nav_timeseries(asof_date: str, nav: dict, ledger: pd.DataFrame) -> str:
+./paper/mark_to_market.py:62:    out_path = Path("outputs/perf/nav_timeseries.csv")
+./paper/mark_to_market.py:90:        notional = float(ledger.loc[ledger["trade_date"].astype(str) == d, "notional"].sum()) if (not ledger.empty and "trade_date" in ledger.columns) else 0.0
+./paper/mark_to_market.py:95:    logger.info("[PERF] updated nav_timeseries: %s", out_path)
+
+==================================================
+OUTPUTS DIRECTORY SNAPSHOT
+==================================================
+total 0
+drwxr-xr-x@  9 brettolson  staff   288 Feb 18 09:14 .
+drwxr-xr-x@ 32 brettolson  staff  1024 Feb 18 09:20 ..
+drwxr-xr-x@  3 brettolson  staff    96 Feb 13 12:29 cache
+drwxr-xr-x@ 17 brettolson  staff   544 Feb 18 09:09 daily
+drwxr-xr-x@  5 brettolson  staff   160 Feb 17 12:51 execution_email
+drwxr-xr-x@ 14 brettolson  staff   448 Feb 17 12:51 ledger
+drwxr-xr-x@  4 brettolson  staff   128 Feb 13 13:30 paper_state
+drwxr-xr-x@ 11 brettolson  staff   352 Feb 18 09:14 perf
+drwxr-xr-x@  4 brettolson  staff   128 Feb 17 11:08 shadow_orders
+total 96
+drwxr-xr-x@ 14 brettolson  staff   448 Feb 17 12:51 .
+drwxr-xr-x@  9 brettolson  staff   288 Feb 18 09:14 ..
+-rw-r--r--@  1 brettolson  staff    81 Feb 13 13:30 cash_2026-02-13.json
+-rw-r--r--@  1 brettolson  staff    82 Feb 18 09:14 cash_2026-02-17.json
+-rw-r--r--@  1 brettolson  staff    82 Feb 17 11:08 cash_2026-02-24.json
+-rw-r--r--@  1 brettolson  staff   213 Feb 13 13:30 holdings_2026-02-13.csv
+-rw-r--r--@  1 brettolson  staff   219 Feb 18 09:14 holdings_2026-02-17.csv
+-rw-r--r--@  1 brettolson  staff   219 Feb 17 11:08 holdings_2026-02-24.csv
+-rw-r--r--@  1 brettolson  staff   254 Feb 13 13:30 ledger_write_2026-02-13.json
+-rw-r--r--@  1 brettolson  staff   272 Feb 18 09:14 ledger_write_2026-02-17.json
+-rw-r--r--@  1 brettolson  staff   250 Feb 13 13:30 positions_2026-02-13.csv
+-rw-r--r--@  1 brettolson  staff   256 Feb 18 09:14 positions_2026-02-17.csv
+-rw-r--r--@  1 brettolson  staff   256 Feb 17 11:08 positions_2026-02-24.csv
+-rw-r--r--@  1 brettolson  staff  2824 Feb 13 13:30 trades.csv
+total 72
+drwxr-xr-x@ 11 brettolson  staff  352 Feb 18 09:14 .
+drwxr-xr-x@  9 brettolson  staff  288 Feb 18 09:14 ..
+-rw-r--r--@  1 brettolson  staff  121 Feb 18 09:14 contribution_sleeves_2026-02-17.csv
+-rw-r--r--@  1 brettolson  staff  464 Feb 18 09:14 contribution_tickers_2026-02-17.csv
+-rw-r--r--@  1 brettolson  staff  644 Feb 13 13:30 holdings_mtm_2026-02-13.csv
+-rw-r--r--@  1 brettolson  staff  656 Feb 18 09:14 holdings_mtm_2026-02-17.csv
+-rw-r--r--@  1 brettolson  staff    1 Feb 17 11:08 holdings_mtm_2026-02-24.csv
+-rw-r--r--@  1 brettolson  staff  253 Feb 13 13:30 nav_2026-02-13.json
+-rw-r--r--@  1 brettolson  staff  254 Feb 18 09:14 nav_2026-02-17.json
+-rw-r--r--@  1 brettolson  staff  307 Feb 17 11:08 nav_2026-02-24.json
+-rw-r--r--@  1 brettolson  staff  269 Feb 18 09:14 nav_timeseries.csv
+
+==================================================
+SHADOW RUN OUTPUT
+==================================================
+Backtest Version Check: 2025-12-14-Debug-2
+Backtest Version Check: Sleeve-Trend-v1-2026-01-26-RevB
+[SLEEVE2] today=2026-02-18 last_bar=2026-02-17 asof=2026-02-17 lookback_start=2025-11-25 calendar_days=56 prices_wide=(251,201) target_w=(56,201) last_gross=1.000000 last_net=1.000000
