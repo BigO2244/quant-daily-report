@@ -32,10 +32,57 @@ def _annualized_stats(daily_returns: pd.Series) -> tuple[float, float, float, fl
 
 
 def _max_drawdown(nav: pd.Series) -> float:
+    nav = nav.dropna()
     if nav.empty:
         return np.nan
     dd = nav / nav.cummax() - 1.0
     return float(dd.min())
+
+
+def _compute_metrics(nav: pd.Series, spy_nav: pd.Series) -> dict:
+    nav = nav.astype(float)
+    spy_nav = spy_nav.astype(float)
+
+    ret = nav.pct_change().replace([np.inf, -np.inf], np.nan)
+    spy_ret = spy_nav.pct_change().replace([np.inf, -np.inf], np.nan)
+    aligned = pd.concat([ret.rename("ret"), spy_ret.rename("spy_ret")], axis=1).dropna()
+    if aligned.empty:
+        return {
+            "total_return": np.nan,
+            "cagr": np.nan,
+            "vol": np.nan,
+            "sharpe": np.nan,
+            "max_drawdown": np.nan,
+            "beta_vs_spy": np.nan,
+        }
+
+    ret = aligned["ret"]
+    spy_ret = aligned["spy_ret"]
+    nav_clean = nav.dropna()
+    start = nav_clean.iloc[0]
+    end = nav_clean.iloc[-1]
+    total_return = (end / start) - 1.0
+
+    n_days = len(aligned)
+    years = n_days / 252.0
+    cagr = (end / start) ** (1.0 / years) - 1.0 if years > 0 else np.nan
+
+    ret_std = ret.std(ddof=0)
+    vol = ret_std * np.sqrt(252.0)
+    sharpe = (ret.mean() / ret_std) * np.sqrt(252.0) if ret_std > 0 else np.nan
+    max_dd = _max_drawdown(nav)
+
+    var_spy = spy_ret.var(ddof=0)
+    beta = ret.cov(spy_ret) / var_spy if var_spy > 0 else np.nan
+
+    return {
+        "total_return": float(total_return),
+        "cagr": float(cagr),
+        "vol": float(vol),
+        "sharpe": float(sharpe),
+        "max_drawdown": float(max_dd),
+        "beta_vs_spy": float(beta),
+    }
 
 
 def _beta_vs_spy(port_ret: pd.Series, spy_ret: pd.Series) -> float:
@@ -202,10 +249,37 @@ def run_backtest(
     ts_df["spy_ret"] = ts_df["spy_ret"].fillna(0.0)
     ts_df["spy_nav"] = ts_df["spy_nav"].ffill().bfill()
 
+    # Circuit-breaker overlay: apply only via return scaling when updating NAV.
+    ts_df = ts_df.sort_values("date").reset_index(drop=True)
+    spy_series = ts_df["spy_nav"].astype(float)
+    spy_200d = spy_series.rolling(200, min_periods=200).mean()
+    spy_63d_ret = spy_series / spy_series.shift(63) - 1.0
+
+    net_nav_series = ts_df["net_nav"].astype(float)
+    strategy_dd = net_nav_series / net_nav_series.cummax() - 1.0
+
+    exposure = pd.Series(1.0, index=ts_df.index)
+    bear_condition = (spy_series < spy_200d) & (spy_63d_ret < -0.15)
+    exposure.loc[bear_condition.fillna(False)] = 0.5
+
+    capital_lock = (strategy_dd < -0.35) & (spy_series < spy_200d)
+    exposure.loc[capital_lock.fillna(False)] = 0.0
+
+    ts_df["exposure_multiplier"] = exposure
+    ts_df["gross_ret_cb"] = ts_df["gross_portfolio_ret"].fillna(0.0) * ts_df["exposure_multiplier"]
+    ts_df["net_ret_cb"] = ts_df["net_portfolio_ret"].fillna(0.0) * ts_df["exposure_multiplier"]
+    ts_df["gross_nav_cb"] = (1.0 + ts_df["gross_ret_cb"]).cumprod()
+    ts_df["net_nav_cb"] = (1.0 + ts_df["net_ret_cb"]).cumprod()
+
     gross_total, gross_cagr, gross_vol, gross_sharpe = _annualized_stats(ts_df["gross_portfolio_ret"])
     net_total, net_cagr, net_vol, net_sharpe = _annualized_stats(ts_df["net_portfolio_ret"])
     s_total, s_cagr, s_vol, s_sharpe = _annualized_stats(ts_df["spy_ret"])
     avg_turnover = float(np.mean(turnover_events)) if turnover_events else 0.0
+    m_gross_cb = _compute_metrics(ts_df["gross_nav_cb"], ts_df["spy_nav"])
+    m_net_cb = _compute_metrics(ts_df["net_nav_cb"], ts_df["spy_nav"])
+    breaker_days_bear = int((ts_df["exposure_multiplier"] == 0.5).sum())
+    breaker_days_lock = int((ts_df["exposure_multiplier"] == 0.0).sum())
+    breaker_days_any = int((ts_df["exposure_multiplier"] != 1.0).sum())
 
     summary = pd.DataFrame(
         [
@@ -232,6 +306,21 @@ def run_backtest(
                 "spy_vol": s_vol,
                 "spy_sharpe": s_sharpe,
                 "spy_max_drawdown": _max_drawdown(ts_df["spy_nav"]),
+                "gross_total_return_cb": m_gross_cb["total_return"],
+                "gross_cagr_cb": m_gross_cb["cagr"],
+                "gross_vol_cb": m_gross_cb["vol"],
+                "gross_sharpe_cb": m_gross_cb["sharpe"],
+                "gross_max_drawdown_cb": m_gross_cb["max_drawdown"],
+                "gross_beta_vs_spy_cb": m_gross_cb["beta_vs_spy"],
+                "net_total_return_cb": m_net_cb["total_return"],
+                "net_cagr_cb": m_net_cb["cagr"],
+                "net_vol_cb": m_net_cb["vol"],
+                "net_sharpe_cb": m_net_cb["sharpe"],
+                "net_max_drawdown_cb": m_net_cb["max_drawdown"],
+                "net_beta_vs_spy_cb": m_net_cb["beta_vs_spy"],
+                "breaker_days_bear": breaker_days_bear,
+                "breaker_days_lock": breaker_days_lock,
+                "breaker_days_any": breaker_days_any,
             }
         ]
     )
@@ -291,7 +380,17 @@ def _write_equity_curve_png(ts_df: pd.DataFrame, path: Path) -> None:
 def save_outputs(summary: pd.DataFrame, ts_df: pd.DataFrame, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary.to_csv(output_dir / "sleeve1_alpha_variant_summary.csv", index=False)
-    ts_df[["date", "gross_nav", "net_nav", "spy_nav"]].to_csv(
+    ts_df[
+        [
+            "date",
+            "gross_nav",
+            "net_nav",
+            "spy_nav",
+            "exposure_multiplier",
+            "gross_nav_cb",
+            "net_nav_cb",
+        ]
+    ].to_csv(
         output_dir / "sleeve1_alpha_variant_timeseries.csv", index=False
     )
     _write_equity_curve_png(ts_df, output_dir / "sleeve1_alpha_variant_equity_curve.png")
