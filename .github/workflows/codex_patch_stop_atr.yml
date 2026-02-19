@@ -1,0 +1,326 @@
+name: codex patch stop atr
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  patch-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create branch from origin/main
+        run: |
+          git fetch origin main --prune
+          git checkout -B fix/snapshot-stop-atr-mult-and-robustness origin/main
+
+      - name: Apply patch in-place
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          dqr_path = Path("daily_quant_report.py")
+          s = dqr_path.read_text(encoding="utf-8")
+
+          defaults_block = textwrap.dedent(
+              """
+              STOP_ATR_MULT_DEFAULT = 2.0
+              TAKE_PROFIT_ATR_MULT_DEFAULT = 3.0
+              STOP_PCT_DEFAULT = 0.08
+              TAKE_PROFIT_PCT_DEFAULT = 0.12
+
+
+              def _snapshot_risk_value(name: str, default: float) -> float:
+                  env_val = os.getenv(name)
+                  if env_val:
+                      try:
+                          return float(env_val)
+                      except Exception:
+                          logger.warning("[SNAPSHOT] Invalid %s env value '%s'; using default %.4f", name, env_val, default)
+                  try:
+                      with open("paper/config_paper.json", "r", encoding="utf-8") as f:
+                          cfg = json.load(f) or {}
+                      risk_cfg = cfg.get("risk") or {}
+                      config_val = risk_cfg.get(name.lower())
+                      if config_val is not None:
+                          return float(config_val)
+                  except Exception:
+                      pass
+                  return default
+
+
+              """
+          )
+
+          inactive_hint_block = textwrap.dedent(
+              """
+              def _inactive_input_hint(obj) -> str:
+                  if obj is None:
+                      return "None"
+                  try:
+                      if isinstance(obj, dict):
+                          if obj.get("equity_df") is None:
+                              return "missing equity_df"
+                          if obj.get("prices") is None and obj.get("prices_df") is None:
+                              return "missing prices"
+                          if obj.get("reason"):
+                              return str(obj.get("reason"))
+                      return "ok"
+                  except Exception:
+                      return "unknown"
+
+
+              """
+          )
+
+          # Insert defaults/helper immediately after import block (if not present)
+          if "def _snapshot_risk_value(" not in s or "STOP_ATR_MULT_DEFAULT" not in s:
+              import_block = re.search(r"\A(?:\s*(?:from\s+\S+\s+import\s+[^\n]+|import\s+[^\n]+)\s*\n)+", s, flags=re.M)
+              if not import_block:
+                  raise RuntimeError("Could not locate import block for deterministic helper insertion.")
+              insert_at = import_block.end()
+              to_insert = ""
+              if "STOP_ATR_MULT_DEFAULT" not in s:
+                  to_insert += defaults_block
+              elif "def _snapshot_risk_value(" not in s:
+                  # keep constants if they already exist, inject helper only
+                  helper_only = "\n\n" + "\n".join(defaults_block.splitlines()[6:])
+                  to_insert += helper_only
+              if to_insert:
+                  s = s[:insert_at] + "\n" + to_insert + s[insert_at:]
+
+          # Ensure _inactive_input_hint exists before any reference
+          if "def _inactive_input_hint(" not in s:
+              helpers_anchor = "# ============================================================\n# Helpers\n# ============================================================\n"
+              if helpers_anchor in s:
+                  s = s.replace(helpers_anchor, helpers_anchor + inactive_hint_block, 1)
+              else:
+                  # fallback: place after _snapshot_risk_value
+                  idx = s.find("def _snapshot_risk_value(")
+                  if idx == -1:
+                      raise RuntimeError("_snapshot_risk_value not found while inserting _inactive_input_hint")
+                  end_idx = s.find("\n\n", idx)
+                  end_idx = end_idx if end_idx != -1 else idx
+                  s = s[:end_idx + 2] + inactive_hint_block + s[end_idx + 2:]
+
+          # Ensure local risk params are always defined in build_daily_snapshot before per-ticker loop
+          marker = "    holdings = []\n    risk_levels = []\n"
+          assign_block = (
+              "    stop_atr_mult = _snapshot_risk_value(\"STOP_ATR_MULT\", STOP_ATR_MULT_DEFAULT)\n"
+              "    take_profit_atr_mult = _snapshot_risk_value(\n"
+              "        \"TAKE_PROFIT_ATR_MULT\", TAKE_PROFIT_ATR_MULT_DEFAULT\n"
+              "    )\n"
+              "    stop_pct = _snapshot_risk_value(\"STOP_PCT\", STOP_PCT_DEFAULT)\n"
+              "    take_profit_pct = _snapshot_risk_value(\"TAKE_PROFIT_PCT\", TAKE_PROFIT_PCT_DEFAULT)\n"
+          )
+          if marker in s and "stop_atr_mult = _snapshot_risk_value(\"STOP_ATR_MULT\", STOP_ATR_MULT_DEFAULT)" not in s:
+              s = s.replace(marker, marker + assign_block, 1)
+
+          # Replace any direct STOP_ATR_MULT env parsing inside build_daily_snapshot body
+          fn_start = s.find("def build_daily_snapshot(")
+          if fn_start == -1:
+              raise RuntimeError("build_daily_snapshot not found")
+          fn_end = s.find("\ndef ", fn_start + 1)
+          if fn_end == -1:
+              fn_end = len(s)
+          fn_body = s[fn_start:fn_end]
+          fn_body = re.sub(
+              r"\n\s*stop_atr_mult\s*=\s*float\(os\.getenv\(\"STOP_ATR_MULT\",\s*\"[^\"]+\"\)\)\n",
+              "\n",
+              fn_body,
+          )
+          fn_body = re.sub(
+              r"\n\s*take_profit_atr_mult\s*=\s*float\(os\.getenv\(\"TAKE_PROFIT_ATR_MULT\",\s*\"[^\"]+\"\)\)\n",
+              "\n",
+              fn_body,
+          )
+          fn_body = re.sub(
+              r"\n\s*stop_pct\s*=\s*float\(os\.getenv\(\"STOP_PCT\",\s*\"[^\"]+\"\)\)\n",
+              "\n",
+              fn_body,
+          )
+          fn_body = re.sub(
+              r"\n\s*take_profit_pct\s*=\s*float\(os\.getenv\(\"TAKE_PROFIT_PCT\",\s*\"[^\"]+\"\)\)\n",
+              "\n",
+              fn_body,
+          )
+          s = s[:fn_start] + fn_body + s[fn_end:]
+
+          # Add inactivity hint logging once
+          no_targets = (
+              "        logger.warning(\n"
+              "            \"[PAPER] No target weights available; skipping signals snapshot.\"\n"
+              "        )\n"
+          )
+          hints = (
+              "        logger.info(\n"
+              "            \"[PAPER] inactivity hints: trend=%s | sleeve_2=%s | charlie_munger=%s\",\n"
+              "            _inactive_input_hint(st_signals if isinstance(st_signals, dict) else None),\n"
+              "            _inactive_input_hint(s2_details),\n"
+              "            _inactive_input_hint(cm_details),\n"
+              "        )\n"
+          )
+          if no_targets in s and "[PAPER] inactivity hints:" not in s:
+              s = s.replace(no_targets, no_targets + hints, 1)
+
+          # Wrap per-ticker stop/take calc block robustly if not already wrapped
+          if "[SNAPSHOT] stop calc failed for %s on %s: %s" not in s:
+              calc_pat = re.compile(
+                  r"(?P<indent>\s*)atr = atr_map\.get\(ticker\)\n"
+                  r"(?P<body>(?:(?!\n\s*risk_levels\.append\().|\n)+)"
+                  r"(?=\n\s*risk_levels\.append\()",
+                  flags=re.M,
+              )
+              m = calc_pat.search(s)
+              if m:
+                  indent = m.group("indent")
+                  body = m.group("body")
+                  wrapped = (
+                      f"{indent}atr = atr_map.get(ticker)\n"
+                      f"{indent}try:\n"
+                      + "\n".join(
+                          (indent + "    " + line[len(indent):]) if line.startswith(indent) else (indent + "    " + line)
+                          for line in body.splitlines()
+                      )
+                      + "\n"
+                      f"{indent}except Exception as err:\n"
+                      f"{indent}    logger.error(\n"
+                      f"{indent}        \"[SNAPSHOT] stop calc failed for %s on %s: %s\",\n"
+                      f"{indent}        ticker,\n"
+                      f"{indent}        report_date.strftime(\"%Y-%m-%d\"),\n"
+                      f"{indent}        err,\n"
+                      f"{indent}    )\n"
+                      f"{indent}    stop_loss = None\n"
+                      f"{indent}    take_profit = None\n"
+                      f"{indent}    atr = None"
+                  )
+                  s = s[:m.start()] + wrapped + s[m.end():]
+
+          dqr_path.write_text(s, encoding="utf-8")
+
+          test_path = Path("tests/test_snapshot_stop_atr_mult_regression.py")
+          test_path.parent.mkdir(parents=True, exist_ok=True)
+          test_path.write_text(
+              "import daily_quant_report as dqr\n\n"
+              "def test_snapshot_risk_value_falls_back_to_default_on_missing_and_invalid(monkeypatch):\n"
+              "    monkeypatch.delenv(\"STOP_ATR_MULT\", raising=False)\n"
+              "    assert dqr._snapshot_risk_value(\"STOP_ATR_MULT\", 2.0) == 2.0\n"
+              "    monkeypatch.setenv(\"STOP_ATR_MULT\", \"bad\")\n"
+              "    assert dqr._snapshot_risk_value(\"STOP_ATR_MULT\", 2.0) == 2.0\n"
+              "    monkeypatch.setenv(\"STOP_ATR_MULT\", \"2.75\")\n"
+              "    assert dqr._snapshot_risk_value(\"STOP_ATR_MULT\", 2.0) == 2.75\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run daily report (future REPORT_DATE)
+        run: PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 REPORT_DATE=2026-02-19 python3 daily_quant_report.py
+
+      - name: Run daily report (session date)
+        run: PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 python3 daily_quant_report.py
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Compile check before commit
+        run: python -m compileall daily_quant_report.py
+
+      - name: Commit changes
+        run: |
+          git add daily_quant_report.py tests/test_snapshot_stop_atr_mult_regression.py .github/workflows/codex_patch_stop_atr.yml
+          git commit -m "Fix STOP_ATR_MULT NameError and harden snapshot robustness" || echo "No changes to commit"
+
+      - name: Push branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push -u origin fix/snapshot-stop-atr-mult-and-robustness
+
+      - name: Open PR with gh if available
+        id: pr_gh
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            gh pr create \
+              --base main \
+              --head fix/snapshot-stop-atr-mult-and-robustness \
+              --title "Fix STOP_ATR_MULT NameError and make snapshot robust" \
+              --body "Root cause:\n- STOP_ATR_MULT could be referenced without robust default/config fallback in snapshot risk calc, causing NameError/failures in some paths.\n- Snapshot generation could fail on per-ticker stop/target calculations instead of degrading safely.\n\nHow fixed:\n- Added default/config/env resolution helper for snapshot risk params including STOP_ATR_MULT.\n- Added per-ticker try/except around stop/take-profit calculation and fallback behavior.\n- Added inactivity hint logging when target weights are unavailable.\n- Added regression test for STOP_ATR_MULT default resolution behavior.\n\nHow tested:\n- python -m pip install --upgrade pip\n- pip install -r requirements.txt\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 REPORT_DATE=2026-02-19 python3 daily_quant_report.py\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 python3 daily_quant_report.py\n- pytest -q"
+          fi
+
+      - name: Open PR with REST API fallback
+        if: steps.pr_gh.outcome != 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          owner="${REPO%%/*}"
+          repo="${REPO##*/}"
+          payload=$(cat <<'JSON'
+          {
+            "title": "Fix STOP_ATR_MULT NameError and make snapshot robust",
+            "head": "fix/snapshot-stop-atr-mult-and-robustness",
+            "base": "main",
+            "body": "Root cause:\n- STOP_ATR_MULT could be referenced without robust default/config fallback in snapshot risk calc, causing NameError/failures in some paths.\n- Snapshot generation could fail on per-ticker stop/target calculations instead of degrading safely.\n\nHow fixed:\n- Added default/config/env resolution helper for snapshot risk params including STOP_ATR_MULT.\n- Added per-ticker try/except around stop/take-profit calculation and fallback behavior.\n- Added inactivity hint logging when target weights are unavailable.\n- Added regression test for STOP_ATR_MULT default resolution behavior.\n\nHow tested:\n- python -m pip install --upgrade pip\n- pip install -r requirements.txt\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 REPORT_DATE=2026-02-19 python3 daily_quant_report.py\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 python3 daily_quant_report.py\n- pytest -q"
+          }
+          JSON
+          )
+
+          set +e
+          http_code=$(curl -sS -o pr_response.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${owner}/${repo}/pulls" \
+            -d "$payload")
+          set -e
+
+          HTTP_CODE="$http_code" python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          code = int(os.environ["HTTP_CODE"])
+          data = json.loads(Path("pr_response.json").read_text(encoding="utf-8") or "{}")
+
+          if code in (200, 201):
+              print("PR created")
+              sys.exit(0)
+
+          msg = str(data.get("message", ""))
+          errs = data.get("errors") or []
+          text = msg + " " + json.dumps(errs)
+
+          if "A pull request already exists" in text or "already exists" in text:
+              print("PR already exists; continuing")
+              sys.exit(0)
+
+          print(f"PR creation failed with HTTP {code}: {data}")
+          sys.exit(1)
+          PY
