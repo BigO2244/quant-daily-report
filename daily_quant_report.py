@@ -81,6 +81,29 @@ DATE_FORMAT = os.getenv("DATE_FORMAT", "US")
 DISPLAY_DECIMALS = int(os.getenv("DISPLAY_DECIMALS", "2"))
 CHARLIE_MIN = 0.20
 CHARLIE_MAX = 0.30
+STOP_ATR_MULT_DEFAULT = 2.0
+TAKE_PROFIT_ATR_MULT_DEFAULT = 3.0
+STOP_PCT_DEFAULT = 0.08
+TAKE_PROFIT_PCT_DEFAULT = 0.12
+
+
+def _snapshot_risk_value(name: str, default: float) -> float:
+    env_val = os.getenv(name)
+    if env_val:
+        try:
+            return float(env_val)
+        except Exception:
+            logger.warning("[SNAPSHOT] Invalid %s env value '%s'; using default %.4f", name, env_val, default)
+    try:
+        with open("paper/config_paper.json", "r", encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+        risk_cfg = cfg.get("risk") or {}
+        config_val = risk_cfg.get(name.lower())
+        if config_val is not None:
+            return float(config_val)
+    except Exception:
+        pass
+    return default
 # ============================================================
 # Helpers
 # ============================================================
@@ -1049,6 +1072,18 @@ def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
     if pd.isna(last_eq) or last_eq <= 0:
         return False, f"invalid terminal equity ({last_eq})"
     return True, ""
+
+
+def _inactive_input_hint(details: dict | None) -> str:
+    if not isinstance(details, dict):
+        return "missing details dict"
+    target_weights = details.get("target_weights")
+    if not isinstance(target_weights, pd.DataFrame) or target_weights.empty:
+        return "missing/empty target_weights"
+    weights_df = details.get("weights_df")
+    if isinstance(weights_df, pd.DataFrame) and weights_df.empty:
+        return "weights_df empty"
+    return "input present but sleeve output empty"
 # ============================================================
 # Sleeve runners
 # ============================================================
@@ -1444,6 +1479,13 @@ def build_daily_snapshot(
     s2_details: dict,
     cm_details: dict | None = None,
 ) -> dict:
+    stop_atr_mult = _snapshot_risk_value("STOP_ATR_MULT", STOP_ATR_MULT_DEFAULT)
+    take_profit_atr_mult = _snapshot_risk_value(
+        "TAKE_PROFIT_ATR_MULT", TAKE_PROFIT_ATR_MULT_DEFAULT
+    )
+    stop_pct = _snapshot_risk_value("STOP_PCT", STOP_PCT_DEFAULT)
+    take_profit_pct = _snapshot_risk_value("TAKE_PROFIT_PCT", TAKE_PROFIT_PCT_DEFAULT)
+
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
@@ -1583,27 +1625,39 @@ def build_daily_snapshot(
             }
         )
         atr = atr_map.get(ticker)
-        if entry_px is None:
+        try:
+            if entry_px is None:
+                stop_loss = None
+                take_profit = None
+            elif atr is not None:
+                if weight > 0:
+                    stop_loss = entry_px - stop_atr_mult * atr
+                    take_profit = entry_px + take_profit_atr_mult * atr
+                else:
+                    stop_loss = entry_px + stop_atr_mult * atr
+                    take_profit = entry_px - take_profit_atr_mult * atr
+            else:
+                if weight > 0:
+                    stop_loss = entry_px * (1 - stop_pct)
+                    take_profit = entry_px * (1 + take_profit_pct)
+                else:
+                    stop_loss = entry_px * (1 + stop_pct)
+                    take_profit = entry_px * (1 - take_profit_pct)
+        except Exception as err:
+            logger.error(
+                "[SNAPSHOT] stop calc failed for %s on %s: %s",
+                ticker,
+                report_date.strftime("%Y-%m-%d"),
+                err,
+            )
             stop_loss = None
             take_profit = None
-        elif atr is not None:
-            if weight > 0:
-                stop_loss = entry_px - STOP_ATR_MULT * atr
-                take_profit = entry_px + TAKE_PROFIT_ATR_MULT * atr
-            else:
-                stop_loss = entry_px + STOP_ATR_MULT * atr
-                take_profit = entry_px - TAKE_PROFIT_ATR_MULT * atr
-        else:
-            if weight > 0:
-                stop_loss = entry_px * (1 - STOP_PCT)
-                take_profit = entry_px * (1 + TAKE_PROFIT_PCT)
-            else:
-                stop_loss = entry_px * (1 + STOP_PCT)
-                take_profit = entry_px * (1 - TAKE_PROFIT_PCT)
+            atr = None
         risk_levels.append(
             {
                 "ticker": ticker,
                 "entry_price": entry_px,
+                "atr": atr,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
             }
@@ -2307,9 +2361,17 @@ def main(argv: list[str] | None = None):
     if not trend_valid:
         logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
     if not s2_valid:
-        logger.warning("sleeve_2 inactive: %s -> routed to CASH", s2_reason)
+        logger.warning(
+            "sleeve_2 inactive: %s (%s) -> routed to CASH",
+            s2_reason,
+            _inactive_input_hint(s2_details),
+        )
     if not cm_valid:
-        logger.warning("charlie_munger inactive: %s -> routed to CASH", cm_reason)
+        logger.warning(
+            "charlie_munger inactive: %s (%s) -> routed to CASH",
+            cm_reason,
+            _inactive_input_hint(cm_details),
+        )
     # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
