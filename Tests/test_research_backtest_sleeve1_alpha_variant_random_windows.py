@@ -10,18 +10,13 @@ REQUIRED_COLUMNS = {
     "window_id",
     "start_date",
     "end_date",
-    "port_total_return",
-    "port_cagr",
-    "port_vol",
-    "port_sharpe",
-    "port_max_drawdown",
-    "port_beta_vs_spy",
-    "spy_total_return",
-    "spy_cagr",
-    "spy_vol",
-    "spy_sharpe",
-    "spy_max_drawdown",
-    "excess_cagr",
+    "avg_turnover",
+    "cost_bps",
+    "gross_port_cagr",
+    "net_port_cagr",
+    "gross_port_max_drawdown",
+    "net_port_max_drawdown",
+    "net_excess_cagr",
 }
 
 
@@ -39,6 +34,9 @@ def test_sleeve1_alpha_variant_random_windows_outputs_exist(tmp_path: Path):
         "--outdir",
         str(out_dir),
         "--synthetic",
+        "--apply-costs",
+        "--cost-bps",
+        "25",
     ]
     subprocess.run(cmd, check=True)
 
@@ -52,6 +50,10 @@ def test_sleeve1_alpha_variant_random_windows_outputs_exist(tmp_path: Path):
 
     df3 = pd.read_csv(out3)
     df5 = pd.read_csv(out5)
+    s = pd.read_csv(summary)
 
     assert REQUIRED_COLUMNS.issubset(df3.columns)
     assert REQUIRED_COLUMNS.issubset(df5.columns)
+    assert "net_excess_cagr" in df3.columns
+    assert "net_excess_cagr" in df5.columns
+    assert {"net_port_cagr", "net_port_max_drawdown", "net_excess_cagr"}.issubset(set(s["metric"].dropna()))

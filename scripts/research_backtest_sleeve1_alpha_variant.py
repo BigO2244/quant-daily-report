@@ -102,7 +102,13 @@ def _synthetic_prices(tickers: list[str], start: pd.Timestamp, end: pd.Timestamp
     return pd.DataFrame(rows)
 
 
-def run_backtest(start: pd.Timestamp, end: pd.Timestamp, synthetic: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run_backtest(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    synthetic: bool = False,
+    apply_costs: bool = False,
+    cost_bps: float = 25.0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     original_download = sleeve1.download_prices
 
     def _download_prices_full_history(tickers, period="1y", interval="1d"):
@@ -138,18 +144,41 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp, synthetic: bool = False
     weights = pd.Series(0.0, index=prices.columns)
     pending_weights: pd.Series | None = None
     ts_rows: list[dict] = []
-    nav = 1.0
+    gross_nav = 1.0
+    net_nav = 1.0
+    turnover_events: list[float] = []
+    total_cost_drag = 0.0
+    cost_rate = cost_bps / 10000.0
 
     for i, d in enumerate(dates):
+        turnover = 0.0
+        cost_t = 0.0
         if pending_weights is not None:
+            turnover = float((pending_weights - weights).abs().sum() / 2.0)
+            turnover_events.append(turnover)
+            cost_t = turnover * cost_rate if apply_costs else 0.0
+            total_cost_drag += cost_t
             weights = pending_weights
             pending_weights = None
         if i == 0 and weights.sum() == 0.0:
             rebalance_dates.add(d)
 
-        day_ret = float((weights * rets.loc[d].fillna(0.0)).sum()) if weights.sum() > 0 else 0.0
-        nav *= (1.0 + day_ret)
-        ts_rows.append({"date": d, "portfolio_ret": day_ret, "portfolio_nav": nav, "n_holdings": int((weights > 0).sum())})
+        gross_ret = float((weights * rets.loc[d].fillna(0.0)).sum()) if weights.sum() > 0 else 0.0
+        net_ret = gross_ret - cost_t
+        gross_nav *= (1.0 + gross_ret)
+        net_nav *= (1.0 + net_ret)
+        ts_rows.append(
+            {
+                "date": d,
+                "gross_portfolio_ret": gross_ret,
+                "net_portfolio_ret": net_ret,
+                "gross_nav": gross_nav,
+                "net_nav": net_nav,
+                "turnover": turnover,
+                "cost": cost_t,
+                "n_holdings": int((weights > 0).sum()),
+            }
+        )
 
         if d in rebalance_dates:
             day_rank = ranking[ranking["date"] == d].head(5)
@@ -173,20 +202,31 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp, synthetic: bool = False
     ts_df["spy_ret"] = ts_df["spy_ret"].fillna(0.0)
     ts_df["spy_nav"] = ts_df["spy_nav"].ffill().bfill()
 
-    p_total, p_cagr, p_vol, p_sharpe = _annualized_stats(ts_df["portfolio_ret"])
+    gross_total, gross_cagr, gross_vol, gross_sharpe = _annualized_stats(ts_df["gross_portfolio_ret"])
+    net_total, net_cagr, net_vol, net_sharpe = _annualized_stats(ts_df["net_portfolio_ret"])
     s_total, s_cagr, s_vol, s_sharpe = _annualized_stats(ts_df["spy_ret"])
+    avg_turnover = float(np.mean(turnover_events)) if turnover_events else 0.0
 
     summary = pd.DataFrame(
         [
             {
                 "start_date": start.date().isoformat(),
                 "end_date": end.date().isoformat(),
-                "total_return": p_total,
-                "cagr": p_cagr,
-                "vol": p_vol,
-                "sharpe": p_sharpe,
-                "max_drawdown": _max_drawdown(ts_df["portfolio_nav"]),
-                "beta_vs_spy": _beta_vs_spy(ts_df["portfolio_ret"], ts_df["spy_ret"]),
+                "gross_total_return": gross_total,
+                "gross_cagr": gross_cagr,
+                "gross_vol": gross_vol,
+                "gross_sharpe": gross_sharpe,
+                "gross_max_drawdown": _max_drawdown(ts_df["gross_nav"]),
+                "gross_beta_vs_spy": _beta_vs_spy(ts_df["gross_portfolio_ret"], ts_df["spy_ret"]),
+                "net_total_return": net_total,
+                "net_cagr": net_cagr,
+                "net_vol": net_vol,
+                "net_sharpe": net_sharpe,
+                "net_max_drawdown": _max_drawdown(ts_df["net_nav"]),
+                "net_beta_vs_spy": _beta_vs_spy(ts_df["net_portfolio_ret"], ts_df["spy_ret"]),
+                "avg_turnover": avg_turnover,
+                "cost_bps": float(cost_bps),
+                "total_cost_drag": float(total_cost_drag),
                 "spy_total_return": s_total,
                 "spy_cagr": s_cagr,
                 "spy_vol": s_vol,
@@ -220,7 +260,7 @@ def _write_equity_curve_png(ts_df: pd.DataFrame, path: Path) -> None:
     img[y1, x0 : x1 + 1] = 0
     img[y0 : y1 + 1, x0] = 0
 
-    nav = ts_df[["portfolio_nav", "spy_nav"]].replace([np.inf, -np.inf], np.nan).dropna()
+    nav = ts_df[["net_nav", "spy_nav"]].replace([np.inf, -np.inf], np.nan).dropna()
     if nav.empty or len(ts_df) <= 1:
         _write_png_rgb(path, img)
         return
@@ -243,14 +283,17 @@ def _write_equity_curve_png(ts_df: pd.DataFrame, path: Path) -> None:
                 img[y, x] = np.array(color, dtype=np.uint8)
 
     draw([to_xy(i, float(v)) for i, v in enumerate(ts_df["spy_nav"].ffill().fillna(1.0))], (40, 100, 240))
-    draw([to_xy(i, float(v)) for i, v in enumerate(ts_df["portfolio_nav"].ffill().fillna(1.0))], (220, 50, 32))
+    draw([to_xy(i, float(v)) for i, v in enumerate(ts_df["gross_nav"].ffill().fillna(1.0))], (180, 180, 180))
+    draw([to_xy(i, float(v)) for i, v in enumerate(ts_df["net_nav"].ffill().fillna(1.0))], (220, 50, 32))
     _write_png_rgb(path, img)
 
 
 def save_outputs(summary: pd.DataFrame, ts_df: pd.DataFrame, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary.to_csv(output_dir / "sleeve1_alpha_variant_summary.csv", index=False)
-    ts_df.to_csv(output_dir / "sleeve1_alpha_variant_timeseries.csv", index=False)
+    ts_df[["date", "gross_nav", "net_nav", "spy_nav"]].to_csv(
+        output_dir / "sleeve1_alpha_variant_timeseries.csv", index=False
+    )
     _write_equity_curve_png(ts_df, output_dir / "sleeve1_alpha_variant_equity_curve.png")
 
 
@@ -260,6 +303,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end", default="2025-12-31")
     parser.add_argument("--output-dir", default="outputs/research")
     parser.add_argument("--synthetic", action="store_true")
+    parser.add_argument("--cost-bps", type=float, default=25.0)
+    parser.add_argument("--apply-costs", action="store_true")
     return parser.parse_args()
 
 
@@ -267,7 +312,13 @@ def main() -> None:
     args = parse_args()
     start = pd.Timestamp(args.start)
     end = pd.Timestamp(args.end)
-    summary, ts_df = run_backtest(start=start, end=end, synthetic=args.synthetic)
+    summary, ts_df = run_backtest(
+        start=start,
+        end=end,
+        synthetic=args.synthetic,
+        apply_costs=args.apply_costs,
+        cost_bps=args.cost_bps,
+    )
     save_outputs(summary=summary, ts_df=ts_df, output_dir=Path(args.output_dir))
 
 
