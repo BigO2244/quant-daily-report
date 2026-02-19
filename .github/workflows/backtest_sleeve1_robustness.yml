@@ -1,0 +1,28 @@
+name: Sleeve1 Robustness Backtest
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 8 * * 1"
+
+jobs:
+  robustness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run Sleeve1 robustness backtest
+        run: |
+          python -m backtests.sleeve1_robustness --start 2005-01-01 --top_n 10
+      - name: Upload robustness artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sleeve1-robustness
+          path: outputs/backtests/sleeve1_robustness/**
+          if-no-files-found: error

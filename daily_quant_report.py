@@ -40,24 +40,6 @@ from sleeves.sleeve_trend.backtest import (
 )
 from sleeves.sleeve_trend import config as trend_cfg
 # ============================================================
-# Sleeve 2 — import module once; resolve symbols dynamically
-# ============================================================
-try:
-    import sleeves.sleeve_2.backtest as s2_mod
-except Exception:
-    s2_mod = None
-s2_run_backtest = getattr(s2_mod, "run_backtest", None) if s2_mod else None
-s2_run_backtest_details = (
-    getattr(s2_mod, "run_backtest_with_details", None) if s2_mod else None
-)
-s2_prepare_data = getattr(s2_mod, "prepare_data", None) if s2_mod else None
-s2_backtest = getattr(s2_mod, "backtest", None) if s2_mod else None
-try:
-    import sleeves.charlie_munger.backtest as cm_mod
-except Exception:
-    cm_mod = None
-cm_run_backtest_details = getattr(cm_mod, "run_backtest_with_details", None) if cm_mod else None
-# ============================================================
 # Email sender (exact repo-aware lookup)
 # ============================================================
 try:
@@ -87,14 +69,6 @@ from core.alpha_attribution import load_benchmark_prices  # noqa: E402
 from engine.backtest_engine import (  # noqa: E402
     infer_latest_entries,
     attach_entry_prices,
-)
-from sleeves.sleeve_2.config import (  # noqa: E402
-    STOP_ATR_MULT,
-    TAKE_PROFIT_ATR_MULT,
-    STOP_PCT,
-    TAKE_PROFIT_PCT,
-    LONG_THRESHOLD as S2_LONG_THRESHOLD,
-    Z_EXTREME_SHORT,
 )
 logger = logging.getLogger(__name__)
 # Backward-compatible alias for tests/patch points
@@ -1090,27 +1064,13 @@ def run_sleeve_trend():
     equity_df, trades_df = st_backtest(signals)
     return equity_df, trades_df, signals
 def run_sleeve_2():
-    if s2_run_backtest_details is not None:
-        logger.info("[SLEEVE 2] Running run_backtest_with_details()...")
-        return s2_run_backtest_details(period="1y", interval="1d")
-    if s2_run_backtest is not None:
-        logger.info("[SLEEVE 2] Running run_backtest()...")
-        equity_df, trades_df = s2_run_backtest(period="1y", interval="1d")
-        return {"equity_df": equity_df, "trades_df": trades_df}
-    if s2_prepare_data is not None and s2_backtest is not None:
-        logger.info("[SLEEVE 2] Preparing data...")
-        signals = s2_prepare_data()
-        logger.info("[SLEEVE 2] Running backtest...")
-        equity_df, trades_df = s2_backtest(signals)
-        return {"equity_df": equity_df, "trades_df": trades_df}
-    raise RuntimeError("No valid Sleeve 2 runner found")
+    """Sleeve 2 is temporarily disabled for robustness testing."""
+    logger.info("[SLEEVE 2] Disabled")
+    return {"equity_df": pd.DataFrame(), "trades_df": pd.DataFrame(), "target_weights": pd.DataFrame()}
 def run_charlie_munger():
-    """
-    Run Charlie Munger sleeve backtest and return details dict.
-    Keep this direct to avoid fragile "runner discovery" behavior.
-    """
-    from sleeves.charlie_munger.backtest import run_backtest_with_details
-    return run_backtest_with_details()
+    """Charlie sleeve is temporarily disabled for robustness testing."""
+    logger.info("[CHARLIE] Disabled")
+    return {"equity_df": pd.DataFrame(), "trades_df": pd.DataFrame(), "target_weights": pd.DataFrame()}
 def run_sleeve_charlie_munger():
     """Backward-compatible alias."""
     return run_charlie_munger()
@@ -2334,26 +2294,10 @@ def main(argv: list[str] | None = None):
                 pd.DataFrame(),
                 pd.DataFrame(),
             )
-        try:
-            s2_details = run_sleeve_2()
-            s2_equity = s2_details.get("equity_df", pd.DataFrame())
-            s2_trades = s2_details.get("trades_df", pd.DataFrame())
-        except Exception as e:
-            logger.warning("[WARN] Sleeve 2 failed: %s", e)
-            s2_details = {}
-            s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
-        try:
-            cm_runner = globals().get("run_sleeve_charlie_munger")
-            if callable(cm_runner):
-                cm_details = cm_runner()
-            else:
-                cm_details = run_charlie_munger()
-            cm_equity = cm_details.get("equity_df", pd.DataFrame())
-            cm_trades = cm_details.get("trades_df", pd.DataFrame())
-        except Exception as e:
-            logger.warning("[WARN] Sleeve Charlie Munger failed: %s", e)
-            cm_details = {}
-            cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
+        s2_details = {}
+        s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
+        cm_details = {}
+        cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
     # ── Sleeve health checks ─────────────────────────────────────
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
@@ -2388,11 +2332,11 @@ def main(argv: list[str] | None = None):
 
     allocator = PortfolioAllocator(
         risk_off=risk_off,
-        stash_sleeve_name=os.getenv("STASH_SLEEVE_NAME", "charlie_munger"),
-        risk_off_stash_pct=float(os.getenv("RISK_OFF_STASH_PCT", "1.0")),
+        stash_sleeve_name="CASH",
+        risk_off_stash_pct=0.0,
     )
 
-    alloc_result = allocator.allocate([trend_output, val_output, cm_output])
+    alloc_result = allocator.allocate([trend_output])
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
     _old_allocs = dict(alloc_result.sleeve_allocations)
 
@@ -2870,5 +2814,14 @@ def main(argv: list[str] | None = None):
             logger.warning("[WARN] Email not sent: %s", e)
     else:
         logger.warning("[WARN] send_email not found — HTML generated only")
+
+    if os.getenv("RUN_ROBUSTNESS_BACKTEST", "0").lower() in {"1", "true", "yes", "y"}:
+        try:
+            from backtests.sleeve1_robustness import main as run_robustness
+
+            run_robustness([])
+            logger.info("[OK] Ran sleeve1 robustness backtest")
+        except Exception as e:
+            logger.warning("[WARN] Robustness backtest failed: %s", e)
 if __name__ == "__main__":
     main()
