@@ -21,6 +21,7 @@ import os
 from typing import Optional
 
 import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -778,6 +779,8 @@ def holdings_snapshot_df(result: AllocationResult) -> pd.DataFrame:
     if result.combined_weights.empty:
         return pd.DataFrame(columns=["Ticker", "Weight %", "Sleeve"])
     df = result.combined_weights.copy()
+    if "sleeve_name" not in df.columns:
+        df["sleeve_name"] = np.where(df.get("ticker", "") == CASH_TICKER, "CASH", "sleeve_trend")
     df = df.rename(
         columns={
             "ticker": "Ticker",
@@ -785,6 +788,8 @@ def holdings_snapshot_df(result: AllocationResult) -> pd.DataFrame:
             "sleeve_name": "Sleeve",
         }
     )
+    if "Sleeve" not in df.columns:
+        df["Sleeve"] = np.where(df.get("Ticker", "") == CASH_TICKER, "CASH", "sleeve_trend")
     df["Weight %"] = df["Weight %"].apply(lambda x: f"{x:.2%}")
     return df[["Ticker", "Weight %", "Sleeve"]].sort_values(
         "Ticker", key=lambda x: x != CASH_TICKER
