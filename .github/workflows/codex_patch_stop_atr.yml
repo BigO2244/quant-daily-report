@@ -261,67 +261,7 @@ jobs:
         run: |
           git push -u origin fix/snapshot-stop-atr-mult-and-robustness
 
-      - name: Open PR with gh if available
-        id: pr_gh
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Next steps (manual PR)
         run: |
-          if command -v gh >/dev/null 2>&1; then
-            gh pr create \
-              --base main \
-              --head fix/snapshot-stop-atr-mult-and-robustness \
-              --title "Fix STOP_ATR_MULT NameError and make snapshot robust" \
-              --body "Root cause:\n- STOP_ATR_MULT could be referenced without robust default/config fallback in snapshot risk calc, causing NameError/failures in some paths.\n- Snapshot generation could fail on per-ticker stop/target calculations instead of degrading safely.\n\nHow fixed:\n- Added default/config/env resolution helper for snapshot risk params including STOP_ATR_MULT.\n- Added per-ticker try/except around stop/take-profit calculation and fallback behavior.\n- Added inactivity hint logging when target weights are unavailable.\n- Added regression test for STOP_ATR_MULT default resolution behavior.\n\nHow tested:\n- python -m pip install --upgrade pip\n- pip install -r requirements.txt\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 REPORT_DATE=2026-02-19 python3 daily_quant_report.py\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 python3 daily_quant_report.py\n- pytest -q"
-          fi
-
-      - name: Open PR with REST API fallback
-        if: steps.pr_gh.outcome != 'success'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          owner="${REPO%%/*}"
-          repo="${REPO##*/}"
-          payload=$(cat <<'JSON'
-          {
-            "title": "Fix STOP_ATR_MULT NameError and make snapshot robust",
-            "head": "fix/snapshot-stop-atr-mult-and-robustness",
-            "base": "main",
-            "body": "Root cause:\n- STOP_ATR_MULT could be referenced without robust default/config fallback in snapshot risk calc, causing NameError/failures in some paths.\n- Snapshot generation could fail on per-ticker stop/target calculations instead of degrading safely.\n\nHow fixed:\n- Added default/config/env resolution helper for snapshot risk params including STOP_ATR_MULT.\n- Added per-ticker try/except around stop/take-profit calculation and fallback behavior.\n- Added inactivity hint logging when target weights are unavailable.\n- Added regression test for STOP_ATR_MULT default resolution behavior.\n\nHow tested:\n- python -m pip install --upgrade pip\n- pip install -r requirements.txt\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 REPORT_DATE=2026-02-19 python3 daily_quant_report.py\n- PAPER_TRADING=1 DATE_FORMAT=US DISPLAY_DECIMALS=2 python3 daily_quant_report.py\n- pytest -q"
-          }
-          JSON
-          )
-
-          set +e
-          http_code=$(curl -sS -o pr_response.json -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${owner}/${repo}/pulls" \
-            -d "$payload")
-          set -e
-
-          HTTP_CODE="$http_code" python - <<'PY'
-          import json
-          import os
-          import sys
-          from pathlib import Path
-
-          code = int(os.environ["HTTP_CODE"])
-          data = json.loads(Path("pr_response.json").read_text(encoding="utf-8") or "{}")
-
-          if code in (200, 201):
-              print("PR created")
-              sys.exit(0)
-
-          msg = str(data.get("message", ""))
-          errs = data.get("errors") or []
-          text = msg + " " + json.dumps(errs)
-
-          if "A pull request already exists" in text or "already exists" in text:
-              print("PR already exists; continuing")
-              sys.exit(0)
-
-          print(f"PR creation failed with HTTP {code}: {data}")
-          sys.exit(1)
-          PY
+          echo "Branch pushed: fix/snapshot-stop-atr-mult-and-robustness"
+          echo "Create PR: https://github.com/${{ github.repository }}/compare/main...fix/snapshot-stop-atr-mult-and-robustness?expand=1"
