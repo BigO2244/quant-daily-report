@@ -380,6 +380,8 @@ def _write_equity_curve_png(ts_df: pd.DataFrame, path: Path) -> None:
 def save_outputs(summary: pd.DataFrame, ts_df: pd.DataFrame, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary.to_csv(output_dir / "sleeve1_alpha_variant_summary.csv", index=False)
+    required = {"exposure_multiplier", "gross_nav_cb", "net_nav_cb"}
+    assert required.issubset(ts_df.columns), f"Missing CB cols: {required - set(ts_df.columns)}; cols={list(ts_df.columns)}"
     ts_df[
         [
             "date",
