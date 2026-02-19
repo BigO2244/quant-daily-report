@@ -94,12 +94,25 @@ def _sample_windows(
     return windows
 
 
-def _window_metrics(seed: int, windows: list[tuple[pd.Timestamp, pd.Timestamp]], synthetic: bool) -> pd.DataFrame:
+def _window_metrics(
+    seed: int,
+    windows: list[tuple[pd.Timestamp, pd.Timestamp]],
+    synthetic: bool,
+    apply_costs: bool,
+    cost_bps: float,
+) -> pd.DataFrame:
     rows: list[dict] = []
     for idx, (start_date, end_date) in enumerate(windows, start=1):
-        summary, _ = run_backtest(start=start_date, end=end_date, synthetic=synthetic)
+        summary, _ = run_backtest(
+            start=start_date,
+            end=end_date,
+            synthetic=synthetic,
+            apply_costs=apply_costs,
+            cost_bps=cost_bps,
+        )
         record = summary.iloc[0].to_dict()
-        port_cagr = float(record["cagr"])
+        gross_port_cagr = float(record["gross_cagr"])
+        net_port_cagr = float(record["net_cagr"])
         spy_cagr = float(record["spy_cagr"])
         rows.append(
             {
@@ -107,18 +120,27 @@ def _window_metrics(seed: int, windows: list[tuple[pd.Timestamp, pd.Timestamp]],
                 "window_id": idx,
                 "start_date": start_date.date().isoformat(),
                 "end_date": end_date.date().isoformat(),
-                "port_total_return": float(record["total_return"]),
-                "port_cagr": port_cagr,
-                "port_vol": float(record["vol"]),
-                "port_sharpe": float(record["sharpe"]),
-                "port_max_drawdown": float(record["max_drawdown"]),
-                "port_beta_vs_spy": float(record["beta_vs_spy"]),
+                "avg_turnover": float(record["avg_turnover"]),
+                "cost_bps": float(record["cost_bps"]),
+                "gross_port_total_return": float(record["gross_total_return"]),
+                "gross_port_cagr": gross_port_cagr,
+                "gross_port_vol": float(record["gross_vol"]),
+                "gross_port_sharpe": float(record["gross_sharpe"]),
+                "gross_port_max_drawdown": float(record["gross_max_drawdown"]),
+                "gross_port_beta_vs_spy": float(record["gross_beta_vs_spy"]),
+                "net_port_total_return": float(record["net_total_return"]),
+                "net_port_cagr": net_port_cagr,
+                "net_port_vol": float(record["net_vol"]),
+                "net_port_sharpe": float(record["net_sharpe"]),
+                "net_port_max_drawdown": float(record["net_max_drawdown"]),
+                "net_port_beta_vs_spy": float(record["net_beta_vs_spy"]),
                 "spy_total_return": float(record["spy_total_return"]),
                 "spy_cagr": spy_cagr,
                 "spy_vol": float(record["spy_vol"]),
                 "spy_sharpe": float(record["spy_sharpe"]),
                 "spy_max_drawdown": float(record["spy_max_drawdown"]),
-                "excess_cagr": port_cagr - spy_cagr,
+                "gross_excess_cagr": gross_port_cagr - spy_cagr,
+                "net_excess_cagr": net_port_cagr - spy_cagr,
             }
         )
     return pd.DataFrame(rows)
@@ -128,7 +150,7 @@ def _summarize_windows(df_3y: pd.DataFrame, df_5y: pd.DataFrame) -> pd.DataFrame
     rows: list[dict] = []
 
     def add_percentiles(df: pd.DataFrame, horizon: str) -> None:
-        for metric in ["port_cagr", "port_max_drawdown", "excess_cagr"]:
+        for metric in ["net_port_cagr", "net_port_max_drawdown", "net_excess_cagr"]:
             s = df[metric]
             rows.append(
                 {
@@ -144,31 +166,31 @@ def _summarize_windows(df_3y: pd.DataFrame, df_5y: pd.DataFrame) -> pd.DataFrame
             )
 
     def add_worst(df: pd.DataFrame, horizon: str) -> None:
-        worst_excess = df[df["excess_cagr"] == df["excess_cagr"].min()]
+        worst_excess = df[df["net_excess_cagr"] == df["net_excess_cagr"].min()]
         for _, r in worst_excess.iterrows():
             rows.append(
                 {
                     "section": "worst_excess_cagr",
                     "horizon": horizon,
-                    "metric": "excess_cagr",
+                    "metric": "net_excess_cagr",
                     "window_id": int(r["window_id"]),
                     "start_date": r["start_date"],
                     "end_date": r["end_date"],
-                    "value": float(r["excess_cagr"]),
+                    "value": float(r["net_excess_cagr"]),
                 }
             )
 
-        worst_dd = df[df["port_max_drawdown"] == df["port_max_drawdown"].min()]
+        worst_dd = df[df["net_port_max_drawdown"] == df["net_port_max_drawdown"].min()]
         for _, r in worst_dd.iterrows():
             rows.append(
                 {
                     "section": "worst_max_drawdown",
                     "horizon": horizon,
-                    "metric": "port_max_drawdown",
+                    "metric": "net_port_max_drawdown",
                     "window_id": int(r["window_id"]),
                     "start_date": r["start_date"],
                     "end_date": r["end_date"],
-                    "value": float(r["port_max_drawdown"]),
+                    "value": float(r["net_port_max_drawdown"]),
                 }
             )
 
@@ -186,6 +208,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n5", type=int, default=10)
     parser.add_argument("--outdir", default="outputs/research")
     parser.add_argument("--synthetic", action="store_true")
+    parser.add_argument("--cost-bps", type=float, default=25.0)
+    parser.add_argument("--apply-costs", action="store_true")
     return parser.parse_args()
 
 
@@ -214,8 +238,20 @@ def main() -> None:
         sample_start_max=pd.Timestamp("2021-12-31"),
     )
 
-    df_3y = _window_metrics(seed=args.seed, windows=windows_3y, synthetic=args.synthetic)
-    df_5y = _window_metrics(seed=args.seed, windows=windows_5y, synthetic=args.synthetic)
+    df_3y = _window_metrics(
+        seed=args.seed,
+        windows=windows_3y,
+        synthetic=args.synthetic,
+        apply_costs=args.apply_costs,
+        cost_bps=args.cost_bps,
+    )
+    df_5y = _window_metrics(
+        seed=args.seed,
+        windows=windows_5y,
+        synthetic=args.synthetic,
+        apply_costs=args.apply_costs,
+        cost_bps=args.cost_bps,
+    )
     summary_df = _summarize_windows(df_3y=df_3y, df_5y=df_5y)
 
     df_3y.to_csv(outdir / "sleeve1_alpha_random_windows_3y.csv", index=False)
