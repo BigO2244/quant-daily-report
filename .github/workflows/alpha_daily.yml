@@ -1,0 +1,66 @@
+name: Alpha Daily Run
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "15 11 * * 1-5"
+
+jobs:
+  alpha:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate alpha report (refresh data)
+        env:
+          DATE_FORMAT: "US"
+        run: |
+          python3 scripts/alpha_report.py --apply-costs --cost-bps 25
+
+      - name: Update live shadow NAV ledger + regenerate report
+        run: |
+          python3 scripts/daily_alpha_run.py
+
+      - name: Email alpha report
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.EMAIL_SENDER }}
+          SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+        run: |
+          python3 scripts/email_alpha_report.py
+
+      - name: Upload alpha report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-report
+          path: outputs/alpha_report
+
+      - name: Commit updated live NAV ledger
+        run: |
+          if git status --porcelain | grep -q "data/live_nav.csv"; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git add data/live_nav.csv
+            git commit -m "Update live NAV ledger"
+            git push
+          else
+            echo "No ledger changes to commit."
+          fi

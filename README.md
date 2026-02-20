@@ -31,3 +31,15 @@ Key parameters:
 Paper broker runtime state (ledger/trades) is stored in `outputs/paper_state/` by default.
 Set `PAPER_STATE_DIR` to override this location.
 Legacy `paper/ledger.csv` and `paper/trades.csv` are treated only as one-time seed inputs when state files are first initialized.
+
+## Alpha standalone report (local)
+
+```bash
+python3 scripts/alpha_report.py --apply-costs --cost-bps 25
+python3 scripts/daily_alpha_run.py
+SMTP_HOST=... SMTP_PORT=... SMTP_USER=... SMTP_PASSWORD=... REPORT_TO_EMAIL=... python3 scripts/email_alpha_report.py
+```
+
+Notes:
+- Requires `matplotlib` (plus pandas/numpy).
+- Uses artifacts in `outputs/research` as source inputs.
