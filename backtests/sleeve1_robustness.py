@@ -87,12 +87,12 @@ def run_backtest(config: RobustnessConfig) -> dict[str, pd.DataFrame | dict]:
     prices = download_prices(tickers, period="max", interval="1d")
     prices = prices[prices["date"].between(start - pd.Timedelta(days=420), end)].copy()
     close = prices.pivot(index="date", columns="ticker", values="close").sort_index()
-    month_end = close.resample("ME").last()
+    month_end = close.resample("M").last()
 
     spy_daily = close["SPY"].dropna()
     spy_200d = spy_daily.rolling(200, min_periods=200).mean()
     gate_daily = spy_daily >= spy_200d
-    gate = gate_daily.resample("ME").last().reindex(month_end.index).astype("boolean").fillna(False).shift(1).fillna(False)
+    gate = gate_daily.resample("M").last().reindex(month_end.index).astype("boolean").fillna(False).shift(1).fillna(False)
     spy = month_end["SPY"].dropna()
 
     asset_month = month_end.reindex(columns=universe)

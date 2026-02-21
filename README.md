@@ -43,3 +43,7 @@ SMTP_HOST=... SMTP_PORT=... SMTP_USER=... SMTP_PASSWORD=... REPORT_TO_EMAIL=... 
 Notes:
 - Requires `matplotlib` (plus pandas/numpy).
 - Uses artifacts in `outputs/research` as source inputs.
+
+## Audit Workflows
+
+Audit export and Monte Carlo workflows are documented in `docs/audit.md`.
