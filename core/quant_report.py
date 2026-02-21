@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from core.email_env import resolve_email_env
+
 logger = logging.getLogger(__name__)
 
 IN_CI = os.getenv("CI", "").lower() == "true" or bool(os.getenv("GITHUB_ACTIONS"))
@@ -498,41 +500,19 @@ def send_email(
     subject: str, body_html: Optional[str] = None, body_text: Optional[str] = None
 ) -> None:
     """Send HTML/email using EMAIL_* as canonical env with legacy fallback."""
+    resolved = resolve_email_env()
+    missing = list(resolved.get("missing") or [])
+    if missing:
+        raise RuntimeError(
+            "Missing required email env vars for logical fields: "
+            f"{', '.join(missing)}. "
+            "Supported aliases: "
+            "sender=EMAIL_SENDER|SMTP_USER|REPORT_EMAIL_FROM; "
+            "password=EMAIL_APP_PASSWORD|SMTP_PASSWORD; "
+            "recipient=EMAIL_RECIPIENT|REPORT_TO_EMAIL|REPORT_EMAIL_TO."
+        )
 
-    def _resolve_email_env() -> dict[str, str]:
-        sender = os.environ.get("EMAIL_SENDER", "").strip() or os.environ.get("SMTP_USER", "").strip()
-        app_password = os.environ.get("EMAIL_APP_PASSWORD", "").strip() or os.environ.get(
-            "SMTP_PASSWORD", ""
-        ).strip()
-        recipient = os.environ.get("EMAIL_RECIPIENT", "").strip() or os.environ.get(
-            "REPORT_TO_EMAIL", ""
-        ).strip()
-
-        required = {
-            "EMAIL_SENDER": sender,
-            "EMAIL_APP_PASSWORD": app_password,
-            "EMAIL_RECIPIENT": recipient,
-        }
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(
-                "Missing required email env vars "
-                "(EMAIL_SENDER/EMAIL_APP_PASSWORD/EMAIL_RECIPIENT; "
-                "legacy aliases: SMTP_USER/SMTP_PASSWORD/REPORT_TO_EMAIL). "
-                f"Missing: {', '.join(missing)}"
-            )
-
-        return {
-            "SMTP_HOST": os.environ.get("SMTP_HOST", "").strip() or "smtp.gmail.com",
-            "SMTP_PORT": os.environ.get("SMTP_PORT", "").strip() or "587",
-            "SMTP_USER": os.environ.get("SMTP_USER", "").strip() or sender,
-            "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD", "").strip()
-            or app_password,
-            "REPORT_TO_EMAIL": os.environ.get("REPORT_TO_EMAIL", "").strip()
-            or recipient,
-        }
-
-    normalized = _resolve_email_env()
+    normalized = dict(resolved.get("legacy_env") or {})
 
     # Backward-compatibility: downstream code reads SMTP_* and REPORT_TO_EMAIL.
     os.environ.update(normalized)

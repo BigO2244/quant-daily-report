@@ -35,6 +35,7 @@ def write_signals_snapshot(
     ticker_col: str = "ticker",
     weight_col: str = "target_weight",
     model_version: str | None = None,
+    extra: dict | None = None,
 ) -> str:
     """
     Writes signals/YYYY-MM-DD.json
@@ -69,6 +70,14 @@ def write_signals_snapshot(
     df[ticker_col] = df[ticker_col].astype(str).str.upper().str.strip()
     df = df[df[ticker_col].str.len() > 0].copy()
 
+    # If all target weights are zero/non-positive (e.g., breaker lock), emit CASH-only.
+    weight_sum = float(pd.to_numeric(df.get(weight_col), errors="coerce").fillna(0.0).sum())
+    if weight_sum <= 0.0:
+        cash_row = {ticker_col: "CASH", weight_col: 1.0}
+        if sleeve_col:
+            cash_row[sleeve_col] = "core"
+        df = pd.DataFrame([cash_row])
+
     # Normalize weights to sum to 1
     df = normalize_weights(df, weight_col=weight_col)
 
@@ -97,6 +106,8 @@ def write_signals_snapshot(
         payload["meta"]["model_version"] = model_version
     if cash_target_weight is not None:
         payload["cash_target_weight"] = float(cash_target_weight)
+    if extra:
+        payload.update(extra)
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)

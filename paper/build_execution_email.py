@@ -147,6 +147,8 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     pricing_asof = str(payload.get("pricing_asof", "") or "")
     pricing_disclaimer = payload.get("pricing_disclaimer")
     turnover_note = payload.get("turnover_note")
+    status_label = payload.get("status_label")
+    status_reason = payload.get("status_reason")
 
     subject = f"TRADE EXECUTION — {trade_date} ({mode})"
 
@@ -180,6 +182,10 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
             lines.append(f"Planned For: {_fmt_planned_for(planned_for)}")
         if plan_only:
             lines.append("Planning email only — no orders were sent.")
+    if status_label:
+        lines.append(f"Execution Detail: {str(status_label)}")
+    if status_reason:
+        lines.append(f"Execution Reason: {str(status_reason)}")
 
     if turnover_note:
         lines.append(f"Risk Note: {turnover_note}")
@@ -437,12 +443,18 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     status = str(payload.get("execution_status", "READY")).upper()
     mode = str(payload.get("mode", "SHADOW")).upper()
     trade_date = str(payload.get("trade_date", dt.date.today().isoformat()))
+    status_label = payload.get("status_label")
+    status_reason = payload.get("status_reason")
 
     header_items = [
         f"<li><b>Mode:</b> {escape(mode)}</li>",
         f"<li><b>Trade Date:</b> {escape(trade_date)}</li>",
         f"<li><b>Execution Status:</b> {escape(status)}</li>",
     ]
+    if status_label:
+        header_items.append(f"<li><b>Execution Detail:</b> {escape(str(status_label))}</li>")
+    if status_reason:
+        header_items.append(f"<li><b>Execution Reason:</b> {escape(str(status_reason))}</li>")
     if payload.get("turnover_note"):
         header_items.append(f"<li><b>Risk Note:</b> {escape(str(payload.get('turnover_note')))}</li>")
 

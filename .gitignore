@@ -15,3 +15,15 @@ signals/
 signals/*.json
 signals_store/
 signals_store/
+
+# Local drop/hold area (never push)
+hold/
+
+# Local runtime artifacts
+data/live_nav.csv
+
+# Experimental breaker research/scripts (kept out of main by default)
+research/validate_breaker_*.py
+scripts/alpha_report.py
+scripts/daily_alpha_run.py
+scripts/email_alpha_report.py

@@ -1,6 +1,7 @@
 import pytest
 
 from core import quant_report
+from core.email_env import resolve_email_env
 
 
 class _DummySMTP:
@@ -77,3 +78,41 @@ def test_send_email_accepts_legacy_smtp_env_without_email_vars(monkeypatch):
     assert quant_report.os.environ["SMTP_USER"] == "legacy-sender@example.com"
     assert quant_report.os.environ["SMTP_PASSWORD"] == "legacy-pass"
     assert quant_report.os.environ["REPORT_TO_EMAIL"] == "legacy-recipient@example.com"
+
+
+def test_resolve_email_env_accepts_legacy_aliases(monkeypatch):
+    monkeypatch.delenv("EMAIL_SENDER", raising=False)
+    monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
+    monkeypatch.delenv("EMAIL_RECIPIENT", raising=False)
+    monkeypatch.setenv("SMTP_USER", "legacy-sender@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "legacy-pass")
+    monkeypatch.setenv("REPORT_TO_EMAIL", "legacy-recipient@example.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_PORT", "2525")
+
+    resolved = resolve_email_env()
+
+    assert resolved["sender"] == "legacy-sender@example.com"
+    assert resolved["password"] == "legacy-pass"
+    assert resolved["recipient"] == "legacy-recipient@example.com"
+    assert resolved["missing"] == []
+    assert resolved["smtp_host"] == "smtp.example.com"
+    assert resolved["smtp_port"] == "2525"
+
+
+def test_resolve_email_env_prefers_email_aliases_over_legacy(monkeypatch):
+    monkeypatch.setenv("EMAIL_SENDER", "modern-sender@example.com")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "modern-pass")
+    monkeypatch.setenv("EMAIL_RECIPIENT", "modern-recipient@example.com")
+    monkeypatch.setenv("SMTP_USER", "legacy-sender@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "legacy-pass")
+    monkeypatch.setenv("REPORT_TO_EMAIL", "legacy-recipient@example.com")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "alt-from@example.com")
+    monkeypatch.setenv("REPORT_EMAIL_TO", "alt-to@example.com")
+
+    resolved = resolve_email_env()
+
+    assert resolved["sender"] == "modern-sender@example.com"
+    assert resolved["password"] == "modern-pass"
+    assert resolved["recipient"] == "modern-recipient@example.com"
+    assert resolved["missing"] == []

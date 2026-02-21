@@ -168,11 +168,19 @@ def load_targets(
     target_cash_weight = max(0.0, min(1.0, target_cash_weight))
 
     non_cash = df[df["ticker"] != "CASH"].copy()
+    non_cash = non_cash[non_cash["target_weight"].abs() > 1e-12].copy()
     non_cash_sum = float(non_cash["target_weight"].sum())
+    investable_weight_target = 1.0 - target_cash_weight
     if non_cash_sum <= 0:
+        if investable_weight_target <= 1e-9:
+            return (
+                non_cash[["ticker", "sleeve", "target_weight"]],
+                target_cash_weight,
+                snapshot_date,
+                meta.get("asof_date"),
+            )
         raise ValueError("Signals non-cash target_weight sum <= 0")
 
-    investable_weight_target = 1.0 - target_cash_weight
     if abs(non_cash_sum - investable_weight_target) <= 1e-6:
         pass
     elif abs(non_cash_sum - 1.0) <= 1e-6:
@@ -963,6 +971,23 @@ def run_paper_day(
         runtime_constraints.get("cash_target_weight", cfg.cash_target_weight_default)
     )
 
+    breaker_mode = str(os.getenv("BREAKER_MODE", "partial")).strip().lower()
+    breaker_mode_source = "env"
+    try:
+        with open(signals_path, "r", encoding="utf-8") as f:
+            signal_obj = json.load(f)
+        if isinstance(signal_obj, dict):
+            signal_breaker = signal_obj.get("breaker") or {}
+            signal_breaker_mode = signal_breaker.get("mode")
+            if signal_breaker_mode is not None:
+                breaker_mode = str(signal_breaker_mode).strip().lower()
+                breaker_mode_source = "signals"
+    except Exception:
+        pass
+    if breaker_mode not in {"off", "partial", "lock"}:
+        breaker_mode = "partial"
+        breaker_mode_source = "default"
+
     targets, target_cash_weight, snapshot_date, asof_date = load_targets(
         signals_path,
         cash_target_weight_default=cash_target_weight_default,
@@ -973,7 +998,8 @@ def run_paper_day(
         if not holdings_prev.empty:
             held = set(holdings_prev["ticker"].astype(str).str.upper())
             targets = targets[targets["ticker"].astype(str).str.upper().isin(held)].copy()
-        target_cash_weight = 0.0
+        # Preserve model/snapshot cash target (e.g., breaker overlays) on exit-only days.
+        target_cash_weight = max(0.0, min(1.0, float(target_cash_weight)))
     if snapshot_date and snapshot_date != run_date:
         raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")
 
@@ -1073,9 +1099,12 @@ def run_paper_day(
         if blocked_tickers:
             targets = targets[~targets["ticker"].astype(str).isin(set(blocked_tickers.keys()))].copy()
         wsum = float(targets["target_weight"].sum())
-        if wsum <= 0:
-            raise RuntimeError("After dropping missing-priced/blocked tickers, no targets remain.")
-        targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
+        if investable_weight <= 1e-12:
+            targets = targets.iloc[0:0].copy()
+        else:
+            if wsum <= 0:
+                raise RuntimeError("After dropping missing-priced/blocked tickers, no targets remain.")
+            targets["target_weight"] = targets["target_weight"] / wsum * investable_weight
 
     market_closed_or_not_session = not bool(mkt.is_open_now)
     if market_closed_or_not_session:
@@ -1138,6 +1167,23 @@ def run_paper_day(
             )
             blocked = True
             trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
+
+    if breaker_mode == "lock" and trades is not None and not trades.empty:
+        side_series = (
+            trades["side"].astype(str).str.upper()
+            if "side" in trades.columns
+            else pd.Series([""] * len(trades), index=trades.index, dtype=str)
+        )
+        sell_mask = side_series.isin({"SELL", "CLOSE", "REDUCE"})
+        dropped_non_sell = int((~sell_mask).sum())
+        trades = trades.loc[sell_mask].copy()
+        logger.info(
+            "[BREAKER] lock mode sells-only filter applied dropped_non_sell=%d kept=%d",
+            dropped_non_sell,
+            int(len(trades)),
+        )
+        if dropped_non_sell > 0:
+            blocked_reasons.append(f"breaker_lock_filtered_non_sell:{dropped_non_sell}")
 
     executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(trades, cfg)
 
@@ -1316,4 +1362,8 @@ def run_paper_day(
         "shadow_orders_path": shadow_orders_path,
         "run_id": run_id,
         "broker_reconciliation": recon,
+        "breaker": {
+            "mode": breaker_mode,
+            "mode_source": breaker_mode_source,
+        },
     }

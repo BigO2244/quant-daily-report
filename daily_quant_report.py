@@ -25,6 +25,8 @@ from paper.nav2 import update_nav
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
+from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
+
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
 # ============================================================
@@ -376,6 +378,52 @@ def _should_execute_run(*, trade_date_str: str, today_et_str: str, paper_summary
     return should_execute, is_planning_run, market_is_open_for_trade_date
 
 
+def _apply_breaker_allocation_diagnostics(
+    allocation_diagnostics: dict | None,
+    daily_snapshot: dict | None,
+) -> dict:
+    diagnostics = dict(allocation_diagnostics or {})
+    sleeve1 = dict((diagnostics.get("sleeve_1") or {}))
+    snapshot = daily_snapshot or {}
+    breaker = (snapshot.get("breaker") or {}) if isinstance(snapshot, dict) else {}
+
+    mode = str(breaker.get("mode", "")).strip().lower()
+    multiplier = _coerce_float_or_none(breaker.get("exposure_multiplier_today"))
+    invested_after = _coerce_float_or_none(breaker.get("invested_after_overlay"))
+    if invested_after is None:
+        target_cash = _coerce_float_or_none(snapshot.get("target_cash_weight"))
+        if target_cash is not None:
+            invested_after = max(0.0, min(1.0, 1.0 - target_cash))
+
+    if invested_after is None:
+        diagnostics["sleeve_1"] = sleeve1
+        return diagnostics
+
+    invested_after = max(0.0, min(1.0, invested_after))
+    forced_cash_post = max(0.0, min(1.0, 1.0 - invested_after))
+
+    desired_pre = _coerce_float_or_none(sleeve1.get("desired_allocation"))
+    if desired_pre is not None and multiplier is not None:
+        multiplier = max(0.0, min(1.0, multiplier))
+        sleeve1["desired_allocation_pre_breaker"] = desired_pre
+        sleeve1["desired_allocation"] = max(0.0, min(1.0, desired_pre * multiplier))
+
+    sleeve1["achieved_invested"] = invested_after
+    sleeve1["forced_cash"] = forced_cash_post
+
+    existing_constraint = str(sleeve1.get("limiting_constraint", "") or "").strip()
+    if mode == "lock":
+        sleeve1["limiting_constraint"] = "BREAKER_MODE=lock"
+    elif mode == "partial":
+        if existing_constraint and existing_constraint.lower() != "none":
+            sleeve1["limiting_constraint"] = f"BREAKER_MODE=partial + {existing_constraint}"
+        else:
+            sleeve1["limiting_constraint"] = "BREAKER_MODE=partial"
+
+    diagnostics["sleeve_1"] = sleeve1
+    return diagnostics
+
+
 def build_execution_email_payload(
     trade_date: str,
     daily_snapshot: dict,
@@ -414,6 +462,15 @@ def build_execution_email_payload(
         if any("signal_date_mismatch" in str(r) for r in blocked):
             status = "HALTED"
             halted_reason = "SIGNAL DATE MISMATCH"
+    paper_breaker = (paper_summary or {}).get("breaker") if isinstance(paper_summary, dict) else {}
+    snapshot_breaker = (daily_snapshot or {}).get("breaker") if isinstance(daily_snapshot, dict) else {}
+    breaker_mode = str(
+        (paper_breaker or {}).get("mode")
+        or (snapshot_breaker or {}).get("mode")
+        or os.getenv("BREAKER_MODE", "partial")
+    ).strip().lower()
+    if breaker_mode not in {"off", "partial", "lock"}:
+        breaker_mode = "partial"
     risk_map = {r.get("ticker"): r for r in (daily_snapshot.get("risk_levels", []) or []) if r.get("ticker")}
     holdings_shares = {
         str(h.get("ticker")): _coerce_whole_shares(h.get("shares"))
@@ -515,7 +572,22 @@ def build_execution_email_payload(
                 "order_id": row.get("order_id"),
             }
         )
+    if breaker_mode == "lock":
+        trades = [
+            t for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"}
+        ]
     trades = sorted(trades, key=lambda x: (x.get("ticker") or "", x.get("side") or ""))
+    buy_count = sum(1 for t in trades if str(t.get("side", "")).upper() == "BUY")
+    sell_count = sum(1 for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"})
+    status_label = None
+    status_reason = None
+    if breaker_mode == "lock":
+        if trades and buy_count == 0 and sell_count > 0:
+            status_label = "EXIT ORDERS (BREAKER LOCK)"
+            status_reason = "BREAKER_MODE=lock — liquidation-only"
+        elif not trades:
+            status_label = "LOCKED (NO ORDERS)"
+            status_reason = "BREAKER_MODE=lock — already at cash"
     order_ids = sorted(
         [t.get("order_id") for t in trades if t.get("order_id")],
         key=lambda oid: tuple((str(oid).split(":"))[-2:]) if ":" in str(oid) else ("", str(oid)),
@@ -562,9 +634,13 @@ def build_execution_email_payload(
             net_exposure = sum(signed)
         except Exception:
             net_exposure = None
+    snapshot_target_cash_weight_raw = (daily_snapshot or {}).get("target_cash_weight")
+    snapshot_target_cash_weight = _coerce_float_or_none(snapshot_target_cash_weight_raw)
     target_cash_weight_raw = (paper_summary or {}).get("target_cash_weight")
     achieved_cash_weight_raw = (paper_summary or {}).get("achieved_cash_weight")
     target_cash_weight = _coerce_float_or_none(target_cash_weight_raw)
+    if target_cash_weight is None:
+        target_cash_weight = snapshot_target_cash_weight
     achieved_cash_weight = _coerce_float_or_none(achieved_cash_weight_raw)
     risk_summary = {
         "Turnover requested ($)": f"${turnover_requested:,.2f}" if turnover_requested is not None else "unavailable",
@@ -587,6 +663,8 @@ def build_execution_email_payload(
         "mode": mode,
         "execution_status": status,
         "halt_reason": halted_reason,
+        "status_label": status_label,
+        "status_reason": status_reason,
         "market_status": (paper_summary or {}).get("market_status"),
         "market_reason": (paper_summary or {}).get("market_reason"),
         "planned_for": planned_for,
@@ -604,8 +682,13 @@ def build_execution_email_payload(
         "proposed_trades_intent_count": proposed_trades_intent_count,
         "proposed_trades_intent": proposed_trades_intent_count,
         "executable_trades_count": int(len(trades)),
+        "buys": int(buy_count),
+        "sells": int(sell_count),
         "min_trade_dollars": min_trade_dollars,
         "filter_stats": filter_stats,
+        "breaker": {
+            "mode": breaker_mode,
+        },
         "risk_meta": {
             "turnover_requested": turnover_requested,
             "turnover_cap": turnover_cap,
@@ -639,6 +722,8 @@ def build_execution_email_payload(
                 ),
             }
         )
+        if breaker_mode == "lock":
+            payload["no_trades_reason"] = "BREAKER_MODE=lock — already at cash"
         if turnover_scaled and turnover_requested is not None and turnover_cap is not None and turnover_scale is not None:
             payload["no_trades_reason"] = (
                 f"Turnover cap scaling applied (requested ${turnover_requested:,.2f} vs cap ${turnover_cap:,.2f}, "
@@ -713,7 +798,9 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     allocations = snapshot.get("allocations", {}) or {}
     sleeve_splits = allocations.get("sleeves", {}) or {}
     cash_pct = allocations.get("cash", 0.0)
-    target_cash = snapshot.get("target_cash_weight", cash_pct)
+    target_cash = snapshot.get("target_cash_weight")
+    if target_cash is None:
+        target_cash = snapshot.get("cash_target", cash_pct)
     perf = snapshot.get("performance_summary", {}) or {}
     diagnostics = snapshot.get("performance_diagnostics", {}) or {}
     alpha = snapshot.get("alpha_attribution", {}) or {}
@@ -738,6 +825,11 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     executable_count = (execution_payload or {}).get("executable_trades_count") if execution_payload else None
     if executable_count is None:
         executable_count = len(exec_trades)
+    exec_status_label = (
+        str((execution_payload or {}).get("status_label"))
+        if (execution_payload or {}).get("status_label")
+        else ("NO TRADES" if not exec_trades else "TRADES READY")
+    )
     def _primary_no_trade_reason() -> str:
         payload = execution_payload or {}
         if not payload:
@@ -755,6 +847,17 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
             return f"minimum notional filter (${float(min_trade):,.0f})"
         return "already at target / rounded to zero shares"
     exec_no_trade_reason = _primary_no_trade_reason()
+    exec_status_reason = (execution_payload or {}).get("status_reason") if execution_payload else None
+    if not exec_status_reason:
+        exec_status_reason = exec_no_trade_reason
+    breaker_mode_for_exec = str((((execution_payload or {}).get("breaker") or {}).get("mode") or "")).strip().lower()
+    intent_suffix = ""
+    if breaker_mode_for_exec == "lock":
+        try:
+            if int(intent_from_payload or 0) == 0:
+                intent_suffix = " (breaker overrides)"
+        except Exception:
+            intent_suffix = " (breaker overrides)"
     nav_metrics = snapshot.get("nav_metrics", {}) or {}
     inception_metrics = snapshot.get("inception_metrics", {}) or {}
     alloc_diag = snapshot.get("allocation_diagnostics", {}) or {}
@@ -813,7 +916,8 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         f"• SPY Since Inception: {_fmt_pct(inception_metrics.get('spy_return_since_inception'))}",
         "",
         "ALLOCATION DIAGNOSTICS",
-        f"• Sleeve 1 desired allocation: {_fmt_pct(sleeve1_diag.get('desired_allocation'))}",
+        f"• Sleeve 1 desired allocation (post-breaker): {_fmt_pct(sleeve1_diag.get('desired_allocation'))}",
+        f"• Sleeve 1 desired allocation (pre-breaker): {_fmt_pct(sleeve1_diag.get('desired_allocation_pre_breaker'))}" if sleeve1_diag.get("desired_allocation_pre_breaker") is not None else None,
         f"• Sleeve 1 achieved invested: {_fmt_pct(sleeve1_diag.get('achieved_invested'))}",
         f"• Sleeve 1 forced cash: {_fmt_pct(sleeve1_diag.get('forced_cash'))}",
         f"• Sleeve 1 cap names: {sleeve1_diag.get('selected_names', 'n/a')} selected / {sleeve1_diag.get('min_required_names', 'n/a')} required",
@@ -852,13 +956,14 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
             "",
             "TRADES FOR TODAY (NEW ORDERS — EXECUTION PAYLOAD)",
             f"• Executable Trades: {int(executable_count or 0)}" if execution_payload else "• Executable Trades: unavailable (execution payload missing)",
-            f"• Status: {'NO TRADES' if not exec_trades else 'TRADES READY'}" if execution_payload else "• Status: unavailable (execution payload missing)",
-            f"• Reason: {exec_no_trade_reason}" if execution_payload else "• Reason: execution payload missing",
+            f"• Status: {exec_status_label}" if execution_payload else "• Status: unavailable (execution payload missing)",
+            f"• Reason: {exec_status_reason}" if execution_payload else "• Reason: execution payload missing",
             "",
             "MODEL INTENT (PRE-CONSTRAINTS)",
-            f"• Proposed Intent Count: {int(intent_from_payload)}" if intent_from_payload is not None else "• Proposed Intent Count: unavailable (execution payload missing)",
+            f"• Proposed Intent Count: {int(intent_from_payload)}{intent_suffix}" if intent_from_payload is not None else "• Proposed Intent Count: unavailable (execution payload missing)",
             f"• Executable Trades Count: {int(executable_count or 0)}" if execution_payload else "• Executable Trades Count: unavailable (execution payload missing)",
             f"• Primary Non-Execution Reason: {exec_no_trade_reason}" if execution_payload and int(executable_count or 0) == 0 else "• Primary Non-Execution Reason: n/a (orders are executable)",
+            f"• Breaker Mode: {breaker_mode_for_exec.upper()}" if breaker_mode_for_exec else "• Breaker Mode: n/a",
             "• Note: Model intent is pre-constraints; executable orders reflect market/constraint filters.",
             "",
             "SYSTEM HEALTH",
@@ -869,6 +974,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
             "— Automated Portfolio Engine",
         ]
     )
+    lines = [line for line in lines if line is not None]
     return subject, "\n".join(lines)
 def _normalize_weights(sleeve_allocations: dict[str, float], cash_weight: float) -> tuple[dict[str, float], float]:
     sleeves = {k: max(0.0, float(v)) for k, v in (sleeve_allocations or {}).items()}
@@ -1582,6 +1688,12 @@ def build_daily_snapshot(
     )
     stop_pct = _snapshot_risk_value("STOP_PCT", STOP_PCT_DEFAULT)
     take_profit_pct = _snapshot_risk_value("TAKE_PROFIT_PCT", TAKE_PROFIT_PCT_DEFAULT)
+    target_cash_weight_today = float(max(0.0, min(1.0, getattr(alloc_result, "cash_weight", 0.0))))
+    breaker_cfg = get_breaker_config()
+    exposure_today = float(breaker_cfg.get("exposure_multiplier", 1.0))
+    exposure_label = str(breaker_cfg.get("label", "UNKNOWN"))
+    invested_before_overlay = 0.0
+    invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
 
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
@@ -1635,13 +1747,43 @@ def build_daily_snapshot(
     else:
         run_date_str = report_date.strftime("%Y-%m-%d")
         cutoff_date = prev_trading_day(run_date_str)
+
+        invested_before_overlay = float(weights_df["target_weight"].sum()) if not weights_df.empty else 0.0
+        weights_df_overlay = apply_portfolio_exposure_overlay(weights_df, exposure_today, cash_ticker="CASH")
+        invested_after_overlay = 0.0
+        if isinstance(weights_df_overlay, pd.DataFrame) and not weights_df_overlay.empty:
+            non_cash = weights_df_overlay[weights_df_overlay["ticker"].astype(str) != CASH_TICKER].copy()
+            invested_after_overlay = float(non_cash["target_weight"].sum()) if not non_cash.empty else 0.0
+            weights_df = non_cash[non_cash["target_weight"].abs() > WEIGHT_TOLERANCE].copy()
+        target_cash_weight_today = max(0.0, min(1.0, 1.0 - invested_after_overlay))
+        logger.info(
+            "[BREAKER] overlay applied multiplier=%.4f invested_before=%.4f invested_after=%.4f cash_target=%.4f",
+            float(exposure_today),
+            invested_before_overlay,
+            invested_after_overlay,
+            target_cash_weight_today,
+        )
+
+        breaker_block = {
+            "breaker": {
+                "mode": breaker_cfg.get("mode", "partial"),
+                "exposure_multiplier_today": exposure_today,
+                "exposure_label_today": exposure_label,
+                "invested_before_overlay": invested_before_overlay,
+                "invested_after_overlay": invested_after_overlay,
+                "cash_target_weight_today": target_cash_weight_today,
+            }
+        }
+
+        # Persist breaker-aware targets for execution/audit.
         signals_path = write_signals_snapshot(
             df_targets=weights_df,
             run_date=run_date_str,
             asof_date=cutoff_date,
             out_dir="signals",
-            cash_target_weight=float(alloc_result.cash_weight),
+            cash_target_weight=float(target_cash_weight_today),
             sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
+            extra=breaker_block,
         )
         logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
         signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
@@ -1868,10 +2010,22 @@ def build_daily_snapshot(
             else "broker equity placeholder (set BROKER_EQUITY)"
         ),
     }
+    base_sleeves = {
+        str(name): max(0.0, float(weight))
+        for name, weight in (alloc_result.sleeve_allocations or {}).items()
+    }
+    base_sleeves_total = float(sum(base_sleeves.values()))
+    target_risk_on = max(0.0, min(1.0, 1.0 - float(target_cash_weight_today)))
+    if base_sleeves_total > WEIGHT_TOLERANCE:
+        sleeve_scale = target_risk_on / base_sleeves_total
+        display_sleeves = {name: float(weight * sleeve_scale) for name, weight in base_sleeves.items()}
+    else:
+        display_sleeves = {name: 0.0 for name in base_sleeves}
+    display_cash = max(0.0, min(1.0, 1.0 - float(sum(display_sleeves.values()))))
     allocations = {
-        "risk_on": 1.0 - alloc_result.cash_weight,
-        "cash": alloc_result.cash_weight,
-        "sleeves": alloc_result.sleeve_allocations,
+        "risk_on": 1.0 - display_cash,
+        "cash": display_cash,
+        "sleeves": display_sleeves,
         "cash_reason": getattr(alloc_result, "cash_reason", None),
     }
     performance_diagnostics = {
@@ -1919,6 +2073,17 @@ def build_daily_snapshot(
     )
     return {
         "asof": report_date,
+        "cash_target": target_cash_weight_today,
+        "target_cash_weight": target_cash_weight_today,
+        "breaker": {
+            "mode": breaker_cfg.get("mode", "partial"),
+            "exposure_multiplier_today": exposure_today,
+            "exposure_label_today": exposure_label,
+            "invested_before_overlay": invested_before_overlay,
+            "invested_after_overlay": invested_after_overlay,
+            "cash_target_weight_today": target_cash_weight_today,
+        },
+        "sleeve_allocations": allocations.get("sleeves", {}),
         "allocations": allocations,
         "performance_summary": performance_summary,
         "orders": orders,
@@ -2300,16 +2465,25 @@ def build_html_report(
         if alloc_html
         else ""
     )
-    alloc_diag_rows = pd.DataFrame([
-        {"Metric": "Sleeve 1 desired allocation", "Value": _fmt_pct(sleeve1_diag.get("desired_allocation"))},
-        {"Metric": "Sleeve 1 achieved invested", "Value": _fmt_pct(sleeve1_diag.get("achieved_invested"))},
-        {"Metric": "Sleeve 1 forced cash", "Value": _fmt_pct(sleeve1_diag.get("forced_cash"))},
-        {
-            "Metric": "Sleeve 1 names selected / required",
-            "Value": f"{sleeve1_diag.get('selected_names', 'n/a')} / {sleeve1_diag.get('min_required_names', 'n/a')}",
-        },
-        {"Metric": "Limiting constraint", "Value": sleeve1_diag.get("limiting_constraint", "n/a")},
-    ])
+    alloc_diag_items = [
+        {"Metric": "Sleeve 1 desired allocation (post-breaker)", "Value": _fmt_pct(sleeve1_diag.get("desired_allocation"))},
+    ]
+    if sleeve1_diag.get("desired_allocation_pre_breaker") is not None:
+        alloc_diag_items.append(
+            {"Metric": "Sleeve 1 desired allocation (pre-breaker)", "Value": _fmt_pct(sleeve1_diag.get("desired_allocation_pre_breaker"))}
+        )
+    alloc_diag_items.extend(
+        [
+            {"Metric": "Sleeve 1 achieved invested", "Value": _fmt_pct(sleeve1_diag.get("achieved_invested"))},
+            {"Metric": "Sleeve 1 forced cash", "Value": _fmt_pct(sleeve1_diag.get("forced_cash"))},
+            {
+                "Metric": "Sleeve 1 names selected / required",
+                "Value": f"{sleeve1_diag.get('selected_names', 'n/a')} / {sleeve1_diag.get('min_required_names', 'n/a')}",
+            },
+            {"Metric": "Limiting constraint", "Value": sleeve1_diag.get("limiting_constraint", "n/a")},
+        ]
+    )
+    alloc_diag_rows = pd.DataFrame(alloc_diag_items)
     alloc_diag_section = f'<div class="card">{html_table(alloc_diag_rows, "Allocation Diagnostics")}</div>'
     holdings_html = (
         html_table(holdings, "Holdings Snapshot", 20)
@@ -2710,6 +2884,10 @@ def main(argv: list[str] | None = None):
         logger.error("[ERROR] %s", e)
         sys.exit(0)
     daily_snapshot["alpha_attribution"] = alpha_stats
+    allocation_diagnostics = _apply_breaker_allocation_diagnostics(
+        allocation_diagnostics,
+        daily_snapshot,
+    )
     daily_snapshot["allocation_diagnostics"] = allocation_diagnostics
     daily_snapshot["inception_metrics"] = {
         **(daily_snapshot.get("inception_metrics") or {}),
@@ -2727,13 +2905,16 @@ def main(argv: list[str] | None = None):
     paper_ledger_path, paper_trades_path = ensure_paper_state_files()
     if os.path.exists(signals_path_exec):
         try:
-            shadow_constraints = {
-                "cash_target_weight": float(
+            snapshot_cash_target_weight = _coerce_float_or_none((daily_snapshot or {}).get("target_cash_weight"))
+            if snapshot_cash_target_weight is None:
+                snapshot_cash_target_weight = float(
                     {
                         **alloc_result.sleeve_allocations,
                         "CASH": alloc_result.cash_weight,
                     }.get("CASH", 0.0)
                 )
+            shadow_constraints = {
+                "cash_target_weight": float(snapshot_cash_target_weight)
             }
             trading_mode = str(os.getenv("TRADING_MODE", "shadow")).strip().lower()
             if trading_mode == "shadow" and os.getenv("ALLOW_RERUN_RESET", "1") == "1":
@@ -2846,10 +3027,11 @@ def main(argv: list[str] | None = None):
         buy_count = sum(1 for t in exec_trades if str(t.get("side", "")).upper() == "BUY")
         sell_count = sum(1 for t in exec_trades if str(t.get("side", "")).upper() != "BUY")
         logger.info(
-            "[EXECUTION_EMAIL] built trades=%d buys=%d sells=%d",
+            "[EXECUTION_EMAIL] built trades=%d buys=%d sells=%d status=%s",
             len(exec_trades),
             buy_count,
             sell_count,
+            execution_payload.get("status_label") or ("NO TRADES" if not exec_trades else "TRADES READY"),
         )
     execution_payload_path, payload_preserved, preserved_path = _write_execution_email_payload(execution_payload, trade_date_str)
     integrity = {
