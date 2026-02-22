@@ -26,6 +26,12 @@ from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
+from audit.export import write_audit_bundle
+from audit.policy_backtest import (
+    default_run_id as audit_default_run_id,
+    load_sleeve1_dataset,
+    run_window_backtest,
+)
 
 # ============================================================
 # Sleeve 1 — structured access (do NOT call main())
@@ -2593,10 +2599,182 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Generate planning artifacts only; skip order generation even when market is open.",
     )
+    parser.add_argument(
+        "--backtest-start",
+        dest="backtest_start",
+        default=None,
+        help="Backtest start date YYYY-MM-DD (enables backtest mode).",
+    )
+    parser.add_argument(
+        "--backtest-end",
+        dest="backtest_end",
+        default=None,
+        help="Backtest end date YYYY-MM-DD (enables backtest mode).",
+    )
+    parser.add_argument(
+        "--breaker-policy",
+        dest="breaker_policy",
+        default=None,
+        help="Breaker policy for backtest mode: FULL|PARTIAL|LOCK.",
+    )
+    parser.add_argument(
+        "--audit-export",
+        dest="audit_export",
+        default=None,
+        help="Backtest mode: write audit bundle when true (1/0).",
+    )
+    parser.add_argument(
+        "--audit-run-id",
+        dest="audit_run_id",
+        default=None,
+        help="Backtest mode: audit run id.",
+    )
+    parser.add_argument(
+        "--audit-outdir",
+        dest="audit_outdir",
+        default=None,
+        help="Backtest mode: base audit output directory.",
+    )
+    parser.add_argument(
+        "--allow-empty-sleeves",
+        dest="allow_empty_sleeves",
+        default=None,
+        help="Backtest mode: allow empty outputs (1/0).",
+    )
     return parser.parse_args(argv)
+
+
+def _is_truthy(value: str | int | bool | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _is_backtest_mode(args: argparse.Namespace) -> bool:
+    return bool(
+        getattr(args, "backtest_start", None)
+        or getattr(args, "backtest_end", None)
+        or os.getenv("BACKTEST_START")
+        or os.getenv("BACKTEST_END")
+    )
+
+
+def _resolve_backtest_dates(args: argparse.Namespace) -> tuple[pd.Timestamp, pd.Timestamp]:
+    start_raw = getattr(args, "backtest_start", None) or os.getenv("BACKTEST_START")
+    end_raw = getattr(args, "backtest_end", None) or os.getenv("BACKTEST_END")
+    if not start_raw or not end_raw:
+        raise RuntimeError(
+            "Backtest mode requires BACKTEST_START and BACKTEST_END (or --backtest-start/--backtest-end)."
+        )
+    start = pd.Timestamp(start_raw).normalize()
+    end = pd.Timestamp(end_raw).normalize()
+    if end < start:
+        raise RuntimeError(
+            f"Backtest mode failed: BACKTEST_END ({end.date()}) < BACKTEST_START ({start.date()})."
+        )
+    return start, end
+
+
+def _run_backtest_mode(args: argparse.Namespace) -> None:
+    start, end = _resolve_backtest_dates(args)
+    policy = (
+        str(getattr(args, "breaker_policy", None) or os.getenv("BREAKER_POLICY", "FULL"))
+        .strip()
+        .upper()
+    )
+    if policy not in {"FULL", "PARTIAL", "LOCK"}:
+        policy = "FULL"
+
+    # Backtest/policy runs are deterministic by default: state does not override env policy.
+    os.environ.setdefault("BREAKER_STATE_CAN_OVERRIDE", "0")
+
+    allow_empty = _is_truthy(
+        getattr(args, "allow_empty_sleeves", None)
+        if getattr(args, "allow_empty_sleeves", None) is not None
+        else os.getenv("ALLOW_EMPTY_SLEEVES"),
+        default=False,
+    )
+    synthetic = _is_truthy(os.getenv("BACKTEST_SYNTHETIC"), default=False)
+    initial_equity = float(os.getenv("BACKTEST_INITIAL_EQUITY", "10000"))
+    commission_bps = float(os.getenv("BACKTEST_COMMISSION_BPS", "0"))
+    slippage_bps = float(os.getenv("BACKTEST_SLIPPAGE_BPS", "0"))
+    top_n = int(os.getenv("BACKTEST_TOP_N", "5"))
+
+    dataset = load_sleeve1_dataset(
+        start=start,
+        end=end,
+        synthetic=synthetic,
+    )
+    result = run_window_backtest(
+        dataset,
+        start=start,
+        end=end,
+        breaker_policy=policy,
+        top_n=top_n,
+        initial_equity=initial_equity,
+        commission_bps=commission_bps,
+        slippage_bps=slippage_bps,
+        allow_empty_sleeves=allow_empty,
+    )
+
+    errors: list[str] = []
+    if result.get("target_weights_post", pd.DataFrame()).empty:
+        errors.append(
+            "Backtest mode failed: sleeve_1 empty target_weights (missing data). Set ALLOW_EMPTY_SLEEVES=1 to continue."
+        )
+    if result.get("portfolio_daily", pd.DataFrame()).empty:
+        errors.append(
+            "Backtest mode failed: portfolio_daily is empty. Set ALLOW_EMPTY_SLEEVES=1 to continue."
+        )
+    if result.get("holdings_daily", pd.DataFrame()).empty:
+        errors.append(
+            "Backtest mode failed: holdings_daily is empty. Set ALLOW_EMPTY_SLEEVES=1 to continue."
+        )
+
+    if errors and not allow_empty:
+        raise RuntimeError(errors[0])
+
+    summary = dict(result.get("summary", {}))
+    if errors:
+        summary["warnings"] = "; ".join(errors)
+    summary["allow_empty_sleeves"] = bool(allow_empty)
+
+    audit_export = _is_truthy(
+        getattr(args, "audit_export", None)
+        if getattr(args, "audit_export", None) is not None
+        else os.getenv("AUDIT_EXPORT", "1"),
+        default=True,
+    )
+    run_id = (
+        str(getattr(args, "audit_run_id", None) or os.getenv("AUDIT_RUN_ID", "")).strip()
+        or audit_default_run_id(start=start, end=end, policy=policy)
+    )
+    audit_root = Path(
+        getattr(args, "audit_outdir", None) or os.getenv("AUDIT_OUTDIR", "outputs/audit")
+    )
+    audit_out = audit_root / run_id
+    if audit_export:
+        write_audit_bundle(
+            run_id=run_id,
+            trades_df=result.get("trades"),
+            holdings_daily_df=result.get("holdings_daily"),
+            portfolio_daily_df=result.get("portfolio_daily"),
+            summary=summary,
+            outdir=audit_out,
+        )
+    print(
+        "[BACKTEST_MODE] "
+        f"start={start.date()} end={end.date()} policy={policy} "
+        f"audit_out={audit_out if audit_export else 'disabled'}"
+    )
 def main(argv: list[str] | None = None):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
+    if _is_backtest_mode(args):
+        _run_backtest_mode(args)
+        return
     offline_fixture = os.getenv("OFFLINE_FIXTURE", "").lower() in {"1", "true", "yes"}
     fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)

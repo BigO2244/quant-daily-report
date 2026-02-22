@@ -44,16 +44,19 @@ def compute_daily_attribution(asof_date: str, prev_date: str) -> dict[str, pd.Da
     sleeves_df = pd.DataFrame(columns=["sleeve", "weight_start", "sleeve_return", "contribution"])
     if not tickers_df.empty:
         grp = tickers_df.groupby("sleeve", as_index=False)
-        sleeves_df = grp.apply(
-            lambda g: pd.Series(
-                {
-                    "weight_start": g["weight_start"].sum(),
-                    "sleeve_return": (g["contribution"].sum() / g["weight_start"].sum()) if g["weight_start"].sum() else 0.0,
-                    "contribution": g["contribution"].sum(),
-                }
-            ),
-            include_groups=False,
-        ).reset_index()
+        agg_fn = lambda g: pd.Series(  # noqa: E731
+            {
+                "weight_start": g["weight_start"].sum(),
+                "sleeve_return": (g["contribution"].sum() / g["weight_start"].sum()) if g["weight_start"].sum() else 0.0,
+                "contribution": g["contribution"].sum(),
+            }
+        )
+        try:
+            # pandas >=2.2
+            sleeves_df = grp.apply(agg_fn, include_groups=False).reset_index()
+        except TypeError:
+            # pandas <2.2
+            sleeves_df = grp.apply(agg_fn).reset_index()
     return {"tickers": tickers_df, "sleeves": sleeves_df}
 
 

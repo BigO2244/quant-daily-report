@@ -40,6 +40,93 @@ def get_breaker_config() -> dict:
     }
 
 
+def get_exposure_multiplier(
+    breaker_policy: str,
+    breaker_state: dict | None = None,
+    *,
+    state_can_override: bool | None = None,
+) -> float:
+    """
+    Resolve a single effective exposure multiplier from policy + state.
+
+    Precedence:
+      1) BREAKER_POLICY (or breaker_policy arg) sets default multiplier.
+      2) breaker_state may override ONLY when BREAKER_STATE_CAN_OVERRIDE=1
+         (or state_can_override=True explicitly).
+    """
+    policy = str(
+        breaker_policy or os.getenv("BREAKER_POLICY", "FULL")
+    ).strip().upper()
+    if policy not in {"FULL", "PARTIAL", "LOCK"}:
+        policy = "FULL"
+
+    state = dict(breaker_state or {})
+    mode = str(state.get("mode", "")).strip().lower()
+    if state_can_override is None:
+        raw_override = os.getenv("BREAKER_STATE_CAN_OVERRIDE", "1")
+        override_allowed = str(raw_override).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
+    else:
+        override_allowed = bool(state_can_override)
+
+    explicit_mult = None
+    for key in (
+        "exposure_multiplier",
+        "exposure_multiplier_today",
+        "exposure",
+        "multiplier",
+    ):
+        if key in state:
+            try:
+                explicit_mult = float(state[key])
+                break
+            except Exception:
+                explicit_mult = None
+
+    partial_default = 0.5
+    try:
+        partial_default = float(
+            state.get(
+                "partial_exposure",
+                os.getenv("BREAKER_PARTIAL_EXPOSURE", "0.5"),
+            )
+        )
+    except Exception:
+        partial_default = 0.5
+    partial_default = max(0.0, min(1.0, partial_default))
+
+    default_mult = {"FULL": 1.0, "PARTIAL": partial_default, "LOCK": 0.0}[policy]
+    mult = default_mult
+
+    if override_allowed:
+        if mode == "lock":
+            mult = 0.0
+        elif mode == "partial":
+            mult = (
+                float(explicit_mult)
+                if explicit_mult is not None
+                else float(partial_default)
+            )
+        elif mode in {"off", "full", "unlock"}:
+            mult = float(explicit_mult) if explicit_mult is not None else 1.0
+        elif explicit_mult is not None:
+            mult = float(explicit_mult)
+
+    mult = max(0.0, min(1.0, float(mult)))
+    print(
+        "[BREAKER_POLICY] "
+        f"env={policy} state_mode={mode or 'none'} "
+        f"override_allowed={1 if override_allowed else 0} "
+        f"multiplier={mult:.4f}"
+    )
+    return mult
+
+
 def compute_exposure_multiplier(
     breaker_any: np.ndarray,
     breaker_lock: np.ndarray | None = None,
