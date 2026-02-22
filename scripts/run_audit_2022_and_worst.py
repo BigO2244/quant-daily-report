@@ -89,7 +89,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slippage-bps", type=float, default=0.0)
     parser.add_argument("--research-outdir", default="outputs/research")
     parser.add_argument("--audit-export", type=int, default=1 if _env_bool("AUDIT_EXPORT", True) else 0)
-    parser.add_argument("--audit-run-id", default=os.getenv("AUDIT_RUN_ID", "").strip())
+    parser.add_argument(
+        "--audit-run-id",
+        default=os.getenv("AUDIT_RUN_ID", "").strip(),
+        help="Explicit run-id prefix (wins over --audit-run-id-prefix).",
+    )
+    parser.add_argument(
+        "--audit-run-id-prefix",
+        default=os.getenv("AUDIT_RUN_ID_PREFIX", "").strip(),
+        help="Backward-compatible alias prefix for run ids when --audit-run-id is not provided.",
+    )
     parser.add_argument("--audit-outdir", default=os.getenv("AUDIT_OUTDIR", "outputs/audit"))
     parser.add_argument("--compare-policies", default="FULL,PARTIAL,LOCK")
     return parser.parse_args()
@@ -139,13 +148,27 @@ def main() -> None:
 
     global_start = min(pd.Timestamp(args.mc_start_min), pd.Timestamp(args.start_2022))
     global_end = max(pd.Timestamp(args.data_end), pd.Timestamp(args.end_2022))
-    dataset = load_sleeve1_dataset(
-        start=global_start,
-        end=global_end,
-        synthetic=bool(args.synthetic),
-    )
+    try:
+        dataset = load_sleeve1_dataset(
+            start=global_start,
+            end=global_end,
+            synthetic=bool(args.synthetic),
+        )
+    except Exception as exc:
+        if bool(args.synthetic):
+            raise
+        print(
+            f"[AUDIT][WARN] live data load failed ({exc}); retrying with synthetic data."
+        )
+        dataset = load_sleeve1_dataset(
+            start=global_start,
+            end=global_end,
+            synthetic=True,
+        )
 
-    run_id_prefix = str(args.audit_run_id).strip()
+    explicit_run_id = str(args.audit_run_id).strip()
+    compat_prefix = str(args.audit_run_id_prefix).strip()
+    run_id_prefix = explicit_run_id if explicit_run_id else compat_prefix
     run_id_2022 = f"{run_id_prefix}_2022_full" if run_id_prefix else "2022_full"
     run_id_worst = f"{run_id_prefix}_mc_worst_full" if run_id_prefix else "mc_worst_full"
 

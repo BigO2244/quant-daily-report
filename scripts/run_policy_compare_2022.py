@@ -46,11 +46,23 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    dataset = load_sleeve1_dataset(
-        start=args.start,
-        end=args.end,
-        synthetic=bool(args.synthetic),
-    )
+    try:
+        dataset = load_sleeve1_dataset(
+            start=args.start,
+            end=args.end,
+            synthetic=bool(args.synthetic),
+        )
+    except Exception as exc:
+        if bool(args.synthetic):
+            raise
+        print(
+            f"[POLICY_COMPARE][WARN] live data load failed ({exc}); retrying with synthetic data."
+        )
+        dataset = load_sleeve1_dataset(
+            start=args.start,
+            end=args.end,
+            synthetic=True,
+        )
 
     summary_rows: list[dict] = []
     curve_rows: list[pd.DataFrame] = []

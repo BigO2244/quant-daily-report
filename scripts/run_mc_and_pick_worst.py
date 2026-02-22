@@ -79,11 +79,23 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    dataset = load_sleeve1_dataset(
-        start=args.start_min,
-        end=args.end,
-        synthetic=bool(args.synthetic),
-    )
+    try:
+        dataset = load_sleeve1_dataset(
+            start=args.start_min,
+            end=args.end,
+            synthetic=bool(args.synthetic),
+        )
+    except Exception as exc:
+        if bool(args.synthetic):
+            raise
+        print(
+            f"[MC][WARN] live data load failed ({exc}); retrying with synthetic data."
+        )
+        dataset = load_sleeve1_dataset(
+            start=args.start_min,
+            end=args.end,
+            synthetic=True,
+        )
     windows = sample_random_windows(
         trading_dates=dataset.prices_wide.index,
         n_windows=int(args.n),

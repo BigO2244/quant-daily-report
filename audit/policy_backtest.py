@@ -308,10 +308,10 @@ def _build_holdings_daily(
         px = px.reindex(index=pidx, columns=h.columns).ffill().fillna(0.0)
 
         shares_long = (
-            h.stack(dropna=False).rename("shares").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"})
+            h.stack().rename("shares").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"})
         )
         prices_long = (
-            px.stack(dropna=False).rename("price").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"})
+            px.stack().rename("price").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"})
         )
         non_cash = shares_long.merge(prices_long, on=["date", "ticker"], how="left")
         non_cash["shares"] = pd.to_numeric(non_cash["shares"], errors="coerce").fillna(0.0)
@@ -325,7 +325,7 @@ def _build_holdings_daily(
                 w.index = pd.to_datetime(w.index)
             w = w.reindex(index=pidx, columns=h.columns).fillna(0.0)
             w_long = (
-                w.stack(dropna=False)
+                w.stack()
                 .rename("weight")
                 .reset_index()
                 .rename(columns={"level_0": "date", "level_1": "ticker"})
@@ -385,7 +385,7 @@ def _build_trades(trades_df: pd.DataFrame, prices_wide: pd.DataFrame) -> pd.Data
     if not isinstance(px.index, pd.DatetimeIndex):
         px.index = pd.to_datetime(px.index)
     px_long = (
-        px.stack(dropna=False).rename("price").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"})
+        px.stack().rename("price").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"})
     )
     t = t.merge(px_long, on=["date", "ticker"], how="left")
     t["price"] = pd.to_numeric(t["price"], errors="coerce").fillna(0.0)
