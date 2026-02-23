@@ -16,6 +16,15 @@ DEFAULT_TOP_N = 10
 DEFAULT_SLIPPAGE_BPS = 10
 
 
+def _month_end_rule() -> str:
+    probe = pd.Series([1.0], index=pd.to_datetime(["2026-01-01"]))
+    try:
+        probe.resample("ME").last()
+        return "ME"
+    except Exception:
+        return "M"
+
+
 @dataclass
 class RobustnessConfig:
     start: str = DEFAULT_START
@@ -87,12 +96,13 @@ def run_backtest(config: RobustnessConfig) -> dict[str, pd.DataFrame | dict]:
     prices = download_prices(tickers, period="max", interval="1d")
     prices = prices[prices["date"].between(start - pd.Timedelta(days=420), end)].copy()
     close = prices.pivot(index="date", columns="ticker", values="close").sort_index()
-    month_end = close.resample("ME").last()
+    month_end_rule = _month_end_rule()
+    month_end = close.resample(month_end_rule).last()
 
     spy_daily = close["SPY"].dropna()
     spy_200d = spy_daily.rolling(200, min_periods=200).mean()
     gate_daily = spy_daily >= spy_200d
-    gate = gate_daily.resample("M").last().reindex(month_end.index).astype("boolean").fillna(False).shift(1).fillna(False)
+    gate = gate_daily.resample(month_end_rule).last().reindex(month_end.index).astype("boolean").fillna(False).shift(1).fillna(False)
     spy = month_end["SPY"].dropna()
 
     asset_month = month_end.reindex(columns=universe)

@@ -64,12 +64,30 @@ def build_paper_report_html(
     cash = None
     invested = None
     exposure = None
-    if not summary_unavailable and not day.empty:
+    turnover_dollars = None
+    turnover_pct = None
+    if not summary_unavailable:
         try:
-            equity = float(day["total_equity"].iloc[0]) if "total_equity" in day.columns else None
-            cash = float(day["cash"].iloc[0]) if "cash" in day.columns else None
-            invested = float(day["market_value"].sum()) if "market_value" in day.columns else None
-            exposure = (invested / equity) if (equity and invested is not None) else None
+            if not nav_row.empty:
+                equity = float(nav_row["equity"].iloc[0]) if "equity" in nav_row.columns else None
+                cash = float(nav_row["cash"].iloc[0]) if "cash" in nav_row.columns else None
+                if equity is not None and cash is not None:
+                    invested = float(equity - cash)
+                elif not day.empty and "market_value" in day.columns:
+                    invested = float(day["market_value"].sum())
+                if "gross_exposure" in nav_row.columns:
+                    exposure = float(nav_row["gross_exposure"].iloc[0])
+                elif equity and invested is not None:
+                    exposure = invested / equity
+                if "turnover_dollars" in nav_row.columns:
+                    turnover_dollars = float(nav_row["turnover_dollars"].iloc[0])
+                if "turnover_pct" in nav_row.columns:
+                    turnover_pct = float(nav_row["turnover_pct"].iloc[0])
+            elif not day.empty:
+                equity = float(day["total_equity"].iloc[0]) if "total_equity" in day.columns else None
+                cash = float(day["cash"].iloc[0]) if "cash" in day.columns else None
+                invested = float(day["market_value"].sum()) if "market_value" in day.columns else None
+                exposure = (invested / equity) if (equity and invested is not None) else None
         except Exception:
             equity, cash, invested, exposure = None, None, None, None
 
@@ -177,11 +195,13 @@ def build_paper_report_html(
     return f"""
 <div style="font-family: Arial, sans-serif;">
   <h2>Paper Trading Execution — {run_date}</h2>
-  {unavailable_html if summary_unavailable else f'''<ul>
+    {unavailable_html if summary_unavailable else f'''<ul>
     <li><b>Total Equity:</b> {_fmt_money(equity)}</li>
     <li><b>Cash:</b> {_fmt_money(cash)}</li>
     <li><b>Invested:</b> {_fmt_money(invested)}</li>
     <li><b>Exposure:</b> {_fmt_pct(exposure)}</li>
+    <li><b>Turnover ($):</b> {_fmt_money(turnover_dollars)}</li>
+    <li><b>Turnover (%):</b> {_fmt_pct(turnover_pct)}</li>
     <li><b>Benchmark:</b> {benchmark_ticker}</li>
   </ul>'''}
 

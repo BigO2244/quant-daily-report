@@ -8,11 +8,11 @@ from typing import Callable
 import pandas as pd
 
 from paper.ledger2 import LEDGER2_PATH, load_ledger
+from paper.mark_to_market import update_nav_timeseries
 from paper.paper_broker import fetch_prev_closes_yfinance
+from paper.reporting_consistency import compute_nav
 
 logger = logging.getLogger(__name__)
-
-NAV_TS_COLUMNS = ["date", "equity", "cash", "return_1d"]
 
 
 def _default_get_price_fn(ticker: str, asof_date: str) -> float | None:
@@ -79,37 +79,6 @@ def _compute_portfolio_state(ledger_df: pd.DataFrame, asof_date: str, starting_c
     return cash, holdings
 
 
-def _upsert_nav_timeseries(path: str, asof_date: str, equity: float, cash: float) -> str:
-    ts_path = Path(path)
-    ts_path.parent.mkdir(parents=True, exist_ok=True)
-    if ts_path.exists() and ts_path.stat().st_size > 0:
-        ts = pd.read_csv(ts_path)
-    else:
-        ts = pd.DataFrame(columns=NAV_TS_COLUMNS)
-
-    ts = ts[ts["date"].astype(str) != str(asof_date)].copy() if not ts.empty else ts
-    ts = pd.concat(
-        [ts, pd.DataFrame([{"date": str(asof_date), "equity": float(equity), "cash": float(cash), "return_1d": 0.0}])],
-        ignore_index=True,
-    )
-    ts["date"] = pd.to_datetime(ts["date"])
-    ts = ts.sort_values("date").reset_index(drop=True)
-
-    returns: list[float | str] = []
-    prev_equity: float | None = None
-    for _, row in ts.iterrows():
-        eq = float(row["equity"])
-        if prev_equity is None or prev_equity == 0:
-            returns.append(0.0)
-        else:
-            returns.append((eq / prev_equity) - 1.0)
-        prev_equity = eq
-    ts["return_1d"] = returns
-    ts["date"] = ts["date"].dt.strftime("%Y-%m-%d")
-    ts.to_csv(ts_path, index=False)
-    return str(ts_path)
-
-
 def update_nav(
     asof_date: str,
     trade_date: str,
@@ -127,8 +96,8 @@ def update_nav(
 
     resolved_price_fn = get_price_fn or _default_get_price_fn
     holdings_rows = []
+    price_map: dict[str, float] = {}
     missing_prices: list[str] = []
-    market_value = 0.0
 
     for ticker, pos in sorted(holdings.items()):
         shares = float(pos["shares"])
@@ -139,22 +108,46 @@ def update_nav(
             missing_prices.append(ticker)
             continue
         mtm_price = float(mtm_price)
-        mv = shares * mtm_price
-        market_value += mv
+        price_map[ticker] = mtm_price
         holdings_rows.append(
             {
-                "date": asof_date,
                 "ticker": ticker,
                 "shares": shares,
                 "avg_cost": float(pos["avg_cost"]),
-                "mtm_price": mtm_price,
-                "market_value": mv,
-                "unrealized_pnl": shares * (mtm_price - float(pos["avg_cost"])),
                 "realized_pnl": float(pos["realized_pnl"]),
+                "sleeve": "main",
             }
         )
 
-    equity = float(cash + market_value)
+    holdings_df = pd.DataFrame(holdings_rows)
+    mtm, nav = compute_nav(ledger=holdings_df, prices=price_map, cash=float(cash))
+    realized_map = {
+        str(r["ticker"]).upper(): float(r.get("realized_pnl", 0.0))
+        for _, r in holdings_df.iterrows()
+    }
+    holdings_out = pd.DataFrame(
+        columns=[
+            "date",
+            "ticker",
+            "shares",
+            "avg_cost",
+            "mtm_price",
+            "market_value",
+            "unrealized_pnl",
+            "realized_pnl",
+        ]
+    )
+    if not mtm.empty:
+        holdings_out = mtm.rename(columns={"price": "mtm_price"})[
+            ["ticker", "shares", "avg_cost", "mtm_price", "market_value", "unrealized_pnl"]
+        ].copy()
+        holdings_out["realized_pnl"] = (
+            holdings_out["ticker"].astype(str).str.upper().map(realized_map).fillna(0.0)
+        )
+        holdings_out.insert(0, "date", str(asof_date))
+
+    equity = float(nav.get("equity", 0.0))
+    market_value = float(nav.get("totals", {}).get("market_value", 0.0))
 
     nav_payload = {
         "date": str(asof_date),
@@ -163,6 +156,8 @@ def update_nav(
         "run_id": str(run_id),
         "equity": equity,
         "cash": float(cash),
+        "gross_exposure": float(nav.get("gross_exposure", 0.0)),
+        "net_exposure": float(nav.get("net_exposure", 0.0)),
         "market_value": float(market_value),
         "missing_prices": sorted(set(missing_prices)),
     }
@@ -171,9 +166,13 @@ def update_nav(
     nav_path.write_text(json.dumps(nav_payload, indent=2) + "\n", encoding="utf-8")
 
     holdings_path = perf_dir / f"holdings_mtm_{asof_date}.csv"
-    pd.DataFrame(holdings_rows).to_csv(holdings_path, index=False)
+    holdings_out.to_csv(holdings_path, index=False)
 
-    nav_ts_path = _upsert_nav_timeseries(str(perf_dir / "nav_timeseries.csv"), asof_date, equity, float(cash))
+    nav_ts_path = update_nav_timeseries(
+        asof_date=asof_date,
+        nav=nav_payload,
+        ledger=ledger_df,
+    )
 
     return {
         "nav_path": str(nav_path),

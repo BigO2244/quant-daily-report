@@ -17,7 +17,7 @@ Execution model
 
 Rebalance schedule
 ------------------
-  If `rebal_rule` is provided (e.g. "D", "W-FRI", "M"), the engine only
+  If `rebal_rule` is provided (e.g. "D", "W-FRI", "ME"), the engine only
   applies new weights on rebalance dates; in between, weights drift with
   prices.  Default "D" = daily rebalance (weights re-applied every bar).
 """
@@ -60,7 +60,7 @@ def run_backtest(
         One-way slippage in bps applied to absolute turnover notional.
     rebal_rule : str
         Pandas frequency alias for rebalance dates.  "D" = daily,
-        "W-FRI" = weekly on Fridays, "M" = month-end, etc.
+        "W-FRI" = weekly on Fridays, "ME" = month-end, etc.
     benchmark_prices : Series, optional
         If provided, computes benchmark return and alpha.
 
@@ -229,7 +229,16 @@ def _rebal_mask(dates: pd.DatetimeIndex, rule: str) -> np.ndarray:
     if rule == "D":
         mask[:] = True
         return mask
-    # Use pandas resampling to find period boundaries
+    # Use pandas resampling to find period boundaries.
+    # "ME" is preferred on newer pandas; older pandas may only support "M".
+    rule = str(rule)
+    if rule.upper() in {"M", "ME"}:
+        probe = pd.Series([1], index=pd.to_datetime([dates[0]]))
+        try:
+            probe.resample("ME").last()
+            rule = "ME"
+        except Exception:
+            rule = "M"
     dummy = pd.Series(1, index=dates)
     rebal_dates = set(dummy.resample(rule).last().dropna().index)
     # map to nearest available date in our index

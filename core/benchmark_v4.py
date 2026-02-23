@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -25,16 +26,23 @@ def _fetch_spy_adj_close(start_date: str, end_date: str) -> pd.Series:
     return s
 
 
-def update_inception_nav_series(asof_date: str, model_nav: float, output_path: str = DEFAULT_PATH) -> pd.DataFrame:
-    start = pd.Timestamp(INCEPTION_DATE)
+def _effective_inception_date() -> str:
+    return str(os.getenv("PAPER_INCEPTION_DATE", INCEPTION_DATE)).strip() or INCEPTION_DATE
+
+
+def update_inception_nav_series(asof_date: str, model_nav: float, output_path: str | None = None) -> pd.DataFrame:
+    inception_date = _effective_inception_date()
+    start = pd.Timestamp(inception_date)
     asof = pd.Timestamp(asof_date)
     if asof < start:
         return pd.DataFrame()
 
+    if output_path is None:
+        output_path = f"outputs/perf/inception_nav_{start.strftime('%Y-%m-%d')}.csv"
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    spy = _fetch_spy_adj_close(INCEPTION_DATE, (asof + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+    spy = _fetch_spy_adj_close(inception_date, (asof + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
     if spy.empty or start not in spy.index:
         return pd.DataFrame()
 
@@ -50,7 +58,7 @@ def update_inception_nav_series(asof_date: str, model_nav: float, output_path: s
 
     row = pd.DataFrame([{"date": asof, "model_nav": float(model_nav), "spy_nav": float(spy_nav.iloc[-1])}])
     ts = ts[ts["date"] != asof] if not ts.empty else ts
-    ts = pd.concat([ts, row], ignore_index=True)
+    ts = row if ts.empty else pd.concat([ts, row], ignore_index=True)
     ts = ts.sort_values("date").reset_index(drop=True)
 
     ts["model_return_since_inception"] = ts["model_nav"] / STARTING_NAV - 1.0

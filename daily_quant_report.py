@@ -11,17 +11,24 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
 from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
-from paper.state_paths import ensure_paper_state_files
+from paper.state_paths import (
+    ensure_paper_state_files,
+    LEDGER_HEADERS as PAPER_LEDGER_HEADERS,
+    TRADES_HEADERS as PAPER_TRADES_HEADERS,
+)
 from paper.paper_report import build_paper_report_html
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.alpha import compute_alpha_attribution
 from paper.email_styles import base_email_css
 from paper.trading_calendar import prev_trading_day
-from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, load_ledger, make_run_id
-from paper.positions import rebuild_positions_from_ledger, write_position_outputs
-from paper.mark_to_market import mark_holdings, update_nav_timeseries, write_perf_outputs
-from paper.ledger2 import append_rows as append_ledger2_rows, payload_to_rows as ledger2_payload_to_rows
+from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, make_run_id
+from paper.ledger2 import (
+    append_rows as append_ledger2_rows,
+    payload_to_rows as ledger2_payload_to_rows,
+    LEDGER2_COLUMNS,
+)
 from paper.nav2 import update_nav
+from paper.reporting_consistency import compute_exposure, determine_sleeve_state
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
@@ -314,6 +321,152 @@ def write_integrity_artifact(asof_date: str, payload: dict) -> str:
     integrity_path.parent.mkdir(parents=True, exist_ok=True)
     integrity_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return str(integrity_path)
+
+
+def write_health_artifact(trade_date: str, payload: dict) -> str:
+    health_path = Path("outputs") / "daily" / f"health_{trade_date}.json"
+    health_path.parent.mkdir(parents=True, exist_ok=True)
+    health_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return str(health_path)
+
+
+def _reset_csv_with_headers(path: str | Path, headers: list[str]) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(columns=headers).to_csv(p, index=False)
+
+
+def _apply_paper_reset(
+    *,
+    trade_date: str,
+    paper_start_cash: float,
+    paper_ledger_path: str,
+    paper_trades_path: str,
+) -> dict:
+    start_cash = float(paper_start_cash)
+
+    _reset_csv_with_headers(paper_ledger_path, PAPER_LEDGER_HEADERS)
+    _reset_csv_with_headers(paper_trades_path, PAPER_TRADES_HEADERS)
+    _reset_csv_with_headers("outputs/ledger/trades.csv", LEDGER2_COLUMNS)
+    _reset_csv_with_headers(
+        "outputs/shadow_orders/orders_sent.csv",
+        ["date", "run_id", "order_id", "ticker", "side"],
+    )
+
+    nav_seed = pd.DataFrame(
+        [
+            {
+                "date": str(trade_date),
+                "equity": start_cash,
+                "cash": start_cash,
+                "gross_exposure": 0.0,
+                "net_exposure": 0.0,
+                "return_1d": 0.0,
+                "turnover_dollars": 0.0,
+                "turnover_pct": 0.0,
+                "turnover": 0.0,
+            }
+        ]
+    )
+    nav_path = Path("outputs/perf/nav_timeseries.csv")
+    nav_path.parent.mkdir(parents=True, exist_ok=True)
+    nav_seed.to_csv(nav_path, index=False)
+
+    return {
+        "start_cash": start_cash,
+        "paper_ledger_path": str(paper_ledger_path),
+        "paper_trades_path": str(paper_trades_path),
+        "ledger2_path": "outputs/ledger/trades.csv",
+        "nav_timeseries_path": str(nav_path),
+        "orders_sent_path": "outputs/shadow_orders/orders_sent.csv",
+    }
+
+
+def _build_health_payload(
+    *,
+    trade_date: str,
+    paper_summary: dict | None,
+    execution_payload: dict | None,
+    nav_ts_path: str | None,
+    should_execute: bool,
+    leverage_enabled: bool,
+    tolerance: float = 1e-6,
+) -> dict:
+    summary = paper_summary or {}
+    payload = execution_payload or {}
+    warnings: list[str] = []
+
+    planned_trade_count = int(len((summary.get("trade_plan") or []))) if isinstance(summary.get("trade_plan"), list) else int(len((payload.get("trades") or [])))
+    executed_trade_count = int(summary.get("num_trades") or 0)
+    broker_equity = _coerce_float_or_none(summary.get("total_equity"))
+    broker_cash = _coerce_float_or_none(summary.get("cash"))
+    achieved_cash_weight = _coerce_float_or_none(summary.get("achieved_cash_weight"))
+    gross_exposure = _coerce_float_or_none(summary.get("gross_exposure"))
+    net_exposure = _coerce_float_or_none(summary.get("net_exposure"))
+    turnover_dollars = _coerce_float_or_none(summary.get("turnover_notional")) or 0.0
+    turnover_pct = _coerce_float_or_none(summary.get("turnover_pct")) or 0.0
+
+    nav_equity_last_row = None
+    if nav_ts_path and Path(nav_ts_path).exists() and Path(nav_ts_path).stat().st_size > 0:
+        nav_ts = pd.read_csv(nav_ts_path)
+        if not nav_ts.empty and "date" in nav_ts.columns:
+            nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+            before = len(nav_ts)
+            nav_ts = nav_ts.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
+            if len(nav_ts) != before:
+                warnings.append(f"nav_timeseries_duplicates_removed:{before - len(nav_ts)}")
+                nav_ts["date"] = nav_ts["date"].dt.strftime("%Y-%m-%d")
+                nav_ts.to_csv(nav_ts_path, index=False)
+            nav_equity_last_row = _coerce_float_or_none(nav_ts.iloc[-1].get("equity"))
+            nav_turnover = _coerce_float_or_none(nav_ts.iloc[-1].get("turnover_dollars"))
+            nav_turnover_pct = _coerce_float_or_none(nav_ts.iloc[-1].get("turnover_pct"))
+            if nav_turnover is not None:
+                turnover_dollars = nav_turnover
+            if nav_turnover_pct is not None:
+                turnover_pct = nav_turnover_pct
+
+    market_guard = summary.get("market_guard") if isinstance(summary.get("market_guard"), dict) else {}
+    market_guard_status = str(market_guard.get("status") or summary.get("market_status") or "UNKNOWN").upper()
+
+    if should_execute:
+        if broker_equity is None or nav_equity_last_row is None:
+            raise AssertionError("health_check_failed: missing broker/nav equity on execution run")
+        if abs(float(nav_equity_last_row) - float(broker_equity)) > float(tolerance):
+            raise AssertionError(
+                f"health_check_failed: nav equity {nav_equity_last_row} != broker equity {broker_equity}"
+            )
+        if broker_cash is not None and broker_equity and broker_equity > 0 and achieved_cash_weight is not None:
+            implied = float(broker_cash) / float(broker_equity)
+            if abs(float(achieved_cash_weight) - implied) > float(tolerance):
+                raise AssertionError(
+                    f"health_check_failed: achieved_cash_weight {achieved_cash_weight} != broker_cash/broker_equity {implied}"
+                )
+        if gross_exposure is not None and (not leverage_enabled) and float(gross_exposure) > (1.0 + float(tolerance)):
+            raise AssertionError(
+                f"health_check_failed: gross_exposure {gross_exposure} exceeds 1.0 without leverage"
+            )
+    else:
+        # Planning/non-exec runs must not report executed turnover.
+        turnover_dollars = 0.0
+        turnover_pct = 0.0
+
+    return {
+        "trade_date": str(trade_date),
+        "market_guard_status": market_guard_status,
+        "planned_trade_count": int(planned_trade_count),
+        "executed_trade_count": int(executed_trade_count),
+        "broker_equity": broker_equity,
+        "broker_cash": broker_cash,
+        "achieved_cash_weight": achieved_cash_weight,
+        "gross_exposure": gross_exposure,
+        "net_exposure": net_exposure,
+        "nav_equity_last_row": nav_equity_last_row,
+        "turnover_dollars": float(turnover_dollars),
+        "turnover_pct": float(turnover_pct),
+        "warnings": warnings,
+    }
+
+
 def _payload_num_trades(payload: object) -> int:
     if isinstance(payload, list):
         return len(payload)
@@ -430,6 +583,60 @@ def _apply_breaker_allocation_diagnostics(
     return diagnostics
 
 
+def _merge_nav_metrics_into_snapshot(
+    daily_snapshot: dict,
+    nav_timeseries: pd.DataFrame,
+    *,
+    asof_date: str | None = None,
+    tolerance: float = 1e-6,
+) -> None:
+    nav_ts = _safe_df(nav_timeseries).copy()
+    if nav_ts.empty or "date" not in nav_ts.columns or "equity" not in nav_ts.columns:
+        return
+
+    nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+    nav_ts = nav_ts.sort_values("date").reset_index(drop=True)
+    target_row = nav_ts.iloc[-1]
+    if asof_date:
+        same_day = nav_ts[nav_ts["date"] == pd.to_datetime(asof_date)]
+        if not same_day.empty:
+            target_row = same_day.iloc[-1]
+
+    eq = float(target_row["equity"])
+    run_date = pd.to_datetime(target_row["date"])
+    month_rows = nav_ts[nav_ts["date"].dt.to_period("M") == run_date.to_period("M")]
+    week_rows = nav_ts[
+        nav_ts["date"].dt.isocalendar().week == run_date.isocalendar().week
+    ]
+    si_base = float(nav_ts["equity"].iloc[0]) if len(nav_ts) else None
+    week_base = float(week_rows["equity"].iloc[0]) if not week_rows.empty else None
+    month_base = float(month_rows["equity"].iloc[0]) if not month_rows.empty else None
+
+    nav_metrics = {
+        "equity": eq,
+        "cash": _coerce_float_or_none(target_row.get("cash")),
+        "gross_exposure": _coerce_float_or_none(target_row.get("gross_exposure")),
+        "net_exposure": _coerce_float_or_none(target_row.get("net_exposure")),
+        "return_1d": float(target_row.get("return_1d", 0.0) or 0.0),
+        "turnover_dollars": float(
+            _coerce_float_or_none(target_row.get("turnover_dollars")) or 0.0
+        ),
+        "turnover_pct": float(
+            _coerce_float_or_none(target_row.get("turnover_pct"))
+            if _coerce_float_or_none(target_row.get("turnover_pct")) is not None
+            else (_coerce_float_or_none(target_row.get("turnover")) or 0.0)
+        ),
+        "wtd": (eq / week_base - 1.0) if week_base else 0.0,
+        "mtd": (eq / month_base - 1.0) if month_base else 0.0,
+        "si": (eq / si_base - 1.0) if si_base else 0.0,
+    }
+    daily_snapshot["nav_metrics"] = nav_metrics
+
+    perf_diag = dict(daily_snapshot.get("performance_diagnostics") or {})
+    perf_diag["current_equity"] = eq
+    daily_snapshot["performance_diagnostics"] = perf_diag
+
+
 def build_execution_email_payload(
     trade_date: str,
     daily_snapshot: dict,
@@ -498,6 +705,8 @@ def build_execution_email_payload(
     turnover_requested = _coerce_float_or_none(turnover_requested_raw)
     turnover_cap = _coerce_float_or_none(turnover_cap_raw)
     turnover_scale = _coerce_float_or_none(turnover_scale_raw)
+    turnover_dollars = _coerce_float_or_none((paper_summary or {}).get("turnover_notional"))
+    turnover_pct = _coerce_float_or_none((paper_summary or {}).get("turnover_pct"))
     trades = []
     source_rows = []
     if status == "PLANNED" and planned_trades:
@@ -616,30 +825,6 @@ def build_execution_email_payload(
     pricing_asof = (paper_summary or {}).get("pricing_asof") or trade_date
     total_equity = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
     holdings = (daily_snapshot or {}).get("holdings", []) or []
-    position_weights: list[float] = []
-    for holding in holdings:
-        try:
-            shares = float(holding.get("shares"))
-            price = float(holding.get("last_price"))
-            mv = abs(shares * price)
-            if total_equity is not None and total_equity > 0:
-                position_weights.append(mv / total_equity)
-        except Exception:
-            continue
-    gross_exposure = sum(position_weights) if position_weights else None
-    net_exposure = None
-    if holdings and total_equity is not None and total_equity > 0:
-        try:
-            signed = []
-            for h in holdings:
-                shares = float(h.get("shares"))
-                px = float(h.get("last_price"))
-                direction = str(h.get("direction", "LONG")).upper()
-                sign = -1.0 if direction == "SHORT" else 1.0
-                signed.append(sign * abs(shares * px) / total_equity)
-            net_exposure = sum(signed)
-        except Exception:
-            net_exposure = None
     snapshot_target_cash_weight_raw = (daily_snapshot or {}).get("target_cash_weight")
     snapshot_target_cash_weight = _coerce_float_or_none(snapshot_target_cash_weight_raw)
     target_cash_weight_raw = (paper_summary or {}).get("target_cash_weight")
@@ -648,16 +833,80 @@ def build_execution_email_payload(
     if target_cash_weight is None:
         target_cash_weight = snapshot_target_cash_weight
     achieved_cash_weight = _coerce_float_or_none(achieved_cash_weight_raw)
+
+    gross_exposure = _coerce_float_or_none((paper_summary or {}).get("gross_exposure"))
+    net_exposure = _coerce_float_or_none((paper_summary or {}).get("net_exposure"))
+    exposure_map: dict[str, float] = {}
+    if isinstance((paper_summary or {}).get("position_reconciliation"), list):
+        for row in (paper_summary or {}).get("position_reconciliation", []) or []:
+            ticker = str((row or {}).get("ticker", "")).upper()
+            if not ticker or ticker == CASH_TICKER:
+                continue
+            w = _coerce_float_or_none((row or {}).get("achieved_weight"))
+            if w is None:
+                continue
+            exposure_map[ticker] = w
+    if exposure_map:
+        exposure_stats = compute_exposure(exposure_map, leverage_enabled=False, enforce_bounds=True)
+        gross_exposure = float(exposure_stats["gross_exposure"])
+        net_exposure = float(exposure_stats["net_exposure"])
+    elif gross_exposure is None or net_exposure is None:
+        holdings_weight_map: dict[str, float] = {}
+        snapshot_equity = _coerce_float_or_none(
+            ((daily_snapshot or {}).get("performance_diagnostics") or {}).get("current_equity")
+        )
+        denom = snapshot_equity if snapshot_equity and snapshot_equity > 0 else total_equity
+        if holdings and denom and denom > 0:
+            for h in holdings:
+                ticker = str(h.get("ticker", "")).upper()
+                if not ticker or ticker == CASH_TICKER:
+                    continue
+                try:
+                    shares = float(h.get("shares"))
+                    px = float(h.get("last_price"))
+                    direction = str(h.get("direction", "LONG")).upper()
+                    sign = -1.0 if direction == "SHORT" else 1.0
+                    holdings_weight_map[ticker] = sign * abs(shares * px) / float(denom)
+                except Exception:
+                    continue
+        if holdings_weight_map:
+            exposure_stats = compute_exposure(
+                holdings_weight_map,
+                leverage_enabled=any(v < 0 for v in holdings_weight_map.values()),
+                enforce_bounds=not any(v < 0 for v in holdings_weight_map.values()),
+            )
+            gross_exposure = float(exposure_stats["gross_exposure"])
+            net_exposure = float(exposure_stats["net_exposure"])
+
+    max_position_weight = None
+    if exposure_map:
+        try:
+            max_position_weight = max(abs(float(v)) for v in exposure_map.values()) if exposure_map else None
+        except Exception:
+            max_position_weight = None
+    elif holdings and total_equity and total_equity > 0:
+        try:
+            max_position_weight = max(
+                abs(float(h.get("shares", 0.0)) * float(h.get("last_price", 0.0))) / float(total_equity)
+                for h in holdings
+                if str(h.get("ticker", "")).upper() != CASH_TICKER
+            )
+        except Exception:
+            max_position_weight = None
+
+    position_count = len(exposure_map) if exposure_map else (len(holdings) if holdings else None)
     risk_summary = {
         "Turnover requested ($)": f"${turnover_requested:,.2f}" if turnover_requested is not None else "unavailable",
         "Turnover cap ($)": f"${turnover_cap:,.2f}" if turnover_cap is not None else "unavailable",
         "Turnover scale": f"{turnover_scale:.4f}" if turnover_scale is not None else "unavailable",
+        "Executed turnover ($)": f"${turnover_dollars:,.2f}" if turnover_dollars is not None else "unavailable",
+        "Executed turnover (%)": f"{turnover_pct * 100:.2f}%" if turnover_pct is not None else "unavailable",
         "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%" if target_cash_weight is not None else "unavailable",
         "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%" if achieved_cash_weight is not None else "unavailable",
         "Gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "unavailable",
         "Net exposure (%)": f"{net_exposure * 100:.2f}%" if net_exposure is not None else "unavailable",
-        "# positions": str(len(holdings)) if holdings else "unavailable",
-        "Max position weight (%)": f"{max(position_weights) * 100:.2f}%" if position_weights else "unavailable",
+        "# positions": str(position_count) if position_count is not None else "unavailable",
+        "Max position weight (%)": f"{max_position_weight * 100:.2f}%" if max_position_weight is not None else "unavailable",
     }
     intent_list = (daily_snapshot or {}).get("proposed_trades") if isinstance(daily_snapshot, dict) else None
     proposed_trades_intent_count = len(intent_list) if isinstance(intent_list, list) else None
@@ -681,6 +930,7 @@ def build_execution_email_payload(
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
         "cash_target_weight": target_cash_weight,
+        "achieved_cash_weight": achieved_cash_weight,
         "investable_dollars": _coerce_float_or_none((paper_summary or {}).get("investable_dollars")),
         "equity": sizing_equity if sizing_equity is not None else total_equity_fallback,
         "cash_target_dollars": _coerce_float_or_none((paper_summary or {}).get("target_cash_dollars")),
@@ -691,6 +941,8 @@ def build_execution_email_payload(
         "buys": int(buy_count),
         "sells": int(sell_count),
         "min_trade_dollars": min_trade_dollars,
+        "turnover_dollars": turnover_dollars,
+        "turnover_pct": turnover_pct,
         "filter_stats": filter_stats,
         "breaker": {
             "mode": breaker_mode,
@@ -700,6 +952,8 @@ def build_execution_email_payload(
             "turnover_cap": turnover_cap,
             "turnover_scaled": turnover_scaled,
             "turnover_scale": turnover_scale,
+            "turnover_dollars": turnover_dollars,
+            "turnover_pct": turnover_pct,
         },
         "risk_summary": risk_summary,
     }
@@ -804,9 +1058,14 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     allocations = snapshot.get("allocations", {}) or {}
     sleeve_splits = allocations.get("sleeves", {}) or {}
     cash_pct = allocations.get("cash", 0.0)
+    achieved_cash = _coerce_float_or_none((execution_payload or {}).get("achieved_cash_weight"))
+    display_cash_pct = achieved_cash if achieved_cash is not None else cash_pct
+    turnover_dollars = _coerce_float_or_none((execution_payload or {}).get("turnover_dollars"))
+    turnover_pct = _coerce_float_or_none((execution_payload or {}).get("turnover_pct"))
     target_cash = snapshot.get("target_cash_weight")
     if target_cash is None:
         target_cash = snapshot.get("cash_target", cash_pct)
+    sleeve_states = snapshot.get("sleeve_states", {}) or {}
     perf = snapshot.get("performance_summary", {}) or {}
     diagnostics = snapshot.get("performance_diagnostics", {}) or {}
     alpha = snapshot.get("alpha_attribution", {}) or {}
@@ -865,17 +1124,39 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         except Exception:
             intent_suffix = " (breaker overrides)"
     nav_metrics = snapshot.get("nav_metrics", {}) or {}
+    nav_cash = _coerce_float_or_none(nav_metrics.get("cash"))
+    nav_equity = _coerce_float_or_none(nav_metrics.get("equity"))
+    if achieved_cash is None and nav_cash is not None and nav_equity is not None and nav_equity > 0:
+        display_cash_pct = max(0.0, min(1.0, float(nav_cash) / float(nav_equity)))
+    if turnover_dollars is None:
+        turnover_dollars = _coerce_float_or_none(nav_metrics.get("turnover_dollars"))
+    if turnover_pct is None:
+        turnover_pct = _coerce_float_or_none(nav_metrics.get("turnover_pct"))
     inception_metrics = snapshot.get("inception_metrics", {}) or {}
     alloc_diag = snapshot.get("allocation_diagnostics", {}) or {}
     sleeve1_diag = alloc_diag.get("sleeve_1", {}) or {}
+    def _sleeve_state_status(name: str) -> str:
+        state = sleeve_states.get(name, {}) if isinstance(sleeve_states, dict) else {}
+        if bool(state.get("active")):
+            return "ACTIVE"
+        reason = str(state.get("reason", "")).strip()
+        return f"INACTIVE ({reason})" if reason else "INACTIVE"
+
+    if isinstance(sleeve_states, dict) and sleeve_states:
+        active_sleeve_count = int(sum(1 for st in sleeve_states.values() if bool((st or {}).get("active"))))
+    else:
+        active_sleeve_count = len([k for k, v in sleeve_splits.items() if float(v) > WEIGHT_TOLERANCE])
+
     lines = [
         f"ENVIRONMENT: {env_mode}",
         "",
         "PORTFOLIO AT A GLANCE",
         f"• Total Equity: {_fmt_money(nav_metrics.get('equity', total_equity))}",
         f"• Day Move: {_fmt_pct(nav_metrics.get('return_1d', day_return))}",
-        f"• Cash: {_fmt_pct(cash_pct)} (Target: {_fmt_pct(target_cash)})",
-        f"• Active Sleeves: {len([k for k, v in sleeve_splits.items() if float(v) > WEIGHT_TOLERANCE])}",
+        f"• Cash: {_fmt_pct(display_cash_pct)} (Target: {_fmt_pct(target_cash)})",
+        f"• Turnover ($): {_fmt_money(turnover_dollars)}",
+        f"• Turnover (%): {_fmt_pct(turnover_pct)}",
+        f"• Active Sleeves: {active_sleeve_count}",
         "",
         "RUN CONTEXT",
         f"• Inception: {_fmt_date(inception_metrics.get('inception_date'))}",
@@ -891,21 +1172,21 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "---",
         "",
         "SLEEVE 1 — MOMENTUM (FAST)",
-        "• Status: ACTIVE",
-        "• Signal State: ON",
+        f"• Status: {_sleeve_state_status('sleeve_trend')}",
+        f"• Signal State: {'ON' if _sleeve_state_status('sleeve_trend') == 'ACTIVE' else 'OFF'}",
         f"• Trades Today: {_trades_today('sleeve_trend')}",
         f"• Constraint Impact: {'Position caps + cash target' if skipped else 'None'}",
         "• Role: Capture short- to mid-term trend persistence",
         "",
         "SLEEVE 2 — VALUATION (OPPORTUNISTIC)",
-        "• Status: ACTIVE",
-        "• Signal State: ON",
+        f"• Status: {_sleeve_state_status('sleeve_2')}",
+        f"• Signal State: {'ON' if _sleeve_state_status('sleeve_2') == 'ACTIVE' else 'OFF'}",
         f"• Trades Today: {_trades_today('sleeve_2')}",
         f"• Constraint Impact: {'Position caps' if skipped else 'None'}",
         "• Role: Mean reversion and valuation dislocations",
         "",
         "CHARLIE MUNGER SLEEVE — LONG HOLD",
-        "• Status: ACTIVE",
+        f"• Status: {_sleeve_state_status('charlie_munger')}",
         f"• Allocation: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
         f"• New Buys Today: {'NONE' if not cm_selected else len(cm_selected)}",
         f"• Candidates Near 200-Week MA: {cm_near_ma}",
@@ -2034,6 +2315,49 @@ def build_daily_snapshot(
         "sleeves": display_sleeves,
         "cash_reason": getattr(alloc_result, "cash_reason", None),
     }
+    trend_target_weights = pd.DataFrame(columns=["ticker", "target_weight"])
+    if not weights_df.empty:
+        if "sleeve" in weights_df.columns:
+            trend_target_weights = weights_df[
+                weights_df["sleeve"].astype(str) == "sleeve_trend"
+            ][["ticker", "target_weight"]].copy()
+        elif "sleeve_name" in weights_df.columns:
+            trend_target_weights = weights_df[
+                weights_df["sleeve_name"].astype(str) == "sleeve_trend"
+            ][["ticker", "target_weight"]].copy()
+    if trend_target_weights.empty:
+        combined = _safe_df(getattr(alloc_result, "combined_weights", pd.DataFrame()))
+        if not combined.empty and "sleeve_name" in combined.columns:
+            trend_target_weights = combined[
+                combined["sleeve_name"].astype(str) == "sleeve_trend"
+            ][["ticker", "target_weight"]].copy()
+
+    sleeve_states = {
+        "sleeve_trend": determine_sleeve_state(
+            {
+                "equity_df": _safe_df(st_equity),
+                "target_weights": _safe_df(trend_target_weights),
+            },
+            allocation_weight=float(display_sleeves.get("sleeve_trend", 0.0)),
+            weight_tolerance=WEIGHT_TOLERANCE,
+        ),
+        "sleeve_2": determine_sleeve_state(
+            {
+                "equity_df": _safe_df(s2_equity),
+                "target_weights": _safe_df((s2_details or {}).get("target_weights")),
+            },
+            allocation_weight=float(display_sleeves.get("sleeve_2", 0.0)),
+            weight_tolerance=WEIGHT_TOLERANCE,
+        ),
+        "charlie_munger": determine_sleeve_state(
+            {
+                "equity_df": _safe_df((cm_details or {}).get("equity_df")),
+                "target_weights": _safe_df((cm_details or {}).get("target_weights")),
+            },
+            allocation_weight=float(display_sleeves.get("charlie_munger", 0.0)),
+            weight_tolerance=WEIGHT_TOLERANCE,
+        ),
+    }
     performance_diagnostics = {
         "current_equity": portfolio_stats.get("equity"),
         "day_return": portfolio_stats.get("day_return"),
@@ -2091,6 +2415,7 @@ def build_daily_snapshot(
         },
         "sleeve_allocations": allocations.get("sleeves", {}),
         "allocations": allocations,
+        "sleeve_states": sleeve_states,
         "performance_summary": performance_summary,
         "orders": orders,
         "risk_levels": risk_levels,
@@ -2589,6 +2914,21 @@ def build_html_report(
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run daily quant report workflow")
     parser.add_argument(
+        "--paper-reset",
+        "--paper_reset",
+        dest="paper_reset",
+        action="store_true",
+        help="Reset paper/shadow state to a clean start before running.",
+    )
+    parser.add_argument(
+        "--paper-start-cash",
+        "--paper_start_cash",
+        dest="paper_start_cash",
+        type=float,
+        default=10_000.0,
+        help="Starting cash used with --paper-reset (default: 10000).",
+    )
+    parser.add_argument(
         "--reset-ledger-date",
         dest="reset_ledger_date",
         default=None,
@@ -3081,6 +3421,25 @@ def main(argv: list[str] | None = None):
     sent_ledger_removed = 0
     sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
     paper_ledger_path, paper_trades_path = ensure_paper_state_files()
+    reset_info = None
+    if bool(getattr(args, "paper_reset", False)):
+        os.environ["PAPER_START_CASH"] = str(float(getattr(args, "paper_start_cash", 10_000.0)))
+        os.environ["PAPER_INCEPTION_DATE"] = trade_date_str
+        reset_info = _apply_paper_reset(
+            trade_date=trade_date_str,
+            paper_start_cash=float(getattr(args, "paper_start_cash", 10_000.0)),
+            paper_ledger_path=paper_ledger_path,
+            paper_trades_path=paper_trades_path,
+        )
+        logger.info(
+            "[PAPER][RESET] trade_date=%s start_cash=%.2f",
+            trade_date_str,
+            float(getattr(args, "paper_start_cash", 10_000.0)),
+        )
+        daily_snapshot["inception_metrics"] = {
+            **(daily_snapshot.get("inception_metrics") or {}),
+            "inception_date": trade_date_str,
+        }
     if os.path.exists(signals_path_exec):
         try:
             snapshot_cash_target_weight = _coerce_float_or_none((daily_snapshot or {}).get("target_cash_weight"))
@@ -3246,34 +3605,6 @@ def main(argv: list[str] | None = None):
                 signal_hash=signal_hash,
             )
             appended = append_ledger_rows(rows)
-            ledger_df = load_ledger()
-            rebuilt = rebuild_positions_from_ledger(ledger_df, asof_date)
-            write_position_outputs(rebuilt["positions"], rebuilt["cash"], asof_date)
-            holdings = rebuilt["positions"][["ticker", "shares", "avg_cost", "sleeve"]] if not rebuilt["positions"].empty else pd.DataFrame(columns=["ticker", "shares", "avg_cost", "sleeve"])
-            mtm, nav = mark_holdings(holdings, rebuilt["cash"], asof_date)
-            write_perf_outputs(mtm, nav, asof_date)
-            nav_ts_path = update_nav_timeseries(asof_date, nav, ledger_df)
-            nav_ts = pd.read_csv(nav_ts_path)
-            nav_ts["date"] = pd.to_datetime(nav_ts["date"])
-            nav_ts = nav_ts.sort_values("date")
-            current = nav_ts[nav_ts["date"] == pd.to_datetime(asof_date)]
-            if not current.empty:
-                mtd_start = nav_ts[(nav_ts["date"].dt.to_period("M") == pd.to_datetime(asof_date).to_period("M"))]["equity"].iloc[0]
-                week_start = nav_ts[(nav_ts["date"].dt.isocalendar().week == pd.to_datetime(asof_date).isocalendar().week)]["equity"].iloc[0]
-                si_start = nav_ts["equity"].iloc[0]
-                eq = float(current["equity"].iloc[0])
-                daily_snapshot["nav_metrics"] = {
-                    "equity": eq,
-                    "return_1d": float(current["return_1d"].iloc[0]),
-                    "wtd": (eq / float(week_start) - 1.0) if week_start else 0.0,
-                    "mtd": (eq / float(mtd_start) - 1.0) if mtd_start else 0.0,
-                    "si": (eq / float(si_start) - 1.0) if si_start else 0.0,
-                }
-            prev_dates = nav_ts[nav_ts["date"] < pd.to_datetime(asof_date)]["date"]
-            if not prev_dates.empty:
-                prev_date = prev_dates.max().strftime("%Y-%m-%d")
-                attr = compute_daily_attribution(asof_date, prev_date)
-                write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
             with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
                 json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
                 f.write("\n")
@@ -3310,6 +3641,20 @@ def main(argv: list[str] | None = None):
                 source=ledger_source,
                 run_id=ledger_run_id,
             )
+            nav_ts_path = nav_result.get("nav_timeseries_path")
+            if nav_ts_path and os.path.exists(str(nav_ts_path)):
+                nav_ts = pd.read_csv(str(nav_ts_path))
+                _merge_nav_metrics_into_snapshot(
+                    daily_snapshot,
+                    nav_ts,
+                    asof_date=asof_date,
+                )
+                nav_ts["date"] = pd.to_datetime(nav_ts["date"])
+                prev_dates = nav_ts[nav_ts["date"] < pd.to_datetime(asof_date)]["date"]
+                if not prev_dates.empty:
+                    prev_date = prev_dates.max().strftime("%Y-%m-%d")
+                    attr = compute_daily_attribution(asof_date, prev_date)
+                    write_attribution_outputs(asof_date, attr["tickers"], attr["sleeves"])
             inception_ts = update_inception_nav_series(asof_date=asof_date, model_nav=float(nav_result.get("equity", 0.0)))
             if not inception_ts.empty:
                 last = inception_ts.iloc[-1].to_dict()
@@ -3335,6 +3680,36 @@ def main(argv: list[str] | None = None):
             integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
         except Exception as e:
             logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
+    if not daily_snapshot.get("nav_metrics"):
+        nav_ts_path_fallback = Path("outputs/perf/nav_timeseries.csv")
+        if nav_ts_path_fallback.exists() and nav_ts_path_fallback.stat().st_size > 0:
+            try:
+                nav_ts_fallback = pd.read_csv(nav_ts_path_fallback)
+                _merge_nav_metrics_into_snapshot(
+                    daily_snapshot,
+                    nav_ts_fallback,
+                    asof_date=integrity.get("asof_date"),
+                )
+            except Exception as e:
+                logger.warning("[NAV][WARN] unable to hydrate snapshot nav metrics: %s", e)
+    try:
+        health_payload = _build_health_payload(
+            trade_date=trade_date_str,
+            paper_summary=paper_summary,
+            execution_payload=execution_payload,
+            nav_ts_path=integrity.get("nav_timeseries_path") or "outputs/perf/nav_timeseries.csv",
+            should_execute=bool(should_execute),
+            leverage_enabled=str(os.getenv("ALLOW_LEVERAGE", "0")).strip().lower() in {"1", "true", "yes", "y", "on"},
+        )
+        if reset_info:
+            health_payload["paper_reset"] = True
+            health_payload["paper_start_cash"] = float(reset_info.get("start_cash", 0.0))
+        write_health_artifact(trade_date_str, health_payload)
+    except AssertionError as e:
+        logger.error("[HEALTH][FAIL] %s", e)
+        raise
+    except Exception as e:
+        logger.warning("[HEALTH][WARN] failed writing health artifact: %s", e)
     try:
         write_integrity_artifact(integrity["asof_date"], integrity)
     except Exception as e:

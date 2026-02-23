@@ -18,6 +18,7 @@ import yfinance as yf
 
 from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
+from paper.reporting_consistency import compute_exposure
 from core.growth_engine_v4 import is_monday_rebalance
 from core.universe_v4 import is_allowed_etf_symbol
 
@@ -60,8 +61,12 @@ def load_config(path: str) -> PaperConfig:
 
     trading_mode = os.getenv("TRADING_MODE", str(mode_cfg.get("trading_mode", "paper"))).strip().lower()
 
+    initial_equity = float(
+        os.getenv("PAPER_START_CASH", cfg.get("initial_equity", 10000.0))
+    )
+
     return PaperConfig(
-        initial_equity=float(cfg["initial_equity"]),
+        initial_equity=initial_equity,
         benchmark_ticker=str(cfg["benchmark_ticker"]),
         slippage_bps=float(execution.get("slippage_bps", 0.0)),
         allow_fractional=bool(constraints.get("allow_fractional_shares", True)),
@@ -1193,7 +1198,7 @@ def run_paper_day(
     else:
         trades_out.insert(0, "date", run_date)
 
-    if not blocked:
+    if not blocked and not planning_mode:
         append_csv(trades_out, trades_path)
 
     trade_plan = (
@@ -1204,7 +1209,7 @@ def run_paper_day(
         else []
     )
 
-    if not blocked:
+    if not blocked and not planning_mode:
         holdings_new, cash_new = apply_trades_to_holdings(
             holdings=holdings_prev,
             targets=targets,
@@ -1218,10 +1223,17 @@ def run_paper_day(
     else:
         holdings_new = holdings_prev.copy()
         cash_new = float(cash_prev)
-        total_equity = float(equity_prev)
+        if holdings_new is not None and not holdings_new.empty and pricing_series is not None and not pricing_series.empty:
+            m2m = mark_to_market(holdings_new, pricing_series)
+            total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
+            total_equity = float(cash_new + total_mv)
+            if total_equity <= 0:
+                total_equity = float(equity_prev)
+        else:
+            m2m = pd.DataFrame(columns=["ticker", "sleeve", "shares", "price", "market_value"])
+            total_mv = 0.0
+            total_equity = float(equity_prev)
         achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
-        m2m = pd.DataFrame(columns=["ticker", "sleeve", "shares", "price", "market_value"])
-        total_mv = 0.0
     invested_dollars = total_mv
     investable_dollars = float(trade_meta.get("target_investable_dollars", equity_prev * investable_weight))
     target_cash_dollars = float(equity_prev * target_cash_weight)
@@ -1232,6 +1244,13 @@ def run_paper_day(
             str(r["ticker"]): float(r["market_value"]) / total_equity
             for _, r in m2m.iterrows()
         }
+    exposure = compute_exposure(
+        achieved_weights,
+        leverage_enabled=bool((m2m["shares"] < 0).any()) if not m2m.empty and "shares" in m2m.columns else False,
+        enforce_bounds=True,
+    )
+    gross_exposure = float(exposure["gross_exposure"])
+    net_exposure = float(exposure["net_exposure"])
     target_weights = {
         str(r["ticker"]): float(r["target_weight"]) for _, r in targets.iterrows()
     }
@@ -1250,7 +1269,7 @@ def run_paper_day(
             }
         )
 
-    if not blocked:
+    if not blocked and not planning_mode:
         ledger_day = m2m[["ticker", "sleeve", "shares", "price", "market_value"]].copy()
         ledger_day.insert(0, "date", run_date)
         ledger_day["cash"] = cash_new
@@ -1297,12 +1316,14 @@ def run_paper_day(
             "position_deltas": [],
         }
 
-    executed_trades = int(len(trades_out)) if trades_out is not None else 0
+    executed_trades = int(len(trades_out)) if (trades_out is not None and not planning_mode) else 0
     turnover = (
         float(trades_out["notional"].sum())
         if executed_trades and "notional" in trades_out.columns
         else 0.0
     )
+    turnover_denominator = float(equity_prev) if float(equity_prev) > 0 else float(cfg.initial_equity)
+    turnover_pct = (turnover / turnover_denominator) if turnover_denominator > 0 else 0.0
 
     logger.info(
         "[SHADOW] mode=%s market=%s orders=%d blocked=%d recon=%s",
@@ -1334,10 +1355,13 @@ def run_paper_day(
         "cash": cash_new,
         "num_trades": executed_trades,
         "turnover_notional": turnover,
+        "turnover_pct": float(turnover_pct),
         "benchmark": cfg.benchmark_ticker,
         "min_trade_dollars": float(cfg.min_trade_dollars),
         "target_cash_weight": float(target_cash_weight),
         "achieved_cash_weight": float(achieved_cash_weight),
+        "gross_exposure": float(gross_exposure),
+        "net_exposure": float(net_exposure),
         "investable_dollars": float(investable_dollars),
         "invested_dollars": float(invested_dollars),
         "target_cash_dollars": float(target_cash_dollars),
