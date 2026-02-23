@@ -8,7 +8,8 @@ from paper.ledger2 import append_rows, ensure_dirs, load_ledger
 from paper.nav2 import update_nav
 
 
-def test_ledger2_idempotent_append(tmp_path):
+def test_ledger2_idempotent_append(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     ledger_path = tmp_path / "outputs" / "ledger" / "trades.csv"
     ensure_dirs(str(ledger_path))
     row = {
@@ -125,8 +126,8 @@ def test_ledger_schema_with_signal_hash_parses_and_nav2_health_ok(tmp_path, monk
     assert not ts.empty
     assert (ts["date"] == "2026-01-02").sum() == 1
 
-    equity = float(nav_result["equity"])
-    cash = float(nav_result["cash"])
+    equity = 10000.0
+    cash = 9000.0
     gross = float(ts.iloc[-1]["gross_exposure"])
     net = float(ts.iloc[-1]["net_exposure"])
     achieved_cash_weight = (cash / equity) if equity > 0 else 0.0
@@ -147,8 +148,75 @@ def test_ledger_schema_with_signal_hash_parses_and_nav2_health_ok(tmp_path, monk
         },
         execution_payload={"trades": []},
         nav_ts_path="outputs/perf/nav_timeseries.csv",
+        ledger_path=str(ledger_path),
         should_execute=True,
         leverage_enabled=False,
     )
 
-    assert abs(float(health["broker_equity"]) - float(health["nav_equity_last_row"])) < 1e-9
+    assert abs(float(health["broker_equity"]) - float(health["execution_basis_equity"])) < 1e-9
+
+
+def test_turnover_deduped_and_health_uses_execution_basis_when_mark_differs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ledger_path = tmp_path / "outputs" / "ledger" / "trades.csv"
+    ensure_dirs(str(ledger_path))
+
+    # Duplicate execution row for the same order_id/trade_date should be deduped.
+    row = {
+        "timestamp_et": "2026-01-02T10:00:00-05:00",
+        "run_id": "r1",
+        "source": "SHADOW",
+        "trade_date": "2026-01-02",
+        "asof_date": "2026-01-01",
+        "order_id": "oid-1",
+        "ticker": "AAPL",
+        "sleeve": "main",
+        "side": "BUY",
+        "quantity": 10,
+        "fill_price": 100.0,
+        "notional": 1000.0,
+        "fees": 0.0,
+        "reason": "rebalance_to_target",
+        "signal_hash": "",
+        "execution_status": "FILLED_ESTIMATE",
+    }
+    pd.DataFrame([row, row]).to_csv(ledger_path, index=False)
+
+    # Mark basis intentionally differs from execution basis.
+    nav_ts = pd.DataFrame(
+        [
+            {"date": "2026-01-01", "equity": 10000.0, "cash": 10000.0, "gross_exposure": 0.0, "net_exposure": 0.0, "return_1d": 0.0, "turnover_dollars": 0.0, "turnover_pct": 0.0, "turnover": 0.0},
+            {"date": "2026-01-02", "equity": 10020.0, "cash": 9000.0, "gross_exposure": 0.1, "net_exposure": 0.1, "return_1d": 0.002, "turnover_dollars": 2000.0, "turnover_pct": 0.2, "turnover": 0.2},
+        ]
+    )
+    nav_path = tmp_path / "outputs" / "perf" / "nav_timeseries.csv"
+    nav_path.parent.mkdir(parents=True, exist_ok=True)
+    nav_ts.to_csv(nav_path, index=False)
+
+    health = dqr._build_health_payload(
+        trade_date="2026-01-02",
+        paper_summary={
+            "trade_plan": [],
+            "num_trades": 1,
+            # Execution basis from fills: 10,000 start - 1,000 buy cash + 1,000 holdings @fill = 10,000
+            "total_equity": 10000.0,
+            "cash": 9000.0,
+            "achieved_cash_weight": 0.9,
+            "gross_exposure": 0.1,
+            "net_exposure": 0.1,
+            "turnover_notional": 2000.0,  # stale/duplicated input should be ignored in execution mode
+            "turnover_pct": 0.2,
+            "market_guard": {"status": "OPEN"},
+        },
+        execution_payload={"trades": []},
+        nav_ts_path=str(nav_path),
+        ledger_path=str(ledger_path),
+        should_execute=True,
+        leverage_enabled=False,
+    )
+
+    assert abs(float(health["execution_basis_equity"]) - 10000.0) < 1e-9
+    assert abs(float(health["broker_equity"]) - float(health["execution_basis_equity"])) < 1e-9
+    assert abs(float(health["turnover_dollars"]) - 1000.0) < 1e-9
+    assert abs(float(health["turnover_pct"]) - 0.1) < 1e-9
+    assert any("valuation_basis_mismatch" in str(w) for w in (health.get("warnings") or []))

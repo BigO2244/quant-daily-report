@@ -6,7 +6,8 @@ import daily_quant_report as dqr
 from backtests import sleeve1_robustness as rb
 
 
-def test_charlie_not_referenced_in_allocation(monkeypatch):
+def test_charlie_not_referenced_in_allocation(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(dqr, "run_sleeve_1", lambda: (pd.DataFrame(), pd.DataFrame()))
     monkeypatch.setattr(
         dqr,

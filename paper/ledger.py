@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from paper.paths import LEDGER_TRADES_PATH
 from paper.paper_broker import fetch_prev_closes_yfinance
 
 logger = logging.getLogger(__name__)
@@ -71,14 +72,14 @@ def make_run_id() -> str:
 
 
 
-def load_ledger(path: str = "outputs/ledger/trades.csv") -> pd.DataFrame:
+def load_ledger(path: str = str(LEDGER_TRADES_PATH)) -> pd.DataFrame:
     """Load the execution ledger."""
     ensure_ledger_exists(path)
     return pd.read_csv(path)
 
 
 
-def append_ledger_rows(rows: list[dict[str, Any]], path: str = "outputs/ledger/trades.csv") -> int:
+def append_ledger_rows(rows: list[dict[str, Any]], path: str = str(LEDGER_TRADES_PATH)) -> int:
     """Append unique rows based on (trade_date, order_id, source)."""
     ensure_ledger_exists(path)
     if not rows:

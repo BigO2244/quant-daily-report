@@ -8,11 +8,15 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from paper.paths import (
+    LEDGER_TRADES_PATH,
+    ensure_no_legacy_ledger,
+)
 from paper.paper_broker import fetch_prev_closes_yfinance
 
 logger = logging.getLogger(__name__)
 
-LEDGER2_PATH = "outputs/ledger/trades.csv"
+LEDGER2_PATH = str(LEDGER_TRADES_PATH)
 LEDGER2_COLUMNS = [
     "timestamp_et",
     "run_id",
@@ -66,7 +70,7 @@ LEGACY_LEDGER_COLUMNS_WITH_STATUS = [
     "signal_hash",
     "status",
 ]
-UNIQUE_KEY_COLS = ["trade_date", "order_id", "source"]
+UNIQUE_KEY_COLS = ["trade_date", "order_id"]
 
 
 def ensure_dirs(path: str = LEDGER2_PATH) -> None:
@@ -147,7 +151,26 @@ def _load_and_normalize_rows(path: str) -> tuple[pd.DataFrame, bool]:
 
 
 def load_ledger(path: str = LEDGER2_PATH, *, rewrite_if_needed: bool = True) -> pd.DataFrame:
+    ensure_no_legacy_ledger(logger=logger, when="load_ledger")
     df, needs_rewrite = _load_and_normalize_rows(path)
+    if not df.empty and all(col in df.columns for col in UNIQUE_KEY_COLS):
+        before = len(df)
+        sort_cols = ["trade_date"]
+        if "timestamp_et" in df.columns:
+            sort_cols.append("timestamp_et")
+        df = (
+            df.sort_values(sort_cols, na_position="last")
+            .drop_duplicates(subset=UNIQUE_KEY_COLS, keep="last")
+            .reset_index(drop=True)
+        )
+        if len(df) != before:
+            needs_rewrite = True
+            logger.info(
+                "[LEDGER2] dropped duplicate rows on load path=%s removed=%d key=%s",
+                path,
+                before - len(df),
+                UNIQUE_KEY_COLS,
+            )
     if rewrite_if_needed and needs_rewrite:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=False)
@@ -156,14 +179,29 @@ def load_ledger(path: str = LEDGER2_PATH, *, rewrite_if_needed: bool = True) -> 
 
 
 def append_rows(path: str, rows: list[dict[str, Any]]) -> tuple[int, int]:
+    ensure_no_legacy_ledger(logger=logger, when="append_rows_pre")
     ledger_df = load_ledger(path, rewrite_if_needed=True)
+    existing_count = int(len(ledger_df))
     incoming = pd.DataFrame(rows or []).reindex(columns=LEDGER2_COLUMNS)
     if incoming.empty:
         if ledger_df.empty and not Path(path).exists():
             incoming.to_csv(path, index=False)
         elif ledger_df.empty and Path(path).exists() and Path(path).stat().st_size == 0:
             pd.DataFrame(columns=LEDGER2_COLUMNS).to_csv(path, index=False)
+        logger.info(
+            "[LEDGER] path=%s rows_appended=0 total_rows=%d duplicates_removed=0",
+            path,
+            existing_count,
+        )
         return 0, 0
+
+    before_incoming = int(len(incoming))
+    incoming = (
+        incoming.sort_values(["trade_date", "timestamp_et"], na_position="last")
+        .drop_duplicates(subset=UNIQUE_KEY_COLS, keep="last")
+        .reset_index(drop=True)
+    )
+    incoming_dupes_removed = max(0, before_incoming - int(len(incoming)))
 
     existing_keys = set()
     if not ledger_df.empty:
@@ -180,10 +218,29 @@ def append_rows(path: str, rows: list[dict[str, Any]]) -> tuple[int, int]:
         pd.DataFrame(columns=LEDGER2_COLUMNS).to_csv(ledger_path, index=False)
 
     if to_append.empty:
+        duplicates_removed = incoming_dupes_removed + skipped
+        logger.info(
+            "[LEDGER] path=%s rows_appended=0 total_rows=%d duplicates_removed=%d",
+            path,
+            existing_count,
+            duplicates_removed,
+        )
         return 0, skipped
 
     to_append.to_csv(ledger_path, mode="a", header=False, index=False)
-    return int(len(to_append)), skipped
+    refreshed = load_ledger(path, rewrite_if_needed=True)
+    total_rows = int(len(refreshed))
+    rows_appended = int(len(to_append))
+    duplicates_removed = incoming_dupes_removed + skipped
+    logger.info(
+        "[LEDGER] path=%s rows_appended=%d total_rows=%d duplicates_removed=%d",
+        path,
+        rows_appended,
+        total_rows,
+        duplicates_removed,
+    )
+    ensure_no_legacy_ledger(logger=logger, when="append_rows_post")
+    return rows_appended, skipped
 
 
 def _default_get_price_fn(ticker: str, asof_date: str) -> float | None:

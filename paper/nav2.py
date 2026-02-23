@@ -53,6 +53,23 @@ def _compute_portfolio_state(ledger_df: pd.DataFrame, asof_date: str, starting_c
     if usable.empty:
         return cash, holdings
 
+    if all(col in usable.columns for col in ("trade_date", "order_id")):
+        before = len(usable)
+        dedupe_sort_cols = ["trade_date"]
+        if "timestamp_et" in usable.columns:
+            dedupe_sort_cols.append("timestamp_et")
+        usable = (
+            usable.sort_values(dedupe_sort_cols, na_position="last")
+            .drop_duplicates(subset=["trade_date", "order_id"], keep="last")
+            .reset_index(drop=True)
+        )
+        if len(usable) != before:
+            logger.info(
+                "[NAV2] deduped usable ledger rows removed=%d key=(trade_date,order_id) asof=%s",
+                before - len(usable),
+                asof_date,
+            )
+
     for col in ("quantity", "fill_price", "notional", "fees"):
         if col not in usable.columns:
             usable[col] = pd.NA

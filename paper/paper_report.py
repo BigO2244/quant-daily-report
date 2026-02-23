@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import pandas as pd
 
+from paper.paths import LEDGER_TRADES_PATH
+
 
 def _read_csv_if_exists(path: str) -> pd.DataFrame:
     if not os.path.exists(path) or os.path.getsize(path) == 0:
@@ -37,7 +39,7 @@ def build_paper_report_html(
     reconciliation: dict | None = None,
     shadow_status: dict | None = None,
 ) -> str:
-    canonical_trades_path = "outputs/ledger/trades.csv"
+    canonical_trades_path = str(LEDGER_TRADES_PATH)
     canonical_nav_path = "outputs/perf/nav_timeseries.csv"
     led = _read_csv_if_exists(ledger_path)
     day = led[led["date"] == run_date].copy() if (not led.empty and "date" in led.columns) else pd.DataFrame()
