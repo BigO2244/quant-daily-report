@@ -53,7 +53,28 @@ def _compute_portfolio_state(ledger_df: pd.DataFrame, asof_date: str, starting_c
     if usable.empty:
         return cash, holdings
 
-    for _, row in usable.sort_values(["trade_date", "timestamp_et"], na_position="last").iterrows():
+    for col in ("quantity", "fill_price", "notional", "fees"):
+        if col not in usable.columns:
+            usable[col] = pd.NA
+        usable[col] = pd.to_numeric(usable[col], errors="coerce")
+
+    bad_fees = int(usable["fees"].isna().sum())
+    if bad_fees > 0:
+        logger.warning(
+            "[NAV2] coercing non-numeric fees to 0.0 count=%d asof=%s",
+            bad_fees,
+            asof_date,
+        )
+    usable["fees"] = usable["fees"].fillna(0.0)
+    usable["quantity"] = usable["quantity"].fillna(0.0)
+    usable["fill_price"] = usable["fill_price"].fillna(0.0)
+    usable["notional"] = usable["notional"].fillna(0.0)
+
+    sort_cols = ["trade_date"]
+    if "timestamp_et" in usable.columns:
+        sort_cols.append("timestamp_et")
+
+    for _, row in usable.sort_values(sort_cols, na_position="last").iterrows():
         ticker = str(row.get("ticker") or "").upper()
         if not ticker:
             continue

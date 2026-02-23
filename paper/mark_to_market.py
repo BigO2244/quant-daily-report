@@ -77,6 +77,15 @@ def update_nav_timeseries(asof_date: str, nav: dict, ledger: pd.DataFrame) -> st
     ts["date"] = pd.to_datetime(ts["date"])
     ts = ts.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
 
+    def _trade_notional_for_date(trade_date: str) -> float:
+        if ledger.empty or "trade_date" not in ledger.columns or "notional" not in ledger.columns:
+            return 0.0
+        day = ledger.loc[ledger["trade_date"].astype(str) == str(trade_date), ["notional"]].copy()
+        if day.empty:
+            return 0.0
+        day["notional"] = pd.to_numeric(day["notional"], errors="coerce").fillna(0.0)
+        return float(day["notional"].abs().sum())
+
     for i in range(len(ts)):
         if i == 0:
             ts.loc[i, "return_1d"] = 0.0
@@ -89,7 +98,7 @@ def update_nav_timeseries(asof_date: str, nav: dict, ledger: pd.DataFrame) -> st
         ts.loc[i, "return_1d"] = (curr_eq / prev_eq - 1.0) if prev_eq else 0.0
         # Turnover convention: notional traded on trade_date == this row's date divided by prior equity.
         d = ts.loc[i, "date"].strftime("%Y-%m-%d")
-        notional = float(ledger.loc[ledger["trade_date"].astype(str) == d, "notional"].abs().sum()) if (not ledger.empty and "trade_date" in ledger.columns and "notional" in ledger.columns) else 0.0
+        notional = _trade_notional_for_date(d)
         turnover_pct = (notional / prev_eq) if prev_eq else 0.0
         ts.loc[i, "turnover_dollars"] = notional
         ts.loc[i, "turnover_pct"] = turnover_pct
@@ -99,7 +108,7 @@ def update_nav_timeseries(asof_date: str, nav: dict, ledger: pd.DataFrame) -> st
     if len(ts) > 0:
         d0 = ts.loc[0, "date"].strftime("%Y-%m-%d")
         eq0 = float(ts.loc[0, "equity"])
-        n0 = float(ledger.loc[ledger["trade_date"].astype(str) == d0, "notional"].abs().sum()) if (not ledger.empty and "trade_date" in ledger.columns and "notional" in ledger.columns) else 0.0
+        n0 = _trade_notional_for_date(d0)
         pct0 = (n0 / eq0) if eq0 else 0.0
         ts.loc[0, "turnover_dollars"] = n0
         ts.loc[0, "turnover_pct"] = pct0

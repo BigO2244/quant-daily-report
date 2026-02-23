@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +28,43 @@ LEDGER2_COLUMNS = [
     "notional",
     "fees",
     "reason",
+    "signal_hash",
     "execution_status",
+]
+LEDGER2_COLUMNS_NO_SIGNAL_HASH = [
+    "timestamp_et",
+    "run_id",
+    "source",
+    "trade_date",
+    "asof_date",
+    "order_id",
+    "ticker",
+    "sleeve",
+    "side",
+    "quantity",
+    "fill_price",
+    "notional",
+    "fees",
+    "reason",
+    "execution_status",
+]
+LEGACY_LEDGER_COLUMNS_WITH_STATUS = [
+    "timestamp_et",
+    "run_id",
+    "source",
+    "trade_date",
+    "asof_date",
+    "order_id",
+    "ticker",
+    "sleeve",
+    "side",
+    "quantity",
+    "fill_price",
+    "notional",
+    "fees",
+    "reason",
+    "signal_hash",
+    "status",
 ]
 UNIQUE_KEY_COLS = ["trade_date", "order_id", "source"]
 
@@ -36,17 +73,90 @@ def ensure_dirs(path: str = LEDGER2_PATH) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
-def load_ledger(path: str = LEDGER2_PATH) -> pd.DataFrame:
+def _normalize_raw_row(row: list[str]) -> dict[str, Any] | None:
+    """Normalize historical ledger row shapes into canonical LEDGER2_COLUMNS."""
+    n = len(row)
+    if n >= len(LEDGER2_COLUMNS):
+        values = list(row[: len(LEDGER2_COLUMNS)])
+        return dict(zip(LEDGER2_COLUMNS, values))
+    if n == len(LEDGER2_COLUMNS_NO_SIGNAL_HASH):
+        out = dict(zip(LEDGER2_COLUMNS_NO_SIGNAL_HASH, row))
+        out["signal_hash"] = ""
+        return {col: out.get(col, "") for col in LEDGER2_COLUMNS}
+    if n == len(LEGACY_LEDGER_COLUMNS_WITH_STATUS):
+        out = dict(zip(LEGACY_LEDGER_COLUMNS_WITH_STATUS, row))
+        out["execution_status"] = out.get("status", "")
+        return {
+            "timestamp_et": out.get("timestamp_et", ""),
+            "run_id": out.get("run_id", ""),
+            "source": out.get("source", ""),
+            "trade_date": out.get("trade_date", ""),
+            "asof_date": out.get("asof_date", ""),
+            "order_id": out.get("order_id", ""),
+            "ticker": out.get("ticker", ""),
+            "sleeve": out.get("sleeve", ""),
+            "side": out.get("side", ""),
+            "quantity": out.get("quantity", ""),
+            "fill_price": out.get("fill_price", ""),
+            "notional": out.get("notional", ""),
+            "fees": out.get("fees", ""),
+            "reason": out.get("reason", ""),
+            "signal_hash": out.get("signal_hash", ""),
+            "execution_status": out.get("execution_status", ""),
+        }
+    return None
+
+
+def _load_and_normalize_rows(path: str) -> tuple[pd.DataFrame, bool]:
     ensure_dirs(path)
     ledger_path = Path(path)
     if not ledger_path.exists() or ledger_path.stat().st_size == 0:
-        return pd.DataFrame(columns=LEDGER2_COLUMNS)
-    df = pd.read_csv(ledger_path)
+        return pd.DataFrame(columns=LEDGER2_COLUMNS), False
+
+    with ledger_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        raw_rows = list(reader)
+
+    if not raw_rows:
+        return pd.DataFrame(columns=LEDGER2_COLUMNS), False
+
+    header = [str(c).strip() for c in raw_rows[0]]
+    body = raw_rows[1:]
+    normalized_rows: list[dict[str, Any]] = []
+    needs_rewrite = header != LEDGER2_COLUMNS
+
+    for idx, row in enumerate(body, start=2):
+        if not row or all(str(v).strip() == "" for v in row):
+            continue
+        normalized = _normalize_raw_row(row)
+        if normalized is None:
+            logger.warning(
+                "[LEDGER2] skipping malformed row line=%d cols=%d path=%s",
+                idx,
+                len(row),
+                path,
+            )
+            needs_rewrite = True
+            continue
+        if len(row) != len(LEDGER2_COLUMNS):
+            needs_rewrite = True
+        normalized_rows.append(normalized)
+
+    df = pd.DataFrame(normalized_rows).reindex(columns=LEDGER2_COLUMNS)
+    return df, needs_rewrite
+
+
+def load_ledger(path: str = LEDGER2_PATH, *, rewrite_if_needed: bool = True) -> pd.DataFrame:
+    df, needs_rewrite = _load_and_normalize_rows(path)
+    if rewrite_if_needed and needs_rewrite:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(path, index=False)
+        logger.info("[LEDGER2] normalized ledger schema/path=%s rows=%d", path, len(df))
     return df.reindex(columns=LEDGER2_COLUMNS)
 
 
 def append_rows(path: str, rows: list[dict[str, Any]]) -> tuple[int, int]:
-    ledger_df = load_ledger(path)
+    ledger_df = load_ledger(path, rewrite_if_needed=True)
     incoming = pd.DataFrame(rows or []).reindex(columns=LEDGER2_COLUMNS)
     if incoming.empty:
         if ledger_df.empty and not Path(path).exists():
@@ -114,6 +224,7 @@ def payload_to_rows(
     payload_status = "UNKNOWN"
     if isinstance(execution_payload, dict):
         payload_status = str(execution_payload.get("execution_status") or "UNKNOWN").upper()
+    signal_hash_value = str(signal_hash or "")
 
     rows: list[dict[str, Any]] = []
     missing_prices: list[str] = []
@@ -166,6 +277,7 @@ def payload_to_rows(
                 "notional": notional,
                 "fees": fees,
                 "reason": str(trade.get("reason") or ""),
+                "signal_hash": signal_hash_value,
                 "execution_status": payload_status,
             }
         )
