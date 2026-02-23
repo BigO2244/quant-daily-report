@@ -87,7 +87,7 @@ def run_backtest(config: RobustnessConfig) -> dict[str, pd.DataFrame | dict]:
     prices = download_prices(tickers, period="max", interval="1d")
     prices = prices[prices["date"].between(start - pd.Timedelta(days=420), end)].copy()
     close = prices.pivot(index="date", columns="ticker", values="close").sort_index()
-    month_end = close.resample("M").last()
+    month_end = close.resample("ME").last()
 
     spy_daily = close["SPY"].dropna()
     spy_200d = spy_daily.rolling(200, min_periods=200).mean()
