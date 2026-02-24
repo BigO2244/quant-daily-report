@@ -1,0 +1,68 @@
+name: Daily Alpaca Paper Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Override REPORT_DATE (YYYY-MM-DD). Leave blank for today ET."
+        required: false
+        type: string
+  schedule:
+    # 9:35 AM America/New_York is 14:35 UTC during Standard Time, 13:35 UTC during DST.
+    # Use two schedules to straddle DST shifts, OR keep one and rely on market-open gate.
+    - cron: "35 14 * * 1-5"
+    - cron: "35 13 * * 1-5"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      TRADING_MODE: alpaca
+      ALPACA_PAPER: "1"
+      PAPER_TRADING: "1"
+      MODE: SHADOW
+
+      # Secrets (do not print these)
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+
+      # If user passed an override date via workflow_dispatch
+      REPORT_DATE: ${{ inputs.report_date }}
+
+      # Ensure date calculations use Eastern if REPORT_DATE isn't provided
+      TZ: America/New_York
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Alpaca smoke test (non-fatal)
+        run: |
+          source .venv/bin/activate
+          python3 alpaca_smoke_test.py || true
+
+      - name: Run daily report
+        run: |
+          chmod +x scripts/run_daily.sh
+          ./scripts/run_daily.sh
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-${{ env.REPORT_DATE }}
+          path: outputs/

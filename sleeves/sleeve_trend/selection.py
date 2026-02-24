@@ -59,7 +59,7 @@ GATE_MIN_AVG_VOLUME = cfg.MIN_AVG_VOLUME  # 100K shares min
 
 # Weighting method
 WEIGHT_METHOD = "inverse_vol"  # "inverse_vol" | "score" | "equal"
-MAX_SINGLE_WEIGHT = cfg.MAX_POSITION_PCT  # 10% cap per position
+MAX_SINGLE_WEIGHT = 0.50  # 50% cap per position
 MIN_SINGLE_WEIGHT = 0.02  # 2% floor — don't bother with tiny positions
 
 # Inverse-vol parameters
@@ -401,6 +401,11 @@ def _iterative_cap(
         return np.full(n, 1.0 / n)
     w = w / s
 
+    # If cap is infeasible for this basket size, keep normalized weights.
+    # This preserves current behavior for small-N cases (e.g., equal weight top-5 with 10% cap).
+    if cap * n < 1.0 - 1e-12:
+        return w
+
     # Apply floor first
     below_floor = w < floor
     if below_floor.any() and not below_floor.all():
@@ -420,10 +425,27 @@ def _iterative_cap(
         if free_total > 0:
             w[free] += excess * (w[free] / free_total)
 
-    # Final normalize to exactly 1.0
+    # Final drift adjust without re-inflating capped names.
     s = w.sum()
-    if s > 0:
-        w = w / s
+    if s <= 0:
+        return np.full(n, 1.0 / n)
+
+    drift = 1.0 - s
+    if abs(drift) > 1e-12:
+        if drift < 0:
+            # Scale down only (cannot violate cap).
+            w = w / s
+        else:
+            under = w < cap - 1e-12
+            if under.any():
+                under_sum = w[under].sum()
+                if under_sum > 1e-12:
+                    w[under] += drift * (w[under] / under_sum)
+                else:
+                    w[under] += drift / under.sum()
+
+    # Numeric safety: never exceed cap.
+    w = np.minimum(w, cap)
 
     return w
 

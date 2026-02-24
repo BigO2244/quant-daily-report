@@ -5,7 +5,14 @@
 #   2) explicit "bug fix only" justification
 # ============================================================
 
-print("Backtest Version Check: 2025-12-14-Debug-2")
+"""
+Sleeve 1 backtest.
+
+IMPORTANT: No import-time side effects (prints/logging).
+The CLI help path (-h/--help) may import modules; keep it clean.
+"""
+
+BACKTEST_VERSION = "2025-12-14-Debug-2"
 
 assert __name__.startswith("sleeves.sleeve_1"), "Invalid import context for Sleeve 1"
 

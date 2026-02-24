@@ -155,3 +155,85 @@ def test_exec_basis_equity_ties_broker(tmp_path, monkeypatch):
 
     assert payload["status"] == "PASS"
     assert abs(float(payload["execution_basis_equity"]) - float(payload["broker_equity"])) <= 0.1
+
+
+def test_health_tolerance_allows_small_execution_broker_drift(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    append_rows(str(LEDGER_TRADES_PATH), [_row("oid-1", notional=1000.0)])
+    nav_path = tmp_path / "outputs" / "perf" / "nav_timeseries.csv"
+    nav_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_nav(str(nav_path), equity=10020.0, cash=9000.0)
+
+    broker_equity = 9998.2  # small fees/slippage-like drift vs execution-basis 10000
+    broker_cash = 9000.0
+    payload = dqr._build_health_payload(
+        trade_date="2026-02-23",
+        paper_summary={
+            "run_id": "run-1",
+            "trade_plan": [],
+            "num_trades": 1,
+            "total_equity": broker_equity,
+            "cash": broker_cash,
+            "achieved_cash_weight": broker_cash / broker_equity,
+            "gross_exposure": 0.1,
+            "net_exposure": 0.1,
+            "market_guard": {"status": "OPEN"},
+        },
+        execution_payload={"trades": []},
+        nav_ts_path=str(nav_path),
+        ledger_path=str(LEDGER_TRADES_PATH),
+        should_execute=True,
+        leverage_enabled=False,
+    )
+
+    assert payload["status"] == "PASS"
+    assert abs(float(payload["execution_vs_broker_equity_delta"])) == pytest.approx(
+        abs(float(payload["execution_basis_equity"]) - float(payload["broker_equity"])),
+        abs=1e-9,
+    )
+    assert float(payload["execution_vs_broker_equity_tolerance"]) >= 5.0
+
+
+def test_health_prefers_recon_equity_basis_when_available(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    append_rows(str(LEDGER_TRADES_PATH), [_row("oid-1", notional=1000.0)])
+    nav_path = tmp_path / "outputs" / "perf" / "nav_timeseries.csv"
+    nav_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_nav(str(nav_path), equity=10120.0, cash=9000.0)
+
+    # Execution-basis equity from the ledger is 10,000, but broker reconciliation
+    # confirms model-vs-broker parity near 10,120.
+    payload = dqr._build_health_payload(
+        trade_date="2026-02-23",
+        paper_summary={
+            "run_id": "run-1",
+            "trade_plan": [],
+            "num_trades": 1,
+            "total_equity": 10120.0,
+            "cash": 9000.0,
+            "achieved_cash_weight": 9000.0 / 10120.0,
+            "gross_exposure": 0.1,
+            "net_exposure": 0.1,
+            "market_guard": {"status": "OPEN"},
+            "broker_reconciliation": {
+                "status": "PASS",
+                "model_equity": 10119.5,
+                "broker_equity": 10120.0,
+                "equity_tolerance": 10.0,
+                "equity_delta": -0.5,
+                "broker_minus_model_equity_delta": 0.5,
+            },
+        },
+        execution_payload={"trades": []},
+        nav_ts_path=str(nav_path),
+        ledger_path=str(LEDGER_TRADES_PATH),
+        should_execute=True,
+        leverage_enabled=False,
+    )
+
+    assert payload["status"] == "PASS"
+    assert float(payload["model_equity_recon"]) == pytest.approx(10119.5, abs=1e-9)
+    assert float(payload["recon_delta"]) == pytest.approx(0.5, abs=1e-9)
+    assert float(payload["execution_vs_broker_equity_delta"]) == pytest.approx(
+        0.5, abs=1e-9
+    )
