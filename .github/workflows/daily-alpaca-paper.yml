@@ -8,8 +8,8 @@ on:
         required: false
         type: string
   schedule:
-    # 9:35 AM America/New_York is 14:35 UTC during Standard Time, 13:35 UTC during DST.
-    # Use two schedules to straddle DST shifts, OR keep one and rely on market-open gate.
+    # 9:35 AM America/New_York is 14:35 UTC in EST and 13:35 UTC in EDT.
+    # Keep both cron entries to handle DST shifts.
     - cron: "35 14 * * 1-5"
     - cron: "35 13 * * 1-5"
 
@@ -20,9 +20,9 @@ jobs:
 
     env:
       TRADING_MODE: alpaca
-      ALPACA_PAPER: "1"
-      PAPER_TRADING: "1"
-      MODE: SHADOW
+      MODE: ALPACA
+      ALPACA_PAPER: "true"
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets/v2"
 
       # Secrets (do not print these)
       ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
@@ -55,14 +55,19 @@ jobs:
           source .venv/bin/activate
           python3 alpaca_smoke_test.py || true
 
-      - name: Run daily report
+      - name: Run daily quant execution
         run: |
-          chmod +x scripts/run_daily.sh
-          ./scripts/run_daily.sh
+          source .venv/bin/activate
+          python3 daily_quant_report.py
 
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: outputs-${{ env.REPORT_DATE }}
-          path: outputs/
+          if-no-files-found: warn
+          path: |
+            outputs/daily
+            outputs/execution_email
+            outputs/ledger
+            outputs/perf

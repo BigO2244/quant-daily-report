@@ -23,14 +23,11 @@ def _env_int(name: str, default: int) -> int:
         raise RuntimeError(f"Invalid int for env var {name}: {v!r}") from e
 
 
-def _smtp_session() -> smtplib.SMTP:
+def _smtp_session(host: str, port: int) -> smtplib.SMTP:
     """
     Create an SMTP session that is explicitly connected before starttls().
     This avoids 'SMTPServerDisconnected: please run connect() first' in CI.
     """
-    host = _req_env("SMTP_HOST")
-    port = _env_int("SMTP_PORT", 587)
-
     s = smtplib.SMTP(timeout=30)
     s.connect(host, port)  # <-- critical: explicit connect
     s.ehlo()
@@ -45,6 +42,8 @@ def main() -> None:
     ap.add_argument("--subject-prefix", default="[ALPHA]")
     args = ap.parse_args()
 
+    smtp_host = _req_env("SMTP_HOST")
+    smtp_port = _env_int("SMTP_PORT", 587)
     smtp_user = _req_env("SMTP_USER")
     smtp_pass = _req_env("SMTP_PASSWORD")
     email_to = _req_env("REPORT_TO_EMAIL")
@@ -73,7 +72,7 @@ def main() -> None:
     msg.add_attachment(html.encode("utf-8"), maintype="text", subtype="html", filename="alpha_report.html")
 
     try:
-        with _smtp_session() as s:
+        with _smtp_session(smtp_host, smtp_port) as s:
             s.login(smtp_user, smtp_pass)
             s.send_message(msg)
     except Exception as e:

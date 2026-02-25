@@ -34,19 +34,12 @@ jobs:
         run: |
           python3 scripts/alpha_report.py --apply-costs --cost-bps 25
 
-      # 🚀 LIVE EXECUTION STEP (Alpaca Paper)
-      - name: Run daily quant report (Alpaca execution routing)
-        env:
-          TRADING_MODE: alpaca
-          MODE: ALPACA
-          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
-          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
-          ALPACA_PAPER: "true"
-          ALPACA_BASE_URL: "https://paper-api.alpaca.markets/v2"
+      - name: Update shadow NAV from alpha timeseries
         run: |
-          python3 daily_quant_report.py
+          python3 scripts/daily_alpha_run.py
 
       - name: Email alpha report
+        continue-on-error: true
         env:
           SMTP_HOST: "smtp.gmail.com"
           SMTP_PORT: "587"
