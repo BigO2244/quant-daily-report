@@ -52,14 +52,14 @@ def test_live_market_closed_halts_and_generates_no_plan():
     assert payload["trades"] == []
 
 
-def _mock_open_market(monkeypatch):
+def _mock_open_market(monkeypatch, trading_mode: str = "shadow"):
     cfg = broker.PaperConfig(
         initial_equity=10000.0,
         benchmark_ticker="SPY",
         slippage_bps=0.0,
         allow_fractional=True,
         min_trade_dollars=1.0,
-        trading_mode="shadow",
+        trading_mode=trading_mode,
     )
     monkeypatch.setattr(broker, "load_config", lambda path: cfg)
     monkeypatch.setattr(
@@ -157,6 +157,125 @@ def test_shadow_market_open_not_halted(monkeypatch):
 
     assert result["execution_status"] == "READY"
     assert result["market_status"] == "OPEN"
+    # 2026-02-10 is a Tuesday: buys should still be allowed unless exit_only is explicit.
+    assert result["exit_only"] is False
+    assert len(result["execution_trades"]) == 1
+    assert str(result["execution_trades"][0]["side"]).upper() == "BUY"
+
+
+def test_shadow_idempotent_skip_prevents_same_day_reexecution(monkeypatch):
+    _mock_open_market(monkeypatch)
+    monkeypatch.setattr(
+        broker,
+        "_filter_idempotent_orders",
+        lambda orders, path: ([], [str(o.get("order_id", "")) for o in orders]),
+    )
+
+    def _apply_noop_holdings(holdings, targets, trades, starting_cash):
+        _ = targets
+        assert trades is not None
+        assert trades.empty
+        return holdings.copy(), float(starting_cash)
+
+    monkeypatch.setattr(broker, "apply_trades_to_holdings", _apply_noop_holdings)
+    monkeypatch.setattr(
+        broker,
+        "mark_to_market",
+        lambda holdings, prices: pd.DataFrame(
+            columns=["ticker", "sleeve", "shares", "price", "market_value"]
+        ),
+    )
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+    )
+
+    assert result["execution_status"] == "READY"
+    assert int(result["num_trades"]) == 0
+    assert float(result["turnover_notional"]) == 0.0
+    assert result["execution_trades"] == []
+    assert result["shadow_orders"] == []
+    assert len(result["idempotent_skips"]) == 1
+
+
+def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _mock_open_market(monkeypatch, trading_mode="alpaca")
+
+    class _StubAlpaca:
+        paper = True
+
+        @classmethod
+        def from_env(cls):
+            return cls()
+
+        def find_order_by_client_id(self, client_id):
+            _ = client_id
+            return None
+
+        def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
+            _ = (symbol, qty, side, client_order_id, tif)
+            return {
+                "id": "alpaca-oid-1",
+                "status": "accepted",
+                "submitted_at": "2026-02-10T10:00:00-05:00",
+            }
+
+        def submit_limit_order(
+            self, symbol, qty, side, limit_price, client_order_id, tif="day"
+        ):
+            _ = (symbol, qty, side, limit_price, client_order_id, tif)
+            return {
+                "id": "alpaca-oid-limit-1",
+                "status": "accepted",
+                "submitted_at": "2026-02-10T10:00:00-05:00",
+            }
+
+        def get_account(self):
+            return {"cash": "9000.0", "equity": "10050.0", "buying_power": "18000.0"}
+
+        def get_positions(self):
+            return [
+                {
+                    "symbol": "AAPL",
+                    "qty": "10",
+                    "current_price": "105.0",
+                    "market_value": "1050.0",
+                }
+            ]
+
+    monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
+
+    def _unexpected_apply_trades(*args, **kwargs):
+        raise AssertionError("apply_trades_to_holdings should not be used in alpaca mode")
+
+    monkeypatch.setattr(broker, "apply_trades_to_holdings", _unexpected_apply_trades)
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+    )
+
+    assert result["trading_mode"] == "alpaca"
+    assert result["execution_status"] == "READY"
+    assert int(result["num_trades"]) == 1
+    assert float(result["cash"]) == pytest.approx(9000.0, abs=1e-9)
+    assert float(result["total_equity"]) == pytest.approx(10050.0, abs=1e-9)
+    assert float(result["invested_dollars"]) == pytest.approx(1050.0, abs=1e-9)
+    assert len(result["alpaca_submissions"]) == 1
+    assert result["alpaca_orders_path"].endswith("outputs/alpaca/orders_2026-02-10.csv")
+    assert (tmp_path / "outputs" / "alpaca" / "orders_2026-02-10.csv").exists()
 
 
 
@@ -360,6 +479,52 @@ def test_build_rebalance_trades_min_trade_dollars_is_configurable():
     assert high_threshold_trades.empty
     assert len(low_threshold_trades) == 1
     assert low_threshold_trades.iloc[0]["notional"] == 99.0
+
+
+def test_build_rebalance_trades_whole_share_cash_sweep_improves_capital_usage():
+    holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    targets = pd.DataFrame(
+        [
+            {"ticker": "AAPL", "target_weight": 0.20, "sleeve": "core"},
+            {"ticker": "MSFT", "target_weight": 0.15, "sleeve": "core"},
+            {"ticker": "NVDA", "target_weight": 0.10, "sleeve": "core"},
+        ]
+    )
+    prices = pd.Series({"AAPL": 501.0, "MSFT": 499.0, "NVDA": 497.0})
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=100.0,
+    )
+
+    trades, meta = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=10000.0,
+        starting_cash=10000.0,
+        target_cash_weight=0.55,
+        cfg=cfg,
+    )
+
+    buys = trades[trades["side"].astype(str).str.upper() == "BUY"].copy()
+    spent = float(buys["notional"].sum()) if not buys.empty else 0.0
+    target_investable = float(meta.get("target_investable_dollars", 0.0))
+    residual = max(0.0, target_investable - spent)
+
+    # Naive whole-share allocation baseline before sweep:
+    # floor(target_dollars / price) * price per ticker.
+    naive_spent = (
+        int((0.20 * 10000.0) // 501.0) * 501.0
+        + int((0.15 * 10000.0) // 499.0) * 499.0
+        + int((0.10 * 10000.0) // 497.0) * 497.0
+    )
+
+    assert spent >= naive_spent
+    assert int(meta.get("cash_sweep_added_shares", 0)) >= 1
+    assert residual <= 100.0 + 1e-9
 
 
 

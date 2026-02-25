@@ -3,3 +3,4 @@ numpy
 yfinance
 yfinance>=0.2.40
 matplotlib
+alpaca-py

@@ -42,7 +42,8 @@ def test_shadow_rerun_reset_behavior(tmp_path):
     assert kept.iloc[0]["date"] == "2026-02-01"
 
 
-def test_ledger2_idempotent_append(tmp_path):
+def test_ledger2_idempotent_append(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     ledger_path = tmp_path / "trades.csv"
     ensure_ledger2_exists(str(ledger_path))
     rows = [

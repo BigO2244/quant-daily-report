@@ -9,20 +9,45 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
+from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
 from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
 from paper.reporting_consistency import compute_exposure
-from core.growth_engine_v4 import is_monday_rebalance
 from core.universe_v4 import is_allowed_etf_symbol
 
 logger = logging.getLogger(__name__)
+
+SENT_LEDGER_COLUMNS = [
+    "date",
+    "run_id",
+    "order_id",
+    "ticker",
+    "side",
+    "client_order_id",
+    "alpaca_order_id",
+    "status",
+]
+
+
+def _load_yfinance():
+    """Lazy import so non-price-fetching paths and CLI help avoid yfinance startup."""
+    import yfinance as yf
+
+    return yf
+
+
+def _is_truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 @dataclass
@@ -210,6 +235,7 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.DataFram
     start = pd.Timestamp(run_date)
     end = start + pd.Timedelta(days=1)
 
+    yf = _load_yfinance()
     yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
 
     px = yf.download(
@@ -273,6 +299,7 @@ def fetch_prev_closes_yfinance(tickers: List[str], asof_date: str) -> pd.DataFra
     start = pd.Timestamp(asof_date)
     end = start + pd.Timedelta(days=1)
 
+    yf = _load_yfinance()
     yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
     px = yf.download(
         tickers=tickers,
@@ -485,6 +512,7 @@ def build_rebalance_trades(
                     "price": float(slipped_px),
                     "slippage_cost_per_share": float(slip_cost_per_share),
                     "target_weight": float(row["target_weight"]),
+                    "target_dollars": float(row["target_dollars"]),
                 }
             )
 
@@ -568,11 +596,124 @@ def build_rebalance_trades(
         )
 
     overspend_prevented = len(scaled_tickers) > 0
+    sweep_added_shares = 0
+    sweep_iterations = 0
+    sweep_tickers: set[str] = set()
+
+    # Whole-share cash sweep: allocate leftover investable dollars by adding +1 share
+    # to the most underfilled target names (deterministic ranking).
+    if (not cfg.allow_fractional) and buy_candidates:
+        shares_after: Dict[str, float] = {
+            str(ticker): float(shares) for ticker, shares in h.items()
+        }
+        buy_trade_index: Dict[str, int] = {}
+        for idx, tr in enumerate(trades):
+            tkr = str(tr.get("ticker", ""))
+            side = str(tr.get("side", "")).upper()
+            sh = float(tr.get("shares", 0.0))
+            if side == "BUY":
+                shares_after[tkr] = float(shares_after.get(tkr, 0.0) + sh)
+                buy_trade_index[tkr] = idx
+            elif side == "SELL":
+                shares_after[tkr] = max(0.0, float(shares_after.get(tkr, 0.0) - sh))
+
+        target_meta: Dict[str, Dict[str, float]] = {
+            str(c["ticker"]): {
+                "price": float(c["price"]),
+                "target_dollars": float(c["target_dollars"]),
+                "target_weight": float(c["target_weight"]),
+                "slippage_cost_per_share": float(c["slippage_cost_per_share"]),
+            }
+            for c in buy_candidates
+        }
+
+        max_iterations = 500
+        for _ in range(max_iterations):
+            remaining_target = max(0.0, float(target_investable_dollars) - float(invested_buys))
+            remaining_cash = max(0.0, float(cash_after_sells) - float(invested_buys))
+            remaining = min(remaining_target, remaining_cash)
+            if remaining <= 1e-9:
+                break
+
+            ranked: List[tuple[float, float, str]] = []
+            min_add_price = None
+            for tkr, meta in sorted(target_meta.items()):
+                px = float(meta["price"])
+                if px <= 0:
+                    continue
+                current_shares = max(0.0, float(shares_after.get(tkr, 0.0)))
+                current_dollars = current_shares * px
+                gap = float(meta["target_dollars"]) - current_dollars
+                if gap <= 1e-9:
+                    continue
+                if remaining + 1e-9 < px:
+                    continue
+                # New BUY orders must still satisfy minimum notional.
+                if tkr not in buy_trade_index and px + 1e-9 < float(cfg.min_trade_dollars):
+                    continue
+                min_add_price = px if min_add_price is None else min(min_add_price, px)
+                ranked.append((gap, float(meta["target_weight"]), tkr))
+
+            if not ranked:
+                break
+            if remaining + 1e-9 < float(cfg.min_trade_dollars):
+                break
+            if min_add_price is not None and remaining + 1e-9 < float(min_add_price):
+                break
+
+            ranked.sort(key=lambda x: (-x[0], -x[1], x[2]))
+            _, _, best_ticker = ranked[0]
+            best_meta = target_meta[best_ticker]
+            px = float(best_meta["price"])
+
+            if best_ticker in buy_trade_index:
+                idx = buy_trade_index[best_ticker]
+                trades[idx]["shares"] = float(trades[idx]["shares"]) + 1.0
+                trades[idx]["notional"] = float(trades[idx]["notional"]) + px
+                trades[idx]["slippage_cost"] = float(trades[idx]["slippage_cost"]) + float(
+                    best_meta["slippage_cost_per_share"]
+                )
+            else:
+                trades.append(
+                    {
+                        "ticker": best_ticker,
+                        "side": "BUY",
+                        "shares": 1.0,
+                        "price": float(px),
+                        "slippage_cost": float(best_meta["slippage_cost_per_share"]),
+                        "notional": float(px),
+                        "reason": "cash_sweep",
+                    }
+                )
+                buy_trade_index[best_ticker] = len(trades) - 1
+
+            shares_after[best_ticker] = float(shares_after.get(best_ticker, 0.0) + 1.0)
+            invested_buys = float(invested_buys + px)
+            sweep_added_shares += 1
+            sweep_iterations += 1
+            sweep_tickers.add(best_ticker)
+
+    final_remaining_target = max(0.0, float(target_investable_dollars) - float(invested_buys))
+    final_remaining_cash = max(0.0, float(cash_after_sells) - float(invested_buys))
+    cash_sweep_remaining_dollars = float(min(final_remaining_target, final_remaining_cash))
+
+    if sweep_added_shares > 0:
+        logger.info(
+            "[CASH_SWEEP] added_shares=%d tickers=%d residual_cash=%.2f",
+            sweep_added_shares,
+            len(sweep_tickers),
+            cash_sweep_remaining_dollars,
+        )
+
     return pd.DataFrame(trades), {
         "target_cash_weight": float(target_cash_weight),
         "target_investable_dollars": float(target_investable_dollars),
         "scaled_tickers": sorted(set(scaled_tickers)),
         "overspend_prevented": overspend_prevented,
+        "cash_sweep_added_shares": int(sweep_added_shares),
+        "cash_sweep_iterations": int(sweep_iterations),
+        "cash_sweep_tickers": sorted(sweep_tickers),
+        "cash_sweep_remaining_dollars": float(cash_sweep_remaining_dollars),
     }
 
 
@@ -835,7 +976,11 @@ def _normalize_and_filter_executable_trades(
 
 def _filter_idempotent_orders(orders: List[Dict[str, object]], sent_ledger_path: str) -> Tuple[List[Dict[str, object]], List[str]]:
     sent = _read_csv(sent_ledger_path)
-    existing = set(sent["order_id"].astype(str).tolist()) if not sent.empty else set()
+    existing = (
+        set(sent["order_id"].astype(str).tolist())
+        if (not sent.empty and "order_id" in sent.columns)
+        else set()
+    )
     out: List[Dict[str, object]] = []
     skipped: List[str] = []
     for o in orders:
@@ -847,11 +992,59 @@ def _filter_idempotent_orders(orders: List[Dict[str, object]], sent_ledger_path:
     return out, skipped
 
 
-def _persist_sent_orders(orders: List[Dict[str, object]], sent_ledger_path: str, run_date: str, run_id: str) -> None:
+def _coerce_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _persist_sent_orders(
+    orders: List[Dict[str, object]],
+    sent_ledger_path: str,
+    run_date: str,
+    run_id: str,
+    order_metadata: Dict[str, Dict[str, object]] | None = None,
+) -> None:
     if not orders:
         return
-    rows = [{"date": run_date, "run_id": run_id, "order_id": o["order_id"], "ticker": o["ticker"], "side": o["side"]} for o in orders]
-    append_csv(pd.DataFrame(rows), sent_ledger_path)
+    order_metadata = order_metadata or {}
+    rows = []
+    for o in orders:
+        internal_order_id = str(o.get("order_id", ""))
+        meta = order_metadata.get(internal_order_id, {})
+        rows.append(
+            {
+                "date": run_date,
+                "run_id": run_id,
+                "order_id": internal_order_id,
+                "ticker": str(o.get("ticker", "")),
+                "side": str(o.get("side", "")).upper(),
+                "client_order_id": str(meta.get("client_order_id") or ""),
+                "alpaca_order_id": str(meta.get("alpaca_order_id") or ""),
+                "status": str(meta.get("status") or ""),
+            }
+        )
+
+    incoming = pd.DataFrame(rows)
+    existing = _read_csv(sent_ledger_path)
+
+    if existing.empty:
+        combined = incoming.copy()
+    else:
+        combined = pd.concat([existing, incoming], ignore_index=True, sort=False)
+
+    for col in SENT_LEDGER_COLUMNS:
+        if col not in combined.columns:
+            combined[col] = ""
+    combined = combined[SENT_LEDGER_COLUMNS + [c for c in combined.columns if c not in SENT_LEDGER_COLUMNS]]
+    if "order_id" in combined.columns:
+        combined = combined.drop_duplicates(subset=["order_id"], keep="first")
+    sort_cols = [c for c in ("date", "order_id") if c in combined.columns]
+    if sort_cols:
+        combined = combined.sort_values(sort_cols).reset_index(drop=True)
+    _ensure_parent_dir(sent_ledger_path)
+    combined.to_csv(sent_ledger_path, index=False)
 
 
 def reset_orders_sent_ledger_for_date(sent_ledger_path: str, trade_date: str) -> int:
@@ -886,6 +1079,74 @@ def _write_shadow_orders(run_date: str, orders: List[Dict[str, object]]) -> str:
     return str(out_path)
 
 
+def _write_alpaca_orders(run_date: str, submissions: List[Dict[str, object]]) -> str:
+    out_path = Path("outputs") / "alpaca" / f"orders_{run_date}.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cols = [
+        "trade_date",
+        "order_id",
+        "client_order_id",
+        "alpaca_order_id",
+        "ticker",
+        "side",
+        "quantity",
+        "status",
+        "submitted_at",
+        "mode",
+    ]
+    frame = pd.DataFrame(submissions or [])
+    if frame.empty:
+        frame = pd.DataFrame(columns=cols)
+    else:
+        for c in cols:
+            if c not in frame.columns:
+                frame[c] = ""
+        frame = frame[cols + [c for c in frame.columns if c not in cols]]
+    frame.to_csv(out_path, index=False)
+    return str(out_path)
+
+
+def _alpaca_positions_to_holdings(
+    positions: List[Dict[str, object]],
+    sleeve: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    holdings_rows: List[Dict[str, object]] = []
+    m2m_rows: List[Dict[str, object]] = []
+    for pos in positions or []:
+        ticker = str(pos.get("symbol") or "").upper().strip()
+        if not ticker:
+            continue
+        qty = _coerce_float(pos.get("qty"), 0.0)
+        shares = abs(qty)
+        if shares <= 0:
+            continue
+        current_price = _coerce_float(pos.get("current_price"), 0.0)
+        market_value = _coerce_float(pos.get("market_value"), shares * current_price)
+        holdings_rows.append(
+            {
+                "ticker": ticker,
+                "sleeve": sleeve,
+                "shares": float(shares),
+            }
+        )
+        m2m_rows.append(
+            {
+                "ticker": ticker,
+                "sleeve": sleeve,
+                "shares": float(shares),
+                "price": float(current_price),
+                "market_value": float(market_value),
+            }
+        )
+    holdings = pd.DataFrame(holdings_rows)
+    if holdings.empty:
+        holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    m2m = pd.DataFrame(m2m_rows)
+    if m2m.empty:
+        m2m = pd.DataFrame(columns=["ticker", "sleeve", "shares", "price", "market_value"])
+    return holdings, m2m
+
+
 def _broker_reconciliation(
     model_cash: float,
     model_positions: pd.DataFrame,
@@ -908,6 +1169,9 @@ def _broker_reconciliation(
 
     return {
         "status": "PASS" if ok else "FAIL",
+        "model_equity": float(model_equity),
+        "broker_equity": float(broker_equity),
+        "broker_minus_model_equity_delta": float(broker_equity - model_equity),
         "cash_delta": cash_delta,
         "equity_delta": equity_delta,
         "equity_tolerance": equity_tol,
@@ -937,7 +1201,7 @@ def run_paper_day(
     mode = cfg.trading_mode
     if mode == "live":
         raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
-    if mode not in {"paper", "shadow"}:
+    if mode not in {"paper", "shadow", "alpaca"}:
         raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
@@ -975,6 +1239,9 @@ def run_paper_day(
     cash_target_weight_default = float(
         runtime_constraints.get("cash_target_weight", cfg.cash_target_weight_default)
     )
+    exit_only = _is_truthy(runtime_constraints.get("exit_only")) or _is_truthy(
+        os.getenv("EXIT_ONLY")
+    )
 
     breaker_mode = str(os.getenv("BREAKER_MODE", "partial")).strip().lower()
     breaker_mode_source = "env"
@@ -998,12 +1265,14 @@ def run_paper_day(
         cash_target_weight_default=cash_target_weight_default,
     )
 
-    if not is_monday_rebalance(run_date):
-        logger.info("[SCHEDULE] Non-Monday run_date=%s -> exit-only execution", run_date)
+    if exit_only:
+        logger.info("[SCHEDULE] Explicit exit-only mode enabled run_date=%s", run_date)
         if not holdings_prev.empty:
             held = set(holdings_prev["ticker"].astype(str).str.upper())
             targets = targets[targets["ticker"].astype(str).str.upper().isin(held)].copy()
-        # Preserve model/snapshot cash target (e.g., breaker overlays) on exit-only days.
+        else:
+            targets = targets.iloc[0:0].copy()
+        # Preserve model/snapshot cash target (e.g., breaker overlays) in exit-only mode.
         target_cash_weight = max(0.0, min(1.0, float(target_cash_weight)))
     if snapshot_date and snapshot_date != run_date:
         raise RuntimeError(f"[HALT] signal_date_mismatch snapshot_date={snapshot_date} execution_date={run_date}")
@@ -1191,8 +1460,194 @@ def run_paper_day(
             blocked_reasons.append(f"breaker_lock_filtered_non_sell:{dropped_non_sell}")
 
     executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(trades, cfg)
+    execution_trades = executable_trades.copy()
+    run_id = _run_id(run_date, cfg)
+    shadow_orders_path = None
+    alpaca_orders_path = None
+    alpaca_submissions: List[Dict[str, object]] = []
+    alpaca_submission_summary: Dict[str, object] = {
+        "initial_intended_orders": 0,
+        "post_local_idempotent_orders": 0,
+        "submitted_orders": 0,
+        "remote_existing_orders": 0,
+    }
+    idempotent_skips: List[str] = []
+    orders: List[Dict[str, object]] = []
+    sent_ledger_path: str = cfg.sent_ledger_path
+    alpaca_account_snapshot: Dict[str, object] | None = None
+    alpaca_positions_snapshot: List[Dict[str, object]] = []
 
-    trades_out = executable_trades.copy()
+    if mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only:
+        initial_orders = _build_shadow_orders(execution_trades, run_id)
+        alpaca_submission_summary["initial_intended_orders"] = int(len(initial_orders))
+        orders, local_idempotent_skips = _filter_idempotent_orders(initial_orders, sent_ledger_path)
+        idempotent_skips.extend(local_idempotent_skips)
+        alpaca_submission_summary["local_idempotent_skips"] = int(len(local_idempotent_skips))
+        alpaca_submission_summary["post_local_idempotent_orders"] = int(len(orders))
+        submission_metadata: Dict[str, Dict[str, object]] = {}
+        orders_for_execution = list(orders)
+
+        if mode == "alpaca":
+            alpaca = AlpacaBroker.from_env()
+            submitted_orders: List[Dict[str, object]] = []
+            remote_existing_orders: List[Dict[str, object]] = []
+            for order in orders:
+                internal_order_id = str(order.get("order_id", ""))
+                ticker = str(order.get("ticker", "")).upper()
+                side = str(order.get("side", "")).upper()
+                quantity = abs(_coerce_float(order.get("quantity"), 0.0))
+                order_type = str(order.get("order_type", "MKT")).upper()
+                tif = str(order.get("time_in_force", "DAY")).lower()
+                if quantity <= 0:
+                    continue
+
+                client_order_id = alpaca_client_order_id(internal_order_id)
+                existing_remote = alpaca.find_order_by_client_id(client_order_id)
+                if existing_remote:
+                    idempotent_skips.append(internal_order_id)
+                    remote_existing_orders.append(order)
+                    alpaca_submission_summary["remote_existing_orders"] = int(
+                        alpaca_submission_summary["remote_existing_orders"]
+                    ) + 1
+                    submission_metadata[internal_order_id] = {
+                        "client_order_id": client_order_id,
+                        "alpaca_order_id": str(existing_remote.get("id") or ""),
+                        "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                    }
+                    alpaca_submissions.append(
+                        {
+                            "trade_date": run_date,
+                            "order_id": internal_order_id,
+                            "client_order_id": client_order_id,
+                            "alpaca_order_id": str(existing_remote.get("id") or ""),
+                            "ticker": ticker,
+                            "side": side,
+                            "quantity": float(quantity),
+                            "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                            "submitted_at": str(existing_remote.get("submitted_at") or ""),
+                            "mode": "alpaca",
+                        }
+                    )
+                    logger.info(
+                        "[ALPACA][IDEMPOTENT] skipped remote-existing order_id=%s client_order_id=%s",
+                        internal_order_id,
+                        client_order_id,
+                    )
+                    continue
+
+                try:
+                    if order_type == "MKT":
+                        submitted = alpaca.submit_market_order(
+                            symbol=ticker,
+                            qty=float(quantity),
+                            side=side,
+                            client_order_id=client_order_id,
+                            tif=tif,
+                        )
+                    else:
+                        submitted = alpaca.submit_limit_order(
+                            symbol=ticker,
+                            qty=float(quantity),
+                            side=side,
+                            limit_price=_coerce_float(order.get("notional"), 0.0)
+                            / max(float(quantity), 1.0),
+                            client_order_id=client_order_id,
+                            tif=tif,
+                        )
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Alpaca submission failed order_id={internal_order_id}: {exc}"
+                    ) from exc
+
+                alpaca_order_id = str(submitted.get("id") or "")
+                status = str(submitted.get("status") or "SUBMITTED")
+                submitted_at = str(submitted.get("submitted_at") or "")
+                submission_metadata[internal_order_id] = {
+                    "client_order_id": client_order_id,
+                    "alpaca_order_id": alpaca_order_id,
+                    "status": status,
+                }
+                alpaca_submissions.append(
+                    {
+                        "trade_date": run_date,
+                        "order_id": internal_order_id,
+                        "client_order_id": client_order_id,
+                        "alpaca_order_id": alpaca_order_id,
+                        "ticker": ticker,
+                        "side": side,
+                        "quantity": float(quantity),
+                        "status": status,
+                        "submitted_at": submitted_at,
+                        "mode": "alpaca",
+                    }
+                )
+                submitted_orders.append(order)
+                logger.info(
+                    "[ALPACA][SUBMIT] order_id=%s client_order_id=%s alpaca_order_id=%s status=%s",
+                    internal_order_id,
+                    client_order_id,
+                    alpaca_order_id,
+                    status,
+                )
+
+            orders_for_execution = submitted_orders
+            alpaca_submission_summary["submitted_orders"] = int(len(submitted_orders))
+
+            persist_orders = submitted_orders + remote_existing_orders
+            if persist_orders:
+                _persist_sent_orders(
+                    persist_orders,
+                    sent_ledger_path,
+                    run_date,
+                    run_id,
+                    order_metadata=submission_metadata,
+                )
+
+            try:
+                alpaca_account_snapshot = alpaca.get_account()
+                alpaca_positions_snapshot = alpaca.get_positions()
+            except Exception as exc:
+                raise RuntimeError(f"Failed to refresh Alpaca account/positions: {exc}") from exc
+
+            alpaca_orders_path = _write_alpaca_orders(run_date, alpaca_submissions)
+            orders = submitted_orders
+        else:
+            alpaca_submission_summary["submitted_orders"] = int(len(orders))
+            _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
+
+        shadow_orders_path = _write_shadow_orders(run_date, orders)
+        alpaca_submission_summary["idempotent_skips_total"] = int(len(idempotent_skips))
+
+        allowed_order_ids = {
+            str(order.get("order_id"))
+            for order in orders_for_execution
+            if order.get("order_id")
+        }
+        if not execution_trades.empty:
+            kept_rows: List[Dict[str, object]] = []
+            for _, tr in execution_trades.iterrows():
+                ticker = str(tr.get("ticker", ""))
+                side = str(tr.get("side", "")).upper()
+                order_id = f"{run_id}:{ticker}:{side}"
+                if order_id in allowed_order_ids:
+                    kept_rows.append(tr.to_dict())
+            execution_trades = (
+                pd.DataFrame(kept_rows).reindex(columns=execution_trades.columns)
+                if kept_rows
+                else execution_trades.iloc[0:0].copy()
+            )
+            dropped_idempotent = int(len(executable_trades) - len(execution_trades))
+            if dropped_idempotent > 0:
+                execution_filter_stats["idempotent_dropped"] = dropped_idempotent
+                execution_filter_stats["kept_after_idempotent"] = int(len(execution_trades))
+                execution_filter_stats["kept"] = int(len(execution_trades))
+                logger.info(
+                    "[ORDER][IDEMPOTENT] filtered_executable_trades=%d kept_after_idempotent=%d",
+                    dropped_idempotent,
+                    int(len(execution_trades)),
+                )
+
+    trades_out = execution_trades.copy()
     if trades_out.empty:
         trades_out = pd.DataFrame(columns=["date", "ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
     else:
@@ -1202,24 +1657,47 @@ def run_paper_day(
         append_csv(trades_out, trades_path)
 
     trade_plan = (
-        executable_trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]]
+        execution_trades[["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]]
         .assign(quantity=lambda df: df["shares"])
         .to_dict("records")
-        if executable_trades is not None and not executable_trades.empty
+        if execution_trades is not None and not execution_trades.empty
         else []
     )
 
     if not blocked and not planning_mode:
-        holdings_new, cash_new = apply_trades_to_holdings(
-            holdings=holdings_prev,
-            targets=targets,
-            trades=executable_trades,
-            starting_cash=cash_prev,
-        )
-        m2m = mark_to_market(holdings_new, pricing_series)
-        total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
-        total_equity = float(cash_new + total_mv)
-        achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
+        if mode == "alpaca":
+            if alpaca_account_snapshot is None:
+                alpaca = AlpacaBroker.from_env()
+                alpaca_account_snapshot = alpaca.get_account()
+                alpaca_positions_snapshot = alpaca.get_positions()
+            holdings_new, m2m = _alpaca_positions_to_holdings(
+                positions=alpaca_positions_snapshot,
+                sleeve=cfg.portfolio_id,
+            )
+            total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
+            cash_new = _coerce_float(
+                alpaca_account_snapshot.get("cash"),
+                cash_prev,
+            )
+            total_equity = _coerce_float(
+                alpaca_account_snapshot.get("equity")
+                or alpaca_account_snapshot.get("portfolio_value"),
+                cash_new + total_mv,
+            )
+            if total_equity <= 0:
+                total_equity = float(cash_new + total_mv)
+            achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
+        else:
+            holdings_new, cash_new = apply_trades_to_holdings(
+                holdings=holdings_prev,
+                targets=targets,
+                trades=execution_trades,
+                starting_cash=cash_prev,
+            )
+            m2m = mark_to_market(holdings_new, pricing_series)
+            total_mv = float(m2m["market_value"].sum()) if not m2m.empty else 0.0
+            total_equity = float(cash_new + total_mv)
+            achieved_cash_weight = (cash_new / total_equity) if total_equity > 0 else 0.0
     else:
         holdings_new = holdings_prev.copy()
         cash_new = float(cash_prev)
@@ -1276,18 +1754,6 @@ def run_paper_day(
         ledger_day["total_equity"] = total_equity
         append_csv(ledger_day, ledger_path)
 
-    run_id = _run_id(run_date, cfg)
-    shadow_orders_path = None
-    idempotent_skips: List[str] = []
-    orders: List[Dict[str, object]] = []
-    sent_ledger_path: str = cfg.sent_ledger_path
-
-    if mode == "shadow" and mkt.is_open_now and not plan_only:
-        orders = _build_shadow_orders(executable_trades, run_id)
-        orders, idempotent_skips = _filter_idempotent_orders(orders, sent_ledger_path)
-        _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
-        shadow_orders_path = _write_shadow_orders(run_date, orders)
-
     broker_state = {
         "cash": cash_new,
         "positions": holdings_new,
@@ -1310,6 +1776,9 @@ def run_paper_day(
     else:
         recon = {
             "status": "SKIP",
+            "model_equity": float(total_equity),
+            "broker_equity": float(total_equity),
+            "broker_minus_model_equity_delta": 0.0,
             "cash_delta": 0.0,
             "equity_delta": 0.0,
             "equity_tolerance": 0.0,
@@ -1329,7 +1798,7 @@ def run_paper_day(
         "[SHADOW] mode=%s market=%s orders=%d blocked=%d recon=%s",
         mode,
         "OPEN" if mkt.is_open_now else "CLOSED",
-        len(orders) if mode == "shadow" else executed_trades,
+        len(orders),
         len(blocked_reasons) + len(idempotent_skips),
         recon["status"],
     )
@@ -1373,8 +1842,8 @@ def run_paper_day(
         "blocked_tickers": blocked_tickers,
         "execution_status": "HALTED" if blocked else ("PLANNED" if (plan_only or not mkt.is_open_now) else "READY"),
         "execution_trades": (
-            executable_trades[["ticker", "side", "shares", "price", "notional", "reason"]].to_dict("records")
-            if executable_trades is not None and not executable_trades.empty
+            execution_trades[["ticker", "side", "shares", "price", "notional", "reason"]].to_dict("records")
+            if execution_trades is not None and not execution_trades.empty
             else []
         ),
         "trade_plan": trade_plan,
@@ -1384,10 +1853,14 @@ def run_paper_day(
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,
         "shadow_orders_path": shadow_orders_path,
+        "alpaca_submissions": alpaca_submissions,
+        "alpaca_orders_path": alpaca_orders_path,
+        "alpaca_submission_summary": alpaca_submission_summary,
         "run_id": run_id,
         "broker_reconciliation": recon,
         "breaker": {
             "mode": breaker_mode,
             "mode_source": breaker_mode_source,
         },
+        "exit_only": bool(exit_only),
     }

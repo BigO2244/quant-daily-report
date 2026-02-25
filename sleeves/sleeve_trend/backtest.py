@@ -10,6 +10,12 @@
 # 5. Enhanced statistics (CAGR/Vol/Sharpe/Sortino/MaxDD/Turnover/Beta/Corr)
 # ============================================================
 
+"""
+Sleeve Trend backtest.
+
+IMPORTANT: No import-time side effects (prints/logging).
+The CLI help path (-h/--help) may import modules; keep it clean.
+"""
 
 import pandas as pd  # noqa: E402
 import numpy as np  # noqa: E402
@@ -23,7 +29,7 @@ from core.quant_report import (  # noqa: E402
 from . import config as cfg  # noqa: E402
 from .indicators import compute_trend_indicators  # noqa: E402
 
-print("Backtest Version Check: Sleeve-Trend-v1-2026-01-26-RevB")
+BACKTEST_VERSION = "Sleeve-Trend-v1-2026-01-26-RevB"
 assert __name__.startswith("sleeves.sleeve_trend"), "Invalid import context for Sleeve Trend"
 
 # ============================================================

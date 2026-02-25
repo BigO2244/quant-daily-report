@@ -145,9 +145,15 @@ def _mock_open_market(monkeypatch):
 
 
 def test_parse_args_supports_paper_reset_flags():
-    args = dqr._parse_args(["--paper-reset", "--paper-start-cash", "12345"])
+    args = dqr._parse_args(
+        ["--paper-reset", "--paper-start-cash", "12345", "--force-execution"]
+    )
     assert args.paper_reset is True
     assert abs(float(args.paper_start_cash) - 12345.0) < 1e-9
+    assert args.force_execution is True
+
+    alias_args = dqr._parse_args(["--reset-orders-sent"])
+    assert alias_args.force_execution is True
 
 
 def test_paper_reset_starts_clean_and_seeds_nav(tmp_path, monkeypatch):

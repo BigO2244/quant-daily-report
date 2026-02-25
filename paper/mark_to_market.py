@@ -80,9 +80,26 @@ def update_nav_timeseries(asof_date: str, nav: dict, ledger: pd.DataFrame) -> st
     def _trade_notional_for_date(trade_date: str) -> float:
         if ledger.empty or "trade_date" not in ledger.columns or "notional" not in ledger.columns:
             return 0.0
-        day = ledger.loc[ledger["trade_date"].astype(str) == str(trade_date), ["notional"]].copy()
+        day = ledger.loc[ledger["trade_date"].astype(str) == str(trade_date)].copy()
         if day.empty:
             return 0.0
+        if all(col in day.columns for col in ("trade_date", "order_id")):
+            before = len(day)
+            sort_cols = ["trade_date"]
+            if "timestamp_et" in day.columns:
+                sort_cols.append("timestamp_et")
+            day = (
+                day.sort_values(sort_cols, na_position="last")
+                .drop_duplicates(subset=["trade_date", "order_id"], keep="last")
+                .reset_index(drop=True)
+            )
+            if len(day) != before:
+                logger.info(
+                    "[PERF] deduped turnover ledger rows removed=%d trade_date=%s",
+                    before - len(day),
+                    trade_date,
+                )
+        day = day[["notional"]].copy()
         day["notional"] = pd.to_numeric(day["notional"], errors="coerce").fillna(0.0)
         return float(day["notional"].abs().sum())
 

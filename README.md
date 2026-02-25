@@ -47,3 +47,36 @@ Notes:
 ## Audit Workflows
 
 Audit export and Monte Carlo workflows are documented in `docs/audit.md`.
+
+## Alpaca Paper Execution
+
+Set credentials and paper toggle:
+
+```bash
+export TRADING_MODE=alpaca
+export ALPACA_PAPER=1
+export ALPACA_API_KEY_ID="YOUR_KEY"
+export ALPACA_API_SECRET_KEY="YOUR_SECRET"
+```
+
+Smoke-test connectivity:
+
+```bash
+python3 alpaca_smoke_test.py
+# or
+python3 scripts/alpaca_smoke_test.py
+```
+
+Run a daily report:
+
+```bash
+REPORT_DATE=2026-02-24 PAPER_TRADING=1 MODE=SHADOW python3 daily_quant_report.py
+```
+
+Note: `REPORT_DATE` must be a real date string (`YYYY-MM-DD`), not placeholders like `YYYY-MM-DD`.
+
+## Local Green Loop
+
+```bash
+bash scripts/local_green_loop.sh
+```

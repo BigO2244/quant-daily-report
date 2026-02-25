@@ -3,6 +3,7 @@ name: Alpha Daily Run
 on:
   workflow_dispatch: {}
   schedule:
+    # 6:15am ET ≈ 11:15 UTC (adjust for DST if you want)
     - cron: "15 11 * * 1-5"
 
 jobs:
@@ -27,23 +28,53 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate alpha report (refresh data)
+      - name: Run research backtest + report (refresh market data)
         env:
           DATE_FORMAT: "US"
         run: |
           python3 scripts/alpha_report.py --apply-costs --cost-bps 25
 
-      - name: Update live shadow NAV ledger + regenerate report
+      - name: Update shadow NAV from alpha timeseries
         run: |
           python3 scripts/daily_alpha_run.py
 
-      - name: Email alpha report
+      - name: Debug email script fingerprint
+        if: ${{ vars.ENABLE_EMAIL != '0' }}
+        run: |
+          python3 - << 'PY'
+          import hashlib, pathlib
+          p = pathlib.Path("scripts/email_alpha_report.py")
+          b = p.read_bytes()
+          print("EMAIL_SHA256", hashlib.sha256(b).hexdigest())
+          PY
+
+      - name: Debug email env presence
+        if: ${{ vars.ENABLE_EMAIL != '0' }}
         env:
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_HOST: "smtp.gmail.com"
+          SMTP_PORT: "587"
           SMTP_USER: ${{ secrets.EMAIL_SENDER }}
           SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+          EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN }}
+        run: |
+          python3 - << 'PY'
+          import os
+          for k in ["SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","REPORT_TO_EMAIL","EMAIL_DRY_RUN"]:
+              v = os.getenv(k)
+              print(k, "SET" if (v and str(v).strip()) else "MISSING")
+          PY
+
+      - name: Email alpha report
+        if: ${{ vars.ENABLE_EMAIL != '0' }}
+        continue-on-error: true
+        env:
+          SMTP_HOST: "smtp.gmail.com"
+          SMTP_PORT: "587"
+          SMTP_USER: ${{ secrets.EMAIL_SENDER }}
+          SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+          EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN }}
         run: |
           python3 scripts/email_alpha_report.py
 

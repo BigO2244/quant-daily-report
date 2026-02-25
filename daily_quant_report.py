@@ -1,3 +1,10 @@
+"""
+daily_quant_report.py
+
+Keep module import side-effects minimal so `-h/--help` returns immediately.
+Heavy modules are loaded lazily after argparse parsing.
+"""
+
 import datetime as dt
 import json
 import argparse
@@ -10,7 +17,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
-from paper.paper_broker import run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
 from paper.state_paths import (
     ensure_paper_state_files,
     LEDGER_HEADERS as PAPER_LEDGER_HEADERS,
@@ -21,11 +27,15 @@ from paper.build_execution_email import build_execution_email_html, build_execut
 from paper.alpha import compute_alpha_attribution
 from paper.email_styles import base_email_css
 from paper.trading_calendar import prev_trading_day
-from paper.ledger import append_ledger_rows, compute_signal_hash, ledger_rows_from_execution_payload, make_run_id
+from paper.ledger import compute_signal_hash
 from paper.ledger2 import (
     append_rows as append_ledger2_rows,
     payload_to_rows as ledger2_payload_to_rows,
     LEDGER2_COLUMNS,
+)
+from paper.paths import (
+    LEDGER_TRADES_PATH,
+    ensure_no_legacy_ledger,
 )
 from paper.nav2 import update_nav
 from paper.reporting_consistency import compute_exposure, determine_sleeve_state
@@ -33,35 +43,9 @@ from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
-from audit.export import write_audit_bundle
-from audit.policy_backtest import (
-    default_run_id as audit_default_run_id,
-    load_sleeve1_dataset,
-    run_window_backtest,
-)
 
-# ============================================================
-# Sleeve 1 — structured access (do NOT call main())
-# ============================================================
-from sleeves.sleeve_1.backtest import (
-    prepare_data as s1_prepare_data,
-    backtest as s1_backtest,
-)
-# ============================================================
-# Sleeve Trend — structured access
-# ============================================================
-from sleeves.sleeve_trend.backtest import (
-    prepare_data as st_prepare_data,
-    backtest as st_backtest,
-)
+from sleeves.sleeve_trend.build_sleeve_output import build_trend_sleeve_output
 from sleeves.sleeve_trend import config as trend_cfg
-# ============================================================
-# Email sender (exact repo-aware lookup)
-# ============================================================
-try:
-    from core.quant_report import send_email
-except Exception:
-    send_email = None
 # ============================================================
 # Portfolio allocation (dynamic)
 # ============================================================
@@ -77,15 +61,28 @@ from core.portfolio_alloc import (  # noqa: E402
     DEFAULT_PORTFOLIO_BASE_EQUITY,
     WEIGHT_TOLERANCE,
 )
-from core.quant_report import (  # noqa: E402
-    download_prices,
-    add_atr,
-)
 from core.alpha_attribution import load_benchmark_prices  # noqa: E402
 from engine.backtest_engine import (  # noqa: E402
     infer_latest_entries,
     attach_entry_prices,
 )
+
+# Lazy-imported symbols (defined for monkeypatch compatibility in tests).
+run_paper_day = None
+reset_orders_sent_ledger_for_date = None
+fetch_prev_closes_yfinance = None
+send_email = None
+download_prices = None
+add_atr = None
+s1_prepare_data = None
+s1_backtest = None
+st_prepare_data = None
+st_backtest = None
+write_audit_bundle = None
+audit_default_run_id = None
+load_sleeve1_dataset = None
+run_window_backtest = None
+
 logger = logging.getLogger(__name__)
 # Backward-compatible alias for tests/patch points
 calc_alpha_stats = compute_alpha_attribution
@@ -101,6 +98,100 @@ STOP_ATR_MULT_DEFAULT = 2.0
 TAKE_PROFIT_ATR_MULT_DEFAULT = 3.0
 STOP_PCT_DEFAULT = 0.08
 TAKE_PROFIT_PCT_DEFAULT = 0.12
+
+
+def _ensure_paper_broker_imports() -> None:
+    """Load paper broker functions lazily to keep CLI help lightweight."""
+    global run_paper_day, reset_orders_sent_ledger_for_date, fetch_prev_closes_yfinance
+    if (
+        run_paper_day is not None
+        and reset_orders_sent_ledger_for_date is not None
+        and fetch_prev_closes_yfinance is not None
+    ):
+        return
+    from paper.paper_broker import (
+        run_paper_day as _run_paper_day,
+        reset_orders_sent_ledger_for_date as _reset_orders_sent_ledger_for_date,
+        fetch_prev_closes_yfinance as _fetch_prev_closes_yfinance,
+    )
+    if run_paper_day is None:
+        run_paper_day = _run_paper_day
+    if reset_orders_sent_ledger_for_date is None:
+        reset_orders_sent_ledger_for_date = _reset_orders_sent_ledger_for_date
+    if fetch_prev_closes_yfinance is None:
+        fetch_prev_closes_yfinance = _fetch_prev_closes_yfinance
+
+
+def _ensure_quant_report_imports() -> None:
+    """Load quant report helpers lazily to avoid yfinance import at module load."""
+    global send_email, download_prices, add_atr
+    if send_email is not None and download_prices is not None and add_atr is not None:
+        return
+    from core.quant_report import (
+        send_email as _send_email,
+        download_prices as _download_prices,
+        add_atr as _add_atr,
+    )
+    if send_email is None:
+        send_email = _send_email
+    if download_prices is None:
+        download_prices = _download_prices
+    if add_atr is None:
+        add_atr = _add_atr
+
+
+def _ensure_sleeve_backtest_imports() -> None:
+    """Load sleeve backtest modules lazily to avoid import-time print side effects."""
+    global s1_prepare_data, s1_backtest, st_prepare_data, st_backtest
+    if (
+        s1_prepare_data is not None
+        and s1_backtest is not None
+        and st_prepare_data is not None
+        and st_backtest is not None
+    ):
+        return
+    from sleeves.sleeve_1.backtest import (
+        prepare_data as _s1_prepare_data,
+        backtest as _s1_backtest,
+    )
+    from sleeves.sleeve_trend.backtest import (
+        prepare_data as _st_prepare_data,
+        backtest as _st_backtest,
+    )
+    if s1_prepare_data is None:
+        s1_prepare_data = _s1_prepare_data
+    if s1_backtest is None:
+        s1_backtest = _s1_backtest
+    if st_prepare_data is None:
+        st_prepare_data = _st_prepare_data
+    if st_backtest is None:
+        st_backtest = _st_backtest
+
+
+def _ensure_audit_imports() -> None:
+    """Load audit/backtest modules lazily to avoid import-time side effects on CLI help."""
+    global write_audit_bundle, audit_default_run_id, load_sleeve1_dataset, run_window_backtest
+    if (
+        write_audit_bundle is not None
+        and audit_default_run_id is not None
+        and load_sleeve1_dataset is not None
+        and run_window_backtest is not None
+    ):
+        return
+    from audit.export import write_audit_bundle as _write_audit_bundle
+    from audit.policy_backtest import (
+        default_run_id as _audit_default_run_id,
+        load_sleeve1_dataset as _load_sleeve1_dataset,
+        run_window_backtest as _run_window_backtest,
+    )
+    if write_audit_bundle is None:
+        write_audit_bundle = _write_audit_bundle
+    if audit_default_run_id is None:
+        audit_default_run_id = _audit_default_run_id
+    if load_sleeve1_dataset is None:
+        load_sleeve1_dataset = _load_sleeve1_dataset
+    if run_window_backtest is None:
+        run_window_backtest = _run_window_backtest
 
 
 def _snapshot_risk_value(name: str, default: float) -> float:
@@ -255,14 +346,42 @@ def _asof_date_from_df(df: pd.DataFrame) -> pd.Timestamp | None:
     if "date" in df.columns:
         return pd.to_datetime(df["date"]).max()
     return None
+
+
+_REPORT_DATE_PLACEHOLDERS = {
+    "yyyy-mm-dd",
+    "yyyy/mm/dd",
+    "<date>",
+    "date",
+}
+
+
+def _parse_report_date_env(raw_value: str | None) -> pd.Timestamp | None:
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    if lowered in _REPORT_DATE_PLACEHOLDERS:
+        raise ValueError(
+            "REPORT_DATE is set to placeholder 'YYYY-MM-DD'. "
+            "Set it to an actual date, for example: export REPORT_DATE=2026-02-24"
+        )
+    try:
+        return pd.to_datetime(value).normalize()
+    except Exception as exc:
+        raise ValueError(
+            f"Invalid REPORT_DATE='{value}'. Use YYYY-MM-DD, for example: 2026-02-24"
+        ) from exc
+
+
 def _infer_report_date(
     *,
     sleeve_details: list[dict | None] | None,
     fallback: pd.Timestamp,
 ) -> pd.Timestamp:
-    report_date_env = os.getenv("REPORT_DATE", "").strip()
-    if report_date_env:
-        return pd.to_datetime(report_date_env).normalize()
+    report_date_env = _parse_report_date_env(os.getenv("REPORT_DATE", ""))
+    if report_date_env is not None:
+        return report_date_env
     asof_candidates: list[pd.Timestamp] = []
     target_weight_candidates: list[pd.Timestamp] = []
     for details in (sleeve_details or []):
@@ -330,10 +449,37 @@ def write_health_artifact(trade_date: str, payload: dict) -> str:
     return str(health_path)
 
 
-def _reset_csv_with_headers(path: str | Path, headers: list[str]) -> None:
+def _finalize_health_payload(trade_date: str, health_payload: dict) -> str:
+    path = write_health_artifact(trade_date, health_payload)
+    logger.info(
+        "[HEALTH] status=%s model_equity=%s broker_equity=%s exec_equity=%s ledger_path=%s",
+        str(health_payload.get("status", "UNKNOWN")).upper(),
+        health_payload.get("model_equity_recon"),
+        health_payload.get("broker_equity"),
+        health_payload.get("execution_basis_equity"),
+        health_payload.get("ledger_path_used") or str(LEDGER_TRADES_PATH),
+    )
+    if str(health_payload.get("status", "PASS")).upper() == "FAIL":
+        logger.error("[HEALTH][FAIL] %s", health_payload.get("error") or "health_check_failed")
+        raise AssertionError(str(health_payload.get("error") or "health_check_failed"))
+    return str(path)
+
+
+def _ensure_csv_with_headers(path: str | Path, headers: list[str]) -> None:
+    """
+    Create CSV with headers if missing/empty.
+    Never overwrite a non-empty file (append-only safety).
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(columns=headers).to_csv(p, index=False)
+    if not p.exists():
+        pd.DataFrame(columns=headers).to_csv(p, index=False)
+        return
+    try:
+        if p.stat().st_size == 0:
+            pd.DataFrame(columns=headers).to_csv(p, index=False)
+    except FileNotFoundError:
+        pd.DataFrame(columns=headers).to_csv(p, index=False)
 
 
 def _apply_paper_reset(
@@ -343,12 +489,14 @@ def _apply_paper_reset(
     paper_ledger_path: str,
     paper_trades_path: str,
 ) -> dict:
+    ensure_no_legacy_ledger(logger=logger, when="paper_reset_pre")
     start_cash = float(paper_start_cash)
 
-    _reset_csv_with_headers(paper_ledger_path, PAPER_LEDGER_HEADERS)
-    _reset_csv_with_headers(paper_trades_path, PAPER_TRADES_HEADERS)
-    _reset_csv_with_headers("outputs/ledger/trades.csv", LEDGER2_COLUMNS)
-    _reset_csv_with_headers(
+    _ensure_csv_with_headers(paper_ledger_path, PAPER_LEDGER_HEADERS)
+    _ensure_csv_with_headers(paper_trades_path, PAPER_TRADES_HEADERS)
+    ledger2_path = LEDGER_TRADES_PATH
+    _ensure_csv_with_headers(ledger2_path, LEDGER2_COLUMNS)
+    _ensure_csv_with_headers(
         "outputs/shadow_orders/orders_sent.csv",
         ["date", "run_id", "order_id", "ticker", "side"],
     )
@@ -376,9 +524,156 @@ def _apply_paper_reset(
         "start_cash": start_cash,
         "paper_ledger_path": str(paper_ledger_path),
         "paper_trades_path": str(paper_trades_path),
-        "ledger2_path": "outputs/ledger/trades.csv",
+        "ledger2_path": str(ledger2_path),
         "nav_timeseries_path": str(nav_path),
         "orders_sent_path": "outputs/shadow_orders/orders_sent.csv",
+    }
+
+
+def _load_execution_ledger_dedup(ledger_path: str | None) -> tuple[pd.DataFrame, int]:
+    ensure_no_legacy_ledger(logger=logger, when="health_ledger_load")
+    if not ledger_path:
+        return pd.DataFrame(), 0
+    path = Path(ledger_path)
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame(), 0
+    df = pd.read_csv(path)
+    if df.empty:
+        return df, 0
+
+    removed = 0
+    if all(col in df.columns for col in ("trade_date", "order_id")):
+        before = len(df)
+        sort_cols = ["trade_date"]
+        if "timestamp_et" in df.columns:
+            sort_cols.append("timestamp_et")
+        df = (
+            df.sort_values(sort_cols, na_position="last")
+            .drop_duplicates(subset=["trade_date", "order_id"], keep="last")
+            .reset_index(drop=True)
+        )
+        removed = before - len(df)
+
+    for col in ("quantity", "fill_price", "notional", "fees"):
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    for col in ("trade_date", "ticker", "side"):
+        if col not in df.columns:
+            df[col] = ""
+    return df, int(removed)
+
+
+def _compute_execution_basis_metrics(
+    *,
+    trade_date: str,
+    ledger_path: str | None,
+    starting_cash: float,
+) -> dict[str, float | int | None]:
+    df, dedup_removed = _load_execution_ledger_dedup(ledger_path)
+    ledger_rows_total = int(len(df))
+    if df.empty:
+        return {
+            "equity": float(starting_cash),
+            "cash": float(starting_cash),
+            "holdings_value": 0.0,
+            "turnover_dollars": 0.0,
+            "turnover_pct": 0.0,
+            "prior_equity_for_turnover": float(starting_cash),
+            "rows_used": 0,
+            "dedup_removed": int(dedup_removed),
+            "ledger_rows_total": int(ledger_rows_total),
+        }
+
+    up_to_date = df[df["trade_date"].astype(str) <= str(trade_date)].copy()
+    if "execution_status" in up_to_date.columns:
+        exec_status = up_to_date["execution_status"].astype(str).str.upper()
+        executed_mask = exec_status.isin({"FILLED", "FILLED_ESTIMATE", "READY", "EXECUTED"})
+        up_to_date = up_to_date[executed_mask].copy()
+    if up_to_date.empty:
+        return {
+            "equity": float(starting_cash),
+            "cash": float(starting_cash),
+            "holdings_value": 0.0,
+            "turnover_dollars": 0.0,
+            "turnover_pct": 0.0,
+            "prior_equity_for_turnover": float(starting_cash),
+            "rows_used": 0,
+            "dedup_removed": int(dedup_removed),
+            "ledger_rows_total": int(ledger_rows_total),
+        }
+
+    sort_cols = ["trade_date"]
+    if "timestamp_et" in up_to_date.columns:
+        sort_cols.append("timestamp_et")
+    up_to_date = up_to_date.sort_values(sort_cols, na_position="last").reset_index(drop=True)
+
+    cash = float(starting_cash)
+    holdings: dict[str, float] = {}
+    last_fill: dict[str, float] = {}
+    turnover_by_date: dict[str, float] = {}
+    prior_equity_by_date: dict[str, float] = {}
+    current_date: str | None = None
+
+    for _, row in up_to_date.iterrows():
+        row_date = str(row.get("trade_date") or "")
+        if not row_date:
+            continue
+        if row_date != current_date:
+            holdings_value = float(
+                sum(
+                    max(0.0, float(shares)) * float(last_fill.get(ticker, 0.0))
+                    for ticker, shares in holdings.items()
+                )
+            )
+            prior_equity_by_date[row_date] = float(cash + holdings_value)
+            turnover_by_date.setdefault(row_date, 0.0)
+            current_date = row_date
+
+        ticker = str(row.get("ticker") or "").upper()
+        side = str(row.get("side") or "").upper()
+        qty = float(row.get("quantity") or 0.0)
+        fill_price = float(row.get("fill_price") or 0.0)
+        fees = float(row.get("fees") or 0.0)
+        if qty <= 0 or fill_price <= 0:
+            continue
+
+        row_notional = float(row.get("notional") or 0.0)
+        notional = abs(row_notional) if abs(row_notional) > 0 else abs(qty * fill_price)
+
+        if side == "BUY":
+            cash -= notional + fees
+            holdings[ticker] = max(0.0, float(holdings.get(ticker, 0.0)) + qty)
+            last_fill[ticker] = fill_price
+        elif side == "SELL":
+            prev_shares = max(0.0, float(holdings.get(ticker, 0.0)))
+            sell_qty = min(qty, prev_shares)
+            cash += (sell_qty * fill_price) - fees
+            holdings[ticker] = max(0.0, prev_shares - sell_qty)
+            last_fill[ticker] = fill_price
+
+        turnover_by_date[row_date] = float(turnover_by_date.get(row_date, 0.0) + notional)
+
+    holdings_value = float(
+        sum(
+            max(0.0, float(shares)) * float(last_fill.get(ticker, 0.0))
+            for ticker, shares in holdings.items()
+        )
+    )
+    equity = float(cash + holdings_value)
+    prior_equity = float(prior_equity_by_date.get(str(trade_date), starting_cash))
+    turnover_dollars = float(turnover_by_date.get(str(trade_date), 0.0))
+    turnover_pct = float(turnover_dollars / prior_equity) if prior_equity > 0 else 0.0
+    return {
+        "equity": equity,
+        "cash": float(cash),
+        "holdings_value": holdings_value,
+        "turnover_dollars": turnover_dollars,
+        "turnover_pct": turnover_pct,
+        "prior_equity_for_turnover": prior_equity,
+        "rows_used": int(len(up_to_date)),
+        "dedup_removed": int(dedup_removed),
+        "ledger_rows_total": int(ledger_rows_total),
     }
 
 
@@ -388,13 +683,17 @@ def _build_health_payload(
     paper_summary: dict | None,
     execution_payload: dict | None,
     nav_ts_path: str | None,
+    ledger_path: str | None = str(LEDGER_TRADES_PATH),
     should_execute: bool,
     leverage_enabled: bool,
     tolerance: float = 1e-6,
+    execution_equity_tolerance_dollars: float = 5.0,
+    execution_equity_tolerance_bps: float = 5.0,
 ) -> dict:
     summary = paper_summary or {}
     payload = execution_payload or {}
     warnings: list[str] = []
+    errors: list[str] = []
 
     planned_trade_count = int(len((summary.get("trade_plan") or []))) if isinstance(summary.get("trade_plan"), list) else int(len((payload.get("trades") or [])))
     executed_trade_count = int(summary.get("num_trades") or 0)
@@ -405,6 +704,27 @@ def _build_health_payload(
     net_exposure = _coerce_float_or_none(summary.get("net_exposure"))
     turnover_dollars = _coerce_float_or_none(summary.get("turnover_notional")) or 0.0
     turnover_pct = _coerce_float_or_none(summary.get("turnover_pct")) or 0.0
+    broker_reconciliation = (
+        summary.get("broker_reconciliation")
+        if isinstance(summary.get("broker_reconciliation"), dict)
+        else {}
+    )
+    model_equity_recon = _coerce_float_or_none(
+        broker_reconciliation.get("model_equity")
+    )
+    broker_equity_recon = _coerce_float_or_none(
+        broker_reconciliation.get("broker_equity")
+    )
+    recon_delta = None
+    if model_equity_recon is not None and broker_equity_recon is not None:
+        recon_delta = float(broker_equity_recon) - float(model_equity_recon)
+    recon_tolerance = _coerce_float_or_none(
+        broker_reconciliation.get("equity_tolerance")
+    )
+    if broker_equity is None and broker_equity_recon is not None:
+        broker_equity = float(broker_equity_recon)
+    if recon_delta is None and model_equity_recon is not None and broker_equity is not None:
+        recon_delta = float(broker_equity) - float(model_equity_recon)
 
     nav_equity_last_row = None
     if nav_ts_path and Path(nav_ts_path).exists() and Path(nav_ts_path).stat().st_size > 0:
@@ -418,31 +738,112 @@ def _build_health_payload(
                 nav_ts["date"] = nav_ts["date"].dt.strftime("%Y-%m-%d")
                 nav_ts.to_csv(nav_ts_path, index=False)
             nav_equity_last_row = _coerce_float_or_none(nav_ts.iloc[-1].get("equity"))
-            nav_turnover = _coerce_float_or_none(nav_ts.iloc[-1].get("turnover_dollars"))
-            nav_turnover_pct = _coerce_float_or_none(nav_ts.iloc[-1].get("turnover_pct"))
-            if nav_turnover is not None:
-                turnover_dollars = nav_turnover
-            if nav_turnover_pct is not None:
-                turnover_pct = nav_turnover_pct
+
+    execution_basis = _compute_execution_basis_metrics(
+        trade_date=str(trade_date),
+        ledger_path=ledger_path,
+        starting_cash=float(os.getenv("PAPER_START_CASH", "10000")),
+    )
+    execution_basis_equity = _coerce_float_or_none(execution_basis.get("equity"))
+    execution_basis_cash = _coerce_float_or_none(execution_basis.get("cash"))
+    execution_basis_holdings_value = _coerce_float_or_none(execution_basis.get("holdings_value"))
+    execution_basis_turnover_dollars = _coerce_float_or_none(execution_basis.get("turnover_dollars")) or 0.0
+    execution_basis_turnover_pct = _coerce_float_or_none(execution_basis.get("turnover_pct")) or 0.0
+    execution_basis_rows_used = int(execution_basis.get("rows_used") or 0)
+    execution_basis_dedup_removed = int(execution_basis.get("dedup_removed") or 0)
+    execution_vs_broker_equity_delta = None
+    execution_vs_broker_equity_tolerance = None
+    if execution_basis_dedup_removed > 0:
+        warnings.append(f"ledger_duplicates_removed:{execution_basis_dedup_removed}")
 
     market_guard = summary.get("market_guard") if isinstance(summary.get("market_guard"), dict) else {}
     market_guard_status = str(market_guard.get("status") or summary.get("market_status") or "UNKNOWN").upper()
+    run_id = str(summary.get("run_id") or payload.get("run_id") or "")
 
     if should_execute:
-        if broker_equity is None or nav_equity_last_row is None:
-            raise AssertionError("health_check_failed: missing broker/nav equity on execution run")
-        if abs(float(nav_equity_last_row) - float(broker_equity)) > float(tolerance):
-            raise AssertionError(
-                f"health_check_failed: nav equity {nav_equity_last_row} != broker equity {broker_equity}"
+        if execution_basis_rows_used > 0:
+            turnover_dollars = float(execution_basis_turnover_dollars)
+            turnover_pct = float(execution_basis_turnover_pct)
+        else:
+            warnings.append("execution_basis_rows_missing")
+        if broker_equity is None:
+            errors.append(
+                "health_check_failed: missing broker equity on execution run"
+            )
+        if (
+            model_equity_recon is None
+            and execution_basis_rows_used > 0
+            and execution_basis_equity is None
+        ):
+            errors.append(
+                "health_check_failed: missing broker/execution-basis equity on execution run"
+            )
+        if model_equity_recon is not None and broker_equity is not None:
+            execution_vs_broker_equity_delta = float(broker_equity) - float(
+                model_equity_recon
+            )
+            execution_vs_broker_equity_tolerance = max(
+                float(execution_equity_tolerance_dollars),
+                abs(float(model_equity_recon))
+                * (float(execution_equity_tolerance_bps) / 10000.0),
+            )
+            if abs(float(execution_vs_broker_equity_delta)) > float(
+                execution_vs_broker_equity_tolerance
+            ):
+                errors.append(
+                    "health_check_failed: broker-recon equity drift exceeds tolerance "
+                    f"(delta={execution_vs_broker_equity_delta:.6f}, "
+                    f"tol={execution_vs_broker_equity_tolerance:.6f}, "
+                    f"model={float(model_equity_recon):.6f}, broker={float(broker_equity):.6f})"
+                )
+        elif (
+            execution_basis_rows_used > 0
+            and execution_basis_equity is not None
+            and broker_equity is not None
+        ):
+            # Fallback when broker reconciliation metrics are unavailable.
+            execution_vs_broker_equity_delta = float(execution_basis_equity) - float(
+                broker_equity
+            )
+            execution_vs_broker_equity_tolerance = max(
+                float(execution_equity_tolerance_dollars),
+                abs(float(execution_basis_equity))
+                * (float(execution_equity_tolerance_bps) / 10000.0),
+            )
+            if abs(float(execution_vs_broker_equity_delta)) > float(
+                execution_vs_broker_equity_tolerance
+            ):
+                errors.append(
+                    "health_check_failed: execution-basis equity drift exceeds tolerance "
+                    f"(delta={execution_vs_broker_equity_delta:.6f}, "
+                    f"tol={execution_vs_broker_equity_tolerance:.6f}, "
+                    f"exec={float(execution_basis_equity):.6f}, broker={float(broker_equity):.6f})"
+                )
+        if (
+            nav_equity_last_row is not None
+            and broker_equity is not None
+            and abs(float(nav_equity_last_row) - float(broker_equity))
+            > float(
+                execution_vs_broker_equity_tolerance
+                if execution_vs_broker_equity_tolerance is not None
+                else max(
+                    float(execution_equity_tolerance_dollars),
+                    abs(float(nav_equity_last_row))
+                    * (float(execution_equity_tolerance_bps) / 10000.0),
+                )
+            )
+        ):
+            warnings.append(
+                f"valuation_basis_mismatch: mark_basis={float(nav_equity_last_row):.6f} broker={float(broker_equity):.6f}"
             )
         if broker_cash is not None and broker_equity and broker_equity > 0 and achieved_cash_weight is not None:
             implied = float(broker_cash) / float(broker_equity)
             if abs(float(achieved_cash_weight) - implied) > float(tolerance):
-                raise AssertionError(
+                errors.append(
                     f"health_check_failed: achieved_cash_weight {achieved_cash_weight} != broker_cash/broker_equity {implied}"
                 )
         if gross_exposure is not None and (not leverage_enabled) and float(gross_exposure) > (1.0 + float(tolerance)):
-            raise AssertionError(
+            errors.append(
                 f"health_check_failed: gross_exposure {gross_exposure} exceeds 1.0 without leverage"
             )
     else:
@@ -450,19 +851,42 @@ def _build_health_payload(
         turnover_dollars = 0.0
         turnover_pct = 0.0
 
+    status = "FAIL" if errors else "PASS"
+    error_text = "; ".join(errors) if errors else None
+
     return {
+        "status": status,
+        "error": error_text,
         "trade_date": str(trade_date),
+        "run_id": run_id,
         "market_guard_status": market_guard_status,
         "planned_trade_count": int(planned_trade_count),
         "executed_trade_count": int(executed_trade_count),
+        "model_equity_recon": _coerce_float_or_none(model_equity_recon),
         "broker_equity": broker_equity,
+        "recon_delta": _coerce_float_or_none(recon_delta),
+        "recon_equity_tolerance": _coerce_float_or_none(recon_tolerance),
         "broker_cash": broker_cash,
         "achieved_cash_weight": achieved_cash_weight,
         "gross_exposure": gross_exposure,
         "net_exposure": net_exposure,
         "nav_equity_last_row": nav_equity_last_row,
+        "nav_last_equity": nav_equity_last_row,
+        "mark_basis_equity": nav_equity_last_row,
+        "execution_basis_equity": execution_basis_equity,
+        "execution_vs_broker_equity_delta": _coerce_float_or_none(execution_vs_broker_equity_delta),
+        "execution_vs_broker_equity_tolerance": _coerce_float_or_none(execution_vs_broker_equity_tolerance),
+        "execution_basis_cash": execution_basis_cash,
+        "execution_basis_holdings_value": execution_basis_holdings_value,
+        "execution_basis_rows_used": int(execution_basis_rows_used),
+        "execution_basis_dedup_removed": int(execution_basis_dedup_removed),
+        "ledger_path_used": str(ledger_path or ""),
+        "ledger_rows": int(execution_basis.get("ledger_rows_total") or 0),
+        "ledger_dupe_rows": int(execution_basis_dedup_removed),
         "turnover_dollars": float(turnover_dollars),
         "turnover_pct": float(turnover_pct),
+        "execution_basis_turnover_dollars": float(execution_basis_turnover_dollars),
+        "execution_basis_turnover_pct": float(execution_basis_turnover_pct),
         "warnings": warnings,
     }
 
@@ -661,7 +1085,7 @@ def build_execution_email_payload(
     if paper_summary:
         market_open = str(paper_summary.get("market_status", "")).upper() == "OPEN"
         if not market_open:
-            if mode == "SHADOW" or plan_only:
+            if mode in {"SHADOW", "ALPACA"} or plan_only:
                 status = "PLANNED"
             else:
                 status = "HALTED"
@@ -1578,11 +2002,13 @@ def _inactive_input_hint(details: dict | None) -> str:
 # Sleeve runners
 # ============================================================
 def run_sleeve_1():
+    _ensure_sleeve_backtest_imports()
     logger.info("[SLEEVE 1] Preparing data...")
     signals = s1_prepare_data()
     logger.info("[SLEEVE 1] Running backtest...")
     return s1_backtest(signals)
 def run_sleeve_trend():
+    _ensure_sleeve_backtest_imports()
     logger.info("[SLEEVE TREND] Preparing data...")
     signals = st_prepare_data()
     logger.info("[SLEEVE TREND] Running backtest...")
@@ -2935,9 +3361,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution",
     )
     parser.add_argument(
+        "--force-execution",
+        "--force_execution",
+        "--reset-orders-sent",
+        "--reset_orders_sent",
+        dest="force_execution",
+        action="store_true",
+        help=(
+            "Force same-day execution by resetting orders_sent idempotency markers "
+            "(equivalent to FORCE_EXECUTION=1)."
+        ),
+    )
+    parser.add_argument(
         "--plan-only",
         action="store_true",
         help="Generate planning artifacts only; skip order generation even when market is open.",
+    )
+    parser.add_argument(
+        "--exit-only",
+        "--exit_only",
+        dest="exit_only",
+        action="store_true",
+        help="Explicitly force exit-only execution (sells/reductions only).",
     )
     parser.add_argument(
         "--backtest-start",
@@ -3018,6 +3463,7 @@ def _resolve_backtest_dates(args: argparse.Namespace) -> tuple[pd.Timestamp, pd.
 
 
 def _run_backtest_mode(args: argparse.Namespace) -> None:
+    _ensure_audit_imports()
     start, end = _resolve_backtest_dates(args)
     policy = (
         str(getattr(args, "breaker_policy", None) or os.getenv("BREAKER_POLICY", "FULL"))
@@ -3112,9 +3558,14 @@ def _run_backtest_mode(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
+    # Fail fast on placeholder/invalid REPORT_DATE before running sleeves/network calls.
+    _parse_report_date_env(os.getenv("REPORT_DATE", ""))
+    ensure_no_legacy_ledger(logger=logger, when="startup")
     if _is_backtest_mode(args):
         _run_backtest_mode(args)
         return
+    _ensure_quant_report_imports()
+    _ensure_paper_broker_imports()
     offline_fixture = os.getenv("OFFLINE_FIXTURE", "").lower() in {"1", "true", "yes"}
     fixture_date = os.getenv("OFFLINE_FIXTURE_DATE", "2000-01-01")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -3181,7 +3632,7 @@ def main(argv: list[str] | None = None):
             _inactive_input_hint(cm_details),
         )
     # ── Extract sleeve outputs for dynamic allocation ─────────────
-    trend_output = extract_sleeve_output(st_equity, st_trades, "sleeve_trend", 1.0)
+    trend_output = build_trend_sleeve_output(st_signals, st_equity, top_n=10)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
     val_output = extract_sleeve_output(
         s2_equity,
@@ -3453,24 +3904,40 @@ def main(argv: list[str] | None = None):
             shadow_constraints = {
                 "cash_target_weight": float(snapshot_cash_target_weight)
             }
+            if bool(getattr(args, "exit_only", False)) or _is_truthy(os.getenv("EXIT_ONLY"), default=False):
+                shadow_constraints["exit_only"] = True
             trading_mode = str(os.getenv("TRADING_MODE", "shadow")).strip().lower()
-            if trading_mode == "shadow" and os.getenv("ALLOW_RERUN_RESET", "1") == "1":
-                sent_ledger_removed += reset_orders_sent_ledger_for_date(
-                    sent_ledger_path,
-                    trade_date_str,
+            force_execution = bool(
+                bool(getattr(args, "force_execution", False))
+                or _is_truthy(os.getenv("FORCE_EXECUTION"), default=False)
+            )
+            if force_execution:
+                if trading_mode == "shadow":
+                    sent_ledger_removed += reset_orders_sent_ledger_for_date(
+                        sent_ledger_path,
+                        trade_date_str,
+                    )
+                if args.reset_ledger_date:
+                    sent_ledger_removed += reset_orders_sent_ledger_for_date(
+                        sent_ledger_path,
+                        args.reset_ledger_date,
+                    )
+            else:
+                logger.info(
+                    "[ORDER] orders_sent guard active; not resetting (%s)",
+                    "use --force-execution/--reset-orders-sent or FORCE_EXECUTION=1",
                 )
-            if args.reset_ledger_date:
-                sent_ledger_removed += reset_orders_sent_ledger_for_date(
-                    sent_ledger_path,
-                    args.reset_ledger_date,
-                )
+                if args.reset_ledger_date:
+                    logger.info(
+                        "[ORDER] --reset-ledger-date ignored without force execution override"
+                    )
             paper_summary = run_paper_day(
                 run_date=trade_date_str,
                 signals_path=signals_path_exec,
                 ledger_path=paper_ledger_path,
                 trades_path=paper_trades_path,
                 config_path="paper/config_paper.json",
-                force=False,
+                force=force_execution,
                 constraints=shadow_constraints,
                 plan_only=args.plan_only,
             )
@@ -3583,42 +4050,26 @@ def main(argv: list[str] | None = None):
         "sent_ledger_path": sent_ledger_path,
         "sent_ledger_reset_removed": int(sent_ledger_removed),
         "missing_prices": [],
-        "ledger2_path": "outputs/ledger/trades.csv",
+        "ledger2_path": str(LEDGER_TRADES_PATH),
         "ledger2_appended_rows": 0,
         "ledger2_skipped_rows": 0,
         "nav_path": None,
         "nav_timeseries_path": None,
     }
-    # legacy pipeline retained for backward compatibility
     if should_execute:
-        try:
-            asof_date = str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str))
-            ledger_run_id = (paper_summary or {}).get("run_id") or make_run_id()
-            ledger_source = str((paper_summary or {}).get("trading_mode") or "SHADOW").upper()
-            signal_hash = compute_signal_hash(signals_path_exec)
-            rows = ledger_rows_from_execution_payload(
-                payload_path=execution_payload_path,
-                trade_date=trade_date_str,
-                asof_date=asof_date,
-                source=ledger_source,
-                run_id=ledger_run_id,
-                signal_hash=signal_hash,
-            )
-            appended = append_ledger_rows(rows)
-            with open(os.path.join("outputs", "ledger", f"ledger_write_{asof_date}.json"), "w", encoding="utf-8") as f:
-                json.dump({"run_id": ledger_run_id, "trade_date": trade_date_str, "asof_date": asof_date, "rows_input": len(rows), "rows_appended": appended, "ledger_path": "outputs/ledger/trades.csv", "execution_payload_path": execution_payload_path}, f, indent=2)
-                f.write("\n")
-        except Exception as e:
-            logger.warning("[LEDGER][WARN] post-execution perf pipeline failed: %s", e)
-    if should_execute:
+        rows2: list[dict] = []
+        appended2 = 0
+        skipped2 = 0
+        missing_prices: list[str] = []
+        ledger2_error = None
+        asof_date = integrity["asof_date"]
+        ledger_run_id = str(uuid.uuid4())
+        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
+        signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
         try:
             Path("outputs/ledger").mkdir(parents=True, exist_ok=True)
             Path("outputs/perf").mkdir(parents=True, exist_ok=True)
             Path("outputs/daily").mkdir(parents=True, exist_ok=True)
-            asof_date = integrity["asof_date"]
-            ledger_run_id = str(uuid.uuid4())
-            ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
-            signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
             def _ledger_price_fn(ticker: str, req_asof_date: str):
                 px = fetch_prev_closes_yfinance([ticker], asof_date=req_asof_date)
                 if px.empty:
@@ -3633,7 +4084,8 @@ def main(argv: list[str] | None = None):
                 signal_hash=signal_hash,
                 get_price_fn=_ledger_price_fn,
             )
-            appended2, skipped2 = append_ledger2_rows("outputs/ledger/trades.csv", rows2)
+            appended2, skipped2 = append_ledger2_rows(str(LEDGER_TRADES_PATH), rows2)
+            ensure_no_legacy_ledger(logger=logger, when="post_ledger_write")
             nav_result = update_nav(
                 asof_date=asof_date,
                 trade_date=trade_date_str,
@@ -3670,7 +4122,7 @@ def main(argv: list[str] | None = None):
                 }
             integrity.update(
                 {
-                    "ledger2_path": "outputs/ledger/trades.csv",
+                    "ledger2_path": str(LEDGER_TRADES_PATH),
                     "ledger2_appended_rows": int(appended2),
                     "ledger2_skipped_rows": int(skipped2),
                     "nav_path": nav_result.get("nav_path"),
@@ -3679,7 +4131,27 @@ def main(argv: list[str] | None = None):
             )
             integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
         except Exception as e:
+            ledger2_error = str(e)
             logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
+        try:
+            ledger_write_path = Path("outputs/ledger") / f"ledger_write_{asof_date}.json"
+            ledger_write_payload = {
+                "run_id": ledger_run_id,
+                "trade_date": trade_date_str,
+                "asof_date": asof_date,
+                "rows_input": int(len(rows2)),
+                "rows_appended": int(appended2),
+                "rows_skipped": int(skipped2),
+                "ledger_path": str(LEDGER_TRADES_PATH),
+                "execution_payload_path": execution_payload_path,
+            }
+            if ledger2_error:
+                ledger_write_payload["error"] = ledger2_error
+            with ledger_write_path.open("w", encoding="utf-8") as f:
+                json.dump(ledger_write_payload, f, indent=2)
+                f.write("\n")
+        except Exception as e:
+            logger.warning("[LEDGER2][WARN] failed writing ledger metadata: %s", e)
     if not daily_snapshot.get("nav_metrics"):
         nav_ts_path_fallback = Path("outputs/perf/nav_timeseries.csv")
         if nav_ts_path_fallback.exists() and nav_ts_path_fallback.stat().st_size > 0:
@@ -3692,23 +4164,46 @@ def main(argv: list[str] | None = None):
                 )
             except Exception as e:
                 logger.warning("[NAV][WARN] unable to hydrate snapshot nav metrics: %s", e)
+    health_payload: dict
     try:
         health_payload = _build_health_payload(
             trade_date=trade_date_str,
             paper_summary=paper_summary,
             execution_payload=execution_payload,
             nav_ts_path=integrity.get("nav_timeseries_path") or "outputs/perf/nav_timeseries.csv",
+            ledger_path=str(LEDGER_TRADES_PATH),
             should_execute=bool(should_execute),
             leverage_enabled=str(os.getenv("ALLOW_LEVERAGE", "0")).strip().lower() in {"1", "true", "yes", "y", "on"},
         )
-        if reset_info:
-            health_payload["paper_reset"] = True
-            health_payload["paper_start_cash"] = float(reset_info.get("start_cash", 0.0))
-        write_health_artifact(trade_date_str, health_payload)
-    except AssertionError as e:
-        logger.error("[HEALTH][FAIL] %s", e)
-        raise
     except Exception as e:
+        health_payload = {
+            "status": "FAIL",
+            "error": f"health_payload_build_failed: {e}",
+            "trade_date": trade_date_str,
+            "run_id": str((paper_summary or {}).get("run_id") or (execution_payload or {}).get("run_id") or ""),
+            "market_guard_status": str((((paper_summary or {}).get("market_guard") or {}).get("status") or (paper_summary or {}).get("market_status") or "UNKNOWN").upper()),
+            "model_equity_recon": _coerce_float_or_none((((paper_summary or {}).get("broker_reconciliation") or {}).get("model_equity"))),
+            "broker_equity": _coerce_float_or_none((paper_summary or {}).get("total_equity")),
+            "recon_delta": _coerce_float_or_none((((paper_summary or {}).get("broker_reconciliation") or {}).get("broker_minus_model_equity_delta"))),
+            "broker_cash": _coerce_float_or_none((paper_summary or {}).get("cash")),
+            "execution_basis_equity": None,
+            "mark_basis_equity": None,
+            "nav_last_equity": None,
+            "ledger_path_used": str(LEDGER_TRADES_PATH),
+            "ledger_rows": 0,
+            "ledger_dupe_rows": 0,
+            "turnover_dollars": 0.0,
+            "turnover_pct": 0.0,
+            "warnings": [f"health_payload_exception:{e}"],
+        }
+    if reset_info:
+        health_payload["paper_reset"] = True
+        health_payload["paper_start_cash"] = float(reset_info.get("start_cash", 0.0))
+    try:
+        _finalize_health_payload(trade_date_str, health_payload)
+    except Exception as e:
+        if isinstance(e, AssertionError):
+            raise
         logger.warning("[HEALTH][WARN] failed writing health artifact: %s", e)
     try:
         write_integrity_artifact(integrity["asof_date"], integrity)
