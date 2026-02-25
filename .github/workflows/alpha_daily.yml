@@ -3,6 +3,7 @@ name: Alpha Daily Run
 on:
   workflow_dispatch: {}
   schedule:
+    # 6:15am ET ≈ 11:15 UTC (adjust for DST if you want)
     - cron: "15 11 * * 1-5"
 
 jobs:
@@ -27,15 +28,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate alpha report (refresh data)
+      - name: Run research backtest + report (refresh market data)
         env:
           DATE_FORMAT: "US"
         run: |
           python3 scripts/alpha_report.py --apply-costs --cost-bps 25
 
-      - name: Update live shadow NAV ledger + regenerate report
+      # 🚀 LIVE EXECUTION STEP (Alpaca Paper)
+      - name: Run daily quant report (Alpaca execution routing)
+        env:
+          TRADING_MODE: alpaca
+          MODE: ALPACA
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+          ALPACA_PAPER: "true"
+          ALPACA_BASE_URL: "https://paper-api.alpaca.markets/v2"
         run: |
-          python3 scripts/daily_alpha_run.py
+          python3 daily_quant_report.py
 
       - name: Email alpha report
         env:

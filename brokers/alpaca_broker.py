@@ -14,6 +14,22 @@ def _is_truthy(value: object, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_first(*names: str) -> Optional[str]:
+    """Return the first non-empty environment variable value for the given names."""
+    for n in names:
+        v = os.getenv(n)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _as_dict(obj: Any) -> Dict[str, Any]:
     if obj is None:
         return {}
@@ -85,27 +101,80 @@ def _normalize_position_obj(position: Any) -> Dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class AlpacaEnv:
+    key_id: str
+    secret_key: str
+    base_url: str
+    paper: bool
+
+
+def load_alpaca_env() -> AlpacaEnv:
+    """
+    Read Alpaca credentials/config from env.
+
+    Preferred:
+      - ALPACA_API_KEY_ID
+      - ALPACA_API_SECRET_KEY
+      - ALPACA_PAPER (true/false)
+      - (optional) ALPACA_BASE_URL
+
+    Legacy supported:
+      - ALPACA_KEY_ID
+      - ALPACA_SECRET_KEY
+      - (optional) ALPACA_BASE_URL
+    """
+    key_id = _env_first("ALPACA_API_KEY_ID", "ALPACA_KEY_ID")
+    secret_key = _env_first("ALPACA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
+    paper = _env_bool("ALPACA_PAPER", default=True)
+
+    base_url = _env_first("ALPACA_BASE_URL")
+    if not base_url:
+        base_url = (
+            "https://paper-api.alpaca.markets/v2"
+            if paper
+            else "https://api.alpaca.markets/v2"
+        )
+
+    if not key_id or not secret_key:
+        raise RuntimeError(
+            "Missing Alpaca credentials. Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY "
+            "(or legacy ALPACA_KEY_ID / ALPACA_SECRET_KEY)."
+        )
+
+    return AlpacaEnv(
+        key_id=key_id,
+        secret_key=secret_key,
+        base_url=base_url,
+        paper=paper,
+    )
+
+
 @dataclass
 class AlpacaBroker:
     trading_client: Any
     paper: bool = True
+    base_url: str = ""
 
     @classmethod
     def from_env(cls) -> "AlpacaBroker":
-        api_key = os.getenv("ALPACA_API_KEY_ID")
-        api_secret = os.getenv("ALPACA_API_SECRET_KEY")
-        if not api_key or not api_secret:
-            raise RuntimeError(
-                "Missing Alpaca credentials: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required."
-            )
-        paper = _is_truthy(os.getenv("ALPACA_PAPER"), default=True)
+        cfg = load_alpaca_env()
         try:
             from alpaca.trading.client import TradingClient
         except Exception as exc:
             raise RuntimeError(
                 "alpaca-py is required for TRADING_MODE=alpaca. Install with `pip install alpaca-py`."
             ) from exc
-        return cls(trading_client=TradingClient(api_key, api_secret, paper=paper), paper=paper)
+        try:
+            client = TradingClient(
+                cfg.key_id,
+                cfg.secret_key,
+                paper=cfg.paper,
+                url_override=cfg.base_url,
+            )
+        except TypeError:
+            client = TradingClient(cfg.key_id, cfg.secret_key, paper=cfg.paper)
+        return cls(trading_client=client, paper=cfg.paper, base_url=cfg.base_url)
 
     def get_account(self) -> Dict[str, Any]:
         account = self.trading_client.get_account()
