@@ -1,5 +1,4 @@
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -93,6 +92,7 @@ def test_smtp_session_calls_connect_before_starttls(monkeypatch):
     call_names = [c[0] for c in smtp.calls]
 
     assert call_names[:4] == ["connect", "ehlo", "starttls", "ehlo"]
+    assert call_names.index("connect") < call_names.index("starttls")
     smtp.quit()
 
 
@@ -118,7 +118,7 @@ def test_dry_run_skips_login_and_send(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
 
     assert "[EMAIL] DRY_RUN complete." in out
-    assert "script_version=" in out
+    assert "version=" in out
 
     assert FakeSMTP.instances, "Expected at least one SMTP session instance"
     all_calls = [call[0] for inst in FakeSMTP.instances for call in inst.calls]

@@ -5,7 +5,7 @@ import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 
-__EMAIL_SCRIPT_VERSION__ = "2026-02-25-b351e2a"
+__EMAIL_SCRIPT_VERSION__ = "2026-02-25-v1"
 _REQUIRED_EMAIL_ENV_VARS = (
     "SMTP_HOST",
     "SMTP_PORT",
@@ -62,10 +62,11 @@ def main() -> None:
     smtp_pass = env["SMTP_PASSWORD"]
     email_to = env["REPORT_TO_EMAIL"]
     dry_run = os.getenv("EMAIL_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    dry_run_flag = "1" if dry_run else "0"
 
     print(
-        f"[EMAIL] script_version={__EMAIL_SCRIPT_VERSION__} "
-        f"host={smtp_host} port={smtp_port}"
+        f"[EMAIL] version={__EMAIL_SCRIPT_VERSION__} "
+        f"host={smtp_host} port={smtp_port} dry_run={dry_run_flag}"
     )
 
     report_dir = Path(args.report_dir)
