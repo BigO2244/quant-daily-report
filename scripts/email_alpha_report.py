@@ -5,22 +5,35 @@ import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 
+__EMAIL_SCRIPT_VERSION__ = "2026-02-25-b351e2a"
+_REQUIRED_EMAIL_ENV_VARS = (
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "REPORT_TO_EMAIL",
+)
 
-def _req_env(name: str) -> str:
-    v = os.getenv(name)
-    if v is None or str(v).strip() == "":
-        raise RuntimeError(f"Missing required env var: {name}")
-    return str(v).strip()
+
+def _required_email_env() -> dict[str, str]:
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for name in _REQUIRED_EMAIL_ENV_VARS:
+        v = os.getenv(name)
+        if v is None or str(v).strip() == "":
+            missing.append(name)
+            continue
+        values[name] = str(v).strip()
+    if missing:
+        raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
+    return values
 
 
-def _env_int(name: str, default: int) -> int:
-    v = os.getenv(name)
-    if v is None or str(v).strip() == "":
-        return default
+def _parse_port(raw: str) -> int:
     try:
-        return int(str(v).strip())
+        return int(str(raw).strip())
     except ValueError as e:
-        raise RuntimeError(f"Invalid int for env var {name}: {v!r}") from e
+        raise RuntimeError(f"Invalid SMTP_PORT value: {raw!r}") from e
 
 
 def _smtp_session(host: str, port: int) -> smtplib.SMTP:
@@ -42,11 +55,18 @@ def main() -> None:
     ap.add_argument("--subject-prefix", default="[ALPHA]")
     args = ap.parse_args()
 
-    smtp_host = _req_env("SMTP_HOST")
-    smtp_port = _env_int("SMTP_PORT", 587)
-    smtp_user = _req_env("SMTP_USER")
-    smtp_pass = _req_env("SMTP_PASSWORD")
-    email_to = _req_env("REPORT_TO_EMAIL")
+    env = _required_email_env()
+    smtp_host = env["SMTP_HOST"]
+    smtp_port = _parse_port(env["SMTP_PORT"])
+    smtp_user = env["SMTP_USER"]
+    smtp_pass = env["SMTP_PASSWORD"]
+    email_to = env["REPORT_TO_EMAIL"]
+    dry_run = os.getenv("EMAIL_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    print(
+        f"[EMAIL] script_version={__EMAIL_SCRIPT_VERSION__} "
+        f"host={smtp_host} port={smtp_port}"
+    )
 
     report_dir = Path(args.report_dir)
     html_path = report_dir / "alpha_report.html"
@@ -73,6 +93,9 @@ def main() -> None:
 
     try:
         with _smtp_session(smtp_host, smtp_port) as s:
+            if dry_run:
+                print("[EMAIL] DRY_RUN complete.")
+                return
             s.login(smtp_user, smtp_pass)
             s.send_message(msg)
     except Exception as e:

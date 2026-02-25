@@ -38,6 +38,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Print email script version
+        run: |
+          python3 -c "import scripts.email_alpha_report as m; print('EMAIL_SCRIPT_VERSION', getattr(m, '__EMAIL_SCRIPT_VERSION__', 'MISSING'))"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
