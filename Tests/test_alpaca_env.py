@@ -28,7 +28,7 @@ def test_load_alpaca_env_prefers_new_names(monkeypatch):
     assert cfg.key_id == "new-key"
     assert cfg.secret_key == "new-secret"
     assert cfg.paper is True
-    assert cfg.base_url == "https://paper-api.alpaca.markets/v2"
+    assert cfg.base_url == "https://paper-api.alpaca.markets"
 
 
 def test_load_alpaca_env_uses_legacy_names(monkeypatch):
@@ -42,7 +42,7 @@ def test_load_alpaca_env_uses_legacy_names(monkeypatch):
     assert cfg.key_id == "legacy-key"
     assert cfg.secret_key == "legacy-secret"
     assert cfg.paper is False
-    assert cfg.base_url == "https://api.alpaca.markets/v2"
+    assert cfg.base_url == "https://api.alpaca.markets"
 
 
 def test_load_alpaca_env_respects_base_url_override(monkeypatch):
@@ -53,7 +53,7 @@ def test_load_alpaca_env_respects_base_url_override(monkeypatch):
 
     cfg = load_alpaca_env()
 
-    assert cfg.base_url == "https://example.test/v2"
+    assert cfg.base_url == "https://example.test"
 
 
 def test_load_alpaca_env_missing_credentials(monkeypatch):
