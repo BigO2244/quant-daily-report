@@ -55,6 +55,25 @@ jobs:
           source .venv/bin/activate
           python3 alpaca_smoke_test.py || true
 
+      - name: Alpaca raw /v2/account probe
+        env:
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+          ALPACA_BASE_URL: "https://paper-api.alpaca.markets/v2"
+        run: |
+          python - <<'PY'
+          import os, requests
+          base=os.environ["ALPACA_BASE_URL"].rstrip("/")
+          key=os.environ.get("ALPACA_API_KEY_ID")
+          sec=os.environ.get("ALPACA_API_SECRET_KEY")
+          print("BASE", base)
+          print("key_set", bool(key), "secret_set", bool(sec))
+          url = base + "/account"
+          r = requests.get(url, headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec}, timeout=10)
+          print("GET", url, "->", r.status_code, r.text[:200])
+          PY
+
+
       - name: Run daily quant execution
         run: |
           set -euxo pipefail
