@@ -278,6 +278,56 @@ def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path)
     assert (tmp_path / "outputs" / "alpaca" / "orders_2026-02-10.csv").exists()
 
 
+def test_alpaca_mode_invariant_raises_when_executable_but_zero_submit_attempts(
+    monkeypatch, tmp_path
+):
+    monkeypatch.chdir(tmp_path)
+    _mock_open_market(monkeypatch, trading_mode="alpaca")
+
+    class _StubAlpaca:
+        paper = True
+
+        @classmethod
+        def from_env(cls):
+            return cls()
+
+        def find_order_by_client_id(self, client_id):
+            _ = client_id
+            return {"id": "existing-order", "status": "accepted", "submitted_at": "2026-02-10T10:00:00-05:00"}
+
+        def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
+            _ = (symbol, qty, side, client_order_id, tif)
+            raise AssertionError("submit_market_order should not be called in this test")
+
+        def submit_limit_order(
+            self, symbol, qty, side, limit_price, client_order_id, tif="day"
+        ):
+            _ = (symbol, qty, side, limit_price, client_order_id, tif)
+            raise AssertionError("submit_limit_order should not be called in this test")
+
+        def get_account(self):
+            return {"id": "acct", "status": "ACTIVE", "cash": "9000.0", "equity": "10050.0", "buying_power": "18000.0"}
+
+        def get_positions(self):
+            return []
+
+    monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    with pytest.raises(
+        RuntimeError,
+        match="\\[INVARIANT\\] ALPACA mode had executable trades but 0 submit attempts",
+    ):
+        broker.run_paper_day(
+            run_date="2026-02-10",
+            signals_path="signals/2026-02-10.json",
+            ledger_path="paper/ledger.csv",
+            trades_path="paper/trades.csv",
+            config_path="paper/config_paper.json",
+            now_et=now_et,
+        )
+
+
 
 
 

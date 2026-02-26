@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -48,6 +49,12 @@ def _is_truthy(value: object) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _format_reason_counts(counts: Counter[str]) -> str:
+    if not counts:
+        return "none"
+    return ",".join(f"{k}:{int(v)}" for k, v in sorted(counts.items()))
 
 
 @dataclass
@@ -1199,10 +1206,23 @@ def run_paper_day(
     cfg = load_config(config_path)
 
     mode = cfg.trading_mode
+    env_mode = str(os.getenv("MODE", "")).strip().lower()
+    env_trading_mode = str(os.getenv("TRADING_MODE", mode)).strip().lower()
+    allowed_modes = {"", "paper", "shadow", "alpaca", "live"}
+    if env_mode not in allowed_modes:
+        raise RuntimeError(f"Unsupported MODE={env_mode}")
+    if env_trading_mode not in allowed_modes - {""}:
+        raise RuntimeError(f"Unsupported TRADING_MODE={env_trading_mode}")
+    alpaca_requested = "alpaca" in {mode, env_mode, env_trading_mode}
+
     if mode == "live":
         raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
     if mode not in {"paper", "shadow", "alpaca"}:
         raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
+    if alpaca_requested and mode != "alpaca":
+        raise RuntimeError(
+            f"[INVARIANT] Alpaca requested via MODE/TRADING_MODE but broker mode resolved to {mode}"
+        )
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
 
@@ -1224,12 +1244,15 @@ def run_paper_day(
     plan_only = bool(plan_only or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"})
 
     mkt = market_session_status(run_date=run_date, now_et=now_et, cutoff_time_et=cfg.market_cutoff_time_et)
+    market_allow = bool(mkt.is_open_now)
     logger.info(
-        "[MARKET_GUARD] now_et=%s trade_date=%s calendar=%s is_trading_session=%s session_open_et=%s session_close_et=%s next_open_et=%s",
+        "[MARKET_GUARD] now=%s tz=%s trade_date=%s calendar=%s classification=%s allow=%s session_open_et=%s session_close_et=%s next_open_et=%s",
         now_et.isoformat(),
+        str(now_et.tzinfo),
         run_date,
         mkt.calendar_name,
-        mkt.is_open_now,
+        mkt.reason,
+        market_allow,
         mkt.session_open_et.isoformat() if mkt.session_open_et else "n/a",
         mkt.session_close_et.isoformat() if mkt.session_close_et else "n/a",
         mkt.next_open_et.isoformat() if mkt.next_open_et else "n/a",
@@ -1263,6 +1286,16 @@ def run_paper_day(
     targets, target_cash_weight, snapshot_date, asof_date = load_targets(
         signals_path,
         cash_target_weight_default=cash_target_weight_default,
+    )
+    investable_multiplier = max(0.0, 1.0 - float(target_cash_weight))
+    breaker_suppresses_trading = bool(breaker_mode == "lock" and investable_multiplier <= 1e-9)
+    logger.info(
+        "[BREAKER] mode=%s source=%s target_cash_weight=%.6f investable_multiplier=%.6f suppresses_trading=%s",
+        breaker_mode,
+        breaker_mode_source,
+        float(target_cash_weight),
+        float(investable_multiplier),
+        breaker_suppresses_trading,
     )
 
     if exit_only:
@@ -1461,6 +1494,11 @@ def run_paper_day(
 
     executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(trades, cfg)
     execution_trades = executable_trades.copy()
+    filter_drop_reasons: Counter[str] = Counter()
+    if int(execution_filter_stats.get("dropped_zero_shares", 0)) > 0:
+        filter_drop_reasons["zero_shares"] = int(execution_filter_stats.get("dropped_zero_shares", 0))
+    if int(execution_filter_stats.get("dropped_min_notional", 0)) > 0:
+        filter_drop_reasons["min_notional"] = int(execution_filter_stats.get("dropped_min_notional", 0))
     run_id = _run_id(run_date, cfg)
     shadow_orders_path = None
     alpaca_orders_path = None
@@ -1471,17 +1509,33 @@ def run_paper_day(
         "submitted_orders": 0,
         "remote_existing_orders": 0,
     }
+    idempotent_drop_reasons: Counter[str] = Counter()
+    submit_attempts = 0
+    submit_success = 0
+    submit_failed = 0
     idempotent_skips: List[str] = []
     orders: List[Dict[str, object]] = []
     sent_ledger_path: str = cfg.sent_ledger_path
     alpaca_account_snapshot: Dict[str, object] | None = None
     alpaca_positions_snapshot: List[Dict[str, object]] = []
+    execution_enabled = bool(mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only and not blocked)
+    logger.info(
+        "[EXEC_GATE] mode=%s allow=%s market_open=%s plan_only=%s blocked=%s reason=%s",
+        mode,
+        execution_enabled,
+        bool(mkt.is_open_now),
+        bool(plan_only),
+        bool(blocked),
+        mkt.reason,
+    )
 
-    if mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only:
+    if execution_enabled:
         initial_orders = _build_shadow_orders(execution_trades, run_id)
         alpaca_submission_summary["initial_intended_orders"] = int(len(initial_orders))
         orders, local_idempotent_skips = _filter_idempotent_orders(initial_orders, sent_ledger_path)
         idempotent_skips.extend(local_idempotent_skips)
+        if local_idempotent_skips:
+            idempotent_drop_reasons["local_ledger"] += int(len(local_idempotent_skips))
         alpaca_submission_summary["local_idempotent_skips"] = int(len(local_idempotent_skips))
         alpaca_submission_summary["post_local_idempotent_orders"] = int(len(orders))
         submission_metadata: Dict[str, Dict[str, object]] = {}
@@ -1489,6 +1543,19 @@ def run_paper_day(
 
         if mode == "alpaca":
             alpaca = AlpacaBroker.from_env()
+            broker_cls = alpaca.__class__
+            logger.info(
+                "[BROKER] selected=%s.%s mode=%s env_mode=%s env_trading_mode=%s",
+                broker_cls.__module__,
+                broker_cls.__name__,
+                mode,
+                env_mode or "n/a",
+                env_trading_mode,
+            )
+            if alpaca_requested and not isinstance(alpaca, AlpacaBroker):
+                raise RuntimeError(
+                    f"[INVARIANT] Expected AlpacaBroker in alpaca mode, got {broker_cls.__module__}.{broker_cls.__name__}"
+                )
             submitted_orders: List[Dict[str, object]] = []
             remote_existing_orders: List[Dict[str, object]] = []
             for order in orders:
@@ -1505,6 +1572,7 @@ def run_paper_day(
                 existing_remote = alpaca.find_order_by_client_id(client_order_id)
                 if existing_remote:
                     idempotent_skips.append(internal_order_id)
+                    idempotent_drop_reasons["remote_existing"] += 1
                     remote_existing_orders.append(order)
                     alpaca_submission_summary["remote_existing_orders"] = int(
                         alpaca_submission_summary["remote_existing_orders"]
@@ -1535,6 +1603,7 @@ def run_paper_day(
                     )
                     continue
 
+                submit_attempts += 1
                 try:
                     if order_type == "MKT":
                         submitted = alpaca.submit_market_order(
@@ -1555,9 +1624,11 @@ def run_paper_day(
                             tif=tif,
                         )
                 except Exception as exc:
+                    submit_failed += 1
                     raise RuntimeError(
                         f"Alpaca submission failed order_id={internal_order_id}: {exc}"
                     ) from exc
+                submit_success += 1
 
                 alpaca_order_id = str(submitted.get("id") or "")
                 status = str(submitted.get("status") or "SUBMITTED")
@@ -1640,12 +1711,57 @@ def run_paper_day(
             if dropped_idempotent > 0:
                 execution_filter_stats["idempotent_dropped"] = dropped_idempotent
                 execution_filter_stats["kept_after_idempotent"] = int(len(execution_trades))
-                execution_filter_stats["kept"] = int(len(execution_trades))
+                if int(sum(idempotent_drop_reasons.values())) < dropped_idempotent:
+                    idempotent_drop_reasons["other"] += int(
+                        dropped_idempotent - int(sum(idempotent_drop_reasons.values()))
+                    )
                 logger.info(
                     "[ORDER][IDEMPOTENT] filtered_executable_trades=%d kept_after_idempotent=%d",
                     dropped_idempotent,
                     int(len(execution_trades)),
                 )
+
+    trades_raw = int(execution_filter_stats.get("raw", 0))
+    trades_after_filter = int(execution_filter_stats.get("kept", len(executable_trades)))
+    trades_after_idempotency = int(len(execution_trades))
+    idempotent_dropped = max(0, trades_after_filter - trades_after_idempotency)
+    known_idempotent_drops = int(sum(idempotent_drop_reasons.values()))
+    if idempotent_dropped > known_idempotent_drops:
+        idempotent_drop_reasons["other"] += int(idempotent_dropped - known_idempotent_drops)
+    exec_trace = {
+        "trades_raw": trades_raw,
+        "trades_after_filter": trades_after_filter,
+        "trades_after_idempotency": trades_after_idempotency,
+        "filter_drop_reasons": dict(filter_drop_reasons),
+        "idempotent_drop_reasons": dict(idempotent_drop_reasons),
+        "idempotent_dropped": int(idempotent_dropped),
+        "submit_attempts": int(submit_attempts),
+        "submit_success": int(submit_success),
+        "submit_failed": int(submit_failed),
+        "execution_enabled": bool(execution_enabled),
+    }
+    logger.info(
+        "[EXEC_TRACE] trades_raw=%d trades_after_filter=%d filter_drop_reasons=%s trades_after_idempotency=%d idempotent_dropped=%d idempotent_reasons=%s submit_attempts=%d submit_success=%d submit_failed=%d execution_enabled=%s",
+        trades_raw,
+        trades_after_filter,
+        _format_reason_counts(filter_drop_reasons),
+        trades_after_idempotency,
+        int(idempotent_dropped),
+        _format_reason_counts(idempotent_drop_reasons),
+        int(submit_attempts),
+        int(submit_success),
+        int(submit_failed),
+        bool(execution_enabled),
+    )
+    if mode == "alpaca" and execution_enabled:
+        if trades_after_filter > 0 and submit_attempts == 0:
+            raise RuntimeError(
+                "[INVARIANT] ALPACA mode had executable trades but 0 submit attempts"
+            )
+        if submit_attempts > 0 and submit_success == 0:
+            raise RuntimeError(
+                "[INVARIANT] ALPACA mode attempted submits but 0 success"
+            )
 
     trades_out = execution_trades.copy()
     if trades_out.empty:
@@ -1848,6 +1964,8 @@ def run_paper_day(
         ),
         "trade_plan": trade_plan,
         "execution_filter": execution_filter_stats,
+        "exec_trace": exec_trace,
+        "execution_enabled": bool(execution_enabled),
         "risk_meta": risk_meta,
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,

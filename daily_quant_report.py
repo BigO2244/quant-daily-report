@@ -3437,6 +3437,31 @@ def _is_truthy(value: str | int | bool | None, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _normalize_exec_mode(value: str | None, default: str) -> str:
+    norm = str(value if value is not None else default).strip().lower()
+    return norm or str(default).strip().lower()
+
+
+def _resolve_exec_modes() -> tuple[str, str, bool]:
+    raw_mode = os.getenv("MODE")
+    raw_trading_mode = os.getenv("TRADING_MODE", "shadow")
+    trading_mode_norm = _normalize_exec_mode(raw_trading_mode, "shadow")
+    mode_norm = _normalize_exec_mode(raw_mode, trading_mode_norm)
+    allowed_modes = {"paper", "shadow", "alpaca", "live"}
+    if mode_norm not in allowed_modes:
+        raise RuntimeError(f"Unsupported MODE={mode_norm}")
+    if trading_mode_norm not in allowed_modes:
+        raise RuntimeError(f"Unsupported TRADING_MODE={trading_mode_norm}")
+    alpaca_requested = "alpaca" in {mode_norm, trading_mode_norm}
+    if alpaca_requested and trading_mode_norm != "alpaca":
+        raise RuntimeError(
+            "[INVARIANT] MODE/TRADING_MODE indicate alpaca but TRADING_MODE is not alpaca"
+        )
+    os.environ["MODE"] = mode_norm
+    os.environ["TRADING_MODE"] = trading_mode_norm
+    return mode_norm, trading_mode_norm, alpaca_requested
+
+
 def _is_backtest_mode(args: argparse.Namespace) -> bool:
     return bool(
         getattr(args, "backtest_start", None)
@@ -3558,6 +3583,18 @@ def _run_backtest_mode(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
+    mode_norm, trading_mode_norm, alpaca_requested = _resolve_exec_modes()
+    boot_now_utc = dt.datetime.now(dt.timezone.utc)
+    boot_now_et = boot_now_utc.astimezone(ZoneInfo("America/New_York"))
+    logger.info(
+        "[BOOT] mode=%s trading_mode=%s report_date_env=%s tz_env=%s now_utc=%s now_et=%s session_basis=America/New_York",
+        mode_norm,
+        trading_mode_norm,
+        str(os.getenv("REPORT_DATE", "")).strip() or "n/a",
+        str(os.getenv("TZ", "")).strip() or "n/a",
+        boot_now_utc.isoformat(),
+        boot_now_et.isoformat(),
+    )
     # Fail fast on placeholder/invalid REPORT_DATE before running sleeves/network calls.
     _parse_report_date_env(os.getenv("REPORT_DATE", ""))
     ensure_no_legacy_ledger(logger=logger, when="startup")
@@ -3864,6 +3901,12 @@ def main(argv: list[str] | None = None):
     }
     # --- Paper trading execution + report ---
     trade_date_str = report_date.strftime("%Y-%m-%d")
+    logger.info(
+        "[BOOT] report_date=%s mode=%s trading_mode=%s",
+        trade_date_str,
+        mode_norm,
+        trading_mode_norm,
+    )
     signals_path_exec = daily_snapshot.get("signals_snapshot_path") or os.path.join(
         "signals", f"{trade_date_str}.json"
     )
@@ -3906,7 +3949,7 @@ def main(argv: list[str] | None = None):
             }
             if bool(getattr(args, "exit_only", False)) or _is_truthy(os.getenv("EXIT_ONLY"), default=False):
                 shadow_constraints["exit_only"] = True
-            trading_mode = str(os.getenv("TRADING_MODE", "shadow")).strip().lower()
+            trading_mode = trading_mode_norm
             force_execution = bool(
                 bool(getattr(args, "force_execution", False))
                 or _is_truthy(os.getenv("FORCE_EXECUTION"), default=False)
@@ -3941,6 +3984,12 @@ def main(argv: list[str] | None = None):
                 constraints=shadow_constraints,
                 plan_only=args.plan_only,
             )
+            if alpaca_requested:
+                summary_mode = str((paper_summary or {}).get("trading_mode", "")).strip().lower()
+                if summary_mode != "alpaca":
+                    raise RuntimeError(
+                        f"[INVARIANT] Alpaca requested but paper broker resolved trading_mode={summary_mode or 'unknown'}"
+                    )
             logger.info(
                 "[PAPER] Executed paper trading for %s using signals %s",
                 trade_date_str,
@@ -3953,6 +4002,8 @@ def main(argv: list[str] | None = None):
                     "[PAPER] Already executed for %s; rendering report from ledger.",
                     trade_date_str,
                 )
+            elif alpaca_requested:
+                raise
             else:
                 logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
         market_guard = (paper_summary or {}).get("market_guard") if isinstance(paper_summary, dict) else None
