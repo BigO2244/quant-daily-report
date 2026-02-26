@@ -62,7 +62,6 @@ jobs:
           ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
         run: |
           .venv/bin/python - <<'PY'
-          import json
           import os
           import ssl
           import urllib.request
@@ -71,11 +70,10 @@ jobs:
           key = os.environ.get("ALPACA_API_KEY_ID")
           sec = os.environ.get("ALPACA_API_SECRET_KEY")
 
-          print("BASE", base)
-          print("key_set", bool(key), "secret_set", bool(sec))
-
           if base.endswith("/v2"):
               base = base[:-3]
+          print("BASE", base)
+          print("key_set", bool(key), "secret_set", bool(sec))
           url = base + "/v2/account"
 
           req = urllib.request.Request(
