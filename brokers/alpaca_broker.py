@@ -33,6 +33,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _canonical_alpaca_base(base_url: Optional[str], paper: bool) -> str:
+    default_base = "https://paper-api.alpaca.markets" if paper else "https://api.alpaca.markets"
+    base = str(base_url or default_base).strip().rstrip("/")
+    if base.endswith("/v2"):
+        base = base[:-3]
+    return base
+
+
 def _as_dict(obj: Any) -> Dict[str, Any]:
     if obj is None:
         return {}
@@ -131,13 +139,7 @@ def load_alpaca_env() -> AlpacaEnv:
     secret_key = _env_first("ALPACA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
     paper = _env_bool("ALPACA_PAPER", default=True)
 
-    base_url = _env_first("ALPACA_BASE_URL")
-    if not base_url:
-        base_url = (
-            "https://paper-api.alpaca.markets/v2"
-            if paper
-            else "https://api.alpaca.markets/v2"
-        )
+    base_url = _canonical_alpaca_base(_env_first("ALPACA_BASE_URL"), paper=paper)
 
     if not key_id or not secret_key:
         raise RuntimeError(
@@ -163,11 +165,11 @@ class AlpacaBroker:
     def from_env(cls) -> "AlpacaBroker":
         cfg = load_alpaca_env()
         logger.info(
-            "[ALPACA] base_url=%s paper=%s key_set=%s secret_set=%s",
+            "[ALPACA] base=%s key_set=%s secret_set=%s paper=%s",
             cfg.base_url,
-            bool(cfg.paper),
             bool(cfg.key_id),
             bool(cfg.secret_key),
+            bool(cfg.paper),
         )
         try:
             from alpaca.trading.client import TradingClient
@@ -187,7 +189,18 @@ class AlpacaBroker:
         return cls(trading_client=client, paper=cfg.paper, base_url=cfg.base_url)
 
     def get_account(self) -> Dict[str, Any]:
-        account = self.trading_client.get_account()
+        account_endpoint = f"{str(self.base_url).rstrip('/')}/v2/account"
+        try:
+            account = self.trading_client.get_account()
+        except Exception as exc:
+            msg = _safe_str(exc)
+            if "404" in msg.lower() or "not found" in msg.lower():
+                raise RuntimeError(
+                    f"Alpaca get_account 404 endpoint={account_endpoint}: {msg}"
+                ) from exc
+            raise RuntimeError(
+                f"Alpaca get_account failed endpoint={account_endpoint}: {msg}"
+            ) from exc
         d = _as_dict(account)
         out = {
             "id": _safe_str(d.get("id") or getattr(account, "id", "")),

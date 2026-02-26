@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +34,34 @@ def _print_setup_help() -> None:
     )
 
 
+def _canonical_alpaca_base() -> str:
+    base = (os.getenv("ALPACA_BASE_URL") or "https://paper-api.alpaca.markets").strip().rstrip("/")
+    if base.endswith("/v2"):
+        base = base[:-3]
+    return base
+
+
+def _probe_account_endpoint(url: str, key: str, secret: str) -> tuple[int, str]:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "APCA-API-KEY-ID": key,
+            "APCA-API-SECRET-KEY": secret,
+        },
+    )
+    ctx = ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return int(getattr(resp, "status", 200)), body[:200]
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(exc)
+        return int(exc.code), body[:200]
+
+
 def main() -> int:
     missing = _missing_env_vars()
     if missing:
@@ -41,6 +72,33 @@ def main() -> int:
         )
         _print_setup_help()
         return 2
+
+    key = str(os.getenv("ALPACA_API_KEY_ID", "")).strip()
+    secret = str(os.getenv("ALPACA_API_SECRET_KEY", "")).strip()
+    paper_raw = str(os.getenv("ALPACA_PAPER", "")).strip() or "unset"
+    base = _canonical_alpaca_base()
+    url = f"{base}/v2/account"
+    print(
+        f"[ALPACA][SMOKE] url={url} key_set={bool(key)} secret_set={bool(secret)} paper={paper_raw}"
+    )
+    try:
+        status_code, body_prefix = _probe_account_endpoint(url=url, key=key, secret=secret)
+    except Exception as exc:
+        print(f"[ALPACA][SMOKE][FAIL] probe_exception={exc!r}", file=sys.stderr)
+        return 1
+    if status_code == 404:
+        print(
+            f"[ALPACA][SMOKE][FAIL] status=404 url={url} body={body_prefix}",
+            file=sys.stderr,
+        )
+        return 1
+    if status_code >= 400:
+        print(
+            f"[ALPACA][SMOKE][FAIL] status={status_code} url={url} body={body_prefix}",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         broker = AlpacaBroker.from_env()
         account = broker.get_account()
