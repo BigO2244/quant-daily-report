@@ -38,10 +38,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Print email script version
-        run: |
-          python3 -c "import scripts.email_alpha_report as m; print('EMAIL_SCRIPT_VERSION', getattr(m, '__EMAIL_SCRIPT_VERSION__', 'MISSING'))"
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -59,10 +55,31 @@ jobs:
           source .venv/bin/activate
           python3 alpaca_smoke_test.py || true
 
+      - name: Alpaca raw /v2/account probe
+        env:
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+          ALPACA_BASE_URL: "https://paper-api.alpaca.markets/v2"
+        run: |
+          python - <<'PY'
+          import os, requests
+          base=os.environ["ALPACA_BASE_URL"].rstrip("/")
+          key=os.environ.get("ALPACA_API_KEY_ID")
+          sec=os.environ.get("ALPACA_API_SECRET_KEY")
+          print("BASE", base)
+          print("key_set", bool(key), "secret_set", bool(sec))
+          url = base + "/account"
+          r = requests.get(url, headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec}, timeout=10)
+          print("GET", url, "->", r.status_code, r.text[:200])
+          PY
+
+
       - name: Run daily quant execution
         run: |
+          set -euxo pipefail
           source .venv/bin/activate
-          python3 daily_quant_report.py
+          mkdir -p outputs
+          python3 daily_quant_report.py 2>&1 | tee outputs/ci_alpaca_run.log
 
       - name: Upload outputs
         if: always()
@@ -71,7 +88,9 @@ jobs:
           name: outputs-${{ env.REPORT_DATE }}
           if-no-files-found: warn
           path: |
+            outputs/ci_alpaca_run.log
+            outputs/alpaca/orders_*.csv
+            outputs/orders_*.csv
             outputs/daily
-            outputs/execution_email
             outputs/ledger
             outputs/perf

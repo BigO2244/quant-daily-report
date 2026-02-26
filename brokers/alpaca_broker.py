@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _is_truthy(value: object, default: bool = False) -> bool:
@@ -159,6 +162,13 @@ class AlpacaBroker:
     @classmethod
     def from_env(cls) -> "AlpacaBroker":
         cfg = load_alpaca_env()
+        logger.info(
+            "[ALPACA] base_url=%s paper=%s key_set=%s secret_set=%s",
+            cfg.base_url,
+            bool(cfg.paper),
+            bool(cfg.key_id),
+            bool(cfg.secret_key),
+        )
         try:
             from alpaca.trading.client import TradingClient
         except Exception as exc:
@@ -179,7 +189,7 @@ class AlpacaBroker:
     def get_account(self) -> Dict[str, Any]:
         account = self.trading_client.get_account()
         d = _as_dict(account)
-        return {
+        out = {
             "id": _safe_str(d.get("id") or getattr(account, "id", "")),
             "status": _safe_str(d.get("status") or getattr(account, "status", "")),
             "cash": _safe_str(d.get("cash") or getattr(account, "cash", "")),
@@ -192,6 +202,15 @@ class AlpacaBroker:
             ),
             "raw": d,
         }
+        logger.info(
+            "[ALPACA] account id=%s status=%s equity=%s cash=%s buying_power=%s",
+            out.get("id", ""),
+            out.get("status", ""),
+            out.get("equity", ""),
+            out.get("cash", ""),
+            out.get("buying_power", ""),
+        )
+        return out
 
     def get_positions(self) -> List[Dict[str, Any]]:
         positions = self.trading_client.get_all_positions()
@@ -220,14 +239,46 @@ class AlpacaBroker:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
-        req = MarketOrderRequest(
-            symbol=str(symbol).upper(),
-            qty=float(qty),
-            side=OrderSide.BUY if str(side).upper() == "BUY" else OrderSide.SELL,
-            time_in_force=TimeInForce(str(tif).lower()),
-            client_order_id=str(client_order_id),
+        side_norm = str(side).upper()
+        qty_float = float(qty)
+        client_id = str(client_order_id)
+        symbol_norm = str(symbol).upper()
+        logger.info(
+            "[ALPACA_SUBMIT] attempt order_type=market symbol=%s side=%s qty=%.6f client_order_id=%s",
+            symbol_norm,
+            side_norm,
+            qty_float,
+            client_id,
         )
-        return _normalize_order_obj(self.trading_client.submit_order(order_data=req))
+        req = MarketOrderRequest(
+            symbol=symbol_norm,
+            qty=qty_float,
+            side=OrderSide.BUY if side_norm == "BUY" else OrderSide.SELL,
+            time_in_force=TimeInForce(str(tif).lower()),
+            client_order_id=client_id,
+        )
+        try:
+            out = _normalize_order_obj(self.trading_client.submit_order(order_data=req))
+        except Exception as exc:
+            logger.exception(
+                "[ALPACA_SUBMIT] ERROR order_type=market symbol=%s side=%s qty=%.6f client_order_id=%s error=%s",
+                symbol_norm,
+                side_norm,
+                qty_float,
+                client_id,
+                _safe_str(exc),
+            )
+            raise
+        logger.info(
+            "[ALPACA_SUBMIT] OK order_type=market symbol=%s side=%s qty=%.6f client_order_id=%s alpaca_order_id=%s status=%s",
+            symbol_norm,
+            side_norm,
+            qty_float,
+            client_id,
+            _safe_str(out.get("id")),
+            _safe_str(out.get("status")),
+        )
+        return out
 
     def submit_limit_order(
         self,
@@ -241,15 +292,52 @@ class AlpacaBroker:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
 
-        req = LimitOrderRequest(
-            symbol=str(symbol).upper(),
-            qty=float(qty),
-            side=OrderSide.BUY if str(side).upper() == "BUY" else OrderSide.SELL,
-            time_in_force=TimeInForce(str(tif).lower()),
-            client_order_id=str(client_order_id),
-            limit_price=float(limit_price),
+        side_norm = str(side).upper()
+        qty_float = float(qty)
+        symbol_norm = str(symbol).upper()
+        client_id = str(client_order_id)
+        limit_price_float = float(limit_price)
+        logger.info(
+            "[ALPACA_SUBMIT] attempt order_type=limit symbol=%s side=%s qty=%.6f limit_price=%.6f notional=%.2f client_order_id=%s",
+            symbol_norm,
+            side_norm,
+            qty_float,
+            limit_price_float,
+            qty_float * limit_price_float,
+            client_id,
         )
-        return _normalize_order_obj(self.trading_client.submit_order(order_data=req))
+        req = LimitOrderRequest(
+            symbol=symbol_norm,
+            qty=qty_float,
+            side=OrderSide.BUY if side_norm == "BUY" else OrderSide.SELL,
+            time_in_force=TimeInForce(str(tif).lower()),
+            client_order_id=client_id,
+            limit_price=limit_price_float,
+        )
+        try:
+            out = _normalize_order_obj(self.trading_client.submit_order(order_data=req))
+        except Exception as exc:
+            logger.exception(
+                "[ALPACA_SUBMIT] ERROR order_type=limit symbol=%s side=%s qty=%.6f limit_price=%.6f client_order_id=%s error=%s",
+                symbol_norm,
+                side_norm,
+                qty_float,
+                limit_price_float,
+                client_id,
+                _safe_str(exc),
+            )
+            raise
+        logger.info(
+            "[ALPACA_SUBMIT] OK order_type=limit symbol=%s side=%s qty=%.6f limit_price=%.6f client_order_id=%s alpaca_order_id=%s status=%s",
+            symbol_norm,
+            side_norm,
+            qty_float,
+            limit_price_float,
+            client_id,
+            _safe_str(out.get("id")),
+            _safe_str(out.get("status")),
+        )
+        return out
 
     def list_orders(self, status: str = "open", limit: int = 100) -> List[Dict[str, Any]]:
         from alpaca.trading.enums import QueryOrderStatus
