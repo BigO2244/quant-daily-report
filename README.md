@@ -32,6 +32,12 @@ Paper broker runtime state (ledger/trades) is stored in `outputs/paper_state/` b
 Set `PAPER_STATE_DIR` to override this location.
 Legacy `paper/ledger.csv` and `paper/trades.csv` are treated only as one-time seed inputs when state files are first initialized.
 
+## Run Archiving
+
+Daily runs now use immutable canonical artifacts under `outputs/runs/<RUN_ID>/`.
+`outputs/latest.json` is a mutable pointer to the latest run.
+See `docs/run_archiving.md` for structure, integrity files, and reproduction steps.
+
 ## Alpha standalone report (local)
 
 ```bash

@@ -38,6 +38,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set run metadata
+        run: |
+          set -euxo pipefail
+          if [ -z "${REPORT_DATE:-}" ]; then
+            REPORT_DATE="$(TZ=America/New_York date +%F)"
+          fi
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -99,18 +109,18 @@ jobs:
           set -euxo pipefail
           source .venv/bin/activate
           mkdir -p outputs
-          python3 daily_quant_report.py 2>&1 | tee outputs/ci_alpaca_run.log
+          status=0
+          if ! python3 daily_quant_report.py 2>&1 | tee outputs/ci_alpaca_run.log; then
+            status=$?
+          fi
+          mkdir -p "outputs/runs/${RUN_ID}/logs"
+          cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
+          exit "$status"
 
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: outputs-${{ env.REPORT_DATE }}
+          name: alpaca-paper-${{ env.REPORT_DATE }}-${{ env.RUN_ID }}
           if-no-files-found: warn
-          path: |
-            outputs/ci_alpaca_run.log
-            outputs/alpaca/orders_*.csv
-            outputs/orders_*.csv
-            outputs/daily
-            outputs/ledger
-            outputs/perf
+          path: outputs/runs/${{ env.RUN_ID }}/
