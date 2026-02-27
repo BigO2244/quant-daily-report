@@ -56,6 +56,7 @@ from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
+from reconciliation import pre_trade_reconcile_or_exit, post_trade_validate
 
 from sleeves.sleeve_trend.build_sleeve_output import build_trend_sleeve_output
 from sleeves.sleeve_trend import config as trend_cfg
@@ -4239,6 +4240,13 @@ def main(argv: list[str] | None = None):
                     logger.info(
                         "[ORDER] --reset-ledger-date ignored without force execution override"
                     )
+            if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+                pre_trade_reconcile_or_exit(
+                    run_date=trade_date_str,
+                    trading_mode=trading_mode_norm,
+                    ledger_path=paper_ledger_path,
+                    sent_ledger_path=sent_ledger_path,
+                )
             paper_summary = run_paper_day(
                 run_date=trade_date_str,
                 signals_path=signals_path_exec,
@@ -4260,6 +4268,13 @@ def main(argv: list[str] | None = None):
                 trade_date_str,
                 signals_path_exec,
             )
+            if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+                post_trade_validate(
+                    run_date=trade_date_str,
+                    trading_mode=trading_mode_norm,
+                    ledger_path=paper_ledger_path,
+                    sent_ledger_path=sent_ledger_path,
+                )
         except Exception as e:
             msg = repr(e)
             if "Ledger already contains run_date" in msg:
