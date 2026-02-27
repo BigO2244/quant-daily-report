@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
+from paper.run_manager import safe_write_text
 from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
 from paper.reporting_consistency import compute_exposure
@@ -55,6 +56,15 @@ def _format_reason_counts(counts: Counter[str]) -> str:
     if not counts:
         return "none"
     return ",".join(f"{k}:{int(v)}" for k, v in sorted(counts.items()))
+
+
+def _run_output_root() -> Path:
+    base = str(os.getenv("RUN_OUTPUT_ROOT", "")).strip()
+    return Path(base) if base else Path("outputs")
+
+
+def _allow_overwrite() -> bool:
+    return _is_truthy(os.getenv("ALLOW_OVERWRITE"))
 
 
 @dataclass
@@ -1078,16 +1088,20 @@ def reset_orders_sent_ledger_for_date(sent_ledger_path: str, trade_date: str) ->
     return removed
 
 def _write_shadow_orders(run_date: str, orders: List[Dict[str, object]]) -> str:
-    out_path = Path("outputs") / "shadow_orders" / f"{run_date}.json"
+    root = _run_output_root()
+    out_path = root / "broker" / f"shadow_orders_{run_date}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(orders, f, indent=2)
-        f.write("\n")
+    safe_write_text(
+        out_path,
+        json.dumps(orders, indent=2) + "\n",
+        allow_overwrite=_allow_overwrite(),
+    )
     return str(out_path)
 
 
 def _write_alpaca_orders(run_date: str, submissions: List[Dict[str, object]]) -> str:
-    out_path = Path("outputs") / "alpaca" / f"orders_{run_date}.csv"
+    root = _run_output_root()
+    out_path = root / "broker" / f"orders_{run_date}.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cols = [
         "trade_date",
@@ -1109,7 +1123,11 @@ def _write_alpaca_orders(run_date: str, submissions: List[Dict[str, object]]) ->
             if c not in frame.columns:
                 frame[c] = ""
         frame = frame[cols + [c for c in frame.columns if c not in cols]]
-    frame.to_csv(out_path, index=False)
+    safe_write_text(
+        out_path,
+        frame.to_csv(index=False),
+        allow_overwrite=_allow_overwrite(),
+    )
     return str(out_path)
 
 

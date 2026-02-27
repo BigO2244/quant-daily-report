@@ -13,6 +13,9 @@ import logging
 import math
 import os
 import sys
+import subprocess
+import atexit
+from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -36,6 +39,16 @@ from paper.ledger2 import (
 from paper.paths import (
     LEDGER_TRADES_PATH,
     ensure_no_legacy_ledger,
+)
+from paper.run_manager import (
+    collect_manifest,
+    ensure_dir,
+    file_sha256,
+    get_run_dir,
+    get_run_id,
+    safe_write_bytes,
+    safe_write_text,
+    write_latest_pointer,
 )
 from paper.nav2 import update_nav
 from paper.reporting_consistency import compute_exposure, determine_sleeve_state
@@ -98,6 +111,76 @@ STOP_ATR_MULT_DEFAULT = 2.0
 TAKE_PROFIT_ATR_MULT_DEFAULT = 3.0
 STOP_PCT_DEFAULT = 0.08
 TAKE_PROFIT_PCT_DEFAULT = 0.12
+
+
+@dataclass
+class RunContext:
+    run_id: str
+    run_root: Path
+    allow_overwrite: bool
+    created_at: str
+    git_sha: str | None
+    mode: str
+    trading_mode: str
+    report_date_env: str | None = None
+    report_date: str | None = None
+    paper_trading: bool | None = None
+
+
+_RUN_CONTEXT: RunContext | None = None
+_RUN_CONTEXT_FINALIZED = False
+
+
+def _get_git_sha() -> str | None:
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def _pointer_payload(*, run_ctx: RunContext, canonical_path: Path) -> dict:
+    return {
+        "run_id": run_ctx.run_id,
+        "canonical_path": str(canonical_path),
+    }
+
+
+def _write_view_pointer(path: Path, payload: dict) -> None:
+    ensure_dir(path.parent)
+    safe_write_text(path, json.dumps(payload, indent=2) + "\n", allow_overwrite=True)
+
+
+def _snapshot_existing_file(
+    src_path: str | Path,
+    *,
+    category: str,
+    filename: str | None = None,
+) -> str | None:
+    src = Path(src_path)
+    if _RUN_CONTEXT is None:
+        return None
+    if not src.exists() or not src.is_file():
+        return None
+    dest = _canonical_artifact_path(category, filename or src.name)
+    safe_write_bytes(
+        dest,
+        src.read_bytes(),
+        allow_overwrite=_RUN_CONTEXT.allow_overwrite,
+    )
+    return str(dest)
+
+
+def _canonical_artifact_path(category: str, filename: str) -> Path:
+    if _RUN_CONTEXT is None:
+        return Path("outputs") / category / filename
+    base = _RUN_CONTEXT.run_root / category
+    ensure_dir(base)
+    return base / filename
 
 
 def _ensure_paper_broker_imports() -> None:
@@ -403,7 +486,9 @@ def _infer_report_date(
     if target_weight_candidates:
         return max(target_weight_candidates)
     return pd.to_datetime(fallback).normalize()
-def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, bool, str | None]:
+
+
+def _legacy_write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, bool, str | None]:
     out_dir = Path("outputs") / "execution_email"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{run_date}.json"
@@ -430,23 +515,67 @@ def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, b
                 suffix,
                 write_path,
             )
-    with open(write_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-        f.write("\n")
-    logger.info("[EXECUTION_EMAIL] payload written: %s", write_path)
+    safe_write_text(
+        write_path,
+        json.dumps(payload, indent=2) + "\n",
+        allow_overwrite=(write_path == out_path),
+    )
     return str(write_path), preserved, preserved_path
+
+
+def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, bool, str | None]:
+    if _RUN_CONTEXT is None:
+        write_path, preserved, preserved_path = _legacy_write_execution_email_payload(payload, run_date)
+        logger.info("[EXECUTION_EMAIL] payload written: %s", write_path)
+        return write_path, preserved, preserved_path
+
+    payload_text = json.dumps(payload, indent=2) + "\n"
+    canonical_path = _canonical_artifact_path("snapshots", f"execution_email_{run_date}.json")
+    safe_write_text(
+        canonical_path,
+        payload_text,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    out_dir = Path("outputs") / "execution_email"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    view_path = out_dir / f"{run_date}.json"
+    safe_write_text(view_path, payload_text, allow_overwrite=True)
+    logger.info("[EXECUTION_EMAIL] payload written: %s", canonical_path)
+    return str(canonical_path), False, None
+
+
 def write_integrity_artifact(asof_date: str, payload: dict) -> str:
-    integrity_path = Path("outputs") / "daily" / f"integrity_{asof_date}.json"
-    integrity_path.parent.mkdir(parents=True, exist_ok=True)
-    integrity_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return str(integrity_path)
+    payload_text = json.dumps(payload, indent=2) + "\n"
+    view_path = Path("outputs") / "daily" / f"integrity_{asof_date}.json"
+    if _RUN_CONTEXT is None:
+        safe_write_text(view_path, payload_text, allow_overwrite=True)
+        return str(view_path)
+
+    canonical_path = _canonical_artifact_path("snapshots", f"integrity_{asof_date}.json")
+    safe_write_text(
+        canonical_path,
+        payload_text,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    safe_write_text(view_path, payload_text, allow_overwrite=True)
+    return str(canonical_path)
 
 
 def write_health_artifact(trade_date: str, payload: dict) -> str:
-    health_path = Path("outputs") / "daily" / f"health_{trade_date}.json"
-    health_path.parent.mkdir(parents=True, exist_ok=True)
-    health_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return str(health_path)
+    payload_text = json.dumps(payload, indent=2) + "\n"
+    view_path = Path("outputs") / "daily" / f"health_{trade_date}.json"
+    if _RUN_CONTEXT is None:
+        safe_write_text(view_path, payload_text, allow_overwrite=True)
+        return str(view_path)
+
+    canonical_path = _canonical_artifact_path("snapshots", f"health_{trade_date}.json")
+    safe_write_text(
+        canonical_path,
+        payload_text,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    safe_write_text(view_path, payload_text, allow_overwrite=True)
+    return str(canonical_path)
 
 
 def _finalize_health_payload(trade_date: str, health_payload: dict) -> str:
@@ -3426,6 +3555,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Backtest mode: allow empty outputs (1/0).",
     )
+    parser.add_argument(
+        "--allow-overwrite",
+        dest="allow_overwrite",
+        action="store_true",
+        help="Allow overwriting existing files for the same RUN_ID (emergency use only).",
+    )
     return parser.parse_args(argv)
 
 
@@ -3460,6 +3595,116 @@ def _resolve_exec_modes() -> tuple[str, str, bool]:
     os.environ["MODE"] = mode_norm
     os.environ["TRADING_MODE"] = trading_mode_norm
     return mode_norm, trading_mode_norm, alpaca_requested
+
+
+def _init_run_context(
+    *,
+    allow_overwrite: bool,
+    mode: str,
+    trading_mode: str,
+    report_date_env: str | None,
+) -> RunContext:
+    run_id = get_run_id()
+    run_root = get_run_dir(run_id)
+    if run_root.exists() and any(run_root.iterdir()) and not allow_overwrite:
+        raise FileExistsError(
+            f"Run directory already exists and is non-empty: {run_root}. "
+            "Refusing to overwrite. Use --allow-overwrite only for emergency reruns."
+        )
+    for sub in ("logs", "reports", "broker", "ledger", "snapshots", "audit"):
+        ensure_dir(run_root / sub)
+    ctx = RunContext(
+        run_id=run_id,
+        run_root=run_root,
+        allow_overwrite=bool(allow_overwrite),
+        created_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        git_sha=_get_git_sha(),
+        mode=mode,
+        trading_mode=trading_mode,
+        report_date_env=report_date_env or None,
+        paper_trading=str(os.getenv("ALPACA_PAPER", "")).strip().lower() in {"1", "true", "yes", "y", "on"},
+    )
+    os.environ["RUN_ID"] = ctx.run_id
+    os.environ["RUN_OUTPUT_ROOT"] = str(ctx.run_root)
+    if ctx.allow_overwrite:
+        os.environ["ALLOW_OVERWRITE"] = "1"
+    else:
+        os.environ.pop("ALLOW_OVERWRITE", None)
+    initial_meta = {
+        "run_id": ctx.run_id,
+        "created_at": ctx.created_at,
+        "mode": ctx.mode,
+        "trading_mode": ctx.trading_mode,
+        "paper_trading": ctx.paper_trading,
+        "report_date_env": ctx.report_date_env,
+        "report_date": ctx.report_date,
+        "git_sha": ctx.git_sha,
+        "run_root": str(ctx.run_root),
+    }
+    safe_write_text(
+        ctx.run_root / "meta.json",
+        json.dumps(initial_meta, indent=2) + "\n",
+        allow_overwrite=ctx.allow_overwrite,
+    )
+    return ctx
+
+
+def _finalize_run_context(run_ctx: RunContext) -> None:
+    meta = {
+        "run_id": run_ctx.run_id,
+        "created_at": run_ctx.created_at,
+        "mode": run_ctx.mode,
+        "trading_mode": run_ctx.trading_mode,
+        "paper_trading": run_ctx.paper_trading,
+        "report_date_env": run_ctx.report_date_env,
+        "report_date": run_ctx.report_date,
+        "git_sha": run_ctx.git_sha,
+        "run_root": str(run_ctx.run_root),
+    }
+    safe_write_text(
+        run_ctx.run_root / "meta.json",
+        json.dumps(meta, indent=2) + "\n",
+        allow_overwrite=True,
+    )
+    manifest_payload = collect_manifest(run_ctx.run_root)
+    safe_write_text(
+        run_ctx.run_root / "manifest.json",
+        json.dumps(manifest_payload, indent=2) + "\n",
+        allow_overwrite=run_ctx.allow_overwrite,
+    )
+    lines: list[str] = []
+    for item in manifest_payload.get("files", []):
+        rel = str(item.get("path", ""))
+        if not rel:
+            continue
+        abs_path = run_ctx.run_root / rel
+        lines.append(f"{file_sha256(abs_path)}  {rel}")
+    safe_write_text(
+        run_ctx.run_root / "checksums.sha256",
+        ("\n".join(lines) + "\n") if lines else "",
+        allow_overwrite=run_ctx.allow_overwrite,
+    )
+    latest_payload = {
+        "run_id": run_ctx.run_id,
+        "path": str(run_ctx.run_root),
+        "report_date": run_ctx.report_date,
+        "mode": run_ctx.mode,
+        "paper_trading": run_ctx.paper_trading,
+        "git_sha": run_ctx.git_sha,
+        "created_at": run_ctx.created_at,
+    }
+    write_latest_pointer(Path("outputs/latest.json"), latest_payload)
+
+
+def _finalize_run_context_once() -> None:
+    global _RUN_CONTEXT_FINALIZED
+    if _RUN_CONTEXT is None or _RUN_CONTEXT_FINALIZED:
+        return
+    try:
+        _finalize_run_context(_RUN_CONTEXT)
+    except Exception as exc:
+        logger.warning("[RUN_ARCHIVE][WARN] finalize failed: %s", exc)
+    _RUN_CONTEXT_FINALIZED = True
 
 
 def _is_backtest_mode(args: argparse.Namespace) -> bool:
@@ -3581,6 +3826,7 @@ def _run_backtest_mode(args: argparse.Namespace) -> None:
         f"audit_out={audit_out if audit_export else 'disabled'}"
     )
 def main(argv: list[str] | None = None):
+    global _RUN_CONTEXT
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
     mode_norm, trading_mode_norm, alpaca_requested = _resolve_exec_modes()
@@ -3601,6 +3847,23 @@ def main(argv: list[str] | None = None):
     if _is_backtest_mode(args):
         _run_backtest_mode(args)
         return
+    allow_overwrite = bool(
+        bool(getattr(args, "allow_overwrite", False))
+        or _is_truthy(os.getenv("ALLOW_OVERWRITE"), default=False)
+    )
+    _RUN_CONTEXT = _init_run_context(
+        allow_overwrite=allow_overwrite,
+        mode=mode_norm,
+        trading_mode=trading_mode_norm,
+        report_date_env=str(os.getenv("REPORT_DATE", "")).strip() or None,
+    )
+    atexit.register(_finalize_run_context_once)
+    logger.info(
+        "[RUN_ARCHIVE] run_id=%s run_root=%s allow_overwrite=%s",
+        _RUN_CONTEXT.run_id,
+        _RUN_CONTEXT.run_root,
+        _RUN_CONTEXT.allow_overwrite,
+    )
     _ensure_quant_report_imports()
     _ensure_paper_broker_imports()
     offline_fixture = os.getenv("OFFLINE_FIXTURE", "").lower() in {"1", "true", "yes"}
@@ -3901,6 +4164,8 @@ def main(argv: list[str] | None = None):
     }
     # --- Paper trading execution + report ---
     trade_date_str = report_date.strftime("%Y-%m-%d")
+    if _RUN_CONTEXT is not None:
+        _RUN_CONTEXT.report_date = trade_date_str
     logger.info(
         "[BOOT] report_date=%s mode=%s trading_mode=%s",
         trade_date_str,
@@ -4106,6 +4371,7 @@ def main(argv: list[str] | None = None):
         "ledger2_skipped_rows": 0,
         "nav_path": None,
         "nav_timeseries_path": None,
+        "holdings_mtm_path": None,
     }
     if should_execute:
         rows2: list[dict] = []
@@ -4178,14 +4444,23 @@ def main(argv: list[str] | None = None):
                     "ledger2_skipped_rows": int(skipped2),
                     "nav_path": nav_result.get("nav_path"),
                     "nav_timeseries_path": nav_result.get("nav_timeseries_path"),
+                    "holdings_mtm_path": nav_result.get("holdings_mtm_path"),
                 }
             )
             integrity["missing_prices"] = sorted(set((missing_prices or []) + (nav_result.get("missing_prices") or [])))
+            _snapshot_existing_file(
+                nav_result.get("nav_path") or "",
+                category="snapshots",
+            )
+            _snapshot_existing_file(
+                nav_result.get("holdings_mtm_path") or "",
+                category="snapshots",
+            )
         except Exception as e:
             ledger2_error = str(e)
             logger.warning("[LEDGER2][WARN] ledger/nav2 pipeline failed: %s", e)
         try:
-            ledger_write_path = Path("outputs/ledger") / f"ledger_write_{asof_date}.json"
+            ledger_write_path = _canonical_artifact_path("ledger", f"ledger_write_{asof_date}.json")
             ledger_write_payload = {
                 "run_id": ledger_run_id,
                 "trade_date": trade_date_str,
@@ -4198,9 +4473,18 @@ def main(argv: list[str] | None = None):
             }
             if ledger2_error:
                 ledger_write_payload["error"] = ledger2_error
-            with ledger_write_path.open("w", encoding="utf-8") as f:
-                json.dump(ledger_write_payload, f, indent=2)
-                f.write("\n")
+            safe_write_text(
+                ledger_write_path,
+                json.dumps(ledger_write_payload, indent=2) + "\n",
+                allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+            )
+            view_path = Path("outputs/ledger") / f"ledger_write_{asof_date}.json"
+            _write_view_pointer(
+                view_path,
+                _pointer_payload(run_ctx=_RUN_CONTEXT, canonical_path=ledger_write_path)
+                if _RUN_CONTEXT is not None
+                else {"canonical_path": str(ledger_write_path)},
+            )
         except Exception as e:
             logger.warning("[LEDGER2][WARN] failed writing ledger metadata: %s", e)
     if not daily_snapshot.get("nav_metrics"):
@@ -4262,23 +4546,41 @@ def main(argv: list[str] | None = None):
         logger.warning("[INTEGRITY][WARN] failed writing integrity artifact: %s", e)
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)
-    execution_path = os.path.join(OUTPUT_DIR, f"trade_execution_{trade_date_str}.txt")
-    with open(execution_path, "w", encoding="utf-8") as f:
-        f.write(exec_body.rstrip() + "\n")
-    logger.info("[OK] Execution trade email written: %s", execution_path)
+    execution_text = exec_body.rstrip() + "\n"
+    execution_canonical_path = _canonical_artifact_path("reports", f"trade_execution_{trade_date_str}.txt")
+    safe_write_text(
+        execution_canonical_path,
+        execution_text,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    execution_path = Path(OUTPUT_DIR) / f"trade_execution_{trade_date_str}.txt"
+    safe_write_text(execution_path, execution_text, allow_overwrite=True)
+    logger.info("[OK] Execution trade email written: %s", execution_canonical_path)
     snapshot_subject, snapshot_body = create_snapshot_email(
         daily_snapshot,
         execution_payload=execution_payload,
     )
-    snapshot_path = os.path.join(OUTPUT_DIR, f"trade_snapshot_{trade_date_str}.txt")
-    with open(snapshot_path, "w", encoding="utf-8") as f:
-        f.write(snapshot_body.rstrip() + "\n")
-    logger.info("[OK] Model snapshot email written: %s", snapshot_path)
+    snapshot_text = snapshot_body.rstrip() + "\n"
+    snapshot_canonical_path = _canonical_artifact_path("reports", f"trade_snapshot_{trade_date_str}.txt")
+    safe_write_text(
+        snapshot_canonical_path,
+        snapshot_text,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    snapshot_path = Path(OUTPUT_DIR) / f"trade_snapshot_{trade_date_str}.txt"
+    safe_write_text(snapshot_path, snapshot_text, allow_overwrite=True)
+    logger.info("[OK] Model snapshot email written: %s", snapshot_canonical_path)
     # Backward-compatibility alias (deprecated)
-    rundown_path = os.path.join(OUTPUT_DIR, f"trade_rundown_{trade_date_str}.txt")
-    with open(rundown_path, "w", encoding="utf-8") as f:
-        f.write(snapshot_body.rstrip() + "\n")
-    logger.info("[OK] Legacy trade rundown alias written: %s", rundown_path)
+    rundown_text = snapshot_body.rstrip() + "\n"
+    rundown_canonical_path = _canonical_artifact_path("reports", f"trade_rundown_{trade_date_str}.txt")
+    safe_write_text(
+        rundown_canonical_path,
+        rundown_text,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    rundown_path = Path(OUTPUT_DIR) / f"trade_rundown_{trade_date_str}.txt"
+    safe_write_text(rundown_path, rundown_text, allow_overwrite=True)
+    logger.info("[OK] Legacy trade rundown alias written: %s", rundown_canonical_path)
     # ── Build report ──────────────────────────────────────────────
     html = build_html_report(
         report_date=report_date,
@@ -4298,9 +4600,14 @@ def main(argv: list[str] | None = None):
     # Append paper trading HTML section (if available)
     if paper_html:
         html = html + "<hr/>" + paper_html
-    out_path = os.path.join(OUTPUT_DIR, f"quant_report_{trade_date_str}.html")
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    out_path = _canonical_artifact_path("reports", f"quant_report_{trade_date_str}.html")
+    safe_write_text(
+        out_path,
+        html,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    out_view_path = Path(OUTPUT_DIR) / f"quant_report_{trade_date_str}.html"
+    safe_write_text(out_view_path, html, allow_overwrite=True)
     logger.info("[OK] HTML report written: %s", out_path)
     logger.info("\n[EMAIL PREVIEW]\n")
     logger.info("%s", snapshot_body)
@@ -4322,5 +4629,15 @@ def main(argv: list[str] | None = None):
             logger.info("[OK] Ran sleeve1 robustness backtest")
         except Exception as e:
             logger.warning("[WARN] Robustness backtest failed: %s", e)
+    for src, category, name in (
+        (str(LEDGER_TRADES_PATH), "ledger", "trades.csv"),
+        (sent_ledger_path, "ledger", "orders_sent.csv"),
+        ("outputs/perf/nav_timeseries.csv", "snapshots", "nav_timeseries.csv"),
+    ):
+        try:
+            _snapshot_existing_file(src, category=category, filename=name)
+        except Exception as e:
+            logger.warning("[RUN_ARCHIVE][WARN] snapshot failed src=%s err=%s", src, e)
+    _finalize_run_context_once()
 if __name__ == "__main__":
     main()

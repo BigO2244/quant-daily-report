@@ -18,6 +18,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set run metadata
+        run: |
+          set -euxo pipefail
+          REPORT_DATE="$(TZ=America/New_York date +%F)"
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -37,6 +45,40 @@ jobs:
       - name: Update shadow NAV from alpha timeseries
         run: |
           python3 scripts/daily_alpha_run.py
+
+      - name: Archive alpha artifacts into run folder
+        run: |
+          set -euxo pipefail
+          mkdir -p "outputs/runs/${RUN_ID}/reports" "outputs/runs/${RUN_ID}/snapshots"
+          if [ -d outputs/alpha_report ]; then
+            cp -R outputs/alpha_report/. "outputs/runs/${RUN_ID}/reports/"
+          fi
+          if [ -f data/live_nav.csv ]; then
+            cp data/live_nav.csv "outputs/runs/${RUN_ID}/snapshots/live_nav.csv"
+          fi
+          python3 - << 'PY'
+          import datetime as dt
+          import json
+          import os
+          from pathlib import Path
+
+          run_id = os.environ.get("RUN_ID", "").strip()
+          report_date = os.environ.get("REPORT_DATE", "").strip() or None
+          run_root = Path("outputs") / "runs" / run_id
+          payload = {
+              "run_id": run_id,
+              "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+              "report_date": report_date,
+              "mode": "alpha_shadow",
+              "paper_trading": None,
+              "git_sha": os.environ.get("GITHUB_SHA"),
+              "path": str(run_root),
+          }
+          run_root.mkdir(parents=True, exist_ok=True)
+          (run_root / "meta.json").write_text(json.dumps(payload, indent=2) + "\\n", encoding="utf-8")
+          Path("outputs").mkdir(parents=True, exist_ok=True)
+          (Path("outputs") / "latest.json").write_text(json.dumps(payload, indent=2) + "\\n", encoding="utf-8")
+          PY
 
       - name: Debug email script fingerprint
         if: ${{ vars.ENABLE_EMAIL != '0' }}
@@ -81,8 +123,9 @@ jobs:
       - name: Upload alpha report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: alpha-report
-          path: outputs/alpha_report
+          name: alpha-shadow-${{ env.REPORT_DATE }}-${{ env.RUN_ID }}
+          if-no-files-found: warn
+          path: outputs/runs/${{ env.RUN_ID }}/
 
       - name: Commit updated live NAV ledger
         run: |
