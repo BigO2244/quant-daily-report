@@ -336,11 +336,15 @@ def _sent_ledger_meta(sent_ledger_path: str) -> dict[str, Any]:
     }
 
 
-def _write_report(stage: str, run_date: str, payload: dict[str, Any]) -> str:
+def _recon_out_path(run_date: str, phase: str) -> Path:
     base_dir = Path(str(os.getenv("RUN_OUTPUT_ROOT", "")).strip() or "outputs")
     broker_dir = base_dir / "broker"
     broker_dir.mkdir(parents=True, exist_ok=True)
-    out_path = broker_dir / f"recon_{stage}_{run_date}.json"
+    return broker_dir / f"recon_{phase}_{run_date}.json"
+
+
+def _write_report(phase: str, run_date: str, payload: dict[str, Any]) -> str:
+    out_path = _recon_out_path(run_date=run_date, phase=phase)
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(out_path)
 
@@ -396,6 +400,7 @@ def _reconcile(
         strict=strict,
     )
     payload = {
+        "phase": stage,
         "stage": stage,
         "run_date": str(run_date),
         "trading_mode": str(trading_mode),
@@ -416,7 +421,7 @@ def _reconcile(
         "equity_delta": equity_delta,
         "diffs": diffs,
     }
-    report_path = _write_report(stage=stage, run_date=run_date, payload=payload)
+    report_path = _write_report(phase=stage, run_date=run_date, payload=payload)
     if verdict == "PASS":
         logger.info("[RECON][%s] PASS report=%s", stage.upper(), report_path)
     else:
