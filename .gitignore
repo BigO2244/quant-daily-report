@@ -1,33 +1,43 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.ipynb_checkpoints/
+# macOS
 .DS_Store
-outputs/
-outputs/paper_state/
+**/.DS_Store
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test artifacts
 .pytest_cache/
 .coverage
 coverage.xml
+
+# Logs
 *.log
 
-# Python
-__pycache__/
-*.pyc
-paper/holdings_latest.csv
+# Runtime outputs
+outputs/
+outputs/paper_state/
+data/live_nav.csv
+
+# Signals (runtime only)
 signals/
-signals/*.json
-signals_store/
 signals_store/
 
 # Local drop/hold area (never push)
 hold/
 
-# Local runtime artifacts
-data/live_nav.csv
+# Local environment variables
+.env
+.env.*
 
-# Experimental breaker research/scripts (kept out of main by default)
+# Experimental / research scripts (not production)
 research/validate_breaker_*.py
 scripts/alpha_report.py
 scripts/daily_alpha_run.py
 scripts/email_alpha_report.py
+
+# Paper artifacts
+paper/holdings_latest.csv
