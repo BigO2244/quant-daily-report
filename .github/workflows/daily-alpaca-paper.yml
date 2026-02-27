@@ -114,8 +114,11 @@ jobs:
           python3 - <<'PY'
           import os
           for k in ["ALPACA_API_KEY_ID","ALPACA_API_SECRET_KEY","ALPACA_PAPER"]:
-            v=os.environ.get(k,"")
-            print(f"{k}: set={'YES' if v else 'NO'} len={len(v)} leading_ws={v[:1].isspace() if v else False} trailing_ws={v[-1:].isspace() if v else False} has_newline={('\\n' in v) or ('\\r' in v)}")
+              v = os.environ.get(k, "")
+              leading_ws = bool(v) and v[:1].isspace()
+              trailing_ws = bool(v) and v[-1:].isspace()
+              has_newline = ("\n" in v) or ("\r" in v)
+              print(f"{k}: set={'YES' if v else 'NO'} len={len(v)} leading_ws={leading_ws} trailing_ws={trailing_ws} has_newline={has_newline}")
           PY
 
       - name: Diag Alpaca auth (safe)
