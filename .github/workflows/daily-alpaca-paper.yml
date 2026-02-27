@@ -20,8 +20,8 @@ jobs:
 
     env:
       TRADING_MODE: alpaca
-      MODE: ALPACA
-      ALPACA_PAPER: "true"
+      MODE: alpaca
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
       ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
 
       # Secrets (do not print these)
@@ -69,6 +69,7 @@ jobs:
         env:
           ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
           ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+          ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
           ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
         run: |
           .venv/bin/python - <<'PY'
@@ -102,6 +103,34 @@ jobs:
               print("GET", url, "-> EXC", repr(e))
               raise
           PY
+
+      - name: Verify Alpaca env presence (no values)
+        shell: bash
+        env:
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+          ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+        run: |
+          python3 - <<'PY'
+          import os
+          for k in ["ALPACA_API_KEY_ID","ALPACA_API_SECRET_KEY","ALPACA_PAPER"]:
+            v=os.environ.get(k,"")
+            print(f"{k}: set={'YES' if v else 'NO'} len={len(v)} leading_ws={v[:1].isspace() if v else False} trailing_ws={v[-1:].isspace() if v else False} has_newline={('\\n' in v) or ('\\r' in v)}")
+          PY
+
+      - name: Diag Alpaca auth (safe)
+        shell: bash
+        env:
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+          ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+          ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+        run: |
+          set -euo pipefail
+          mkdir -p outputs
+          .venv/bin/python scripts/diag_alpaca_auth.py | tee outputs/diag_alpaca_auth.log
+          grep -q "\[DIAG\]\[CURL\] HTTP code: 200" outputs/diag_alpaca_auth.log
+          grep -q "\[DIAG\]\[PY\] OK" outputs/diag_alpaca_auth.log
 
 
       - name: Run daily quant execution
