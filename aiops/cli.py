@@ -1,0 +1,69 @@
+"""CLI interface for aiops."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from .spec_parser import REQUIRED_PARSE_HEADERS, SpecValidationError, parse_headers, validate_headers
+from .util import VALID_MODES
+from .verify import run_verify
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Create top-level CLI parser."""
+
+    parser = argparse.ArgumentParser(prog="aiops", description="Brett AI OS starter-kit CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    parse_cmd = subparsers.add_parser("parse", help="Parse and validate a spec")
+    parse_cmd.add_argument("spec_path", help="Path to spec markdown file")
+
+    verify_cmd = subparsers.add_parser("verify", help="Run mode-gated verification")
+    verify_cmd.add_argument("spec_path", help="Path to spec markdown file")
+    verify_cmd.add_argument("--mode", choices=VALID_MODES, help="Override mode from spec")
+
+    return parser
+
+
+def handle_parse(spec_path: Path) -> int:
+    """Handle parse command output and exit code."""
+
+    try:
+        headers = parse_headers(spec_path)
+        validate_headers(headers, REQUIRED_PARSE_HEADERS)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    except SpecValidationError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+    ordered = {
+        "MODE": headers.get("MODE", ""),
+        "PROJECT_TYPE": headers.get("PROJECT_TYPE", ""),
+        "RISK_TIER": headers.get("RISK_TIER", ""),
+        "OBJECTIVE": headers.get("OBJECTIVE", ""),
+    }
+    print(json.dumps(ordered, indent=2))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint."""
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "parse":
+        return handle_parse(Path(args.spec_path))
+    if args.command == "verify":
+        try:
+            return run_verify(Path(args.spec_path), mode_override=args.mode)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            return 1
+
+    parser.print_help()
+    return 1
