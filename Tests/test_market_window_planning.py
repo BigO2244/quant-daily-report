@@ -274,8 +274,8 @@ def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path)
     assert float(result["total_equity"]) == pytest.approx(10050.0, abs=1e-9)
     assert float(result["invested_dollars"]) == pytest.approx(1050.0, abs=1e-9)
     assert len(result["alpaca_submissions"]) == 1
-    assert result["alpaca_orders_path"].endswith("outputs/alpaca/orders_2026-02-10.csv")
-    assert (tmp_path / "outputs" / "alpaca" / "orders_2026-02-10.csv").exists()
+    assert result["alpaca_orders_path"].endswith("orders_2026-02-10.csv")
+    assert (tmp_path / result["alpaca_orders_path"]).exists()
 
 
 def test_alpaca_mode_invariant_raises_when_executable_but_zero_submit_attempts(

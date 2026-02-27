@@ -6,6 +6,10 @@ __pycache__/
 .DS_Store
 outputs/
 outputs/paper_state/
+.pytest_cache/
+.coverage
+coverage.xml
+*.log
 
 # Python
 __pycache__/
