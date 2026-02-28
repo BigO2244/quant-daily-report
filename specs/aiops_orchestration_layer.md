@@ -1,10 +1,7 @@
 # SPEC — AIOPS Orchestration Layer
 
-## OBJECTIVE
-Introduce deterministic orchestration to eliminate human relay between ChatGPT (spec author) and Codex (implementer).
-
-## MODE
-BUILD
+OBJECTIVE: Introduce deterministic orchestration to eliminate human relay between ChatGPT (spec author) and Codex (implementer).
+MODE: BUILD
 
 ## FILES
 
