@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .dispatch import run_dispatch
 from .plan import run_plan
 from .spec_parser import REQUIRED_PARSE_HEADERS, SpecValidationError, parse_headers, validate_headers
 from .util import VALID_MODES
@@ -28,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     plan_cmd = subparsers.add_parser("plan", help="Create deterministic planning artifacts")
     plan_cmd.add_argument("spec_path", help="Path to spec markdown file")
     plan_cmd.add_argument("--mode", choices=VALID_MODES, help="Override mode from spec")
+
+    dispatch_cmd = subparsers.add_parser("dispatch", help="Execute a plan contract and run verify")
+    dispatch_cmd.add_argument("--run", required=True, dest="run_id", help="Plan run ID under reports/ai_runs")
 
     return parser
 
@@ -71,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "plan":
         return run_plan(Path(args.spec_path), mode_override=args.mode)
+    if args.command == "dispatch":
+        return run_dispatch(args.run_id)
 
     parser.print_help()
     return 1
