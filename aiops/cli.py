@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .plan import run_plan
 from .spec_parser import REQUIRED_PARSE_HEADERS, SpecValidationError, parse_headers, validate_headers
 from .util import VALID_MODES
 from .verify import run_verify
@@ -23,6 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cmd = subparsers.add_parser("verify", help="Run mode-gated verification")
     verify_cmd.add_argument("spec_path", help="Path to spec markdown file")
     verify_cmd.add_argument("--mode", choices=VALID_MODES, help="Override mode from spec")
+
+    plan_cmd = subparsers.add_parser("plan", help="Create deterministic planning artifacts")
+    plan_cmd.add_argument("spec_path", help="Path to spec markdown file")
+    plan_cmd.add_argument("--mode", choices=VALID_MODES, help="Override mode from spec")
 
     return parser
 
@@ -64,6 +69,12 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(f"ERROR: {exc}")
             return 1
+    if args.command == "plan":
+        return run_plan(Path(args.spec_path), mode_override=args.mode)
 
     parser.print_help()
     return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
