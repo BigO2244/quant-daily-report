@@ -73,9 +73,9 @@ def test_dispatch_runs_verify_with_mode_from_plan(tmp_path: Path, monkeypatch) -
         def __init__(self, returncode: int) -> None:
             self.returncode = returncode
 
-    def _fake_run(command: list[str], cwd: Path, check: bool):
+    def _fake_run(command: list[str], cwd: Path, capture_output: bool, text: bool, check: bool, timeout: int | None = None):
         calls.append(command)
-        if command[0] == "codex":
+        if command[:2] == ["codex", "exec"]:
             return _Result(0)
         if command[:2] == ["aiops", "verify"]:
             return _Result(7)
@@ -86,5 +86,40 @@ def test_dispatch_runs_verify_with_mode_from_plan(tmp_path: Path, monkeypatch) -
     exit_code = run_dispatch(run_id)
 
     assert exit_code == 7
-    assert calls[0] == ["codex", str(plan_path)]
+    assert calls[0][0:2] == ["codex", "exec"]
+    assert f"RUN_ID: {run_id}" in calls[0][2]
+    assert f"PLAN_PATH: {plan_path}" in calls[0][2]
+    assert f"SPEC_SNAPSHOT_PATH: {snapshot_path}" in calls[0][2]
     assert calls[1] == ["aiops", "verify", str(snapshot_path), "--mode", "HARDEN"]
+
+
+def test_dispatch_does_not_print_secret_env_values(tmp_path: Path, monkeypatch, capsys) -> None:
+    run_id = "20260228_010203_abc1234"
+    run_dir = tmp_path / "reports" / "ai_runs" / run_id
+    run_dir.mkdir(parents=True)
+    plan_path = run_dir / "plan.md"
+    plan_path.write_text("MODE: BUILD\nPLAN_HASH: abcdef\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aiops.dispatch.shutil.which", lambda _: "/usr/local/bin/codex")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret-value")
+
+    class _Result:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def _fake_run(command: list[str], cwd: Path, capture_output: bool, text: bool, check: bool, timeout: int | None = None):
+        if command[:2] == ["codex", "exec"]:
+            return _Result(9)
+        if command[:2] == ["aiops", "verify"]:
+            return _Result(0)
+        raise AssertionError(f"Unexpected command: {command}")
+
+    monkeypatch.setattr("aiops.dispatch.subprocess.run", _fake_run)
+
+    exit_code = run_dispatch(run_id)
+
+    captured = capsys.readouterr()
+    combined = f"{captured.out}\n{captured.err}"
+    assert exit_code == 9
+    assert "OPENAI_API_KEY" not in combined
+    assert "sk-test-secret-value" not in combined

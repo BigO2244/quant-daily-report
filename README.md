@@ -34,6 +34,33 @@ Notes:
 
 Audit export and Monte Carlo workflows are documented in `docs/audit.md`.
 
+## AIOps Codex Runner (Dispatch)
+
+`aiops dispatch --run <RUN_ID>` attempts non-interactive Codex execution when a `codex` CLI is available on PATH.
+If `codex` is missing, dispatch preserves fallback behavior by writing `reports/ai_runs/<RUN_ID>/codex_task.txt` and exiting non-zero.
+
+Install Codex CLI (choose one):
+
+```bash
+brew install codex
+# or
+npm install -g @openai/codex
+```
+
+Validate installation:
+
+```bash
+which codex
+codex --help
+codex exec --help
+```
+
+Optional timeout for long Codex runs:
+
+```bash
+export AIOPS_CODEX_TIMEOUT_SECONDS=1800
+```
+
 ## Alpaca Paper Execution
 
 Set credentials and paper toggle:
