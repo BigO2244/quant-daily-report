@@ -34,46 +34,91 @@ Notes:
 
 Audit export and Monte Carlo workflows are documented in `docs/audit.md`.
 
-## AIOps Codex Runner (Dispatch)
+## AIOps Lifecycle Commands
 
-`aiops dispatch --run <RUN_ID>` attempts non-interactive Codex execution when a `codex` CLI is available on PATH.
-If `codex` is missing, dispatch preserves fallback behavior by writing `reports/ai_runs/<RUN_ID>/codex_task.txt` and exiting non-zero.
+The AIOps module provides a fully orchestrated workflow for managing specifications, plans, and execution with deterministic contracts.
 
-Install Codex CLI (choose one):
+### Quick Start
+
+```bash
+# Parse and validate a spec
+aiops parse specs/my_spec.md
+
+# Generate a plan (prints 4 artifact lines to stdout)
+aiops plan --spec specs/my_spec.md --mode BUILD
+
+# Full lifecycle: parse → plan → dispatch → run → verify
+aiops run-all --spec specs/my_spec.md --mode BUILD
+```
+
+### Commands
+
+- **`aiops parse <spec>`** — Validate spec syntax and headers
+- **`aiops plan <spec> [--mode MODE]`** — Create deterministic plan artifacts
+- **`aiops verify <spec> [--mode MODE]`** — Run mode-gated verification checks
+- **`aiops dispatch --run <RUN_ID>`** — Execute plan (codex or fallback)
+- **`aiops run <spec> [--mode MODE]`** — Full workflow except verify
+- **`aiops run-all <spec> --mode MODE`** — Fully orchestrated lifecycle
+
+### Codex Installation
+
+If Codex is available, `dispatch` will execute it automatically.
+Install Codex CLI via Homebrew or npm:
 
 ```bash
 brew install codex
 # or
 npm install -g @openai/codex
+
+# Verify:
+which codex && codex --help
 ```
 
-Validate installation:
+### Exit Codes
+
+`run-all` returns stable exit codes for CI/CD integration:
+
+| Code | Status | Meaning |
+|------|--------|---------|
+| 0 | OK | All stages succeeded |
+| 2 | NEEDS_OPERATOR | Codex unavailable; manual task file prepared |
+| 3 | VERIFY_FAILED | Verify checks failed |
+| 4 | PARSE_OR_PLAN_FAILED | Spec invalid or plan failed |
+| 5 | DISPATCH_FAILED | Dispatch execution failed |
+| 6 | RUN_FAILED | Run stage failed |
+
+### Documentation
+
+For complete contract specifications, workflow details, and troubleshooting:
+
+- **[System Contract v0.1](specs/aiops_system_contract_v0_1.md)** — CLI contracts, exit codes, artifact formats
+- **[Workflow & Operator Guide](docs/aiops_workflow.md)** — Commands, examples, recovery procedures
+- **[Test Fixtures README](tests/fixtures/README.md)** — Golden test patterns and determinism guarantees
+
+### Testing & CI Gates
+
+Run the full test suite to validate AIOps contracts:
 
 ```bash
-which codex
-codex --help
-codex exec --help
+# All tests (including AIOps contract tests)
+pytest -q
+
+# AIOps contract tests only
+pytest tests/test_aiops_contracts.py -v
+
+# Specific contract category
+pytest tests/test_aiops_contracts.py::TestContractPlanCommand -v
 ```
 
-Optional timeout for long Codex runs:
+The contract test suite enforces:
+- Deterministic CLI outputs (no random variance)
+- Stable exit codes (0, 2, 3, 4, 5, 6)
+- Golden outputs (plan.md, run_all_summary.md)
+- No secrets in stdout/stderr
+- Correct artifact formatting and directory structure
 
-```bash
-export AIOPS_CODEX_TIMEOUT_SECONDS=1800
-```
+CI/CD should fail on `pytest -q` exit code != 0.
 
-AIOps full lifecycle command:
-
-```bash
-aiops run-all --spec specs/your_spec.md --mode BUILD
-```
-
-`run-all` exit codes:
-- `0`: OK
-- `2`: NEEDS_OPERATOR (codex missing; `codex_task.txt` written)
-- `3`: VERIFY_FAILED
-- `4`: PARSE_OR_PLAN_FAILED
-- `5`: DISPATCH_FAILED
-- `6`: RUN_FAILED
 
 ## Alpaca Paper Execution
 

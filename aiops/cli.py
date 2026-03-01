@@ -84,7 +84,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}")
             return 1
     if args.command == "plan":
-        exit_code, _ = run_plan(Path(args.spec_path), mode_override=args.mode)
+        exit_code, run_id = run_plan(Path(args.spec_path), mode_override=args.mode)
+        if exit_code == 0 and run_id:
+            repo_root = Path.cwd()
+            run_dir = repo_root / "reports" / "ai_runs" / run_id
+            print(f"RUN_ID: {run_id}")
+            print(f"RUN_DIR: {run_dir}")
+            print(f"PLAN_PATH: {run_dir / 'plan.md'}")
+            print(f"SPEC_SNAPSHOT_PATH: {run_dir / 'spec_snapshot.md'}")
         return exit_code
     if args.command == "dispatch":
         return run_dispatch(args.run_id)
