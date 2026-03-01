@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 from .util import VALID_MODES
+
+
+DEFAULT_CODEX_TIMEOUT_SECONDS = 1800
 
 
 def _parse_plan_field(plan_text: str, field: str) -> str:
@@ -42,8 +46,17 @@ def _build_codex_task_text(run_id: str, plan_path: Path, spec_snapshot_path: Pat
     )
 
 
-def run_dispatch(run_id: str) -> int:
-    """Execute codex for a plan contract and then run verify."""
+def _codex_timeout_seconds() -> int:
+    raw_value = os.environ.get("AIOPS_CODEX_TIMEOUT_SECONDS", str(DEFAULT_CODEX_TIMEOUT_SECONDS)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return DEFAULT_CODEX_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_CODEX_TIMEOUT_SECONDS
+
+
+def run_dispatch(run_id: str, run_verify_step: bool = True) -> int:
+    """Execute codex for a plan contract and optionally run verify."""
 
     repo_root = Path.cwd()
     run_dir = repo_root / "reports" / "ai_runs" / run_id
@@ -68,24 +81,43 @@ def run_dispatch(run_id: str) -> int:
         return 1
 
     spec_snapshot_path = run_dir / "spec_snapshot.md"
-    
+    task_text = _build_codex_task_text(run_id, plan_path, spec_snapshot_path, mode)
+
     codex_path = shutil.which("codex")
     if not codex_path:
         task_path = run_dir / "codex_task.txt"
-        task_path.write_text(
-            _build_codex_task_text(run_id, plan_path, spec_snapshot_path, mode),
-            encoding="utf-8"
-        )
+        task_path.write_text(task_text, encoding="utf-8")
         print(f"ERROR: codex not found on PATH; wrote task file: {task_path}")
         return 2
 
-    codex_result = subprocess.run(["codex", str(plan_path)], cwd=repo_root, check=False)
+    try:
+        codex_result = subprocess.run(
+            ["codex", "exec", task_text],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_codex_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired:
+        print("ERROR: codex exec timed out")
+        return 124
+    except OSError as exc:
+        print(f"ERROR: failed to execute codex: {exc}")
+        return 1
+
     if codex_result.returncode != 0:
+        print(f"ERROR: codex exec failed with exit code {codex_result.returncode}")
         return codex_result.returncode
+
+    if not run_verify_step:
+        return 0
 
     verify_result = subprocess.run(
         ["aiops", "verify", str(spec_snapshot_path), "--mode", mode],
         cwd=repo_root,
+        capture_output=True,
+        text=True,
         check=False,
     )
     return verify_result.returncode
