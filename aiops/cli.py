@@ -79,12 +79,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}")
             return 1
     if args.command == "plan":
-        exit_code, _ = run_plan(Path(args.spec_path), mode_override=args.mode)
+        exit_code, payload = run_plan(Path(args.spec_path), mode_override=args.mode)
+    if exit_code != 0:
         return exit_code
-    if args.command == "dispatch":
-        return run_dispatch(args.run_id)
-    if args.command == "run":
-        return run_end_to_end(Path(args.spec_path), mode_override=args.mode)
+
+    # payload appears to be a RUN_ID string in this repo. Support dict too (future-proof),
+    # but keep stdout deterministic and EXACTLY four lines on success.
+    if isinstance(payload, str):
+        run_id = payload
+        run_dir = f"reports/ai_runs/{run_id}"
+    elif isinstance(payload, dict):
+        run_id = payload.get("run_id") or payload.get("RUN_ID")
+        run_dir = payload.get("run_dir") or payload.get("RUN_DIR")
+        if not run_id or not run_dir:
+            print("ERROR: run_plan payload missing run_id/run_dir")
+            return 1
+    else:
+        print(f"ERROR: unexpected run_plan payload type: {type(payload).__name__}")
+        return 1
+
+    print(f"RUN_ID: {run_id}")
+    print(f"RUN_DIR: {run_dir}")
+    print(f"PLAN_PATH: {run_dir}/plan.md")
+    print(f"SPEC_SNAPSHOT_PATH: {run_dir}/spec_snapshot.md")
+    return 0
 
     parser.print_help()
     return 1
