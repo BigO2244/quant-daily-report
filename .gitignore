@@ -42,3 +42,6 @@ scripts/email_alpha_report.py
 # Paper artifacts
 paper/holdings_latest.csv
 /reports/ai_runs/
+
+# Python packaging artifacts
+*.egg-info/

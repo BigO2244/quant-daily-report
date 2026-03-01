@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-daily-report"
+version = "0.1.0"
+description = "Quant trading system with AI OS governance layer"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aiops*"]
+
+[project.scripts]
+aiops = "aiops.cli:main"
