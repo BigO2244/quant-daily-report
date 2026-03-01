@@ -9,6 +9,7 @@ from pathlib import Path
 from .dispatch import run_dispatch
 from .plan import run_plan
 from .run import run_end_to_end
+from .run_all import run_all
 from .spec_parser import REQUIRED_PARSE_HEADERS, SpecValidationError, parse_headers, validate_headers
 from .util import VALID_MODES
 from .verify import run_verify
@@ -37,6 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd = subparsers.add_parser("run", help="Execute parse → plan → dispatch end-to-end")
     run_cmd.add_argument("spec_path", help="Path to spec markdown file")
     run_cmd.add_argument("--mode", choices=VALID_MODES, default="BUILD", help="Execution mode (default: BUILD)")
+
+    run_all_cmd = subparsers.add_parser("run-all", help="Execute parse → plan → dispatch → run → verify")
+    run_all_cmd.add_argument("--spec", required=True, dest="spec_path", help="Path to spec markdown file")
+    run_all_cmd.add_argument("--mode", required=True, choices=VALID_MODES, help="Execution mode")
 
     return parser
 
@@ -85,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_dispatch(args.run_id)
     if args.command == "run":
         return run_end_to_end(Path(args.spec_path), mode_override=args.mode)
+    if args.command == "run-all":
+        return run_all(Path(args.spec_path), mode_override=args.mode)
 
     parser.print_help()
     return 1

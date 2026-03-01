@@ -61,6 +61,20 @@ Optional timeout for long Codex runs:
 export AIOPS_CODEX_TIMEOUT_SECONDS=1800
 ```
 
+AIOps full lifecycle command:
+
+```bash
+aiops run-all --spec specs/your_spec.md --mode BUILD
+```
+
+`run-all` exit codes:
+- `0`: OK
+- `2`: NEEDS_OPERATOR (codex missing; `codex_task.txt` written)
+- `3`: VERIFY_FAILED
+- `4`: PARSE_OR_PLAN_FAILED
+- `5`: DISPATCH_FAILED
+- `6`: RUN_FAILED
+
 ## Alpaca Paper Execution
 
 Set credentials and paper toggle:

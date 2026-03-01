@@ -55,8 +55,8 @@ def _codex_timeout_seconds() -> int:
     return value if value > 0 else DEFAULT_CODEX_TIMEOUT_SECONDS
 
 
-def run_dispatch(run_id: str) -> int:
-    """Execute codex for a plan contract and then run verify."""
+def run_dispatch(run_id: str, run_verify_step: bool = True) -> int:
+    """Execute codex for a plan contract and optionally run verify."""
 
     repo_root = Path.cwd()
     run_dir = repo_root / "reports" / "ai_runs" / run_id
@@ -109,6 +109,9 @@ def run_dispatch(run_id: str) -> int:
     if codex_result.returncode != 0:
         print(f"ERROR: codex exec failed with exit code {codex_result.returncode}")
         return codex_result.returncode
+
+    if not run_verify_step:
+        return 0
 
     verify_result = subprocess.run(
         ["aiops", "verify", str(spec_snapshot_path), "--mode", mode],
