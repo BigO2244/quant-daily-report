@@ -77,11 +77,10 @@ def test_parse_valid_spec(venv_python: Path, valid_spec: Path) -> None:
 
     assert result.returncode == 0, f"parse failed: {result.stderr}"
     output = json.loads(result.stdout)
-    assert "mode" in output
-    assert "objective" in output
-    assert "all_headers" in output
-    assert output["all_headers"].get("MODE") is not None
-    assert output["all_headers"].get("OBJECTIVE") is not None
+    assert "MODE" in output
+    assert "OBJECTIVE" in output
+    assert "PROJECT_TYPE" in output
+    assert "RISK_TIER" in output
 
 
 def test_parse_missing_spec(venv_python: Path, repo_root: Path) -> None:
@@ -116,6 +115,9 @@ def test_dispatch_missing_run(venv_python: Path, repo_root: Path) -> None:
     )
 
     assert result.returncode != 0, "dispatch should fail for missing run"
+    assert "Traceback" not in result.stderr, f"dispatch crashed with traceback: {result.stderr}"
+    assert "UnboundLocalError" not in result.stderr
+    assert "NameError" not in result.stderr
     assert "ERROR" in result.stderr or "ERROR" in result.stdout
 
 
@@ -153,6 +155,7 @@ def test_run_no_crash_on_missing_codex(venv_python: Path, valid_spec: Path, repo
         timeout=20.0,
     )
 
+    assert result.returncode != 0
     # Should not crash; should exit with non-zero (likely 2 from dispatch due to missing codex)
     # But it must NOT have a Python traceback
     assert "Traceback" not in result.stderr, f"run crashed with traceback: {result.stderr}"
