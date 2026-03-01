@@ -102,8 +102,12 @@ def render_plan(
     return f"{body}PLAN_HASH: {plan_hash}\n", plan_hash
 
 
-def run_plan(spec_path: Path, mode_override: str | None = None) -> int:
-    """Create deterministic planning artifacts for a spec."""
+def run_plan(spec_path: Path, mode_override: str | None = None) -> tuple[int, str]:
+    """Create deterministic planning artifacts for a spec.
+    
+    Returns:
+        tuple[int, str]: (exit_code, run_id). run_id is empty string on failure.
+    """
 
     repo_root = Path.cwd()
 
@@ -112,15 +116,15 @@ def run_plan(spec_path: Path, mode_override: str | None = None) -> int:
         validate_headers(headers, REQUIRED_PARSE_HEADERS)
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}")
-        return 1
+        return (1, "")
     except SpecValidationError as exc:
         print(f"ERROR: {exc}")
-        return 1
+        return (1, "")
 
     mode = mode_override or headers.get("MODE", "")
     if mode not in VALID_MODES:
         print(f"ERROR: Invalid MODE '{mode}'. Allowed values: {', '.join(VALID_MODES)}")
-        return 1
+        return (1, "")
 
     spec_text = spec_path.read_text(encoding="utf-8")
     spec_hash = hashlib.sha256(spec_text.encode("utf-8")).hexdigest()
@@ -147,8 +151,8 @@ def run_plan(spec_path: Path, mode_override: str | None = None) -> int:
         ensure_writable_dir(run_dir)
     except OSError as exc:
         print(f"ERROR: Reports directory not writable: {run_dir} ({exc})")
-        return 1
+        return (1, "")
 
     (run_dir / "spec_snapshot.md").write_text(spec_text, encoding="utf-8")
     (run_dir / "plan.md").write_text(plan_text, encoding="utf-8")
-    return 0
+    return (0, run_id)

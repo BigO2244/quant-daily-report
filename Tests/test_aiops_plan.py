@@ -80,17 +80,19 @@ def test_run_plan_regeneration_produces_identical_output(tmp_path: Path, monkeyp
     monkeypatch.setattr("aiops.plan.now_local", lambda: fixed_dt)
     monkeypatch.setattr("aiops.plan.get_git_metadata", lambda _: {"available": True, "short_sha": "abc1234"})
 
-    first_exit = run_plan(spec_path, mode_override="BUILD")
+    first_exit, first_run_id = run_plan(spec_path, mode_override="BUILD")
     run_id = "20260228_150405_abc1234"
     run_dir = repo_root / "reports" / "ai_runs" / run_id
     plan_path = run_dir / "plan.md"
     snapshot_path = run_dir / "spec_snapshot.md"
     first_plan = plan_path.read_text(encoding="utf-8")
 
-    second_exit = run_plan(spec_path, mode_override="BUILD")
+    second_exit, second_run_id = run_plan(spec_path, mode_override="BUILD")
     second_plan = plan_path.read_text(encoding="utf-8")
 
     assert first_exit == 0
     assert second_exit == 0
+    assert first_run_id == run_id
+    assert second_run_id == run_id
     assert snapshot_path.read_text(encoding="utf-8") == spec_text
     assert first_plan == second_plan
