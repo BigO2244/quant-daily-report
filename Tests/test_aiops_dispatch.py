@@ -38,8 +38,22 @@ def test_dispatch_codex_missing_writes_task_and_exits_2(tmp_path: Path, monkeypa
     assert exit_code == 2
     assert task_path.exists()
     task_text = task_path.read_text(encoding="utf-8")
+    
+    # Verify all required fields are present
+    assert f"RUN_ID: {run_id}" in task_text
     assert "PLAN_PATH:" in task_text
-    assert "aiops/20260228_010203_abc1234" in task_text
+    assert "SPEC_SNAPSHOT_PATH:" in task_text
+    assert "MODE: BUILD" in task_text
+    assert "TEST_COMMAND: pytest -q" in task_text
+    assert "VERIFY_COMMAND: aiops verify" in task_text
+    assert f"BRANCH: aiops/{run_id}" in task_text
+    assert "EXECUTION_CHECKLIST:" in task_text
+    assert "Implement strictly per plan contract." in task_text
+    assert "Run TEST_COMMAND and verify all tests pass." in task_text
+    assert "Run VERIFY_COMMAND (must exit 0)." in task_text
+    assert "Ensure git status is clean." in task_text
+    assert f"Commit with message containing RUN_ID {run_id}." in task_text
+    assert "Push branch." in task_text
 
 
 def test_dispatch_runs_verify_with_mode_from_plan(tmp_path: Path, monkeypatch) -> None:

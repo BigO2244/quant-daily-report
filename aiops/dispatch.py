@@ -17,17 +17,26 @@ def _parse_plan_field(plan_text: str, field: str) -> str:
     return ""
 
 
-def _build_codex_task_text(run_id: str, plan_path: Path) -> str:
+def _build_codex_task_text(run_id: str, plan_path: Path, spec_snapshot_path: Path, mode: str) -> str:
     return "\n".join(
         [
             f"RUN_ID: {run_id}",
             f"PLAN_PATH: {plan_path}",
+            f"SPEC_SNAPSHOT_PATH: {spec_snapshot_path}",
+            f"MODE: {mode}",
             "",
-            "INSTRUCTIONS:",
-            "- Follow the plan contract exactly.",
-            "- Modify only files declared in the plan FILES section.",
-            "- Run tests required by the plan before finalizing.",
-            f"- Open or update branch: aiops/{run_id}",
+            "TEST_COMMAND: pytest -q",
+            f"VERIFY_COMMAND: aiops verify {spec_snapshot_path} --mode {mode}",
+            f"BRANCH: aiops/{run_id}",
+            "",
+            "EXECUTION_CHECKLIST:",
+            "- Implement strictly per plan contract.",
+            "- Modify only files declared in plan FILES section.",
+            "- Run TEST_COMMAND and verify all tests pass.",
+            "- Run VERIFY_COMMAND (must exit 0).",
+            "- Ensure git status is clean.",
+            f"- Commit with message containing RUN_ID {run_id}.",
+            "- Push branch.",
             "",
         ]
     )
@@ -58,10 +67,15 @@ def run_dispatch(run_id: str) -> int:
         print(f"ERROR: Missing PLAN_HASH in plan contract: {plan_path}")
         return 1
 
+    spec_snapshot_path = run_dir / "spec_snapshot.md"
+    
     codex_path = shutil.which("codex")
     if not codex_path:
         task_path = run_dir / "codex_task.txt"
-        task_path.write_text(_build_codex_task_text(run_id, plan_path), encoding="utf-8")
+        task_path.write_text(
+            _build_codex_task_text(run_id, plan_path, spec_snapshot_path, mode),
+            encoding="utf-8"
+        )
         print(f"ERROR: codex not found on PATH; wrote task file: {task_path}")
         return 2
 
@@ -69,7 +83,6 @@ def run_dispatch(run_id: str) -> int:
     if codex_result.returncode != 0:
         return codex_result.returncode
 
-    spec_snapshot_path = run_dir / "spec_snapshot.md"
     verify_result = subprocess.run(
         ["aiops", "verify", str(spec_snapshot_path), "--mode", mode],
         cwd=repo_root,
