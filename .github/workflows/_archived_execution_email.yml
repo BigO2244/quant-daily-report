@@ -39,6 +39,20 @@ jobs:
         run: |
           python daily_quant_report.py
 
+      - name: Verify trade execution email script exists
+        run: |
+          echo "Current working directory:"
+          pwd
+          echo "Directory contents:"
+          ls -la
+          echo "Verifying script exists..."
+          test -f daily_trade_execution_email.py
+
+      - name: Send trade execution email
+        continue-on-error: true
+        run: python daily_trade_execution_email.py
+
+
       - name: Send trade execution email
         env:
           SMTP_HOST: "smtp.gmail.com"
