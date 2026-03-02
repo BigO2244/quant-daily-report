@@ -1,4 +1,6 @@
 MODE: HARDEN
+PROJECT_TYPE: Repo Governance Automation
+RISK_TIER: Medium
 OBJECTIVE: Auto-run Alpaca paper execution daily at 09:35 ET on trading days, and deliver the Daily Quant Report with suggested trades earlier pre-market (target 08:00 ET).
 
 ## FILES

@@ -84,7 +84,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}")
             return 1
     if args.command == "plan":
-        feature/aiops-orchestration
         exit_code, run_id = run_plan(Path(args.spec_path), mode_override=args.mode)
         if exit_code == 0 and run_id:
             repo_root = Path.cwd()
@@ -93,9 +92,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"RUN_DIR: {run_dir}")
             print(f"PLAN_PATH: {run_dir / 'plan.md'}")
             print(f"SPEC_SNAPSHOT_PATH: {run_dir / 'spec_snapshot.md'}")
-
-        exit_code, payload = run_plan(Path(args.spec_path), mode_override=args.mode)
-        main
         return exit_code
     if args.command == "dispatch":
         try:
@@ -104,17 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}")
             return 1
     if args.command == "run":
-        feature/aiops-orchestration
         return run_end_to_end(Path(args.spec_path), mode_override=args.mode)
     if args.command == "run-all":
         return run_all(Path(args.spec_path), mode_override=args.mode)
- 
-        try:
-            return run_end_to_end(Path(args.spec_path), mode_override=args.mode)
-        except (FileNotFoundError, RuntimeError) as exc:
-            print(f"ERROR: {exc}")
-            return 1
-        main
 
     print(f"ERROR: unknown command: {args.command}")
     return 2
