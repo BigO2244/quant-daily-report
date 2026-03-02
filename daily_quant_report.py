@@ -28,6 +28,7 @@ from paper.state_paths import (
 from paper.paper_report import build_paper_report_html
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.alpha import compute_alpha_attribution
+from core.email_orchestrator import orchestrate_email
 from paper.email_styles import base_email_css
 from paper.trading_calendar import prev_trading_day
 from paper.ledger import compute_signal_hash
@@ -4626,13 +4627,75 @@ def main(argv: list[str] | None = None):
     logger.info("[OK] HTML report written: %s", out_path)
     logger.info("\n[EMAIL PREVIEW]\n")
     logger.info("%s", snapshot_body)
-    if send_email:
+    
+    # ── Email orchestration (consolidated PRE/POST/ALERT) ──────────
+    if send_email and not os.getenv("EMAIL_DRY_RUN"):
         try:
-            send_email(subject=exec_subject, body_html=exec_body_html, body_text=exec_body)
-            send_email(subject=snapshot_subject, body_html=html, body_text=snapshot_body)
-            logger.info("[OK] Emails sent (execution + snapshot)")
+            # Determine workflow step: PRE (planning) or POST (execution)
+            workflow_step = "PRE" if is_planning_run else "POST"
+            
+            # Get workflow URL from GitHub Actions if available
+            workflow_url = None
+            gh_run_id = os.getenv("GITHUB_RUN_ID")
+            gh_repo = os.getenv("GITHUB_REPOSITORY")
+            if gh_run_id and gh_repo:
+                workflow_url = f"https://github.com/{gh_repo}/actions/runs/{gh_run_id}"
+            
+            # Get run context
+            run_root = _RUN_CONTEXT.run_root if _RUN_CONTEXT else Path("outputs/runs/unknown")
+            run_id = _RUN_CONTEXT.run_id if _RUN_CONTEXT else None
+            
+            # Orchestrate email delivery
+            email_result = orchestrate_email(
+                workflow_step=workflow_step,
+                execution_payload=execution_payload,
+                paper_summary=paper_summary,
+                run_root=run_root,
+                trade_date=trade_date_str,
+                mode=mode_norm,
+                run_id=run_id,
+                workflow_url=workflow_url,
+                force=False,
+            )
+            
+            if email_result["sent"]:
+                logger.info(
+                    "[OK] Email sent via orchestrator: type=%s",
+                    email_result["email_type"],
+                )
+            elif email_result["skipped"]:
+                logger.info(
+                    "[OK] Email skipped (already sent): type=%s",
+                    email_result["email_type"],
+                )
+            
+            if email_result.get("error"):
+                logger.warning(
+                    "[WARN] Email orchestration had errors: %s",
+                    email_result["error"],
+                )
+                
         except Exception as e:
-            logger.warning("[WARN] Email not sent: %s", e)
+            logger.warning("[WARN] Email orchestration failed: %s", e)
+            # Still try to send an ALERT email about the failure
+            try:
+                from core.email_orchestrator import send_alert_email
+                run_root = _RUN_CONTEXT.run_root if _RUN_CONTEXT else Path("outputs/runs/unknown")
+                run_id = _RUN_CONTEXT.run_id if _RUN_CONTEXT else None
+                workflow_step = "PRE" if is_planning_run else "POST"
+                send_alert_email(
+                    error_summary=f"Email orchestration failure: {e}",
+                    trade_date=trade_date_str,
+                    mode=mode_norm,
+                    step=workflow_step,
+                    run_root=run_root,
+                    run_id=run_id,
+                    workflow_url=workflow_url if 'workflow_url' in locals() else None,
+                )
+            except Exception as alert_err:
+                logger.error("[ERROR] Failed to send alert email: %s", alert_err)
+    elif os.getenv("EMAIL_DRY_RUN"):
+        logger.info("[EMAIL_DRY_RUN] Email sending disabled via EMAIL_DRY_RUN env var")
     else:
         logger.warning("[WARN] send_email not found — HTML generated only")
 
