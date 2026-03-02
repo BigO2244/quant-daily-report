@@ -155,6 +155,9 @@ def test_parse_args_supports_paper_reset_flags():
     alias_args = dqr._parse_args(["--reset-orders-sent"])
     assert alias_args.force_execution is True
 
+    bootstrap_args = dqr._parse_args(["--bootstrap-model-ledger-from-broker"])
+    assert bootstrap_args.bootstrap_model_ledger_from_broker is True
+
 
 def test_paper_reset_starts_clean_and_seeds_nav(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
