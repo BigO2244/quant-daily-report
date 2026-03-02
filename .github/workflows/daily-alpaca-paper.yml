@@ -19,9 +19,12 @@ on:
     - cron: "35 13 * * 1-5"
 
 jobs:
-  run:
+  engine_run:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      run_id: ${{ steps.set_meta.outputs.run_id }}
+      report_date: ${{ steps.set_meta.outputs.report_date }}
 
     env:
       TRADING_MODE: alpaca
@@ -39,6 +42,7 @@ jobs:
 
       # Ensure date calculations use Eastern if REPORT_DATE isn't provided
       TZ: America/New_York
+      EMAIL_STRICT: "0"
 
     steps:
       - name: Checkout
@@ -55,6 +59,7 @@ jobs:
           echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -211,4 +216,95 @@ jobs:
         with:
           name: alpaca-paper-${{ env.REPORT_DATE }}-${{ steps.set_meta.outputs.run_id }}
           if-no-files-found: warn
-          path: outputs/runs/${{ steps.set_meta.outputs.run_id }}/
+          path: |
+            outputs/runs/${{ steps.set_meta.outputs.run_id }}/
+            outputs/execution_email/${{ env.REPORT_DATE }}.json
+
+  email:
+    needs: engine_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      REPORT_DATE: ${{ needs.engine_run.outputs.report_date }}
+      RUN_ID: ${{ needs.engine_run.outputs.run_id }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
+      EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download engine artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-paper-${{ needs.engine_run.outputs.report_date }}-${{ needs.engine_run.outputs.run_id }}
+          path: downloaded
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare persisted email inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p outputs/execution_email outputs/daily
+          payload_src="$(find downloaded -type f -path "*/execution_email/${REPORT_DATE}.json" | head -n1 || true)"
+          if [ -n "$payload_src" ]; then
+            cp -f "$payload_src" "outputs/execution_email/${REPORT_DATE}.json"
+          else
+            echo "[EMAIL][WARN] execution payload not found for ${REPORT_DATE}"
+          fi
+
+      - name: Send execution email from persisted payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          .venv/bin/python daily_trade_execution_email.py
+
+      - name: Send snapshot email from persisted artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          .venv/bin/python - <<'PY'
+          import os
+          from pathlib import Path
+          from core.quant_report import send_email
+
+          report_date = os.environ.get("REPORT_DATE", "").strip()
+          if not report_date:
+              raise RuntimeError("REPORT_DATE is required")
+
+          if os.environ.get("EMAIL_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "y", "on"}:
+              print("[EMAIL][DRY_RUN] skipping snapshot email send")
+              raise SystemExit(0)
+
+          root = Path("downloaded")
+          snapshot_candidates = list(root.glob(f"**/reports/trade_snapshot_{report_date}.txt"))
+          html_candidates = list(root.glob(f"**/reports/quant_report_{report_date}.html"))
+
+          if not snapshot_candidates:
+              raise RuntimeError(f"Missing persisted snapshot text for {report_date}")
+          if not html_candidates:
+              raise RuntimeError(f"Missing persisted HTML report for {report_date}")
+
+          body_text = snapshot_candidates[0].read_text(encoding="utf-8")
+          body_html = html_candidates[0].read_text(encoding="utf-8")
+          subject = f"Daily Quant Snapshot {report_date}"
+          send_email(subject=subject, body_html=body_html, body_text=body_text)
+          print("[EMAIL] snapshot email sent")
+          PY

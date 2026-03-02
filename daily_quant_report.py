@@ -3587,6 +3587,62 @@ def _is_truthy(value: str | int | bool | None, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _email_strict_enabled() -> bool:
+    return _is_truthy(os.getenv("EMAIL_STRICT"), default=False)
+
+
+def _email_dry_run_enabled() -> bool:
+    return _is_truthy(os.getenv("EMAIL_DRY_RUN"), default=False)
+
+
+def _try_send_email(*, subject: str, body_html: str | None, body_text: str | None, label: str) -> bool:
+    strict = _email_strict_enabled()
+    if _email_dry_run_enabled():
+        logger.info("[EMAIL][DRY_RUN] skipped %s email send", label)
+        return True
+
+    if send_email is None:
+        msg = "send_email not available"
+        if strict:
+            raise RuntimeError(msg)
+        logger.warning("[WARN] %s — %s email not sent", msg, label)
+        return False
+
+    try:
+        send_email(subject=subject, body_html=body_html, body_text=body_text)
+        return True
+    except Exception as exc:
+        if strict:
+            logger.error("[EMAIL][STRICT] %s email failed: %s", label, exc)
+            raise
+        logger.warning("[WARN] %s email not sent: %s", label, exc)
+        return False
+
+
+def _send_report_emails(
+    *,
+    exec_subject: str,
+    exec_body_html: str,
+    exec_body_text: str,
+    snapshot_subject: str,
+    snapshot_body_html: str,
+    snapshot_body_text: str,
+) -> tuple[bool, bool]:
+    execution_ok = _try_send_email(
+        subject=exec_subject,
+        body_html=exec_body_html,
+        body_text=exec_body_text,
+        label="execution",
+    )
+    snapshot_ok = _try_send_email(
+        subject=snapshot_subject,
+        body_html=snapshot_body_html,
+        body_text=snapshot_body_text,
+        label="snapshot",
+    )
+    return execution_ok, snapshot_ok
+
+
 def _normalize_exec_mode(value: str | None, default: str) -> str:
     norm = str(value if value is not None else default).strip().lower()
     return norm or str(default).strip().lower()
@@ -4658,15 +4714,19 @@ def main(argv: list[str] | None = None):
     logger.info("[OK] HTML report written: %s", out_path)
     logger.info("\n[EMAIL PREVIEW]\n")
     logger.info("%s", snapshot_body)
-    if send_email:
-        try:
-            send_email(subject=exec_subject, body_html=exec_body_html, body_text=exec_body)
-            send_email(subject=snapshot_subject, body_html=html, body_text=snapshot_body)
+    try:
+        execution_email_ok, snapshot_email_ok = _send_report_emails(
+            exec_subject=exec_subject,
+            exec_body_html=exec_body_html,
+            exec_body_text=exec_body,
+            snapshot_subject=snapshot_subject,
+            snapshot_body_html=html,
+            snapshot_body_text=snapshot_body,
+        )
+        if execution_email_ok and snapshot_email_ok:
             logger.info("[OK] Emails sent (execution + snapshot)")
-        except Exception as e:
-            logger.warning("[WARN] Email not sent: %s", e)
-    else:
-        logger.warning("[WARN] send_email not found — HTML generated only")
+    except Exception:
+        raise
 
     if os.getenv("RUN_ROBUSTNESS_BACKTEST", "0").lower() in {"1", "true", "yes", "y"}:
         try:
