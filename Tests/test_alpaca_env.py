@@ -61,3 +61,37 @@ def test_load_alpaca_env_missing_credentials(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Missing Alpaca credentials"):
         load_alpaca_env()
+
+
+def test_load_alpaca_env_missing_key_logs_set_missing_status(monkeypatch, caplog):
+    """Verify error message displays SET/MISSING status without revealing secrets."""
+    _clear_alpaca_env(monkeypatch)
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "secret-value")
+    # Deliberately omit ALPACA_API_KEY_ID to trigger error
+
+    with pytest.raises(RuntimeError) as exc_info:
+        load_alpaca_env()
+
+    # Verify error message shows SET/MISSING, not the actual secret value
+    error_msg = str(exc_info.value)
+    assert "key_id=MISSING" in error_msg
+    assert "secret_key=SET" in error_msg
+    assert "secret-value" not in error_msg  # Ensure secret not in message
+    assert "[ALPACA_LOAD_ENV]" in caplog.text  # Log entry should appear
+
+
+def test_load_alpaca_env_missing_secret_logs_set_missing_status(monkeypatch, caplog):
+    """Verify error message displays SET/MISSING status when secret is missing."""
+    _clear_alpaca_env(monkeypatch)
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "key-value")
+    # Deliberately omit ALPACA_API_SECRET_KEY to trigger error
+
+    with pytest.raises(RuntimeError) as exc_info:
+        load_alpaca_env()
+
+    # Verify error message shows SET/MISSING, not the actual key value
+    error_msg = str(exc_info.value)
+    assert "key_id=SET" in error_msg
+    assert "secret_key=MISSING" in error_msg
+    assert "key-value" not in error_msg  # Ensure key not in message
+    assert "[ALPACA_LOAD_ENV]" in caplog.text  # Log entry should appear

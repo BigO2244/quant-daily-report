@@ -142,9 +142,18 @@ def load_alpaca_env() -> AlpacaEnv:
     base_url = _canonical_alpaca_base(_env_first("ALPACA_BASE_URL"), paper=paper)
 
     if not key_id or not secret_key:
+        # Log which credentials are missing (without revealing values)
+        key_status = "SET" if key_id else "MISSING"
+        secret_status = "SET" if secret_key else "MISSING"
+        logger.error(
+            "[ALPACA_LOAD_ENV] Credential status: ALPACA_API_KEY_ID=%s, ALPACA_API_SECRET_KEY=%s",
+            key_status,
+            secret_status,
+        )
         raise RuntimeError(
-            "Missing Alpaca credentials. Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY "
-            "(or legacy ALPACA_KEY_ID / ALPACA_SECRET_KEY)."
+            "Missing Alpaca credentials. "
+            "Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY as GitHub Secrets and pass via workflow env. "
+            f"Current status: key_id={key_status}, secret_key={secret_status}"
         )
 
     return AlpacaEnv(

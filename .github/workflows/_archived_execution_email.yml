@@ -50,18 +50,13 @@ jobs:
 
       - name: Send trade execution email
         continue-on-error: true
-        run: python daily_trade_execution_email.py
-
-
-      - name: Send trade execution email
         env:
           SMTP_HOST: "smtp.gmail.com"
           SMTP_PORT: "587"
           SMTP_USER: ${{ secrets.EMAIL_SENDER }}
           SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
-        run: |
-          python daily_trade_execution_email.py
+        run: python daily_trade_execution_email.py
 
       - name: Upload execution email artifacts
         if: always()

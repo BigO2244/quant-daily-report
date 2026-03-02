@@ -10,6 +10,88 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Canonical Model Snapshot Helpers
+# ============================================================
+
+def _canonical_model_snapshot_path() -> Path:
+    """Return path to canonical model snapshot JSON."""
+    snapshot_dir = Path("outputs/paper_state")
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    return snapshot_dir / "canonical_positions.json"
+
+
+def _write_canonical_model_snapshot(
+    positions: dict[str, float],
+    cash: float | None = None,
+    equity: float | None = None,
+    reason: str = "runtime_update",
+) -> Path:
+    """Write canonical model snapshot to disk."""
+    path = _canonical_model_snapshot_path()
+    payload = {
+        "positions": positions,
+        "position_count": len(positions),
+        "cash": cash,
+        "equity": equity,
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "reason": reason,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    logger.info("[RECON] Wrote canonical model snapshot: %s reason=%s", path, reason)
+    return path
+
+
+def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
+    """Load canonical model snapshot or return dict with parse_error."""
+    path = _canonical_model_snapshot_path()
+    if not path.exists():
+        return {
+            "positions": {},
+            "position_count": 0,
+            "cash": None,
+            "equity": None,
+            "path": str(path),
+            "path_exists": False,
+            "parser": "canonical_json",
+            "parse_error": "canonical_snapshot_missing",
+        }
+    
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        positions = _normalize_positions(payload.get("positions") or {})
+        cash = _coerce_float(payload.get("cash"))
+        equity = _coerce_float(payload.get("equity"))
+        
+        parse_error = None
+        if not positions and not allow_empty:
+            parse_error = "no_positions_in_canonical_snapshot"
+        
+        return {
+            "positions": positions,
+            "position_count": len(positions),
+            "cash": cash,
+            "equity": equity,
+            "reason": payload.get("reason") if isinstance(payload, dict) else None,
+            "path": str(path),
+            "path_exists": True,
+            "parser": "canonical_json",
+            "parse_error": parse_error,
+        }
+    except Exception as e:
+        logger.warning("[RECON] Failed to load canonical snapshot: %s", e)
+        return {
+            "positions": {},
+            "position_count": 0,
+            "cash": None,
+            "equity": None,
+            "path": str(path),
+            "path_exists": True,
+            "parser": "canonical_json",
+            "parse_error": f"canonical_snapshot_parse_error: {e}",
+        }
+
+
 
 def _is_truthy(value: object, default: bool = False) -> bool:
     if value is None:
@@ -365,7 +447,19 @@ def _reconcile(
     equity_tol_pct = _env_float("RECON_EQUITY_TOL_PCT", 0.001)
 
     broker_snapshot = _load_broker_snapshot(trading_mode)
-    model_snapshot = _load_model_snapshot(ledger_path, allow_empty=allow_empty)
+    # Try canonical snapshot first, fall back to legacy ledger
+    canonical_snapshot = _load_canonical_model_snapshot(allow_empty=allow_empty)
+    if canonical_snapshot.get("parse_error"):
+        # Canonical not available; fall back to ledger
+        model_snapshot = _load_model_snapshot(ledger_path, allow_empty=allow_empty)
+        if model_snapshot.get("parse_error") and len(broker_snapshot.get("positions") or {}) > 0:
+            # Bootstrap scenario: model is empty but broker has positions
+            model_snapshot["bootstrap_hint"] = (
+                "Model snapshot empty but broker has positions. "
+                "Run with --bootstrap-model-ledger-from-broker to bootstrap from broker, or reset broker positions."
+            )
+    else:
+        model_snapshot = canonical_snapshot
     diffs = compare_positions(
         broker_positions=broker_snapshot.get("positions") or {},
         model_positions=model_snapshot.get("positions") or {},
@@ -373,6 +467,8 @@ def _reconcile(
     )
     if model_snapshot.get("parse_error"):
         diffs.setdefault("errors", []).append(str(model_snapshot.get("parse_error")))
+    if model_snapshot.get("bootstrap_hint"):
+        diffs.setdefault("errors", []).append(str(model_snapshot.get("bootstrap_hint")))
 
     broker_cash = _coerce_float(broker_snapshot.get("cash"))
     model_cash = _coerce_float(model_snapshot.get("cash"))
@@ -422,6 +518,16 @@ def _reconcile(
         "diffs": diffs,
     }
     report_path = _write_report(phase=stage, run_date=run_date, payload=payload)
+    logger.info(
+        "[RECON][%s] verdict=%s errors=%d broker_positions=%d model_positions=%d model_path=%s report=%s",
+        stage.upper(),
+        verdict,
+        len((diffs or {}).get("errors") or []),
+        int(len(broker_snapshot.get("positions") or {})),
+        int(len(model_snapshot.get("positions") or {})),
+        str(model_snapshot.get("path") or "n/a"),
+        report_path,
+    )
     if verdict == "PASS":
         logger.info("[RECON][%s] PASS report=%s", stage.upper(), report_path)
     else:
@@ -474,3 +580,67 @@ def post_trade_validate(
         raise RuntimeError(
             f"Post-trade reconciliation failed strict mode verdict={verdict} report={report_path}"
         )
+
+# ============================================================
+# Bootstrap and Ledger Initialization
+# ============================================================
+
+def ensure_sent_ledger_exists(sent_ledger_path: str) -> None:
+    """Ensure sent ledger exists with headers (idempotent)."""
+    path = Path(str(sent_ledger_path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if (not path.exists()) or path.stat().st_size == 0:
+        # Write header row only
+        with path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["date", "run_id", "order_id", "ticker", "side"])
+            writer.writeheader()
+        logger.info("[RECON] Created sent ledger with headers: %s", path)
+
+
+def bootstrap_model_ledger_from_broker(
+    trading_mode: str,
+    ledger_path: str,
+    sent_ledger_path: str,
+    run_date: str,
+) -> bool:
+    """
+    Bootstrap model ledger from current broker positions (ALPACA only).
+    Should only be called once to initialize model snapshot from broker.
+    Returns True if bootstrap succeeded, False otherwise.
+    """
+    if str(trading_mode or "").strip().lower() != "alpaca":
+        logger.error("[BOOTSTRAP] Bootstrap only supported in alpaca mode, got %s", trading_mode)
+        return False
+    
+    try:
+        broker_snapshot = _load_broker_snapshot(trading_mode)
+        positions = broker_snapshot.get("positions") or {}
+        cash = broker_snapshot.get("cash")
+        equity = broker_snapshot.get("equity")
+        
+        if not positions:
+            logger.warning("[BOOTSTRAP] Broker has no positions, bootstrap would be empty")
+        
+        # Write canonical model snapshot
+        _write_canonical_model_snapshot(
+            positions=positions,
+            cash=cash,
+            equity=equity,
+            reason="bootstrap_from_broker",
+        )
+        
+        # Ensure sent ledgers exist
+        ensure_sent_ledger_exists(sent_ledger_path)
+        ensure_sent_ledger_exists("outputs/shadow_orders/orders_sent.csv")
+        
+        logger.info(
+            "[BOOTSTRAP] Bootstrap complete: positions=%d cash=%s equity=%s",
+            len(positions),
+            cash,
+            equity,
+        )
+        return True
+    except Exception as e:
+        logger.error("[BOOTSTRAP] Bootstrap failed: %s", e)
+        return False
+

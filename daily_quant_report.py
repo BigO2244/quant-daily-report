@@ -56,7 +56,12 @@ from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
 from research.signal_store import persist_signal_snapshot
 from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
-from reconciliation import pre_trade_reconcile_or_exit, post_trade_validate
+from reconciliation import (
+    bootstrap_model_ledger_from_broker,
+    ensure_sent_ledger_exists,
+    post_trade_validate,
+    pre_trade_reconcile_or_exit,
+)
 
 from sleeves.sleeve_trend.build_sleeve_output import build_trend_sleeve_output
 from sleeves.sleeve_trend import config as trend_cfg
@@ -3508,6 +3513,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Generate planning artifacts only; skip order generation even when market is open.",
     )
     parser.add_argument(
+        "--bootstrap-model-ledger-from-broker",
+        dest="bootstrap_model_ledger_from_broker",
+        action="store_true",
+        help=(
+            "Bootstrap canonical model snapshot from broker positions and exit without "
+            "submitting orders (alpaca only)."
+        ),
+    )
+    parser.add_argument(
         "--exit-only",
         "--exit_only",
         dest="exit_only",
@@ -4180,6 +4194,7 @@ def main(argv: list[str] | None = None):
     paper_html = ""
     sent_ledger_removed = 0
     sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
+    ensure_sent_ledger_exists(sent_ledger_path)
     paper_ledger_path, paper_trades_path = ensure_paper_state_files()
     reset_info = None
     if bool(getattr(args, "paper_reset", False)):
@@ -4200,6 +4215,23 @@ def main(argv: list[str] | None = None):
             **(daily_snapshot.get("inception_metrics") or {}),
             "inception_date": trade_date_str,
         }
+    if bool(getattr(args, "bootstrap_model_ledger_from_broker", False)):
+        if trading_mode_norm != "alpaca":
+            raise RuntimeError(
+                "--bootstrap-model-ledger-from-broker is only supported when TRADING_MODE=alpaca"
+            )
+        ok = bootstrap_model_ledger_from_broker(
+            trading_mode=trading_mode_norm,
+            ledger_path=paper_ledger_path,
+            sent_ledger_path=sent_ledger_path,
+            run_date=trade_date_str,
+        )
+        if not ok:
+            raise SystemExit(1)
+        logger.info(
+            "[BOOTSTRAP] Canonical model snapshot initialized from broker; exiting before order generation"
+        )
+        return
     if os.path.exists(signals_path_exec):
         try:
             snapshot_cash_target_weight = _coerce_float_or_none((daily_snapshot or {}).get("target_cash_weight"))

@@ -7,6 +7,11 @@ on:
         description: "Override REPORT_DATE (YYYY-MM-DD). Leave blank for today ET."
         required: false
         type: string
+      bootstrap_model_ledger_from_broker:
+        description: "Run bootstrap-only mode (writes canonical model snapshot from broker, exits without orders)."
+        required: false
+        type: boolean
+        default: false
   schedule:
     # 9:35 AM America/New_York is 14:35 UTC in EST and 13:35 UTC in EDT.
     # Keep both cron entries to handle DST shifts.
@@ -30,6 +35,7 @@ jobs:
 
       # If user passed an override date via workflow_dispatch
       REPORT_DATE: ${{ inputs.report_date }}
+      BOOTSTRAP_MODEL_LEDGER_FROM_BROKER: ${{ inputs.bootstrap_model_ledger_from_broker }}
 
       # Ensure date calculations use Eastern if REPORT_DATE isn't provided
       TZ: America/New_York
@@ -39,6 +45,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set run metadata
+        id: set_meta
         run: |
           set -euxo pipefail
           if [ -z "${REPORT_DATE:-}" ]; then
@@ -47,6 +54,7 @@ jobs:
           RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -136,13 +144,61 @@ jobs:
           grep -q "\[DIAG\]\[PY\] OK" outputs/diag_alpaca_auth.log
 
 
+      - name: Check critical env vars (SET/MISSING only, no values)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          critical_vars = [
+              "ALPACA_API_KEY_ID",
+              "ALPACA_API_SECRET_KEY",
+              "ALPACA_PAPER",
+              "ALPACA_BASE_URL",
+              "MODE",
+              "TRADING_MODE",
+              "REPORT_DATE",
+              "TZ",
+          ]
+          print("[ENV_CHECK] Critical variable status (DO NOT PRINT VALUES):")
+          all_set = True
+          for var in critical_vars:
+              status = "SET" if os.environ.get(var) else "MISSING"
+              print(f"  {var}={status}")
+              if status == "MISSING":
+                  all_set = False
+          if not all_set:
+              print("\n[ENV_CHECK][ERROR] Some critical env vars are missing!")
+              import sys
+              sys.exit(1)
+          print("\n[ENV_CHECK][OK] All critical env vars are set")
+          PY
+
+      - name: Verify canonical model snapshot exists (unless bootstrap)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bootstrap="${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}"
+          if [ "$bootstrap" = "true" ]; then
+            echo "[RECON] Bootstrap mode enabled; skipping canonical snapshot precheck"
+            exit 0
+          fi
+          if [ ! -f outputs/paper_state/canonical_positions.json ]; then
+            echo "[RECON][ERROR] Missing outputs/paper_state/canonical_positions.json"
+            echo "[RECON][ACTION] Run workflow_dispatch once with bootstrap_model_ledger_from_broker=true"
+            exit 1
+          fi
+
       - name: Run daily quant execution
         run: |
           set -euxo pipefail
           source .venv/bin/activate
           mkdir -p outputs
           status=0
-          if ! python3 daily_quant_report.py 2>&1 | tee outputs/ci_alpaca_run.log; then
+          cmd=(python3 daily_quant_report.py)
+          if [ "${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}" = "true" ]; then
+            cmd+=(--bootstrap-model-ledger-from-broker)
+          fi
+          if ! "${cmd[@]}" 2>&1 | tee outputs/ci_alpaca_run.log; then
             status=$?
           fi
           mkdir -p "outputs/runs/${RUN_ID}/logs"
@@ -153,6 +209,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: alpaca-paper-${{ env.REPORT_DATE }}-${{ env.RUN_ID }}
+          name: alpaca-paper-${{ env.REPORT_DATE }}-${{ steps.set_meta.outputs.run_id }}
           if-no-files-found: warn
-          path: outputs/runs/${{ env.RUN_ID }}/
+          path: outputs/runs/${{ steps.set_meta.outputs.run_id }}/
