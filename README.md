@@ -147,6 +147,11 @@ REPORT_DATE=2026-02-24 PAPER_TRADING=1 MODE=SHADOW python3 daily_quant_report.py
 
 Note: `REPORT_DATE` must be a real date string (`YYYY-MM-DD`), not placeholders like `YYYY-MM-DD`.
 
+Email failure mode:
+- `EMAIL_STRICT=0` (default): SMTP/email failures are warnings only and do not fail `daily_quant_report.py`.
+- `EMAIL_STRICT=1`: SMTP/email failures are fatal and fail the run.
+- `EMAIL_DRY_RUN=1`: skips SMTP sends while still producing persisted email artifacts.
+
 ## Local Green Loop
 
 ```bash
