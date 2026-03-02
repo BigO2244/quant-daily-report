@@ -1,0 +1,120 @@
+name: Alpaca Paper Execute at Open
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Override REPORT_DATE (YYYY-MM-DD). Leave blank for today ET."
+        required: false
+        type: string
+  schedule:
+    # 09:35 ET = 14:35 UTC (EST, currently in effect)
+    # After DST (2026-03-08): 09:35 ET = 13:35 UTC
+    # For now, use 14:35 UTC; may need to add second cron after DST begins
+    - cron: "35 14 * * 1-5"
+
+jobs:
+  alpaca_execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+
+      # Secrets (do not print these)
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+
+      # If user passed an override date via workflow_dispatch
+      REPORT_DATE: ${{ inputs.report_date }}
+
+      # Ensure date calculations use Eastern if REPORT_DATE isn't provided
+      TZ: America/New_York
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set run metadata
+        run: |
+          set -euxo pipefail
+          if [ -z "${REPORT_DATE:-}" ]; then
+            REPORT_DATE="$(TZ=America/New_York date +%F)"
+          fi
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Alpaca paper execution
+        run: |
+          set -euxo pipefail
+          source .venv/bin/activate
+          mkdir -p outputs
+          status=0
+          if ! python3 daily_quant_report.py 2>&1 | tee outputs/alpaca_execution.log; then
+            status=$?
+          fi
+          exit "$status"
+
+      - name: Archive execution artifacts
+        if: always()
+        run: |
+          set -euxo pipefail
+          mkdir -p "outputs/runs/${RUN_ID}/logs" "outputs/runs/${RUN_ID}/trading"
+          cp -f outputs/alpaca_execution.log "outputs/runs/${RUN_ID}/logs/alpaca_execution.log" || true
+          
+          # Archive trading artifacts if they exist
+          if [ -d outputs/ledger ]; then
+            cp -R outputs/ledger/. "outputs/runs/${RUN_ID}/trading/" || true
+          fi
+          if [ -f data/live_nav.csv ]; then
+            mkdir -p "outputs/runs/${RUN_ID}/snapshots"
+            cp data/live_nav.csv "outputs/runs/${RUN_ID}/snapshots/live_nav.csv" || true
+          fi
+          
+          # Write metadata
+          python3 - << 'PY'
+          import datetime as dt
+          import json
+          import os
+          from pathlib import Path
+          
+          run_id = os.environ.get("RUN_ID", "").strip()
+          report_date = os.environ.get("REPORT_DATE", "").strip() or None
+          run_root = Path("outputs") / "runs" / run_id
+          payload = {
+              "run_id": run_id,
+              "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+              "report_date": report_date,
+              "mode": "alpaca_paper_execution",
+              "git_sha": os.environ.get("GITHUB_SHA"),
+              "path": str(run_root),
+          }
+          run_root.mkdir(parents=True, exist_ok=True)
+          (run_root / "meta.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-execution-${{ env.RUN_ID }}
+          path: outputs/runs/${{ env.RUN_ID }}/
+          retention-days: 30

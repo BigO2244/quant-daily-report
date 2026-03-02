@@ -1,0 +1,103 @@
+name: Daily Quant Report Pre-Market
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 08:00 ET = 13:00 UTC (EST, currently in effect)
+    # After DST (2026-03-08): 08:00 ET = 12:00 UTC
+    # For now, use 13:00 UTC; may need to add second cron after DST begins
+    - cron: "0 13 * * 1-5"
+
+jobs:
+  premarket_report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+
+    env:
+      TZ: America/New_York
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set run metadata
+        run: |
+          set -euxo pipefail
+          REPORT_DATE="$(TZ=America/New_York date +%F)"
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run daily report generation (plan-only mode)
+        env:
+          MODE: paper
+          TRADING_MODE: paper
+          # Disable order execution; generate suggested trades only
+          EMAIL_DRY_RUN: "1"
+        run: |
+          set -euxo pipefail
+          source .venv/bin/activate
+          mkdir -p outputs
+          status=0
+          if ! python3 daily_quant_report.py --plan-only 2>&1 | tee outputs/premarket_report.log; then
+            status=$?
+          fi
+          exit "$status"
+
+      - name: Archive pre-market artifacts
+        if: always()
+        run: |
+          set -euxo pipefail
+          mkdir -p "outputs/runs/${RUN_ID}/logs" "outputs/runs/${RUN_ID}/reports"
+          cp -f outputs/premarket_report.log "outputs/runs/${RUN_ID}/logs/premarket_report.log" || true
+          
+          # Archive report outputs if they exist
+          if [ -d outputs/alpha_report ]; then
+            cp -R outputs/alpha_report/. "outputs/runs/${RUN_ID}/reports/" || true
+          fi
+          
+          # Write metadata
+          python3 - << 'PY'
+          import datetime as dt
+          import json
+          import os
+          from pathlib import Path
+          
+          run_id = os.environ.get("RUN_ID", "").strip()
+          report_date = os.environ.get("REPORT_DATE", "").strip() or None
+          run_root = Path("outputs") / "runs" / run_id
+          payload = {
+              "run_id": run_id,
+              "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+              "report_date": report_date,
+              "mode": "premarket_report",
+              "git_sha": os.environ.get("GITHUB_SHA"),
+              "path": str(run_root),
+          }
+          run_root.mkdir(parents=True, exist_ok=True)
+          (run_root / "meta.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: premarket-report-${{ env.RUN_ID }}
+          path: outputs/runs/${{ env.RUN_ID }}/
+          retention-days: 30
