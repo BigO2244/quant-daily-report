@@ -3979,6 +3979,13 @@ def main(argv: list[str] | None = None):
                 pd.DataFrame(),
                 pd.DataFrame(),
             )
+        # ── Rolling IC monitor (non-blocking) ────────────────────────
+        try:
+            from research.ic_monitor import compute_and_log_ic
+            compute_and_log_ic(report_date=today)
+        except Exception as _ic_err:
+            logger.info("[IC_MONITOR] Skipped: %s", _ic_err)
+        # ─────────────────────────────────────────────────────────────
         s2_details = {}
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
         cm_details = {}
