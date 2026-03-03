@@ -1,6 +1,9 @@
 # engine/breaker.py
+import logging
 import os
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 def get_breaker_config() -> dict:
     def _float_env(name: str, default: float) -> float:
@@ -118,11 +121,9 @@ def get_exposure_multiplier(
             mult = float(explicit_mult)
 
     mult = max(0.0, min(1.0, float(mult)))
-    print(
-        "[BREAKER_POLICY] "
-        f"env={policy} state_mode={mode or 'none'} "
-        f"override_allowed={1 if override_allowed else 0} "
-        f"multiplier={mult:.4f}"
+    logger.debug(
+        "[BREAKER_POLICY] env=%s state_mode=%s override_allowed=%d multiplier=%.4f",
+        policy, mode or "none", 1 if override_allowed else 0, mult,
     )
     return mult
 

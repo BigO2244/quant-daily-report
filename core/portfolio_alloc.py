@@ -29,7 +29,10 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 DEFAULT_PORTFOLIO_BASE_EQUITY = 10_000.0
-DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 0.70, "sleeve_2": 0.20, "charlie_munger": 0.10}
+# Active sleeves: sleeve_trend only.
+# sleeve_2 and charlie_munger are disabled pending future reimplementation.
+# To re-enable a sleeve, add it back here and wire it into daily_quant_report.py.
+DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 1.00}
 DEFAULT_MAX_POSITION_PCT = 0.10
 DEFAULT_MAX_SLEEVE_EXPOSURE = 1.00
 DEFAULT_MAX_TURNOVER = 0.50
@@ -48,8 +51,9 @@ PREPARE_FOR_BUY_NEXT_DAY = os.getenv("PREPARE_FOR_BUY_NEXT_DAY", "0").lower() in
     "yes",
     "y",
 )
-# Risk-off stash routing (flight to safety)
-STASH_SLEEVE_NAME = os.getenv("STASH_SLEEVE_NAME", "charlie_munger").strip() or "charlie_munger"
+# Risk-off stash: routes to CASH when no active stash sleeve is available.
+# Set STASH_SLEEVE_NAME env var to re-enable sleeve-based stashing.
+STASH_SLEEVE_NAME = os.getenv("STASH_SLEEVE_NAME", "CASH").strip() or "CASH"
 try:
     RISK_OFF_STASH_PCT = float(os.getenv("RISK_OFF_STASH_PCT", "1.0"))
 except Exception:

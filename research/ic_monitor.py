@@ -1,7 +1,11 @@
 """
 research/ic_monitor.py
 ======================
-Rolling Information Coefficient (IC) monitor for Sleeve 1 signals.
+Rolling Information Coefficient (IC) monitor for Sleeve Trend signals.
+
+Reads signal snapshots written to signals/<date>.json by daily_quant_report.py.
+These snapshots are populated by Sleeve Trend — the active live trading engine
+that drives Alpaca order execution.
 
 The IC is the Pearson correlation between the composite signal on day T
 and the actual 1-day forward return on day T+1.  A persistently positive
