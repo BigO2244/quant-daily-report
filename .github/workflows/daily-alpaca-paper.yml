@@ -50,12 +50,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore canonical model snapshot artifact (best effort)
-        uses: actions/download-artifact@v4
+      - name: Restore canonical model snapshot (cache)
+        uses: actions/cache@v4
         with:
-          name: canonical-model-snapshot
-          path: outputs
-        continue-on-error: true
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v1
+          restore-keys: |
+            canonical-model-snapshot-v1
 
       - name: Debug trigger + inputs
         shell: bash
