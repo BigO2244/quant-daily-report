@@ -50,6 +50,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore canonical model snapshot artifact (best effort)
+        uses: actions/download-artifact@v4
+        with:
+          name: canonical-model-snapshot
+          path: outputs
+        continue-on-error: true
+
       - name: Debug trigger + inputs
         shell: bash
         run: |
@@ -221,6 +228,15 @@ jobs:
           mkdir -p "outputs/runs/${RUN_ID}/logs"
           cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
           exit "$status"
+
+      - name: Upload canonical model snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-model-snapshot
+          if-no-files-found: warn
+          path: |
+            outputs/paper_state/canonical_positions.json
 
       - name: Upload outputs
         if: always()
