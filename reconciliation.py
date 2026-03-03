@@ -644,3 +644,51 @@ def bootstrap_model_ledger_from_broker(
         logger.error("[BOOTSTRAP] Bootstrap failed: %s", e)
         return False
 
+
+def refresh_canonical_snapshot_from_broker(
+    trading_mode: str,
+    run_date: str | None = None,
+) -> bool:
+    """
+    Refresh canonical model snapshot from current broker positions.
+    Should be called after successful order execution to align model state with broker reality.
+    
+    Args:
+        trading_mode: The trading mode (e.g., "alpaca")
+        run_date: Optional run date for logging
+    
+    Returns:
+        True if refresh succeeded, False otherwise.
+    """
+    if str(trading_mode or "").strip().lower() != "alpaca":
+        logger.warning(
+            "[POSTTRADE] Canonical refresh only supported in alpaca mode, got %s",
+            trading_mode,
+        )
+        return False
+    
+    try:
+        broker_snapshot = _load_broker_snapshot(trading_mode)
+        positions = broker_snapshot.get("positions") or {}
+        cash = broker_snapshot.get("cash")
+        equity = broker_snapshot.get("equity")
+        
+        # Write canonical model snapshot
+        _write_canonical_model_snapshot(
+            positions=positions,
+            cash=cash,
+            equity=equity,
+            reason="posttrade_refresh_from_broker",
+        )
+        
+        logger.info(
+            "[POSTTRADE] Refreshed canonical snapshot from broker: positions=%d cash=%s equity=%s run_date=%s",
+            len(positions),
+            cash,
+            equity,
+            run_date or "n/a",
+        )
+        return True
+    except Exception as e:
+        logger.warning("[POSTTRADE] Failed to refresh canonical snapshot: %s", e)
+        return False

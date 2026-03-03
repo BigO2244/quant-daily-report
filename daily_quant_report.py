@@ -61,6 +61,7 @@ from reconciliation import (
     ensure_sent_ledger_exists,
     post_trade_validate,
     pre_trade_reconcile_or_exit,
+    refresh_canonical_snapshot_from_broker,
 )
 
 from sleeves.sleeve_trend.build_sleeve_output import build_trend_sleeve_output
@@ -4357,6 +4358,11 @@ def main(argv: list[str] | None = None):
                 signals_path_exec,
             )
             if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+                # Refresh canonical snapshot from broker to ensure model matches reality after execution
+                refresh_canonical_snapshot_from_broker(
+                    trading_mode=trading_mode_norm,
+                    run_date=trade_date_str,
+                )
                 post_trade_validate(
                     run_date=trade_date_str,
                     trading_mode=trading_mode_norm,
