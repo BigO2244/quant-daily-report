@@ -1,0 +1,21 @@
+{
+  "cash": 91911.93,
+  "equity": 99853.01,
+  "position_count": 12,
+  "positions": {
+    "ADI": 2.0,
+    "FDX": 2.0,
+    "GLW": 2.0,
+    "JCI": 3.0,
+    "JNJ": 2.0,
+    "KMI": 30.0,
+    "MNST": 10.0,
+    "MO": 7.0,
+    "MRK": 3.0,
+    "ROST": 4.0,
+    "WBD": 34.0,
+    "WMB": 12.0
+  },
+  "reason": "bootstrap_from_broker",
+  "timestamp_utc": "2026-03-03T16:14:07.033926+00:00"
+}
