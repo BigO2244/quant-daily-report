@@ -38,7 +38,9 @@ jobs:
 
       # If user passed an override date via workflow_dispatch
       REPORT_DATE: ${{ inputs.report_date }}
-      BOOTSTRAP_MODEL_LEDGER_FROM_BROKER: ${{ inputs.bootstrap_model_ledger_from_broker }}
+
+      # Bootstrap only allowed via workflow_dispatch; never via schedule
+      BOOTSTRAP_MODEL_LEDGER_FROM_BROKER: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_model_ledger_from_broker || 'false' }}
 
       # Ensure date calculations use Eastern if REPORT_DATE isn't provided
       TZ: America/New_York
@@ -48,8 +50,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug trigger + inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "event_name=${{ github.event_name }}"
+          echo "report_date_input='${{ inputs.report_date }}'"
+          echo "bootstrap_input='${{ inputs.bootstrap_model_ledger_from_broker }}'"
+          echo "BOOTSTRAP_MODEL_LEDGER_FROM_BROKER='${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER}'"
+          echo "REPORT_DATE='${REPORT_DATE}'"
+          echo "TZ='${TZ}'"
+
       - name: Set run metadata
         id: set_meta
+        shell: bash
         run: |
           set -euxo pipefail
           if [ -z "${REPORT_DATE:-}" ]; then
@@ -67,6 +81,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        shell: bash
         run: |
           python -m venv .venv
           source .venv/bin/activate
@@ -74,6 +89,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Alpaca smoke test (non-fatal)
+        shell: bash
         run: |
           source .venv/bin/activate
           python3 alpaca_smoke_test.py || true
@@ -84,6 +100,7 @@ jobs:
           ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
           ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
           ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+        shell: bash
         run: |
           .venv/bin/python - <<'PY'
           import os
@@ -108,13 +125,9 @@ jobs:
               },
           )
           ctx = ssl.create_default_context()
-          try:
-              with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
-                  body = resp.read().decode("utf-8", errors="replace")
-                  print("GET", url, "->", resp.status, body[:200])
-          except Exception as e:
-              print("GET", url, "-> EXC", repr(e))
-              raise
+          with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+              body = resp.read().decode("utf-8", errors="replace")
+              print("GET", url, "->", resp.status, body[:200])
           PY
 
       - name: Verify Alpaca env presence (no values)
@@ -148,7 +161,6 @@ jobs:
           grep -q "\[DIAG\]\[CURL\] HTTP code: 200" outputs/diag_alpaca_auth.log
           grep -q "\[DIAG\]\[PY\] OK" outputs/diag_alpaca_auth.log
 
-
       - name: Check critical env vars (SET/MISSING only, no values)
         shell: bash
         run: |
@@ -173,8 +185,7 @@ jobs:
                   all_set = False
           if not all_set:
               print("\n[ENV_CHECK][ERROR] Some critical env vars are missing!")
-              import sys
-              sys.exit(1)
+              raise SystemExit(1)
           print("\n[ENV_CHECK][OK] All critical env vars are set")
           PY
 
@@ -194,6 +205,7 @@ jobs:
           fi
 
       - name: Run daily quant execution
+        shell: bash
         run: |
           set -euxo pipefail
           source .venv/bin/activate
@@ -250,6 +262,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        shell: bash
         run: |
           python -m venv .venv
           source .venv/bin/activate
