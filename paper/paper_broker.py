@@ -1229,24 +1229,35 @@ def run_paper_day(
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
-    mode = cfg.trading_mode
+    # Mode resolution: env MODE overrides config, then fall back to config
+    cfg_mode = str(cfg.trading_mode).strip().lower()
     env_mode = str(os.getenv("MODE", "")).strip().lower()
-    env_trading_mode = str(os.getenv("TRADING_MODE", mode)).strip().lower()
-    allowed_modes = {"", "paper", "shadow", "alpaca", "live"}
-    if env_mode not in allowed_modes:
+    env_trading_mode = str(os.getenv("TRADING_MODE", "")).strip().lower()
+    
+    allowed_modes = {"paper", "shadow", "alpaca", "live"}
+    
+    # Validate all mode inputs
+    if cfg_mode not in allowed_modes:
+        raise RuntimeError(f"Unsupported config trading_mode={cfg_mode}")
+    if env_mode and env_mode not in allowed_modes:
         raise RuntimeError(f"Unsupported MODE={env_mode}")
-    if env_trading_mode not in allowed_modes - {""}:
+    if env_trading_mode and env_trading_mode not in allowed_modes:
         raise RuntimeError(f"Unsupported TRADING_MODE={env_trading_mode}")
-    alpaca_requested = "alpaca" in {mode, env_mode, env_trading_mode}
-
-    if mode == "live":
+    
+    # Determine effective mode: MODE env var takes precedence over config
+    effective_mode = env_mode if env_mode else cfg_mode
+    
+    # Reject live mode
+    if effective_mode == "live":
         raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
-    if mode not in {"paper", "shadow", "alpaca"}:
-        raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
-    if alpaca_requested and mode != "alpaca":
-        raise RuntimeError(
-            f"[INVARIANT] Alpaca requested via MODE/TRADING_MODE but broker mode resolved to {mode}"
-        )
+    
+    # Ensure effective mode is allowed at runtime
+    if effective_mode not in {"paper", "shadow", "alpaca"}:
+        raise RuntimeError(f"Unsupported effective TRADING_MODE={effective_mode}")
+    
+    # Use effective_mode for the rest of the function
+    mode = effective_mode
+    alpaca_requested = (mode == "alpaca")
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
 
@@ -1268,12 +1279,23 @@ def run_paper_day(
     plan_only = bool(plan_only or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"})
 
     # Weekend pause — skip order submission on Sat/Sun
+    # Early return BEFORE loading targets/signals to avoid failures on empty signals
     is_weekend = _is_weekend_et(now_et)
-    if is_weekend:
+    if is_weekend and not force:
         logger.info(
             "[WEEKEND_PAUSE] Skipping order submission — current day is %s (ET)",
             now_et.strftime("%A")
         )
+        return {
+            "execution_enabled": False,
+            "execution_status": "SKIPPED_WEEKEND",
+            "mode": mode,
+            "trading_mode": mode,
+            "run_date": run_date,
+            "orders": [],
+            "turnover": 0.0,
+            "trades": pd.DataFrame(),
+        }
 
     # Sync holdings from Alpaca broker for weekday paper/alpaca runs
     # This ensures SELLs are generated when broker has positions not in targets

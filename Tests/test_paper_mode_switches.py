@@ -17,8 +17,8 @@ def test_weekend_pause_saturday(monkeypatch):
     """Test that weekend pause blocks execution on Saturday."""
     from paper import paper_broker
     
-    # Saturday at 10 AM ET
-    saturday_et = dt.datetime(2026, 3, 8, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+    # Saturday at 10 AM ET (March 7, 2026 is Saturday)
+    saturday_et = dt.datetime(2026, 3, 7, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
     
     assert paper_broker._is_weekend_et(saturday_et) is True
 
@@ -27,8 +27,8 @@ def test_weekend_pause_sunday(monkeypatch):
     """Test that weekend pause blocks execution on Sunday."""
     from paper import paper_broker
     
-    # Sunday at 10 AM ET
-    sunday_et = dt.datetime(2026, 3, 9, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+    # Sunday at 10 AM ET (March 8, 2026 is Sunday)
+    sunday_et = dt.datetime(2026, 3, 8, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
     
     assert paper_broker._is_weekend_et(sunday_et) is True
 
@@ -199,8 +199,8 @@ def test_weekend_execution_status_is_skipped(tmp_path, monkeypatch):
     # Create minimal signals file
     signals_path = tmp_path / "signals.json"
     signals_path.write_text(json.dumps({
-        "date": "2026-03-08",
-        "asof_date": "2026-03-07",
+        "date": "2026-03-07",
+        "asof_date": "2026-03-06",
         "positions": []
     }))
     
@@ -212,8 +212,8 @@ def test_weekend_execution_status_is_skipped(tmp_path, monkeypatch):
     trades_path = tmp_path / "trades.csv"
     trades_path.write_text("date,ticker,sleeve,side,shares,price,slippage_cost,notional,reason\n")
     
-    # Saturday in ET
-    saturday_et = dt.datetime(2026, 3, 8, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+    # Saturday in ET (March 7, 2026 is Saturday)
+    saturday_et = dt.datetime(2026, 3, 7, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
     
     # Mock AlpacaBroker to avoid real API calls
     class MockAlpaca:
@@ -232,7 +232,7 @@ def test_weekend_execution_status_is_skipped(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_broker, "fetch_prev_closes_yfinance", lambda tickers, asof_date: pd.DataFrame())
     
     result = paper_broker.run_paper_day(
-        run_date="2026-03-08",
+        run_date="2026-03-07",
         signals_path=str(signals_path),
         ledger_path=str(ledger_path),
         trades_path=str(trades_path),
