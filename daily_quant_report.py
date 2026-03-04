@@ -107,6 +107,12 @@ logger = logging.getLogger(__name__)
 # Backward-compatible alias for tests/patch points
 calc_alpha_stats = compute_alpha_attribution
 # ============================================================
+# Trading mode config
+# ============================================================
+# Default trading mode if TRADING_MODE env var is not set
+# "paper" = paper trading with Alpaca, "shadow" = planning only
+DEFAULT_TRADING_MODE = "paper"
+# ============================================================
 # Output config
 # ============================================================
 OUTPUT_DIR = "outputs/daily"
@@ -1202,7 +1208,7 @@ def build_execution_email_payload(
     daily_snapshot: dict,
     paper_summary: dict | None,
 ) -> dict:
-    mode = (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")
+    mode = (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
     mode = str(mode).upper()
     if mode == "LIVE":
         return {
@@ -1455,9 +1461,18 @@ def build_execution_email_payload(
             max_position_weight = None
 
     position_count = len(exposure_map) if exposure_map else (len(holdings) if holdings else None)
+    
+    # Format turnover_cap - if infinite, show as Disabled
+    if turnover_cap is None:
+        turnover_cap_display = "unavailable"
+    elif math.isinf(turnover_cap):
+        turnover_cap_display = "Disabled (∞)"
+    else:
+        turnover_cap_display = f"${turnover_cap:,.2f}"
+    
     risk_summary = {
         "Turnover requested ($)": f"${turnover_requested:,.2f}" if turnover_requested is not None else "unavailable",
-        "Turnover cap ($)": f"${turnover_cap:,.2f}" if turnover_cap is not None else "unavailable",
+        "Turnover cap ($)": turnover_cap_display,
         "Turnover scale": f"{turnover_scale:.4f}" if turnover_scale is not None else "unavailable",
         "Executed turnover ($)": f"${turnover_dollars:,.2f}" if turnover_dollars is not None else "unavailable",
         "Executed turnover (%)": f"{turnover_pct * 100:.2f}%" if turnover_pct is not None else "unavailable",
@@ -1639,7 +1654,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     def _trades_today(sleeve_name: str) -> str:
         count = len([o for o in orders if o.get("sleeve") == sleeve_name])
         return "NONE" if count == 0 else str(count)
-    raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", "SHADOW")).upper()
+    raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper()
     env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
     exec_trades = (execution_payload or {}).get("trades", []) or []
     intent_from_payload = (execution_payload or {}).get("proposed_trades_intent_count") if execution_payload else None
@@ -3651,8 +3666,8 @@ def _normalize_exec_mode(value: str | None, default: str) -> str:
 
 def _resolve_exec_modes() -> tuple[str, str, bool]:
     raw_mode = os.getenv("MODE")
-    raw_trading_mode = os.getenv("TRADING_MODE", "shadow")
-    trading_mode_norm = _normalize_exec_mode(raw_trading_mode, "shadow")
+    raw_trading_mode = os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+    trading_mode_norm = _normalize_exec_mode(raw_trading_mode, DEFAULT_TRADING_MODE)
     mode_norm = _normalize_exec_mode(raw_mode, trading_mode_norm)
     allowed_modes = {"paper", "shadow", "alpaca", "live"}
     if mode_norm not in allowed_modes:
@@ -4284,7 +4299,7 @@ def main(argv: list[str] | None = None):
     paper_summary = None
     paper_html = ""
     sent_ledger_removed = 0
-    sent_ledger_path = "outputs/shadow_orders/orders_sent.csv"
+    sent_ledger_path = "outputs/orders_sent/orders_sent.csv"
     ensure_sent_ledger_exists(sent_ledger_path)
     paper_ledger_path, paper_trades_path = ensure_paper_state_files()
     reset_info = None
@@ -4436,7 +4451,7 @@ def main(argv: list[str] | None = None):
                 benchmark_ticker="SPY",
                 reconciliation=paper_summary,
                 shadow_status={
-                    "trading_mode": (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow").upper(),
+                    "trading_mode": (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE).upper(),
                     "market_status": market_status,
                     "market_guard": (paper_summary or {}).get("market_guard"),
                     "orders_generated": len((paper_summary or {}).get("shadow_orders", []) or []),
@@ -4500,7 +4515,7 @@ def main(argv: list[str] | None = None):
     integrity = {
         "trade_date": trade_date_str,
         "asof_date": str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str)),
-        "mode": str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper(),
+        "mode": str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
         "execution_status": execution_payload.get("execution_status"),
         "halt_reason": execution_payload.get("halt_reason"),
         "payload_path_written": execution_payload_path,
@@ -4524,7 +4539,7 @@ def main(argv: list[str] | None = None):
         ledger2_error = None
         asof_date = integrity["asof_date"]
         ledger_run_id = str(uuid.uuid4())
-        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", "shadow")).upper()
+        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper()
         signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
         try:
             Path("outputs/ledger").mkdir(parents=True, exist_ok=True)

@@ -88,7 +88,7 @@ class PaperConfig:
     halt_on_data_error: bool = True
     require_benchmark_price: bool = True
     cash_target_weight_default: float = 0.0
-    sent_ledger_path: str = "outputs/shadow_orders/orders_sent.csv"
+    sent_ledger_path: str = "outputs/orders_sent/orders_sent.csv"
 
 
 def load_config(path: str) -> PaperConfig:
@@ -1210,6 +1210,12 @@ def _current_et(now_utc: dt.datetime | None = None) -> dt.datetime:
     return now_utc.astimezone(ZoneInfo("America/New_York"))
 
 
+def _is_weekend_et(now_et: dt.datetime) -> bool:
+    """Check if current time is Saturday or Sunday in ET timezone."""
+    weekday = now_et.weekday()  # Monday = 0, Sunday = 6
+    return weekday in (5, 6)  # Saturday = 5, Sunday = 6
+
+
 def run_paper_day(
     run_date: str,
     signals_path: str,
@@ -1260,6 +1266,35 @@ def run_paper_day(
 
     now_et = now_et.astimezone(ZoneInfo("America/New_York"))
     plan_only = bool(plan_only or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"})
+
+    # Weekend pause — skip order submission on Sat/Sun
+    is_weekend = _is_weekend_et(now_et)
+    if is_weekend:
+        logger.info(
+            "[WEEKEND_PAUSE] Skipping order submission — current day is %s (ET)",
+            now_et.strftime("%A")
+        )
+
+    # Sync holdings from Alpaca broker for weekday paper/alpaca runs
+    # This ensures SELLs are generated when broker has positions not in targets
+    if mode in {"paper", "alpaca"} and not is_weekend:
+        try:
+            alpaca = AlpacaBroker.from_env()
+            broker_positions = alpaca.get_positions()
+            if broker_positions:
+                broker_holdings_df, _ = _alpaca_positions_to_holdings(broker_positions, "main")
+                if not broker_holdings_df.empty:
+                    logger.info(
+                        "[HOLDINGS_SYNC] Synced %d positions from Alpaca broker",
+                        len(broker_holdings_df)
+                    )
+                    # Replace holdings_prev with broker positions for diff engine
+                    holdings_prev = broker_holdings_df[["ticker", "shares"]].copy()
+        except Exception as exc:
+            logger.warning(
+                "[HOLDINGS_SYNC] Failed to sync from Alpaca broker: %s (continuing with ledger holdings)",
+                exc
+            )
 
     mkt = market_session_status(run_date=run_date, now_et=now_et, cutoff_time_et=cfg.market_cutoff_time_et)
     market_allow = bool(mkt.is_open_now)
@@ -1536,14 +1571,15 @@ def run_paper_day(
     sent_ledger_path: str = cfg.sent_ledger_path
     alpaca_account_snapshot: Dict[str, object] | None = None
     alpaca_positions_snapshot: List[Dict[str, object]] = []
-    execution_enabled = bool(mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only and not blocked)
+    execution_enabled = bool(mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only and not blocked and not is_weekend)
     logger.info(
-        "[EXEC_GATE] mode=%s allow=%s market_open=%s plan_only=%s blocked=%s reason=%s",
+        "[EXEC_GATE] mode=%s allow=%s market_open=%s plan_only=%s blocked=%s is_weekend=%s reason=%s",
         mode,
         execution_enabled,
         bool(mkt.is_open_now),
         bool(plan_only),
         bool(blocked),
+        bool(is_weekend),
         mkt.reason,
     )
 
@@ -1974,7 +2010,12 @@ def run_paper_day(
         "position_reconciliation": position_recon,
         "blocked_reasons": blocked_reasons,
         "blocked_tickers": blocked_tickers,
-        "execution_status": "HALTED" if blocked else ("PLANNED" if (plan_only or not mkt.is_open_now) else "READY"),
+        "execution_status": (
+            "SKIPPED_WEEKEND" if is_weekend
+            else "HALTED" if blocked
+            else "PLANNED" if (plan_only or not mkt.is_open_now)
+            else "READY"
+        ),
         "execution_trades": (
             execution_trades[["ticker", "side", "shares", "price", "notional", "reason"]].to_dict("records")
             if execution_trades is not None and not execution_trades.empty

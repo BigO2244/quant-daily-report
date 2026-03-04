@@ -4,7 +4,7 @@
   "execution": {
     "price": "next_open",
     "slippage_bps": 5,
-    "sent_ledger_path": "outputs/shadow_orders/orders_sent_TEST.csv"
+    "sent_ledger_path": "outputs/orders_sent/orders_sent_TEST.csv"
   },
   "constraints": {
     "allow_fractional_shares": true,
@@ -24,7 +24,7 @@
     "require_benchmark_price": true
   },
   "risk": {
-    "max_turnover_pct": 0.0,
+    "max_turnover_pct": 0.75,
     "max_trades_per_day": 10,
     "max_position_change_pct": 0.15,
     "action": "scale_down"
