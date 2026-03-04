@@ -70,9 +70,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: outputs/paper_state/canonical_positions.json
-          key: canonical-model-snapshot-v1-${{ github.run_id }}
+          # Stable key: overwrites the single cache entry each run so there is always exactly
+          # one canonical snapshot and restore-keys never need to guess.  A per-run key
+          # (e.g. appending github.run_id) creates unbounded entries that GitHub evicts after
+          # 7 days, which would cause reconciliation to fail after any 5-day gap.
+          key: canonical-model-snapshot-v1
           restore-keys: |
-            canonical-model-snapshot-v1-
+            canonical-model-snapshot-v1
 
       - name: Debug trigger + inputs
         shell: bash
@@ -284,7 +288,23 @@ jobs:
           fi
           
           echo "[AUTO_BOOTSTRAP] PRETRADE reconciliation failure detected (exit code 2)"
-          
+
+          # Safety sentinel: exit code 2 is a general POSIX error code, not exclusively
+          # produced by pre-trade reconciliation.  Before triggering any broker API call
+          # or snapshot write, confirm the reconciliation report file was actually written
+          # by the reconciliation module.  If it is absent, a different code path produced
+          # the exit 2 (e.g. argparse misuse, library error) and bootstrapping would
+          # silently overwrite a correct canonical snapshot with stale or empty broker data.
+          recon_sentinel="outputs/broker/recon_pretrade_${REPORT_DATE:-unknown}.json"
+          if [ ! -f "$recon_sentinel" ]; then
+            echo "[AUTO_BOOTSTRAP][SAFETY] Sentinel not found: $recon_sentinel"
+            echo "[AUTO_BOOTSTRAP][SAFETY] exit code 2 did NOT originate from pre-trade reconciliation"
+            echo "[AUTO_BOOTSTRAP][SAFETY] Refusing to bootstrap — manual investigation required"
+            echo "[AUTO_BOOTSTRAP][SAFETY] Check outputs/ci_alpaca_run.log for the actual failure cause"
+            exit 2
+          fi
+          echo "[AUTO_BOOTSTRAP] Sentinel confirmed: $recon_sentinel"
+
           # Check if auto-bootstrap is enabled via repo variable (default: disabled)
           auto_bootstrap="${{ vars.AUTO_BOOTSTRAP_ON_RECON_FAIL || '0' }}"
           echo "[AUTO_BOOTSTRAP] AUTO_BOOTSTRAP_ON_RECON_FAIL setting: $auto_bootstrap"
@@ -384,7 +404,8 @@ print(f"[AUTO_BOOTSTRAP] Execution email payload written: {out_path}")
         uses: actions/cache/save@v4
         with:
           path: outputs/paper_state/canonical_positions.json
-          key: canonical-model-snapshot-v1-${{ github.run_id }}
+          # Must match the restore key so this overwrites the previous entry in-place.
+          key: canonical-model-snapshot-v1
         continue-on-error: true
 
       - name: List files before upload
@@ -422,6 +443,7 @@ print(f"[AUTO_BOOTSTRAP] Execution email payload written: {out_path}")
 
   email:
     needs: engine_run
+    if: always()   # must run even when engine_run fails (recon failure, auto-bootstrap) so operator is always notified
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
