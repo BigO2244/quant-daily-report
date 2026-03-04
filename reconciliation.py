@@ -619,8 +619,25 @@ def bootstrap_model_ledger_from_broker(
         equity = broker_snapshot.get("equity")
         
         if not positions:
-            logger.warning("[BOOTSTRAP] Broker has no positions, bootstrap would be empty")
-        
+            # Distinguish between a legitimately flat account and a silent API failure.
+            # If equity > $100 but the position list is empty, the broker almost certainly
+            # returned an error or a partial response.  Writing an empty canonical snapshot
+            # in that scenario would cause the next run to start ordering from a blank slate
+            # against an account that still holds real positions.
+            if equity is not None and float(equity) > 100.0:
+                logger.error(
+                    "[BOOTSTRAP] Broker reports 0 positions but equity=%.2f — "
+                    "possible API error or partial response; refusing to write empty snapshot. "
+                    "Verify broker connectivity and retry.",
+                    float(equity),
+                )
+                return False
+            logger.warning(
+                "[BOOTSTRAP] Broker has no positions and equity=%s; "
+                "bootstrapping an empty (flat-account) snapshot.",
+                equity,
+            )
+
         # Write canonical model snapshot
         _write_canonical_model_snapshot(
             positions=positions,
