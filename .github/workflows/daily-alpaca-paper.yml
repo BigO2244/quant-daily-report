@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      run_id: ${{ steps.set_meta.outputs.run_id }}
       report_date: ${{ steps.set_meta.outputs.report_date }}
 
     env:
@@ -95,13 +94,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "[META] run_id='${{ steps.set_meta.outputs.run_id }}' report_date='${{ steps.set_meta.outputs.report_date }}'"
-          if [ -z "${{ steps.set_meta.outputs.run_id }}" ]; then
-            echo "[META][ERROR] run_id is empty"
-            exit 1
-          fi
+          echo "[META] report_date='${{ steps.set_meta.outputs.report_date }}' run_id='${RUN_ID}'"
           if [ -z "${{ steps.set_meta.outputs.report_date }}" ]; then
             echo "[META][ERROR] report_date is empty"
+            exit 1
+          fi
+          if [ -z "${RUN_ID:-}" ]; then
+            echo "[META][ERROR] RUN_ID env is empty"
             exit 1
           fi
           echo "[META][OK] All metadata outputs validated"
@@ -279,10 +278,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: alpaca-paper-${{ env.REPORT_DATE }}-${{ steps.set_meta.outputs.run_id }}
+          name: alpaca-paper
           if-no-files-found: warn
           path: |
             outputs/runs/${{ steps.set_meta.outputs.run_id }}/
+            outputs/paper_state/canonical_positions.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
 
   email:
@@ -292,7 +292,6 @@ jobs:
     continue-on-error: true
     env:
       REPORT_DATE: ${{ needs.engine_run.outputs.report_date }}
-      RUN_ID: ${{ needs.engine_run.outputs.run_id }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -315,22 +314,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "[EMAIL_META] report_date='${REPORT_DATE}' run_id='${RUN_ID}'"
-          if [ -z "${RUN_ID}" ]; then
-            echo "[EMAIL_META][ERROR] RUN_ID is empty"
-            exit 1
-          fi
+          echo "[EMAIL_META] report_date='${REPORT_DATE}'"
           if [ -z "${REPORT_DATE}" ]; then
             echo "[EMAIL_META][ERROR] REPORT_DATE is empty"
             exit 1
           fi
-          echo "[EMAIL_META][OK] Artifact name will be: alpaca-paper-${REPORT_DATE}-${RUN_ID}"
+          echo "[EMAIL_META][OK] Artifact name will be: alpaca-paper"
 
       - name: Download engine artifacts
         uses: actions/download-artifact@v4
         with:
-          name: alpaca-paper-${{ needs.engine_run.outputs.report_date }}-${{ needs.engine_run.outputs.run_id }}
+          name: alpaca-paper
           path: downloaded
+
+      - name: Infer RUN_ID from downloaded artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_DIR="$(find downloaded -type d -path '*/runs/*' | grep -E '/runs/[^/]+$' | head -n 1 || true)"
+          if [ -z "$RUN_DIR" ]; then
+            echo "[EMAIL][ERROR] Could not find downloaded/**/runs/<RUN_ID>/"
+            find downloaded -maxdepth 6 -type f -print || true
+            exit 1
+          fi
+          RUN_ID="$(basename "$RUN_DIR")"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "[EMAIL_META] inferred RUN_ID=$RUN_ID"
 
       - name: Set up Python
         uses: actions/setup-python@v5
