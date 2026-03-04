@@ -1,5 +1,14 @@
 name: Daily Alpaca Paper Run
 
+# Auto-Bootstrap Feature:
+# When PRETRADE reconciliation fails (broker/model position drift), the workflow can
+# automatically refresh the canonical model snapshot from broker positions.
+# - Controlled by repo variable: AUTO_BOOTSTRAP_ON_RECON_FAIL (default: 0 = disabled)
+# - When enabled: auto-bootstraps, sends email with drift details, next run succeeds
+# - When disabled: workflow fails with exit 2, requires manual bootstrap via workflow_dispatch
+# - Safety: Never places orders when drift detected
+# - See docs/OPERATIONS.md for full details
+
 on:
   workflow_dispatch:
     inputs:
@@ -61,9 +70,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: outputs/paper_state/canonical_positions.json
-          key: canonical-model-snapshot-v1
+          key: canonical-model-snapshot-v1-${{ github.run_id }}
           restore-keys: |
-            canonical-model-snapshot-v1
+            canonical-model-snapshot-v1-
 
       - name: Debug trigger + inputs
         shell: bash
@@ -250,7 +259,133 @@ jobs:
           fi
           mkdir -p "outputs/runs/${RUN_ID}/logs"
           cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
+          echo "$status" > outputs/exit_status.txt
           exit "$status"
+
+      - name: Auto-bootstrap on reconciliation failure (if enabled)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          # Read the exit status from previous step
+          if [ ! -f outputs/exit_status.txt ]; then
+            echo "[AUTO_BOOTSTRAP] No exit status file found; skipping auto-bootstrap check"
+            exit 0
+          fi
+          
+          exit_status=$(cat outputs/exit_status.txt)
+          echo "[AUTO_BOOTSTRAP] Previous step exit status: $exit_status"
+          
+          # Exit code 2 means PRETRADE reconciliation failed
+          if [ "$exit_status" != "2" ]; then
+            echo "[AUTO_BOOTSTRAP] Exit status is not 2 (recon FAIL); skipping auto-bootstrap"
+            exit 0
+          fi
+          
+          echo "[AUTO_BOOTSTRAP] PRETRADE reconciliation failure detected (exit code 2)"
+          
+          # Check if auto-bootstrap is enabled via repo variable (default: disabled)
+          auto_bootstrap="${{ vars.AUTO_BOOTSTRAP_ON_RECON_FAIL || '0' }}"
+          echo "[AUTO_BOOTSTRAP] AUTO_BOOTSTRAP_ON_RECON_FAIL setting: $auto_bootstrap"
+          
+          if [ "$auto_bootstrap" != "1" ] && [ "$auto_bootstrap" != "true" ]; then
+            echo "[AUTO_BOOTSTRAP] Auto-bootstrap is DISABLED; workflow will fail with exit 2"
+            echo "[AUTO_BOOTSTRAP] To enable: Set repository variable AUTO_BOOTSTRAP_ON_RECON_FAIL=1"
+            echo "[AUTO_BOOTSTRAP] Or manually run with workflow_dispatch input: bootstrap_model_ledger_from_broker=true"
+            exit 2
+          fi
+          
+          echo "[AUTO_BOOTSTRAP] Auto-bootstrap is ENABLED; attempting to bootstrap canonical snapshot from broker..."
+          
+          # Activate venv and run bootstrap
+          source .venv/bin/activate
+          
+          if python3 daily_quant_report.py --bootstrap-model-ledger-from-broker 2>&1 | tee -a outputs/ci_alpaca_run.log; then
+            echo "[AUTO_BOOTSTRAP][SUCCESS] Canonical snapshot refreshed from broker positions"
+            echo "[AUTO_BOOTSTRAP] Next scheduled run should pass PRETRADE reconciliation"
+            
+            # Update run log with bootstrap success
+            mkdir -p "outputs/runs/${RUN_ID}/logs"
+            cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
+            
+            # Create a marker file to indicate auto-bootstrap was triggered
+            echo "{\"auto_bootstrap_triggered\": true, \"reason\": \"pretrade_recon_fail\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "outputs/runs/${RUN_ID}/auto_bootstrap.json"
+            
+            # Create execution email payload with recon failure info
+            echo "[AUTO_BOOTSTRAP] Creating execution email payload with recon failure info..."
+            mkdir -p "outputs/execution_email"
+            
+            # Try to read recon report for details
+            recon_report_path="outputs/broker/recon_pretrade_${REPORT_DATE}.json"
+            export recon_data="{}"
+            if [ -f "$recon_report_path" ]; then
+              echo "[AUTO_BOOTSTRAP] Found recon report: $recon_report_path"
+              recon_data=$(cat "$recon_report_path" | python3 -c "import json, sys; data = json.load(sys.stdin); print(json.dumps({'verdict': data.get('verdict'), 'diffs': data.get('diffs')}))" 2>/dev/null || echo "{}")
+              export recon_data
+            else
+              echo "[AUTO_BOOTSTRAP] Recon report not found at $recon_report_path"
+            fi
+            
+            # Create execution email payload with recon failure info
+            mkdir -p "outputs/execution_email"
+            python3 -c '
+import json, os
+from pathlib import Path
+
+report_date = os.environ["REPORT_DATE"]
+run_id = os.environ["RUN_ID"]
+recon_data_str = os.environ.get("recon_data", "{}")
+
+try:
+    recon_data = json.loads(recon_data_str)
+except:
+    recon_data = {}
+
+payload = {
+    "trade_date": report_date,
+    "mode": "ALPACA",
+    "execution_status": "HALTED",
+    "halt_reason": "PRETRADE RECONCILIATION FAILED — AUTO BOOTSTRAP TRIGGERED",
+    "status_label": "RECON_FAIL_AUTO_BOOTSTRAP",
+    "status_reason": "Broker/model positions diverged; canonical snapshot auto-refreshed from broker. Next run should succeed.",
+    "trades": [],
+    "run_id": run_id,
+    "order_ids": [],
+    "auto_bootstrap_triggered": True,
+    "recon_failure": True,
+    "recon_verdict": recon_data.get("verdict", "FAIL"),
+    "recon_diffs": recon_data.get("diffs", {}),
+    "market_status": "CLOSED",
+    "execution_notes": [
+        "⚠️ NO TRADES SENT — PRETRADE RECONCILIATION FAILED",
+        "Auto-bootstrap refreshed canonical model snapshot from broker positions.",
+        "Next scheduled run should pass reconciliation and resume normal trading.",
+        "Review recon diffs below for details on position mismatches."
+    ]
+}
+
+out_path = Path("outputs/execution_email") / f"{report_date}.json"
+out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+print(f"[AUTO_BOOTSTRAP] Execution email payload written: {out_path}")
+'
+            
+            # Exit 0 to mark this run as "recovered" (not a hard failure)
+            exit 0
+          else
+            bootstrap_status=$?
+            echo "[AUTO_BOOTSTRAP][ERROR] Bootstrap failed with exit code: $bootstrap_status"
+            echo "[AUTO_BOOTSTRAP] Manual intervention required"
+            exit 1
+          fi
+
+      - name: Save updated canonical snapshot to cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v1-${{ github.run_id }}
+        continue-on-error: true
 
       - name: List files before upload
         if: always()
