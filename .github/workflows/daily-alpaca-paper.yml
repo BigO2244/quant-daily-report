@@ -366,12 +366,44 @@ jobs:
             echo "[EMAIL][WARN] execution payload not found for ${REPORT_DATE}"
           fi
 
+      - name: Guard email credentials (auto dry-run when missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in SMTP_USER SMTP_PASSWORD REPORT_TO_EMAIL; do
+            if [ -z "${!key:-}" ]; then
+              echo "[EMAIL][WARN] ${key} is empty"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "[EMAIL][WARN] Missing SMTP credentials/recipient; forcing EMAIL_DRY_RUN=1"
+            echo "EMAIL_DRY_RUN=1" >> "$GITHUB_ENV"
+            if [ -z "${SMTP_USER:-}" ]; then
+              echo "SMTP_USER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
+              echo "EMAIL_SENDER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
+            fi
+            if [ -z "${SMTP_PASSWORD:-}" ]; then
+              echo "SMTP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
+              echo "EMAIL_APP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
+            fi
+            if [ -z "${REPORT_TO_EMAIL:-}" ]; then
+              echo "REPORT_TO_EMAIL=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
+              echo "EMAIL_RECIPIENT=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
+            fi
+          fi
+
       - name: Send execution email from persisted payload
         shell: bash
         run: |
           set -euo pipefail
           source .venv/bin/activate
-          .venv/bin/python daily_trade_execution_email.py
+          cmd=(.venv/bin/python daily_trade_execution_email.py)
+          if [ "${EMAIL_DRY_RUN:-0}" = "1" ] || [ "${EMAIL_DRY_RUN:-}" = "true" ]; then
+            cmd+=(--dry-run)
+          fi
+          "${cmd[@]}"
 
       - name: Send snapshot email from persisted artifacts
         shell: bash
