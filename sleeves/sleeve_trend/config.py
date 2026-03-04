@@ -149,3 +149,31 @@ UNIVERSE_CSV = "data/universe.csv"
 # ============================================================
 
 BENCHMARK_TICKER = "SPY"  # S&P 500 ETF for beta/correlation
+
+# ============================================================
+# VIX REGIME DETECTION
+# ============================================================
+# VIX level boundaries that define four volatility regimes.
+# Thresholds are checked as: vix < VIX_LOW_THRESHOLD → LOW, etc.
+
+VIX_LOW_THRESHOLD      = 20   # Below 20  = low-vol / risk-on
+VIX_ELEVATED_THRESHOLD = 30   # 20–30     = elevated vol, cautious
+VIX_HIGH_THRESHOLD     = 40   # 30–40     = high vol, defensive
+                               # ≥ 40      = CRISIS, near-cash
+
+# Position-size scalar applied to every target_weight in the regime.
+# Undeployed capital (1 - scale) flows automatically to CASH.
+VIX_SCALE_LOW       = 1.00   # Full size
+VIX_SCALE_ELEVATED  = 0.75   # 75 % of normal
+VIX_SCALE_HIGH      = 0.50   # 50 % of normal
+VIX_SCALE_CRISIS    = 0.25   # 25 % of normal (near-cash)
+
+# Maximum simultaneous positions per regime.
+# Fewer positions in chaotic markets → higher-conviction, easier to exit.
+VIX_MAX_POSITIONS_LOW       = 10
+VIX_MAX_POSITIONS_ELEVATED  =  7
+VIX_MAX_POSITIONS_HIGH      =  4
+VIX_MAX_POSITIONS_CRISIS    =  2
+
+# Fallback VIX level when yfinance fetch fails (conservative: ELEVATED).
+VIX_FETCH_FALLBACK = 25.0

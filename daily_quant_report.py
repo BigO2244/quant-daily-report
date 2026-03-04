@@ -4010,8 +4010,24 @@ def main(argv: list[str] | None = None):
             cm_reason,
             _inactive_input_hint(cm_details),
         )
+    # ── VIX regime detection (non-blocking) ──────────────────────
+    _vix_regime: dict | None = None
+    try:
+        from research.vix_regime import get_current_regime
+        _vix_regime = get_current_regime()
+        logger.info(
+            "[VIX_REGIME] Regime=%s  VIX=%.2f  scale=%.0f%%  max_pos=%d",
+            _vix_regime["regime"],
+            _vix_regime["vix"],
+            _vix_regime["position_scale"] * 100,
+            _vix_regime["max_positions"],
+        )
+    except Exception as _vix_err:
+        logger.warning("[VIX_REGIME] Skipped (defaulting to full deployment): %s", _vix_err)
+    # ─────────────────────────────────────────────────────────────
+
     # ── Extract sleeve outputs for dynamic allocation ─────────────
-    trend_output = build_trend_sleeve_output(st_signals, st_equity, top_n=10)
+    trend_output = build_trend_sleeve_output(st_signals, st_equity, top_n=10, regime=_vix_regime)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
     val_output = extract_sleeve_output(
         s2_equity,
@@ -4030,10 +4046,21 @@ def main(argv: list[str] | None = None):
     # ── Run dynamic allocation ────────────────────────────────────
     risk_off = os.getenv("RISK_OFF", "0").lower() in ("1", "true", "yes", "y")
 
+    # Regime-conditioned gross exposure target.
+    # In LOW regime (scale=1.0) we target full deployment.
+    # In HIGH/CRISIS regimes the allocator boosts only up to position_scale,
+    # routing the remainder to CASH — no options or short selling required.
+    _regime_gross_exp = (
+        float(_vix_regime["position_scale"])
+        if _vix_regime is not None
+        else DEFAULT_MIN_GROSS_EXPOSURE
+    )
+
     allocator = PortfolioAllocator(
         risk_off=risk_off,
         stash_sleeve_name="CASH",
         risk_off_stash_pct=0.0,
+        min_gross_exposure=_regime_gross_exp,
     )
 
     trend_output, cap_fill_diag = _expand_sleeve_holdings_for_cap(
