@@ -149,6 +149,8 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     turnover_note = payload.get("turnover_note")
     status_label = payload.get("status_label")
     status_reason = payload.get("status_reason")
+    recon_failure = bool(payload.get("recon_failure", False))
+    auto_bootstrap_triggered = bool(payload.get("auto_bootstrap_triggered", False))
 
     subject = f"TRADE EXECUTION — {trade_date} ({mode})"
 
@@ -160,6 +162,84 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     if status == "HALTED":
         suffix = f" — {reason}" if reason else ""
         lines.append(f"Execution Status: HALTED{suffix}")
+        
+        # If this is a recon failure with auto-bootstrap, show detailed info
+        if recon_failure:
+            lines.extend([
+                "",
+                "=" * 70,
+                "⚠️  NO TRADES SENT — PRETRADE RECONCILIATION FAILED  ⚠️",
+                "=" * 70,
+                "",
+            ])
+            
+            if auto_bootstrap_triggered:
+                lines.extend([
+                    "AUTO-RECOVERY ACTION TAKEN:",
+                    "✓ Canonical model snapshot auto-refreshed from broker positions",
+                    "✓ Next scheduled run should pass reconciliation",
+                    "✓ Normal trading will resume once positions sync",
+                    "",
+                ])
+            
+            recon_verdict = payload.get("recon_verdict", "FAIL")
+            recon_diffs = payload.get("recon_diffs", {}) or {}
+            
+            lines.extend([
+                "RECONCILIATION DETAILS:",
+                f"• Verdict: {recon_verdict}",
+            ])
+            
+            missing_in_broker = recon_diffs.get("missing_in_broker", []) or []
+            missing_in_model = recon_diffs.get("missing_in_model", []) or []
+            qty_mismatches = recon_diffs.get("qty_mismatches", []) or []
+            
+            if missing_in_broker:
+                lines.extend([
+                    "",
+                    "Missing in Broker (model expected these positions):",
+                ])
+                for ticker in missing_in_broker:
+                    lines.append(f"  - {ticker}")
+            
+            if missing_in_model:
+                lines.extend([
+                    "",
+                    "Missing in Model (broker has these positions):",
+                ])
+                for ticker in missing_in_model:
+                    lines.append(f"  - {ticker}")
+            
+            if qty_mismatches:
+                lines.extend([
+                    "",
+                    "Quantity Mismatches:",
+                    "  Ticker | Broker Qty | Model Qty | Diff",
+                    "  ------ | ---------- | --------- | ----",
+                ])
+                for mismatch in qty_mismatches:
+                    if isinstance(mismatch, dict):
+                        ticker = mismatch.get("symbol", "?")
+                        broker_qty = mismatch.get("broker_qty", 0)
+                        model_qty = mismatch.get("model_qty", 0)
+                        diff = mismatch.get("diff", 0)
+                        lines.append(f"  {ticker} | {broker_qty} | {model_qty} | {diff:+.2f}")
+            
+            if status_reason:
+                lines.extend([
+                    "",
+                    f"Status Reason: {status_reason}",
+                ])
+            
+            execution_notes = payload.get("execution_notes", []) or []
+            if execution_notes:
+                lines.extend([
+                    "",
+                    "NOTES:",
+                ])
+                for note in execution_notes:
+                    lines.append(f"• {note}")
+        
         return subject, "\n".join(lines)
 
     lines.append(f"Pricing Source: {pricing_source}")
@@ -445,6 +525,8 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     trade_date = str(payload.get("trade_date", dt.date.today().isoformat()))
     status_label = payload.get("status_label")
     status_reason = payload.get("status_reason")
+    recon_failure = bool(payload.get("recon_failure", False))
+    auto_bootstrap_triggered = bool(payload.get("auto_bootstrap_triggered", False))
 
     header_items = [
         f"<li><b>Mode:</b> {escape(mode)}</li>",
@@ -458,7 +540,77 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     if payload.get("turnover_note"):
         header_items.append(f"<li><b>Risk Note:</b> {escape(str(payload.get('turnover_note')))}</li>")
 
-    cards = [render_card("Run Context", f"<ul class='kvs'>{''.join(header_items)}</ul>")]
+    cards = []
+    
+    # Add prominent recon failure banner if applicable
+    if recon_failure:
+        recon_verdict = payload.get("recon_verdict", "FAIL")
+        recon_diffs = payload.get("recon_diffs", {}) or {}
+        missing_in_broker = recon_diffs.get("missing_in_broker", []) or []
+        missing_in_model = recon_diffs.get("missing_in_model", []) or []
+        qty_mismatches = recon_diffs.get("qty_mismatches", []) or []
+        
+        banner_html = '<div style="background-color: #fff3cd; border: 3px solid #ffc107; padding: 20px; margin-bottom: 20px; border-radius: 8px;">'
+        banner_html += '<h2 style="color: #856404; margin-top: 0;">⚠️ NO TRADES SENT — PRETRADE RECONCILIATION FAILED</h2>'
+        
+        if auto_bootstrap_triggered:
+            banner_html += '<div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 12px; margin: 15px 0;">'
+            banner_html += '<h3 style="color: #155724; margin: 0 0 8px 0;">Auto-Recovery Action Taken:</h3>'
+            banner_html += '<ul style="margin: 0; padding-left: 20px; color: #155724;">'
+            banner_html += '<li>✓ Canonical model snapshot auto-refreshed from broker positions</li>'
+            banner_html += '<li>✓ Next scheduled run should pass reconciliation</li>'
+            banner_html += '<li>✓ Normal trading will resume once positions sync</li>'
+            banner_html += '</ul>'
+            banner_html += '</div>'
+        
+        banner_html += f'<p><b>Reconciliation Verdict:</b> <span style="color: #dc3545;">{escape(recon_verdict)}</span></p>'
+        
+        if missing_in_broker:
+            banner_html += '<p><b>Missing in Broker</b> (model expected these positions):</p><ul>'
+            for ticker in missing_in_broker:
+                banner_html += f'<li>{escape(str(ticker))}</li>'
+            banner_html += '</ul>'
+        
+        if missing_in_model:
+            banner_html += '<p><b>Missing in Model</b> (broker has these positions):</p><ul>'
+            for ticker in missing_in_model:
+                banner_html += f'<li>{escape(str(ticker))}</li>'
+            banner_html += '</ul>'
+        
+        if qty_mismatches:
+            banner_html += '<p><b>Quantity Mismatches:</b></p>'
+            banner_html += '<table style="border-collapse: collapse; width: 100%; margin-top: 8px;"><thead><tr style="background-color: #f8f9fa;">'
+            banner_html += '<th style="border: 1px solid #dee2e6; padding: 8px; text-align: left;">Ticker</th>'
+            banner_html += '<th style="border: 1px solid #dee2e6; padding: 8px; text-align: right;">Broker Qty</th>'
+            banner_html += '<th style="border: 1px solid #dee2e6; padding: 8px; text-align: right;">Model Qty</th>'
+            banner_html += '<th style="border: 1px solid #dee2e6; padding: 8px; text-align: right;">Diff</th>'
+            banner_html += '</tr></thead><tbody>'
+            for mismatch in qty_mismatches:
+                if isinstance(mismatch, dict):
+                    ticker = escape(str(mismatch.get("symbol", "?")))
+                    broker_qty = mismatch.get("broker_qty", 0)
+                    model_qty = mismatch.get("model_qty", 0)
+                    diff = mismatch.get("diff", 0)
+                    diff_color = "#dc3545" if abs(diff) > 0 else "#6c757d"
+                    banner_html += f'<tr><td style="border: 1px solid #dee2e6; padding: 8px;">{ticker}</td>'
+                    banner_html += f'<td style="border: 1px solid #dee2e6; padding: 8px; text-align: right;">{broker_qty}</td>'
+                    banner_html += f'<td style="border: 1px solid #dee2e6; padding: 8px; text-align: right;">{model_qty}</td>'
+                    banner_html += f'<td style="border: 1px solid #dee2e6; padding: 8px; text-align: right; color: {diff_color}; font-weight: bold;">{diff:+.2f}</td></tr>'
+            banner_html += '</tbody></table>'
+        
+        execution_notes = payload.get("execution_notes", []) or []
+        if execution_notes:
+            banner_html += '<div style="margin-top: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 4px;">'
+            banner_html += '<p style="margin: 0 0 8px 0; font-weight: bold;">Notes:</p><ul style="margin: 0;">'
+            for note in execution_notes:
+                banner_html += f'<li>{escape(str(note))}</li>'
+            banner_html += '</ul></div>'
+        
+        banner_html += '</div>'
+        
+        cards.append(banner_html)
+    
+    cards.append(render_card("Run Context", f"<ul class='kvs'>{''.join(header_items)}</ul>"))
 
     trades = payload.get("trades", []) or []
     if not trades:
