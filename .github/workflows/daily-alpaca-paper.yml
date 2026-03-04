@@ -50,6 +50,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Print commit info
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[GIT] Current commit:"
+          git rev-parse HEAD
+          git log -1 --oneline
+
       - name: Restore canonical model snapshot (cache)
         uses: actions/cache@v4
         with:
@@ -82,6 +90,21 @@ jobs:
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Assert meta outputs present
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[META] run_id='${{ steps.set_meta.outputs.run_id }}' report_date='${{ steps.set_meta.outputs.report_date }}'"
+          if [ -z "${{ steps.set_meta.outputs.run_id }}" ]; then
+            echo "[META][ERROR] run_id is empty"
+            exit 1
+          fi
+          if [ -z "${{ steps.set_meta.outputs.report_date }}" ]; then
+            echo "[META][ERROR] report_date is empty"
+            exit 1
+          fi
+          echo "[META][OK] All metadata outputs validated"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -230,6 +253,19 @@ jobs:
           cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
           exit "$status"
 
+      - name: List files before upload
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[UPLOAD_PREP] Listing files to be uploaded:"
+          echo "Run directory: outputs/runs/${RUN_ID}/"
+          ls -laR "outputs/runs/${RUN_ID}/" || echo "[WARN] Run directory not found"
+          echo "Execution email payload: outputs/execution_email/${REPORT_DATE}.json"
+          ls -la "outputs/execution_email/${REPORT_DATE}.json" || echo "[WARN] Execution email payload not found"
+          echo "Canonical positions: outputs/paper_state/canonical_positions.json"
+          ls -la "outputs/paper_state/canonical_positions.json" || echo "[WARN] Canonical positions not found"
+
       - name: Upload canonical model snapshot artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -266,6 +302,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Print commit info
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[GIT] Current commit:"
+          git rev-parse HEAD
+          git log -1 --oneline
+
+      - name: Assert email job env vars present
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[EMAIL_META] report_date='${REPORT_DATE}' run_id='${RUN_ID}'"
+          if [ -z "${RUN_ID}" ]; then
+            echo "[EMAIL_META][ERROR] RUN_ID is empty"
+            exit 1
+          fi
+          if [ -z "${REPORT_DATE}" ]; then
+            echo "[EMAIL_META][ERROR] REPORT_DATE is empty"
+            exit 1
+          fi
+          echo "[EMAIL_META][OK] Artifact name will be: alpaca-paper-${REPORT_DATE}-${RUN_ID}"
 
       - name: Download engine artifacts
         uses: actions/download-artifact@v4
