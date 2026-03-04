@@ -1,0 +1,234 @@
+# Trading Model Audit — Stock Selection, Alpha Thesis, and Testing
+
+Last updated: <!-- YYYY-MM-DD -->
+Owner: Brett
+Repo: quant-daily-report
+Scope: This document explains (1) where the stock-selection “engine” lives, (2) what techniques we use to find alpha/edge, (3) how risk overlays and portfolio construction interact with selection, and (4) how we tested and validated the approach.
+
+---
+
+## 0) Executive Summary (fill-in)
+
+**What the model is:**  
+- Short description (e.g., “multi-sleeve systematic equity strategy with risk overlays and broker execution”)
+
+**Primary alpha hypothesis:**  
+- Bullet the 1–3 key drivers of expected edge (momentum, valuation, trend regime overlay, etc.)
+
+**How it expresses positions:**  
+- Long-only / long-short / cash-optional; rebalance cadence; universe
+
+**How it is governed:**  
+- Spec-driven changes (AIOps), CI tests, approval packs, reproducible run artifacts
+
+---
+
+## 1) System Architecture at a Glance
+
+### 1.1 Components
+1) **Selection / Signal Engine (WHAT to own)**  
+- Location(s): `<!-- path(s) -->`  
+- Entry point(s): `<!-- function(s) -->`  
+- Outputs: `<!-- ranked candidates, scores, signals dataframe, target weights -->`
+
+2) **Portfolio Construction / Risk (HOW MUCH to own)**  
+- Location(s): `<!-- path(s) -->`  
+- Key controls: cash targets, max position, sector limits, breaker policy, risk-on/off overlay
+
+3) **Execution (HOW to trade)**  
+- Broker adapter(s): `<!-- Alpaca modules -->`  
+- Order sizing and submission: `<!-- path(s) -->`  
+- State persistence: `outputs/paper_state/`, `outputs/runs/`, ledgers
+
+4) **Reporting / Artifacts (EVIDENCE + TRACEABILITY)**  
+- Daily reports: `<!-- path(s) -->`  
+- AIOps run directories: `reports/ai_runs/<RUN_ID>/`  
+- Canonical run outputs: `outputs/runs/<RUN_ID>/`
+
+---
+
+## 2) Where the Stock Selection Engine Lives
+
+### 2.1 Universe definition
+**Goal:** define eligible tickers before scoring/ranking.
+
+- Universe source: `<!-- e.g. S&P500 list, custom list, Alpaca assets -->`
+- Filters: liquidity, price, market cap, exclusions
+- Code: `<!-- path + function -->`
+- Output format: `<!-- list of symbols / dataframe -->`
+
+### 2.2 Feature engineering
+**Goal:** compute the predictive inputs (returns, moving averages, volatility, etc.)
+
+- Feature set (core):
+  - `<!-- e.g. 20/60/200 day returns, MA cross, vol, drawdown -->`
+- Code: `<!-- path + function(s) -->`
+- Data inputs:
+  - Market data provider: `<!-- Alpaca / polygon / cached -->`
+  - Lookback: `<!-- windows -->`
+- Output artifacts (if any): `<!-- parquet/csv -->`
+
+### 2.3 Scoring and ranking (the “alpha core”)
+**Goal:** convert features into a score and rank candidates.
+
+- Scoring approach:
+  - `<!-- e.g. weighted sum, z-scores, thresholds -->`
+- Selection rules:
+  - top N / top percentile
+  - minimum score threshold
+  - avoid duplicates / cooldown rules
+- Code entry point:
+  - `<!-- path + function -->`
+- Primary outputs:
+  - `ranked_candidates`
+  - `signals` table with per-factor contributions (if available)
+
+### 2.4 Final candidate list → target portfolio
+**Goal:** convert ranks/scores into target weights.
+
+- Weighting:
+  - equal weight / score-proportional / volatility targeting
+- Constraints:
+  - max position size
+  - max number of holdings
+  - cash allocation rules
+- Code: `<!-- path -->`
+
+---
+
+## 3) Where We Believe Alpha / Edge Comes From
+
+### 3.1 Alpha hypotheses (explicit)
+List hypotheses as testable statements:
+
+1) **H1:** `<!-- example: Momentum persistence over X horizon produces excess returns net of costs -->`
+2) **H2:** `<!-- example: Regime overlay reduces drawdowns without killing CAGR -->`
+3) **H3:** `<!-- example: Valuation tilt improves risk-adjusted returns in sideways regimes -->`
+
+### 3.2 How we avoid “fake alpha”
+- Survivorship bias controls: `<!-- yes/no + how -->`
+- Look-ahead bias controls: `<!-- yes/no + how -->`
+- Overfitting controls:
+  - fixed feature set
+  - limited hyperparameter tuning
+  - walk-forward / out-of-sample tests
+- Transaction cost and slippage modeling: `<!-- approach -->`
+
+### 3.3 Known weaknesses / expected failure modes
+- Momentum crash risk (sharp reversals)
+- Sideways chop whipsaws
+- Liquidity / spread sensitivity
+- Data outages or broker API issues
+- Parameter instability across regimes
+
+---
+
+## 4) Risk Controls and Overlays
+
+### 4.1 Risk-on / risk-off logic
+- Triggers: `<!-- MA regime, volatility, drawdown, breaker policy -->`
+- Behavior:
+  - shift to cash / reduce exposure / partial lock
+- Code: `<!-- path + function -->`
+
+### 4.2 Position sizing
+- Sizing: `<!-- equal weight / vol targeting -->`
+- Caps: `<!-- max % per name -->`
+- Portfolio constraints: `<!-- sector caps, etc. -->`
+
+### 4.3 Portfolio turnover controls
+- Rebalance cadence: `<!-- daily/weekly -->`
+- Minimum holding period: `<!-- if any -->`
+- Turnover penalty: `<!-- if any -->`
+
+---
+
+## 5) How We Tested It (Backtests, Robustness, and Validation)
+
+### 5.1 Backtest harness (code)
+- Backtest driver(s): `<!-- path(s) -->`
+- How to run:
+  - Command(s): `<!-- exact CLI invocation -->`
+- Outputs produced:
+  - `metrics.json`, `equity_curve.csv`, `positions.csv`, etc.
+
+### 5.2 What “good” looks like (metrics + thresholds)
+Define minimum acceptable metrics and why:
+
+- CAGR: `<!-- target -->`
+- Max drawdown: `<!-- target -->`
+- Sharpe / Sortino: `<!-- target -->`
+- Win rate / hit ratio: `<!-- optional -->`
+- Turnover: `<!-- target ceiling -->`
+- Benchmark comparison: `<!-- SPY, QQQ, etc. -->`
+
+### 5.3 Robustness testing
+- Walk-forward / rolling windows: `<!-- yes/no -->`
+- Monte Carlo / bootstrapping: `<!-- yes/no -->`
+- Sensitivity analysis (parameter sweeps): `<!-- yes/no -->`
+- Regime splits (bull/bear/sideways): `<!-- yes/no -->`
+
+### 5.4 Paper trading validation
+- Paper start date: `<!-- YYYY-MM-DD -->`
+- What we monitor daily:
+  - order failures / partial fills
+  - position reconciliation vs broker
+  - drift vs targets
+  - latency / missing data
+- Artifacts:
+  - `outputs/paper_state/*`
+  - `outputs/runs/<RUN_ID>/*`
+
+### 5.5 Change control (AIOps governance)
+- Spec template: `specs/*.md`
+- Modes: EXPLORE / BUILD / HARDEN
+- Evidence:
+  - `reports/ai_runs/<RUN_ID>/approval.md`
+  - tests executed (pytest, verification scripts)
+- Rollback plan:
+  - revert commit / disable workflow / restore last known good artifacts
+
+---
+
+## 6) Where Backtests and Evidence Live (Repo Map)
+
+### 6.1 Code
+- Sleeves / strategies: `<!-- paths -->`
+- Backtest harness: `<!-- paths -->`
+- Risk / overlay: `<!-- paths -->`
+- Execution / broker: `<!-- paths -->`
+
+### 6.2 Artifacts (generated)
+- AIOps runs: `reports/ai_runs/<RUN_ID>/`
+- Canonical run outputs: `outputs/runs/<RUN_ID>/`
+- Paper state: `outputs/paper_state/`
+- Reports: `<!-- reports/daily? -->`
+- Archived experiments: `archive/`
+
+---
+
+## 7) Audit Checklist (repeatable)
+
+### 7.1 Identify the current production selection path
+- [ ] Locate the selection entrypoint
+- [ ] Confirm universe source + filters
+- [ ] Confirm feature set + lookbacks
+- [ ] Confirm scoring and ranking rules
+- [ ] Confirm target weighting + constraints
+
+### 7.2 Validate backtests support the current logic
+- [ ] Confirm backtest code uses the same selection functions
+- [ ] Confirm costs/slippage assumptions are reasonable
+- [ ] Confirm out-of-sample evaluation exists
+- [ ] Confirm robustness tests exist and pass
+
+### 7.3 Validate live/paper ops integrity
+- [ ] Reconciliation confirms broker positions match canonical positions
+- [ ] Workflows produce artifacts before email/notifications
+- [ ] Failures are noisy but non-destructive
+- [ ] Rollback path is documented and tested
+
+---
+
+## 8) Open Questions / TODOs
+- `<!-- list -->`
