@@ -563,9 +563,11 @@ jobs:
           html_candidates = list(root.glob(f"**/reports/quant_report_{report_date}.html"))
 
           if not snapshot_candidates:
-              raise RuntimeError(f"Missing persisted snapshot text for {report_date}")
+              print(f"[EMAIL][SKIP] No snapshot text found for {report_date} — bootstrap or pre-recon run; skipping snapshot email")
+              raise SystemExit(0)
           if not html_candidates:
-              raise RuntimeError(f"Missing persisted HTML report for {report_date}")
+              print(f"[EMAIL][SKIP] No HTML report found for {report_date} — bootstrap or pre-recon run; skipping snapshot email")
+              raise SystemExit(0)
 
           body_text = snapshot_candidates[0].read_text(encoding="utf-8")
           body_html = html_candidates[0].read_text(encoding="utf-8")
