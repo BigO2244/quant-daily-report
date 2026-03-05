@@ -65,7 +65,13 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
         
         parse_error = None
         if not positions and not allow_empty:
-            parse_error = "no_positions_in_canonical_snapshot"
+            # A snapshot with a 'reason' field was deliberately written (e.g.
+            # bootstrap_from_broker on a freshly-reset flat account).  Treat
+            # 0 positions as valid in that case so reconciliation can compare
+            # a flat model against a flat broker and correctly return PASS.
+            reason = payload.get("reason") if isinstance(payload, dict) else None
+            if not reason:
+                parse_error = "no_positions_in_canonical_snapshot"
         
         return {
             "positions": positions,
