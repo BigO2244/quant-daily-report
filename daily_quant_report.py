@@ -3538,6 +3538,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--force-bootstrap-flat",
+        dest="force_bootstrap_flat",
+        action="store_true",
+        help=(
+            "Bypass the empty-position safety guard during bootstrap. "
+            "Use when the account is genuinely flat (0 positions, all cash) after a "
+            "manual reset and the guard would otherwise refuse to write the flat snapshot."
+        ),
+    )
+    parser.add_argument(
         "--exit-only",
         "--exit_only",
         dest="exit_only",
@@ -4331,6 +4341,7 @@ def main(argv: list[str] | None = None):
             ledger_path=paper_ledger_path,
             sent_ledger_path=sent_ledger_path,
             run_date=trade_date_str,
+            force=bool(getattr(args, "force_bootstrap_flat", False)),
         )
         if not ok:
             raise SystemExit(1)

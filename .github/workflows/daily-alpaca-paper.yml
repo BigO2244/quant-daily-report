@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: false
+      force_bootstrap_flat:
+        description: "Bypass empty-position safety guard during bootstrap. Use when account is genuinely flat (0 positions, all cash) after a manual reset."
+        required: false
+        type: boolean
+        default: false
   schedule:
     # 9:35 AM America/New_York is 14:35 UTC in EST and 13:35 UTC in EDT.
     # Keep both cron entries to handle DST shifts.
@@ -49,6 +54,7 @@ jobs:
 
       # Bootstrap only allowed via workflow_dispatch; never via schedule
       BOOTSTRAP_MODEL_LEDGER_FROM_BROKER: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_model_ledger_from_broker || 'false' }}
+      FORCE_BOOTSTRAP_FLAT: ${{ github.event_name == 'workflow_dispatch' && inputs.force_bootstrap_flat || 'false' }}
 
       # Ensure date calculations use Eastern if REPORT_DATE isn't provided
       TZ: America/New_York
@@ -257,6 +263,9 @@ jobs:
           cmd=(python3 daily_quant_report.py)
           if [ "${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}" = "true" ]; then
             cmd+=(--bootstrap-model-ledger-from-broker)
+          fi
+          if [ "${FORCE_BOOTSTRAP_FLAT:-false}" = "true" ]; then
+            cmd+=(--force-bootstrap-flat)
           fi
           if ! "${cmd[@]}" 2>&1 | tee outputs/ci_alpaca_run.log; then
             status=$?

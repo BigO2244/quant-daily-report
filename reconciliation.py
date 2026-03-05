@@ -602,22 +602,33 @@ def bootstrap_model_ledger_from_broker(
     ledger_path: str,
     sent_ledger_path: str,
     run_date: str,
+    force: bool = False,
 ) -> bool:
     """
     Bootstrap model ledger from current broker positions (ALPACA only).
     Should only be called once to initialize model snapshot from broker.
+
+    Args:
+        force: When True, bypass the empty-position safety guard and write a flat
+               canonical snapshot even when the account has equity > $100 but 0
+               positions (e.g. a freshly-reset paper account that is 100% cash).
+               Use this flag only when you have manually verified the account is
+               genuinely flat.  Without force=True the guard protects against
+               silently overwriting the snapshot with an empty one caused by a
+               transient API error.
+
     Returns True if bootstrap succeeded, False otherwise.
     """
     if str(trading_mode or "").strip().lower() != "alpaca":
         logger.error("[BOOTSTRAP] Bootstrap only supported in alpaca mode, got %s", trading_mode)
         return False
-    
+
     try:
         broker_snapshot = _load_broker_snapshot(trading_mode)
         positions = broker_snapshot.get("positions") or {}
         cash = broker_snapshot.get("cash")
         equity = broker_snapshot.get("equity")
-        
+
         if not positions:
             # Distinguish between a legitimately flat account and a silent API failure.
             # If equity > $100 but the position list is empty, the broker almost certainly
@@ -625,18 +636,26 @@ def bootstrap_model_ledger_from_broker(
             # in that scenario would cause the next run to start ordering from a blank slate
             # against an account that still holds real positions.
             if equity is not None and float(equity) > 100.0:
-                logger.error(
+                if not force:
+                    logger.error(
+                        "[BOOTSTRAP] Broker reports 0 positions but equity=%.2f — "
+                        "possible API error or partial response; refusing to write empty snapshot. "
+                        "If the account is genuinely flat (e.g. freshly reset), re-run with "
+                        "--force-bootstrap-flat to bypass this guard.",
+                        float(equity),
+                    )
+                    return False
+                logger.warning(
                     "[BOOTSTRAP] Broker reports 0 positions but equity=%.2f — "
-                    "possible API error or partial response; refusing to write empty snapshot. "
-                    "Verify broker connectivity and retry.",
+                    "force=True; writing flat canonical snapshot as requested.",
                     float(equity),
                 )
-                return False
-            logger.warning(
-                "[BOOTSTRAP] Broker has no positions and equity=%s; "
-                "bootstrapping an empty (flat-account) snapshot.",
-                equity,
-            )
+            else:
+                logger.warning(
+                    "[BOOTSTRAP] Broker has no positions and equity=%s; "
+                    "bootstrapping an empty (flat-account) snapshot.",
+                    equity,
+                )
 
         # Write canonical model snapshot
         _write_canonical_model_snapshot(
