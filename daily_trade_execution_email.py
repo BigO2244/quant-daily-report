@@ -52,6 +52,9 @@ def main(argv: list[str] | None = None) -> None:
     mode = cfg.trading_mode.lower()
     if mode == "live":
         raise RuntimeError("TRADING_MODE=live is blocked for execution email.")
+    # "alpaca" is the live paper-trading mode — treat it the same as "paper"
+    if mode == "alpaca":
+        mode = "paper"
     if mode not in {"paper", "shadow"}:
         raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
 
