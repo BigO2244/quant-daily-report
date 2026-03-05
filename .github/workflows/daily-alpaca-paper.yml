@@ -422,11 +422,14 @@ jobs:
     continue-on-error: true
     env:
       REPORT_DATE: ${{ needs.engine_run.outputs.report_date }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      REPORT_TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: ${{ secrets.EMAIL_SENDER }}
+      SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+      EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+      EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+      REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+      EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
       EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN || '0' }}
     steps:
       - name: Checkout
@@ -522,6 +525,8 @@ jobs:
               echo "REPORT_TO_EMAIL=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
               echo "EMAIL_RECIPIENT=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
             fi
+          else
+            echo "[EMAIL] Credentials present — live send enabled"
           fi
 
       - name: Send execution email from persisted payload
