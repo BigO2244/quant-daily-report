@@ -76,13 +76,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: outputs/paper_state/canonical_positions.json
-          # Stable key: overwrites the single cache entry each run so there is always exactly
-          # one canonical snapshot and restore-keys never need to guess.  A per-run key
-          # (e.g. appending github.run_id) creates unbounded entries that GitHub evicts after
-          # 7 days, which would cause reconciliation to fail after any 5-day gap.
-          key: canonical-model-snapshot-v1
+          # Date-scoped key: creates a new cache entry each calendar day so GitHub
+          # can always write (immutable-key constraint satisfied). restore-keys
+          # prefix-matches the most recent prior day's entry if today's doesn't
+          # exist yet, ensuring the snapshot survives weekends and holidays without
+          # a 7-day eviction risk. Bumped to v2 to clear the stale v1 entry.
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE || github.run_id }}
           restore-keys: |
-            canonical-model-snapshot-v1
+            canonical-model-snapshot-v2-
 
       - name: Debug trigger + inputs
         shell: bash
@@ -376,8 +377,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: outputs/paper_state/canonical_positions.json
-          # Must match the restore key so this overwrites the previous entry in-place.
-          key: canonical-model-snapshot-v1
+          # Must match the restore key exactly so each day gets its own entry.
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE || github.run_id }}
         continue-on-error: true
 
       - name: List files before upload
