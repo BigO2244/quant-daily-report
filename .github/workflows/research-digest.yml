@@ -71,11 +71,10 @@ jobs:
 
       # ── 5. Install dependencies ───────────────────────────────────────────────
       - name: Install dependencies
-        working-directory: quant_research_agent
         shell: bash
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r quant_research_agent/requirements.txt
 
       # ── 6. Validate email credentials (non-fatal) ────────────────────────────
       # Warns if secrets are missing so the artifact is still saved even
@@ -109,7 +108,6 @@ jobs:
       # logs a warning), so this only triggers on ingest/analysis crashes.
       - name: Run digest pipeline
         id: run_digest
-        working-directory: quant_research_agent
         continue-on-error: true
         shell: bash
         env:
@@ -123,10 +121,10 @@ jobs:
           ENABLE_EMAIL:       ${{ secrets.ENABLE_EMAIL }}
         run: |
           set -uo pipefail
-          OUTPUT_DIR="../outputs/runs/${RUN_ID}"
+          OUTPUT_DIR="outputs/runs/${RUN_ID}"
           mkdir -p "$OUTPUT_DIR"
           # Capture main.py exit code through the tee pipe correctly
-          python main.py --output-dir "$OUTPUT_DIR" 2>&1 | tee "$OUTPUT_DIR/digest.log"
+          python quant_research_agent/main.py --output-dir "$OUTPUT_DIR" 2>&1 | tee "$OUTPUT_DIR/digest.log"
           pipeline_exit="${PIPESTATUS[0]}"
           echo "pipeline_exit=$pipeline_exit" >> "$GITHUB_OUTPUT"
           exit "$pipeline_exit"
