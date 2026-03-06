@@ -1099,6 +1099,59 @@ def _write_shadow_orders(run_date: str, orders: List[Dict[str, object]]) -> str:
     return str(out_path)
 
 
+def _write_intended_orders_artifact(
+    run_date: str,
+    run_id: str,
+    execution_trades: "pd.DataFrame",
+    execution_enabled: bool,
+    block_reasons: List[str],
+) -> str:
+    """Persist intended orders before submission so run outcome is always diagnosable.
+
+    Written regardless of whether execution proceeds.  Allows operators to
+    distinguish:
+      - orders_intended_count=0                    => strategy generated no trades
+      - orders_intended_count>0, execution_enabled=False => blocked by execution gate
+      - orders_intended_count>0, execution_enabled=True  => orders submitted
+    """
+    root = _run_output_root()
+    out_path = root / "broker" / f"intended_orders_{run_date}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    orders_list: List[Dict[str, object]] = []
+    if execution_trades is not None and not execution_trades.empty:
+        for _, row in execution_trades.iterrows():
+            orders_list.append({
+                "ticker": str(row.get("ticker", "")),
+                "side": str(row.get("side", "")),
+                "shares": float(row["shares"]) if row.get("shares") is not None else None,
+                "price": float(row["price"]) if row.get("price") is not None else None,
+                "notional": float(row["notional"]) if row.get("notional") is not None else None,
+                "reason": str(row["reason"]) if row.get("reason") is not None else None,
+            })
+    payload = {
+        "report_date": run_date,
+        "run_id": run_id,
+        "orders_intended_count": len(orders_list),
+        "orders_intended": orders_list,
+        "execution_blocked": not execution_enabled,
+        "block_reasons": list(block_reasons),
+        "execution_enabled": execution_enabled,
+        # reconcile_report is null here; the recon_execution_blocked_*.json
+        # artifact (written by reconciliation.py) covers the case where
+        # recon blocked before run_paper_day was called.
+        "reconcile_report": None,
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    logger.info(
+        "[INTENDED_ORDERS] orders=%d execution_enabled=%s path=%s",
+        len(orders_list),
+        execution_enabled,
+        out_path,
+    )
+    return str(out_path)
+
+
 def _write_alpaca_orders(run_date: str, submissions: List[Dict[str, object]]) -> str:
     root = _run_output_root()
     out_path = root / "broker" / f"orders_{run_date}.csv"
@@ -1297,11 +1350,39 @@ def run_paper_day(
             "trades": pd.DataFrame(),
         }
 
-    # Sync holdings from Alpaca broker for weekday paper/alpaca runs
-    # This ensures SELLs are generated when broker has positions not in targets
+    # Sync holdings and valuation from Alpaca broker for weekday runs.
+    # For alpaca mode, broker account equity is the authoritative valuation base
+    # for position sizing — it reflects live market prices.  Canonical/ledger
+    # equity is stale (recorded at prior execution) and is preserved only as an
+    # audit field in the recon report.
     if mode in {"paper", "alpaca"} and not is_weekend:
         try:
             alpaca = AlpacaBroker.from_env()
+            # Broker equity authority: in alpaca mode pull live account equity so
+            # target-dollar sizing uses current portfolio value, not a stale snapshot.
+            if mode == "alpaca":
+                try:
+                    _acct = alpaca.get_account() or {}
+                    _live_equity = _coerce_float(_acct.get("equity") or _acct.get("portfolio_value"))
+                    _live_cash = _coerce_float(_acct.get("cash"))
+                    if _live_equity is not None and _live_equity > 0:
+                        logger.info(
+                            "[HOLDINGS_SYNC] Live broker equity=%.2f cash=%s "
+                            "replaces ledger equity=%.2f for portfolio sizing",
+                            _live_equity,
+                            _live_cash,
+                            equity_prev,
+                        )
+                        equity_prev = _live_equity
+                        if _live_cash is not None and _live_cash >= 0:
+                            cash_prev = _live_cash
+                except Exception as _acct_exc:
+                    logger.warning(
+                        "[HOLDINGS_SYNC] Failed to fetch live broker equity: %s "
+                        "— continuing with ledger equity=%.2f",
+                        _acct_exc,
+                        equity_prev,
+                    )
             broker_positions = alpaca.get_positions()
             if broker_positions:
                 broker_holdings_df, _ = _alpaca_positions_to_holdings(broker_positions, "main")
@@ -1604,6 +1685,22 @@ def run_paper_day(
         bool(is_weekend),
         mkt.reason,
     )
+
+    # Persist intended orders artifact before any submission attempt.
+    # Written unconditionally so post-run diagnosis can always distinguish:
+    #   orders_intended_count=0                      => strategy had no trades
+    #   orders_intended_count>0 + execution_blocked  => gate prevented submission
+    #   orders_intended_count>0 + execution_enabled  => orders were submitted
+    try:
+        _write_intended_orders_artifact(
+            run_date=run_date,
+            run_id=run_id,
+            execution_trades=execution_trades,
+            execution_enabled=execution_enabled,
+            block_reasons=list(blocked_reasons),
+        )
+    except Exception as _art_exc:
+        logger.warning("[INTENDED_ORDERS] Failed to write artifact: %s", _art_exc)
 
     if execution_enabled:
         initial_orders = _build_shadow_orders(execution_trades, run_id)
