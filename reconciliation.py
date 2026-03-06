@@ -229,11 +229,28 @@ def verdict_from_diffs(
     equity_tol_abs: float = 10.0,
     equity_tol_pct: float = 0.001,
     strict: bool = False,
+    hard_fail_on_equity_drift: bool = False,
 ) -> str:
+    """Return PASS / WARN / FAIL for a reconciliation diff result.
+
+    Position-state integrity issues (missing symbols, qty mismatches, errors)
+    always produce FAIL regardless of any tolerance or flag.
+
+    Cash/equity drift alone produces WARN by default so that normal
+    mark-to-market movement between snapshot time and execution time does not
+    block order submission.  Set hard_fail_on_equity_drift=True (via
+    RECON_EQUITY_HARD_FAIL=1 env var) to restore the old strict-fail
+    behaviour for equity drift.
+
+    The ``strict`` parameter is kept for backward compatibility but no longer
+    controls the equity/cash escalation path; use hard_fail_on_equity_drift
+    for that purpose.
+    """
     missing_model = list((diffs or {}).get("missing_in_model") or [])
     missing_broker = list((diffs or {}).get("missing_in_broker") or [])
     qty_mismatches = list((diffs or {}).get("qty_mismatches") or [])
     errors = list((diffs or {}).get("errors") or [])
+    # Position-state integrity: always hard-fail, no flags can soften this.
     if missing_model or missing_broker or qty_mismatches or errors:
         return "FAIL"
 
@@ -251,7 +268,43 @@ def verdict_from_diffs(
     )
     if not cash_breach and not equity_breach:
         return "PASS"
-    return "FAIL" if strict else "WARN"
+    # Equity/cash drift alone: WARN by default; FAIL only with explicit opt-in.
+    if hard_fail_on_equity_drift:
+        return "FAIL"
+    return "WARN"
+
+
+def _classify_block_reason(
+    diffs: dict[str, Any],
+    *,
+    cash_breach: bool,
+    equity_breach: bool,
+    model_parse_error: str | None = None,
+) -> str:
+    """Return a short token classifying why reconciliation produced a non-PASS verdict."""
+    errors = list((diffs or {}).get("errors") or [])
+    missing_model = list((diffs or {}).get("missing_in_model") or [])
+    missing_broker = list((diffs or {}).get("missing_in_broker") or [])
+    qty_mismatches = list((diffs or {}).get("qty_mismatches") or [])
+
+    if errors or model_parse_error:
+        joined = " ".join(str(e) for e in errors) + " " + str(model_parse_error or "")
+        if any(kw in joined for kw in ("missing", "stale", "parse_error", "snapshot")):
+            return "stale_state"
+        if "broker_read" in joined or "broker" in joined.lower():
+            return "broker_read_failure"
+        return "stale_state"
+    if missing_model or missing_broker:
+        return "positions_mismatch"
+    if qty_mismatches:
+        return "quantity_mismatch"
+    if equity_breach and cash_breach:
+        return "equity_cash_drift"
+    if equity_breach:
+        return "equity_only_drift"
+    if cash_breach:
+        return "cash_only_drift"
+    return "none"
 
 
 def _load_broker_snapshot(trading_mode: str) -> dict[str, Any]:
@@ -446,11 +499,13 @@ def _reconcile(
     sent_ledger_path: str,
     allow_empty: bool,
     strict: bool,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
+    """Run one reconcile pass and return (verdict, report_path, block_reason)."""
     max_qty_diff = _env_float("RECON_MAX_QTY_DIFF", 0.0)
     cash_tol = _env_float("RECON_CASH_TOL", 5.0)
     equity_tol_abs = _env_float("RECON_EQUITY_TOL_ABS", 10.0)
     equity_tol_pct = _env_float("RECON_EQUITY_TOL_PCT", 0.001)
+    equity_hard_fail = _is_truthy(os.getenv("RECON_EQUITY_HARD_FAIL"), default=False)
 
     broker_snapshot = _load_broker_snapshot(trading_mode)
     # Try canonical snapshot first, fall back to legacy ledger
@@ -491,6 +546,14 @@ def _reconcile(
         else None
     )
     equity_base = model_equity if model_equity is not None else broker_equity
+
+    # Compute breach flags locally so _classify_block_reason has them.
+    effective_equity_tol = float(equity_tol_abs)
+    if equity_base is not None:
+        effective_equity_tol = max(float(equity_tol_abs), abs(float(equity_base)) * float(equity_tol_pct))
+    cash_breach = cash_delta is not None and abs(float(cash_delta)) > float(cash_tol)
+    equity_breach = equity_delta is not None and abs(float(equity_delta)) > effective_equity_tol
+
     verdict = verdict_from_diffs(
         diffs,
         cash_delta=cash_delta,
@@ -500,6 +563,20 @@ def _reconcile(
         equity_tol_abs=equity_tol_abs,
         equity_tol_pct=equity_tol_pct,
         strict=strict,
+        hard_fail_on_equity_drift=equity_hard_fail,
+    )
+    block_reason = _classify_block_reason(
+        diffs,
+        cash_breach=cash_breach,
+        equity_breach=equity_breach,
+        model_parse_error=model_snapshot.get("parse_error"),
+    ) if verdict != "PASS" else "none"
+
+    positions_ok = not (
+        diffs.get("missing_in_model")
+        or diffs.get("missing_in_broker")
+        or diffs.get("qty_mismatches")
+        or diffs.get("errors")
     )
     payload = {
         "phase": stage,
@@ -508,13 +585,22 @@ def _reconcile(
         "trading_mode": str(trading_mode),
         "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "verdict": verdict,
+        "block_reason": block_reason,
         "strict": bool(strict),
         "allow_empty": bool(allow_empty),
+        "recon_summary": {
+            "positions_ok": bool(positions_ok),
+            "equity_drift_only": bool(equity_breach and positions_ok and not cash_breach),
+            "equity_breach": bool(equity_breach),
+            "cash_breach": bool(cash_breach),
+            "equity_hard_fail_enabled": bool(equity_hard_fail),
+        },
         "config": {
             "max_qty_diff": max_qty_diff,
             "cash_tol": cash_tol,
             "equity_tol_abs": equity_tol_abs,
             "equity_tol_pct": equity_tol_pct,
+            "equity_hard_fail": bool(equity_hard_fail),
         },
         "broker_snapshot": broker_snapshot,
         "model_snapshot": model_snapshot,
@@ -525,20 +611,69 @@ def _reconcile(
     }
     report_path = _write_report(phase=stage, run_date=run_date, payload=payload)
     logger.info(
-        "[RECON][%s] verdict=%s errors=%d broker_positions=%d model_positions=%d model_path=%s report=%s",
+        "[RECON][%s] verdict=%s block_reason=%s positions_ok=%s "
+        "broker_equity=%s model_equity=%s equity_delta=%s "
+        "broker_positions=%d model_positions=%d report=%s",
         stage.upper(),
         verdict,
-        len((diffs or {}).get("errors") or []),
+        block_reason,
+        positions_ok,
+        broker_equity,
+        model_equity,
+        equity_delta,
         int(len(broker_snapshot.get("positions") or {})),
         int(len(model_snapshot.get("positions") or {})),
-        str(model_snapshot.get("path") or "n/a"),
         report_path,
     )
     if verdict == "PASS":
         logger.info("[RECON][%s] PASS report=%s", stage.upper(), report_path)
+    elif verdict == "WARN":
+        logger.warning(
+            "[RECON][%s] WARN block_reason=%s — proceeding to execution (equity drift only)",
+            stage.upper(),
+            block_reason,
+        )
     else:
-        logger.warning("[RECON][%s] %s report=%s", stage.upper(), verdict, report_path)
-    return verdict, report_path
+        logger.warning("[RECON][%s] FAIL block_reason=%s report=%s", stage.upper(), block_reason, report_path)
+    return verdict, report_path, block_reason
+
+
+def _write_recon_blocked_artifact(
+    run_date: str,
+    block_reason: str,
+    recon_report_path: str,
+) -> str:
+    """Write a structured artifact recording that pre-trade reconcile blocked execution.
+
+    This file lets operators distinguish "strategy decided not to trade" from
+    "strategy wanted to trade but reconcile blocked it."  It is written before
+    SystemExit(2) is raised so it survives the process exit.
+    """
+    base_dir = Path(str(os.getenv("RUN_OUTPUT_ROOT", "")).strip() or "outputs")
+    broker_dir = base_dir / "broker"
+    broker_dir.mkdir(parents=True, exist_ok=True)
+    out_path = broker_dir / f"recon_execution_blocked_{run_date}.json"
+    payload = {
+        "status": "blocked_by_recon",
+        "run_date": str(run_date),
+        "block_reason": block_reason,
+        "recon_report": recon_report_path,
+        # Strategy did not execute so we cannot know intended order count.
+        "orders_intended_count": None,
+        "note": (
+            "Pre-trade reconcile gate blocked order submission. "
+            "Strategy signal was not evaluated; intended orders are unknown. "
+            "See recon_report for full details."
+        ),
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    logger.warning(
+        "[RECON] Execution blocked artifact written: %s  block_reason=%s",
+        out_path,
+        block_reason,
+    )
+    return str(out_path)
 
 
 def pre_trade_reconcile_or_exit(
@@ -548,10 +683,17 @@ def pre_trade_reconcile_or_exit(
     sent_ledger_path: str,
     allow_empty: bool = False,
 ) -> None:
+    """Run pre-trade reconcile; raise SystemExit(2) only on hard FAIL.
+
+    A WARN verdict (equity/cash drift with matching positions) does NOT block
+    execution — that is normal mark-to-market movement between snapshot time and
+    run time.  Only FAIL (position mismatch, parse error, stale state, or
+    explicit RECON_EQUITY_HARD_FAIL=1) raises SystemExit(2).
+    """
     if not _is_truthy(os.getenv("RECON_ENABLE"), default=True):
         return
     strict_pre = _is_truthy(os.getenv("RECON_STRICT_PRE"), default=True)
-    verdict, _ = _reconcile(
+    verdict, report_path, block_reason = _reconcile(
         stage="pretrade",
         run_date=run_date,
         trading_mode=trading_mode,
@@ -560,7 +702,12 @@ def pre_trade_reconcile_or_exit(
         allow_empty=allow_empty,
         strict=strict_pre,
     )
-    if strict_pre and verdict != "PASS":
+    if verdict == "FAIL":
+        _write_recon_blocked_artifact(
+            run_date=run_date,
+            block_reason=block_reason,
+            recon_report_path=report_path,
+        )
         raise SystemExit(2)
 
 
@@ -573,7 +720,7 @@ def post_trade_validate(
     if not _is_truthy(os.getenv("RECON_ENABLE"), default=True):
         return
     strict_post = _is_truthy(os.getenv("RECON_STRICT_POST"), default=False)
-    verdict, report_path = _reconcile(
+    verdict, report_path, _block_reason = _reconcile(
         stage="posttrade",
         run_date=run_date,
         trading_mode=trading_mode,

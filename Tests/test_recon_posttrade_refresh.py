@@ -174,7 +174,7 @@ def test_posttrade_recon_passes_with_refreshed_canonical(tmp_path, monkeypatch):
     missing_ledger = tmp_path / "paper_state" / "ledger.csv"
     sent_ledger = tmp_path / "shadow_orders" / "orders_sent.csv"
     
-    verdict, report_path = reconciliation._reconcile(
+    verdict, report_path, _block_reason = reconciliation._reconcile(
         stage="posttrade",
         run_date="2026-03-02",
         trading_mode="alpaca",
