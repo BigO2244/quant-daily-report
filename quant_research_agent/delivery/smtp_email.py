@@ -46,12 +46,19 @@ def _resolve_creds() -> dict[str, str]:
 
 def _smtp_connect(host: str, port: int) -> smtplib.SMTP:
     """
-    Explicit connect + STARTTLS (matches scripts/email_alpha_report.py).
-    The explicit .connect() call avoids 'SMTPServerDisconnected: please run
-    connect() first' errors that occur in CI with smtplib.SMTP(host, port).
+    Connect and negotiate STARTTLS.
+
+    Uses smtplib.SMTP(host, port, timeout) so that self._host is set
+    correctly in __init__.  The previous pattern of SMTP(timeout=30) +
+    .connect() left self._host='' which caused:
+        ValueError: server_hostname cannot be an empty string or start
+        with a leading dot.
+    when starttls() passed self._host as the SNI server_hostname to the
+    SSL layer.
     """
-    s = smtplib.SMTP(timeout=30)
-    s.connect(host, port)
+    if not host:
+        raise ValueError(f"SMTP host is empty — cannot connect. Default is smtp.gmail.com:587.")
+    s = smtplib.SMTP(host, port, timeout=30)
     s.ehlo()
     s.starttls()
     s.ehlo()
@@ -83,6 +90,8 @@ def send(
         logger.info("Email skipped (ENABLE_EMAIL=%r). Digest artifacts still saved.", enable)
         return True
 
+    logger.info("Email send enabled (ENABLE_EMAIL=%r)", enable or "<unset>")
+
     creds = _resolve_creds()
     missing = [k for k in ("sender", "password", "recipient") if not creds[k]]
     if missing:
@@ -99,15 +108,16 @@ def send(
         logger.info("[dry-run] Would send to %s — subject: %s", recipient, digest.subject)
         return True
 
+    host = creds["host"]
+    port = int(creds["port"])
+    logger.info("Connecting to SMTP %s:%d ...", host, port)
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = digest.subject
     msg["From"] = creds["sender"]
     msg["To"] = recipient
     msg.attach(MIMEText(digest.plain_body, "plain", "utf-8"))
     msg.attach(MIMEText(digest.html_body, "html", "utf-8"))
-
-    host = creds["host"]
-    port = int(creds["port"])
 
     try:
         with _smtp_connect(host, port) as server:
