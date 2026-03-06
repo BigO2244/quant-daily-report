@@ -1,0 +1,128 @@
+# Strategy context passed to Claude on every analysis run.
+# Edit this file to reflect your current portfolio positioning,
+# investment themes, and what you want the agent to flag.
+
+portfolio:
+  style: "quantitative long/short equity"
+  horizon: "3-10 day holding period"
+  universe: "US large-cap and mid-cap equities"
+
+  # Tickers you are currently holding or watching closely.
+  # The agent will flag any research item that mentions these.
+  watchlist:
+    - NVDA
+    - MSFT
+    - AAPL
+    - AMZN
+    - META
+    - GOOGL
+    - JPM
+    - GS
+    - SPY
+    - QQQ
+
+themes:
+  # Each theme is scored separately. Add/remove freely.
+  - name: ai_infrastructure
+    description: "AI compute, GPU supply chain, inference, data centers"
+    keywords:
+      - AI infrastructure
+      - GPU
+      - inference compute
+      - data center
+      - CUDA
+      - H100
+      - Blackwell
+
+  - name: macro_rates
+    description: "Fed policy, interest rates, yield curve, credit spreads"
+    keywords:
+      - Federal Reserve
+      - interest rate
+      - yield curve
+      - CPI
+      - inflation
+      - FOMC
+      - credit spread
+
+  - name: earnings_revisions
+    description: "Earnings beats/misses, guidance changes, analyst revisions"
+    keywords:
+      - earnings surprise
+      - EPS beat
+      - guidance raised
+      - guidance lowered
+      - analyst upgrade
+      - analyst downgrade
+
+  - name: geopolitical_risk
+    description: "Supply chain, trade policy, sanctions, energy geopolitics"
+    keywords:
+      - tariff
+      - trade war
+      - sanctions
+      - supply chain
+      - OPEC
+      - energy security
+
+scoring:
+  # Relative weights Claude uses when ranking items.
+  # Must sum to 1.0.
+  watchlist_mention: 0.35     # Item mentions a watchlist ticker
+  theme_relevance: 0.35       # Item is strongly on-theme
+  signal_novelty: 0.20        # New information not seen before
+  source_credibility: 0.10    # Quality of the source
+
+  # Items with a total score below this threshold are excluded from the digest.
+  min_score_threshold: 0.40
+
+digest:
+  max_items_per_theme: 5
+  max_total_items: 20
+  include_arxiv: true
+  include_earnings: true
+  include_macro: true
+  include_news: true
+
+scoring_calibration:
+  description: >
+    Scores must reflect actionability for a 3-10 day holding horizon,
+    not fundamental quality alone. A great company is not automatically
+    a high-score signal. Score the CHANGE or CATALYST, not the stock.
+
+  bands:
+    0.90_to_1.00: >
+      Reserve for items with an imminent, specific, time-bound catalyst
+      directly affecting a watchlist ticker within 1-5 trading days.
+      Example: earnings beat announced today, guidance raised, M&A confirmed.
+      Strong fundamentals alone NEVER justify this band.
+
+    0.70_to_0.89: >
+      Clear directional signal with moderate urgency. Relevant to a watchlist
+      ticker with a thesis that has a defined time horizon. Earnings snapshots
+      with strong YoY growth but no new catalyst belong here, not above 0.90.
+
+    0.50_to_0.69: >
+      Relevant research or context that informs strategy but requires
+      additional confirmation. Academic papers, macro series, indirect
+      readthroughs. Worth monitoring, not acting on immediately.
+
+    0.30_to_0.49: >
+      Tangentially relevant. Background context only. No immediate
+      portfolio implication.
+
+    below_0.30: >
+      Not relevant to this strategy. Filter out entirely.
+
+  penalties:
+    - "Static fundamental snapshots (P/E, revenue) with no new catalyst: cap at 0.85"
+    - "Academic papers without direct signal: cap at 0.65"
+    - "Indirect ticker readthroughs (not on watchlist): cap at 0.75"
+    - "Macro series with no regime change: cap at 0.65"
+    - "Crypto, commodities, micro-cap: score <= 0.20 regardless of content"
+
+  bonuses:
+    - "Earnings surprise announced TODAY for watchlist ticker: +0.10"
+    - "Guidance raised for watchlist ticker: +0.10"
+    - "Factor crowding or regime shift signal: +0.05"
+    - "Directly contradicts current position thesis: +0.05 (flag as risk)"
