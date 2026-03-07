@@ -113,3 +113,125 @@ def test_builder_falls_back_to_legacy_canonical_snapshot_path(tmp_path):
     assert canonical_check is not None
     assert canonical_check["status"] == "pass"
     assert canonical_check["detail"] == "canonical-model-snapshot/canonical_positions.json"
+
+
+def test_builder_prefers_broker_snapshot_artifact(tmp_path):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-broker-artifact",
+            "mode": "alpaca",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+    _write_json(
+        tmp_path / "outputs/broker/broker_snapshot_latest.json",
+        {
+            "portfolio_value": 101000.25,
+            "equity": 101000.25,
+            "cash": 20000.0,
+            "buying_power": 60000.0,
+            "as_of": "2026-03-10T15:55:00Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+
+    broker = model["broker_snapshot"]
+    assert broker["source"] == "artifact:outputs/broker/broker_snapshot_latest.json"
+    assert broker["portfolio_value"] == 101000.25
+    assert model["data_freshness"]["broker_vs_run_alignment"] == "aligned"
+
+
+def test_builder_derives_and_persists_broker_snapshot(tmp_path):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-broker-derived",
+            "mode": "alpaca",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+    _write_json(
+        tmp_path / "outputs/paper_state/canonical_positions.json",
+        {
+            "positions": {"AAPL": 2.0},
+            "position_count": 1,
+            "cash": 12000.0,
+            "equity": 98000.0,
+            "as_of": "2026-03-10T16:00:00Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+
+    broker = model["broker_snapshot"]
+    assert str(broker["source"]).startswith("derived:")
+    persisted = tmp_path / "outputs/broker/broker_snapshot_latest.json"
+    assert persisted.exists()
+
+
+def test_builder_gracefully_handles_missing_broker_snapshot(tmp_path):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-missing-broker",
+            "mode": "shadow",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    broker = model["broker_snapshot"]
+    assert broker["status"] == "missing"
+    assert model["data_freshness"]["broker_vs_run_alignment"] == "missing"
+
+
+def test_builder_flags_broker_run_mismatch_as_warning(tmp_path):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-mismatch",
+            "mode": "alpaca",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+    _write_json(
+        tmp_path / "outputs/broker/broker_snapshot_latest.json",
+        {
+            "portfolio_value": 100500.0,
+            "equity": 100500.0,
+            "cash": 15000.0,
+            "buying_power": 55000.0,
+            "as_of": "2026-03-11T09:30:00Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    assert model["data_freshness"]["broker_vs_run_alignment"] == "mismatch"
+    exceptions = model["exceptions"]
+    broker_exception = next((e for e in exceptions if e.get("category") == "Broker snapshot"), None)
+    assert broker_exception is not None
+    assert broker_exception["status"] == "warning"
+
+
+def test_builder_includes_broker_snapshot_and_freshness_fields(tmp_path):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-fields",
+            "mode": "paper",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    assert "governed_snapshot" in model
+    assert "broker_snapshot" in model
+    assert "data_freshness" in model
+    assert "broker_vs_run_alignment" in model["data_freshness"]

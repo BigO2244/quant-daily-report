@@ -82,6 +82,33 @@
       orders_filled: 3,
       orders_rejected: 0
     },
+    governed_snapshot: {
+      portfolio_value: 100482.33,
+      equity: 100482.33,
+      cash: 18287.88,
+      market_value: 82194.45,
+      as_of: "2026-03-06",
+      source: "governed:canonical_performance",
+      status: "fresh"
+    },
+    broker_snapshot: {
+      portfolio_value: 100615.72,
+      cash: 18410.11,
+      buying_power: 73640.44,
+      equity: 100615.72,
+      market_value: 82205.61,
+      as_of: "2026-03-07T13:31:00Z",
+      source: "artifact:outputs/broker/broker_snapshot_latest.json",
+      status: "fresh"
+    },
+    data_freshness: {
+      run_report_date: "2026-03-06",
+      run_last_updated: "2026-03-06T17:10:22Z",
+      broker_as_of: "2026-03-07T13:31:00Z",
+      broker_vs_run_alignment: "mismatch",
+      alignment_detail: "Broker snapshot is newer than governed run date.",
+      stale_threshold_hours: 36
+    },
     top_changes: [
       { ticker: "ADI", action: "BUY", change_weight: 0.0114, reason: "rebalance_to_target" },
       { ticker: "JNJ", action: "SELL", change_weight: -0.0097, reason: "removed_from_targets" },
@@ -161,7 +188,8 @@
     if (normalized.includes("fail") || normalized.includes("error") || normalized.includes("halt") || normalized.includes("lock")) {
       return "fail";
     }
-    if (normalized.includes("warn") || normalized.includes("partial") || normalized.includes("degraded") || normalized.includes("elevated")) {
+    if (normalized.includes("align")) return "pass";
+    if (normalized.includes("warn") || normalized.includes("partial") || normalized.includes("degraded") || normalized.includes("elevated") || normalized.includes("mismatch") || normalized.includes("stale") || normalized.includes("missing")) {
       return "warning";
     }
     if (["pass", "ok", "ready", "success", "completed"].includes(normalized)) return "pass";
@@ -176,6 +204,14 @@
     if (n < 0) return "fail";
     if (n > 0) return "pass";
     return "info";
+  }
+
+  function statusLengthClass(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (text.length > 22 || text.includes("_")) return "status-wrap status-very-long";
+    if (text.length > 12) return "status-wrap status-long";
+    return "";
   }
 
   function drawCanvasEmptyState(ctx, w, h, message) {
@@ -250,13 +286,18 @@
       { key: "Excess Return", value: formatSignedBps(kpis.excess_return), className: trendClass(kpis.excess_return), excess: true },
       { key: "Holdings", value: toNumber(kpis.holdings) === null ? "Data unavailable" : String(kpis.holdings) },
       { key: "Turnover", value: formatPercent(kpis.turnover), className: "info" },
-      { key: "Run Status", value: kpis.run_status || "Unknown", className: runStatusClass }
+      {
+        key: "Run Status",
+        value: kpis.run_status || "Unknown",
+        className: runStatusClass,
+        valueClass: statusLengthClass(kpis.run_status || "Unknown")
+      }
     ];
 
     cards.forEach((card) => {
       const wrapper = document.createElement("article");
       wrapper.className = `kpi-card ${card.prominent ? "prominent" : ""} ${card.excess ? "excess" : ""}`.trim();
-      wrapper.innerHTML = `<div class="kpi-label">${card.key}</div><div class="kpi-value ${card.prominent ? "large" : ""} ${card.className || ""}">${card.value}</div>`;
+      wrapper.innerHTML = `<div class="kpi-label">${card.key}</div><div class="kpi-value ${card.prominent ? "large" : ""} ${card.className || ""} ${card.valueClass || ""}">${card.value}</div>`;
       strip.appendChild(wrapper);
     });
   }
@@ -333,6 +374,50 @@
       el.innerHTML = `<div class="label">${label}</div><div class="value ${cls}">${v === null ? "Data unavailable" : v}</div>`;
       grid.appendChild(el);
     });
+  }
+
+  function renderSnapshots(governed, broker, freshness) {
+    const governedGrid = document.getElementById("governed-snapshot-grid");
+    const brokerGrid = document.getElementById("broker-snapshot-grid");
+    const governedAsOf = document.getElementById("governed-asof-label");
+    const brokerAsOf = document.getElementById("broker-asof-label");
+    const alignmentNote = document.getElementById("snapshot-alignment-note");
+
+    clear(governedGrid);
+    clear(brokerGrid);
+
+    const governedItems = [
+      ["Portfolio Value", formatCurrency(governed.portfolio_value)],
+      ["Cash", formatCurrency(governed.cash)],
+      ["Market Value", formatCurrency(governed.market_value)]
+    ];
+    const brokerItems = [
+      ["Portfolio / Equity", formatCurrency(broker.portfolio_value || broker.equity)],
+      ["Cash", formatCurrency(broker.cash)],
+      ["Buying Power", formatCurrency(broker.buying_power)]
+    ];
+
+    governedItems.forEach(([label, value]) => {
+      const el = document.createElement("div");
+      el.className = "snapshot-item";
+      el.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
+      governedGrid.appendChild(el);
+    });
+
+    brokerItems.forEach(([label, value]) => {
+      const el = document.createElement("div");
+      el.className = "snapshot-item";
+      el.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
+      brokerGrid.appendChild(el);
+    });
+
+    governedAsOf.textContent = `As of: ${governed.as_of || "not available"}`;
+    brokerAsOf.textContent = `As of: ${broker.as_of || "not available"}`;
+
+    const alignment = String((freshness && freshness.broker_vs_run_alignment) || "missing");
+    const detail = (freshness && freshness.alignment_detail) || "Broker snapshot alignment unavailable.";
+    alignmentNote.textContent = detail;
+    alignmentNote.className = `snapshot-note ${statusClass(alignment)}`;
   }
 
   function renderTopChanges(rows) {
@@ -555,6 +640,9 @@
       series: { nav: [], benchmark: [], daily_returns: [], excess_returns: [], drawdown: [] },
       risk: {},
       activity: {},
+      governed_snapshot: { portfolio_value: null, cash: null, market_value: null, as_of: null, source: "missing" },
+      broker_snapshot: { portfolio_value: null, cash: null, buying_power: null, equity: null, market_value: null, as_of: null, source: "missing", status: "missing" },
+      data_freshness: { broker_vs_run_alignment: "missing", alignment_detail: "Broker snapshot unavailable." },
       top_changes: [],
       exceptions: [
         { category: "Data / artifacts", status: "warning", message: errorMessage }
@@ -570,6 +658,7 @@
     currentModel = model;
     renderMeta(model.run_meta || {});
     renderKpis(model.kpis || {});
+    renderSnapshots(model.governed_snapshot || {}, model.broker_snapshot || {}, model.data_freshness || {});
     renderPerfSummary(model.perf_summary || {});
     renderRisk(model.risk || {});
     renderActivity(model.activity || {});

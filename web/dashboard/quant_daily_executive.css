@@ -163,6 +163,21 @@ body {
   font-size: 1.45rem;
 }
 
+.kpi-value.status-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.12;
+}
+
+.kpi-value.status-long {
+  font-size: 1.05rem;
+}
+
+.kpi-value.status-very-long {
+  font-size: 0.92rem;
+}
+
 .kpi-value.pass { color: var(--green); }
 .kpi-value.warning { color: var(--amber); }
 .kpi-value.fail { color: var(--red); }
@@ -171,15 +186,74 @@ body {
 .hero-row,
 .daily-row,
 .activity-row,
-.exceptions-row {
+.exceptions-row,
+.snapshot-row {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 14px;
   align-items: stretch;
 }
 
-.daily-row {
+.daily-row,
+.snapshot-row {
   grid-template-columns: 1fr 1fr;
+}
+
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.snapshot-item {
+  border: 1px solid #e1e8f0;
+  border-radius: 9px;
+  padding: 10px;
+  background: #fafcff;
+}
+
+.snapshot-item .label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+.snapshot-item .value {
+  font-size: 1.04rem;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.snapshot-note {
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid #d7e1ec;
+  background: #f5f9fd;
+  color: #264565;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.snapshot-note.warning {
+  border-color: #ecd3aa;
+  background: #fff7eb;
+  color: var(--amber);
+}
+
+.snapshot-note.fail {
+  border-color: #ebc3c7;
+  background: #fff2f4;
+  color: var(--red);
+}
+
+.snapshot-note.pass {
+  border-color: #bfdccf;
+  background: #eff8f3;
+  color: var(--green);
 }
 
 .section-head {
@@ -392,8 +466,13 @@ h2 {
   .hero-row,
   .daily-row,
   .activity-row,
-  .exceptions-row {
+  .exceptions-row,
+  .snapshot-row {
     grid-template-columns: 1fr;
+  }
+
+  .snapshot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .risk-row {
@@ -415,7 +494,8 @@ h2 {
   .meta-grid,
   .summary-grid,
   .activity-grid,
-  .risk-row {
+  .risk-row,
+  .snapshot-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -106,6 +106,33 @@
     "orders_filled": 3,
     "orders_rejected": 0
   },
+  "governed_snapshot": {
+    "portfolio_value": 100482.33,
+    "equity": 100482.33,
+    "cash": 18287.88,
+    "market_value": 82194.45,
+    "as_of": "2026-03-06",
+    "source": "governed:canonical_performance",
+    "status": "fresh"
+  },
+  "broker_snapshot": {
+    "portfolio_value": 100615.72,
+    "cash": 18410.11,
+    "buying_power": 73640.44,
+    "equity": 100615.72,
+    "market_value": 82205.61,
+    "as_of": "2026-03-07T13:31:00Z",
+    "source": "artifact:outputs/broker/broker_snapshot_latest.json",
+    "status": "fresh"
+  },
+  "data_freshness": {
+    "run_report_date": "2026-03-06",
+    "run_last_updated": "2026-03-06T17:10:22Z",
+    "broker_as_of": "2026-03-07T13:31:00Z",
+    "broker_vs_run_alignment": "mismatch",
+    "alignment_detail": "Broker snapshot is newer than governed run date.",
+    "stale_threshold_hours": 36
+  },
   "top_changes": [
     {"ticker": "ADI", "action": "BUY", "change_weight": 0.0114, "reason": "rebalance_to_target"},
     {"ticker": "JNJ", "action": "SELL", "change_weight": -0.0097, "reason": "removed_from_targets"},

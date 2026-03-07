@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,9 @@ class DashboardBuilder:
         self.warnings: list[str] = []
         self.sources: list[SourceRecord] = []
         self.degraded_metrics: list[str] = []
+        self.broker_source_mode: str = "missing"
+        self.broker_source_used: str = "none"
+        self.freshness_classification: str = "missing"
 
     def _abs(self, rel: str) -> Path:
         return self.repo_root / rel
@@ -63,6 +67,286 @@ class DashboardBuilder:
         except Exception as exc:
             self.warnings.append(f"Failed to parse CSV {rel_path}: {exc}")
             return None
+
+    def _read_json_if_exists(self, rel_path: str, *, used: bool = True) -> dict[str, Any] | list[Any] | None:
+        path = self._abs(rel_path)
+        if not path.exists():
+            return None
+        self._record_source(rel_path, exists=True, used=used)
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            self.warnings.append(f"Failed to parse JSON {rel_path}: {exc}")
+            return None
+
+    @staticmethod
+    def _parse_iso_timestamp(raw: Any) -> datetime | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _as_iso_z(raw: datetime | str | None) -> str | None:
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            parsed = DashboardBuilder._parse_iso_timestamp(raw)
+            if parsed is None:
+                return str(raw)
+            return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        return raw.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _is_truthy(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def _normalize_broker_snapshot(
+        self,
+        *,
+        payload: dict[str, Any],
+        source: str,
+        as_of_hint: str | None = None,
+    ) -> dict[str, Any] | None:
+        account = payload.get("account") if isinstance(payload.get("account"), dict) else payload
+        if not isinstance(account, dict):
+            return None
+
+        portfolio_value = self._coerce_num(account.get("portfolio_value") or account.get("equity"))
+        equity = self._coerce_num(account.get("equity") or account.get("portfolio_value"))
+        cash = self._coerce_num(account.get("cash"))
+        buying_power = self._coerce_num(account.get("buying_power"))
+        market_value = self._coerce_num(account.get("market_value"))
+        if market_value is None and equity is not None and cash is not None:
+            market_value = float(equity - cash)
+
+        if all(v is None for v in [portfolio_value, equity, cash, buying_power, market_value]):
+            return None
+
+        as_of = (
+            str(payload.get("as_of") or "").strip()
+            or str(payload.get("timestamp_utc") or "").strip()
+            or str(payload.get("timestamp") or "").strip()
+            or as_of_hint
+            or self._safe_iso_now()
+        )
+
+        return {
+            "portfolio_value": portfolio_value,
+            "cash": cash,
+            "buying_power": buying_power,
+            "equity": equity,
+            "market_value": market_value,
+            "as_of": self._as_iso_z(as_of),
+            "source": source,
+            "status": "fresh",
+        }
+
+    def _persist_broker_snapshot(self, snapshot: dict[str, Any], *, reason: str) -> None:
+        out_path = self._abs("outputs/broker/broker_snapshot_latest.json")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            **snapshot,
+            "persisted_at": self._safe_iso_now(),
+            "persist_reason": reason,
+        }
+        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.sources.append(SourceRecord("outputs/broker/broker_snapshot_latest.json", "used"))
+
+    def _extract_snapshot_from_recon(self, payload: dict[str, Any], *, source_path: str) -> dict[str, Any] | None:
+        broker_payload = payload.get("broker_snapshot")
+        if not isinstance(broker_payload, dict):
+            return None
+        as_of_hint = str(payload.get("timestamp_utc") or "").strip() or None
+        return self._normalize_broker_snapshot(
+            payload=broker_payload,
+            source=f"artifact:{source_path}",
+            as_of_hint=as_of_hint,
+        )
+
+    def _find_latest_recon_file(self, pattern: str) -> tuple[str | None, dict[str, Any] | None]:
+        broker_dir = self._abs("outputs/broker")
+        if not broker_dir.exists():
+            return None, None
+        files = sorted(broker_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+        for path in files:
+            rel = str(path.relative_to(self.repo_root))
+            payload = self._read_json_if_exists(rel, used=True)
+            if isinstance(payload, dict):
+                return rel, payload
+        return None, None
+
+    def _artifact_broker_snapshot(self, run_id: str | None, report_date: str | None) -> tuple[dict[str, Any] | None, str]:
+        candidate_paths: list[str] = [
+            "outputs/broker/broker_snapshot_latest.json",
+        ]
+        if run_id:
+            candidate_paths.extend(
+                [
+                    f"outputs/runs/{run_id}/broker/broker_snapshot_latest.json",
+                    f"outputs/runs/{run_id}/broker/broker_snapshot.json",
+                ]
+            )
+
+        for rel in candidate_paths:
+            payload = self._read_json_if_exists(rel, used=True)
+            if isinstance(payload, dict):
+                normalized = self._normalize_broker_snapshot(payload=payload, source=f"artifact:{rel}")
+                if normalized:
+                    return normalized, "artifact_reuse"
+
+        if report_date:
+            for rel in [
+                f"outputs/broker/recon_posttrade_{report_date}.json",
+                f"outputs/broker/recon_pretrade_{report_date}.json",
+            ]:
+                payload = self._read_json_if_exists(rel, used=True)
+                if isinstance(payload, dict):
+                    normalized = self._extract_snapshot_from_recon(payload, source_path=rel)
+                    if normalized:
+                        return normalized, "artifact_reuse"
+
+        for pattern in ["recon_posttrade_*.json", "recon_pretrade_*.json"]:
+            rel, payload = self._find_latest_recon_file(pattern)
+            if rel and isinstance(payload, dict):
+                normalized = self._extract_snapshot_from_recon(payload, source_path=rel)
+                if normalized:
+                    return normalized, "artifact_reuse"
+
+        return None, "missing"
+
+    def _derived_broker_snapshot(
+        self,
+        *,
+        execution_payload: dict[str, Any],
+        nav_df: pd.DataFrame | None,
+        canonical_positions: dict[str, Any],
+        report_date: str | None,
+    ) -> tuple[dict[str, Any] | None, str]:
+        if isinstance(execution_payload, dict) and execution_payload:
+            normalized = self._normalize_broker_snapshot(
+                payload=execution_payload,
+                source="derived:execution_payload",
+                as_of_hint=report_date,
+            )
+            if normalized:
+                return normalized, "derived_execution_payload"
+
+        if isinstance(canonical_positions, dict) and canonical_positions:
+            normalized = self._normalize_broker_snapshot(
+                payload=canonical_positions,
+                source="derived:canonical_positions",
+                as_of_hint=report_date,
+            )
+            if normalized:
+                return normalized, "derived_canonical_positions"
+
+        if nav_df is not None and not nav_df.empty and "equity" in nav_df.columns:
+            latest_row = nav_df.dropna(subset=["equity"]).tail(1)
+            if not latest_row.empty:
+                row = latest_row.iloc[0]
+                payload = {
+                    "equity": row.get("equity"),
+                    "portfolio_value": row.get("equity"),
+                    "cash": row.get("cash") if "cash" in latest_row.columns else None,
+                    "as_of": row.get("date") if "date" in latest_row.columns else report_date,
+                }
+                normalized = self._normalize_broker_snapshot(
+                    payload=payload,
+                    source="derived:nav_timeseries",
+                    as_of_hint=report_date,
+                )
+                if normalized:
+                    return normalized, "derived_nav_timeseries"
+
+        return None, "missing"
+
+    def _maybe_live_broker_snapshot(self, report_date: str | None) -> tuple[dict[str, Any] | None, str]:
+        if not self._is_truthy(os.getenv("DASHBOARD_FETCH_BROKER_SNAPSHOT"), default=False):
+            return None, "disabled"
+        key_id = str(os.getenv("ALPACA_API_KEY_ID") or os.getenv("ALPACA_KEY_ID") or "").strip()
+        secret = str(os.getenv("ALPACA_API_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY") or "").strip()
+        if not key_id or not secret:
+            self.warnings.append("Live broker fetch requested but Alpaca credentials are not set.")
+            return None, "missing_credentials"
+        try:
+            from brokers.alpaca_broker import AlpacaBroker
+
+            broker = AlpacaBroker.from_env()
+            account = broker.get_account() or {}
+            snapshot = self._normalize_broker_snapshot(
+                payload=account,
+                source="live:alpaca_account",
+                as_of_hint=self._safe_iso_now(),
+            )
+            if snapshot:
+                return snapshot, "live_fetch"
+        except Exception as exc:
+            self.warnings.append(f"Live broker fetch failed: {exc}")
+            return None, "live_fetch_failed"
+        return None, "live_fetch_failed"
+
+    def _classify_freshness(
+        self,
+        *,
+        report_date: str | None,
+        run_last_updated: str | None,
+        broker_as_of: str | None,
+    ) -> tuple[dict[str, Any], str]:
+        run_dt = self._parse_iso_timestamp(run_last_updated)
+        broker_dt = self._parse_iso_timestamp(broker_as_of)
+        run_date_obj = None
+        if report_date:
+            try:
+                run_date_obj = datetime.fromisoformat(str(report_date)).date()
+            except Exception:
+                run_date_obj = None
+
+        alignment = "missing"
+        detail = "Broker snapshot unavailable."
+        stale_threshold_hours = 36
+
+        if broker_dt is None:
+            alignment = "missing"
+            detail = "Broker snapshot timestamp unavailable."
+        else:
+            age_hours = (datetime.now(timezone.utc) - broker_dt.astimezone(timezone.utc)).total_seconds() / 3600.0
+            if age_hours > stale_threshold_hours:
+                alignment = "stale"
+                detail = f"Broker snapshot older than {stale_threshold_hours} hours."
+            elif run_date_obj is None:
+                alignment = "mismatch"
+                detail = "Run report date unavailable; alignment cannot be confirmed."
+            else:
+                broker_date = broker_dt.date()
+                if broker_date == run_date_obj:
+                    alignment = "aligned"
+                    detail = "Broker snapshot date aligns with run report date."
+                else:
+                    alignment = "mismatch"
+                    if broker_date > run_date_obj:
+                        detail = "Broker snapshot is newer than governed run date."
+                    else:
+                        detail = "Governed run date is newer than broker snapshot."
+
+        freshness = {
+            "run_report_date": report_date,
+            "run_last_updated": self._as_iso_z(run_last_updated),
+            "broker_as_of": self._as_iso_z(broker_as_of),
+            "broker_vs_run_alignment": alignment,
+            "alignment_detail": detail,
+            "stale_threshold_hours": stale_threshold_hours,
+        }
+        return freshness, alignment
 
     def _find_latest_execution_payload(self, report_date: str | None) -> tuple[str | None, dict[str, Any] | None]:
         exec_dir = self._abs("outputs/execution_email")
@@ -251,6 +535,12 @@ class DashboardBuilder:
         report_date = str(latest_obj.get("report_date") or "").strip() or None
         run_id = str(latest_obj.get("run_id") or "").strip() or None
         mode = str(latest_obj.get("mode") or "").strip().upper() or "UNKNOWN"
+        run_last_updated = str(
+            latest_obj.get("created_at")
+            or latest_obj.get("last_updated")
+            or latest_obj.get("updated_at")
+            or ""
+        ).strip() or None
 
         canonical_df = self._read_csv("outputs/alpha_assessment/canonical_performance.csv", required=False, used=True)
         nav_df = self._read_csv("outputs/perf/nav_timeseries.csv", required=False, used=True)
@@ -364,6 +654,76 @@ class DashboardBuilder:
             prev_est = latest_nav / (1.0 + latest_daily_return)
             daily_pl = latest_nav - prev_est
             self.warnings.append("Estimated daily P/L from latest NAV and daily return due to missing prior NAV point.")
+
+        governed_snapshot = {
+            "portfolio_value": latest_nav,
+            "equity": latest_nav,
+            "cash": None,
+            "market_value": None,
+            "as_of": nav_series[-1]["date"] if nav_series else report_date,
+            "source": "governed:canonical_performance" if canonical_df is not None and not canonical_df.empty else "governed:nav_timeseries",
+            "status": "fresh" if latest_nav is not None else "missing",
+        }
+
+        if nav_df is not None and not nav_df.empty:
+            nav_tail = nav_df.tail(1)
+            if not nav_tail.empty:
+                nav_row = nav_tail.iloc[0]
+                governed_snapshot["cash"] = self._coerce_num(nav_row.get("cash"))
+                if governed_snapshot.get("as_of") is None and "date" in nav_tail.columns:
+                    governed_snapshot["as_of"] = str(nav_row.get("date") or "").strip() or report_date
+
+        if governed_snapshot["equity"] is not None and governed_snapshot["cash"] is not None:
+            governed_snapshot["market_value"] = float(governed_snapshot["equity"] - governed_snapshot["cash"])
+
+        broker_snapshot, broker_mode = self._artifact_broker_snapshot(run_id=run_id, report_date=report_date)
+        if broker_snapshot is None:
+            broker_snapshot, broker_mode = self._derived_broker_snapshot(
+                execution_payload=exec_payload_obj,
+                nav_df=nav_df,
+                canonical_positions=positions_obj,
+                report_date=report_date,
+            )
+            if broker_snapshot is not None:
+                try:
+                    self._persist_broker_snapshot(broker_snapshot, reason=f"self_heal_{broker_mode}")
+                except Exception as exc:
+                    self.warnings.append(f"Failed to persist derived broker snapshot artifact: {exc}")
+        if broker_snapshot is None:
+            broker_snapshot, broker_mode = self._maybe_live_broker_snapshot(report_date=report_date)
+            if broker_snapshot is not None:
+                try:
+                    self._persist_broker_snapshot(broker_snapshot, reason="self_heal_live_fetch")
+                except Exception as exc:
+                    self.warnings.append(f"Failed to persist live broker snapshot artifact: {exc}")
+
+        if broker_snapshot is None:
+            broker_snapshot = {
+                "portfolio_value": None,
+                "cash": None,
+                "buying_power": None,
+                "equity": None,
+                "market_value": None,
+                "as_of": None,
+                "source": "missing",
+                "status": "missing",
+            }
+
+        data_freshness, alignment = self._classify_freshness(
+            report_date=report_date,
+            run_last_updated=run_last_updated,
+            broker_as_of=broker_snapshot.get("as_of"),
+        )
+        if alignment == "missing":
+            broker_snapshot["status"] = "missing"
+        elif alignment == "stale":
+            broker_snapshot["status"] = "stale"
+        else:
+            broker_snapshot["status"] = "fresh"
+
+        self.broker_source_mode = broker_mode
+        self.broker_source_used = str(broker_snapshot.get("source") or "missing")
+        self.freshness_classification = alignment
 
         benchmark_return = None
         if benchmark_returns_series:
@@ -665,6 +1025,14 @@ class DashboardBuilder:
             risk_message = f"Breaker or regime indicates caution: {breaker_status}."
         exceptions.append({"category": "Risk", "status": risk_status, "message": risk_message})
 
+        broker_alignment_msg = str(data_freshness.get("alignment_detail") or "Broker alignment not available.")
+        if alignment == "aligned":
+            exceptions.append({"category": "Broker snapshot", "status": "pass", "message": broker_alignment_msg})
+        elif alignment in {"mismatch", "stale"}:
+            exceptions.append({"category": "Broker snapshot", "status": "warning", "message": broker_alignment_msg})
+        else:
+            exceptions.append({"category": "Broker snapshot", "status": "warning", "message": "Broker snapshot unavailable; dashboard is showing governed run values."})
+
         missing_optional = sorted(set(self.missing_files) - set(missing_required))
 
         if missing_required:
@@ -757,6 +1125,16 @@ class DashboardBuilder:
                 "status": "pass" if not self.degraded_metrics else "warning",
                 "detail": "All executive metrics computed." if not self.degraded_metrics else "; ".join(self.degraded_metrics[:3]),
             },
+            {
+                "label": "Broker snapshot available",
+                "status": "pass" if broker_snapshot.get("status") == "fresh" else ("warning" if broker_snapshot.get("status") == "stale" else "fail"),
+                "detail": f"Source: {broker_snapshot.get('source') or 'missing'}; as_of={broker_snapshot.get('as_of') or 'n/a'}",
+            },
+            {
+                "label": "Run vs broker alignment",
+                "status": "pass" if alignment == "aligned" else "warning",
+                "detail": broker_alignment_msg,
+            },
         ]
 
         status_banner = "Run status unavailable."
@@ -784,6 +1162,13 @@ class DashboardBuilder:
                 f"Run likely halted before stage artifacts were generated on {report_date}. "
                 "This classification is inferred from sparse run artifacts."
             )
+
+        if alignment == "mismatch":
+            status_banner = f"{status_banner} Broker snapshot and governed run date are out of sync."
+        elif alignment == "stale":
+            status_banner = f"{status_banner} Broker snapshot is stale."
+        elif alignment == "missing":
+            status_banner = f"{status_banner} Broker snapshot unavailable; governed run snapshot shown."
 
         if inferred_note:
             self.warnings.append(inferred_note)
@@ -843,6 +1228,9 @@ class DashboardBuilder:
                 "orders_filled": orders_filled,
                 "orders_rejected": orders_rejected,
             },
+            "governed_snapshot": governed_snapshot,
+            "broker_snapshot": broker_snapshot,
+            "data_freshness": data_freshness,
             "top_changes": top_changes,
             "exceptions": exceptions,
             "operating_checks": operating_checks,
@@ -851,6 +1239,11 @@ class DashboardBuilder:
                 "missing_files": sorted(set(self.missing_files)),
                 "warnings": self.warnings,
                 "degraded_metrics": self.degraded_metrics,
+                "broker_snapshot": {
+                    "source_mode": self.broker_source_mode,
+                    "source_used": self.broker_source_used,
+                    "freshness": self.freshness_classification,
+                },
             },
         }
         return model
@@ -885,12 +1278,20 @@ def main() -> int:
     missing = notes.get("missing_files", [])
     warnings = notes.get("warnings", [])
     degraded = notes.get("degraded_metrics", [])
+    broker_diag = notes.get("broker_snapshot", {}) if isinstance(notes, dict) else {}
     sources = model.get("sources", [])
     used_count = len([s for s in sources if s.get("status") == "used"])
     missing_count = len([s for s in sources if s.get("status") == "missing"])
 
     print(f"[DASHBOARD] sources_used={used_count} sources_missing={missing_count}")
     print(f"[DASHBOARD] degraded_metrics={len(degraded)} warnings={len(warnings)}")
+    print(
+        "[DASHBOARD] broker_source_mode={mode} broker_source_used={used} freshness={fresh}".format(
+            mode=broker_diag.get("source_mode", "missing"),
+            used=broker_diag.get("source_used", "missing"),
+            fresh=broker_diag.get("freshness", "missing"),
+        )
+    )
     for msg in warnings:
         print(f"[DASHBOARD][WARN] {msg}")
     for metric_msg in degraded:
