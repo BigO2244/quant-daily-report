@@ -358,3 +358,45 @@ Never deploy a strategy that has not passed:
 Signal validation  
 Alpha Lab testing  
 Portfolio risk evaluation
+
+------------------------------------------------------------
+
+15. NEAR-TERM ROADMAP (Q1 2026 and Beyond)
+
+### Foundation Pass (Complete — March 6, 2026)
+
+✓ VIX producer integration (`outputs/perf/vix_close_history.csv`)  
+✓ Canonical performance layer with benchmark + VIX + analyzer scores  
+✓ Alpha assessment build pipeline with producer automation  
+✓ Overlay engine backtesting with no-lookahead rule  
+✓ Analyzer validation and classifier metrics  
+✓ Documentation pack refresh (README, CHANGELOG, runbooks)
+
+### Next Build: Performance Dashboard
+
+Purpose: Real-time visibility into portfolio performance, signal quality, and system health.
+
+Components:
+
+- **Web dashboard** (React/TypeScript or similar): daily performance cards, equity curve, alpha attribution, analyzer signal heatmap
+- **Data backend** (Python): canonical performance CSV → JSON API
+- **Metrics refresh**: daily NAV, returns, volatility, Sharpe, IC, drawdown
+- **Alerts layer**: email/Slack notifications for regime changes, IC drops, reconciliation failures
+
+Acceptance criteria:
+
+- Dashboard loads latest canonical_performance.csv and renders equity curve
+- Shows daily alpha breakdown (excess_return attribution)
+- Displays current VIX regime and backtest analyzer signal accuracy
+- Email alerts sent on reconciliation failures and IC warnings
+
+Target: After Q1 data collection (April–May 2026)
+
+### Beyond: Expanded Signal Discovery
+
+- Alpha Lab v1 formalization (signal registry, promotion pipeline)
+- Earnings-driven signal discovery (EPS surprise + growth)
+- Macro regime signals (FOMC meeting proximity, yield curve inversions)
+- Cross-sleeve rebalancing rules
+- Interactive Brokers integration (parallel to Alpaca)
+- Live trading safeguards (pre-trade chaos testing, drawdown circuit breaker hardening)

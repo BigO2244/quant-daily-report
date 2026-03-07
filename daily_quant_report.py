@@ -51,6 +51,11 @@ from paper.run_manager import (
     write_latest_pointer,
 )
 from paper.nav2 import update_nav
+from paper.perf_artifact_producers import (
+    rebuild_premarket_analyzer_scores,
+    update_benchmark_close_history,
+    update_vix_close_history,
+)
 from paper.reporting_consistency import compute_exposure, determine_sleeve_state
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
@@ -1531,6 +1536,7 @@ def build_execution_email_payload(
             "turnover_pct": turnover_pct,
         },
         "risk_summary": risk_summary,
+        "market_analyzer": (daily_snapshot or {}).get("market_analyzer"),
     }
     if mode == "SHADOW" and not trades:
         payload.update(
@@ -2533,6 +2539,77 @@ def derive_actual_sleeve_allocations(
         for name in sleeve_names:
             allocations[name] = allocations.get(name, 0.0) + share
     return allocations
+
+
+def _build_market_analyzer_payload(
+    *,
+    report_date: pd.Timestamp,
+    vix_regime: dict | None,
+    breaker_mode: str,
+    exposure_today: float,
+    risk_off: bool,
+) -> dict:
+    vix_component = None
+    regime_label = None
+    vix_level = None
+    if isinstance(vix_regime, dict):
+        try:
+            vix_component = float(vix_regime.get("position_scale"))
+        except Exception:
+            vix_component = None
+        regime_label = str(vix_regime.get("regime") or "").strip().upper() or None
+        try:
+            vix_level = float(vix_regime.get("vix"))
+        except Exception:
+            vix_level = None
+
+    breaker_component = float(max(0.0, min(1.0, exposure_today)))
+    risk_off_component = 0.0 if bool(risk_off) else 1.0
+
+    score_candidates = [breaker_component, risk_off_component]
+    if vix_component is not None:
+        score_candidates.append(float(max(0.0, min(1.0, vix_component))))
+    premarket_score = float(min(score_candidates)) if score_candidates else None
+
+    if premarket_score is None:
+        signal_bucket = "UNKNOWN"
+    elif premarket_score <= 0.0:
+        signal_bucket = "LOCK"
+    elif premarket_score <= 0.5:
+        signal_bucket = "BEARISH"
+    elif premarket_score < 1.0:
+        signal_bucket = "DEFENSIVE"
+    else:
+        signal_bucket = "RISK_ON"
+
+    bearish_flag = bool(
+        bool(risk_off)
+        or str(breaker_mode).strip().lower() == "lock"
+        or (regime_label in {"HIGH", "CRISIS"})
+        or (premarket_score is not None and premarket_score <= 0.5)
+    )
+
+    payload = {
+        "date": report_date.strftime("%Y-%m-%d"),
+        "premarket_score": premarket_score,
+        "bearish_flag": bearish_flag,
+        "signal_bucket": signal_bucket,
+        "analyzer_version": "v1_breaker_vix_riskoff",
+        "notes": "derived from active breaker exposure, vix regime scale, and risk_off guard",
+        "vix_component": vix_component,
+        "trend_component": None,
+        "realized_vol_component": None,
+        "gap_risk_component": None,
+        "breadth_component": None,
+        "macro_component": None,
+        "breaker_component": breaker_component,
+        "risk_off_component": risk_off_component,
+    }
+    if regime_label is not None:
+        payload["regime"] = regime_label
+    if vix_level is not None:
+        payload["vix"] = vix_level
+    return payload
 # ============================================================
 # Daily snapshot builder
 # ============================================================
@@ -2545,6 +2622,8 @@ def build_daily_snapshot(
     st_signals: pd.DataFrame,
     s2_details: dict,
     cm_details: dict | None = None,
+    vix_regime: dict | None = None,
+    risk_off: bool = False,
 ) -> dict:
     stop_atr_mult = _snapshot_risk_value("STOP_ATR_MULT", STOP_ATR_MULT_DEFAULT)
     take_profit_atr_mult = _snapshot_risk_value(
@@ -2556,6 +2635,14 @@ def build_daily_snapshot(
     breaker_cfg = get_breaker_config()
     exposure_today = float(breaker_cfg.get("exposure_multiplier", 1.0))
     exposure_label = str(breaker_cfg.get("label", "UNKNOWN"))
+    breaker_mode = str(breaker_cfg.get("mode", "partial"))
+    market_analyzer = _build_market_analyzer_payload(
+        report_date=report_date,
+        vix_regime=vix_regime,
+        breaker_mode=breaker_mode,
+        exposure_today=exposure_today,
+        risk_off=bool(risk_off),
+    )
     invested_before_overlay = 0.0
     invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
 
@@ -2636,7 +2723,8 @@ def build_daily_snapshot(
                 "invested_before_overlay": invested_before_overlay,
                 "invested_after_overlay": invested_after_overlay,
                 "cash_target_weight_today": target_cash_weight_today,
-            }
+            },
+            "market_analyzer": market_analyzer,
         }
 
         # Persist breaker-aware targets for execution/audit.
@@ -2990,6 +3078,7 @@ def build_daily_snapshot(
             "invested_after_overlay": invested_after_overlay,
             "cash_target_weight_today": target_cash_weight_today,
         },
+        "market_analyzer": market_analyzer,
         "sleeve_allocations": allocations.get("sleeves", {}),
         "allocations": allocations,
         "sleeve_states": sleeve_states,
@@ -4279,6 +4368,8 @@ def main(argv: list[str] | None = None):
             st_signals=st_signals,
             s2_details=s2_details,
             cm_details=cm_details,
+            vix_regime=_vix_regime,
+            risk_off=risk_off,
         )
     except RuntimeError as e:
         logger.error("[ERROR] %s", e)
@@ -4713,6 +4804,24 @@ def main(argv: list[str] | None = None):
         write_integrity_artifact(integrity["asof_date"], integrity)
     except Exception as e:
         logger.warning("[INTEGRITY][WARN] failed writing integrity artifact: %s", e)
+
+    # Keep canonical producer artifacts fresh for downstream alpha assessment.
+    try:
+        benchmark_df = update_benchmark_close_history(asof_date=str(integrity.get("asof_date") or trade_date_str))
+        logger.info("[PERF_PRODUCERS] benchmark_close_history rows=%d", len(benchmark_df))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] benchmark producer failed: %s", e)
+    try:
+        vix_df = update_vix_close_history(asof_date=str(integrity.get("asof_date") or trade_date_str))
+        logger.info("[PERF_PRODUCERS] vix_close_history rows=%d", len(vix_df))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] vix producer failed: %s", e)
+    try:
+        analyzer_df = rebuild_premarket_analyzer_scores()
+        logger.info("[PERF_PRODUCERS] premarket_analyzer_scores rows=%d", len(analyzer_df))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] analyzer producer failed: %s", e)
+
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)
     execution_text = exec_body.rstrip() + "\n"

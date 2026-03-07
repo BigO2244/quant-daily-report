@@ -51,3 +51,12 @@ def test_build_daily_snapshot_survives_stop_calc_error(monkeypatch):
     assert snapshot["risk_levels"][0]["stop_loss"] is None
     assert snapshot["risk_levels"][0]["take_profit"] is None
     assert snapshot["risk_levels"][0]["atr"] is None
+    assert "market_analyzer" in snapshot
+    assert set(snapshot["market_analyzer"].keys()) >= {
+        "date",
+        "premarket_score",
+        "bearish_flag",
+        "signal_bucket",
+        "analyzer_version",
+        "notes",
+    }
