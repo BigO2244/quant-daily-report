@@ -210,6 +210,32 @@ See [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for full reconciliation failure r
 
 ---
 
+## Canonical Performance and Alpha Assessment Layer
+
+The **canonical performance pipeline** integrates strategy NAV, benchmark returns, VIX data, and premarket analyzer scores into a unified analysis artifact:
+
+- **Canonical CSV:** `outputs/alpha_assessment/canonical_performance.csv` (schema: date, strategy_nav, strategy_return, spy_close, spy_return, excess_return, vix_close, vix_regime, premarket_score, ...)
+- **Automated producers:**
+  - `update_benchmark_close_history()` → `outputs/perf/benchmark_close_history.csv` (SPY closes via yfinance)
+  - `update_vix_close_history()` → `outputs/perf/vix_close_history.csv` (VIX closes via yfinance)
+  - `rebuild_premarket_analyzer_scores()` → `outputs/perf/premarket_analyzer_scores.csv` (market analyzer payload score from daily runs)
+- **Build command:**
+  ```bash
+  python -m research.alpha_assessment.build_alpha_assessment --rebuild-canonical
+  ```
+- **Downstream:** Canonical performance feeds into overlay engine backtests and analyzer validation metrics.
+- **Data fill rates** (latest build, 17 evaluation rows):
+  - strategy_nav: 5.9%, strategy_return: 5.9% (awaiting additional paper trading runs)
+  - spy_close: 29.4%, spy_return: 23.5%
+  - vix_close: 5.9% (auto-producer, improves with more runs)
+  - premarket_score: 47.1% (real data from daily runs)
+- **Evaluation metrics** (3 rows with both score and spy_return):
+  - Accuracy: 0.33, Precision: 0.33, Recall: 1.0 (sample size limited; confidence interval very wide)
+
+See [`docs/alpha_assessment.md`](docs/alpha_assessment.md) and [`docs/canonical_performance_runbook.md`](docs/canonical_performance_runbook.md).
+
+---
+
 ## AIOps / Governance Model
 
 The `aiops/` module provides a CLI for spec-driven development and validation. Specs are markdown files in `specs/` that define a build contract; AIOps parses them, generates deterministic plans, and can dispatch Codex (or a fallback) to execute.

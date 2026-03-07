@@ -8,7 +8,13 @@ This log covers material architectural and process changes. Routine bug fixes an
 ---
 
 ## Recent Major Changes (Early 2026)
+### VIX Producer Integration — March 6, 2026
 
+- Added `update_vix_close_history()` producer in `paper/perf_artifact_producers.py`
+- VIX data now automatically refreshed in `daily_quant_report.py` and `research/alpha_assessment/build_alpha_assessment.py`
+- Output: `outputs/perf/vix_close_history.csv` with columns `date`, `vix_close`, `vix_return`
+- Unified perf artifacts pipeline: benchmark + VIX + analyzer scores all auto-refreshed before canonical build
+- See `docs/canonical_performance_runbook.md` for build commands and producer automation
 ### Documentation Pack — March 2026
 
 - Created `README.md` as the authoritative repo-level overview and onboarding doc

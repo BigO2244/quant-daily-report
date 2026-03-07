@@ -45,3 +45,14 @@ paper/holdings_latest.csv
 
 # Python packaging artifacts
 *.egg-info/
+
+# Python virtual environments
+.venv/
+
+# macOS duplicate copies
+* 2.py
+* 2.md
+* 2.json
+
+# macOS junk
+.DS_Store
