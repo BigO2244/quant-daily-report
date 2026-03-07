@@ -62,7 +62,7 @@ Run from repo root (`/Users/brettolson/Documents/Caerus/quant-daily-report-main`
 
 ```bash
 cd /Users/brettolson/Documents/Caerus/quant-daily-report-main
-/Users/brettolson/Documents/Caerus/quant-daily-report-main/quant_research_agent/.venv/bin/python scripts/build_quant_dashboard.py
+python3 scripts/build_quant_dashboard.py
 ```
 
 Default output path:
@@ -72,8 +72,10 @@ Default output path:
 Optional output path:
 
 ```bash
-/Users/brettolson/Documents/Caerus/quant-daily-report-main/quant_research_agent/.venv/bin/python scripts/build_quant_dashboard.py --output web/dashboard/dashboard_data.json
+python3 scripts/build_quant_dashboard.py --output web/dashboard/dashboard_data.json
 ```
+
+`web/dashboard/dashboard_data.json` is generated at build time and is not committed by default.
 
 The builder is resilient to missing artifacts. It does not fail hard for absent files; it emits warnings and fills the JSON with null/default placeholders, plus explicit exception/check statuses.
 
@@ -95,7 +97,7 @@ If the browser blocks local `fetch` for `file://` URLs, the page automatically f
 1. Build dashboard JSON:
 
 ```bash
-/Users/brettolson/Documents/Caerus/quant-daily-report-main/quant_research_agent/.venv/bin/python scripts/build_quant_dashboard.py
+python3 scripts/build_quant_dashboard.py
 ```
 
 2. Start a local static server from repo root:
@@ -107,11 +109,12 @@ python3 -m http.server 8765
 
 3. Open with query parameter (uses generated real JSON at `web/dashboard/dashboard_data.json`):
 
-- `http://127.0.0.1:8765/web/dashboard/quant_daily_executive.html?data=dashboard_data.json`
+- `http://localhost:8765/web/dashboard/quant_daily_executive.html?data=dashboard_data.json`
 
 How `?data=` is resolved:
 
 - `?data=dashboard_data.json` loads `web/dashboard/dashboard_data.json` relative to the dashboard HTML path.
+- This is the canonical and most reliable query-string form for local serve mode.
 - `?data=sample_dashboard_data.json` forces sample JSON mode while still using the local server.
 
 ## Source Artifacts Used
