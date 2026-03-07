@@ -137,6 +137,40 @@ class DashboardBuilder:
 
         return health_obj, integrity_obj, health_used, integrity_used
 
+    def _read_first_existing_json(self, rel_paths: list[str], *, required: bool = False) -> tuple[str | None, dict[str, Any] | None]:
+        for rel in rel_paths:
+            parsed = self._read_json(rel, required=False, used=True)
+            if isinstance(parsed, dict):
+                return rel, parsed
+        if required and rel_paths:
+            self.warnings.append(f"Missing required JSON artifact: {rel_paths[0]}")
+        return None, None
+
+    def _find_preflight_failure(self, run_id: str | None) -> tuple[dict[str, Any] | None, str | None]:
+        if not run_id:
+            return None, None
+        rel = f"outputs/runs/{run_id}/logs/preflight_failure.json"
+        payload = self._read_json(rel, required=False, used=True)
+        if isinstance(payload, dict):
+            return payload, rel
+        return None, None
+
+    def _infer_early_halt_without_artifacts(self, run_id: str | None) -> tuple[bool, str | None]:
+        if not run_id:
+            return False, None
+        run_root = self._abs(f"outputs/runs/{run_id}")
+        if not run_root.exists() or not run_root.is_dir():
+            return False, None
+        artifact_files: list[str] = []
+        for file_path in sorted(p for p in run_root.rglob("*") if p.is_file()):
+            rel = file_path.relative_to(run_root).as_posix()
+            if rel in {"meta.json", "manifest.json", "checksums.sha256"}:
+                continue
+            artifact_files.append(rel)
+        if artifact_files:
+            return False, None
+        return True, "Run folder has no stage artifacts beyond meta/manifest/checksums."
+
     @staticmethod
     def _coerce_num(v: Any) -> float | None:
         try:
@@ -228,9 +262,21 @@ class DashboardBuilder:
         exec_payload_obj: dict[str, Any] = execution_payload if isinstance(execution_payload, dict) else {}
         health_obj, integrity_obj, _, _ = self._find_latest_health_integrity(run_id, report_date)
 
-        canonical_positions_path = "canonical-model-snapshot/canonical_positions.json"
-        canonical_positions = self._read_json(canonical_positions_path, required=False, used=True)
-        positions_obj = canonical_positions if isinstance(canonical_positions, dict) else {}
+        canonical_positions_path, positions_obj = self._read_first_existing_json(
+            [
+                "outputs/paper_state/canonical_positions.json",
+                "canonical-model-snapshot/canonical_positions.json",
+            ],
+            required=False,
+        )
+        if canonical_positions_path is None:
+            canonical_positions_path = "outputs/paper_state/canonical_positions.json"
+        if positions_obj is None:
+            positions_obj = {}
+
+        preflight_failure_obj, _preflight_failure_path = self._find_preflight_failure(run_id)
+        preflight_halted = isinstance(preflight_failure_obj, dict)
+        inferred_early_halt, inferred_note = self._infer_early_halt_without_artifacts(run_id)
 
         # Normalize canonical numeric columns if present.
         if canonical_df is not None and not canonical_df.empty:
@@ -349,6 +395,10 @@ class DashboardBuilder:
             execution_status = str(exec_payload_obj.get("execution_status") or exec_payload_obj.get("status_label") or "UNKNOWN").upper()
         elif isinstance(health_obj, dict):
             execution_status = str(health_obj.get("status") or "UNKNOWN").upper()
+        if preflight_halted and execution_status in {"UNKNOWN", "", "N/A"}:
+            execution_status = "HALTED_PREFLIGHT"
+        if inferred_early_halt and execution_status in {"UNKNOWN", "", "N/A", "HALTED"}:
+            execution_status = "HALTED_INFERRED_PREFLIGHT"
 
         # Performance summary metrics.
         mtd = qtd = si = si_alpha = best_day = worst_day = None
@@ -526,9 +576,17 @@ class DashboardBuilder:
             delta = abs(self._coerce_num(health_obj.get("recon_delta")) or 0.0)
             tol = abs(self._coerce_num(health_obj.get("recon_equity_tolerance")) or 0.0)
             recon_ok = delta <= tol if tol > 0 else delta == 0.0
+        if preflight_halted and recon_ok is None:
+            recon_ok = None
+        if inferred_early_halt and recon_ok is None:
+            recon_ok = None
 
         run_success = execution_status in {"PASS", "READY", "SUCCESS", "COMPLETED"}
-        if execution_status in {"HALTED", "FAIL", "FAILED", "ERROR", "RECON_FAIL_AUTO_BOOTSTRAP"}:
+        if preflight_halted:
+            run_success = False
+        if inferred_early_halt:
+            run_success = False
+        if execution_status in {"HALTED", "HALTED_PREFLIGHT", "HALTED_INFERRED_PREFLIGHT", "FAIL", "FAILED", "ERROR", "RECON_FAIL_AUTO_BOOTSTRAP"}:
             run_success = False
 
         required_artifacts = [
@@ -540,14 +598,59 @@ class DashboardBuilder:
         missing_required = [p for p in required_artifacts if not (self.repo_root / p).exists()]
 
         exceptions: list[dict[str, str]] = []
+        if preflight_halted:
+            halt_stage = str(preflight_failure_obj.get("halt_stage") or "preflight")
+            halt_reason = str(preflight_failure_obj.get("halt_reason") or "preflight gate failed")
+            exceptions.append(
+                {
+                    "category": "Preflight",
+                    "status": "fail",
+                    "message": f"Run halted at {halt_stage}: {halt_reason}.",
+                }
+            )
+        elif inferred_early_halt:
+            exceptions.append(
+                {
+                    "category": "Preflight",
+                    "status": "warning",
+                    "message": "Run likely halted before stage artifacts were generated (inferred).",
+                }
+            )
+
         if recon_ok is True:
             exceptions.append({"category": "Reconciliation", "status": "pass", "message": "No issues detected."})
+        elif preflight_halted:
+            exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation gate blocked execution before run stages."})
         elif recon_ok is False:
-            exceptions.append({"category": "Reconciliation", "status": "fail", "message": "Model/broker reconciliation failed."})
+            msg = "Model/broker reconciliation failed."
+            if inferred_early_halt:
+                msg = "Reconciliation likely blocked run before stage artifacts were generated (inferred)."
+                exceptions.append({"category": "Reconciliation", "status": "warning", "message": msg})
+            else:
+                exceptions.append({"category": "Reconciliation", "status": "fail", "message": msg})
+        elif inferred_early_halt:
+            exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status inferred from sparse run artifacts."})
         else:
             exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status unavailable."})
 
-        if run_success:
+        if preflight_halted:
+            halt_stage = str(preflight_failure_obj.get("halt_stage") or "preflight")
+            exceptions.append(
+                {
+                    "category": "Execution",
+                    "status": "warning",
+                    "message": f"Execution did not start due to preflight halt at {halt_stage}.",
+                }
+            )
+        elif inferred_early_halt:
+            exceptions.append(
+                {
+                    "category": "Execution",
+                    "status": "warning",
+                    "message": "Execution likely did not start; halted before stage artifacts were generated (inferred).",
+                }
+            )
+        elif run_success:
             exceptions.append({"category": "Execution", "status": "pass", "message": f"Execution status: {execution_status}."})
         else:
             exceptions.append({"category": "Execution", "status": "fail", "message": f"Execution status: {execution_status}."})
@@ -605,8 +708,12 @@ class DashboardBuilder:
         operating_checks = [
             {
                 "label": "Run completed",
-                "status": "pass" if run_success else "fail",
-                "detail": f"Execution status: {execution_status}.",
+                "status": "pass" if run_success else ("warning" if (preflight_halted or inferred_early_halt) else "fail"),
+                "detail": (
+                    f"Execution status: {execution_status}."
+                    if not (preflight_halted or inferred_early_halt)
+                    else "Run halted before execution stages completed."
+                ),
             },
             {
                 "label": "Trades executed",
@@ -615,8 +722,20 @@ class DashboardBuilder:
             },
             {
                 "label": "Reconciliation passed",
-                "status": "pass" if recon_ok is True else ("fail" if recon_ok is False else "warning"),
-                "detail": "Reconciliation check available." if recon_ok is not None else "Reconciliation artifact not found.",
+                "status": (
+                    "pass"
+                    if recon_ok is True
+                    else ("warning" if (preflight_halted or inferred_early_halt) else ("fail" if recon_ok is False else "warning"))
+                ),
+                "detail": (
+                    "Preflight reconciliation gate failed."
+                    if preflight_halted
+                    else (
+                        "Reconciliation status inferred; halted before stage artifacts were generated."
+                        if inferred_early_halt
+                        else ("Reconciliation check available." if recon_ok is not None else "Reconciliation artifact not found.")
+                    )
+                ),
             },
             {
                 "label": "Canonical positions present",
@@ -654,13 +773,29 @@ class DashboardBuilder:
             )
         elif report_date:
             status_banner = f"Run reported {execution_status} on {report_date}. Review exceptions and operating checks."
+        if preflight_halted and report_date:
+            halt_stage = str(preflight_failure_obj.get("halt_stage") or "preflight")
+            status_banner = (
+                f"Run halted during {halt_stage} on {report_date}. "
+                "Execution did not start; review preflight failure details."
+            )
+        elif inferred_early_halt and report_date:
+            status_banner = (
+                f"Run likely halted before stage artifacts were generated on {report_date}. "
+                "This classification is inferred from sparse run artifacts."
+            )
+
+        if inferred_note:
+            self.warnings.append(inferred_note)
+
+        overall_status = "PASS" if run_success else ("WARNING" if (preflight_halted or inferred_early_halt or execution_status == "UNKNOWN") else "FAIL")
 
         model = {
             "run_meta": {
                 "report_date": report_date or "Not generated",
                 "run_id": run_id or "Not generated",
                 "mode": mode,
-                "overall_status": "PASS" if run_success else ("WARNING" if execution_status == "UNKNOWN" else "FAIL"),
+                "overall_status": overall_status,
                 "benchmark": "SPY",
                 "last_updated": self._safe_iso_now(),
                 "status_banner": status_banner,

@@ -127,7 +127,8 @@ The builder attempts to read the following canonical sources:
 - `outputs/execution_email/<report_date>.json` (or latest usable file)
 - `outputs/runs/<run_id>/snapshots/health_<report_date>.json`
 - `outputs/runs/<run_id>/snapshots/integrity_<report_date>.json`
-- `canonical-model-snapshot/canonical_positions.json`
+- `outputs/paper_state/canonical_positions.json` (preferred)
+- `canonical-model-snapshot/canonical_positions.json` (legacy fallback)
 
 The generated JSON includes a `sources` section listing presence/usage status.
 
