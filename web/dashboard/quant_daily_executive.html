@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quant Daily Executive Dashboard</title>
+  <link rel="stylesheet" href="quant_daily_executive.css">
+</head>
+<body>
+  <main class="dashboard">
+    <header class="header card">
+      <div>
+        <h1>Quant Daily Executive Dashboard</h1>
+        <p class="subtitle">Daily portfolio performance, benchmark comparison, and operating status</p>
+      </div>
+      <div class="meta-grid" id="meta-grid"></div>
+      <div class="status-banner" id="status-banner">Loading executive status...</div>
+    </header>
+
+    <section class="kpi-strip" id="kpi-strip"></section>
+
+    <section class="hero-row">
+      <article class="card chart-card hero-chart-card">
+        <div class="section-head">
+          <h2>NAV vs Benchmark</h2>
+          <span class="muted" id="hero-window-label">Last 30 observations</span>
+        </div>
+        <canvas id="hero-nav-chart" height="300" aria-label="NAV versus benchmark chart"></canvas>
+        <div class="legend">
+          <span><i class="swatch swatch-nav"></i>Portfolio (Indexed)</span>
+          <span><i class="swatch swatch-bench"></i>Benchmark (Indexed)</span>
+        </div>
+      </article>
+      <article class="card perf-summary-card">
+        <h2>Performance Summary</h2>
+        <div class="summary-grid" id="perf-summary-grid"></div>
+      </article>
+    </section>
+
+    <section class="daily-row">
+      <article class="card chart-card">
+        <div class="section-head">
+          <h2>Daily Returns</h2>
+          <span class="muted">Recent observations</span>
+        </div>
+        <canvas id="daily-returns-chart" height="220" aria-label="Daily returns bar chart"></canvas>
+      </article>
+      <article class="card chart-card">
+        <div class="section-head">
+          <h2>Excess Return vs Benchmark</h2>
+          <span class="muted">Recent observations</span>
+        </div>
+        <canvas id="excess-returns-chart" height="220" aria-label="Excess return bar chart"></canvas>
+      </article>
+    </section>
+
+    <section class="risk-row" id="risk-row"></section>
+
+    <section class="activity-row">
+      <article class="card">
+        <h2>Trading Activity Summary</h2>
+        <div class="activity-grid" id="activity-grid"></div>
+      </article>
+      <article class="card">
+        <h2>Top Portfolio Changes</h2>
+        <table class="data-table" id="top-changes-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Action</th>
+              <th>Change in Weight</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="exceptions-row">
+      <article class="card">
+        <h2>Exceptions</h2>
+        <div id="exceptions-list" class="exceptions-list"></div>
+      </article>
+      <article class="card">
+        <h2>Operating Checks</h2>
+        <ul id="operating-checks" class="checks-list"></ul>
+      </article>
+    </section>
+
+    <footer class="footer card">
+      <div class="footer-meta" id="footer-meta"></div>
+      <details>
+        <summary>Source files used</summary>
+        <ul id="sources-list" class="sources-list"></ul>
+      </details>
+    </footer>
+  </main>
+
+  <script src="quant_daily_executive.js"></script>
+</body>
+</html>

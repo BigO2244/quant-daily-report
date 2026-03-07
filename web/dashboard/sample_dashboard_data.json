@@ -1,0 +1,144 @@
+{
+  "run_meta": {
+    "report_date": "2026-03-06",
+    "run_id": "2026-03-06T093505-0500_ab12cd3",
+    "mode": "ALPACA_PAPER",
+    "overall_status": "PASS",
+    "benchmark": "SPY",
+    "last_updated": "2026-03-06T17:10:22Z",
+    "status_banner": "Run completed successfully on March 6, 2026. Three trades executed. Portfolio outperformed benchmark by 7 bps. No material exceptions."
+  },
+  "kpis": {
+    "portfolio_value": 100482.33,
+    "daily_pl": 128.45,
+    "daily_return": 0.0013,
+    "benchmark_return": 0.0006,
+    "excess_return": 0.0007,
+    "holdings": 12,
+    "turnover": 0.082,
+    "run_status": "PASS"
+  },
+  "perf_summary": {
+    "mtd_return": 0.0112,
+    "qtd_return": 0.0187,
+    "since_inception_return": 0.0048,
+    "since_inception_alpha": 0.0026,
+    "current_drawdown": -0.0061,
+    "best_day": 0.0054,
+    "worst_day": -0.0047
+  },
+  "series": {
+    "nav": [
+      {"date": "2026-02-20", "value": 100000.0},
+      {"date": "2026-02-21", "value": 100120.0},
+      {"date": "2026-02-24", "value": 100080.0},
+      {"date": "2026-02-25", "value": 100310.0},
+      {"date": "2026-02-26", "value": 100250.0},
+      {"date": "2026-02-27", "value": 100190.0},
+      {"date": "2026-03-02", "value": 100320.0},
+      {"date": "2026-03-03", "value": 100410.0},
+      {"date": "2026-03-04", "value": 100354.0},
+      {"date": "2026-03-05", "value": 100353.88},
+      {"date": "2026-03-06", "value": 100482.33}
+    ],
+    "benchmark": [
+      {"date": "2026-02-20", "value": 684.12},
+      {"date": "2026-02-21", "value": 686.4},
+      {"date": "2026-02-24", "value": 687.35},
+      {"date": "2026-02-25", "value": 693.15},
+      {"date": "2026-02-26", "value": 689.3},
+      {"date": "2026-02-27", "value": 685.99},
+      {"date": "2026-03-02", "value": 688.12},
+      {"date": "2026-03-03", "value": 690.33},
+      {"date": "2026-03-04", "value": 691.22},
+      {"date": "2026-03-05", "value": 692.05},
+      {"date": "2026-03-06", "value": 692.47}
+    ],
+    "daily_returns": [
+      {"date": "2026-02-24", "value": -0.0004},
+      {"date": "2026-02-25", "value": 0.0023},
+      {"date": "2026-02-26", "value": -0.0006},
+      {"date": "2026-02-27", "value": -0.0006},
+      {"date": "2026-03-02", "value": 0.0013},
+      {"date": "2026-03-03", "value": 0.0009},
+      {"date": "2026-03-04", "value": -0.0006},
+      {"date": "2026-03-05", "value": -0.0000},
+      {"date": "2026-03-06", "value": 0.0013}
+    ],
+    "excess_returns": [
+      {"date": "2026-02-24", "value": -0.0082},
+      {"date": "2026-02-25", "value": -0.0022},
+      {"date": "2026-02-26", "value": 0.0049},
+      {"date": "2026-02-27", "value": 0.0042},
+      {"date": "2026-03-02", "value": 0.0012},
+      {"date": "2026-03-03", "value": -0.0006},
+      {"date": "2026-03-04", "value": -0.0019},
+      {"date": "2026-03-05", "value": -0.0008},
+      {"date": "2026-03-06", "value": 0.0007}
+    ],
+    "drawdown": [
+      {"date": "2026-02-20", "value": 0.0},
+      {"date": "2026-02-24", "value": -0.0004},
+      {"date": "2026-02-25", "value": 0.0},
+      {"date": "2026-02-26", "value": -0.0006},
+      {"date": "2026-02-27", "value": -0.0012},
+      {"date": "2026-03-02", "value": 0.0},
+      {"date": "2026-03-03", "value": 0.0},
+      {"date": "2026-03-04", "value": -0.0006},
+      {"date": "2026-03-05", "value": -0.0006},
+      {"date": "2026-03-06", "value": 0.0}
+    ]
+  },
+  "risk": {
+    "drawdown": -0.0061,
+    "cash_position": 0.182,
+    "gross_exposure": 0.818,
+    "largest_position_weight": 0.089,
+    "turnover_pct": 0.082,
+    "turnover_limit_pct": 0.35,
+    "breaker_status": "PARTIAL"
+  },
+  "activity": {
+    "buys": 2,
+    "sells": 1,
+    "new_positions": 1,
+    "full_exits": 1,
+    "orders_filled": 3,
+    "orders_rejected": 0
+  },
+  "top_changes": [
+    {"ticker": "ADI", "action": "BUY", "change_weight": 0.0114, "reason": "rebalance_to_target"},
+    {"ticker": "JNJ", "action": "SELL", "change_weight": -0.0097, "reason": "removed_from_targets"},
+    {"ticker": "MO", "action": "BUY", "change_weight": 0.0061, "reason": "rebalance_to_target"},
+    {"ticker": "MNST", "action": "BUY", "change_weight": 0.0044, "reason": "rebalance_to_target"},
+    {"ticker": "WBD", "action": "SELL", "change_weight": -0.0036, "reason": "risk_reduction"}
+  ],
+  "exceptions": [
+    {"category": "Reconciliation", "status": "pass", "message": "No issues detected."},
+    {"category": "Execution", "status": "pass", "message": "All planned orders filled."},
+    {"category": "Risk", "status": "warning", "message": "Breaker in PARTIAL mode from volatility guard."},
+    {"category": "Data / artifacts", "status": "pass", "message": "All critical artifacts present."}
+  ],
+  "operating_checks": [
+    {"label": "Run completed", "status": "pass", "detail": "Execution finished with PASS status."},
+    {"label": "Trades executed", "status": "pass", "detail": "3 trades executed."},
+    {"label": "Reconciliation passed", "status": "pass", "detail": "No model/broker drift found."},
+    {"label": "Canonical positions present", "status": "pass", "detail": "Canonical snapshot found."},
+    {"label": "Ledger updated", "status": "pass", "detail": "Trades ledger includes latest run."},
+    {"label": "Daily report generated", "status": "pass", "detail": "Run report artifacts available."}
+  ],
+  "sources": [
+    {"path": "outputs/latest.json", "status": "used"},
+    {"path": "outputs/alpha_assessment/canonical_performance.csv", "status": "used"},
+    {"path": "outputs/perf/nav_timeseries.csv", "status": "used"},
+    {"path": "outputs/perf/benchmark_close_history.csv", "status": "used"},
+    {"path": "outputs/perf/vix_close_history.csv", "status": "used"},
+    {"path": "outputs/execution_email/2026-03-06.json", "status": "example"}
+  ],
+  "builder_notes": {
+    "missing_files": [],
+    "warnings": [
+      "Sample data file for static dashboard preview."
+    ]
+  }
+}
