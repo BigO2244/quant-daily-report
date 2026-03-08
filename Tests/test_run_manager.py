@@ -64,3 +64,16 @@ def test_manifest_and_checksums_smoke(tmp_path):
 
     assert manifest_path.exists()
     assert checksums_path.exists()
+
+
+def test_manifest_includes_preflight_failure_artifact(tmp_path):
+    run_root = tmp_path / "outputs" / "runs" / "2026-03-04T120447-0500_abc1234"
+    ensure_dir(run_root / "logs")
+    safe_write_text(
+        run_root / "logs" / "preflight_failure.json",
+        '{"halt_stage":"pretrade_reconciliation"}\n',
+    )
+
+    manifest = collect_manifest(run_root)
+    paths = {item["path"] for item in manifest["files"]}
+    assert "logs/preflight_failure.json" in paths

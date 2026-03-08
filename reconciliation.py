@@ -21,6 +21,11 @@ def _canonical_model_snapshot_path() -> Path:
     return snapshot_dir / "canonical_positions.json"
 
 
+def _legacy_canonical_model_snapshot_path() -> Path:
+    """Return path to legacy canonical snapshot location (read-only fallback)."""
+    return Path("canonical-model-snapshot") / "canonical_positions.json"
+
+
 def _write_canonical_model_snapshot(
     positions: dict[str, float],
     cash: float | None = None,
@@ -46,6 +51,42 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
     """Load canonical model snapshot or return dict with parse_error."""
     path = _canonical_model_snapshot_path()
     if not path.exists():
+        legacy_path = _legacy_canonical_model_snapshot_path()
+        if legacy_path.exists():
+            try:
+                legacy_payload = json.loads(legacy_path.read_text(encoding="utf-8"))
+                legacy_positions = _normalize_positions(legacy_payload.get("positions") or {})
+                legacy_cash = _coerce_float(legacy_payload.get("cash"))
+                legacy_equity = _coerce_float(legacy_payload.get("equity"))
+                legacy_reason = legacy_payload.get("reason") if isinstance(legacy_payload, dict) else None
+                if legacy_positions or allow_empty:
+                    write_reason = (
+                        f"recovered_from_legacy_snapshot:{legacy_reason}"
+                        if legacy_reason
+                        else "recovered_from_legacy_snapshot"
+                    )
+                    _write_canonical_model_snapshot(
+                        positions=legacy_positions,
+                        cash=legacy_cash,
+                        equity=legacy_equity,
+                        reason=write_reason,
+                    )
+                    return {
+                        "positions": legacy_positions,
+                        "position_count": len(legacy_positions),
+                        "cash": legacy_cash,
+                        "equity": legacy_equity,
+                        "reason": write_reason,
+                        "path": str(path),
+                        "path_exists": True,
+                        "parser": "canonical_json_recovered_from_legacy",
+                        "parse_error": None,
+                        "source_state_notes": [
+                            f"Recovered preferred canonical snapshot from legacy source: {legacy_path}",
+                        ],
+                    }
+            except Exception as e:
+                logger.warning("[RECON] Failed to recover canonical snapshot from legacy path: %s", e)
         return {
             "positions": {},
             "position_count": 0,
@@ -55,6 +96,10 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
             "path_exists": False,
             "parser": "canonical_json",
             "parse_error": "canonical_snapshot_missing",
+            "source_state_notes": [
+                f"Preferred canonical snapshot missing at {path}",
+                f"Legacy snapshot unavailable or unusable at {_legacy_canonical_model_snapshot_path()}",
+            ],
         }
     
     try:
@@ -83,6 +128,7 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
             "path_exists": True,
             "parser": "canonical_json",
             "parse_error": parse_error,
+            "source_state_notes": [],
         }
     except Exception as e:
         logger.warning("[RECON] Failed to load canonical snapshot: %s", e)
@@ -95,6 +141,7 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
             "path_exists": True,
             "parser": "canonical_json",
             "parse_error": f"canonical_snapshot_parse_error: {e}",
+            "source_state_notes": [f"Preferred canonical snapshot parse failed at {path}"],
         }
 
 
@@ -513,6 +560,11 @@ def _reconcile(
     if canonical_snapshot.get("parse_error"):
         # Canonical not available; fall back to ledger
         model_snapshot = _load_model_snapshot(ledger_path, allow_empty=allow_empty)
+        canonical_notes = list(canonical_snapshot.get("source_state_notes") or [])
+        if canonical_notes:
+            merged_notes = list(model_snapshot.get("source_state_notes") or [])
+            merged_notes.extend(canonical_notes)
+            model_snapshot["source_state_notes"] = merged_notes
         if model_snapshot.get("parse_error") and len(broker_snapshot.get("positions") or {}) > 0:
             # Bootstrap scenario: model is empty but broker has positions
             model_snapshot["bootstrap_hint"] = (
@@ -676,6 +728,118 @@ def _write_recon_blocked_artifact(
     return str(out_path)
 
 
+def _recommended_action_for_block_reason(block_reason: str) -> str:
+    reason = str(block_reason or "").strip().lower()
+    if reason == "stale_state":
+        return (
+            "Run bootstrap to refresh canonical snapshot from broker positions, then rerun pre-trade checks. "
+            "If auto-bootstrap is desired, set AUTO_BOOTSTRAP_ON_RECON_FAIL=1."
+        )
+    if reason in {"positions_mismatch", "quantity_mismatch"}:
+        return (
+            "Review model vs broker positions and resolve drift before submitting orders. "
+            "Use reconciliation report details to identify offending symbols."
+        )
+    if reason in {"broker_read_failure"}:
+        return "Check broker connectivity/credentials and retry once broker reads are healthy."
+    if reason in {"equity_only_drift", "cash_only_drift", "equity_cash_drift"}:
+        return "Review cash/equity tolerances and snapshot freshness; reconcile drift policy if needed."
+    return "Review reconciliation report details and resolve pre-trade gate failure before rerun."
+
+
+def _write_preflight_failure_artifact(
+    *,
+    run_date: str,
+    halt_stage: str,
+    halt_reason: str,
+    block_reason: str,
+    recon_report_path: str,
+    source_state_notes: list[str] | None = None,
+) -> str:
+    """Write a structured preflight halt artifact under run logs.
+
+    This artifact is consumed by downstream reporting/dashboard tooling to
+    distinguish an early gate halt from an execution-stage failure.
+    """
+    base_dir = Path(str(os.getenv("RUN_OUTPUT_ROOT", "")).strip() or "outputs")
+    logs_dir = base_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    out_path = logs_dir / "preflight_failure.json"
+    payload = {
+        "run_date": str(run_date),
+        "halt_stage": str(halt_stage),
+        "halt_reason": str(halt_reason),
+        "block_reason": str(block_reason),
+        "recon_report": str(recon_report_path),
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "recommended_action": _recommended_action_for_block_reason(block_reason),
+        "source_state_notes": list(source_state_notes or []),
+    }
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    logger.warning("[RECON] Preflight failure artifact written: %s", out_path)
+    return str(out_path)
+
+
+def _auto_bootstrap_enabled() -> bool:
+    return _is_truthy(os.getenv("AUTO_BOOTSTRAP_ON_RECON_FAIL"), default=False)
+
+
+def _attempt_auto_bootstrap_recovery(
+    *,
+    run_date: str,
+    trading_mode: str,
+    ledger_path: str,
+    sent_ledger_path: str,
+    allow_empty: bool,
+    strict_pre: bool,
+) -> tuple[bool, str, str, str]:
+    """Try to recover from stale-state pre-trade fail by bootstrapping and retrying once.
+
+    Returns (recovered, verdict, report_path, block_reason).
+    """
+    if not _auto_bootstrap_enabled():
+        return False, "FAIL", "", "stale_state"
+    if str(trading_mode or "").strip().lower() != "alpaca":
+        return False, "FAIL", "", "stale_state"
+
+    logger.warning("[RECON][AUTO_BOOTSTRAP] Attempting recovery from stale_state pre-trade failure")
+    force_flat = _is_truthy(os.getenv("AUTO_BOOTSTRAP_FORCE_FLAT"), default=False)
+    ok = bootstrap_model_ledger_from_broker(
+        trading_mode=trading_mode,
+        ledger_path=ledger_path,
+        sent_ledger_path=sent_ledger_path,
+        run_date=run_date,
+        force=force_flat,
+    )
+    if not ok:
+        logger.warning("[RECON][AUTO_BOOTSTRAP] Bootstrap attempt failed")
+        return False, "FAIL", "", "stale_state"
+
+    retry_verdict, retry_report_path, retry_block_reason = _reconcile(
+        stage="pretrade",
+        run_date=run_date,
+        trading_mode=trading_mode,
+        ledger_path=ledger_path,
+        sent_ledger_path=sent_ledger_path,
+        allow_empty=allow_empty,
+        strict=strict_pre,
+    )
+    recovered = retry_verdict != "FAIL"
+    if recovered:
+        logger.warning(
+            "[RECON][AUTO_BOOTSTRAP] Recovery succeeded verdict=%s report=%s",
+            retry_verdict,
+            retry_report_path,
+        )
+    else:
+        logger.warning(
+            "[RECON][AUTO_BOOTSTRAP] Recovery retry still failing block_reason=%s report=%s",
+            retry_block_reason,
+            retry_report_path,
+        )
+    return recovered, retry_verdict, retry_report_path, retry_block_reason
+
+
 def pre_trade_reconcile_or_exit(
     run_date: str,
     trading_mode: str,
@@ -702,11 +866,44 @@ def pre_trade_reconcile_or_exit(
         allow_empty=allow_empty,
         strict=strict_pre,
     )
+    if verdict == "FAIL" and block_reason == "stale_state":
+        recovered, retry_verdict, retry_report_path, retry_block_reason = _attempt_auto_bootstrap_recovery(
+            run_date=run_date,
+            trading_mode=trading_mode,
+            ledger_path=ledger_path,
+            sent_ledger_path=sent_ledger_path,
+            allow_empty=allow_empty,
+            strict_pre=strict_pre,
+        )
+        if recovered:
+            return
+        if retry_report_path:
+            report_path = retry_report_path
+            verdict = retry_verdict
+            block_reason = retry_block_reason
+
     if verdict == "FAIL":
+        source_state_notes = []
+        try:
+            report_payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
+            model_snapshot = report_payload.get("model_snapshot") if isinstance(report_payload, dict) else None
+            if isinstance(model_snapshot, dict):
+                source_state_notes = list(model_snapshot.get("source_state_notes") or [])
+        except Exception:
+            source_state_notes = []
+
         _write_recon_blocked_artifact(
             run_date=run_date,
             block_reason=block_reason,
             recon_report_path=report_path,
+        )
+        _write_preflight_failure_artifact(
+            run_date=run_date,
+            halt_stage="pretrade_reconciliation",
+            halt_reason=f"pretrade_reconcile_failed:{block_reason}",
+            block_reason=block_reason,
+            recon_report_path=report_path,
+            source_state_notes=source_state_notes,
         )
         raise SystemExit(2)
 
