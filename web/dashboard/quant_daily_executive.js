@@ -99,7 +99,12 @@
       market_value: 82205.61,
       as_of: "2026-03-07T13:31:00Z",
       source: "artifact:outputs/broker/broker_snapshot_latest.json",
-      status: "fresh"
+      source_detail: "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+      trust_level: "authoritative",
+      status: "fresh",
+      suspicious: false,
+      confidence_note: "",
+      display_equity: 100615.72
     },
     data_freshness: {
       run_report_date: "2026-03-06",
@@ -107,7 +112,10 @@
       broker_as_of: "2026-03-07T13:31:00Z",
       broker_vs_run_alignment: "mismatch",
       alignment_detail: "Broker snapshot is newer than governed run date.",
-      stale_threshold_hours: 36
+      stale_threshold_hours: 36,
+      broker_trust_level: "authoritative",
+      broker_source_detail: "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+      suspicious_broker_value: false
     },
     top_changes: [
       { ticker: "ADI", action: "BUY", change_weight: 0.0114, reason: "rebalance_to_target" },
@@ -379,6 +387,7 @@
   function renderSnapshots(governed, broker, freshness) {
     const governedGrid = document.getElementById("governed-snapshot-grid");
     const brokerGrid = document.getElementById("broker-snapshot-grid");
+    const brokerTitle = document.getElementById("broker-snapshot-title");
     const governedAsOf = document.getElementById("governed-asof-label");
     const brokerAsOf = document.getElementById("broker-asof-label");
     const alignmentNote = document.getElementById("snapshot-alignment-note");
@@ -391,8 +400,24 @@
       ["Cash", formatCurrency(governed.cash)],
       ["Market Value", formatCurrency(governed.market_value)]
     ];
+    const trust = String(broker.trust_level || "missing").toLowerCase();
+    const lowTrust = trust === "derived" || trust === "missing";
+    const suspicious = !!broker.suspicious;
+
+    if (brokerTitle) {
+      brokerTitle.textContent = lowTrust ? "Derived Broker Estimate" : "Latest Broker Snapshot";
+    }
+
+    const brokerHeadlineValue = suspicious
+      ? "Data unavailable"
+      : formatCurrency(
+        broker.display_equity !== undefined && broker.display_equity !== null
+          ? broker.display_equity
+          : (broker.portfolio_value || broker.equity)
+      );
+
     const brokerItems = [
-      ["Portfolio / Equity", formatCurrency(broker.portfolio_value || broker.equity)],
+      ["Portfolio / Equity", brokerHeadlineValue],
       ["Cash", formatCurrency(broker.cash)],
       ["Buying Power", formatCurrency(broker.buying_power)]
     ];
@@ -412,12 +437,16 @@
     });
 
     governedAsOf.textContent = `As of: ${governed.as_of || "not available"}`;
-    brokerAsOf.textContent = `As of: ${broker.as_of || "not available"}`;
+    brokerAsOf.textContent = `As of: ${broker.as_of || "not available"} (${trust || "missing"})`;
 
     const alignment = String((freshness && freshness.broker_vs_run_alignment) || "missing");
     const detail = (freshness && freshness.alignment_detail) || "Broker snapshot alignment unavailable.";
-    alignmentNote.textContent = detail;
-    alignmentNote.className = `snapshot-note ${statusClass(alignment)}`;
+    const sourceDetail = String(broker.source_detail || broker.source || "source unknown");
+    const confidenceDetail = suspicious
+      ? (broker.confidence_note || "Derived estimate flagged as suspicious.")
+      : (lowTrust ? "Derived estimate; use governed snapshot as primary source." : "Authoritative/reconciled broker source.");
+    alignmentNote.textContent = `${detail} Source: ${sourceDetail}. ${confidenceDetail}`;
+    alignmentNote.className = `snapshot-note ${suspicious ? "warning" : statusClass(alignment)}`;
   }
 
   function renderTopChanges(rows) {
@@ -641,7 +670,21 @@
       risk: {},
       activity: {},
       governed_snapshot: { portfolio_value: null, cash: null, market_value: null, as_of: null, source: "missing" },
-      broker_snapshot: { portfolio_value: null, cash: null, buying_power: null, equity: null, market_value: null, as_of: null, source: "missing", status: "missing" },
+      broker_snapshot: {
+        portfolio_value: null,
+        cash: null,
+        buying_power: null,
+        equity: null,
+        market_value: null,
+        as_of: null,
+        source: "missing",
+        status: "missing",
+        trust_level: "missing",
+        source_detail: "fallback:model",
+        suspicious: false,
+        confidence_note: "Broker snapshot unavailable in fallback model.",
+        display_equity: null,
+      },
       data_freshness: { broker_vs_run_alignment: "missing", alignment_detail: "Broker snapshot unavailable." },
       top_changes: [],
       exceptions: [

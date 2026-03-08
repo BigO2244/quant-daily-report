@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 
 from scripts.build_quant_dashboard import DashboardBuilder
 
@@ -235,3 +236,137 @@ def test_builder_includes_broker_snapshot_and_freshness_fields(tmp_path):
     assert "broker_snapshot" in model
     assert "data_freshness" in model
     assert "broker_vs_run_alignment" in model["data_freshness"]
+
+
+def test_builder_broker_artifact_sets_authoritative_trust(tmp_path):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-authoritative",
+            "mode": "alpaca",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+    _write_json(
+        tmp_path / "outputs/broker/broker_snapshot_latest.json",
+        {
+            "portfolio_value": 10000.0,
+            "equity": 10000.0,
+            "cash": 2500.0,
+            "buying_power": 5000.0,
+            "as_of": "2026-03-10T15:59:00Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    broker = model["broker_snapshot"]
+    assert broker["trust_level"] == "authoritative"
+    assert broker["suspicious"] is False
+
+
+def test_builder_flags_suspicious_derived_broker_ratio(tmp_path):
+    # Governed run value near 10k.
+    perf = tmp_path / "outputs/alpha_assessment/canonical_performance.csv"
+    perf.parent.mkdir(parents=True, exist_ok=True)
+    perf.write_text(
+        "date,strategy_nav,strategy_return\n"
+        "2026-03-10,9999.55,0.0\n",
+        encoding="utf-8",
+    )
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-suspicious-derived",
+            "mode": "alpaca",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+    _write_json(
+        tmp_path / "outputs/paper_state/canonical_positions.json",
+        {
+            "positions": {"AAPL": 2.0},
+            "position_count": 1,
+            "cash": 91911.93,
+            "equity": 99853.01,
+            "timestamp_utc": "2026-03-03T16:14:07Z",
+        },
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    broker = model["broker_snapshot"]
+    freshness = model["data_freshness"]
+
+    assert broker["trust_level"] == "derived"
+    assert broker["suspicious"] is True
+    assert broker["display_equity"] is None
+    assert freshness["suspicious_broker_value"] is True
+
+    broker_exception = next((e for e in model["exceptions"] if e.get("category") == "Broker snapshot"), None)
+    assert broker_exception is not None
+    assert broker_exception["status"] == "warning"
+    assert "Suspicious" in broker_exception["message"]
+
+
+def test_builder_prefers_live_fetch_over_fallback_derivation(tmp_path, monkeypatch):
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-10",
+            "run_id": "run-live-priority",
+            "mode": "alpaca",
+            "created_at": "2026-03-10T16:00:00Z",
+        },
+    )
+
+    monkeypatch.setattr(DashboardBuilder, "_artifact_broker_snapshot", lambda self, run_id, report_date: (None, "missing"))
+    monkeypatch.setattr(
+        DashboardBuilder,
+        "_maybe_live_broker_snapshot",
+        lambda self, report_date: (
+            {
+                "portfolio_value": 10010.0,
+                "equity": 10010.0,
+                "cash": 2500.0,
+                "buying_power": 5000.0,
+                "market_value": 7510.0,
+                "as_of": datetime.now(timezone.utc).isoformat(),
+                "source": "live:alpaca_account",
+                "source_detail": "live Alpaca account fetch",
+                "trust_level": "authoritative",
+                "status": "fresh",
+                "suspicious": False,
+                "confidence_note": "",
+                "display_equity": 10010.0,
+            },
+            "live_fetch",
+        ),
+    )
+    monkeypatch.setattr(
+        DashboardBuilder,
+        "_derived_broker_snapshot",
+        lambda self, execution_payload, nav_df, canonical_positions, report_date: (
+            {
+                "portfolio_value": 50000.0,
+                "equity": 50000.0,
+                "cash": 10000.0,
+                "buying_power": None,
+                "market_value": 40000.0,
+                "as_of": "2026-03-10T10:00:00Z",
+                "source": "derived:nav_timeseries",
+                "source_detail": "derived",
+                "trust_level": "derived",
+                "status": "fresh",
+                "suspicious": False,
+                "confidence_note": "",
+                "display_equity": 50000.0,
+            },
+            "derived_nav_timeseries",
+        ),
+    )
+
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    broker = model["broker_snapshot"]
+    assert broker["source"] == "live:alpaca_account"
+    assert broker["trust_level"] == "authoritative"

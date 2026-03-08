@@ -85,9 +85,10 @@ The builder is resilient to missing artifacts. It does not fail hard for absent 
 Broker snapshot ingestion order is deterministic and self-healing:
 
 1. Reuse the newest governed broker snapshot artifact if available.
-2. Derive broker-state fields from governed artifacts when needed.
+2. Reuse governed reconciliation artifact account values when available.
 3. Optionally fetch a live broker account snapshot during build when explicitly enabled.
-4. Degrade gracefully to `missing` if none of the above succeeds.
+4. Derive broker-state fields from governed artifacts only as a last resort.
+5. Degrade gracefully to `missing` if none of the above succeeds.
 
 Optional live fetch is disabled by default and only runs when:
 
@@ -174,6 +175,17 @@ This keeps rendering fully artifact-driven in the browser while still surfacing 
 - `missing`: broker snapshot could not be resolved.
 
 When alignment is not `aligned`, the dashboard adds warning-level operating checks/exceptions and an explicit snapshot alignment note.
+
+## Trust Level and Sanity Guards
+
+`broker_snapshot.trust_level` indicates confidence in broker values:
+
+- `authoritative`: direct broker snapshot artifact or optional live fetch.
+- `reconciled`: broker account values from governed reconciliation artifacts.
+- `derived`: estimated from governed artifacts only.
+- `missing`: no broker snapshot resolved.
+
+When `trust_level=derived`, sanity guardrails run before display. If derived broker equity is implausibly far from governed run value (ratio outside conservative bounds), the dashboard flags it as suspicious, de-emphasizes the broker headline value, and surfaces warning diagnostics.
 
 ## Missing Data Behavior
 

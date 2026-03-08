@@ -116,6 +116,8 @@ class DashboardBuilder:
         payload: dict[str, Any],
         source: str,
         as_of_hint: str | None = None,
+        trust_level: str = "derived",
+        source_detail: str | None = None,
     ) -> dict[str, Any] | None:
         account = payload.get("account") if isinstance(payload.get("account"), dict) else payload
         if not isinstance(account, dict):
@@ -148,7 +150,11 @@ class DashboardBuilder:
             "market_value": market_value,
             "as_of": self._as_iso_z(as_of),
             "source": source,
+            "source_detail": source_detail or source,
+            "trust_level": trust_level,
             "status": "fresh",
+            "suspicious": False,
+            "confidence_note": "",
         }
 
     def _persist_broker_snapshot(self, snapshot: dict[str, Any], *, reason: str) -> None:
@@ -171,6 +177,8 @@ class DashboardBuilder:
             payload=broker_payload,
             source=f"artifact:{source_path}",
             as_of_hint=as_of_hint,
+            trust_level="reconciled",
+            source_detail=f"reconciliation artifact {source_path}",
         )
 
     def _find_latest_recon_file(self, pattern: str) -> tuple[str | None, dict[str, Any] | None]:
@@ -200,9 +208,14 @@ class DashboardBuilder:
         for rel in candidate_paths:
             payload = self._read_json_if_exists(rel, used=True)
             if isinstance(payload, dict):
-                normalized = self._normalize_broker_snapshot(payload=payload, source=f"artifact:{rel}")
+                normalized = self._normalize_broker_snapshot(
+                    payload=payload,
+                    source=f"artifact:{rel}",
+                    trust_level="authoritative",
+                    source_detail=f"artifact snapshot {rel}",
+                )
                 if normalized:
-                    return normalized, "artifact_reuse"
+                    return normalized, "authoritative_artifact"
 
         if report_date:
             for rel in [
@@ -213,14 +226,14 @@ class DashboardBuilder:
                 if isinstance(payload, dict):
                     normalized = self._extract_snapshot_from_recon(payload, source_path=rel)
                     if normalized:
-                        return normalized, "artifact_reuse"
+                        return normalized, "reconciled_artifact"
 
         for pattern in ["recon_posttrade_*.json", "recon_pretrade_*.json"]:
             rel, payload = self._find_latest_recon_file(pattern)
             if rel and isinstance(payload, dict):
                 normalized = self._extract_snapshot_from_recon(payload, source_path=rel)
                 if normalized:
-                    return normalized, "artifact_reuse"
+                    return normalized, "reconciled_artifact"
 
         return None, "missing"
 
@@ -237,18 +250,11 @@ class DashboardBuilder:
                 payload=execution_payload,
                 source="derived:execution_payload",
                 as_of_hint=report_date,
+                trust_level="derived",
+                source_detail="derived from execution payload",
             )
             if normalized:
                 return normalized, "derived_execution_payload"
-
-        if isinstance(canonical_positions, dict) and canonical_positions:
-            normalized = self._normalize_broker_snapshot(
-                payload=canonical_positions,
-                source="derived:canonical_positions",
-                as_of_hint=report_date,
-            )
-            if normalized:
-                return normalized, "derived_canonical_positions"
 
         if nav_df is not None and not nav_df.empty and "equity" in nav_df.columns:
             latest_row = nav_df.dropna(subset=["equity"]).tail(1)
@@ -264,9 +270,22 @@ class DashboardBuilder:
                     payload=payload,
                     source="derived:nav_timeseries",
                     as_of_hint=report_date,
+                    trust_level="derived",
+                    source_detail="derived from governed nav_timeseries",
                 )
                 if normalized:
                     return normalized, "derived_nav_timeseries"
+
+        if isinstance(canonical_positions, dict) and canonical_positions:
+            normalized = self._normalize_broker_snapshot(
+                payload=canonical_positions,
+                source="derived:canonical_positions",
+                as_of_hint=report_date,
+                trust_level="derived",
+                source_detail="derived from canonical positions snapshot",
+            )
+            if normalized:
+                return normalized, "derived_canonical_positions"
 
         return None, "missing"
 
@@ -287,6 +306,8 @@ class DashboardBuilder:
                 payload=account,
                 source="live:alpaca_account",
                 as_of_hint=self._safe_iso_now(),
+                trust_level="authoritative",
+                source_detail="live Alpaca account fetch",
             )
             if snapshot:
                 return snapshot, "live_fetch"
@@ -347,6 +368,48 @@ class DashboardBuilder:
             "stale_threshold_hours": stale_threshold_hours,
         }
         return freshness, alignment
+
+    def _apply_broker_sanity_guardrails(
+        self,
+        *,
+        broker_snapshot: dict[str, Any],
+        governed_snapshot: dict[str, Any],
+        data_freshness: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        trust = str(broker_snapshot.get("trust_level") or "missing")
+        broker_value = self._coerce_num(
+            broker_snapshot.get("equity")
+            if broker_snapshot.get("equity") is not None
+            else broker_snapshot.get("portfolio_value")
+        )
+        governed_value = self._coerce_num(governed_snapshot.get("portfolio_value"))
+
+        suspicious = False
+        suspicious_reasons: list[str] = []
+
+        if trust == "derived" and broker_value is not None and governed_value and governed_value > 0:
+            ratio = broker_value / governed_value
+            if ratio > 2.0 or ratio < 0.5:
+                suspicious = True
+                suspicious_reasons.append(
+                    f"Derived broker value ratio vs governed snapshot is {ratio:.2f}x"
+                )
+
+        if suspicious:
+            broker_snapshot["status"] = "suspicious"
+            broker_snapshot["suspicious"] = True
+            broker_snapshot["confidence_note"] = "; ".join(suspicious_reasons)
+            broker_snapshot["display_equity"] = None
+            data_freshness["suspicious_broker_value"] = True
+            data_freshness["suspicious_reason"] = broker_snapshot["confidence_note"]
+            self.warnings.append(f"Suspicious derived broker snapshot: {broker_snapshot['confidence_note']}")
+        else:
+            broker_snapshot.setdefault("suspicious", False)
+            broker_snapshot.setdefault("confidence_note", "")
+            broker_snapshot["display_equity"] = broker_value
+            data_freshness.setdefault("suspicious_broker_value", False)
+
+        return broker_snapshot, suspicious
 
     def _find_latest_execution_payload(self, report_date: str | None) -> tuple[str | None, dict[str, Any] | None]:
         exec_dir = self._abs("outputs/execution_email")
@@ -678,6 +741,13 @@ class DashboardBuilder:
 
         broker_snapshot, broker_mode = self._artifact_broker_snapshot(run_id=run_id, report_date=report_date)
         if broker_snapshot is None:
+            broker_snapshot, broker_mode = self._maybe_live_broker_snapshot(report_date=report_date)
+            if broker_snapshot is not None:
+                try:
+                    self._persist_broker_snapshot(broker_snapshot, reason="self_heal_live_fetch")
+                except Exception as exc:
+                    self.warnings.append(f"Failed to persist live broker snapshot artifact: {exc}")
+        if broker_snapshot is None:
             broker_snapshot, broker_mode = self._derived_broker_snapshot(
                 execution_payload=exec_payload_obj,
                 nav_df=nav_df,
@@ -689,13 +759,6 @@ class DashboardBuilder:
                     self._persist_broker_snapshot(broker_snapshot, reason=f"self_heal_{broker_mode}")
                 except Exception as exc:
                     self.warnings.append(f"Failed to persist derived broker snapshot artifact: {exc}")
-        if broker_snapshot is None:
-            broker_snapshot, broker_mode = self._maybe_live_broker_snapshot(report_date=report_date)
-            if broker_snapshot is not None:
-                try:
-                    self._persist_broker_snapshot(broker_snapshot, reason="self_heal_live_fetch")
-                except Exception as exc:
-                    self.warnings.append(f"Failed to persist live broker snapshot artifact: {exc}")
 
         if broker_snapshot is None:
             broker_snapshot = {
@@ -706,7 +769,12 @@ class DashboardBuilder:
                 "market_value": None,
                 "as_of": None,
                 "source": "missing",
+                "source_detail": "broker snapshot unavailable",
+                "trust_level": "missing",
                 "status": "missing",
+                "suspicious": False,
+                "confidence_note": "",
+                "display_equity": None,
             }
 
         data_freshness, alignment = self._classify_freshness(
@@ -714,12 +782,20 @@ class DashboardBuilder:
             run_last_updated=run_last_updated,
             broker_as_of=broker_snapshot.get("as_of"),
         )
+        data_freshness["broker_trust_level"] = broker_snapshot.get("trust_level", "missing")
+        data_freshness["broker_source_detail"] = broker_snapshot.get("source_detail", broker_snapshot.get("source", "missing"))
         if alignment == "missing":
             broker_snapshot["status"] = "missing"
         elif alignment == "stale":
             broker_snapshot["status"] = "stale"
         else:
             broker_snapshot["status"] = "fresh"
+
+        broker_snapshot, suspicious_broker_value = self._apply_broker_sanity_guardrails(
+            broker_snapshot=broker_snapshot,
+            governed_snapshot=governed_snapshot,
+            data_freshness=data_freshness,
+        )
 
         self.broker_source_mode = broker_mode
         self.broker_source_used = str(broker_snapshot.get("source") or "missing")
@@ -1026,7 +1102,21 @@ class DashboardBuilder:
         exceptions.append({"category": "Risk", "status": risk_status, "message": risk_message})
 
         broker_alignment_msg = str(data_freshness.get("alignment_detail") or "Broker alignment not available.")
-        if alignment == "aligned":
+        broker_trust = str(broker_snapshot.get("trust_level") or "missing")
+        if suspicious_broker_value:
+            broker_alignment_msg = str(data_freshness.get("suspicious_reason") or broker_alignment_msg)
+            exceptions.append({
+                "category": "Broker snapshot",
+                "status": "warning",
+                "message": f"Suspicious derived broker estimate: {broker_alignment_msg}",
+            })
+        elif broker_trust == "derived":
+            exceptions.append({
+                "category": "Broker snapshot",
+                "status": "warning",
+                "message": f"Derived broker estimate in use. {broker_alignment_msg}",
+            })
+        elif alignment == "aligned":
             exceptions.append({"category": "Broker snapshot", "status": "pass", "message": broker_alignment_msg})
         elif alignment in {"mismatch", "stale"}:
             exceptions.append({"category": "Broker snapshot", "status": "warning", "message": broker_alignment_msg})
@@ -1127,8 +1217,20 @@ class DashboardBuilder:
             },
             {
                 "label": "Broker snapshot available",
-                "status": "pass" if broker_snapshot.get("status") == "fresh" else ("warning" if broker_snapshot.get("status") == "stale" else "fail"),
-                "detail": f"Source: {broker_snapshot.get('source') or 'missing'}; as_of={broker_snapshot.get('as_of') or 'n/a'}",
+                "status": (
+                    "warning"
+                    if (suspicious_broker_value or broker_trust == "derived")
+                    else ("pass" if broker_snapshot.get("status") == "fresh" else ("warning" if broker_snapshot.get("status") == "stale" else "fail"))
+                ),
+                "detail": (
+                    f"Suspicious derived estimate. Source: {broker_snapshot.get('source_detail') or broker_snapshot.get('source') or 'missing'}"
+                    if suspicious_broker_value
+                    else (
+                        f"Derived estimate. Source: {broker_snapshot.get('source_detail') or broker_snapshot.get('source') or 'missing'}"
+                        if broker_trust == "derived"
+                        else f"Source: {broker_snapshot.get('source_detail') or broker_snapshot.get('source') or 'missing'}; as_of={broker_snapshot.get('as_of') or 'n/a'}"
+                    )
+                ),
             },
             {
                 "label": "Run vs broker alignment",
@@ -1163,7 +1265,11 @@ class DashboardBuilder:
                 "This classification is inferred from sparse run artifacts."
             )
 
-        if alignment == "mismatch":
+        if suspicious_broker_value:
+            status_banner = f"{status_banner} Derived broker estimate is suspicious and has been de-emphasized."
+        elif broker_trust == "derived":
+            status_banner = f"{status_banner} Broker view is a derived estimate (not authoritative)."
+        elif alignment == "mismatch":
             status_banner = f"{status_banner} Broker snapshot and governed run date are out of sync."
         elif alignment == "stale":
             status_banner = f"{status_banner} Broker snapshot is stale."
@@ -1243,6 +1349,9 @@ class DashboardBuilder:
                     "source_mode": self.broker_source_mode,
                     "source_used": self.broker_source_used,
                     "freshness": self.freshness_classification,
+                    "trust_level": broker_snapshot.get("trust_level", "missing"),
+                    "source_detail": broker_snapshot.get("source_detail", "missing"),
+                    "suspicious": bool(broker_snapshot.get("suspicious")),
                 },
             },
         }
@@ -1286,10 +1395,12 @@ def main() -> int:
     print(f"[DASHBOARD] sources_used={used_count} sources_missing={missing_count}")
     print(f"[DASHBOARD] degraded_metrics={len(degraded)} warnings={len(warnings)}")
     print(
-        "[DASHBOARD] broker_source_mode={mode} broker_source_used={used} freshness={fresh}".format(
+        "[DASHBOARD] broker_source_mode={mode} broker_source_used={used} freshness={fresh} trust={trust} suspicious={susp}".format(
             mode=broker_diag.get("source_mode", "missing"),
             used=broker_diag.get("source_used", "missing"),
             fresh=broker_diag.get("freshness", "missing"),
+            trust=broker_diag.get("trust_level", "missing"),
+            susp=broker_diag.get("suspicious", False),
         )
     )
     for msg in warnings:

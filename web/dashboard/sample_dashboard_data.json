@@ -123,7 +123,12 @@
     "market_value": 82205.61,
     "as_of": "2026-03-07T13:31:00Z",
     "source": "artifact:outputs/broker/broker_snapshot_latest.json",
-    "status": "fresh"
+    "source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+    "trust_level": "authoritative",
+    "status": "fresh",
+    "suspicious": false,
+    "confidence_note": "",
+    "display_equity": 100615.72
   },
   "data_freshness": {
     "run_report_date": "2026-03-06",
@@ -131,7 +136,10 @@
     "broker_as_of": "2026-03-07T13:31:00Z",
     "broker_vs_run_alignment": "mismatch",
     "alignment_detail": "Broker snapshot is newer than governed run date.",
-    "stale_threshold_hours": 36
+    "stale_threshold_hours": 36,
+    "broker_trust_level": "authoritative",
+    "broker_source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+    "suspicious_broker_value": false
   },
   "top_changes": [
     {"ticker": "ADI", "action": "BUY", "change_weight": 0.0114, "reason": "rebalance_to_target"},
