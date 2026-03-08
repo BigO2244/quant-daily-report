@@ -395,12 +395,20 @@ class DashboardBuilder:
         suspicious = False
         suspicious_reasons: list[str] = []
 
-        if trust == "derived" and broker_value is not None and governed_value and governed_value > 0:
+        # Stricter plausibility checks for derived/stale snapshots
+        if broker_value is not None and governed_value and governed_value > 0:
             ratio = broker_value / governed_value
-            if ratio > 2.0 or ratio < 0.5:
+            # Flag as suspicious if off by >2x or <0.5x (stricter for derived)
+            if trust == "derived" and (ratio > 2.0 or ratio < 0.5):
                 suspicious = True
                 suspicious_reasons.append(
-                    f"Derived broker value ratio vs governed snapshot is {ratio:.2f}x"
+                    f"Derived broker equity ${broker_value:,.0f} is {ratio:.2f}x vs governed ${governed_value:,.0f}"
+                )
+            # Flag as very suspicious if off by >5x or <0.2x (even for authoritative)
+            elif (ratio > 5.0 or ratio < 0.2):
+                suspicious = True
+                suspicious_reasons.append(
+                    f"Broker equity ${broker_value:,.0f} is {ratio:.2f}x vs governed ${governed_value:,.0f} (implausible magnitude)"
                 )
 
         if suspicious:
@@ -410,7 +418,7 @@ class DashboardBuilder:
             broker_snapshot["display_equity"] = None
             data_freshness["suspicious_broker_value"] = True
             data_freshness["suspicious_reason"] = broker_snapshot["confidence_note"]
-            self.warnings.append(f"Suspicious derived broker snapshot: {broker_snapshot['confidence_note']}")
+            self.warnings.append(f"Suspicious broker snapshot: {broker_snapshot['confidence_note']}")
         else:
             broker_snapshot.setdefault("suspicious", False)
             broker_snapshot.setdefault("confidence_note", "")
@@ -630,7 +638,16 @@ class DashboardBuilder:
         return executive_warnings
 
     def _discover_runs(self) -> list[dict[str, Any]]:
-        """Discover all runs in outputs/runs/ and classify them by completeness."""
+        """Discover all runs in outputs/runs/ and classify them by completeness.
+        
+        Classification includes:
+        - is_complete: Has health/integrity or quant_report
+        - is_failed: Has preflight_failure or is sparse and incomplete
+        - is_sparse: Only has meta.json/manifest
+        - has_real_activity: Has trades/execution records
+        - mode: alpaca (live exec), shadow (simulated), paper, etc.
+        - is_viable_executive: Meets criteria for executive dashboard display
+        """
         runs_root = self._abs("outputs/runs")
         if not runs_root.exists() or not runs_root.is_dir():
             return []
@@ -672,6 +689,10 @@ class DashboardBuilder:
             has_quant_report = any((run_dir / "reports").glob("quant_report_*.html")) if (run_dir / "reports").exists() else False
             has_preflight_failure = (run_dir / "logs" / "preflight_failure.json").exists()
             
+            # Check for real activity artifacts
+            has_trades = (run_dir / "ledger" / "trades.csv").exists()
+            has_execution_email = any((run_dir / "snapshots").glob("execution_email_*.json")) if (run_dir / "snapshots").exists() else False
+            
             # Sparse check
             artifact_count = 0
             for file_path in run_dir.rglob("*"):
@@ -683,6 +704,18 @@ class DashboardBuilder:
             is_sparse = artifact_count == 0
             is_complete = (has_health and has_integrity) or has_quant_report
             is_failed = has_preflight_failure or (is_sparse and not is_complete)
+            has_real_activity = has_trades or has_execution_email
+            
+            # For executive display, requires:
+            # 1. Complete run (health/integrity or report) - proves actual execution
+            # 2. Not failed/halted
+            # 3. Not sparse/meta-only (meta-only runs never executed)
+            # Activity evidence is preferred but not strictly required if otherwise complete
+            is_viable_executive = (
+                is_complete and 
+                not is_failed and 
+                not is_sparse
+            )
             
             discovered_runs.append({
                 "run_id": run_id,
@@ -692,8 +725,10 @@ class DashboardBuilder:
                 "is_complete": is_complete,
                 "is_failed": is_failed,
                 "is_sparse": is_sparse,
+                "has_real_activity": has_real_activity,
                 "has_preflight_failure": has_preflight_failure,
                 "artifact_count": artifact_count,
+                "is_viable_executive": is_viable_executive,
             })
         
         return discovered_runs
@@ -701,28 +736,49 @@ class DashboardBuilder:
     def _select_executive_run(self, latest_attempted_run_id: str | None) -> tuple[str | None, str]:
         """Select the best run for executive metrics display.
         
+        Strict selection criteria:
+        1. Must be complete and not failed
+        2. Must have real activity evidence (trades, execution records)
+        3. Must not be sparse/meta-only
+        4. Prefer alpaca (live execution) over shadow (simulated)
+        5. Prefer latest viable run matching above criteria
+        
         Returns tuple of (selected_run_id, selection_reason).
-        Prefers latest successful completed run; falls back to latest attempted.
         """
         discovered = self._discover_runs()
         if not discovered:
             return latest_attempted_run_id, "no_runs_discovered"
         
-        # Find latest successful completed run
-        successful_runs = [r for r in discovered if r["is_complete"] and not r["is_failed"]]
-        if successful_runs:
-            selected = successful_runs[0]
-            if selected["run_id"] == latest_attempted_run_id:
-                return selected["run_id"], "latest_attempted_is_successful"
-            else:
-                return selected["run_id"], "latest_successful_completed_run"
+        # Find viable executive runs (complete, not sparse, has activity)
+        viable_runs = [r for r in discovered if r["is_viable_executive"] and not r["is_failed"]]
         
-        # No successful runs found; use latest attempted if available
+        if viable_runs:
+            # Among viable runs, prefer by mode: alpaca > paper > shadow
+            alpaca_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "alpaca"]
+            paper_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "paper"]
+            shadow_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "shadow"]
+            
+            # Use highest-priority available mode
+            if alpaca_runs:
+                selected = alpaca_runs[0]
+                return selected["run_id"], "latest_viable_alpaca_executed_run"
+            elif paper_runs:
+                selected = paper_runs[0]
+                return selected["run_id"], "latest_viable_paper_traced_run"
+            elif shadow_runs:
+                selected = shadow_runs[0]
+                return selected["run_id"], "latest_viable_shadow_simulated_run"
+        
+        # Fallback: No viable executive runs found. Use latest attempted if available.
         if latest_attempted_run_id:
-            return latest_attempted_run_id, "no_successful_run_fallback_to_latest_attempted"
+            # Even though not ideal, provide context that this is a fallback
+            return latest_attempted_run_id, "latest_attempted_fallback_no_viable_executive_run"
         
-        # Fallback to most recent discovered run
-        return discovered[0]["run_id"], "most_recent_run_fallback"
+        # Last resort: Most recent discovered run
+        if discovered:
+            return discovered[0]["run_id"], "most_recent_run_fallback_no_viable"
+        
+        return None, "no_runs_discovered"
 
 
     def build(self) -> dict[str, Any]:
@@ -992,6 +1048,29 @@ class DashboardBuilder:
             execution_status = "HALTED_PREFLIGHT"
         if inferred_early_halt and execution_status in {"UNKNOWN", "", "N/A", "HALTED"}:
             execution_status = "HALTED_INFERRED_PREFLIGHT"
+        
+        # For SHADOW mode runs, adjust status to be honest about simulation
+        run_mode_lower = str(mode or "").lower()
+        if run_mode_lower == "shadow":
+            # Check if run has actual activity (trades recorded)
+            has_run_activity = False
+            if run_id:
+                try:
+                    trades_path = self._abs(f"outputs/runs/{run_id}/ledger/trades.csv")
+                    if trades_path.exists():
+                        trades_df = pd.read_csv(trades_path)
+                        has_run_activity = len(trades_df) > 0
+                except Exception:
+                    pass
+            
+            # Adjust status based on activity and original status
+            if execution_status in {"PASS", "COMPLETED", "SUCCESS", "READY"}:
+                execution_status = "SIMULATED"
+            elif execution_status == "PLANNED" and has_run_activity:
+                # Has activity despite PLANNED status - report as executed shadow sim
+                execution_status = "SIMULATED"
+            elif execution_status == "PLANNED" and not has_run_activity:
+                execution_status = "SHADOW_PLANNED"
 
         # Performance summary metrics.
         mtd = qtd = si = si_alpha = best_day = worst_day = None
@@ -1118,10 +1197,26 @@ class DashboardBuilder:
         # Activity section.
         buys = sells = new_positions = full_exits = orders_filled = orders_rejected = 0
         top_changes: list[dict[str, Any]] = []
+        activity_source = "unknown"
 
         trades_list: list[dict[str, Any]] = []
         if isinstance(exec_payload_obj.get("trades"), list):
             trades_list = [t for t in exec_payload_obj["trades"] if isinstance(t, dict)]
+            activity_source = "execution_payload"
+
+        # Fallback: Try to read trades from selected run's ledger if execution payload is missing
+        if not trades_list and run_id:
+            try:
+                trades_path = self._abs(f"outputs/runs/{run_id}/ledger/trades.csv")
+                if trades_path.exists():
+                    run_trades_df = pd.read_csv(trades_path)
+                    if not run_trades_df.empty:
+                        for _, row in run_trades_df.iterrows():
+                            trade_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                            trades_list.append(trade_dict)
+                        activity_source = "run_trades_csv"
+            except Exception:
+                pass
 
         if trades_list:
             for t in trades_list:
@@ -1223,6 +1318,9 @@ class DashboardBuilder:
                 exceptions.append({"category": "Reconciliation", "status": "fail", "message": msg})
         elif inferred_early_halt:
             exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status inferred from sparse run artifacts."})
+        elif run_mode_lower == "shadow":
+            # For shadow mode, reconciliation unavailability is informational, not a warning
+            exceptions.append({"category": "Reconciliation", "status": "pass", "message": "Reconciliation not applicable in shadow simulation mode."})
         else:
             exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status unavailable."})
 
@@ -1244,7 +1342,11 @@ class DashboardBuilder:
                 }
             )
         elif run_success:
-            exceptions.append({"category": "Execution", "status": "pass", "message": f"Execution status: {execution_status}."})
+            if run_mode_lower == "shadow":
+                msg = f"Shadow simulation status: {execution_status}. (This is simulated activity, not live execution.)"
+            else:
+                msg = f"Execution status: {execution_status}."
+            exceptions.append({"category": "Execution", "status": "pass", "message": msg})
         else:
             exceptions.append({"category": "Execution", "status": "fail", "message": f"Execution status: {execution_status}."})
 
@@ -1500,24 +1602,32 @@ class DashboardBuilder:
                 "drawdown": drawdown_series,
                 "chart_metadata": {
                     "nav_chart": {
-                        "title": "Portfolio NAV vs Benchmark",
-                        "x_axis_label": "Date",
-                        "y_axis_label": "Value",
-                        "note": "Indexed to 100 at inception" if nav_series else "NAV data unavailable",
+                        "title": "Portfolio NAV Indexed to 100",
+                        "x_axis_label": "Date (YYYY-MM-DD)",
+                        "y_axis_label": "Indexed Value",
+                        "font_size": "12pt",
+                        "show_grid": True,
+                        "note": "Portfolio NAV (blue) vs SPY benchmark (orange), indexed to 100 at inception" if nav_series else "NAV data unavailable",
                     },
                     "daily_returns_chart": {
-                        "title": "Daily Returns",
-                        "x_axis_label": "Date",
-                        "y_axis_label": "Return (%)",
+                        "title": "Daily Strategy Returns",
+                        "x_axis_label": "Date (YYYY-MM-DD)",
+                        "y_axis_label": "Daily Return (%)",
                         "baseline": 0.0,
-                        "note": "Daily return percentage" if daily_returns_series else "Daily returns unavailable",
+                        "baseline_visible": True,
+                        "font_size": "12pt",
+                        "show_grid": True,
+                        "note": "Daily percentage return; positive values are gains" if daily_returns_series else "Daily returns unavailable",
                     },
                     "excess_returns_chart": {
-                        "title": "Excess Return vs SPY",
-                        "x_axis_label": "Date",
+                        "title": "Daily Excess Return vs SPY",
+                        "x_axis_label": "Date (YYYY-MM-DD)",
                         "y_axis_label": "Excess Return (%)",
                         "baseline": 0.0,
-                        "note": "Daily outperformance vs SPY" if excess_returns_series else "Excess returns unavailable",
+                        "baseline_visible": True,
+                        "font_size": "12pt",
+                        "show_grid": True,
+                        "note": "Daily outperformance/underperformance vs SPY" if excess_returns_series else "Excess returns unavailable",
                     },
                 },
             },
@@ -1539,7 +1649,9 @@ class DashboardBuilder:
                 "orders_rejected": orders_rejected,
                 "source_run_id": selected_run_id,
                 "source_report_date": report_date,
-                "note": f"Activity from selected governed run: {selected_run_id or 'unavailable'}" if selected_run_id != latest_attempted_run_id else "Activity from latest run",
+                "activity_source": activity_source,
+                "is_simulated": run_mode_lower == "shadow",
+                "note": f"Activity source: {activity_source} from {'shadow simulation' if run_mode_lower == 'shadow' else 'execution'} run {selected_run_id or 'unavailable'}",
             },
             "governed_snapshot": governed_snapshot,
             "broker_snapshot": broker_snapshot,

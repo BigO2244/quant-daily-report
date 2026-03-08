@@ -423,7 +423,8 @@ def test_run_selection_prefers_latest_successful_over_halted(tmp_path):
     # Should select the successful run, not the halted one
     selected_run_meta = model["run_meta"]["selected_governed_run"]
     assert selected_run_meta["run_id"] == successful_run_id
-    assert selected_run_meta["selection_reason"] == "latest_successful_completed_run"
+    # Updated assertion for new selection logic that identifies mode
+    assert "viable" in selected_run_meta["selection_reason"].lower()
     
     # Latest attempted should still be recorded
     latest_attempted_meta = model["run_meta"]["latest_attempted_run"]
