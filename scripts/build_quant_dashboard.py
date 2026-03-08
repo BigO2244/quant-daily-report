@@ -649,6 +649,23 @@ class DashboardBuilder:
                 except Exception:
                     pass
             
+            # Validate report_date - skip test/placeholder runs
+            report_date = meta_obj.get("report_date")
+            if report_date and report_date in {"2000-01-01", "1970-01-01"}:
+                # Skip obvious test/placeholder dates
+                continue
+            if report_date:
+                try:
+                    # Validate date format and range
+                    from datetime import datetime
+                    parsed_date = datetime.strptime(report_date, "%Y-%m-%d")
+                    if parsed_date.year < 2020 or parsed_date.year > 2030:
+                        # Skip dates outside reasonable production range
+                        continue
+                except (ValueError, TypeError):
+                    # Skip runs with malformed dates
+                    continue
+            
             # Check for completion indicators
             has_health = (run_dir / "snapshots" / f"health_{meta_obj.get('report_date', '')}.json").exists() if meta_obj.get('report_date') else False
             has_integrity = (run_dir / "snapshots" / f"integrity_{meta_obj.get('report_date', '')}.json").exists() if meta_obj.get('report_date') else False
