@@ -127,6 +127,13 @@ class DashboardBuilder:
         equity = self._coerce_num(account.get("equity") or account.get("portfolio_value"))
         cash = self._coerce_num(account.get("cash"))
         buying_power = self._coerce_num(account.get("buying_power"))
+        
+        # Track whether buying_power was not provided vs unavailable
+        buying_power_note = None
+        if buying_power is None and "buying_power" in account:
+            buying_power_note = "Not provided by broker source"
+        elif buying_power is None:
+            buying_power_note = "Field not present in broker payload"
         market_value = self._coerce_num(account.get("market_value"))
         if market_value is None and equity is not None and cash is not None:
             market_value = float(equity - cash)
@@ -146,6 +153,7 @@ class DashboardBuilder:
             "portfolio_value": portfolio_value,
             "cash": cash,
             "buying_power": buying_power,
+            "buying_power_note": buying_power_note,
             "equity": equity,
             "market_value": market_value,
             "as_of": self._as_iso_z(as_of),
@@ -591,19 +599,151 @@ class DashboardBuilder:
     def _mark_degraded(self, metric_name: str, reason: str) -> None:
         self.degraded_metrics.append(f"{metric_name}: {reason}")
 
+    def _filter_executive_warnings(self) -> list[str]:
+        """Filter warnings to only executive-level concerns.
+        
+        Suppresses low-level artifact/parsing warnings and focuses on:
+        - Preflight/execution failures
+        - Suspicious broker values
+        - Missing critical position/ledger artifacts
+        """
+        executive_warnings = []
+        for w in self.warnings:
+            # Include critical warnings
+            if any(keyword in w.lower() for keyword in [
+                "preflight", "suspicious", "broker snapshot",
+                "canonical positions", "ledger"
+            ]):
+                executive_warnings.append(w)
+            # Suppress low-level artifact warnings
+            elif any(keyword in w.lower() for keyword in [
+                "failed to parse", "derived strategy daily returns",
+                "estimated daily p/l", "payload directory not found",
+                "no usable execution payload"
+            ]):
+                continue
+            # Include other warnings selectively
+            elif "missing required" in w.lower():
+                # Only if it's about core artifacts
+                if any(core in w.lower() for core in ["canonical_performance", "nav_timeseries", "latest.json"]):
+                    executive_warnings.append(w)
+        return executive_warnings
+
+    def _discover_runs(self) -> list[dict[str, Any]]:
+        """Discover all runs in outputs/runs/ and classify them by completeness."""
+        runs_root = self._abs("outputs/runs")
+        if not runs_root.exists() or not runs_root.is_dir():
+            return []
+        
+        discovered_runs: list[dict[str, Any]] = []
+        for run_dir in sorted(runs_root.iterdir(), reverse=True):
+            if not run_dir.is_dir() or run_dir.name.startswith("."):
+                continue
+            
+            run_id = run_dir.name
+            meta_path = run_dir / "meta.json"
+            meta_obj = {}
+            if meta_path.exists():
+                try:
+                    meta_obj = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            
+            # Check for completion indicators
+            has_health = (run_dir / "snapshots" / f"health_{meta_obj.get('report_date', '')}.json").exists() if meta_obj.get('report_date') else False
+            has_integrity = (run_dir / "snapshots" / f"integrity_{meta_obj.get('report_date', '')}.json").exists() if meta_obj.get('report_date') else False
+            has_quant_report = any((run_dir / "reports").glob("quant_report_*.html")) if (run_dir / "reports").exists() else False
+            has_preflight_failure = (run_dir / "logs" / "preflight_failure.json").exists()
+            
+            # Sparse check
+            artifact_count = 0
+            for file_path in run_dir.rglob("*"):
+                if file_path.is_file():
+                    rel = file_path.relative_to(run_dir).as_posix()
+                    if rel not in {"meta.json", "manifest.json", "checksums.sha256"}:
+                        artifact_count += 1
+            
+            is_sparse = artifact_count == 0
+            is_complete = (has_health and has_integrity) or has_quant_report
+            is_failed = has_preflight_failure or (is_sparse and not is_complete)
+            
+            discovered_runs.append({
+                "run_id": run_id,
+                "report_date": meta_obj.get("report_date"),
+                "created_at": meta_obj.get("created_at"),
+                "mode": meta_obj.get("mode"),
+                "is_complete": is_complete,
+                "is_failed": is_failed,
+                "is_sparse": is_sparse,
+                "has_preflight_failure": has_preflight_failure,
+                "artifact_count": artifact_count,
+            })
+        
+        return discovered_runs
+
+    def _select_executive_run(self, latest_attempted_run_id: str | None) -> tuple[str | None, str]:
+        """Select the best run for executive metrics display.
+        
+        Returns tuple of (selected_run_id, selection_reason).
+        Prefers latest successful completed run; falls back to latest attempted.
+        """
+        discovered = self._discover_runs()
+        if not discovered:
+            return latest_attempted_run_id, "no_runs_discovered"
+        
+        # Find latest successful completed run
+        successful_runs = [r for r in discovered if r["is_complete"] and not r["is_failed"]]
+        if successful_runs:
+            selected = successful_runs[0]
+            if selected["run_id"] == latest_attempted_run_id:
+                return selected["run_id"], "latest_attempted_is_successful"
+            else:
+                return selected["run_id"], "latest_successful_completed_run"
+        
+        # No successful runs found; use latest attempted if available
+        if latest_attempted_run_id:
+            return latest_attempted_run_id, "no_successful_run_fallback_to_latest_attempted"
+        
+        # Fallback to most recent discovered run
+        return discovered[0]["run_id"], "most_recent_run_fallback"
+
+
     def build(self) -> dict[str, Any]:
         latest = self._read_json("outputs/latest.json", required=False, used=True)
         latest_obj = latest if isinstance(latest, dict) else {}
 
-        report_date = str(latest_obj.get("report_date") or "").strip() or None
-        run_id = str(latest_obj.get("run_id") or "").strip() or None
-        mode = str(latest_obj.get("mode") or "").strip().upper() or "UNKNOWN"
-        run_last_updated = str(
+        # Latest attempted run from outputs/latest.json
+        latest_attempted_run_id = str(latest_obj.get("run_id") or "").strip() or None
+        latest_attempted_report_date = str(latest_obj.get("report_date") or "").strip() or None
+        latest_attempted_mode = str(latest_obj.get("mode") or "").strip().upper() or "UNKNOWN"
+        latest_attempted_created_at = str(
             latest_obj.get("created_at")
             or latest_obj.get("last_updated")
             or latest_obj.get("updated_at")
             or ""
         ).strip() or None
+
+        # Discover and select executive run
+        selected_run_id, selection_reason = self._select_executive_run(latest_attempted_run_id)
+        
+        # Use selected run for executive metrics
+        report_date = latest_attempted_report_date if selected_run_id == latest_attempted_run_id else None
+        run_id = selected_run_id
+        mode = latest_attempted_mode
+        run_last_updated = latest_attempted_created_at if selected_run_id == latest_attempted_run_id else None
+        
+        # If selected run differs from latest attempted, read its metadata
+        if selected_run_id and selected_run_id != latest_attempted_run_id:
+            selected_meta = self._read_json(f"outputs/runs/{selected_run_id}/meta.json", required=False, used=False)
+            if isinstance(selected_meta,dict):
+                report_date = str(selected_meta.get("report_date") or "").strip() or None
+                mode = str(selected_meta.get("mode") or "").strip().upper() or "UNKNOWN"
+                run_last_updated = str(
+                    selected_meta.get("created_at")
+                    or selected_meta.get("last_updated")
+                    or selected_meta.get("updated_at")
+                    or ""
+                ).strip() or None
 
         canonical_df = self._read_csv("outputs/alpha_assessment/canonical_performance.csv", required=False, used=True)
         nav_df = self._read_csv("outputs/perf/nav_timeseries.csv", required=False, used=True)
@@ -1240,7 +1380,19 @@ class DashboardBuilder:
         ]
 
         status_banner = "Run status unavailable."
-        if report_date and run_success:
+        
+        # Executive-friendly banner based on run selection context
+        if selected_run_id != latest_attempted_run_id and latest_attempted_run_id:
+            # Latest attempted run failed/halted, but successful run available
+            if report_date and run_success:
+                status_banner = (
+                    f"Latest run ({latest_attempted_run_id}) halted. "
+                    f"Executive metrics from most recent successful run ({report_date}). "
+                    f"{('Metrics current as of selected run.' if not suspicious_broker_value else 'Broker estimate is suspicious.')}"
+                )
+            elif report_date:
+                status_banner = f"Showing most recent successful run ({report_date}). Latest attempted run ({latest_attempted_run_id}) failed before completion."
+        elif report_date and run_success:
             trades_txt = f"{orders_filled} trades executed" if orders_filled > 0 else "no trades executed"
             excess_txt = "benchmark comparison unavailable"
             if excess_return is not None:
@@ -1279,6 +1431,9 @@ class DashboardBuilder:
         if inferred_note:
             self.warnings.append(inferred_note)
 
+        # Filter to executive-level warnings only
+        executive_warnings = self._filter_executive_warnings()
+
         overall_status = "PASS" if run_success else ("WARNING" if (preflight_halted or inferred_early_halt or execution_status == "UNKNOWN") else "FAIL")
 
         model = {
@@ -1290,6 +1445,16 @@ class DashboardBuilder:
                 "benchmark": "SPY",
                 "last_updated": self._safe_iso_now(),
                 "status_banner": status_banner,
+"latest_attempted_run": {
+                    "run_id": latest_attempted_run_id,
+                    "report_date": latest_attempted_report_date,
+                    "created_at": latest_attempted_created_at,
+                },
+                "selected_governed_run": {
+                    "run_id": selected_run_id,
+                    "report_date": report_date,
+                    "selection_reason": selection_reason,
+                },
             },
             "kpis": {
                 "portfolio_value": latest_nav,
@@ -1316,6 +1481,28 @@ class DashboardBuilder:
                 "daily_returns": daily_returns_series,
                 "excess_returns": excess_returns_series,
                 "drawdown": drawdown_series,
+                "chart_metadata": {
+                    "nav_chart": {
+                        "title": "Portfolio NAV vs Benchmark",
+                        "x_axis_label": "Date",
+                        "y_axis_label": "Value",
+                        "note": "Indexed to 100 at inception" if nav_series else "NAV data unavailable",
+                    },
+                    "daily_returns_chart": {
+                        "title": "Daily Returns",
+                        "x_axis_label": "Date",
+                        "y_axis_label": "Return (%)",
+                        "baseline": 0.0,
+                        "note": "Daily return percentage" if daily_returns_series else "Daily returns unavailable",
+                    },
+                    "excess_returns_chart": {
+                        "title": "Excess Return vs SPY",
+                        "x_axis_label": "Date",
+                        "y_axis_label": "Excess Return (%)",
+                        "baseline": 0.0,
+                        "note": "Daily outperformance vs SPY" if excess_returns_series else "Excess returns unavailable",
+                    },
+                },
             },
             "risk": {
                 "drawdown": current_drawdown,
@@ -1333,6 +1520,9 @@ class DashboardBuilder:
                 "full_exits": full_exits,
                 "orders_filled": orders_filled,
                 "orders_rejected": orders_rejected,
+                "source_run_id": selected_run_id,
+                "source_report_date": report_date,
+                "note": f"Activity from selected governed run: {selected_run_id or 'unavailable'}" if selected_run_id != latest_attempted_run_id else "Activity from latest run",
             },
             "governed_snapshot": governed_snapshot,
             "broker_snapshot": broker_snapshot,
@@ -1343,7 +1533,8 @@ class DashboardBuilder:
             "sources": [s.__dict__ for s in self.sources],
             "builder_notes": {
                 "missing_files": sorted(set(self.missing_files)),
-                "warnings": self.warnings,
+                "warnings": executive_warnings,
+                "all_warnings": self.warnings,
                 "degraded_metrics": self.degraded_metrics,
                 "broker_snapshot": {
                     "source_mode": self.broker_source_mode,

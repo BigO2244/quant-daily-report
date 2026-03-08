@@ -370,3 +370,141 @@ def test_builder_prefers_live_fetch_over_fallback_derivation(tmp_path, monkeypat
     broker = model["broker_snapshot"]
     assert broker["source"] == "live:alpaca_account"
     assert broker["trust_level"] == "authoritative"
+
+
+def test_run_selection_prefers_latest_successful_over_halted(tmp_path):
+    """Test that dashboard selects latest successful run over newer halted run."""
+    # Create a successful run
+    successful_run_id = "2026-03-02T101004-0500_successful"
+    _write_json(
+        tmp_path / f"outputs/runs/{successful_run_id}/meta.json",
+        {
+            "report_date": "2026-03-02",
+            "run_id": successful_run_id,
+            "mode": "paper",
+            "created_at": "2026-03-02T15:10:04Z",
+        },
+    )
+    _write_json(
+        tmp_path / f"outputs/runs/{successful_run_id}/snapshots/health_2026-03-02.json",
+        {"status": "healthy"},
+    )
+    _write_json(
+        tmp_path / f"outputs/runs/{successful_run_id}/snapshots/integrity_2026-03-02.json",
+        {"status": "pass"},
+    )
+    
+    # Create a newer halted/sparse run
+    halted_run_id = "2026-03-04T120447-0500_halted"
+    _write_json(
+        tmp_path / f"outputs/runs/{halted_run_id}/meta.json",
+        {
+            "report_date": "2026-03-04",
+            "run_id": halted_run_id,
+            "mode": "paper",
+            "created_at": "2026-03-04T17:04:47Z",
+        },
+    )
+    _write_json(tmp_path / f"outputs/runs/{halted_run_id}/manifest.json", {})
+    
+    # Latest.json points to the newer halted run
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-04",
+            "run_id": halted_run_id,
+            "mode": "paper",
+            "created_at": "2026-03-04T17:04:47Z",
+        },
+    )
+    
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    
+    # Should select the successful run, not the halted one
+    selected_run_meta = model["run_meta"]["selected_governed_run"]
+    assert selected_run_meta["run_id"] == successful_run_id
+    assert selected_run_meta["selection_reason"] == "latest_successful_completed_run"
+    
+    # Latest attempted should still be recorded
+    latest_attempted_meta = model["run_meta"]["latest_attempted_run"]
+    assert latest_attempted_meta["run_id"] == halted_run_id
+
+
+def test_run_selection_metadata_included(tmp_path):
+    """Test that run selection metadata is included in output."""
+    run_id = "2026-03-04T120447-0500_test"
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-04",
+            "run_id": run_id,
+            "mode": "paper",
+            "created_at": "2026-03-04T17:04:47Z",
+        },
+    )
+    _write_json(
+        tmp_path / f"outputs/runs/{run_id}/meta.json",
+        {
+            "report_date": "2026-03-04",
+            "run_id": run_id,
+            "mode": "paper",
+        },
+    )
+    _write_json(tmp_path / f"outputs/runs/{run_id}/snapshots/health_2026-03-04.json", {"status": "healthy"})
+    _write_json(tmp_path / f"outputs/runs/{run_id}/snapshots/integrity_2026-03-04.json", {"status": "pass"})
+    
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    
+    assert "latest_attempted_run" in model["run_meta"]
+    assert "selected_governed_run" in model["run_meta"]
+    assert model["run_meta"]["latest_attempted_run"]["run_id"] == run_id
+    assert model["run_meta"]["selected_governed_run"]["run_id"] == run_id
+    assert "selection_reason" in model["run_meta"]["selected_governed_run"]
+
+
+def test_chart_metadata_included(tmp_path):
+    """Test that chart metadata is included in series output."""
+    run_id = "run-chart-test"
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-04",
+            "run_id": run_id,
+            "mode": "paper",
+        },
+    )
+    
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    
+    assert "chart_metadata" in model["series"]
+    chart_meta = model["series"]["chart_metadata"]
+    assert "nav_chart" in chart_meta
+    assert "daily_returns_chart" in chart_meta
+    assert "excess_returns_chart" in chart_meta
+    
+    # Check structure
+    assert "x_axis_label" in chart_meta["nav_chart"]
+    assert "y_axis_label" in chart_meta["nav_chart"]
+    assert chart_meta["daily_returns_chart"]["baseline"] == 0.0
+    assert chart_meta["excess_returns_chart"]["baseline"] == 0.0
+
+
+def test_activity_includes_source_context(tmp_path):
+    """Test that activity section includes source run context."""
+    run_id = "run-activity-test"
+    _write_json(
+        tmp_path / "outputs/latest.json",
+        {
+            "report_date": "2026-03-04",
+            "run_id": run_id,
+            "mode": "paper",
+        },
+    )
+    
+    model = DashboardBuilder(repo_root=tmp_path).build()
+    
+    activity = model["activity"]
+    assert "source_run_id" in activity
+    assert "source_report_date" in activity
+    assert "note" in activity
+

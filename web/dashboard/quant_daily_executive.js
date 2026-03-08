@@ -363,6 +363,18 @@
   function renderActivity(activity) {
     const grid = document.getElementById("activity-grid");
     clear(grid);
+    
+    // Add context note if available
+    const contextNote = activity.note || "";
+    const sourceRunId = activity.source_run_id || "";
+    if (contextNote) {
+      const noteEl = document.createElement("div");
+      noteEl.className = "activity-context-note";
+      noteEl.style.cssText = "grid-column: 1 / -1; font-size: 0.85rem; color: #5c6f82; padding: 0.5rem; background: #f4f7fa; border-radius: 4px; margin-bottom: 0.75rem;";
+      noteEl.textContent = contextNote;
+      grid.appendChild(noteEl);
+    }
+    
     const items = [
       ["Buys", activity.buys],
       ["Sells", activity.sells],
@@ -419,7 +431,7 @@
     const brokerItems = [
       ["Portfolio / Equity", brokerHeadlineValue],
       ["Cash", formatCurrency(broker.cash)],
-      ["Buying Power", formatCurrency(broker.buying_power)]
+      ["Buying Power", broker.buying_power !== null ? formatCurrency(broker.buying_power) : (broker.buying_power_note || "Data unavailable")]
     ];
 
     governedItems.forEach(([label, value]) => {
@@ -591,6 +603,20 @@
     ctx.font = `${11 * window.devicePixelRatio}px Avenir Next, Segoe UI, sans-serif`;
     ctx.fillText(`Min ${yMin.toFixed(1)}`, 6 * window.devicePixelRatio, (h - 10 * window.devicePixelRatio));
     ctx.fillText(`Max ${yMax.toFixed(1)}`, 6 * window.devicePixelRatio, (14 * window.devicePixelRatio));
+    
+    // X-axis label
+    ctx.fillStyle = "#5c6f82";
+    ctx.font = `${10 * window.devicePixelRatio}px Avenir Next, Segoe UI, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("Date", w / 2, h - 4 * window.devicePixelRatio);
+    ctx.textAlign = "left";
+    
+    // Y-axis label (rotated)
+    ctx.save();
+    ctx.translate(10 * window.devicePixelRatio, h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText("Indexed (Base=100)", 0, 0);
+    ctx.restore();
   }
 
   function drawBarChart(canvas, series, positiveColor, negativeColor) {
@@ -612,6 +638,16 @@
     const baseline = pad.top + ((maxVal - 0) / Math.max(maxVal - minVal, 0.00001)) * plotH;
 
     ctx.clearRect(0, 0, w, h);
+    
+    // Draw 0-baseline
+    ctx.strokeStyle = "#2c3e50";
+    ctx.lineWidth = 1.5 * window.devicePixelRatio;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, baseline);
+    ctx.lineTo(w - pad.right, baseline);
+    ctx.stroke();
+    
+    // Draw light grid line for 0-baseline emphasis
     ctx.strokeStyle = "#d8e1ea";
     ctx.lineWidth = 1 * window.devicePixelRatio;
     ctx.beginPath();
@@ -628,6 +664,19 @@
       ctx.fillStyle = v >= 0 ? positiveColor : negativeColor;
       ctx.fillRect(x, y, width, Math.max(barH, 1));
     });
+    
+    // Add axis labels
+    ctx.fillStyle = "#5c6f82";
+    ctx.font = `${10 * window.devicePixelRatio}px Avenir Next, Segoe UI, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("Date", w / 2, h - 4 * window.devicePixelRatio);
+    ctx.textAlign = "left";
+    
+    ctx.save();
+    ctx.translate(10 * window.devicePixelRatio, h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText("Return (%)", 0, 0);
+    ctx.restore();
   }
 
   function renderCharts(series) {

@@ -13,6 +13,33 @@ The **Quant Daily Executive Dashboard** provides an executive-facing, fast-scan 
 
 The page is static-file friendly and designed to open locally in a browser without a frontend framework or web server.
 
+### Executive-Safe Run Selection
+
+The dashboard defaults to the **latest successful completed run** for executive metrics, not necessarily the most recent attempted run. This ensures that:
+
+- Portfolio value, trading activity, and performance charts reflect known-good data
+- Failed or halted runs don't make the dashboard appear broken
+- The latest attempted run status is still surfaced prominently if it differs from the selected run
+
+Run selection logic:
+
+1. **Discover all runs** in `outputs/runs/`
+2. **Classify each run** as complete/successful (has health/integrity snapshots or quant_report) vs failed/halted (sparse artifacts or preflight_failure)
+3. **Select latest successful completed run** for executive metrics
+4. **Record latest attempted run** separately for status alerts
+5. **Fall back** to latest attempted run if no successful run exists
+
+Run selection metadata is included in `run_meta.latest_attempted_run` and `run_meta.selected_governed_run`.
+
+### Warning Density Reduction
+
+The builder filters warnings to focus on executive-level concerns:
+
+- **Included:** preflight failures, suspicious broker values, missing critical position/ledger artifacts
+- **Suppressed:** low-level artifact parsing errors, derived metric estimation notes, missing optional data
+
+Executive warnings are in `builder_notes.warnings`; full diagnostics in `builder_notes.all_warnings`.
+
 ## File Structure
 
 - `web/dashboard/quant_daily_executive.html`
@@ -36,7 +63,12 @@ The dashboard consumes a normalized JSON model with these top-level keys:
     "benchmark": [],
     "daily_returns": [],
     "excess_returns": [],
-    "drawdown": []
+    "drawdown": [],
+    "chart_metadata": {
+      "nav_chart": {"title": "...", "x_axis_label": "Date", "y_axis_label": "Value", "note": "Indexed to 100 at inception"},
+      "daily_returns_chart": {"title": "...", "x_axis_label": "Date", "y_axis_label": "Return (%)", "baseline": 0.0},
+      "excess_returns_chart": {"title": "...", "x_axis_label": "Date", "y_axis_label": "Excess Return (%)", "baseline": 0.0}
+    }
   },
   "risk": {},
   "activity": {},
@@ -58,6 +90,32 @@ The dashboard consumes a normalized JSON model with these top-level keys:
 - chart series rows use:
   - `{"date": "YYYY-MM-DD", "value": <number>}`
 - status fields use pass/warning/fail style semantics
+
+### Chart Improvements
+
+Charts now include:
+
+- **Axis labels:** X-axis (Date) and Y-axis (Indexed Value, Return %, Excess Return %)
+- **0-baseline marker:** Visible 0% line on daily returns and excess returns charts
+- **Indexed NAV note:** NAV chart is indexed to Base=100 at inception
+- **Chart metadata:** Structured metadata in `series.chart_metadata` for rendering context
+
+### Activity Context
+
+The `activity` section now includes:
+
+- `source_run_id` — which run the activity data comes from
+- `source_report_date` — report date of the source run
+- `note` — human-readable context (e.g., "Activity from selected governed run" or "Activity from latest run")
+
+This clarifies whether trade counts reflect the latest attempted run or an earlier successful run.
+
+### Buying Power Handling
+
+The `broker_snapshot.buying_power` field may be `null` if the broker source doesn't provide it.
+
+- `buying_power_note` — included when `buying_power` is `null`, explaining why (e.g., "Not provided by broker source" or "Field not present in broker payload")
+- Dashboard UI displays the note instead of generic "Data unavailable" when the field is explicitly unavailable from the broker
 
 ## Build JSON from Artifacts
 

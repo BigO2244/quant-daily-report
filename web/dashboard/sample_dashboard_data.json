@@ -6,7 +6,17 @@
     "overall_status": "PASS",
     "benchmark": "SPY",
     "last_updated": "2026-03-06T17:10:22Z",
-    "status_banner": "Run completed successfully on March 6, 2026. Three trades executed. Portfolio outperformed benchmark by 7 bps. No material exceptions."
+    "status_banner": "Run completed successfully on March 6, 2026. Three trades executed. Portfolio outperformed benchmark by 7 bps. No material exceptions.",
+    "latest_attempted_run": {
+      "run_id": "2026-03-06T093505-0500_ab12cd3",
+      "report_date": "2026-03-06",
+      "created_at": "2026-03-06T14:35:05Z"
+    },
+    "selected_governed_run": {
+      "run_id": "2026-03-06T093505-0500_ab12cd3",
+      "report_date": "2026-03-06",
+      "selection_reason": "latest_attempted_is_successful"
+    }
   },
   "kpis": {
     "portfolio_value": 100482.33,
@@ -87,7 +97,29 @@
       {"date": "2026-03-04", "value": -0.0006},
       {"date": "2026-03-05", "value": -0.0006},
       {"date": "2026-03-06", "value": 0.0}
-    ]
+    ],
+    "chart_metadata": {
+      "nav_chart": {
+        "title": "Portfolio NAV vs Benchmark",
+        "x_axis_label": "Date",
+        "y_axis_label": "Value",
+        "note": "Indexed to 100 at inception"
+      },
+      "daily_returns_chart": {
+        "title": "Daily Returns",
+        "x_axis_label": "Date",
+        "y_axis_label": "Return (%)",
+        "baseline": 0.0,
+        "note": "Daily return percentage"
+      },
+      "excess_returns_chart": {
+        "title": "Excess Return vs SPY",
+        "x_axis_label": "Date",
+        "y_axis_label": "Excess Return (%)",
+        "baseline": 0.0,
+        "note": "Daily outperformance vs SPY"
+      }
+    }
   },
   "risk": {
     "drawdown": -0.0061,
@@ -104,7 +136,10 @@
     "new_positions": 1,
     "full_exits": 1,
     "orders_filled": 3,
-    "orders_rejected": 0
+    "orders_rejected": 0,
+    "source_run_id": "2026-03-06T093505-0500_ab12cd3",
+    "source_report_date": "2026-03-06",
+    "note": "Activity from latest run"
   },
   "governed_snapshot": {
     "portfolio_value": 100482.33,
@@ -119,6 +154,7 @@
     "portfolio_value": 100615.72,
     "cash": 18410.11,
     "buying_power": 73640.44,
+    "buying_power_note": null,
     "equity": 100615.72,
     "market_value": 82205.61,
     "as_of": "2026-03-07T13:31:00Z",
