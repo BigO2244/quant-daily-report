@@ -372,3 +372,19 @@ def ledger2_rows_from_execution_payload(
         signal_hash=None,
         get_price_fn=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Signal hashing (migrated from paper.ledger to consolidate ledger utilities)
+# ---------------------------------------------------------------------------
+import hashlib as _hashlib
+import os as _os
+
+
+def compute_signal_hash(signals_path: str) -> str:
+    """Compute a deterministic sha1 hash for a signals payload."""
+    if not signals_path or not _os.path.exists(signals_path):
+        return ""
+    with open(signals_path, "rb") as handle:
+        payload = handle.read()
+    return _hashlib.sha1(payload).hexdigest()

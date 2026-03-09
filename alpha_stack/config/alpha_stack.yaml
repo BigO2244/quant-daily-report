@@ -1,0 +1,314 @@
+# ===========================================================================
+# Alpha Stack v1 — Master Configuration
+# ===========================================================================
+#
+# CRITICAL: ALL feature flags default to FALSE.
+# Alpha Stack is completely off by default — production execution is
+# unaffected by anything in this file unless explicitly enabled.
+#
+# To enable Alpha Stack research/shadow mode, set:
+#   ENABLE_ALPHA_STACK: true
+#   ENABLE_ALPHA_STACK_SHADOW: true  (for shadow NAV tracking)
+#
+# NEVER set these to true in the production workflow YAML without a
+# documented promotion review.
+# ===========================================================================
+
+# ===========================================================================
+# FEATURE FLAGS
+# ===========================================================================
+feature_flags:
+  ENABLE_ALPHA_STACK: false           # Master switch — must be true for any AS component to run
+  ENABLE_ALPHA_STACK_SHADOW: false    # Enable shadow mode (parallel paper NAV tracking)
+  ENABLE_MEAN_REVERSION: false        # MR sleeve — off until validated in shadow
+  ENABLE_OPTIONS_OVERLAY: false       # Future options overlays — not implemented in v1
+  ENABLE_VALUE_SLEEVE: false          # Value sleeve — off until PIT fundamentals are wired
+  ENABLE_QUALITY_SLEEVE: false        # Quality sleeve — off until PIT fundamentals are wired
+
+# ===========================================================================
+# UNIVERSE
+# ===========================================================================
+universe:
+  csv_path: "data/universe.csv"       # Reuses production universe file
+  benchmark: "SPY"
+  cash_proxy: "SGOV"
+
+# ===========================================================================
+# DATA / DATASTORE
+# ===========================================================================
+datastore:
+  prices:
+    lookback_days: 504                # ~2 trading years of history
+    cache_dir: "alpha_stack_cache/prices"
+    cache_ttl_hours: 8                # Re-fetch after 8 hours
+  fundamentals:
+    # WARNING: Fundamentals are NOT point-in-time safe in v1.
+    # The interface is implemented with explicit warnings and TODO markers.
+    # Do NOT use fundamental-based sleeves in any live/shadow context
+    # until a filed_date-aware data source is wired.
+    pit_safe: false
+    source: "stub"                    # stub | yfinance (not PIT-safe) | custom
+    warn_on_use: true
+  macro:
+    vix_ticker: "^VIX"
+    spy_ticker: "SPY"
+    tlt_ticker: "TLT"                 # 20y treasury proxy for yield curve
+    hyg_ticker: "HYG"                 # HY credit spread proxy
+    lookback_days: 252
+  breadth:
+    # Breadth is computed from the universe price history (no separate feed needed).
+    # A proper A/D line requires intraday tick data; we use a close-price approximation.
+    universe_source: "datastore"      # Compute from universe prices
+    ema_period_short: 20
+    ema_period_long: 200
+
+# ===========================================================================
+# REGIME ENGINE
+# ===========================================================================
+regime:
+  # --- Trend dimension ---
+  # Computed on SPY (market proxy) as:
+  #   T1 = (Close / EMA200) - 1
+  #   T2 = (EMA50 / EMA200) - 1
+  trend:
+    strong_up:
+      t1_min: 0.03
+      t2_min: 0.01
+    weak_up:
+      t1_min: 0.00
+      t2_min: 0.00
+    neutral:
+      t1_min: -0.02
+      t1_max: 0.00
+    weak_down:
+      t1_max: -0.02
+      t2_max: 0.00
+    strong_down:
+      t1_max: -0.05
+      t2_max: -0.01
+    hysteresis:
+      t1_buffer: 0.005                # 0.5% buffer around T1 boundaries
+      t2_buffer: 0.005                # 0.5% buffer around T2 boundaries
+
+  # --- Volatility dimension (VIX) ---
+  volatility:
+    calm:
+      vix_max: 16.0
+    normal:
+      vix_min: 16.0
+      vix_max: 22.0
+    elevated:
+      vix_min: 22.0
+      vix_max: 30.0
+    crisis:
+      vix_min: 30.0
+    hysteresis:
+      vix_buffer: 1.5               # 1.5 VIX points around each boundary
+
+  # --- Breadth dimension ---
+  # Input: % of universe members trading above their 200-DMA
+  breadth:
+    healthy:
+      pct_above_200_min: 65
+    mixed:
+      pct_above_200_min: 45
+      pct_above_200_max: 65
+    deteriorating:
+      pct_above_200_min: 30
+      pct_above_200_max: 45
+    washed_out:
+      pct_above_200_max: 30
+    hysteresis:
+      pct_buffer: 3.0               # 3 percentage-point buffer around boundaries
+
+  # --- Macro dimension ---
+  # NOTE: Macro state is a composite of credit spreads, yield curve slope,
+  # and policy signals. With only yfinance data, this uses TLT/HYG proxies.
+  # Default to neutral until a proper macro data feed is wired.
+  macro:
+    default_state: "neutral"        # Fallback when macro signals are ambiguous
+    # Proxy thresholds (TLT-based yield proxy, HYG for credit)
+    # These are approximations — treat as TODO for proper macro data source.
+    hy_spread_proxy_elevated: 0.05  # HYG yield spread proxy threshold
+    yield_curve_inversion_threshold: 0.0  # TLT vs short-end comparison
+
+  # --- Hysteresis / transition rules ---
+  hysteresis:
+    min_dwell_days: 5               # Min days in a state before any upgrade/downgrade
+    confirmation_closes: 2          # Threshold must breach for N consecutive closes
+    crisis_bypass_dwell: true       # Crisis vol overrides dwell time (immediate risk-off)
+    max_state_jump: 1               # Max states to skip per transition (no strong_up → strong_down)
+
+# ===========================================================================
+# SLEEVES
+# ===========================================================================
+sleeves:
+  common:
+    min_price: 5.0
+    min_adv_shares: 100000
+    position_cap: 0.10              # Per-name cap at sleeve level
+
+  trend:
+    enabled: true                   # Active when ENABLE_ALPHA_STACK is true
+    # Momentum windows (1-month skip to avoid reversal bias)
+    r12_1_lookback: 252
+    r6_1_lookback: 126
+    r3_1_lookback: 63
+    skip_days: 21                   # Skip most recent 21 trading days
+    # Signal weights (must sum to 1.0)
+    w_r12_1: 0.45
+    w_r6_1: 0.30
+    w_r3_1: 0.15
+    w_trend_flag: 0.10
+    # Volatility-adjusted scoring
+    atr_lookback: 20
+    # Entry/exit thresholds
+    enter_score: 70
+    hold_score: 55
+    exit_score: 45
+    # Sizing
+    vol_floor: 0.10                 # 10% annualized vol floor for inv-vol weights
+    vol_cap: 0.60                   # 60% annualized vol cap
+    top_n: 15
+    max_positions: 20
+
+  value:
+    enabled: false                  # Off until PIT fundamentals are wired
+    # Factor weights (sector-relative z-scores)
+    w_earnings_yield: 0.35
+    w_fcf_yield: 0.25
+    w_book_to_price: 0.20
+    w_shareholder_yield: 0.20
+    # Thresholds
+    enter_score: 75
+    hold_score: 60
+    exit_score: 50
+    top_n: 15
+
+  quality:
+    enabled: false                  # Off until PIT fundamentals are wired
+    # Factor weights
+    w_roe: 0.30
+    w_roic: 0.25
+    w_net_leverage: 0.20            # Higher leverage = worse (negated in scoring)
+    w_margin_vol: 0.15              # Higher margin volatility = worse (negated)
+    w_accruals: 0.10                # Higher accruals = worse (negated)
+    # Thresholds
+    enter_score: 70
+    hold_score: 55
+    exit_score: 45
+    top_n: 15
+
+  mean_reversion:
+    enabled: false                  # Controlled by ENABLE_MEAN_REVERSION flag
+    # Factor weights
+    w_rsi2: 0.35                    # Negated: high RSI(2) = overbought, low = oversold candidate
+    w_bb_z: 0.30                    # Negated: negative z-score = stretched below band
+    w_r_5d: 0.20                    # Negated: 5-day reversal
+    w_volume_shock: 0.15            # Volume spike on down day (positive signal for MR)
+    # Regime gate (hard requirement)
+    allowed_trend_states:
+      - "weak_up"
+      - "neutral"
+    allowed_vol_states:
+      - "calm"
+      - "normal"
+    # Thresholds
+    enter_score: 80
+    hold_score: 65
+    exit_score: 55
+    top_n: 5
+
+# ===========================================================================
+# ALLOCATOR v1 (REGIME-BASED RULES)
+# ===========================================================================
+allocator:
+  # Base sleeve budget by trend state (before modifiers)
+  base_weights:
+    strong_up:
+      trend: 0.55
+      value: 0.20
+      quality: 0.15
+      mean_reversion: 0.10
+    weak_up:
+      trend: 0.45
+      value: 0.25
+      quality: 0.20
+      mean_reversion: 0.10
+    neutral:
+      trend: 0.35
+      value: 0.25
+      quality: 0.30
+      mean_reversion: 0.10
+    weak_down:
+      trend: 0.20
+      value: 0.20
+      quality: 0.50
+      mean_reversion: 0.10
+    strong_down:
+      trend: 0.10
+      value: 0.15
+      quality: 0.65
+      mean_reversion: 0.10
+
+  # Volatility modifiers (applied after trend base)
+  vol_modifiers:
+    elevated:
+      mean_reversion_mult: 0.5      # Cut MR budget 50%; released budget goes to quality
+    crisis:
+      mean_reversion_mult: 0.0      # Zero out MR entirely
+      trend_reduction: 0.30         # Reduce trend 30%; released goes to cash
+
+  # Breadth modifiers (applied after vol modifiers)
+  breadth_modifiers:
+    healthy:
+      trend_add: 0.05               # +5% trend; funded pro-rata from value/quality
+    deteriorating:
+      trend_subtract: 0.05
+      quality_add: 0.05
+    washed_out:
+      disable_new_trend_entries: true  # Hold existing; no new trend buys
+
+  # Macro modifiers (applied last)
+  macro_modifiers:
+    supportive:
+      value_add: 0.05
+      cash_reserve_subtract: 0.05
+    restrictive:
+      cash_reserve_add: 0.05
+      value_subtract: 0.05
+
+  # Portfolio-level hard constraints
+  constraints:
+    max_gross_exposure: 0.95        # 95% max long; 5% min cash
+    min_cash: 0.05
+    max_position_pct: 0.10          # 10% per-name hard cap
+    max_sector_pct: 0.30            # 30% per-sector cap (placeholder if sector data available)
+    # Turnover smoothing
+    max_daily_sleeve_change: 0.05   # 5% max sleeve budget shift per day
+    # Drawdown circuit breaker (placeholder — wire to live NAV before paper mode)
+    drawdown_soft: 0.10             # 10% DD → reduce all sleeves by 50%
+    drawdown_hard: 0.15             # 15% DD → cash-only hold mode
+
+# ===========================================================================
+# RESEARCH / BACKTEST
+# ===========================================================================
+research:
+  # Cost model (applied in all backtest outputs)
+  cost_model:
+    slippage_bps: 25                # 25bps round-trip slippage
+    commission_bps: 1               # ~1bps commission at scale
+    apply_to_turnover: true
+
+  # Rolling attribution windows
+  attribution:
+    rolling_windows: [21, 63, 126, 252]  # Monthly, quarterly, semi, annual
+
+  # IC monitoring
+  ic_monitor:
+    lookback_days: 252              # 1-year rolling IC
+
+  # Output paths (separate from production outputs)
+  output_dir: "outputs/alpha_stack"
+  shadow_output_dir: "outputs/alpha_stack_shadow"
+  cache_dir: "alpha_stack_cache"
