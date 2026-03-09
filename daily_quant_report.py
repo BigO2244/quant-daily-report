@@ -50,6 +50,10 @@ from paper.run_manager import (
     safe_write_text,
     write_latest_pointer,
 )
+from core.run_pointer import write_latest_run_pointer as write_canonical_run_pointer
+from core.execution_payload import write_canonical_execution_payload, normalize_status
+from core.operator_summary import write_operator_summary, format_operator_summary_log
+from core.step_summary import append_step_summary
 from paper.nav2 import update_nav
 from paper.perf_artifact_producers import (
     rebuild_premarket_analyzer_scores,
@@ -560,6 +564,25 @@ def _write_execution_email_payload(payload: dict, run_date: str) -> tuple[str, b
     safe_write_text(view_path, payload_text, allow_overwrite=True)
     logger.info("[EXECUTION_EMAIL] payload written: %s", canonical_path)
     return str(canonical_path), False, None
+
+
+def _write_canonical_execution_payload(payload: dict, run_date: str, run_root: Path | None = None) -> str:
+    target_root = run_root
+    if target_root is None and _RUN_CONTEXT is not None:
+        target_root = _RUN_CONTEXT.run_root
+    out_path = write_canonical_execution_payload(
+        payload,
+        run_date,
+        run_root=target_root,
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    logger.info(
+        "[EXECUTION_PAYLOAD] wrote path=%s trades=%d status=%s",
+        out_path,
+        int((payload or {}).get("executable_trades_count") or 0),
+        (payload or {}).get("execution_status"),
+    )
+    return str(out_path)
 
 
 def write_integrity_artifact(asof_date: str, payload: dict) -> str:
@@ -3870,6 +3893,7 @@ def _finalize_run_context(run_ctx: RunContext) -> None:
         ("\n".join(lines) + "\n") if lines else "",
         allow_overwrite=run_ctx.allow_overwrite,
     )
+    # Write to latest.json for backward compatibility
     latest_payload = {
         "run_id": run_ctx.run_id,
         "path": str(run_ctx.run_root),
@@ -3880,6 +3904,20 @@ def _finalize_run_context(run_ctx: RunContext) -> None:
         "created_at": run_ctx.created_at,
     }
     write_latest_pointer(Path("outputs/latest.json"), latest_payload)
+    
+    # Write canonical run pointer (latest_run.json) as single source of truth
+    # Ensures reporting, execution, and email all read from same artifact location
+    try:
+        write_canonical_run_pointer(
+            run_id=run_ctx.run_id,
+            trade_date=run_ctx.report_date,
+            mode=run_ctx.mode,
+            run_root=str(run_ctx.run_root),
+            status="success",
+        )
+        logger.info("[RUN_ARCHIVE] canonical run pointer written: outputs/latest_run.json")
+    except Exception as e:
+        logger.warning("[RUN_ARCHIVE][WARN] failed to write canonical run pointer: %s", e)
 
 
 def _finalize_run_context_once() -> None:
@@ -4613,6 +4651,52 @@ def main(argv: list[str] | None = None):
             sell_count,
             execution_payload.get("status_label") or ("NO TRADES" if not exec_trades else "TRADES READY"),
         )
+    canonical_execution_payload_path = _write_canonical_execution_payload(
+        execution_payload,
+        trade_date_str,
+        run_root=_RUN_CONTEXT.run_root if _RUN_CONTEXT is not None else None,
+    )
+    
+        # Write operator summary after planner completes
+        if _RUN_CONTEXT is not None and _RUN_CONTEXT.run_root:
+            normalized_status = normalize_status(
+                execution_status=execution_payload.get("execution_status"),
+                halt_reason=execution_payload.get("halt_reason"),
+                executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
+            )
+            write_operator_summary(
+                _RUN_CONTEXT.run_root,
+                run_id=str(_RUN_CONTEXT.run_id),
+                trade_date=trade_date_str,
+                mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+                pretrade_status=normalized_status,
+                pretrade_halt_reason=execution_payload.get("halt_reason"),
+                proposed_trades_count=len(all_proposed_trades or []),
+                executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
+                planner_completed=True,
+            )
+            # Log pretrade summary
+            print(
+                f"[PRETRADE_SUMMARY] run_id={_RUN_CONTEXT.run_id} "
+                f"status={normalized_status} "
+                f"proposed={len(all_proposed_trades or [])} "
+                f"executable={int(execution_payload.get('executable_trades_count') or 0)} "
+                f"payload_path={canonical_execution_payload_path}"
+            )
+            append_step_summary(
+                [
+                    "### Pretrade Summary",
+                    f"- run_id: `{_RUN_CONTEXT.run_id}`",
+                    f"- trade_date: `{trade_date_str}`",
+                    f"- mode: `{str((paper_summary or {}).get('trading_mode') or os.getenv('TRADING_MODE', DEFAULT_TRADING_MODE)).upper()}`",
+                    f"- pretrade_status: `{normalized_status}`",
+                    f"- proposed_trades_count: `{len(all_proposed_trades or [])}`",
+                    f"- executable_trades_count: `{int(execution_payload.get('executable_trades_count') or 0)}`",
+                    f"- operator_summary_path: `{_RUN_CONTEXT.run_root / 'operator_summary.json'}`",
+                    f"- execution_payload_path: `{canonical_execution_payload_path}`",
+                ]
+            )
+    
     execution_payload_path, payload_preserved, preserved_path = _write_execution_email_payload(execution_payload, trade_date_str)
     integrity = {
         "trade_date": trade_date_str,
@@ -4620,6 +4704,7 @@ def main(argv: list[str] | None = None):
         "mode": str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
         "execution_status": execution_payload.get("execution_status"),
         "halt_reason": execution_payload.get("halt_reason"),
+        "canonical_execution_payload_path": canonical_execution_payload_path,
         "payload_path_written": execution_payload_path,
         "payload_preserved": payload_preserved,
         "preserved_path": preserved_path,

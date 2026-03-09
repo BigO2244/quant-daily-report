@@ -427,7 +427,72 @@ class DashboardBuilder:
 
         return broker_snapshot, suspicious
 
-    def _find_latest_execution_payload(self, report_date: str | None) -> tuple[str | None, dict[str, Any] | None]:
+    def _find_latest_execution_payload(self, report_date: str | None, run_id: str | None = None) -> tuple[str | None, dict[str, Any] | None]:
+        # Canonical-first resolution order:
+        # 1) outputs/latest_run.json -> run_root
+        # 2) run_root/operator_summary.json
+        # 3) run_root/execution_results.json
+        # 4) run_root/execution_payload.json
+        # 5) legacy outputs/execution_email/<date>.json fallback
+        run_root_candidates: list[Path] = []
+        latest_run = self._read_json("outputs/latest_run.json", required=False, used=True)
+        if isinstance(latest_run, dict):
+            run_root_raw = str(latest_run.get("run_root") or "").strip()
+            if run_root_raw:
+                run_root_path = Path(run_root_raw)
+                if not run_root_path.is_absolute():
+                    run_root_path = self.repo_root / run_root_path
+                run_root_candidates.append(run_root_path)
+        if run_id:
+            run_root_candidates.append(self._abs(f"outputs/runs/{run_id}"))
+
+        for run_root_path in run_root_candidates:
+            if not run_root_path.exists() or not run_root_path.is_dir():
+                continue
+            try:
+                run_root_rel = str(run_root_path.relative_to(self.repo_root))
+            except Exception:
+                run_root_rel = run_root_path.as_posix()
+
+            op_rel = f"{run_root_rel}/operator_summary.json"
+            rs_rel = f"{run_root_rel}/execution_results.json"
+            ep_rel = f"{run_root_rel}/execution_payload.json"
+
+            operator_summary = self._read_json(op_rel, required=False, used=True)
+            execution_results = self._read_json(rs_rel, required=False, used=True)
+            execution_payload = self._read_json(ep_rel, required=False, used=True)
+
+            merged: dict[str, Any] = {}
+            source = None
+
+            if isinstance(operator_summary, dict):
+                source = op_rel
+                merged.update(operator_summary)
+                pretrade_status = str(operator_summary.get("pretrade_status") or "").upper()
+                if pretrade_status:
+                    merged["execution_status"] = pretrade_status
+                if operator_summary.get("pretrade_halt_reason") and not merged.get("halt_reason"):
+                    merged["halt_reason"] = operator_summary.get("pretrade_halt_reason")
+
+            if isinstance(execution_results, dict):
+                source = source or rs_rel
+                merged.update(execution_results)
+                status = str(execution_results.get("status") or "").upper()
+                if status:
+                    merged["execution_status"] = status
+
+            if isinstance(execution_payload, dict):
+                source = source or ep_rel
+                for key, value in execution_payload.items():
+                    merged.setdefault(key, value)
+                payload_status = str(execution_payload.get("status") or execution_payload.get("execution_status") or "").upper()
+                if payload_status and not merged.get("execution_status"):
+                    merged["execution_status"] = payload_status
+
+            if merged:
+                return source, merged
+
+        # Legacy fallback for backward compatibility when canonical artifacts are absent.
         exec_dir = self._abs("outputs/execution_email")
         if not exec_dir.exists():
             self._record_source("outputs/execution_email", exists=False)
@@ -824,7 +889,7 @@ class DashboardBuilder:
         vix_df = self._read_csv("outputs/perf/vix_close_history.csv", required=False, used=True)
         trades_df = self._read_csv("outputs/ledger/trades.csv", required=False, used=True)
 
-        _, execution_payload = self._find_latest_execution_payload(report_date)
+        _, execution_payload = self._find_latest_execution_payload(report_date, run_id=run_id)
         exec_payload_obj: dict[str, Any] = execution_payload if isinstance(execution_payload, dict) else {}
         health_obj, integrity_obj, _, _ = self._find_latest_health_integrity(run_id, report_date)
 
@@ -1041,7 +1106,12 @@ class DashboardBuilder:
 
         execution_status = "UNKNOWN"
         if exec_payload_obj:
-            execution_status = str(exec_payload_obj.get("execution_status") or exec_payload_obj.get("status_label") or "UNKNOWN").upper()
+            execution_status = str(
+                exec_payload_obj.get("status")
+                or exec_payload_obj.get("execution_status")
+                or exec_payload_obj.get("status_label")
+                or "UNKNOWN"
+            ).upper()
         elif isinstance(health_obj, dict):
             execution_status = str(health_obj.get("status") or "UNKNOWN").upper()
         if preflight_halted and execution_status in {"UNKNOWN", "", "N/A"}:
@@ -1269,7 +1339,15 @@ class DashboardBuilder:
         if inferred_early_halt and recon_ok is None:
             recon_ok = None
 
-        run_success = execution_status in {"PASS", "READY", "SUCCESS", "COMPLETED"}
+        run_success = execution_status in {
+            "PASS",
+            "READY",
+            "SUCCESS",
+            "COMPLETED",
+            "EXECUTED",
+            "NO_ACTION",
+            "SKIPPED_DUPLICATE",
+        }
         if preflight_halted:
             run_success = False
         if inferred_early_halt:
