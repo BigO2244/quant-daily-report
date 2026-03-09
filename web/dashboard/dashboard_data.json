@@ -1,0 +1,367 @@
+{
+  "run_meta": {
+    "report_date": "2026-02-27",
+    "run_id": "2026-02-27T134547-0500_62ce595",
+    "mode": "SHADOW",
+    "overall_status": "FAIL",
+    "benchmark": "SPY",
+    "last_updated": "2026-03-08T15:09:59Z",
+    "status_banner": "Showing most recent successful run (2026-02-27). Latest attempted run (2026-03-04T120447-0500_1c9aa4c) failed before completion. Derived broker estimate is suspicious and has been de-emphasized.",
+    "latest_attempted_run": {
+      "run_id": "2026-03-04T120447-0500_1c9aa4c",
+      "report_date": "2026-03-04",
+      "created_at": "2026-03-04T17:04:47.626425+00:00"
+    },
+    "selected_governed_run": {
+      "run_id": "2026-02-27T134547-0500_62ce595",
+      "report_date": "2026-02-27",
+      "selection_reason": "latest_viable_shadow_simulated_run"
+    }
+  },
+  "kpis": {
+    "portfolio_value": 9999.550018310549,
+    "daily_pl": 0.0,
+    "daily_return": 0.0,
+    "benchmark_return": -0.0075852843081221,
+    "excess_return": 0.0075852843081221,
+    "holdings": 4,
+    "turnover": 0.3148406535996432,
+    "run_status": "SIMULATED"
+  },
+  "perf_summary": {
+    "mtd_return": 0.0,
+    "qtd_return": 0.0,
+    "since_inception_return": 0.0,
+    "since_inception_alpha": 0.007585284308122109,
+    "current_drawdown": 0.0,
+    "best_day": 0.0,
+    "worst_day": 0.0
+  },
+  "series": {
+    "nav": [
+      {
+        "date": "2026-02-27",
+        "value": 9999.550018310549
+      }
+    ],
+    "benchmark": [
+      {
+        "date": "2026-02-23",
+        "value": 682.3900146484375
+      },
+      {
+        "date": "2026-02-24",
+        "value": 687.3499755859375
+      },
+      {
+        "date": "2026-02-25",
+        "value": 693.1500244140625
+      },
+      {
+        "date": "2026-02-26",
+        "value": 689.2999877929688
+      },
+      {
+        "date": "2026-02-27",
+        "value": 685.989990234375
+      }
+    ],
+    "daily_returns": [
+      {
+        "date": "2026-02-27",
+        "value": 0.0
+      }
+    ],
+    "excess_returns": [
+      {
+        "date": "2026-02-27",
+        "value": 0.0075852843081221
+      }
+    ],
+    "drawdown": [
+      {
+        "date": "2026-02-27",
+        "value": 0.0
+      }
+    ],
+    "chart_metadata": {
+      "nav_chart": {
+        "title": "Portfolio NAV Indexed to 100",
+        "x_axis_label": "Date (YYYY-MM-DD)",
+        "y_axis_label": "Indexed Value",
+        "font_size": "12pt",
+        "show_grid": true,
+        "note": "Portfolio NAV (blue) vs SPY benchmark (orange), indexed to 100 at inception"
+      },
+      "daily_returns_chart": {
+        "title": "Daily Strategy Returns",
+        "x_axis_label": "Date (YYYY-MM-DD)",
+        "y_axis_label": "Daily Return (%)",
+        "baseline": 0.0,
+        "baseline_visible": true,
+        "font_size": "12pt",
+        "show_grid": true,
+        "note": "Daily percentage return; positive values are gains"
+      },
+      "excess_returns_chart": {
+        "title": "Daily Excess Return vs SPY",
+        "x_axis_label": "Date (YYYY-MM-DD)",
+        "y_axis_label": "Excess Return (%)",
+        "baseline": 0.0,
+        "baseline_visible": true,
+        "font_size": "12pt",
+        "show_grid": true,
+        "note": "Daily outperformance/underperformance vs SPY"
+      }
+    }
+  },
+  "risk": {
+    "drawdown": 0.0,
+    "cash_position": 0.8211624520579698,
+    "gross_exposure": 0.17883754794203,
+    "largest_position_weight": null,
+    "turnover_pct": 0.3148406535996432,
+    "turnover_limit_pct": 0.35,
+    "breaker_status": "PARTIAL"
+  },
+  "activity": {
+    "buys": 4,
+    "sells": 3,
+    "new_positions": 4,
+    "full_exits": 3,
+    "orders_filled": 7,
+    "orders_rejected": 0,
+    "source_run_id": "2026-02-27T134547-0500_62ce595",
+    "source_report_date": "2026-02-27",
+    "activity_source": "run_trades_csv",
+    "is_simulated": true,
+    "note": "Activity source: run_trades_csv from shadow simulation run 2026-02-27T134547-0500_62ce595"
+  },
+  "governed_snapshot": {
+    "portfolio_value": 9999.550018310549,
+    "equity": 9999.550018310549,
+    "cash": 8211.255012512207,
+    "market_value": 1788.2950057983417,
+    "as_of": "2026-02-27",
+    "source": "governed:canonical_performance",
+    "status": "fresh"
+  },
+  "broker_snapshot": {
+    "portfolio_value": 99853.01,
+    "cash": 91911.93,
+    "buying_power": null,
+    "buying_power_note": "Not provided by broker source",
+    "equity": 99853.01,
+    "market_value": 7941.080000000002,
+    "as_of": "2026-03-03T16:14:07Z",
+    "source": "artifact:outputs/broker/broker_snapshot_latest.json",
+    "source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+    "trust_level": "authoritative",
+    "status": "suspicious",
+    "suspicious": true,
+    "confidence_note": "Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)",
+    "display_equity": null
+  },
+  "data_freshness": {
+    "run_report_date": "2026-02-27",
+    "run_last_updated": "2026-02-27T18:45:47Z",
+    "broker_as_of": "2026-03-03T16:14:07Z",
+    "broker_vs_run_alignment": "stale",
+    "alignment_detail": "Broker snapshot older than 36 hours.",
+    "stale_threshold_hours": 36,
+    "broker_trust_level": "authoritative",
+    "broker_source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+    "suspicious_broker_value": true,
+    "suspicious_reason": "Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
+  },
+  "top_changes": [
+    {
+      "ticker": "MNST",
+      "action": "BUY",
+      "change_weight": 0.05162032208755242,
+      "reason": "rebalance_to_target"
+    },
+    {
+      "ticker": "MO",
+      "action": "BUY",
+      "change_weight": 0.04884469899013247,
+      "reason": "rebalance_to_target"
+    },
+    {
+      "ticker": "JNJ",
+      "action": "SELL",
+      "change_weight": -0.04878379193729283,
+      "reason": "removed_from_targets"
+    },
+    {
+      "ticker": "WBD",
+      "action": "SELL",
+      "change_weight": -0.04822404556776625,
+      "reason": "removed_from_targets"
+    },
+    {
+      "ticker": "JCI",
+      "action": "BUY",
+      "change_weight": 0.043285947422164114,
+      "reason": "rebalance_to_target"
+    }
+  ],
+  "exceptions": [
+    {
+      "category": "Reconciliation",
+      "status": "pass",
+      "message": "Reconciliation not applicable in shadow simulation mode."
+    },
+    {
+      "category": "Execution",
+      "status": "fail",
+      "message": "Execution status: SIMULATED."
+    },
+    {
+      "category": "Risk",
+      "status": "warning",
+      "message": "Breaker or regime indicates caution: PARTIAL."
+    },
+    {
+      "category": "Broker snapshot",
+      "status": "warning",
+      "message": "Suspicious derived broker estimate: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
+    },
+    {
+      "category": "Data / artifacts",
+      "status": "warning",
+      "message": "Missing optional artifacts: outputs/paper_state/canonical_positions.json, outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json"
+    }
+  ],
+  "operating_checks": [
+    {
+      "label": "Run completed",
+      "status": "fail",
+      "detail": "Execution status: SIMULATED."
+    },
+    {
+      "label": "Trades executed",
+      "status": "pass",
+      "detail": "Orders filled: 7."
+    },
+    {
+      "label": "Reconciliation passed",
+      "status": "warning",
+      "detail": "Reconciliation artifact not found."
+    },
+    {
+      "label": "Canonical positions present",
+      "status": "pass",
+      "detail": "canonical-model-snapshot/canonical_positions.json"
+    },
+    {
+      "label": "Ledger updated",
+      "status": "pass",
+      "detail": "Ledger has at least one trade row."
+    },
+    {
+      "label": "Daily report generated",
+      "status": "pass",
+      "detail": "Run report HTML found."
+    },
+    {
+      "label": "Metric completeness",
+      "status": "pass",
+      "detail": "All executive metrics computed."
+    },
+    {
+      "label": "Broker snapshot available",
+      "status": "warning",
+      "detail": "Suspicious derived estimate. Source: artifact snapshot outputs/broker/broker_snapshot_latest.json"
+    },
+    {
+      "label": "Run vs broker alignment",
+      "status": "warning",
+      "detail": "Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
+    }
+  ],
+  "sources": [
+    {
+      "path": "outputs/latest.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/meta.json",
+      "status": "present"
+    },
+    {
+      "path": "outputs/alpha_assessment/canonical_performance.csv",
+      "status": "used"
+    },
+    {
+      "path": "outputs/perf/nav_timeseries.csv",
+      "status": "used"
+    },
+    {
+      "path": "outputs/perf/benchmark_close_history.csv",
+      "status": "used"
+    },
+    {
+      "path": "outputs/perf/vix_close_history.csv",
+      "status": "used"
+    },
+    {
+      "path": "outputs/ledger/trades.csv",
+      "status": "used"
+    },
+    {
+      "path": "outputs/execution_email/2026-02-27.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/snapshots/health_2026-02-27.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/snapshots/integrity_2026-02-27.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/paper_state/canonical_positions.json",
+      "status": "missing"
+    },
+    {
+      "path": "canonical-model-snapshot/canonical_positions.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json",
+      "status": "missing"
+    },
+    {
+      "path": "outputs/broker/broker_snapshot_latest.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/reports/quant_report_*.html",
+      "status": "used"
+    }
+  ],
+  "builder_notes": {
+    "missing_files": [
+      "outputs/paper_state/canonical_positions.json",
+      "outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json"
+    ],
+    "warnings": [
+      "Suspicious broker snapshot: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
+    ],
+    "all_warnings": [
+      "Estimated daily P/L from latest NAV and daily return due to missing prior NAV point.",
+      "Suspicious broker snapshot: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
+    ],
+    "degraded_metrics": [],
+    "broker_snapshot": {
+      "source_mode": "authoritative_artifact",
+      "source_used": "artifact:outputs/broker/broker_snapshot_latest.json",
+      "freshness": "stale",
+      "trust_level": "authoritative",
+      "source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
+      "suspicious": true
+    }
+  }
+}

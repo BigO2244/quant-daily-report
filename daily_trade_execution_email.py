@@ -7,6 +7,8 @@ import os
 import argparse
 from pathlib import Path
 
+from core.email_governance import should_email_pre_trade_status, suppress_internal_state_email
+from core.run_pointer import read_latest_run_pointer
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.paper_broker import load_config, reset_orders_sent_ledger_for_date
 from paper.send_execution_email import send_execution_email
@@ -37,8 +39,23 @@ def _load_payload(path: Path, trade_date: str, mode: str) -> dict:
         return json.load(f)
 
 
+def _resolve_payload_path(trade_date: str) -> Path:
+    latest = read_latest_run_pointer()
+    if isinstance(latest, dict):
+        run_root = str(latest.get("run_root") or "").strip()
+        if run_root:
+            candidate = Path(run_root) / "execution_payload.json"
+            if candidate.exists():
+                logger.info("[EXECUTION_EMAIL] using canonical payload: %s", candidate)
+                return candidate
+
+    legacy = Path("outputs") / "execution_email" / f"{trade_date}.json"
+    logger.info("[EXECUTION_EMAIL] using legacy payload fallback: %s", legacy)
+    return legacy
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build and optionally send execution email artifact")
+    parser = argparse.ArgumentParser(description="Build and optionally send pre-trade execution-status email artifact")
     parser.add_argument("--dry-run", action="store_true", help="write artifact only; skip SMTP send")
     parser.add_argument("--reset-ledger-date", default=None, help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution")
     return parser.parse_args(argv)
@@ -61,7 +78,7 @@ def main(argv: list[str] | None = None) -> None:
     trade_date = _resolve_trade_date()
     if args.reset_ledger_date:
         reset_orders_sent_ledger_for_date("outputs/shadow_orders/orders_sent.csv", args.reset_ledger_date)
-    payload_path = Path("outputs") / "execution_email" / f"{trade_date}.json"
+    payload_path = _resolve_payload_path(trade_date)
     payload = _load_payload(payload_path, trade_date=trade_date, mode=mode)
 
     payload["mode"] = str(payload.get("mode") or mode).upper()
@@ -76,6 +93,25 @@ def main(argv: list[str] | None = None) -> None:
     out_txt.parent.mkdir(parents=True, exist_ok=True)
     out_txt.write_text(body_text.rstrip() + "\n", encoding="utf-8")
     logger.info("[EXECUTION_EMAIL] wrote artifact: %s", out_txt)
+
+    # --- Email Governance: Check if this execution state should generate an email ---
+    execution_status = payload.get("execution_status", "UNKNOWN")
+    halt_reason = payload.get("halt_reason")
+    
+    # Suppress internal state emails (PLANNED, READY, HALTED, MISSING_EXECUTION_PAYLOAD, etc.)
+    # These are recorded in the artifact but do not generate operator emails.
+    if suppress_internal_state_email(execution_status):
+        logger.info(
+            "[EXECUTION_EMAIL] suppressed internal state email: status=%s reason=%s (recorded in artifact only)",
+            execution_status,
+            halt_reason or "none"
+        )
+        return
+    
+    # Check if pre-trade analysis email is enabled in configuration
+    if not should_email_pre_trade_status(execution_status, halt_reason):
+        logger.info("[EXECUTION_EMAIL] email governance suppressed: event_type=pre_trade_analysis")
+        return
 
     if args.dry_run:
         logger.info("[EXECUTION_EMAIL] dry_run=1 — skipping send")

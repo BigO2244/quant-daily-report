@@ -14,6 +14,32 @@ The system is operated via three GitHub Actions workflows and can also be run lo
 
 ---
 
+## Alpha Stack Program (Research/Shadow, Not Production)
+
+Alpha Stack is the forward architecture program for a modular, multi-sleeve platform with regime-aware allocation. It is intentionally separated from the current production engine.
+
+Production safety boundaries
+- Current production engine remains active and frozen except bug fixes and operational hardening.
+- Alpha Stack work is documentation-first, then implemented in separate namespaces, configs, workflows, and output roots.
+- Alpha Stack research/shadow outputs must not overwrite production canonical artifacts.
+- No production cutover occurs until staged promotion gates are passed: design -> backtest -> shadow -> paper -> go/no-go.
+
+Current status
+- Baseline specifications are documented.
+- Implementation has not started.
+- Options overlays are explicitly deferred to future phases (not current capabilities).
+
+Alpha Stack docs
+- Program index: [`docs/alpha_stack/README.md`](docs/alpha_stack/README.md)
+- Architecture: [`docs/alpha_stack/architecture_overview.md`](docs/alpha_stack/architecture_overview.md)
+- Sleeves: [`docs/alpha_stack/sleeve_specifications.md`](docs/alpha_stack/sleeve_specifications.md)
+- Regime allocator: [`docs/alpha_stack/regime_allocator_spec.md`](docs/alpha_stack/regime_allocator_spec.md)
+- Data standards: [`docs/alpha_stack/data_standards.md`](docs/alpha_stack/data_standards.md)
+- Research validation: [`docs/alpha_stack/research_validation_spec.md`](docs/alpha_stack/research_validation_spec.md)
+- Source of truth: [`docs/Alpha_Stack_Architecture_Reference.md`](docs/Alpha_Stack_Architecture_Reference.md)
+
+---
+
 ## What This System Does
 
 1. **Generates daily signals** — EMA crossover + ADX filter applied to a configured universe of US equities, with a VIX-driven position-scaling overlay.

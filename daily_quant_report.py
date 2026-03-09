@@ -30,11 +30,11 @@ from paper.build_execution_email import build_execution_email_html, build_execut
 from paper.alpha import compute_alpha_attribution
 from paper.email_styles import base_email_css
 from paper.trading_calendar import prev_trading_day
-from paper.ledger import compute_signal_hash
 from paper.ledger2 import (
     append_rows as append_ledger2_rows,
     payload_to_rows as ledger2_payload_to_rows,
     LEDGER2_COLUMNS,
+    compute_signal_hash,
 )
 from paper.paths import (
     LEDGER_TRADES_PATH,
@@ -4656,47 +4656,47 @@ def main(argv: list[str] | None = None):
         trade_date_str,
         run_root=_RUN_CONTEXT.run_root if _RUN_CONTEXT is not None else None,
     )
-    
-        # Write operator summary after planner completes
-        if _RUN_CONTEXT is not None and _RUN_CONTEXT.run_root:
-            normalized_status = normalize_status(
-                execution_status=execution_payload.get("execution_status"),
-                halt_reason=execution_payload.get("halt_reason"),
-                executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
-            )
-            write_operator_summary(
-                _RUN_CONTEXT.run_root,
-                run_id=str(_RUN_CONTEXT.run_id),
-                trade_date=trade_date_str,
-                mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
-                pretrade_status=normalized_status,
-                pretrade_halt_reason=execution_payload.get("halt_reason"),
-                proposed_trades_count=len(all_proposed_trades or []),
-                executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
-                planner_completed=True,
-            )
-            # Log pretrade summary
-            print(
-                f"[PRETRADE_SUMMARY] run_id={_RUN_CONTEXT.run_id} "
-                f"status={normalized_status} "
-                f"proposed={len(all_proposed_trades or [])} "
-                f"executable={int(execution_payload.get('executable_trades_count') or 0)} "
-                f"payload_path={canonical_execution_payload_path}"
-            )
-            append_step_summary(
-                [
-                    "### Pretrade Summary",
-                    f"- run_id: `{_RUN_CONTEXT.run_id}`",
-                    f"- trade_date: `{trade_date_str}`",
-                    f"- mode: `{str((paper_summary or {}).get('trading_mode') or os.getenv('TRADING_MODE', DEFAULT_TRADING_MODE)).upper()}`",
-                    f"- pretrade_status: `{normalized_status}`",
-                    f"- proposed_trades_count: `{len(all_proposed_trades or [])}`",
-                    f"- executable_trades_count: `{int(execution_payload.get('executable_trades_count') or 0)}`",
-                    f"- operator_summary_path: `{_RUN_CONTEXT.run_root / 'operator_summary.json'}`",
-                    f"- execution_payload_path: `{canonical_execution_payload_path}`",
-                ]
-            )
-    
+
+    # Write operator summary after planner completes
+    if _RUN_CONTEXT is not None and _RUN_CONTEXT.run_root:
+        normalized_status = normalize_status(
+            execution_status=execution_payload.get("execution_status"),
+            halt_reason=execution_payload.get("halt_reason"),
+            executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
+        )
+        write_operator_summary(
+            _RUN_CONTEXT.run_root,
+            run_id=str(_RUN_CONTEXT.run_id),
+            trade_date=trade_date_str,
+            mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+            pretrade_status=normalized_status,
+            pretrade_halt_reason=execution_payload.get("halt_reason"),
+            proposed_trades_count=len(all_proposed_trades or []),
+            executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
+            planner_completed=True,
+        )
+        # Log pretrade summary
+        print(
+            f"[PRETRADE_SUMMARY] run_id={_RUN_CONTEXT.run_id} "
+            f"status={normalized_status} "
+            f"proposed={len(all_proposed_trades or [])} "
+            f"executable={int(execution_payload.get('executable_trades_count') or 0)} "
+            f"payload_path={canonical_execution_payload_path}"
+        )
+        append_step_summary(
+            [
+                "### Pretrade Summary",
+                f"- run_id: `{_RUN_CONTEXT.run_id}`",
+                f"- trade_date: `{trade_date_str}`",
+                f"- mode: `{str((paper_summary or {}).get('trading_mode') or os.getenv('TRADING_MODE', DEFAULT_TRADING_MODE)).upper()}`",
+                f"- pretrade_status: `{normalized_status}`",
+                f"- proposed_trades_count: `{len(all_proposed_trades or [])}`",
+                f"- executable_trades_count: `{int(execution_payload.get('executable_trades_count') or 0)}`",
+                f"- operator_summary_path: `{_RUN_CONTEXT.run_root / 'operator_summary.json'}`",
+                f"- execution_payload_path: `{canonical_execution_payload_path}`",
+            ]
+        )
+
     execution_payload_path, payload_preserved, preserved_path = _write_execution_email_payload(execution_payload, trade_date_str)
     integrity = {
         "trade_date": trade_date_str,

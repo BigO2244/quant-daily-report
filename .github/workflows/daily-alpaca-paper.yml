@@ -38,6 +38,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       report_date: ${{ steps.set_meta.outputs.report_date }}
+      run_id: ${{ steps.set_meta.outputs.run_id }}
 
     env:
       TRADING_MODE: alpaca
@@ -59,6 +60,12 @@ jobs:
       # Ensure date calculations use Eastern if REPORT_DATE isn't provided
       TZ: America/New_York
       EMAIL_STRICT: "0"
+      
+      # Email Governance Configuration (production defaults: all enabled)
+      EMAIL_MARKET_CONDITIONS: ${{ vars.EMAIL_MARKET_CONDITIONS || '1' }}
+      EMAIL_PRETRADE: ${{ vars.EMAIL_PRETRADE || '1' }}
+      EMAIL_TRADING_CONFIRMATION: ${{ vars.EMAIL_TRADING_CONFIRMATION || '1' }}
+      EMAIL_INTERNAL_DEBUG: ${{ vars.EMAIL_INTERNAL_DEBUG || '0' }}
 
     steps:
       - name: Checkout
@@ -412,10 +419,83 @@ jobs:
           path: |
             outputs/runs/${{ steps.set_meta.outputs.run_id }}/
             outputs/paper_state/canonical_positions.json
+            outputs/latest_run.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
 
-  email:
+  execute_orders:
     needs: engine_run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REPORT_DATE: ${{ needs.engine_run.outputs.report_date }}
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download engine artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-paper
+          path: downloaded
+
+      - name: Prepare canonical execution inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p outputs/runs
+          latest_src="$(find downloaded -type f -path '*/outputs/latest_run.json' | head -n1 || true)"
+          if [ -n "$latest_src" ]; then
+            cp -f "$latest_src" outputs/latest_run.json
+          else
+            echo "[EXECUTION][WARN] latest_run.json missing in artifact"
+          fi
+
+          run_root_src="$(find downloaded -type d -path '*/outputs/runs/*' | grep -E '/outputs/runs/[^/]+$' | head -n1 || true)"
+          if [ -n "$run_root_src" ]; then
+            run_id="$(basename "$run_root_src")"
+            cp -R "$run_root_src" "outputs/runs/$run_id"
+            echo "[EXECUTION] restored run root: outputs/runs/$run_id"
+          else
+            echo "[EXECUTION][WARN] run root not found in artifact"
+          fi
+
+      - name: Execute canonical broker stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          .venv/bin/python scripts/execute_alpaca_orders.py
+
+      - name: Upload execution outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-execution
+          if-no-files-found: warn
+          path: |
+            outputs/latest_run.json
+            outputs/runs/*/execution_results.json
+
+  email:
+    needs: [engine_run, execute_orders]
     if: always()   # must run even when engine_run fails (recon failure, auto-bootstrap) so operator is always notified
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -431,6 +511,14 @@ jobs:
       REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
       EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
       EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN || '0' }}
+      
+      # Email Governance Configuration
+      # Controls which operator-facing emails are sent (default: all enabled)
+      EMAIL_MARKET_CONDITIONS: ${{ vars.EMAIL_MARKET_CONDITIONS || '1' }}
+      EMAIL_PRETRADE: ${{ vars.EMAIL_PRETRADE || '1' }}
+      EMAIL_TRADING_CONFIRMATION: ${{ vars.EMAIL_TRADING_CONFIRMATION || '1' }}
+      # Internal debug emails (default: disabled)
+      EMAIL_INTERNAL_DEBUG: ${{ vars.EMAIL_INTERNAL_DEBUG || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -459,6 +547,13 @@ jobs:
         with:
           name: alpaca-paper
           path: downloaded
+
+      - name: Download execution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-execution
+          path: downloaded_exec
+        continue-on-error: true
 
       - name: Infer RUN_ID from downloaded artifact
         shell: bash
@@ -491,12 +586,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p outputs/execution_email outputs/daily
+          mkdir -p outputs/execution_email outputs/daily outputs/runs downloaded_exec
           payload_src="$(find downloaded -type f -path "*/execution_email/${REPORT_DATE}.json" | head -n1 || true)"
           if [ -n "$payload_src" ]; then
             cp -f "$payload_src" "outputs/execution_email/${REPORT_DATE}.json"
           else
             echo "[EMAIL][WARN] execution payload not found for ${REPORT_DATE}"
+          fi
+
+          latest_src="$(find downloaded downloaded_exec -type f -path '*/latest_run.json' 2>/dev/null | head -n1 || true)"
+          if [ -n "$latest_src" ]; then
+            mkdir -p outputs
+            cp -f "$latest_src" outputs/latest_run.json
+          fi
+
+          run_root_src="$(find downloaded downloaded_exec -type d -path '*/runs/*' 2>/dev/null | grep -E '/runs/[^/]+$' | head -n1 || true)"
+          if [ -n "$run_root_src" ]; then
+            run_id="$(basename "$run_root_src")"
+            cp -R "$run_root_src" "outputs/runs/$run_id" || true
           fi
 
       - name: Guard email credentials (auto dry-run when missing)
@@ -529,7 +636,7 @@ jobs:
             echo "[EMAIL] Credentials present — live send enabled"
           fi
 
-      - name: Send execution email from persisted payload
+      - name: Send pre-trade execution status email
         shell: bash
         run: |
           set -euo pipefail
@@ -539,6 +646,22 @@ jobs:
             cmd+=(--dry-run)
           fi
           "${cmd[@]}"
+
+      - name: Send trading confirmation email from execution results
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          if [ ! -f outputs/latest_run.json ]; then
+            echo "[EMAIL][WARN] latest_run.json missing; skip confirmation email"
+            exit 0
+          fi
+          run_root="$(.venv/bin/python -c "import json, pathlib; p=pathlib.Path('outputs/latest_run.json'); print((json.loads(p.read_text(encoding='utf-8')).get('run_root','') if p.exists() else ''))")"
+          if [ -z "$run_root" ] || [ ! -f "$run_root/execution_results.json" ]; then
+            echo "[EMAIL][WARN] execution_results.json missing; skip confirmation email"
+            exit 0
+          fi
+          .venv/bin/python scripts/send_trading_confirmation_email.py
 
       - name: Send snapshot email from persisted artifacts
         shell: bash

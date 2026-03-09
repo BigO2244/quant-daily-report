@@ -288,7 +288,25 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     run_root = Path(str(latest.get("run_root") or "").strip())
     if not run_root:
         raise RuntimeError("latest_run.json missing run_root")
-    run_root.mkdir(parents=True, exist_ok=True)
+    # Guard: if the directory doesn't exist the artifact was never restored (planner
+    # likely failed before writing any outputs).  Creating it silently here would
+    # produce a misleading MISSING_EXECUTION_PAYLOAD error that hides the real cause.
+    if not run_root.exists():
+        raise RuntimeError(
+            f"[EXECUTION] Run directory not found: {run_root}. "
+            "The engine_run artifact was not restored — check that the planner "
+            "(daily_quant_report.py) completed successfully and that the "
+            "'Prepare canonical execution inputs' step copied the run directory."
+        )
+    # If the directory is present but completely empty, the planner wrote latest_run.json
+    # (so the pointer is valid) but crashed before writing any artifacts.
+    if not any(run_root.iterdir()):
+        raise RuntimeError(
+            f"[EXECUTION] Run directory exists but is empty: {run_root}. "
+            "The planner started but did not produce any output files. "
+            "Check engine_run job logs for the underlying error."
+        )
+    run_root.mkdir(parents=True, exist_ok=True)  # no-op at this point; kept for safety
 
     results_path = _results_path(run_root)
     if results_path.exists() and not force_resubmit:
