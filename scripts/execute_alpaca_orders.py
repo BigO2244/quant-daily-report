@@ -4,8 +4,14 @@ import argparse
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+# Ensure repo root is on sys.path when invoked as `python scripts/execute_alpaca_orders.py`
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
 from core.execution_payload import (
@@ -15,6 +21,7 @@ from core.execution_payload import (
     STATUS_EXECUTED,
     STATUS_SKIPPED_DUPLICATE,
 )
+from core.execution_audit import write_early_halt_audit, write_executor_audit
 from core.operator_summary import write_operator_summary, format_operator_summary_log
 from core.run_pointer import read_latest_run_pointer
 from core.step_summary import append_step_summary
@@ -354,6 +361,12 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             "[EXECUTION_SUMMARY] "
             f"run_id={out.get('run_id','')} submitted=0 accepted=0 rejected=0 status={STATUS_HALTED}"
         )
+        logger.error(
+            "[EXEC_DECISION] HALTED — execution_payload.json not found at %s. "
+            "This means engine_run either failed before writing the payload, or the artifact "
+            "was not restored into the expected path. Check engine_run job logs.",
+            payload_path,
+        )
         # Update operator summary
         write_operator_summary(
             run_root,
@@ -376,6 +389,13 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             accepted_count=0,
             rejected_count=0,
             duplicate_skip_reason=None,
+        )
+        write_early_halt_audit(
+            run_id=str(out.get("run_id") or latest.get("run_id") or "UNKNOWN"),
+            trade_date=str(out.get("trade_date") or latest.get("trade_date") or "UNKNOWN"),
+            mode=str(out.get("mode") or latest.get("mode") or "UNKNOWN"),
+            halt_reason=out["halt_reason"],
+            stage="missing_execution_payload",
         )
         return out
 
@@ -426,6 +446,15 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             "[EXECUTION_SUMMARY] "
             f"run_id={out.get('run_id','')} submitted=0 accepted=0 rejected=0 status={STATUS_HALTED}"
         )
+        logger.error(
+            "[EXEC_DECISION] HALTED — payload status is %s (expected READY). "
+            "halt_reason=%s trades_in_payload=%d. "
+            "This is the gate that blocks order submission when the planner marked the run as non-executable. "
+            "Check engine_run logs for [EXEC_DECISION] to see which gate caused this.",
+            execution_status,
+            out["halt_reason"],
+            len(payload.get("trades") or []),
+        )
         # Update operator summary
         write_operator_summary(
             run_root,
@@ -448,6 +477,13 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             accepted_count=0,
             rejected_count=0,
             duplicate_skip_reason=None,
+        )
+        write_early_halt_audit(
+            run_id=str(out.get("run_id") or "UNKNOWN"),
+            trade_date=str(out.get("trade_date") or "UNKNOWN"),
+            mode=str(out.get("mode") or "UNKNOWN"),
+            halt_reason=out["halt_reason"],
+            stage=f"status_not_ready:{execution_status}",
         )
         return out
 
@@ -536,7 +572,30 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
         rejected_count=int(out.get("rejected_count") or 0),
         duplicate_skip_reason=None,
     )
-    
+
+    # Fetch post-execution broker state for audit
+    _broker_cash_after = None
+    _broker_positions_after = None
+    try:
+        account = broker.get_account()
+        _broker_cash_after = float(account.get("cash") or account.get("buying_power") or 0) or None
+        _broker_positions_after = broker.get_positions()
+    except Exception:
+        pass
+
+    write_executor_audit(
+        run_id=str(out.get("run_id") or "UNKNOWN"),
+        pretrade_status=execution_status,
+        halt_reason=out.get("halt_reason"),
+        submitted_count=int(out.get("submitted_count") or 0),
+        accepted_count=int(out.get("accepted_count") or 0),
+        rejected_count=int(out.get("rejected_count") or 0),
+        broker_responses=out.get("broker_responses"),
+        broker_cash_after=_broker_cash_after,
+        broker_positions_after=_broker_positions_after,
+        execution_status=str(out.get("status") or STATUS_NO_ACTION),
+    )
+
     return out
 
 

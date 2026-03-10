@@ -12,7 +12,13 @@ Environment variables consumed:
 """
 import json
 import os
+import sys
 from pathlib import Path
+
+# Ensure repo root is on sys.path when invoked as `python scripts/generate_bootstrap_email_payload.py`
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from core.execution_payload import STATUS_HALTED, normalize_status, write_canonical_execution_payload
 from core.operator_summary import write_operator_summary
