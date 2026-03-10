@@ -1,0 +1,62 @@
+name: Export Alpaca Broker Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Report date (YYYY-MM-DD). Leave blank for today ET."
+        required: false
+        type: string
+
+jobs:
+  export_snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      REPORT_DATE: ${{ inputs.report_date }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve report date
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${REPORT_DATE:-}" ]; then
+            REPORT_DATE="$(TZ=America/New_York date +%F)"
+          fi
+          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
+          echo "[BROKER_SNAPSHOT] report_date=$REPORT_DATE"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Export read-only broker snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/export_alpaca_broker_snapshot.py --report-date "$REPORT_DATE"
+
+      - name: Upload broker snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: broker-snapshot-${{ env.REPORT_DATE }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: outputs/broker_snapshot/broker_snapshot_${{ env.REPORT_DATE }}.json
