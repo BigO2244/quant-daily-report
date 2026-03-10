@@ -220,7 +220,10 @@ def write_snapshot_json(payload: dict[str, Any], output_dir: str | Path, report_
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"broker_snapshot_{report_date}.json"
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out_path.write_text(
+    json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
+    encoding="utf-8",
+    )
     return out_path
 
 
