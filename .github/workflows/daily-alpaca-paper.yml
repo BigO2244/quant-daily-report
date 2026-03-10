@@ -121,11 +121,16 @@ jobs:
           # resolve run_root even if the planner step fails before writing one.
           # The planner (_init_run_context) will overwrite with status="running",
           # and _finalize_run_context will overwrite with status="success".
-          mkdir -p outputs "outputs/runs/${RUN_ID}"
+          # NOTE: do NOT mkdir outputs/runs/${RUN_ID} here — upload-artifact@v4
+          # silently drops empty directories, so an empty dir would not survive
+          # the artifact upload. The run directory is only created (and populated)
+          # by _init_run_context inside daily_quant_report.py.
+          mkdir -p outputs
           printf '{\n  "run_id": "%s",\n  "trade_date": "%s",\n  "mode": "ALPACA",\n  "run_root": "outputs/runs/%s",\n  "status": "initializing",\n  "created_at": "%s"\n}\n' \
             "$RUN_ID" "$REPORT_DATE" "$RUN_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             > outputs/latest_run.json
-          echo "[META] preliminary latest_run.json written"
+          echo "[RUN_POINTER] created outputs/latest_run.json:"
+          cat outputs/latest_run.json
 
       - name: Assert meta outputs present
         shell: bash
@@ -398,18 +403,29 @@ jobs:
           key: canonical-model-snapshot-v2-${{ env.REPORT_DATE || github.run_id }}
         continue-on-error: true
 
-      - name: List files before upload
+      - name: Validate run pointer and list files before upload
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          echo "[UPLOAD_PREP] Listing files to be uploaded:"
-          echo "Run directory: outputs/runs/${RUN_ID}/"
-          ls -laR "outputs/runs/${RUN_ID}/" || echo "[WARN] Run directory not found"
-          echo "Execution email payload: outputs/execution_email/${REPORT_DATE}.json"
-          ls -la "outputs/execution_email/${REPORT_DATE}.json" || echo "[WARN] Execution email payload not found"
-          echo "Canonical positions: outputs/paper_state/canonical_positions.json"
-          ls -la "outputs/paper_state/canonical_positions.json" || echo "[WARN] Canonical positions not found"
+          # Hard validation: latest_run.json MUST exist — it was written in Set run metadata.
+          # Failure here means Set run metadata itself failed, which is a workflow bug.
+          if [ ! -f outputs/latest_run.json ]; then
+            echo "[RUN_POINTER] ERROR — outputs/latest_run.json is missing before upload."
+            echo "[RUN_POINTER] This means Set run metadata failed to write the preliminary pointer."
+            echo "[RUN_POINTER] Contents of outputs/ (if it exists):"
+            ls -la outputs/ || echo "(outputs/ does not exist)"
+            exit 1
+          fi
+          echo "[RUN_POINTER] validated outputs/latest_run.json:"
+          cat outputs/latest_run.json
+          echo "[RUN_POINTER] uploaded — included in alpaca-paper artifact"
+          echo "[UPLOAD_PREP] Run directory: outputs/runs/${RUN_ID:-<unset>}/"
+          ls -laR "outputs/runs/${RUN_ID:-}/" 2>/dev/null || echo "[UPLOAD_PREP] Run directory not found (planner may have failed early)"
+          echo "[UPLOAD_PREP] Execution email payload: outputs/execution_email/${REPORT_DATE:-<unset>}.json"
+          ls -la "outputs/execution_email/${REPORT_DATE:-}.json" 2>/dev/null || echo "[UPLOAD_PREP] Execution email payload not found"
+          echo "[UPLOAD_PREP] Canonical positions: outputs/paper_state/canonical_positions.json"
+          ls -la "outputs/paper_state/canonical_positions.json" 2>/dev/null || echo "[UPLOAD_PREP] Canonical positions not found"
 
       - name: Upload canonical model snapshot artifact
         if: always()
@@ -427,11 +443,11 @@ jobs:
           name: alpaca-paper
           if-no-files-found: warn
           path: |
-            outputs/runs/${{ env.RUN_ID }}/
+            outputs/runs/**
             outputs/paper_state/canonical_positions.json
             outputs/latest_run.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
-            outputs/execution_audit/
+            outputs/execution_audit/**
 
   execute_orders:
     needs: engine_run
@@ -471,17 +487,26 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p outputs/runs
-          latest_src="$(find downloaded -type f -path '*/outputs/latest_run.json' | head -n1 || true)"
+
+          # Locate latest_run.json.  upload-artifact@v4 preserves the full relative
+          # path (outputs/latest_run.json) when multiple files survive the path spec,
+          # but strips the common ancestor when only one file survives (artifact root
+          # becomes the file's parent).  Search by name to handle both layouts.
+          latest_src="$(find downloaded -type f -name 'latest_run.json' | head -n1 || true)"
           if [ -n "$latest_src" ]; then
             cp -f "$latest_src" outputs/latest_run.json
-            echo "[EXECUTION] restored outputs/latest_run.json from artifact"
+            echo "[RUN_POINTER] validated — restored outputs/latest_run.json from artifact ($latest_src):"
+            cat outputs/latest_run.json
           else
             echo "[EXECUTION][ERROR] latest_run.json missing in artifact — engine_run may have failed before writing it"
+            echo "[EXECUTION][ERROR] Artifact contents:"
+            find downloaded -maxdepth 6 -type f | sort || true
             echo "[EXECUTION][ERROR] Cannot resolve canonical run_root; halting executor"
             exit 1
           fi
 
-          run_root_src="$(find downloaded -type d -path '*/outputs/runs/*' | grep -E '/outputs/runs/[^/]+$' | head -n1 || true)"
+          # Locate the run root directory.  Same prefix-stripping concern applies.
+          run_root_src="$(find downloaded -type d | grep -E '/runs/[^/]+$' | head -n1 || true)"
           if [ -n "$run_root_src" ]; then
             run_id="$(basename "$run_root_src")"
             cp -R "$run_root_src" "outputs/runs/$run_id"
@@ -588,28 +613,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RUN_DIR="$(find downloaded -type d -path '*/runs/*' | grep -E '/runs/[^/]+$' | head -n 1 || true)"
-          if [ -z "$RUN_DIR" ]; then
-            echo "[EMAIL][ERROR] Could not find downloaded/**/runs/<RUN_ID>/"
-            find downloaded -maxdepth 6 -type f -print || true
-            exit 1
-          fi
-          RUN_ID="$(basename "$RUN_DIR")"
-          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-          echo "[EMAIL_META] inferred RUN_ID=$RUN_ID"
 
-          # Derive REPORT_DATE from latest_run.json — do not rely on suppressed job output
-          LATEST_JSON="$(find downloaded -type f -path '*/outputs/latest_run.json' | head -n1 || true)"
+          # Derive REPORT_DATE and RUN_ID from latest_run.json.
+          # Search by name (not path) — robust against upload-artifact@v4 prefix-stripping.
+          LATEST_JSON="$(find downloaded -type f -name 'latest_run.json' | head -n1 || true)"
           if [ -n "$LATEST_JSON" ]; then
             TRADE_DATE="$(python3 -c "import json; d=json.load(open('$LATEST_JSON')); print(d.get('trade_date',''))")"
+            POINTER_RUN_ID="$(python3 -c "import json; d=json.load(open('$LATEST_JSON')); print(d.get('run_id',''))")"
             if [ -n "$TRADE_DATE" ]; then
               echo "REPORT_DATE=$TRADE_DATE" >> "$GITHUB_ENV"
               echo "[EMAIL_META] derived REPORT_DATE=$TRADE_DATE from $LATEST_JSON"
             else
-              echo "[EMAIL_META][WARN] trade_date missing in $LATEST_JSON; REPORT_DATE not set"
+              echo "[EMAIL_META][WARN] trade_date missing in $LATEST_JSON"
             fi
           else
             echo "[EMAIL_META][WARN] latest_run.json not found in artifact; REPORT_DATE not set"
+            POINTER_RUN_ID=""
+          fi
+
+          # Prefer a run directory found in the artifact; fall back to run_id from pointer.
+          RUN_DIR="$(find downloaded -type d | grep -E '/runs/[^/]+$' | head -n 1 || true)"
+          if [ -n "$RUN_DIR" ]; then
+            RUN_ID="$(basename "$RUN_DIR")"
+            echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+            echo "[EMAIL_META] inferred RUN_ID=$RUN_ID from run directory"
+          elif [ -n "${POINTER_RUN_ID:-}" ]; then
+            echo "RUN_ID=$POINTER_RUN_ID" >> "$GITHUB_ENV"
+            echo "[EMAIL_META] inferred RUN_ID=$POINTER_RUN_ID from latest_run.json (no run dir in artifact)"
+          else
+            echo "[EMAIL_META][WARN] Cannot determine RUN_ID — engine_run may have failed before writing any artifacts"
+            echo "[EMAIL_META][WARN] Artifact contents:"
+            find downloaded -maxdepth 6 -type f | sort || true
           fi
 
       - name: Set up Python
