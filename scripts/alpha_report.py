@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -11,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 LIVE_LEDGER_PATH = Path("data/live_nav.csv")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,6 +24,21 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--skip-backtest", action="store_true")
     return ap.parse_args()
+
+
+def _resolve_alpha_variant_script() -> Path:
+    candidates = [
+        REPO_ROOT / "scripts" / "research" / "research_backtest_sleeve1_alpha_variant.py",
+        REPO_ROOT / "scripts" / "research_backtest_sleeve1_alpha_variant.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    checked = "\n".join(f"- {p}" for p in candidates)
+    raise FileNotFoundError(
+        "Unable to locate research backtest script. Checked paths:\n"
+        f"{checked}"
+    )
 
 
 def fmt_pct(x: float) -> str:
@@ -144,15 +162,24 @@ def main() -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
     if not args.skip_backtest:
+        backtest_script = _resolve_alpha_variant_script()
+        env = os.environ.copy()
+        repo_root_str = str(REPO_ROOT)
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            f"{repo_root_str}{os.pathsep}{existing_pythonpath}"
+            if existing_pythonpath
+            else repo_root_str
+        )
         cmd = [
-            "python3",
-            "scripts/research_backtest_sleeve1_alpha_variant.py",
+            sys.executable,
+            str(backtest_script),
             "--output-dir",
             str(research_dir),
         ]
         if args.apply_costs:
             cmd.extend(["--apply-costs", "--cost-bps", str(args.cost_bps)])
-        subprocess.check_call(cmd)
+        subprocess.check_call(cmd, cwd=repo_root_str, env=env)
 
     ts_path = research_dir / "sleeve1_alpha_variant_timeseries.csv"
     summary_path = research_dir / "sleeve1_alpha_variant_summary.csv"
