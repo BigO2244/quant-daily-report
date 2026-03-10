@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from pathlib import Path
+
+# Ensure repo root is on sys.path when invoked as `python scripts/send_trading_confirmation_email.py`
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from core.email_governance import EmailEvent
 from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED, STATUS_SKIPPED_DUPLICATE

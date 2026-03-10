@@ -52,6 +52,8 @@ from paper.run_manager import (
 )
 from core.run_pointer import write_latest_run_pointer as write_canonical_run_pointer
 from core.execution_payload import write_canonical_execution_payload, normalize_status
+from core.execution_audit import write_planner_audit
+from core.execution_summary import write_execution_artifacts
 from core.operator_summary import write_operator_summary, format_operator_summary_log
 from core.step_summary import append_step_summary
 from paper.nav2 import update_nav
@@ -4635,6 +4637,19 @@ def main(argv: list[str] | None = None):
         execution_payload["validation_reason"] = (
             "planning_run_future_date" if is_planning_run else "market_closed_or_not_session"
         )
+    # ── Deterministic gate log — visible in every CI run ─────────────
+    logger.info(
+        "[EXEC_DECISION] trade_date=%s today_et=%s is_planning_run=%s "
+        "market_is_open=%s should_execute=%s execution_status=%s halt_reason=%s trades=%d",
+        trade_date_str,
+        today_et_str,
+        is_planning_run,
+        market_is_open_for_trade_date,
+        should_execute,
+        execution_payload.get("execution_status", "UNKNOWN"),
+        execution_payload.get("halt_reason"),
+        int(execution_payload.get("executable_trades_count") or 0),
+    )
     if execution_payload.get("execution_status") == "HALTED":
         logger.info(
             "[EXECUTION_EMAIL] status=HALTED reason=%s",
@@ -4651,6 +4666,40 @@ def main(argv: list[str] | None = None):
             sell_count,
             execution_payload.get("status_label") or ("NO TRADES" if not exec_trades else "TRADES READY"),
         )
+
+    # ── Write execution audit artifact (non-blocking) ─────────────────
+    if _RUN_CONTEXT is not None:
+        try:
+            _broker_cash = float((paper_summary or {}).get("broker_cash") or 0) or None
+            _broker_pos = (paper_summary or {}).get("alpaca_positions_snapshot") or None
+            _canonical_pos = None
+            try:
+                import json as _json
+                _cpath = Path("outputs/paper_state/canonical_positions.json")
+                if _cpath.exists():
+                    _canonical_pos = _json.loads(_cpath.read_text(encoding="utf-8")).get("positions")
+            except Exception:
+                pass
+            write_planner_audit(
+                run_id=str(_RUN_CONTEXT.run_id),
+                trade_date=trade_date_str,
+                mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+                today_et=today_et_str,
+                is_planning_run=is_planning_run,
+                market_is_open=market_is_open_for_trade_date,
+                should_execute=should_execute,
+                market_guard=(paper_summary or {}).get("market_guard"),
+                broker_cash_before=_broker_cash,
+                broker_positions_before=_broker_pos,
+                canonical_positions_before=_canonical_pos,
+                signals_generated=len((paper_summary or {}).get("signals") or []),
+                proposed_trades=list(all_proposed_trades or []),
+                blocked_reasons=list((paper_summary or {}).get("blocked_reasons") or []),
+                execution_payload=execution_payload,
+            )
+        except Exception as _audit_exc:
+            logger.warning("[EXEC_AUDIT] planner audit failed (non-blocking): %s", _audit_exc)
+
     canonical_execution_payload_path = _write_canonical_execution_payload(
         execution_payload,
         trade_date_str,
@@ -4906,6 +4955,38 @@ def main(argv: list[str] | None = None):
         logger.info("[PERF_PRODUCERS] premarket_analyzer_scores rows=%d", len(analyzer_df))
     except Exception as e:
         logger.warning("[PERF_PRODUCERS][WARN] analyzer producer failed: %s", e)
+
+    # ── Execution Summary & Rolling Export (non-blocking) ─────────────
+    try:
+        if _RUN_CONTEXT is not None:
+            # Gather NAV snapshot for summary
+            nav_snapshot_data = {
+                "position_count": len([h for h in (daily_snapshot.get("holdings") or []) if str(h.get("ticker", "")).upper() != "CASH"]),
+                "equity": portfolio_stats.get("equity"),
+                "cash": float(portfolio_stats.get("equity", 0.0)) if portfolio_stats.get("cash") is None else portfolio_stats.get("cash"),
+                "turnover_pct": float((execution_payload or {}).get("turnover_pct", 0.0)) or float((daily_snapshot.get("nav_metrics") or {}).get("turnover_pct", 0.0)),
+                "holdings": (daily_snapshot.get("holdings") or []),
+            }
+            
+            # Call non-blocking summary writer
+            summary_results = write_execution_artifacts(
+                run_id=_RUN_CONTEXT.run_id,
+                trade_date=trade_date_str,
+                run_dir=_RUN_CONTEXT.run_root,
+                execution_payload=execution_payload,
+                paper_summary=paper_summary,
+                health_payload=health_payload,
+                nav_snapshot=nav_snapshot_data,
+                reconciliation_result=broker_reconciliation,
+            )
+            if summary_results.get("summary_path"):
+                logger.info("[EXECUTION_SUMMARY] artifacts written successfully")
+            if summary_results.get("csv_run_path"):
+                logger.info("[EXECUTION_SUMMARY] per-run CSV artifact: %s", summary_results.get("csv_run_path"))
+            if summary_results.get("csv_path"):
+                logger.info("[EXECUTION_SUMMARY] CSV export updated: %s", summary_results.get("csv_path"))
+    except Exception as e:
+        logger.warning("[EXECUTION_SUMMARY][WARN] summary generation failed (non-blocking): %s", e)
 
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     _, exec_body_html = build_execution_email_html(execution_payload)

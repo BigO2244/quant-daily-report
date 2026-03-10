@@ -421,6 +421,7 @@ jobs:
             outputs/paper_state/canonical_positions.json
             outputs/latest_run.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/execution_audit/
 
   execute_orders:
     needs: engine_run
@@ -479,6 +480,8 @@ jobs:
 
       - name: Execute canonical broker stage
         shell: bash
+        env:
+          PYTHONPATH: "."
         run: |
           set -euo pipefail
           source .venv/bin/activate
@@ -493,6 +496,7 @@ jobs:
           path: |
             outputs/latest_run.json
             outputs/runs/*/execution_results.json
+            outputs/execution_audit/
 
   email:
     needs: [engine_run, execute_orders]
