@@ -70,9 +70,31 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
+def _json_default(obj: Any) -> Any:
+    """Deterministic JSON serializer for non-native types returned by Alpaca SDK."""
+    import uuid
+    import decimal
+    from datetime import date, datetime
+    from enum import Enum
+
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Enum):
+        return obj.value if hasattr(obj, "value") else str(obj)
+    if isinstance(obj, decimal.Decimal):
+        return str(obj)
+    if isinstance(obj, Path):
+        return str(obj)
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return str(obj)
+
+
 def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, default=_json_default) + "\n", encoding="utf-8")
 
 
 def _results_path(run_root: Path) -> Path:
