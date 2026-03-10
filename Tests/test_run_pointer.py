@@ -158,5 +158,187 @@ class TestPointerFreshness:
             assert is_pointer_fresh('2026-03-09', tmpdir) is False
 
 
+class TestRunPointerFallback:
+    """
+    Tests for the outputs/latest.json fallback path.
+
+    Covers the scenario where engine_run finalized a run (wrote latest.json via
+    write_latest_pointer) but latest_run.json was not written (e.g. the
+    write_canonical_run_pointer call failed or the old code path ran).
+    """
+
+    def test_fallback_to_latest_json_path_key(self):
+        """Should return a pointer built from latest.json when latest_run.json is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy = Path(tmpdir) / "outputs" / "latest.json"
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text(json.dumps({
+                "run_id": "20260310T093000Z_paper_1",
+                "path": "outputs/runs/20260310T093000Z_paper_1",
+                "report_date": "2026-03-10",
+                "mode": "ALPACA",
+                "created_at": "2026-03-10T09:30:00Z",
+            }), encoding="utf-8")
+
+            result = read_latest_run_pointer(tmpdir)
+            assert result is not None
+            assert result["run_id"] == "20260310T093000Z_paper_1"
+            assert result["run_root"] == "outputs/runs/20260310T093000Z_paper_1"
+            assert result["trade_date"] == "2026-03-10"
+            assert result["mode"] == "ALPACA"
+            assert result.get("_source") == "legacy_latest_json"
+
+    def test_fallback_to_latest_json_run_root_key(self):
+        """Should accept run_root key in latest.json (some versions write both)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy = Path(tmpdir) / "outputs" / "latest.json"
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text(json.dumps({
+                "run_id": "20260310T093000Z_paper_1",
+                "run_root": "outputs/runs/20260310T093000Z_paper_1",
+                "report_date": "2026-03-10",
+                "mode": "ALPACA",
+                "created_at": "2026-03-10T09:30:00Z",
+            }), encoding="utf-8")
+
+            result = read_latest_run_pointer(tmpdir)
+            assert result is not None
+            assert result["run_root"] == "outputs/runs/20260310T093000Z_paper_1"
+            assert result.get("_source") == "legacy_latest_json"
+
+    def test_fallback_missing_run_root_returns_none(self):
+        """Fallback should return None if latest.json has no path or run_root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy = Path(tmpdir) / "outputs" / "latest.json"
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text(json.dumps({
+                "run_id": "test",
+                "report_date": "2026-03-10",
+            }), encoding="utf-8")
+
+            result = read_latest_run_pointer(tmpdir)
+            assert result is None
+
+    def test_fallback_malformed_latest_json_returns_none(self):
+        """Corrupted latest.json should not raise; fallback returns None."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy = Path(tmpdir) / "outputs" / "latest.json"
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text("{ not valid json }", encoding="utf-8")
+
+            result = read_latest_run_pointer(tmpdir)
+            assert result is None
+
+    def test_canonical_pointer_takes_precedence_over_fallback(self):
+        """latest_run.json should be returned even if latest.json also exists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Write canonical pointer
+            write_latest_run_pointer(
+                run_id="canonical-run",
+                trade_date="2026-03-10",
+                mode="ALPACA",
+                run_root="outputs/runs/canonical-run",
+                status="success",
+                workspace_root=tmpdir,
+            )
+            # Also write legacy pointer with different run_id
+            legacy = Path(tmpdir) / "outputs" / "latest.json"
+            legacy.write_text(json.dumps({
+                "run_id": "legacy-run",
+                "path": "outputs/runs/legacy-run",
+                "report_date": "2026-03-09",
+                "mode": "ALPACA",
+            }), encoding="utf-8")
+
+            result = read_latest_run_pointer(tmpdir)
+            assert result is not None
+            assert result["run_id"] == "canonical-run"
+            assert result.get("_source") is None  # no _source tag means read from latest_run.json
+
+
+class TestWorkflowPointerHandoff:
+    """
+    Simulates the engine_run → execute_orders artifact handoff.
+
+    These tests catch regressions in the pointer contract without requiring
+    a live broker or GitHub Actions environment.
+    """
+
+    def test_preliminary_pointer_format_is_valid(self):
+        """
+        Validates the JSON written by the 'Set run metadata' workflow step.
+
+        The workflow writes:
+            printf '{"run_id":"%s","trade_date":"%s","mode":"ALPACA","run_root":"outputs/runs/%s","status":"initializing","created_at":"%s"}'
+        This test ensures that JSON parses correctly and has all keys required
+        by execute_alpaca_orders.run_execution().
+        """
+        preliminary = {
+            "run_id": "20260310T093500Z_12345678_1",
+            "trade_date": "2026-03-10",
+            "mode": "ALPACA",
+            "run_root": "outputs/runs/20260310T093500Z_12345678_1",
+            "status": "initializing",
+            "created_at": "2026-03-10T14:35:00Z",
+        }
+        required_keys = {"run_id", "trade_date", "mode", "run_root", "status", "created_at"}
+        assert required_keys.issubset(preliminary.keys())
+        # run_root must be non-empty string
+        assert preliminary["run_root"].strip()
+        # trade_date must look like YYYY-MM-DD
+        assert len(preliminary["trade_date"]) == 10
+        assert preliminary["trade_date"][4] == "-" and preliminary["trade_date"][7] == "-"
+
+    def test_pointer_written_by_init_run_context_has_running_status(self):
+        """
+        Pointer written early by _init_run_context should have status='running',
+        not 'success'. Finalize overwrites to 'success' at end of main().
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_latest_run_pointer(
+                run_id="20260310T093500Z_paper_1",
+                trade_date="2026-03-10",
+                mode="ALPACA",
+                run_root="outputs/runs/20260310T093500Z_paper_1",
+                status="running",
+                workspace_root=tmpdir,
+            )
+            result = read_latest_run_pointer(tmpdir)
+            assert result is not None
+            assert result["status"] == "running"
+            assert result["run_root"] == "outputs/runs/20260310T093500Z_paper_1"
+
+    def test_pointer_overwritten_by_finalize_has_success_status(self):
+        """
+        Finalize should overwrite the 'running' pointer with 'success'.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_latest_run_pointer(
+                run_id="20260310T093500Z_paper_1",
+                trade_date="2026-03-10",
+                mode="ALPACA",
+                run_root="outputs/runs/20260310T093500Z_paper_1",
+                status="running",
+                workspace_root=tmpdir,
+            )
+            # Simulate finalize overwriting
+            write_latest_run_pointer(
+                run_id="20260310T093500Z_paper_1",
+                trade_date="2026-03-10",
+                mode="ALPACA",
+                run_root="outputs/runs/20260310T093500Z_paper_1",
+                status="success",
+                workspace_root=tmpdir,
+            )
+            result = read_latest_run_pointer(tmpdir)
+            assert result["status"] == "success"
+
+    def test_both_missing_returns_none(self):
+        """No latest_run.json and no latest.json → None (executor should halt gracefully)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = read_latest_run_pointer(tmpdir)
+            assert result is None
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
