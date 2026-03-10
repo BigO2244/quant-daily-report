@@ -310,8 +310,16 @@ def _compute_verdict(audit: dict) -> dict:
     # Idempotent replay means work was attempted and orders existed from a prior run.
     execution_attempted = executor_status not in {None, "HALTED", "NO_ACTION"} or is_idempotent_replay
 
+    # When this is an idempotent replay, the duplicate_count is reliable evidence
+    # that trades existed and were previously submitted, even if the planner block
+    # is absent (executor-only retry job has no planner section).
+    if is_idempotent_replay and not trades_proposed and _duplicate_count > 0:
+        trades_proposed = True
+
     cash_not_deployed_reason = None
-    # Executor halt takes precedence — if we never got to submission, say why
+    # Executor halt takes precedence — if we never got to submission, say why.
+    # Idempotent replay is checked before the generic no-trades fallback so
+    # it does not inherit "no_executable_trades_after_constraints".
     if executor.get("halt_reason"):
         cash_not_deployed_reason = f"executor_halt: {executor['halt_reason']}"
     elif "should_execute" in gates and not gates["should_execute"]:
@@ -321,18 +329,23 @@ def _compute_verdict(audit: dict) -> dict:
             cash_not_deployed_reason = f"market_not_open: {gates.get('market_guard_reason', 'UNKNOWN')}"
         else:
             cash_not_deployed_reason = "should_execute=False: unknown gate"
+    elif is_idempotent_replay:
+        cash_not_deployed_reason = "orders_already_submitted_prior_run"
     elif not trades_proposed:
         cash_not_deployed_reason = "no_executable_trades_after_constraints"
-    elif is_idempotent_replay:
-        cash_not_deployed_reason = (
-            f"idempotent_replay: {_duplicate_count} order(s) already submitted in a prior attempt"
-        )
     elif submitted == 0 and trades_proposed:
         cash_not_deployed_reason = "trades_proposed_but_not_submitted: check executor stage"
 
+    # proposed_count: prefer planner data; fall back to duplicate_count for replay
+    # runs where the planner block is absent.
+    _planner_proposed = int(planner.get("executable_trades_count") or 0)
+    proposed_count = _planner_proposed if _planner_proposed > 0 else (
+        _duplicate_count if is_idempotent_replay else 0
+    )
+
     return {
         "trades_proposed": trades_proposed,
-        "proposed_count": int(planner.get("executable_trades_count") or 0),
+        "proposed_count": proposed_count,
         "execution_attempted": execution_attempted,
         "orders_submitted": submitted,
         "orders_accepted": accepted,

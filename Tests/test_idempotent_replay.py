@@ -255,6 +255,8 @@ class TestStatusResolution:
 # ---------------------------------------------------------------------------
 
 class TestAuditVerdict:
+    """Verdict tests with a full planner block present (normal two-job run)."""
+
     def _make_audit(self, executor_status, duplicate_count=0, submitted=0, accepted=0):
         from core.execution_audit import _compute_verdict
         audit = {
@@ -285,14 +287,42 @@ class TestAuditVerdict:
         verdict = self._make_audit("IDEMPOTENT_REPLAY", duplicate_count=5)
         assert verdict["is_idempotent_replay"] is True
 
-    def test_idempotent_replay_cash_reason_mentions_prior_submission(self):
+    def test_idempotent_replay_cash_reason_is_canonical(self):
+        """Exact canonical string — not the generic no-action fallback."""
         verdict = self._make_audit("IDEMPOTENT_REPLAY", duplicate_count=5)
-        reason = verdict["cash_not_deployed_reason"] or ""
-        assert "idempotent_replay" in reason or "prior" in reason
+        assert verdict["cash_not_deployed_reason"] == "orders_already_submitted_prior_run"
+
+    def test_idempotent_replay_does_not_inherit_no_action_reason(self):
+        verdict = self._make_audit("IDEMPOTENT_REPLAY", duplicate_count=5)
+        assert verdict["cash_not_deployed_reason"] != "no_executable_trades_after_constraints"
 
     def test_no_action_execution_attempted_false(self):
         verdict = self._make_audit("NO_ACTION", duplicate_count=0)
         assert verdict["execution_attempted"] is False
+
+    def test_no_action_cash_reason_is_no_trades(self):
+        """NO_ACTION without trades must still get the generic no-trades reason."""
+        from core.execution_audit import _compute_verdict
+        audit = {
+            "planner": {
+                "executable_trades_count": 0,
+                "execution_status": "NO_ACTION",
+                "gates": {"should_execute": True},
+                "buy_orders_count": 0,
+                "sell_orders_count": 0,
+                "blocked_reasons": [],
+            },
+            "executor": {
+                "execution_status": "NO_ACTION",
+                "submitted_count": 0,
+                "accepted_count": 0,
+                "rejected_count": 0,
+                "duplicate_count": 0,
+                "halt_reason": None,
+            },
+        }
+        verdict = _compute_verdict(audit)
+        assert verdict["cash_not_deployed_reason"] == "no_executable_trades_after_constraints"
 
     def test_executed_is_not_idempotent_replay(self):
         verdict = self._make_audit("EXECUTED", submitted=3, accepted=3)
@@ -301,6 +331,71 @@ class TestAuditVerdict:
     def test_halted_execution_attempted_false(self):
         verdict = self._make_audit("HALTED", duplicate_count=0)
         assert verdict["execution_attempted"] is False
+
+
+class TestAuditVerdictReplayNoPlannerBlock:
+    """
+    Covers the production failure case: executor-only retry job where the
+    planner block is absent (different run_id, or audit file not carried over).
+    trades_proposed and proposed_count were False/0 from empty planner data,
+    causing the verdict to fall through to "no_executable_trades_after_constraints".
+    """
+
+    def _replay_audit_no_planner(self, duplicate_count=10):
+        from core.execution_audit import _compute_verdict
+        return _compute_verdict({
+            "planner": None,   # absent — matches production artifact structure
+            "executor": {
+                "execution_status": "IDEMPOTENT_REPLAY",
+                "submitted_count": 0,
+                "accepted_count": 0,
+                "rejected_count": 0,
+                "duplicate_count": duplicate_count,
+                "halt_reason": None,
+            },
+            "trade_date": "2026-03-10",
+        })
+
+    def test_cash_reason_is_replay_not_no_trades(self):
+        """Reproduces the exact artifact bug: cash_not_deployed_reason was wrong."""
+        verdict = self._replay_audit_no_planner(10)
+        assert verdict["cash_not_deployed_reason"] == "orders_already_submitted_prior_run"
+        assert verdict["cash_not_deployed_reason"] != "no_executable_trades_after_constraints"
+
+    def test_execution_attempted_true(self):
+        verdict = self._replay_audit_no_planner(10)
+        assert verdict["execution_attempted"] is True
+
+    def test_is_idempotent_replay_true(self):
+        verdict = self._replay_audit_no_planner(10)
+        assert verdict["is_idempotent_replay"] is True
+
+    def test_trades_proposed_inferred_from_duplicate_count(self):
+        """With no planner data but duplicate_count > 0, trades_proposed becomes True."""
+        verdict = self._replay_audit_no_planner(5)
+        assert verdict["trades_proposed"] is True
+
+    def test_proposed_count_falls_back_to_duplicate_count(self):
+        """proposed_count uses duplicate_count as proxy when planner is absent."""
+        verdict = self._replay_audit_no_planner(7)
+        assert verdict["proposed_count"] == 7
+
+    def test_zero_duplicates_does_not_infer_trades_proposed(self):
+        """Safety: duplicate_count=0 with no planner block should not set trades_proposed=True."""
+        from core.execution_audit import _compute_verdict
+        verdict = _compute_verdict({
+            "planner": None,
+            "executor": {
+                "execution_status": "NO_ACTION",
+                "submitted_count": 0,
+                "accepted_count": 0,
+                "rejected_count": 0,
+                "duplicate_count": 0,
+                "halt_reason": None,
+            },
+        })
+        assert verdict["trades_proposed"] is False
+        assert verdict["proposed_count"] == 0
 
 
 # ---------------------------------------------------------------------------
