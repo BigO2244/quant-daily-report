@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,28 @@ logger = logging.getLogger(__name__)
 _AUDIT_DIR = Path("outputs/execution_audit")
 
 
+def safe_artifact_name(value: str) -> str:
+    """
+    Return a filesystem-safe, artifact-safe filename component.
+
+    Keeps alphanumerics, dots, dashes, and underscores.
+    Replaces all other characters (including colons, slashes, angle brackets,
+    pipes, asterisks, question marks, backslashes) with underscores.
+    Collapses consecutive underscores into one.
+    Strips leading/trailing underscores.
+    Returns 'unnamed' if the result is empty.
+
+    The raw original value is NOT modified — this function is only used for
+    path/file naming. Original identifiers are preserved inside JSON payloads.
+    """
+    safe = re.sub(r"[^\w.\-]", "_", str(value))   # keep alnum, _, ., -
+    safe = re.sub(r"_+", "_", safe)                # collapse repeated underscores
+    safe = safe.strip("_")
+    return safe if safe else "unnamed"
+
+
 def _audit_path(run_id: str) -> Path:
-    return _AUDIT_DIR / f"{run_id}.json"
+    return _AUDIT_DIR / f"{safe_artifact_name(run_id)}.json"
 
 
 def _load_existing(run_id: str) -> dict:
