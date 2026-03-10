@@ -427,7 +427,7 @@ jobs:
           name: alpaca-paper
           if-no-files-found: warn
           path: |
-            outputs/runs/${{ steps.set_meta.outputs.run_id }}/
+            outputs/runs/${{ env.RUN_ID }}/
             outputs/paper_state/canonical_positions.json
             outputs/latest_run.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
@@ -439,7 +439,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      REPORT_DATE: ${{ needs.engine_run.outputs.report_date }}
       ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
       ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
       ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
@@ -475,8 +474,11 @@ jobs:
           latest_src="$(find downloaded -type f -path '*/outputs/latest_run.json' | head -n1 || true)"
           if [ -n "$latest_src" ]; then
             cp -f "$latest_src" outputs/latest_run.json
+            echo "[EXECUTION] restored outputs/latest_run.json from artifact"
           else
-            echo "[EXECUTION][WARN] latest_run.json missing in artifact"
+            echo "[EXECUTION][ERROR] latest_run.json missing in artifact — engine_run may have failed before writing it"
+            echo "[EXECUTION][ERROR] Cannot resolve canonical run_root; halting executor"
+            exit 1
           fi
 
           run_root_src="$(find downloaded -type d -path '*/outputs/runs/*' | grep -E '/outputs/runs/[^/]+$' | head -n1 || true)"
@@ -485,7 +487,23 @@ jobs:
             cp -R "$run_root_src" "outputs/runs/$run_id"
             echo "[EXECUTION] restored run root: outputs/runs/$run_id"
           else
-            echo "[EXECUTION][WARN] run root not found in artifact"
+            echo "[EXECUTION][WARN] run root directory not found in artifact (engine may have failed before _init_run_context)"
+          fi
+
+      - name: Derive REPORT_DATE from artifact pointer
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f outputs/latest_run.json ]; then
+            TRADE_DATE="$(python3 -c "import json; d=json.load(open('outputs/latest_run.json')); print(d.get('trade_date',''))")"
+            if [ -n "$TRADE_DATE" ]; then
+              echo "REPORT_DATE=$TRADE_DATE" >> "$GITHUB_ENV"
+              echo "[EXECUTION_META] derived REPORT_DATE=$TRADE_DATE from outputs/latest_run.json"
+            else
+              echo "[EXECUTION_META][WARN] trade_date missing in outputs/latest_run.json"
+            fi
+          else
+            echo "[EXECUTION_META][WARN] outputs/latest_run.json absent; REPORT_DATE not set"
           fi
 
       - name: Execute canonical broker stage
@@ -515,7 +533,6 @@ jobs:
     timeout-minutes: 20
     continue-on-error: true
     env:
-      REPORT_DATE: ${{ needs.engine_run.outputs.report_date }}
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: "587"
       SMTP_USER: ${{ secrets.EMAIL_SENDER }}
@@ -549,11 +566,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "[EMAIL_META] report_date='${REPORT_DATE}'"
-          if [ -z "${REPORT_DATE}" ]; then
-            echo "[EMAIL_META][ERROR] REPORT_DATE is empty"
-            exit 1
-          fi
+          # REPORT_DATE is not available yet — it is derived from the downloaded artifact
+          # in the "Infer RUN_ID and REPORT_DATE" step below. This step just confirms
+          # the artifact name is deterministic.
           echo "[EMAIL_META][OK] Artifact name will be: alpaca-paper"
 
       - name: Download engine artifacts
@@ -569,7 +584,7 @@ jobs:
           path: downloaded_exec
         continue-on-error: true
 
-      - name: Infer RUN_ID from downloaded artifact
+      - name: Infer RUN_ID and REPORT_DATE from downloaded artifact
         shell: bash
         run: |
           set -euo pipefail
@@ -582,6 +597,20 @@ jobs:
           RUN_ID="$(basename "$RUN_DIR")"
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "[EMAIL_META] inferred RUN_ID=$RUN_ID"
+
+          # Derive REPORT_DATE from latest_run.json — do not rely on suppressed job output
+          LATEST_JSON="$(find downloaded -type f -path '*/outputs/latest_run.json' | head -n1 || true)"
+          if [ -n "$LATEST_JSON" ]; then
+            TRADE_DATE="$(python3 -c "import json; d=json.load(open('$LATEST_JSON')); print(d.get('trade_date',''))")"
+            if [ -n "$TRADE_DATE" ]; then
+              echo "REPORT_DATE=$TRADE_DATE" >> "$GITHUB_ENV"
+              echo "[EMAIL_META] derived REPORT_DATE=$TRADE_DATE from $LATEST_JSON"
+            else
+              echo "[EMAIL_META][WARN] trade_date missing in $LATEST_JSON; REPORT_DATE not set"
+            fi
+          else
+            echo "[EMAIL_META][WARN] latest_run.json not found in artifact; REPORT_DATE not set"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5

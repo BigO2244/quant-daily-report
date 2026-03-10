@@ -295,13 +295,43 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     )
     latest = read_latest_run_pointer()
     if not latest or not isinstance(latest, dict):
-        logger.error(
-            "[EXEC_POINTER] MISSING — outputs/latest_run.json not found and no fallback resolved. "
-            "This means engine_run did not write the pointer (planner may have failed before "
+        trade_date = os.environ.get("REPORT_DATE", "UNKNOWN")
+        halt_reason = (
+            "MISSING_POINTER — outputs/latest_run.json not found and no fallback resolved. "
+            "engine_run did not write the pointer (planner may have failed before "
             "_init_run_context, or canonical_positions.json was missing). "
             "Trigger workflow_dispatch with bootstrap_model_ledger_from_broker=true first."
         )
-        raise RuntimeError("Missing outputs/latest_run.json; cannot resolve canonical run_root")
+        logger.error("[EXEC_POINTER] %s", halt_reason)
+        fallback_run_id = f"MISSING_POINTER_{trade_date}"
+        fallback_root = Path(f"outputs/runs/{fallback_run_id}")
+        fallback_root.mkdir(parents=True, exist_ok=True)
+        out: Dict[str, Any] = {
+            "run_id": fallback_run_id,
+            "trade_date": trade_date,
+            "mode": "UNKNOWN",
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "order_ids": [],
+            "status": STATUS_HALTED,
+            "halt_reason": halt_reason,
+            "broker_responses": [],
+            "rejected_reasons": [],
+        }
+        _write_json(_results_path(fallback_root), out)
+        write_early_halt_audit(
+            run_id=fallback_run_id,
+            trade_date=trade_date,
+            mode="UNKNOWN",
+            halt_reason=halt_reason,
+            stage="missing_pointer",
+        )
+        print(
+            f"[EXECUTION_SUMMARY] run_id={fallback_run_id} submitted=0 accepted=0 rejected=0 "
+            f"status={STATUS_HALTED}"
+        )
+        sys.exit(1)
 
     _source = latest.get("_source", "latest_run_json")
     run_root = Path(str(latest.get("run_root") or "").strip())
