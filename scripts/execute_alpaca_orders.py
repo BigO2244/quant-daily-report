@@ -20,6 +20,7 @@ from core.execution_payload import (
     STATUS_NO_ACTION,
     STATUS_EXECUTED,
     STATUS_SKIPPED_DUPLICATE,
+    STATUS_IDEMPOTENT_REPLAY,
 )
 from core.execution_audit import write_early_halt_audit, write_executor_audit
 from core.operator_summary import write_operator_summary, format_operator_summary_log
@@ -110,6 +111,7 @@ def _new_results(pointer: Dict[str, Any], payload: Dict[str, Any] | None = None)
         "submitted_count": 0,
         "accepted_count": 0,
         "rejected_count": 0,
+        "duplicate_count": 0,
         "order_ids": [],
         "status": STATUS_HALTED,
         "halt_reason": None,
@@ -197,6 +199,7 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
     order_ids: List[str] = []
     accepted = 0
     rejected = 0
+    duplicates = 0
     submitted = 0
 
     broker_endpoint = os.getenv("APCA_API_BASE_URL", "unknown")
@@ -230,20 +233,21 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
         client_order_id = alpaca_client_order_id(internal_order_id)
         existing = broker.find_order_by_client_id(client_order_id)
         if existing:
-            reason = f"DUPLICATE_client_order_id:{client_order_id}"
-            logger.info(f"[EXECUTION] Order {idx} duplicate: {reason}")
-            rejected_reasons.append(reason)
+            logger.info(
+                "[EXECUTION] duplicate client_order_id treated as idempotent replay: %s",
+                client_order_id,
+            )
             responses.append(
                 {
                     "ticker": symbol,
                     "side": side,
                     "shares": qty,
                     "client_order_id": client_order_id,
-                    "status": "DUPLICATE_CLIENT_ORDER_ID",
+                    "status": "IDEMPOTENT_REPLAY",
                     "order": existing,
                 }
             )
-            rejected += 1
+            duplicates += 1
             continue
 
         submitted += 1
@@ -290,6 +294,7 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
         "submitted_count": submitted,
         "accepted_count": accepted,
         "rejected_count": rejected,
+        "duplicate_count": duplicates,
         "order_ids": order_ids,
         "broker_responses": responses,
         "rejected_reasons": rejected_reasons,
@@ -615,7 +620,16 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     broker = AlpacaBroker.from_env()
     summary = _submit_orders(payload, broker, run_root)
     out.update(summary)
-    out["status"] = STATUS_EXECUTED if int(out["submitted_count"]) > 0 else STATUS_NO_ACTION
+    _n_submitted = int(out.get("submitted_count") or 0)
+    _n_duplicates = int(out.get("duplicate_count") or 0)
+    _n_rejected = int(out.get("rejected_count") or 0)
+    if _n_submitted > 0:
+        out["status"] = STATUS_EXECUTED
+    elif _n_duplicates > 0:
+        # All work was already submitted in a prior attempt; no new submissions this run.
+        out["status"] = STATUS_IDEMPOTENT_REPLAY
+    else:
+        out["status"] = STATUS_NO_ACTION
     _write_json(results_path, out)
 
     print(
@@ -681,6 +695,7 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
         submitted_count=int(out.get("submitted_count") or 0),
         accepted_count=int(out.get("accepted_count") or 0),
         rejected_count=int(out.get("rejected_count") or 0),
+        duplicate_count=int(out.get("duplicate_count") or 0),
         broker_responses=out.get("broker_responses"),
         broker_cash_after=_broker_cash_after,
         broker_positions_after=_broker_positions_after,

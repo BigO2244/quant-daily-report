@@ -193,6 +193,7 @@ def write_executor_audit(
     submitted_count: int,
     accepted_count: int,
     rejected_count: int,
+    duplicate_count: int = 0,
     broker_responses: list | None = None,
     broker_cash_after: float | None = None,
     broker_positions_after: list | None = None,
@@ -215,6 +216,7 @@ def write_executor_audit(
             "submitted_count": submitted_count,
             "accepted_count": accepted_count,
             "rejected_count": rejected_count,
+            "duplicate_count": duplicate_count,
             "broker_responses_summary": [
                 {
                     "ticker": r.get("ticker"),
@@ -302,6 +304,12 @@ def _compute_verdict(audit: dict) -> dict:
     submitted = int(executor.get("submitted_count") or 0)
     accepted = int(executor.get("accepted_count") or 0)
 
+    executor_status = executor.get("execution_status", "UNKNOWN")
+    is_idempotent_replay = executor_status == "IDEMPOTENT_REPLAY"
+    _duplicate_count = int(executor.get("duplicate_count") or 0)
+    # Idempotent replay means work was attempted and orders existed from a prior run.
+    execution_attempted = executor_status not in {None, "HALTED", "NO_ACTION"} or is_idempotent_replay
+
     cash_not_deployed_reason = None
     # Executor halt takes precedence — if we never got to submission, say why
     if executor.get("halt_reason"):
@@ -315,18 +323,23 @@ def _compute_verdict(audit: dict) -> dict:
             cash_not_deployed_reason = "should_execute=False: unknown gate"
     elif not trades_proposed:
         cash_not_deployed_reason = "no_executable_trades_after_constraints"
+    elif is_idempotent_replay:
+        cash_not_deployed_reason = (
+            f"idempotent_replay: {_duplicate_count} order(s) already submitted in a prior attempt"
+        )
     elif submitted == 0 and trades_proposed:
         cash_not_deployed_reason = "trades_proposed_but_not_submitted: check executor stage"
 
     return {
         "trades_proposed": trades_proposed,
         "proposed_count": int(planner.get("executable_trades_count") or 0),
-        "execution_attempted": executor.get("execution_status") not in {None, "HALTED", "NO_ACTION"},
+        "execution_attempted": execution_attempted,
         "orders_submitted": submitted,
         "orders_accepted": accepted,
         "cash_not_deployed_reason": cash_not_deployed_reason,
         "planner_status": planner.get("execution_status", "UNKNOWN"),
-        "executor_status": executor.get("execution_status", "UNKNOWN"),
+        "executor_status": executor_status,
+        "is_idempotent_replay": is_idempotent_replay,
         "executor_halt_reason": executor.get("halt_reason"),
         "executor_halt_stage": executor.get("halt_stage"),
         "buy_orders": planner.get("buy_orders_count", 0),
