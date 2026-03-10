@@ -311,25 +311,48 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     )
     if not run_root:
         raise RuntimeError("latest_run.json missing run_root")
-    # Guard: if the directory doesn't exist the artifact was never restored (planner
-    # likely failed before writing any outputs).  Creating it silently here would
-    # produce a misleading MISSING_EXECUTION_PAYLOAD error that hides the real cause.
-    if not run_root.exists():
-        raise RuntimeError(
-            f"[EXECUTION] Run directory not found: {run_root}. "
-            "The engine_run artifact was not restored — check that the planner "
-            "(daily_quant_report.py) completed successfully and that the "
-            "'Prepare canonical execution inputs' step copied the run directory."
+    # Guard: if the directory doesn't exist the planner produced no artifacts.
+    # upload-artifact@v4 silently drops empty directories, so this happens whenever
+    # engine_run fails before _init_run_context writes any files (e.g. missing
+    # canonical_positions.json).  Write a HALTED result so the email job can still
+    # send a proper confirmation rather than silently skipping it.
+    if not run_root.exists() or (run_root.exists() and not any(run_root.iterdir())):
+        run_root.mkdir(parents=True, exist_ok=True)
+        out = _new_results(latest)
+        out["status"] = STATUS_HALTED
+        out["halt_reason"] = (
+            f"ENGINE_RUN_NO_ARTIFACTS — run directory missing or empty: {run_root}. "
+            "engine_run likely failed before _init_run_context wrote any outputs. "
+            "Most common cause: canonical_positions.json missing from cache. "
+            "Fix: trigger workflow_dispatch with bootstrap_model_ledger_from_broker=true."
         )
-    # If the directory is present but completely empty, the planner wrote latest_run.json
-    # (so the pointer is valid) but crashed before writing any artifacts.
-    if not any(run_root.iterdir()):
-        raise RuntimeError(
-            f"[EXECUTION] Run directory exists but is empty: {run_root}. "
-            "The planner started but did not produce any output files. "
-            "Check engine_run job logs for the underlying error."
+        _write_json(_results_path(run_root), out)
+        logger.error(
+            "[EXEC_POINTER] HALTED — engine_run produced no artifacts at %s. "
+            "Check engine_run job logs. "
+            "If canonical_positions.json is missing, bootstrap first via workflow_dispatch.",
+            run_root,
         )
-    run_root.mkdir(parents=True, exist_ok=True)  # no-op at this point; kept for safety
+        print(
+            "[EXECUTION_SUMMARY] "
+            f"run_id={out.get('run_id','')} submitted=0 accepted=0 rejected=0 status={STATUS_HALTED}"
+        )
+        write_operator_summary(
+            run_root,
+            run_id=str(out.get("run_id") or ""),
+            trade_date=str(out.get("trade_date") or ""),
+            mode=str(out.get("mode") or ""),
+            pretrade_halt_reason=out["halt_reason"],
+            executor_completed=True,
+        )
+        write_early_halt_audit(
+            run_id=str(out.get("run_id") or latest.get("run_id") or "UNKNOWN"),
+            trade_date=str(out.get("trade_date") or latest.get("trade_date") or "UNKNOWN"),
+            mode=str(out.get("mode") or latest.get("mode") or "UNKNOWN"),
+            halt_reason=out["halt_reason"],
+            stage="engine_run_no_artifacts",
+        )
+        return out
 
     results_path = _results_path(run_root)
     if results_path.exists() and not force_resubmit:
