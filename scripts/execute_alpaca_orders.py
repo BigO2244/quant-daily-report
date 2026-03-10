@@ -23,7 +23,7 @@ from core.execution_payload import (
 )
 from core.execution_audit import write_early_halt_audit, write_executor_audit
 from core.operator_summary import write_operator_summary, format_operator_summary_log
-from core.run_pointer import read_latest_run_pointer
+from core.run_pointer import LATEST_RUN_POINTER, read_latest_run_pointer
 from core.step_summary import append_step_summary
 
 logger = logging.getLogger(__name__)
@@ -288,11 +288,27 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     
     Returns execution results dict with status, counts, and responses.
     """
+    _pointer_path = Path(LATEST_RUN_POINTER)
+    logger.info(
+        "[EXEC_POINTER] checking canonical pointer: exists=%s path=%s",
+        _pointer_path.exists(), _pointer_path,
+    )
     latest = read_latest_run_pointer()
     if not latest or not isinstance(latest, dict):
+        logger.error(
+            "[EXEC_POINTER] MISSING — outputs/latest_run.json not found and no fallback resolved. "
+            "This means engine_run did not write the pointer (planner may have failed before "
+            "_init_run_context, or canonical_positions.json was missing). "
+            "Trigger workflow_dispatch with bootstrap_model_ledger_from_broker=true first."
+        )
         raise RuntimeError("Missing outputs/latest_run.json; cannot resolve canonical run_root")
 
+    _source = latest.get("_source", "latest_run_json")
     run_root = Path(str(latest.get("run_root") or "").strip())
+    logger.info(
+        "[EXEC_POINTER] resolved pointer source=%s run_id=%s trade_date=%s run_root=%s status=%s",
+        _source, latest.get("run_id"), latest.get("trade_date"), run_root, latest.get("status"),
+    )
     if not run_root:
         raise RuntimeError("latest_run.json missing run_root")
     # Guard: if the directory doesn't exist the artifact was never restored (planner

@@ -3857,6 +3857,20 @@ def _init_run_context(
         json.dumps(initial_meta, indent=2) + "\n",
         allow_overwrite=ctx.allow_overwrite,
     )
+    # Write canonical run pointer early so execute_orders can resolve run_root
+    # even if the planner exits before _finalize_run_context() runs.
+    # _finalize_run_context() will overwrite this with status="success".
+    try:
+        write_canonical_run_pointer(
+            run_id=ctx.run_id,
+            trade_date=ctx.report_date_env or "",
+            mode=ctx.mode,
+            run_root=str(ctx.run_root),
+            status="running",
+        )
+    except Exception as _e:
+        # Non-blocking — finalize will write the canonical version later.
+        pass
     return ctx
 
 

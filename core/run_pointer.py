@@ -82,10 +82,28 @@ def read_latest_run_pointer(workspace_root: str = None) -> Optional[dict]:
         workspace_root = os.getcwd()
     
     pointer_path = Path(workspace_root) / LATEST_RUN_POINTER
-    
+
     if not pointer_path.exists():
+        # Fallback: legacy outputs/latest.json uses 'path' key instead of 'run_root'.
+        legacy_path = Path(workspace_root) / "outputs/latest.json"
+        if legacy_path.exists():
+            try:
+                data = json.loads(legacy_path.read_text(encoding="utf-8"))
+                run_root = data.get("run_root") or data.get("path") or ""
+                if run_root:
+                    return {
+                        "run_id": data.get("run_id", ""),
+                        "trade_date": data.get("report_date", ""),
+                        "mode": data.get("mode", ""),
+                        "run_root": run_root,
+                        "status": data.get("status", "unknown"),
+                        "created_at": data.get("created_at", ""),
+                        "_source": "legacy_latest_json",
+                    }
+            except Exception:
+                pass
         return None
-    
+
     with open(pointer_path, 'r') as f:
         return json.load(f)
 

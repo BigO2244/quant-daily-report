@@ -117,6 +117,16 @@ jobs:
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
 
+          # Write a preliminary latest_run.json immediately so execute_orders can
+          # resolve run_root even if the planner step fails before writing one.
+          # The planner (_init_run_context) will overwrite with status="running",
+          # and _finalize_run_context will overwrite with status="success".
+          mkdir -p outputs "outputs/runs/${RUN_ID}"
+          printf '{\n  "run_id": "%s",\n  "trade_date": "%s",\n  "mode": "ALPACA",\n  "run_root": "outputs/runs/%s",\n  "status": "initializing",\n  "created_at": "%s"\n}\n' \
+            "$RUN_ID" "$REPORT_DATE" "$RUN_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > outputs/latest_run.json
+          echo "[META] preliminary latest_run.json written"
+
       - name: Assert meta outputs present
         shell: bash
         run: |
