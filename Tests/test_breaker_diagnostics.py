@@ -1,4 +1,8 @@
+import pandas as pd
+import pytest
+
 import daily_quant_report as dqr
+from engine.breaker import apply_portfolio_exposure_overlay, get_breaker_config
 
 
 def test_apply_breaker_allocation_diagnostics_lock_mode_sets_post_breaker_values():
@@ -103,3 +107,49 @@ def test_snapshot_email_shows_breaker_lock_allocation_diagnostics():
     assert "Sleeve 1 achieved invested: 0.00%" in body
     assert "Sleeve 1 forced cash: 100.00%" in body
     assert "Limiting constraint: BREAKER_MODE=lock" in body
+
+
+# ---------------------------------------------------------------------------
+# New: source/reason diagnostics and cash overlay correctness
+# ---------------------------------------------------------------------------
+
+def _make_weights(tickers_and_weights):
+    rows = [{"ticker": t, "target_weight": w} for t, w in tickers_and_weights]
+    return pd.DataFrame(rows)
+
+
+def test_breaker_config_has_source_and_reason_fields(monkeypatch):
+    """get_breaker_config always returns source and reason."""
+    monkeypatch.delenv("BREAKER_MODE", raising=False)
+    cfg = get_breaker_config()
+    assert "source" in cfg and "reason" in cfg
+    assert cfg["source"] == "default"
+
+
+def test_cash_target_weight_full_when_breaker_off(monkeypatch):
+    """Breaker OFF → exposure=1.0, no spurious cash injected."""
+    monkeypatch.delenv("BREAKER_MODE", raising=False)
+    cfg = get_breaker_config()
+    assert cfg["exposure_multiplier"] == 1.0
+
+    df = _make_weights([("SPY", 0.6), ("QQQ", 0.4)])
+    result = apply_portfolio_exposure_overlay(df, cfg["exposure_multiplier"])
+
+    cash_rows = result[result["ticker"] == "CASH"]
+    cash_weight = float(cash_rows["target_weight"].sum()) if not cash_rows.empty else 0.0
+    assert cash_weight < 1e-9, f"Expected ~0 cash, got {cash_weight}"
+
+
+def test_overlay_weight_sum_invariant(monkeypatch):
+    """Total weight always sums to 1.0 after overlay for any mode."""
+    for mode, partial in [("off", None), ("partial", "0.3"), ("lock", None)]:
+        monkeypatch.setenv("BREAKER_MODE", mode)
+        if partial:
+            monkeypatch.setenv("BREAKER_PARTIAL_EXPOSURE", partial)
+        else:
+            monkeypatch.delenv("BREAKER_PARTIAL_EXPOSURE", raising=False)
+        cfg = get_breaker_config()
+        df = _make_weights([("SPY", 0.5), ("AGG", 0.3), ("GLD", 0.2)])
+        result = apply_portfolio_exposure_overlay(df, cfg["exposure_multiplier"])
+        total = float(result["target_weight"].sum())
+        assert abs(total - 1.0) < 1e-9, f"mode={mode}: total={total}"

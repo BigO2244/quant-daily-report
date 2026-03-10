@@ -1276,10 +1276,10 @@ def build_execution_email_payload(
     breaker_mode = str(
         (paper_breaker or {}).get("mode")
         or (snapshot_breaker or {}).get("mode")
-        or os.getenv("BREAKER_MODE", "partial")
+        or os.getenv("BREAKER_MODE", "off")
     ).strip().lower()
     if breaker_mode not in {"off", "partial", "lock"}:
-        breaker_mode = "partial"
+        breaker_mode = "off"
     risk_map = {r.get("ticker"): r for r in (daily_snapshot.get("risk_levels", []) or []) if r.get("ticker")}
     holdings_shares = {
         str(h.get("ticker")): _coerce_whole_shares(h.get("shares"))
@@ -2660,7 +2660,12 @@ def build_daily_snapshot(
     breaker_cfg = get_breaker_config()
     exposure_today = float(breaker_cfg.get("exposure_multiplier", 1.0))
     exposure_label = str(breaker_cfg.get("label", "UNKNOWN"))
-    breaker_mode = str(breaker_cfg.get("mode", "partial"))
+    breaker_mode = str(breaker_cfg.get("mode", "off"))
+    logger.info(
+        "[BREAKER_CONFIG] resolved mode=%s label=%s exposure=%.4f source=%s reason=%s",
+        breaker_mode, exposure_label, exposure_today,
+        breaker_cfg.get("source", "unknown"), breaker_cfg.get("reason", ""),
+    )
     market_analyzer = _build_market_analyzer_payload(
         report_date=report_date,
         vix_regime=vix_regime,
@@ -2733,16 +2738,20 @@ def build_daily_snapshot(
             weights_df = non_cash[non_cash["target_weight"].abs() > WEIGHT_TOLERANCE].copy()
         target_cash_weight_today = max(0.0, min(1.0, 1.0 - invested_after_overlay))
         logger.info(
-            "[BREAKER] overlay applied multiplier=%.4f invested_before=%.4f invested_after=%.4f cash_target=%.4f",
+            "[BREAKER] overlay applied multiplier=%.4f invested_before=%.4f invested_after=%.4f cash_target=%.4f source=%s reason=%s",
             float(exposure_today),
             invested_before_overlay,
             invested_after_overlay,
             target_cash_weight_today,
+            breaker_cfg.get("source", "unknown"),
+            breaker_cfg.get("reason", ""),
         )
 
         breaker_block = {
             "breaker": {
-                "mode": breaker_cfg.get("mode", "partial"),
+                "mode": breaker_cfg.get("mode", "off"),
+                "source": breaker_cfg.get("source", "unknown"),
+                "reason": breaker_cfg.get("reason", ""),
                 "exposure_multiplier_today": exposure_today,
                 "exposure_label_today": exposure_label,
                 "invested_before_overlay": invested_before_overlay,
@@ -3096,7 +3105,9 @@ def build_daily_snapshot(
         "cash_target": target_cash_weight_today,
         "target_cash_weight": target_cash_weight_today,
         "breaker": {
-            "mode": breaker_cfg.get("mode", "partial"),
+            "mode": breaker_cfg.get("mode", "off"),
+            "source": breaker_cfg.get("source", "unknown"),
+            "reason": breaker_cfg.get("reason", ""),
             "exposure_multiplier_today": exposure_today,
             "exposure_label_today": exposure_label,
             "invested_before_overlay": invested_before_overlay,

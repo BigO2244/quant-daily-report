@@ -15,8 +15,23 @@ def get_breaker_config() -> dict:
         except Exception:
             return default
 
-    mode_raw = str(os.getenv("BREAKER_MODE", "partial")).strip().lower()
-    mode = mode_raw if mode_raw in {"off", "lock", "partial"} else "partial"
+    raw_mode_env = os.getenv("BREAKER_MODE")
+    if raw_mode_env is None:
+        # No explicit override — default to OFF so the strategy runs at full
+        # exposure unless a real trigger is configured.
+        mode = "off"
+        source = "default"
+        reason = "no BREAKER_MODE env var set; defaulting to OFF / full exposure"
+    else:
+        mode_raw = str(raw_mode_env).strip().lower()
+        if mode_raw in {"off", "lock", "partial"}:
+            mode = mode_raw
+            source = "env"
+            reason = f"BREAKER_MODE={mode_raw}"
+        else:
+            mode = "off"
+            source = "default"
+            reason = f"invalid BREAKER_MODE value '{mode_raw}'; defaulting to OFF / full exposure"
 
     partial_exposure = max(0.0, min(1.0, _float_env("BREAKER_PARTIAL_EXPOSURE", 0.5)))
 
@@ -30,10 +45,17 @@ def get_breaker_config() -> dict:
         exposure_multiplier = partial_exposure
         label = "PARTIAL"
 
+    logger.debug(
+        "[BREAKER_CONFIG] mode=%s source=%s reason=%s exposure=%.4f",
+        mode, source, reason, exposure_multiplier,
+    )
+
     return {
         "mode": mode,
         "exposure_multiplier": exposure_multiplier,
         "label": label,
+        "source": source,
+        "reason": reason,
         # Backward-compatible fields for existing helper paths.
         "partial_exposure": partial_exposure,
         "lock_exposure": 0.0,

@@ -1422,8 +1422,8 @@ def run_paper_day(
         os.getenv("EXIT_ONLY")
     )
 
-    breaker_mode = str(os.getenv("BREAKER_MODE", "partial")).strip().lower()
-    breaker_mode_source = "env"
+    breaker_mode = str(os.getenv("BREAKER_MODE", "off")).strip().lower()
+    breaker_mode_source = "env" if os.getenv("BREAKER_MODE") is not None else "default"
     try:
         with open(signals_path, "r", encoding="utf-8") as f:
             signal_obj = json.load(f)
@@ -1436,7 +1436,7 @@ def run_paper_day(
     except Exception:
         pass
     if breaker_mode not in {"off", "partial", "lock"}:
-        breaker_mode = "partial"
+        breaker_mode = "off"
         breaker_mode_source = "default"
 
     targets, target_cash_weight, snapshot_date, asof_date = load_targets(
