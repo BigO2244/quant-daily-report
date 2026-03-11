@@ -24,6 +24,7 @@ from core.execution_payload import (
 )
 from core.execution_audit import write_early_halt_audit, write_executor_audit
 from core.operator_summary import write_operator_summary, format_operator_summary_log
+from core.trading_day_summary import write_trading_day_summary
 from core.run_pointer import LATEST_RUN_POINTER, read_latest_run_pointer
 from core.step_summary import append_step_summary
 
@@ -701,6 +702,17 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
         broker_positions_after=_broker_positions_after,
         execution_status=str(out.get("status") or STATUS_NO_ACTION),
     )
+
+    # Non-blocking: write the CIO-facing trading day summary last so it captures
+    # all execution and broker state written above.
+    try:
+        write_trading_day_summary(
+            run_root=run_root,
+            run_id=str(out.get("run_id") or "UNKNOWN"),
+            trade_date=str(out.get("trade_date") or "UNKNOWN"),
+        )
+    except Exception as _summary_exc:
+        logger.warning("[SUMMARY] trading_day_summary skipped: %s", _summary_exc)
 
     return out
 
