@@ -68,7 +68,20 @@ def write_canonical_execution_payload(
     # Normalize status using canonical function
     raw_status = str((payload or {}).get("execution_status") or "UNKNOWN")
     halt_reason = (payload or {}).get("halt_reason")
-    executable_count = int((payload or {}).get("executable_trades_count") or 0)
+    model_proposed_count = int((payload or {}).get("model_proposed_trades_count") or 0)
+    planner_intended_count = int(
+        (payload or {}).get("planner_intended_trades_count")
+        or (payload or {}).get("proposed_trades_intent_count")
+        or (payload or {}).get("proposed_trades_intent")
+        or 0
+    )
+    executable_count = int(
+        (payload or {}).get("execution_eligible_trades_count")
+        or (payload or {}).get("executable_trades_count")
+        or 0
+    )
+    orders_submitted_count = int((payload or {}).get("orders_submitted_count") or 0)
+    orders_filled_count = int((payload or {}).get("orders_filled_count") or 0)
     
     normalized_status = normalize_status(
         execution_status=raw_status,
@@ -83,6 +96,13 @@ def write_canonical_execution_payload(
         "status": normalized_status,  # Canonical status field
         "halt_reason": halt_reason,
         "trades": list((payload or {}).get("trades") or []),
+        "model_proposed_trades_count": model_proposed_count,
+        "planner_intended_trades_count": planner_intended_count,
+        "execution_eligible_trades_count": executable_count,
+        "orders_submitted_count": orders_submitted_count,
+        "orders_filled_count": orders_filled_count,
+        "proposed_trades_intent_count": planner_intended_count,
+        "proposed_trades_intent": planner_intended_count,
         "executable_trades_count": executable_count,
         # Compatibility fields for legacy code
         "execution_status": normalized_status,

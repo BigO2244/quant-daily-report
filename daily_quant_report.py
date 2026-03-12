@@ -60,6 +60,7 @@ from core.execution_audit import write_planner_audit
 from core.execution_summary import write_execution_artifacts
 from core.operator_summary import write_operator_summary, format_operator_summary_log
 from core.step_summary import append_step_summary
+from core.trade_count_contract import compute_trade_count_contract
 from paper.nav2 import update_nav
 from paper.perf_artifact_producers import (
     rebuild_premarket_analyzer_scores,
@@ -77,6 +78,7 @@ from reconciliation import (
     post_trade_validate,
     pre_trade_reconcile_and_classify,
     pre_trade_reconcile_or_exit,
+    refresh_canonical_snapshot_from_posttrade_snapshot,
     refresh_canonical_snapshot_from_broker,
 )
 
@@ -1561,11 +1563,14 @@ def build_execution_email_payload(
         "# positions": str(position_count) if position_count is not None else "unavailable",
         "Max position weight (%)": f"{max_position_weight * 100:.2f}%" if max_position_weight is not None else "unavailable",
     }
-    planned_trades_for_intent = (paper_summary or {}).get("trade_plan") if isinstance(paper_summary, dict) else None
-    if isinstance(planned_trades_for_intent, list):
-        proposed_trades_intent_count = len(planned_trades_for_intent)
-    else:
-        proposed_trades_intent_count = int(len(trades))
+    trade_count_contract = compute_trade_count_contract(
+        daily_snapshot=daily_snapshot,
+        paper_summary=paper_summary,
+        execution_payload={
+            "trades": trades,
+            "executable_trades_count": int(len(trades)),
+        },
+    )
     sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
     total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
 
@@ -1591,9 +1596,14 @@ def build_execution_email_payload(
         "equity": sizing_equity if sizing_equity is not None else total_equity_fallback,
         "cash_target_dollars": _coerce_float_or_none((paper_summary or {}).get("target_cash_dollars")),
         "blocked_tickers": blocked_tickers,
-        "proposed_trades_intent_count": proposed_trades_intent_count,
-        "proposed_trades_intent": proposed_trades_intent_count,
-        "executable_trades_count": int(len(trades)),
+        "model_proposed_trades_count": int(trade_count_contract["model_proposed_trades_count"]),
+        "planner_intended_trades_count": int(trade_count_contract["planner_intended_trades_count"]),
+        "execution_eligible_trades_count": int(trade_count_contract["execution_eligible_trades_count"]),
+        "orders_submitted_count": int(trade_count_contract["orders_submitted_count"]),
+        "orders_filled_count": int(trade_count_contract["orders_filled_count"]),
+        "proposed_trades_intent_count": int(trade_count_contract["planner_intended_trades_count"]),
+        "proposed_trades_intent": int(trade_count_contract["planner_intended_trades_count"]),
+        "executable_trades_count": int(trade_count_contract["execution_eligible_trades_count"]),
         "buys": int(buy_count),
         "sells": int(sell_count),
         "min_trade_dollars": min_trade_dollars,
@@ -4464,7 +4474,7 @@ def main(argv: list[str] | None = None):
     trade_date_str = report_date.strftime("%Y-%m-%d")
     if _RUN_CONTEXT is not None and not _RUN_CONTEXT.report_date:
         _RUN_CONTEXT.report_date = trade_date_str
-    _capture_pretrade_broker_snapshot(
+    pretrade_broker_capture = _capture_pretrade_broker_snapshot(
         trade_date=trade_date_str,
         alpaca_requested=alpaca_requested,
     )
@@ -4695,10 +4705,32 @@ def main(argv: list[str] | None = None):
             )
             if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
                 # Refresh canonical snapshot from broker to ensure model matches reality after execution
-                refresh_canonical_snapshot_from_broker(
-                    trading_mode=trading_mode_norm,
-                    run_date=trade_date_str,
-                )
+                posttrade_positions_path = (paper_summary or {}).get("posttrade_positions_snapshot_path")
+                posttrade_account_path = (paper_summary or {}).get("posttrade_account_snapshot_path")
+                refreshed_from_snapshot = False
+                if posttrade_positions_path:
+                    try:
+                        positions_snapshot = json.loads(Path(str(posttrade_positions_path)).read_text(encoding="utf-8"))
+                        account_snapshot = (
+                            json.loads(Path(str(posttrade_account_path)).read_text(encoding="utf-8"))
+                            if posttrade_account_path and Path(str(posttrade_account_path)).exists()
+                            else None
+                        )
+                        refreshed_from_snapshot = refresh_canonical_snapshot_from_posttrade_snapshot(
+                            positions_snapshot=positions_snapshot,
+                            account_snapshot=account_snapshot,
+                            run_date=trade_date_str,
+                        )
+                    except Exception as _posttrade_refresh_exc:
+                        logger.warning(
+                            "[POSTTRADE] Snapshot-based canonical refresh failed: %s",
+                            _posttrade_refresh_exc,
+                        )
+                if not refreshed_from_snapshot:
+                    refresh_canonical_snapshot_from_broker(
+                        trading_mode=trading_mode_norm,
+                        run_date=trade_date_str,
+                    )
                 post_trade_validate(
                     run_date=trade_date_str,
                     trading_mode=trading_mode_norm,
@@ -4776,10 +4808,10 @@ def main(argv: list[str] | None = None):
         paper_summary=paper_summary,
     )
     proposed_trades = list((daily_snapshot or {}).get("proposed_trades") or [])
-    planner_proposed_trades_count = (
-        len((paper_summary or {}).get("trade_plan") or [])
-        if isinstance((paper_summary or {}).get("trade_plan"), list)
-        else int(execution_payload.get("executable_trades_count") or len(execution_payload.get("trades") or []))
+    trade_count_contract = compute_trade_count_contract(
+        daily_snapshot=daily_snapshot,
+        paper_summary=paper_summary,
+        execution_payload=execution_payload,
     )
     if not should_execute:
         execution_payload["execution_status"] = "PLANNED"
@@ -4903,20 +4935,29 @@ def main(argv: list[str] | None = None):
             mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
             pretrade_status=normalized_status,
             pretrade_halt_reason=execution_payload.get("halt_reason"),
-            proposed_trades_count=planner_proposed_trades_count,
-            executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
+            proposed_trades_count=int(trade_count_contract["planner_intended_trades_count"]),
+            executable_trades_count=int(trade_count_contract["execution_eligible_trades_count"]),
+            model_proposed_trades_count=int(trade_count_contract["model_proposed_trades_count"]),
+            planner_intended_trades_count=int(trade_count_contract["planner_intended_trades_count"]),
+            execution_eligible_trades_count=int(trade_count_contract["execution_eligible_trades_count"]),
+            orders_submitted_count=int(trade_count_contract["orders_submitted_count"]),
+            orders_filled_count=int(trade_count_contract["orders_filled_count"]),
             planner_completed=True,
             execution_payload_written=True,
             execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
-            suggested_order_count=int(execution_payload.get("executable_trades_count") or 0),
+            suggested_order_count=int(trade_count_contract["execution_eligible_trades_count"]),
             no_trade_reason=_no_trade_reason,
+            broker_pretrade_snapshot_ok=bool(((pretrade_broker_capture or {}).get("snapshot") or {}).get("ok")) if pretrade_broker_capture else None,
+            broker_posttrade_snapshot_ok=bool((paper_summary or {}).get("posttrade_account_snapshot_path") and (paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else None,
+            broker_authoritative_state=bool((paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else False,
         )
         # Log pretrade summary
         print(
             f"[PRETRADE_SUMMARY] run_id={_RUN_CONTEXT.run_id} "
             f"status={normalized_status} "
-            f"proposed={planner_proposed_trades_count} "
-            f"executable={int(execution_payload.get('executable_trades_count') or 0)} "
+            f"model_proposed={int(trade_count_contract['model_proposed_trades_count'])} "
+            f"planner_intended={int(trade_count_contract['planner_intended_trades_count'])} "
+            f"execution_eligible={int(trade_count_contract['execution_eligible_trades_count'])} "
             f"payload_path={canonical_execution_payload_path}"
         )
         append_step_summary(
@@ -4926,8 +4967,11 @@ def main(argv: list[str] | None = None):
                 f"- trade_date: `{trade_date_str}`",
                 f"- mode: `{str((paper_summary or {}).get('trading_mode') or os.getenv('TRADING_MODE', DEFAULT_TRADING_MODE)).upper()}`",
                 f"- pretrade_status: `{normalized_status}`",
-                f"- proposed_trades_count: `{planner_proposed_trades_count}`",
-                f"- executable_trades_count: `{int(execution_payload.get('executable_trades_count') or 0)}`",
+                f"- model_proposed_trades_count: `{int(trade_count_contract['model_proposed_trades_count'])}`",
+                f"- planner_intended_trades_count: `{int(trade_count_contract['planner_intended_trades_count'])}`",
+                f"- execution_eligible_trades_count: `{int(trade_count_contract['execution_eligible_trades_count'])}`",
+                f"- proposed_trades_count (legacy alias): `{int(trade_count_contract['planner_intended_trades_count'])}`",
+                f"- executable_trades_count (legacy alias): `{int(trade_count_contract['execution_eligible_trades_count'])}`",
                 f"- operator_summary_path: `{_RUN_CONTEXT.run_root / 'operator_summary.json'}`",
                 f"- execution_payload_path: `{canonical_execution_payload_path}`",
             ]

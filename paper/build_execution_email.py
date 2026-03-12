@@ -91,7 +91,18 @@ def _fmt_diag_money(value: Any) -> str:
 
 def _diag_from_payload(payload: dict[str, Any], key: str) -> Any:
     if key == "proposed_intent_count":
-        for candidate in ("proposed_trades_intent_count", "proposed_trades_intent", "proposed_intent_count"):
+        for candidate in (
+            "planner_intended_trades_count",
+            "proposed_trades_intent_count",
+            "proposed_trades_intent",
+            "proposed_intent_count",
+        ):
+            if payload.get(candidate) is not None:
+                return payload.get(candidate)
+        return None
+
+    if key == "execution_eligible_count":
+        for candidate in ("execution_eligible_trades_count", "executable_trades_count"):
             if payload.get(candidate) is not None:
                 return payload.get(candidate)
         return None
@@ -395,7 +406,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                 "Metric | Value",
                 "------ | -----",
                 f"Proposed Trades (Intent) | {_fmt_diag_count(_diag_from_payload(payload, 'proposed_intent_count'))}",
-                f"Executable Trades | {_fmt_diag_count(payload.get('executable_trades_count'))}",
+                f"Executable Trades | {_fmt_diag_count(_diag_from_payload(payload, 'execution_eligible_count'))}",
                 f"Dropped Zero Shares | {_fmt_diag_count(_diag_from_payload(payload, 'dropped_zero'))}",
                 f"Dropped Min Notional | {_fmt_diag_count(_diag_from_payload(payload, 'dropped_min_notional'))}",
                 f"Min Trade Dollars | {_fmt_diag_money(payload.get('min_trade_dollars'))}",
@@ -618,7 +629,7 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
         why_rows.extend(
             [
                 ["Proposed Trades (Intent)", _fmt_diag_count(_diag_from_payload(payload, "proposed_intent_count"))],
-                ["Executable Trades", _fmt_diag_count(payload.get("executable_trades_count"))],
+                ["Executable Trades", _fmt_diag_count(_diag_from_payload(payload, "execution_eligible_count"))],
                 ["Dropped Zero Shares", _fmt_diag_count(_diag_from_payload(payload, "dropped_zero"))],
                 ["Dropped Min Notional", _fmt_diag_count(_diag_from_payload(payload, "dropped_min_notional"))],
                 ["Min Trade Dollars", _fmt_diag_money(payload.get("min_trade_dollars"))],

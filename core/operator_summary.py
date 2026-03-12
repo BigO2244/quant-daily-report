@@ -38,6 +38,11 @@ def write_operator_summary(
     submitted_count: int = 0,
     accepted_count: int = 0,
     rejected_count: int = 0,
+    model_proposed_trades_count: int | None = None,
+    planner_intended_trades_count: int | None = None,
+    execution_eligible_trades_count: int | None = None,
+    orders_submitted_count: int | None = None,
+    orders_filled_count: int | None = None,
     skipped_duplicate: bool = False,
     confirmation_email_sent: bool = False,
     planner_completed: bool = False,
@@ -53,6 +58,9 @@ def write_operator_summary(
     no_trade_reason: str | None = None,
     exception_type: str | None = None,
     exception_message: str | None = None,
+    broker_pretrade_snapshot_ok: bool | None = None,
+    broker_posttrade_snapshot_ok: bool | None = None,
+    broker_authoritative_state: bool | None = None,
 ) -> Path:
     """
     Write or update operator_summary.json in run root.
@@ -66,8 +74,8 @@ def write_operator_summary(
         mode: Execution mode (PAPER, ALPACA, SHADOW, etc.)
         pretrade_status: Normalized status after planner (NO_ACTION, READY, HALTED)
         pretrade_halt_reason: Reason if halted during planning
-        proposed_trades_count: Planner-intended trades before broker submission
-        executable_trades_count: Trades passing all filters
+        proposed_trades_count: Legacy alias for planner_intended_trades_count
+        executable_trades_count: Legacy alias for execution_eligible_trades_count
         submitted_count: Orders submitted to broker
         accepted_count: Orders accepted by broker
         rejected_count: Orders rejected by broker
@@ -92,6 +100,32 @@ def write_operator_summary(
         except Exception:
             existing = {}
 
+    planner_intended_value = (
+        int(planner_intended_trades_count)
+        if planner_intended_trades_count is not None
+        else int(proposed_trades_count or existing.get("planner_intended_trades_count") or existing.get("proposed_trades_count", 0))
+    )
+    execution_eligible_value = (
+        int(execution_eligible_trades_count)
+        if execution_eligible_trades_count is not None
+        else int(executable_trades_count or existing.get("execution_eligible_trades_count") or existing.get("executable_trades_count", 0))
+    )
+    orders_submitted_value = (
+        int(orders_submitted_count)
+        if orders_submitted_count is not None
+        else int(submitted_count or existing.get("orders_submitted_count") or existing.get("submitted_count", 0))
+    )
+    orders_filled_value = (
+        int(orders_filled_count)
+        if orders_filled_count is not None
+        else int(existing.get("orders_filled_count", 0))
+    )
+    model_proposed_value = (
+        int(model_proposed_trades_count)
+        if model_proposed_trades_count is not None
+        else int(existing.get("model_proposed_trades_count", 0))
+    )
+
     payload = {
         "run_id": run_id,
         "trade_date": trade_date,
@@ -101,8 +135,13 @@ def write_operator_summary(
         "execution_results_path": str(run_root / "execution_results.json"),
         "pretrade_status": pretrade_status or existing.get("pretrade_status"),
         "pretrade_halt_reason": pretrade_halt_reason or existing.get("pretrade_halt_reason"),
-        "proposed_trades_count": proposed_trades_count or existing.get("proposed_trades_count", 0),
-        "executable_trades_count": executable_trades_count or existing.get("executable_trades_count", 0),
+        "model_proposed_trades_count": model_proposed_value,
+        "planner_intended_trades_count": planner_intended_value,
+        "execution_eligible_trades_count": execution_eligible_value,
+        "orders_submitted_count": orders_submitted_value,
+        "orders_filled_count": orders_filled_value,
+        "proposed_trades_count": planner_intended_value,
+        "executable_trades_count": execution_eligible_value,
         "submitted_count": submitted_count or existing.get("submitted_count", 0),
         "accepted_count": accepted_count or existing.get("accepted_count", 0),
         "rejected_count": rejected_count or existing.get("rejected_count", 0),
@@ -117,11 +156,14 @@ def write_operator_summary(
         "execution_stage_reached": execution_stage_reached or existing.get("execution_stage_reached", False),
         "broker_probe_ok": broker_probe_ok if broker_probe_ok is not None else existing.get("broker_probe_ok"),
         "suggested_order_count": suggested_order_count if suggested_order_count is not None else existing.get("suggested_order_count"),
-        "submitted_order_count": submitted_count or existing.get("submitted_count", 0),
+        "submitted_order_count": orders_submitted_value,
         "no_trade_reason": no_trade_reason or existing.get("no_trade_reason"),
         "halt_reason": pretrade_halt_reason or existing.get("pretrade_halt_reason") or existing.get("halt_reason"),
         "exception_type": exception_type or existing.get("exception_type"),
         "exception_message": exception_message or existing.get("exception_message"),
+        "broker_pretrade_snapshot_ok": broker_pretrade_snapshot_ok if broker_pretrade_snapshot_ok is not None else existing.get("broker_pretrade_snapshot_ok"),
+        "broker_posttrade_snapshot_ok": broker_posttrade_snapshot_ok if broker_posttrade_snapshot_ok is not None else existing.get("broker_posttrade_snapshot_ok"),
+        "broker_authoritative_state": broker_authoritative_state if broker_authoritative_state is not None else existing.get("broker_authoritative_state"),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
