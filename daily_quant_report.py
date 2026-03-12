@@ -50,6 +50,10 @@ from paper.run_manager import (
     safe_write_text,
     write_latest_pointer,
 )
+from brokers.alpaca_snapshot import (
+    fetch_pretrade_snapshot,
+    write_pretrade_snapshot_artifacts,
+)
 from core.run_pointer import write_latest_run_pointer as write_canonical_run_pointer
 from core.execution_payload import write_canonical_execution_payload, normalize_status
 from core.execution_audit import write_planner_audit
@@ -213,6 +217,41 @@ def _canonical_artifact_path(category: str, filename: str) -> Path:
     base = _RUN_CONTEXT.run_root / category
     ensure_dir(base)
     return base / filename
+
+
+def _capture_pretrade_broker_snapshot(*, trade_date: str, alpaca_requested: bool) -> dict | None:
+    """
+    Capture authoritative broker state before any execution-path mutation.
+
+    Phase 1 observability only: failures are recorded to artifacts/logs but do not
+    change execution control flow.
+    """
+    if not alpaca_requested or _RUN_CONTEXT is None or _RUN_CONTEXT.run_root is None:
+        return None
+
+    try:
+        snapshot = fetch_pretrade_snapshot()
+        account_path, positions_path = write_pretrade_snapshot_artifacts(
+            run_root=_RUN_CONTEXT.run_root,
+            run_id=str(_RUN_CONTEXT.run_id),
+            trade_date=str(trade_date),
+            snapshot=snapshot,
+            allow_overwrite=True,
+        )
+        logger.info(
+            "[BROKER][PRETRADE] wrote account=%s positions=%s ok=%s",
+            account_path,
+            positions_path,
+            bool(snapshot.get("ok")),
+        )
+        return {
+            "snapshot": snapshot,
+            "account_path": str(account_path),
+            "positions_path": str(positions_path),
+        }
+    except Exception as exc:
+        logger.warning("[BROKER][PRETRADE] snapshot capture failed (non-blocking): %s", exc)
+        return None
 
 
 def _ensure_paper_broker_imports() -> None:
@@ -4418,6 +4457,13 @@ def main(argv: list[str] | None = None):
             offline_fixture=offline_fixture,
             base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
         )
+    trade_date_str = report_date.strftime("%Y-%m-%d")
+    if _RUN_CONTEXT is not None and not _RUN_CONTEXT.report_date:
+        _RUN_CONTEXT.report_date = trade_date_str
+    _capture_pretrade_broker_snapshot(
+        trade_date=trade_date_str,
+        alpaca_requested=alpaca_requested,
+    )
     if offline_fixture and not portfolio_fixture.empty:
         portfolio_equity_for_alpha = portfolio_fixture
     else:
@@ -4509,7 +4555,6 @@ def main(argv: list[str] | None = None):
         **inception_metrics,
     }
     # --- Paper trading execution + report ---
-    trade_date_str = report_date.strftime("%Y-%m-%d")
     if _RUN_CONTEXT is not None:
         _RUN_CONTEXT.report_date = trade_date_str
     logger.info(
