@@ -56,3 +56,6 @@ paper/holdings_latest.csv
 
 # macOS junk
 .DS_Store
+
+# Internal dashboard artifacts (not part of repo)
+Dashboard/
