@@ -43,6 +43,7 @@ jobs:
     env:
       TRADING_MODE: alpaca
       MODE: alpaca
+      RECON_V2: 1
       ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
       ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
 
@@ -327,7 +328,7 @@ jobs:
           # by the reconciliation module.  If it is absent, a different code path produced
           # the exit 2 (e.g. argparse misuse, library error) and bootstrapping would
           # silently overwrite a correct canonical snapshot with stale or empty broker data.
-          recon_sentinel="outputs/broker/recon_pretrade_${REPORT_DATE:-unknown}.json"
+          recon_sentinel="outputs/runs/${RUN_ID}/broker/recon_pretrade_${REPORT_DATE:-unknown}.json"
           if [ ! -f "$recon_sentinel" ]; then
             echo "[AUTO_BOOTSTRAP][SAFETY] Sentinel not found: $recon_sentinel"
             echo "[AUTO_BOOTSTRAP][SAFETY] exit code 2 did NOT originate from pre-trade reconciliation"
@@ -369,7 +370,7 @@ jobs:
             mkdir -p "outputs/execution_email"
             
             # Try to read recon report for details
-            recon_report_path="outputs/broker/recon_pretrade_${REPORT_DATE}.json"
+            recon_report_path="outputs/runs/${RUN_ID}/broker/recon_pretrade_${REPORT_DATE}.json"
             export recon_data="{}"
             if [ -f "$recon_report_path" ]; then
               echo "[AUTO_BOOTSTRAP] Found recon report: $recon_report_path"
