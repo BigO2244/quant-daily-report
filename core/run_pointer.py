@@ -17,6 +17,26 @@ from typing import Optional
 
 LATEST_RUN_POINTER = 'outputs/latest_run.json'
 
+# ── Terminal run status constants ─────────────────────────────────────────────
+# Use these instead of raw strings to ensure consistent classification across
+# daily_quant_report.py, operator_summary.py, and the dashboard builder.
+TERMINAL_STATUS_SUCCESS = "success"
+TERMINAL_STATUS_NO_ACTION = "no_action"
+TERMINAL_STATUS_FAILED_PRE_PAYLOAD = "failed_pre_payload"
+TERMINAL_STATUS_FAILED_PRE_EXECUTION = "failed_pre_execution"
+TERMINAL_STATUS_FAILED_BROKER_PROBE = "failed_broker_probe"
+TERMINAL_STATUS_FAILED_UNKNOWN = "failed_unknown"
+
+
+def is_run_complete(status: str) -> bool:
+    """Return True if *status* represents a terminal non-failure state."""
+    return status in {TERMINAL_STATUS_SUCCESS, TERMINAL_STATUS_NO_ACTION}
+
+
+def is_run_failure(status: str) -> bool:
+    """Return True if *status* represents a failure / incomplete state."""
+    return not is_run_complete(status) and status not in {"running", "bootstrapped"}
+
 
 def write_latest_run_pointer(
     run_id: str,

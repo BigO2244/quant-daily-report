@@ -153,6 +153,14 @@ class RunContext:
 
 _RUN_CONTEXT: RunContext | None = None
 _RUN_CONTEXT_FINALIZED = False
+# Terminal status tracking — starts as failed_unknown so any unfinished run is
+# classified as a failure.  Updated to "success" / "no_action" only when main()
+# reaches its natural terminal point.  Atexit reads this to write the correct
+# status to latest_run.json and to produce failure artifacts.
+_RUN_TERMINAL_STATUS: str = "failed_unknown"
+# Stage flags: used to produce a precise failure classification on early exit.
+_RUN_STAGE_PAYLOAD_WRITTEN: bool = False    # True after execution_payload.json written
+_RUN_STAGE_EXECUTION_REACHED: bool = False  # True when run_paper_day() is invoked
 
 
 def _get_git_sha() -> str | None:
@@ -3932,25 +3940,76 @@ def _finalize_run_context(run_ctx: RunContext) -> None:
     }
     write_latest_pointer(Path("outputs/latest.json"), latest_payload)
     
-    # Write canonical run pointer (latest_run.json) as single source of truth
-    # Ensures reporting, execution, and email all read from same artifact location
+    # Write canonical run pointer (latest_run.json) as single source of truth.
+    # Use _RUN_TERMINAL_STATUS so failures are never misclassified as "success".
     try:
         write_canonical_run_pointer(
             run_id=run_ctx.run_id,
             trade_date=run_ctx.report_date,
             mode=run_ctx.mode,
             run_root=str(run_ctx.run_root),
-            status="success",
+            status=_RUN_TERMINAL_STATUS,
         )
-        logger.info("[RUN_ARCHIVE] canonical run pointer written: outputs/latest_run.json")
+        logger.info(
+            "[RUN_ARCHIVE] canonical run pointer written: outputs/latest_run.json status=%s",
+            _RUN_TERMINAL_STATUS,
+        )
     except Exception as e:
         logger.warning("[RUN_ARCHIVE][WARN] failed to write canonical run pointer: %s", e)
+
+
+def _is_run_complete(status: str) -> bool:
+    """True when the run reached a terminal non-failure state."""
+    return status in {"success", "no_action"}
+
+
+def _write_failure_artifacts_on_exit(run_ctx: RunContext) -> None:
+    """Write operator_summary and planner_failure.json on early exit. Non-blocking."""
+    try:
+        # Refine generic failed_unknown into a more precise classification.
+        terminal = _RUN_TERMINAL_STATUS
+        if terminal == "failed_unknown":
+            if _RUN_STAGE_EXECUTION_REACHED:
+                terminal = "failed_pre_execution"
+            elif _RUN_STAGE_PAYLOAD_WRITTEN:
+                terminal = "failed_pre_execution"
+            else:
+                terminal = "failed_pre_payload"
+
+        stage = (
+            "execution" if _RUN_STAGE_EXECUTION_REACHED
+            else ("post_payload" if _RUN_STAGE_PAYLOAD_WRITTEN else "pre_payload")
+        )
+
+        from core.operator_summary import write_preflight_failure, write_operator_summary
+        write_preflight_failure(
+            run_ctx.run_root,
+            run_id=run_ctx.run_id,
+            stage=stage,
+            terminal_status=terminal,
+        )
+        op_summary_path = run_ctx.run_root / "operator_summary.json"
+        if not op_summary_path.exists():
+            write_operator_summary(
+                run_ctx.run_root,
+                run_id=run_ctx.run_id,
+                trade_date=run_ctx.report_date or run_ctx.report_date_env or "",
+                mode=run_ctx.mode.upper(),
+                terminal_status=terminal,
+                execution_payload_written=_RUN_STAGE_PAYLOAD_WRITTEN,
+                execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
+            )
+    except Exception as e:
+        logger.warning("[RUN_ARCHIVE][WARN] failure artifacts write failed: %s", e)
 
 
 def _finalize_run_context_once() -> None:
     global _RUN_CONTEXT_FINALIZED
     if _RUN_CONTEXT is None or _RUN_CONTEXT_FINALIZED:
         return
+    # Write failure artifacts before finalizing if run did not reach its terminal state.
+    if not _is_run_complete(_RUN_TERMINAL_STATUS):
+        _write_failure_artifacts_on_exit(_RUN_CONTEXT)
     try:
         _finalize_run_context(_RUN_CONTEXT)
     except Exception as exc:
@@ -4552,6 +4611,8 @@ def main(argv: list[str] | None = None):
                     ledger_path=paper_ledger_path,
                     sent_ledger_path=sent_ledger_path,
                 )
+            global _RUN_STAGE_EXECUTION_REACHED
+            _RUN_STAGE_EXECUTION_REACHED = True
             paper_summary = run_paper_day(
                 run_date=trade_date_str,
                 signals_path=signals_path_exec,
@@ -4725,11 +4786,36 @@ def main(argv: list[str] | None = None):
         except Exception as _audit_exc:
             logger.warning("[EXEC_AUDIT] planner audit failed (non-blocking): %s", _audit_exc)
 
+        # Write per-run broker probe artifact (non-blocking).
+        try:
+            _probe_ok = paper_summary is not None and str(
+                (paper_summary or {}).get("broker_recon_status") or ""
+            ).upper() not in {"FAIL", "ERROR"}
+            _probe_payload = {
+                "run_id": str(_RUN_CONTEXT.run_id),
+                "broker_name": "alpaca" if alpaca_requested else "paper_simulated",
+                "probe_attempted": True,
+                "probe_ok": _probe_ok,
+                "as_of": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "source_type": "authoritative_live" if alpaca_requested else "derived",
+                "base_url": os.getenv("ALPACA_BASE_URL"),
+                "error": str((paper_summary or {}).get("broker_error") or "") or None,
+            }
+            safe_write_text(
+                _canonical_artifact_path("broker", "account_probe.json"),
+                json.dumps(_probe_payload, indent=2) + "\n",
+                allow_overwrite=bool(_RUN_CONTEXT.allow_overwrite),
+            )
+        except Exception as _probe_exc:
+            logger.warning("[BROKER_PROBE][WARN] failed writing probe artifact: %s", _probe_exc)
+
     canonical_execution_payload_path = _write_canonical_execution_payload(
         execution_payload,
         trade_date_str,
         run_root=_RUN_CONTEXT.run_root if _RUN_CONTEXT is not None else None,
     )
+    global _RUN_STAGE_PAYLOAD_WRITTEN
+    _RUN_STAGE_PAYLOAD_WRITTEN = True
 
     # Write operator summary after planner completes
     if _RUN_CONTEXT is not None and _RUN_CONTEXT.run_root:
@@ -4738,6 +4824,13 @@ def main(argv: list[str] | None = None):
             halt_reason=execution_payload.get("halt_reason"),
             executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
         )
+        _no_trade_reason: str | None = None
+        if normalized_status == "NO_ACTION":
+            _no_trade_reason = (
+                execution_payload.get("halt_reason")
+                or execution_payload.get("no_action_reason")
+                or "no_executable_trades_after_constraints"
+            )
         write_operator_summary(
             _RUN_CONTEXT.run_root,
             run_id=str(_RUN_CONTEXT.run_id),
@@ -4748,6 +4841,10 @@ def main(argv: list[str] | None = None):
             proposed_trades_count=len(all_proposed_trades or []),
             executable_trades_count=int(execution_payload.get("executable_trades_count") or 0),
             planner_completed=True,
+            execution_payload_written=True,
+            execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
+            suggested_order_count=int(execution_payload.get("executable_trades_count") or 0),
+            no_trade_reason=_no_trade_reason,
         )
         # Log pretrade summary
         print(
@@ -5111,6 +5208,18 @@ def main(argv: list[str] | None = None):
             _snapshot_existing_file(src, category=category, filename=name)
         except Exception as e:
             logger.warning("[RUN_ARCHIVE][WARN] snapshot failed src=%s err=%s", src, e)
+    # All critical pipeline steps completed — classify terminal status and finalize.
+    global _RUN_TERMINAL_STATUS
+    try:
+        _op_path = (_RUN_CONTEXT.run_root / "operator_summary.json") if _RUN_CONTEXT else None
+        if _op_path and _op_path.exists():
+            _op_data = json.loads(_op_path.read_text(encoding="utf-8"))
+            _pretrade = str(_op_data.get("pretrade_status") or "").upper()
+            _RUN_TERMINAL_STATUS = "no_action" if _pretrade == "NO_ACTION" else "success"
+        else:
+            _RUN_TERMINAL_STATUS = "success"
+    except Exception:
+        _RUN_TERMINAL_STATUS = "success"
     _finalize_run_context_once()
 if __name__ == "__main__":
     main()

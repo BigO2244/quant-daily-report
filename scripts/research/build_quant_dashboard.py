@@ -863,13 +863,55 @@ class DashboardBuilder:
 
         # Discover and select executive run
         selected_run_id, selection_reason = self._select_executive_run(latest_attempted_run_id)
-        
+        discovered_runs = self._discover_runs()
+
+        # ── Latest-attempted run observability ───────────────────────────────
+        # Read latest_run.json for authoritative terminal_status (written by
+        # _finalize_run_context_once, which now uses _RUN_TERMINAL_STATUS).
+        latest_run_ptr = self._read_json("outputs/latest_run.json", required=False, used=True)
+        latest_run_ptr_obj = latest_run_ptr if isinstance(latest_run_ptr, dict) else {}
+        latest_attempted_terminal_status: str | None = str(
+            latest_run_ptr_obj.get("status") or ""
+        ).strip() or None
+
+        # Classify whether the latest attempted run is considered complete.
+        latest_attempted_is_complete: bool = latest_attempted_terminal_status in {
+            "success", "no_action"
+        }
+
+        # List authoritative per-run artifacts that are missing from the latest attempted run.
+        latest_attempted_missing_artifacts: list[str] = []
+        if latest_attempted_run_id:
+            _lat_root = self._abs(f"outputs/runs/{latest_attempted_run_id}")
+            for _artifact_name in (
+                "operator_summary.json",
+                "execution_payload.json",
+                "execution_results.json",
+            ):
+                if not (_lat_root / _artifact_name).exists():
+                    latest_attempted_missing_artifacts.append(_artifact_name)
+
+        # Identify the most recent genuinely complete run for fallback display.
+        latest_successful_run_id: str | None = None
+        latest_successful_trade_date: str | None = None
+        for _r in discovered_runs:
+            if _r.get("is_complete") and not _r.get("is_failed") and not _r.get("is_sparse"):
+                latest_successful_run_id = _r["run_id"]
+                latest_successful_trade_date = _r.get("report_date")
+                break
+
+        fallback_in_use: bool = (
+            selected_run_id != latest_attempted_run_id
+            and latest_attempted_run_id is not None
+        )
+        fallback_reason: str | None = selection_reason if fallback_in_use else None
+
         # Use selected run for executive metrics
         report_date = latest_attempted_report_date if selected_run_id == latest_attempted_run_id else None
         run_id = selected_run_id
         mode = latest_attempted_mode
         run_last_updated = latest_attempted_created_at if selected_run_id == latest_attempted_run_id else None
-        
+
         # If selected run differs from latest attempted, read its metadata
         if selected_run_id and selected_run_id != latest_attempted_run_id:
             selected_meta = self._read_json(f"outputs/runs/{selected_run_id}/meta.json", required=False, used=False)
@@ -1652,6 +1694,15 @@ class DashboardBuilder:
                     "report_date": report_date,
                     "selection_reason": selection_reason,
                 },
+                # Run-observability fields — distinguish incomplete/failed runs from
+                # intentional no-action days and stale fallback dashboard states.
+                "latest_attempted_terminal_status": latest_attempted_terminal_status,
+                "latest_attempted_is_complete": latest_attempted_is_complete,
+                "latest_attempted_missing_artifacts": latest_attempted_missing_artifacts,
+                "latest_successful_run_id": latest_successful_run_id,
+                "latest_successful_trade_date": latest_successful_trade_date,
+                "fallback_in_use": fallback_in_use,
+                "fallback_reason": fallback_reason,
             },
             "kpis": {
                 "portfolio_value": latest_nav,

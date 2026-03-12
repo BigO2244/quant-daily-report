@@ -44,6 +44,15 @@ def write_operator_summary(
     executor_completed: bool = False,
     report_completed: bool = False,
     allow_overwrite: bool = True,
+    # Extended observability fields (all optional for backward compatibility)
+    terminal_status: str | None = None,
+    execution_payload_written: bool = False,
+    execution_stage_reached: bool = False,
+    broker_probe_ok: bool | None = None,
+    suggested_order_count: int | None = None,
+    no_trade_reason: str | None = None,
+    exception_type: str | None = None,
+    exception_message: str | None = None,
 ) -> Path:
     """
     Write or update operator_summary.json in run root.
@@ -102,6 +111,17 @@ def write_operator_summary(
         "planner_completed": planner_completed or existing.get("planner_completed", False),
         "executor_completed": executor_completed or existing.get("executor_completed", False),
         "report_completed": report_completed or existing.get("report_completed", False),
+        # Extended observability fields — present in all new writes, null if unknown.
+        "terminal_status": terminal_status or existing.get("terminal_status"),
+        "execution_payload_written": execution_payload_written or existing.get("execution_payload_written", False),
+        "execution_stage_reached": execution_stage_reached or existing.get("execution_stage_reached", False),
+        "broker_probe_ok": broker_probe_ok if broker_probe_ok is not None else existing.get("broker_probe_ok"),
+        "suggested_order_count": suggested_order_count if suggested_order_count is not None else existing.get("suggested_order_count"),
+        "submitted_order_count": submitted_count or existing.get("submitted_count", 0),
+        "no_trade_reason": no_trade_reason or existing.get("no_trade_reason"),
+        "halt_reason": pretrade_halt_reason or existing.get("pretrade_halt_reason") or existing.get("halt_reason"),
+        "exception_type": exception_type or existing.get("exception_type"),
+        "exception_message": exception_message or existing.get("exception_message"),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
@@ -111,6 +131,40 @@ def write_operator_summary(
         allow_overwrite=allow_overwrite,
     )
     return out_path
+
+
+def write_preflight_failure(
+    run_root: Path,
+    *,
+    run_id: str,
+    stage: str,
+    terminal_status: str,
+    exception_type: str | None = None,
+    exception_message: str | None = None,
+    traceback_excerpt: str | None = None,
+) -> "Path | None":
+    """
+    Write run_root/logs/planner_failure.json on early failure.
+
+    Best-effort and non-blocking — returns None on any write error.
+    Consumed by the dashboard to distinguish a failed run from a no-action day.
+    """
+    try:
+        dest = run_root / "logs" / "planner_failure.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "run_id": run_id,
+            "stage": stage,
+            "terminal_status": terminal_status,
+            "exception_type": exception_type,
+            "exception_message": exception_message,
+            "traceback_excerpt": traceback_excerpt,
+            "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return dest
+    except Exception:
+        return None
 
 
 def load_operator_summary(run_root: Path) -> Dict[str, Any] | None:
