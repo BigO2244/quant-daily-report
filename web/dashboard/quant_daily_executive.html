@@ -3,116 +3,173 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Quant Daily Executive Dashboard</title>
+  <title>Caerus Quant — Portfolio Monitor</title>
   <link rel="stylesheet" href="quant_daily_executive.css">
 </head>
 <body>
-  <main class="dashboard">
-    <header class="header card">
-      <div>
-        <h1>Quant Daily Executive Dashboard</h1>
-        <p class="subtitle">Daily portfolio performance, benchmark comparison, and operating status</p>
+
+  <!-- ═══════════════════════════════════════════════════ HEADER -->
+  <header class="dash-header">
+    <div class="dash-header__left">
+      <div class="dash-header__logo">CAERUS QUANT</div>
+      <div class="dash-header__subtitle">Systematic Equity Monitor</div>
+    </div>
+    <div class="dash-header__center">
+      <div id="status-pill" class="status-pill">LOADING</div>
+      <div id="status-detail" class="status-detail">Fetching artifacts…</div>
+    </div>
+    <div class="dash-header__right">
+      <div class="meta-item"><span class="meta-label">RUN</span><span id="meta-run-id" class="meta-val">—</span></div>
+      <div class="meta-item"><span class="meta-label">DATE</span><span id="meta-date" class="meta-val">—</span></div>
+      <div class="meta-item"><span class="meta-label">MODE</span><span id="meta-mode" class="meta-val">—</span></div>
+      <div class="meta-item"><span class="meta-label">UPDATED</span><span id="meta-updated" class="meta-val">—</span></div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════ STATUS BANNER -->
+  <div id="status-banner" class="status-banner hidden"></div>
+
+  <main class="dash-main">
+
+    <!-- ═══════════════════════════════════════════════════ ROW 1: KPI CARDS -->
+    <section class="kpi-grid">
+      <div class="kpi-card" id="kpi-portfolio-value">
+        <div class="kpi-label">Portfolio Value</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">governed NAV</div>
       </div>
-      <div class="meta-grid" id="meta-grid"></div>
-      <div class="status-banner" id="status-banner">Loading executive status...</div>
-    </header>
+      <div class="kpi-card" id="kpi-daily-pnl">
+        <div class="kpi-label">Daily P&amp;L</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">vs prior close</div>
+      </div>
+      <div class="kpi-card" id="kpi-vs-spy">
+        <div class="kpi-label">Alpha vs SPY</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">today's excess return</div>
+      </div>
+      <div class="kpi-card" id="kpi-cash">
+        <div class="kpi-label">Cash Balance</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">after execution</div>
+      </div>
+      <div class="kpi-card" id="kpi-deployment">
+        <div class="kpi-label">Capital Deployed</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">gross exposure</div>
+      </div>
+      <div class="kpi-card" id="kpi-positions">
+        <div class="kpi-label">Positions</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">held today</div>
+      </div>
+      <div class="kpi-card" id="kpi-trades">
+        <div class="kpi-label">Trades Executed</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-sub">accepted orders</div>
+      </div>
+      <div class="kpi-card" id="kpi-system">
+        <div class="kpi-label">System Status</div>
+        <div class="kpi-value kpi-value--status">—</div>
+        <div class="kpi-sub">pipeline health</div>
+      </div>
+    </section>
 
-    <section class="kpi-strip" id="kpi-strip"></section>
-
-    <section class="snapshot-row">
-      <article class="card">
-        <div class="section-head">
-          <h2>Governed Run Snapshot</h2>
-          <span class="muted" id="governed-asof-label">As of run date</span>
+    <!-- ═══════════════════════════════════════════════════ ROW 2: PERFORMANCE -->
+    <section class="perf-row">
+      <article class="card chart-card chart-card--wide">
+        <div class="card-head">
+          <span class="card-title">Portfolio NAV vs SPY</span>
+          <span class="card-meta" id="nav-chart-window">—</span>
         </div>
-        <div class="snapshot-grid" id="governed-snapshot-grid"></div>
+        <canvas id="chart-nav" aria-label="NAV vs SPY line chart"></canvas>
+        <div class="chart-legend">
+          <span class="legend-item"><i class="legend-dot" style="background:var(--c-blue)"></i>Portfolio</span>
+          <span class="legend-item"><i class="legend-dot" style="background:var(--c-muted)"></i>SPY</span>
+        </div>
       </article>
+
       <article class="card">
-        <div class="section-head">
-          <h2 id="broker-snapshot-title">Latest Broker Snapshot</h2>
-          <span class="muted" id="broker-asof-label">As of broker timestamp</span>
-        </div>
-        <div class="snapshot-grid" id="broker-snapshot-grid"></div>
-        <div class="snapshot-note" id="snapshot-alignment-note">Loading broker freshness...</div>
+        <div class="card-head"><span class="card-title">Performance Summary</span></div>
+        <div class="perf-stats" id="perf-stats"></div>
       </article>
     </section>
 
-    <section class="hero-row">
-      <article class="card chart-card hero-chart-card">
-        <div class="section-head">
-          <h2>NAV vs Benchmark</h2>
-          <span class="muted" id="hero-window-label">Last 30 observations</span>
-        </div>
-        <canvas id="hero-nav-chart" height="300" aria-label="NAV versus benchmark chart"></canvas>
-        <div class="legend">
-          <span><i class="swatch swatch-nav"></i>Portfolio (Indexed)</span>
-          <span><i class="swatch swatch-bench"></i>Benchmark (Indexed)</span>
-        </div>
-      </article>
-      <article class="card perf-summary-card">
-        <h2>Performance Summary</h2>
-        <div class="summary-grid" id="perf-summary-grid"></div>
-      </article>
-    </section>
-
-    <section class="daily-row">
+    <section class="chart-pair-row">
       <article class="card chart-card">
-        <div class="section-head">
-          <h2>Daily Returns</h2>
-          <span class="muted">Recent observations</span>
-        </div>
-        <canvas id="daily-returns-chart" height="220" aria-label="Daily returns bar chart"></canvas>
+        <div class="card-head"><span class="card-title">Daily Returns</span></div>
+        <canvas id="chart-daily" aria-label="Daily returns bar chart"></canvas>
       </article>
       <article class="card chart-card">
-        <div class="section-head">
-          <h2>Excess Return vs Benchmark</h2>
-          <span class="muted">Recent observations</span>
-        </div>
-        <canvas id="excess-returns-chart" height="220" aria-label="Excess return bar chart"></canvas>
+        <div class="card-head"><span class="card-title">Drawdown</span></div>
+        <canvas id="chart-drawdown" aria-label="Drawdown chart"></canvas>
       </article>
     </section>
 
-    <section class="risk-row" id="risk-row"></section>
-
-    <section class="activity-row">
+    <!-- ═══════════════════════════════════════════════════ ROW 3: EXECUTION -->
+    <section class="exec-row">
       <article class="card">
-        <h2>Trading Activity Summary</h2>
-        <div class="activity-grid" id="activity-grid"></div>
+        <div class="card-head"><span class="card-title">Execution Summary</span></div>
+        <div class="exec-stats" id="exec-stats"></div>
       </article>
+
       <article class="card">
-        <h2>Top Portfolio Changes</h2>
-        <table class="data-table" id="top-changes-table">
+        <div class="card-head"><span class="card-title">Order Flow</span></div>
+        <div class="order-flow" id="order-flow"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><span class="card-title">Broker State</span></div>
+        <div class="broker-stats" id="broker-stats"></div>
+      </article>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ ROW 4: PORTFOLIO -->
+    <section class="portfolio-row">
+      <article class="card">
+        <div class="card-head"><span class="card-title">Top Portfolio Changes</span></div>
+        <table class="data-table" id="changes-table">
           <thead>
-            <tr>
-              <th>Ticker</th>
-              <th>Action</th>
-              <th>Change in Weight</th>
-              <th>Reason</th>
-            </tr>
+            <tr><th>Ticker</th><th>Action</th><th>Weight Δ</th><th>Reason</th></tr>
           </thead>
-          <tbody></tbody>
+          <tbody id="changes-body"></tbody>
         </table>
       </article>
-    </section>
 
-    <section class="exceptions-row">
       <article class="card">
-        <h2>Exceptions</h2>
-        <div id="exceptions-list" class="exceptions-list"></div>
-      </article>
-      <article class="card">
-        <h2>Operating Checks</h2>
-        <ul id="operating-checks" class="checks-list"></ul>
+        <div class="card-head"><span class="card-title">Allocation After Rebalance</span></div>
+        <div class="alloc-bars" id="alloc-bars"></div>
       </article>
     </section>
 
-    <footer class="footer card">
-      <div class="footer-meta" id="footer-meta"></div>
+    <!-- ═══════════════════════════════════════════════════ ROW 5: SYSTEM HEALTH -->
+    <section class="health-row">
+      <article class="card">
+        <div class="card-head"><span class="card-title">Operating Checks</span></div>
+        <ul class="checks-list" id="checks-list"></ul>
+      </article>
+      <article class="card">
+        <div class="card-head"><span class="card-title">Exceptions &amp; Warnings</span></div>
+        <div class="exceptions-list" id="exceptions-list"></div>
+      </article>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ DIAGNOSTICS -->
+    <div id="diag-panel" class="diag-panel hidden">
+      <div class="diag-title">DATA SOURCE DIAGNOSTICS</div>
+      <div id="diag-content"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ FOOTER -->
+    <footer class="dash-footer">
+      <span id="footer-run">—</span>
+      <span id="footer-updated">—</span>
       <details>
-        <summary>Source files used</summary>
+        <summary>Source artifacts</summary>
         <ul id="sources-list" class="sources-list"></ul>
       </details>
     </footer>
+
   </main>
 
   <script src="quant_daily_executive.js"></script>

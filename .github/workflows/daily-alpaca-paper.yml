@@ -444,8 +444,10 @@ jobs:
           if-no-files-found: warn
           path: |
             outputs/runs/**
+            outputs/runs/*/trading_day_summary.json
             outputs/paper_state/canonical_positions.json
             outputs/latest_run.json
+            outputs/trading_day_summary.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
             outputs/execution_audit/**
 
@@ -549,6 +551,8 @@ jobs:
           path: |
             outputs/latest_run.json
             outputs/runs/*/execution_results.json
+            outputs/runs/*/trading_day_summary.json
+            outputs/trading_day_summary.json
             outputs/execution_audit/
 
   email:

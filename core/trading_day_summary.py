@@ -2,7 +2,7 @@
 Trading Day Summary — observability artifact for post-run CIO review.
 
 Aggregates execution, portfolio, email, dashboard, and benchmark signals into
-a single outputs/trading_day_summary.json so the CIO can answer in seconds:
+canonical per-run and latest-mirror JSON files so the CIO can answer in seconds:
   - Did trades execute?
   - Did both buys and sells occur?
   - What is the ending cash balance?
@@ -27,6 +27,7 @@ from core.execution_audit import safe_artifact_name
 logger = logging.getLogger(__name__)
 
 SUMMARY_PATH = Path("outputs/trading_day_summary.json")
+RUN_SUMMARY_FILENAME = "trading_day_summary.json"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -301,12 +302,17 @@ def write_trading_day_summary(
     output_path: Optional[Path] = None,
 ) -> Optional[Path]:
     """
-    Build and write outputs/trading_day_summary.json.
+    Build and write trading-day summary artifacts.
+
+    Canonical artifact:
+        outputs/runs/<RUN_ID>/trading_day_summary.json
+    Latest mirror (for local tools like scripts/morning_report.py):
+        outputs/trading_day_summary.json (or output_path override)
 
     Non-blocking: logs a warning and returns None on any failure.
 
     Returns:
-        Path where summary was written, or None on failure.
+        Canonical per-run path where summary was written, or None on failure.
     """
     try:
         summary = build_trading_day_summary(
@@ -316,11 +322,19 @@ def write_trading_day_summary(
             workspace_root=workspace_root,
             audit_dir=audit_dir,
         )
-        dest = output_path or SUMMARY_PATH
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-        logger.info("[SUMMARY] trading_day_summary written: %s", dest)
-        return dest
+        canonical_dest = Path(run_root) / RUN_SUMMARY_FILENAME
+        latest_dest = output_path or SUMMARY_PATH
+        payload = json.dumps(summary, indent=2) + "\n"
+
+        canonical_dest.parent.mkdir(parents=True, exist_ok=True)
+        canonical_dest.write_text(payload, encoding="utf-8")
+
+        latest_dest.parent.mkdir(parents=True, exist_ok=True)
+        latest_dest.write_text(payload, encoding="utf-8")
+
+        logger.info("[SUMMARY] trading_day_summary canonical written: %s", canonical_dest)
+        logger.info("[SUMMARY] trading_day_summary latest mirror written: %s", latest_dest)
+        return canonical_dest
     except Exception as exc:
         logger.warning("[SUMMARY] failed to write trading_day_summary: %s", exc)
         return None

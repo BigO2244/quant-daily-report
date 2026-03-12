@@ -1739,6 +1739,7 @@ class DashboardBuilder:
             "operating_checks": operating_checks,
             "sources": [s.__dict__ for s in self.sources],
             "builder_notes": {
+                "build_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "missing_files": sorted(set(self.missing_files)),
                 "warnings": executive_warnings,
                 "all_warnings": self.warnings,
@@ -1807,6 +1808,12 @@ def main() -> int:
         print(f"[DASHBOARD][DEGRADED] {metric_msg}")
     if missing:
         print("[DASHBOARD][MISSING] " + ", ".join(missing))
+
+    print()
+    print("[DASHBOARD] ── Local development workflow ──────────────────────────────")
+    print("[DASHBOARD]   1. serve:  python -m http.server 8765  (from repo root)")
+    print("[DASHBOARD]   2. open:   http://localhost:8765/web/dashboard/quant_daily_executive.html")
+    print("[DASHBOARD] ─────────────────────────────────────────────────────────────")
 
     return 0
 

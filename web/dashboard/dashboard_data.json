@@ -5,12 +5,12 @@
     "mode": "SHADOW",
     "overall_status": "FAIL",
     "benchmark": "SPY",
-    "last_updated": "2026-03-08T15:09:59Z",
-    "status_banner": "Showing most recent successful run (2026-02-27). Latest attempted run (2026-03-04T120447-0500_1c9aa4c) failed before completion. Derived broker estimate is suspicious and has been de-emphasized.",
+    "last_updated": "2026-03-11T21:07:14Z",
+    "status_banner": "Showing most recent successful run (2026-02-27). Latest attempted run (2026-03-10T095535-0400_3edf5f4) failed before completion. Derived broker estimate is suspicious and has been de-emphasized.",
     "latest_attempted_run": {
-      "run_id": "2026-03-04T120447-0500_1c9aa4c",
-      "report_date": "2026-03-04",
-      "created_at": "2026-03-04T17:04:47.626425+00:00"
+      "run_id": "2026-03-10T095535-0400_3edf5f4",
+      "report_date": "2026-03-10",
+      "created_at": "2026-03-10T13:55:37.818211+00:00"
     },
     "selected_governed_run": {
       "run_id": "2026-02-27T134547-0500_62ce595",
@@ -230,7 +230,7 @@
     {
       "category": "Data / artifacts",
       "status": "warning",
-      "message": "Missing optional artifacts: outputs/paper_state/canonical_positions.json, outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json"
+      "message": "Missing optional artifacts: outputs/paper_state/canonical_positions.json, outputs/runs/2026-02-27T134547-0500_62ce595/execution_payload.json, outputs/runs/2026-02-27T134547-0500_62ce595/execution_results.json"
     }
   ],
   "operating_checks": [
@@ -310,6 +310,34 @@
       "status": "used"
     },
     {
+      "path": "outputs/latest_run.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-03-10T095535-0400_3edf5f4/operator_summary.json",
+      "status": "missing"
+    },
+    {
+      "path": "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_results.json",
+      "status": "missing"
+    },
+    {
+      "path": "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_payload.json",
+      "status": "missing"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/operator_summary.json",
+      "status": "missing"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/execution_results.json",
+      "status": "missing"
+    },
+    {
+      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/execution_payload.json",
+      "status": "missing"
+    },
+    {
       "path": "outputs/execution_email/2026-02-27.json",
       "status": "used"
     },
@@ -343,9 +371,16 @@
     }
   ],
   "builder_notes": {
+    "build_timestamp": "2026-03-11T21:07:14Z",
     "missing_files": [
       "outputs/paper_state/canonical_positions.json",
-      "outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json"
+      "outputs/runs/2026-02-27T134547-0500_62ce595/execution_payload.json",
+      "outputs/runs/2026-02-27T134547-0500_62ce595/execution_results.json",
+      "outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json",
+      "outputs/runs/2026-02-27T134547-0500_62ce595/operator_summary.json",
+      "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_payload.json",
+      "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_results.json",
+      "outputs/runs/2026-03-10T095535-0400_3edf5f4/operator_summary.json"
     ],
     "warnings": [
       "Suspicious broker snapshot: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"

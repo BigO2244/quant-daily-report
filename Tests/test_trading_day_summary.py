@@ -33,6 +33,7 @@ from core.trading_day_summary import (
     _build_dashboard,
     _build_benchmark,
 )
+from scripts import morning_report
 
 
 # ---------------------------------------------------------------------------
@@ -390,23 +391,49 @@ class TestBuildTradingDaySummary:
 # ---------------------------------------------------------------------------
 
 class TestWriteTradingDaySummary:
-    def test_write_produces_valid_json(self, tmp_path):
+    def test_write_produces_canonical_and_mirror_json(self, tmp_path):
         run_id = "20260310T093500Z_paper_1"
         run_root = tmp_path / "outputs" / "runs" / run_id
         run_root.mkdir(parents=True)
 
-        out_path = tmp_path / "outputs" / "trading_day_summary.json"
+        mirror_path = tmp_path / "outputs" / "trading_day_summary.json"
         result = write_trading_day_summary(
             run_root=run_root,
             run_id=run_id,
             trade_date="2026-03-10",
             workspace_root=tmp_path,
-            output_path=out_path,
+            output_path=mirror_path,
         )
-        assert result == out_path
-        assert out_path.exists()
-        parsed = json.loads(out_path.read_text(encoding="utf-8"))
+        canonical_path = run_root / "trading_day_summary.json"
+        assert result == canonical_path
+        assert canonical_path.exists()
+        assert mirror_path.exists()
+        assert canonical_path.read_text(encoding="utf-8") == mirror_path.read_text(encoding="utf-8")
+
+        parsed = json.loads(canonical_path.read_text(encoding="utf-8"))
         assert parsed["run_id"] == run_id
+
+    def test_morning_report_default_path_reads_mirror(self, tmp_path, monkeypatch, capsys):
+        run_id = "20260310T093500Z_paper_1"
+        run_root = tmp_path / "outputs" / "runs" / run_id
+        run_root.mkdir(parents=True)
+        mirror_path = tmp_path / "outputs" / "trading_day_summary.json"
+
+        result = write_trading_day_summary(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date="2026-03-10",
+            workspace_root=tmp_path,
+            output_path=mirror_path,
+        )
+        assert result == run_root / "trading_day_summary.json"
+        assert mirror_path.exists()
+
+        monkeypatch.setattr(morning_report, "_DEFAULT_SUMMARY", mirror_path)
+        rc = morning_report.main([])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "QUANT SYSTEM — MORNING REPORT" in out
 
     def test_write_returns_none_on_internal_error(self, tmp_path):
         """Non-blocking: must not raise."""
