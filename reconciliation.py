@@ -572,6 +572,13 @@ def _canonical_snapshot_is_stale(snapshot: dict[str, Any], run_date: str) -> boo
         return False
 
 
+def _normalize_account_status(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text
+
+
 def _load_broker_snapshot_v2(trading_mode: str) -> dict[str, Any]:
     mode = str(trading_mode or "").strip().lower()
     if mode != "alpaca":
@@ -652,7 +659,7 @@ def classify_drift(
     self_heals: list[str] = []
     hard_blocks: list[str] = []
 
-    account_status = str((broker_snapshot or {}).get("account_status") or "").strip().upper()
+    account_status = _normalize_account_status((broker_snapshot or {}).get("account_status"))
     if (broker_snapshot or {}).get("account_error"):
         hard_blocks.append("broker_account_fetch_failure")
     if (broker_snapshot or {}).get("positions_error"):
