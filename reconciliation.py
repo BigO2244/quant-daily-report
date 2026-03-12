@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import logging
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,7 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
                         "position_count": len(legacy_positions),
                         "cash": legacy_cash,
                         "equity": legacy_equity,
+                        "timestamp_utc": legacy_payload.get("timestamp_utc") if isinstance(legacy_payload, dict) else None,
                         "reason": write_reason,
                         "path": str(path),
                         "path_exists": True,
@@ -123,6 +125,7 @@ def _load_canonical_model_snapshot(allow_empty: bool = False) -> dict[str, Any]:
             "position_count": len(positions),
             "cash": cash,
             "equity": equity,
+            "timestamp_utc": payload.get("timestamp_utc") if isinstance(payload, dict) else None,
             "reason": payload.get("reason") if isinstance(payload, dict) else None,
             "path": str(path),
             "path_exists": True,
@@ -179,6 +182,18 @@ def _coerce_float(value: object) -> float | None:
             return None
         return float(text)
     except Exception:
+        return None
+
+
+def _coerce_decimal(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        text = str(value).strip()
+        if text == "":
+            return None
+        return Decimal(text)
+    except (InvalidOperation, ValueError, TypeError):
         return None
 
 
@@ -535,6 +550,301 @@ def _write_report(phase: str, run_date: str, payload: dict[str, Any]) -> str:
     out_path = _recon_out_path(run_date=run_date, phase=phase)
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(out_path)
+
+
+def _snapshot_timestamp(snapshot: dict[str, Any]) -> str | None:
+    for key in ("timestamp_utc", "captured_at", "as_of"):
+        value = str((snapshot or {}).get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _canonical_snapshot_is_stale(snapshot: dict[str, Any], run_date: str) -> bool:
+    timestamp = _snapshot_timestamp(snapshot)
+    if not timestamp:
+        return False
+    try:
+        normalized = timestamp.replace("Z", "+00:00")
+        snapshot_dt = dt.datetime.fromisoformat(normalized)
+        return snapshot_dt.date().isoformat() < str(run_date)
+    except Exception:
+        return False
+
+
+def _load_broker_snapshot_v2(trading_mode: str) -> dict[str, Any]:
+    mode = str(trading_mode or "").strip().lower()
+    if mode != "alpaca":
+        return {
+            "source": "mode_not_alpaca",
+            "positions": {},
+            "position_count": 0,
+            "cash": None,
+            "equity": None,
+            "account_status": None,
+            "raw_account_fields_found": [],
+            "account_error": None,
+            "positions_error": None,
+            "errors": [],
+        }
+
+    from brokers.alpaca_broker import AlpacaBroker
+
+    payload: dict[str, Any] = {
+        "source": "alpaca_adapter",
+        "positions": {},
+        "position_count": 0,
+        "cash": None,
+        "equity": None,
+        "account_status": None,
+        "raw_account_fields_found": [],
+        "account_error": None,
+        "positions_error": None,
+        "errors": [],
+    }
+    try:
+        broker = AlpacaBroker.from_env()
+    except Exception as exc:
+        payload["account_error"] = f"{type(exc).__name__}: {exc}"
+        payload["positions_error"] = f"{type(exc).__name__}: {exc}"
+        payload["errors"].append("broker_auth_failure")
+        return payload
+
+    try:
+        account = broker.get_account() or {}
+        if not isinstance(account, dict):
+            payload["account_error"] = "corrupt_broker_account_payload"
+            payload["errors"].append("corrupt_broker_account_payload")
+            account = {}
+        payload["cash"] = _coerce_float(account.get("cash"))
+        payload["equity"] = _coerce_float(account.get("equity") or account.get("portfolio_value"))
+        payload["account_status"] = account.get("status")
+        payload["raw_account_fields_found"] = sorted(account.keys())
+    except Exception as exc:
+        payload["account_error"] = f"{type(exc).__name__}: {exc}"
+        payload["errors"].append("broker_account_fetch_failure")
+
+    try:
+        positions_raw = broker.get_positions() or []
+        if not isinstance(positions_raw, (list, dict)):
+            payload["positions_error"] = "corrupt_broker_positions_payload"
+            payload["errors"].append("corrupt_broker_positions_payload")
+            positions_raw = []
+        payload["positions"] = _normalize_positions(positions_raw)
+        payload["position_count"] = int(len(payload["positions"]))
+    except Exception as exc:
+        payload["positions_error"] = f"{type(exc).__name__}: {exc}"
+        payload["errors"].append("broker_positions_fetch_failure")
+
+    return payload
+
+
+def classify_drift(
+    *,
+    run_date: str,
+    broker_snapshot: dict[str, Any],
+    model_snapshot: dict[str, Any],
+    diffs: dict[str, Any],
+    cash_delta: float | None,
+    equity_delta: float | None,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    self_heals: list[str] = []
+    hard_blocks: list[str] = []
+
+    account_status = str((broker_snapshot or {}).get("account_status") or "").strip().upper()
+    if (broker_snapshot or {}).get("account_error"):
+        hard_blocks.append("broker_account_fetch_failure")
+    if (broker_snapshot or {}).get("positions_error"):
+        hard_blocks.append("broker_positions_fetch_failure")
+    hard_blocks.extend(str(item) for item in ((broker_snapshot or {}).get("errors") or []))
+    if account_status and account_status != "ACTIVE":
+        hard_blocks.append(f"account_status_not_active:{account_status}")
+
+    parse_error = str((model_snapshot or {}).get("parse_error") or "").strip()
+    if parse_error:
+        if "missing" in parse_error or "stale" in parse_error or "parse_error" in parse_error:
+            self_heals.append(parse_error)
+        else:
+            self_heals.append(f"canonical_snapshot_issue:{parse_error}")
+    if _canonical_snapshot_is_stale(model_snapshot, run_date):
+        self_heals.append("canonical_snapshot_stale")
+
+    missing_in_model = list((diffs or {}).get("missing_in_model") or [])
+    missing_in_broker = list((diffs or {}).get("missing_in_broker") or [])
+    qty_mismatches = list((diffs or {}).get("qty_mismatches") or [])
+    if missing_in_model or missing_in_broker:
+        self_heals.append("symbol_set_drift")
+    if qty_mismatches:
+        self_heals.append("quantity_mismatch")
+
+    equity_base_decimal = _coerce_decimal((model_snapshot or {}).get("equity"))
+    if equity_base_decimal is None:
+        equity_base_decimal = _coerce_decimal((broker_snapshot or {}).get("equity"))
+    cash_delta_decimal = _coerce_decimal(cash_delta)
+    equity_delta_decimal = _coerce_decimal(equity_delta)
+    if equity_base_decimal not in (None, Decimal("0")):
+        if cash_delta_decimal is not None and abs(cash_delta_decimal) > Decimal("0"):
+            cash_ratio = abs(cash_delta_decimal) / abs(equity_base_decimal)
+            if cash_ratio < Decimal("0.01"):
+                warnings.append("cash_drift_lt_1pct_equity")
+            else:
+                warnings.append("cash_drift_gte_1pct_equity")
+        if equity_delta_decimal is not None and abs(equity_delta_decimal) > Decimal("0"):
+            equity_ratio = abs(equity_delta_decimal) / abs(equity_base_decimal)
+            if equity_ratio < Decimal("0.01"):
+                warnings.append("equity_drift_lt_1pct_equity")
+            else:
+                warnings.append("equity_drift_gte_1pct_equity")
+
+    if hard_blocks:
+        decision = "BLOCK"
+    elif self_heals:
+        decision = "SELF_HEAL"
+    elif warnings:
+        decision = "WARN"
+    else:
+        decision = "PASS"
+
+    return {
+        "reconciliation_decision": decision,
+        "warnings": sorted(set(warnings)),
+        "self_heals": sorted(set(self_heals)),
+        "hard_blocks": sorted(set(hard_blocks)),
+        "missing_in_broker": missing_in_broker,
+        "missing_in_model": missing_in_model,
+        "qty_mismatches": qty_mismatches,
+        "block_reason": sorted(set(hard_blocks))[0] if hard_blocks else "none",
+    }
+
+
+def _refresh_canonical_from_snapshot(
+    *,
+    broker_snapshot: dict[str, Any],
+    reason: str,
+) -> Path:
+    return _write_canonical_model_snapshot(
+        positions=(broker_snapshot or {}).get("positions") or {},
+        cash=_coerce_float((broker_snapshot or {}).get("cash")),
+        equity=_coerce_float((broker_snapshot or {}).get("equity")),
+        reason=reason,
+    )
+
+
+def pre_trade_reconcile_and_classify(
+    *,
+    run_date: str,
+    trading_mode: str,
+    ledger_path: str,
+    sent_ledger_path: str,
+    allow_empty: bool = False,
+) -> dict[str, Any]:
+    del ledger_path, allow_empty
+
+    broker_snapshot = _load_broker_snapshot_v2(trading_mode)
+    model_snapshot = _load_canonical_model_snapshot(allow_empty=True)
+    diffs = compare_positions(
+        broker_positions=broker_snapshot.get("positions") or {},
+        model_positions=model_snapshot.get("positions") or {},
+        max_qty_diff=_env_float("RECON_MAX_QTY_DIFF", 0.0),
+    )
+
+    broker_cash = _coerce_float(broker_snapshot.get("cash"))
+    model_cash = _coerce_float(model_snapshot.get("cash"))
+    broker_equity = _coerce_float(broker_snapshot.get("equity"))
+    model_equity = _coerce_float(model_snapshot.get("equity"))
+    cash_delta = (
+        float(broker_cash) - float(model_cash)
+        if broker_cash is not None and model_cash is not None
+        else None
+    )
+    equity_delta = (
+        float(broker_equity) - float(model_equity)
+        if broker_equity is not None and model_equity is not None
+        else None
+    )
+
+    classification = classify_drift(
+        run_date=run_date,
+        broker_snapshot=broker_snapshot,
+        model_snapshot=model_snapshot,
+        diffs=diffs,
+        cash_delta=cash_delta,
+        equity_delta=equity_delta,
+    )
+    decision = str(classification.get("reconciliation_decision") or "PASS")
+    repair_actions: list[str] = []
+    refreshed_canonical_path: str | None = None
+
+    if decision == "SELF_HEAL":
+        try:
+            refreshed_path = _refresh_canonical_from_snapshot(
+                broker_snapshot=broker_snapshot,
+                reason="pretrade_self_heal_from_broker",
+            )
+            refreshed_canonical_path = str(refreshed_path)
+            repair_actions.append(f"canonical_refreshed_from_broker:{refreshed_path}")
+        except Exception as exc:
+            classification["hard_blocks"] = sorted(
+                set(list(classification.get("hard_blocks") or []) + ["canonical_self_heal_write_failed"])
+            )
+            classification["reconciliation_decision"] = "BLOCK"
+            classification["block_reason"] = "canonical_self_heal_write_failed"
+            repair_actions.append(f"canonical_refresh_failed:{type(exc).__name__}: {exc}")
+
+    payload = {
+        "phase": "pretrade",
+        "stage": "pretrade",
+        "run_date": str(run_date),
+        "trading_mode": str(trading_mode),
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "reconciliation_decision": classification.get("reconciliation_decision"),
+        "warnings": list(classification.get("warnings") or []),
+        "self_heals": list(classification.get("self_heals") or []),
+        "hard_blocks": list(classification.get("hard_blocks") or []),
+        "missing_in_broker": list(classification.get("missing_in_broker") or []),
+        "missing_in_model": list(classification.get("missing_in_model") or []),
+        "qty_mismatches": list(classification.get("qty_mismatches") or []),
+        "block_reason": classification.get("block_reason"),
+        "allowed_to_execute": str(classification.get("reconciliation_decision") or "PASS") != "BLOCK",
+        "repair_actions": repair_actions,
+        "refreshed_canonical_path": refreshed_canonical_path,
+        "broker_snapshot": broker_snapshot,
+        "model_snapshot": model_snapshot,
+        "cash_delta": cash_delta,
+        "equity_delta": equity_delta,
+        "diffs": diffs,
+        "sent_ledger": _sent_ledger_meta(sent_ledger_path),
+    }
+    report_path = _write_report(phase="pretrade", run_date=run_date, payload=payload)
+    payload["report_path"] = report_path
+
+    logger.info(
+        "[RECON][PRETRADE][V2] decision=%s block_reason=%s broker_positions=%d model_positions=%d report=%s",
+        payload["reconciliation_decision"],
+        payload["block_reason"],
+        int(len(broker_snapshot.get("positions") or {})),
+        int(len(model_snapshot.get("positions") or {})),
+        report_path,
+    )
+
+    if payload["reconciliation_decision"] == "BLOCK":
+        source_state_notes = list(model_snapshot.get("source_state_notes") or [])
+        _write_recon_blocked_artifact(
+            run_date=run_date,
+            block_reason=str(payload["block_reason"]),
+            recon_report_path=report_path,
+        )
+        _write_preflight_failure_artifact(
+            run_date=run_date,
+            halt_stage="pretrade_reconciliation",
+            halt_reason=f"pretrade_reconcile_failed:{payload['block_reason']}",
+            block_reason=str(payload["block_reason"]),
+            recon_report_path=report_path,
+            source_state_notes=source_state_notes,
+        )
+
+    return payload
 
 
 def _reconcile(

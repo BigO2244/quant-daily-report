@@ -283,6 +283,7 @@ jobs:
           set -euxo pipefail
           source .venv/bin/activate
           mkdir -p outputs
+          echo "[ENV] RECON_V2=${RECON_V2:-<unset>}"
           cmd=(python3 daily_quant_report.py)
           if [ "${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}" = "true" ]; then
             cmd+=(--bootstrap-model-ledger-from-broker)

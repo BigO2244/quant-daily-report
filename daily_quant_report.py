@@ -75,6 +75,7 @@ from reconciliation import (
     bootstrap_model_ledger_from_broker,
     ensure_sent_ledger_exists,
     post_trade_validate,
+    pre_trade_reconcile_and_classify,
     pre_trade_reconcile_or_exit,
     refresh_canonical_snapshot_from_broker,
 )
@@ -4650,12 +4651,22 @@ def main(argv: list[str] | None = None):
                         "[ORDER] --reset-ledger-date ignored without force execution override"
                     )
             if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
-                pre_trade_reconcile_or_exit(
-                    run_date=trade_date_str,
-                    trading_mode=trading_mode_norm,
-                    ledger_path=paper_ledger_path,
-                    sent_ledger_path=sent_ledger_path,
-                )
+                if _is_truthy(os.getenv("RECON_V2"), default=False):
+                    recon_result = pre_trade_reconcile_and_classify(
+                        run_date=trade_date_str,
+                        trading_mode=trading_mode_norm,
+                        ledger_path=paper_ledger_path,
+                        sent_ledger_path=sent_ledger_path,
+                    )
+                    if str((recon_result or {}).get("reconciliation_decision") or "PASS") == "BLOCK":
+                        raise SystemExit(2)
+                else:
+                    pre_trade_reconcile_or_exit(
+                        run_date=trade_date_str,
+                        trading_mode=trading_mode_norm,
+                        ledger_path=paper_ledger_path,
+                        sent_ledger_path=sent_ledger_path,
+                    )
             global _RUN_STAGE_EXECUTION_REACHED
             _RUN_STAGE_EXECUTION_REACHED = True
             paper_summary = run_paper_day(
