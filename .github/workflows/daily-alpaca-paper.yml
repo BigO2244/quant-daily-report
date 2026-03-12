@@ -282,7 +282,6 @@ jobs:
           set -euxo pipefail
           source .venv/bin/activate
           mkdir -p outputs
-          status=0
           cmd=(python3 daily_quant_report.py)
           if [ "${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}" = "true" ]; then
             cmd+=(--bootstrap-model-ledger-from-broker)
@@ -290,9 +289,10 @@ jobs:
           if [ "${FORCE_BOOTSTRAP_FLAT:-false}" = "true" ]; then
             cmd+=(--force-bootstrap-flat)
           fi
-          if ! "${cmd[@]}" 2>&1 | tee outputs/ci_alpaca_run.log; then
-            status=$?
-          fi
+          set +e
+          "${cmd[@]}" 2>&1 | tee outputs/ci_alpaca_run.log
+          status=${PIPESTATUS[0]}
+          set -e
           mkdir -p "outputs/runs/${RUN_ID}/logs"
           cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
           echo "$status" > outputs/exit_status.txt
