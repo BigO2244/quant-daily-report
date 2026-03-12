@@ -738,6 +738,40 @@ def _refresh_canonical_from_snapshot(
     )
 
 
+def refresh_canonical_snapshot_from_posttrade_snapshot(
+    *,
+    positions_snapshot: dict[str, Any],
+    account_snapshot: dict[str, Any] | None = None,
+    run_date: str | None = None,
+) -> bool:
+    try:
+        positions = _normalize_positions((positions_snapshot or {}).get("positions") or [])
+        account = (account_snapshot or {}).get("account") if isinstance(account_snapshot, dict) else {}
+        if not isinstance(account, dict):
+            account = {}
+        cash = _coerce_float((account_snapshot or {}).get("cash"))
+        if cash is None:
+            cash = _coerce_float(account.get("cash"))
+        equity = _coerce_float((account_snapshot or {}).get("equity"))
+        if equity is None:
+            equity = _coerce_float(account.get("equity") or account.get("portfolio_value"))
+        _write_canonical_model_snapshot(
+            positions=positions,
+            cash=cash,
+            equity=equity,
+            reason="posttrade_refresh_from_snapshot",
+        )
+        logger.info(
+            "[POSTTRADE] Refreshed canonical snapshot from posttrade artifact: positions=%d run_date=%s",
+            len(positions),
+            run_date or "n/a",
+        )
+        return True
+    except Exception as exc:
+        logger.warning("[POSTTRADE] Failed to refresh canonical snapshot from posttrade artifact: %s", exc)
+        return False
+
+
 def pre_trade_reconcile_and_classify(
     *,
     run_date: str,
