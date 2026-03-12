@@ -1561,8 +1561,11 @@ def build_execution_email_payload(
         "# positions": str(position_count) if position_count is not None else "unavailable",
         "Max position weight (%)": f"{max_position_weight * 100:.2f}%" if max_position_weight is not None else "unavailable",
     }
-    intent_list = (daily_snapshot or {}).get("proposed_trades") if isinstance(daily_snapshot, dict) else None
-    proposed_trades_intent_count = len(intent_list) if isinstance(intent_list, list) else None
+    planned_trades_for_intent = (paper_summary or {}).get("trade_plan") if isinstance(paper_summary, dict) else None
+    if isinstance(planned_trades_for_intent, list):
+        proposed_trades_intent_count = len(planned_trades_for_intent)
+    else:
+        proposed_trades_intent_count = int(len(trades))
     sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
     total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
 

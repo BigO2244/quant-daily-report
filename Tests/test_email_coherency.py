@@ -122,7 +122,7 @@ def test_build_execution_payload_turnover_metrics_unavailable_when_missing():
     assert payload["cash_target_dollars"] is None
 
 
-def test_build_execution_payload_uses_execution_filter_stats_and_intent_count():
+def test_build_execution_payload_uses_execution_filter_stats_and_planner_intent_count():
     payload = build_execution_email_payload(
         trade_date="2026-02-17",
         daily_snapshot={
@@ -134,6 +134,7 @@ def test_build_execution_payload_uses_execution_filter_stats_and_intent_count():
             "trading_mode": "SHADOW",
             "market_status": "OPEN",
             "execution_trades": [{"ticker": "AAPL", "side": "BUY", "shares": 2, "notional": 400.0}],
+            "trade_plan": [{"ticker": "AAPL", "side": "BUY", "shares": 2, "notional": 400.0}],
             "execution_filter": {
                 "raw": 2,
                 "rounded": 2,
@@ -147,7 +148,7 @@ def test_build_execution_payload_uses_execution_filter_stats_and_intent_count():
     )
 
     assert payload["filter_stats"]["dropped_zero_shares"] == 1
-    assert payload["proposed_trades_intent_count"] == 2
+    assert payload["proposed_trades_intent_count"] == 1
     assert payload["executable_trades_count"] == len(payload["trades"])
 
 
