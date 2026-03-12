@@ -8,13 +8,19 @@ import pandas as pd
 import daily_quant_report as dqr
 
 
-def test_market_closed_alpaca_run_writes_payload_and_operator_summary(monkeypatch, tmp_path: Path) -> None:
+def test_market_closed_alpaca_run_uses_planner_trade_plan_count_for_summary(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-03-12")
     monkeypatch.setenv("MODE", "alpaca")
     monkeypatch.setenv("TRADING_MODE", "alpaca")
     monkeypatch.setenv("ALPACA_PAPER", "1")
     monkeypatch.setenv("RECON_V2", "1")
+    step_summary_path = tmp_path / "step_summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(step_summary_path))
     monkeypatch.setattr(dqr, "_today_et_str", lambda: "2026-03-12")
 
     monkeypatch.setattr(dqr, "run_sleeve_1", lambda: (pd.DataFrame(), pd.DataFrame()))
@@ -137,13 +143,17 @@ def test_market_closed_alpaca_run_writes_payload_and_operator_summary(monkeypatc
     )
 
     dqr.main([])
+    captured = capsys.readouterr()
 
     latest_run = json.loads((tmp_path / "outputs" / "latest_run.json").read_text(encoding="utf-8"))
     run_root = Path(str(latest_run["run_root"]))
     execution_payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
     operator_summary = json.loads((run_root / "operator_summary.json").read_text(encoding="utf-8"))
+    step_summary = step_summary_path.read_text(encoding="utf-8")
 
     assert execution_payload["executable_trades_count"] == 1
     assert operator_summary["planner_completed"] is True
     assert operator_summary["execution_payload_written"] is True
-    assert operator_summary["proposed_trades_count"] == 2
+    assert operator_summary["proposed_trades_count"] == 1
+    assert "proposed=1" in captured.out
+    assert "- proposed_trades_count: `1`" in step_summary

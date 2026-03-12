@@ -66,7 +66,7 @@ def write_operator_summary(
         mode: Execution mode (PAPER, ALPACA, SHADOW, etc.)
         pretrade_status: Normalized status after planner (NO_ACTION, READY, HALTED)
         pretrade_halt_reason: Reason if halted during planning
-        proposed_trades_count: Total trades proposed before filters
+        proposed_trades_count: Planner-intended trades before broker submission
         executable_trades_count: Trades passing all filters
         submitted_count: Orders submitted to broker
         accepted_count: Orders accepted by broker
