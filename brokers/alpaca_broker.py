@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+BROKER_REJECT_PDT = "BROKER_REJECT_PDT"
+BROKER_REJECT_BUYING_POWER = "BROKER_REJECT_BUYING_POWER"
+BROKER_REJECT_SHORT_NOT_ALLOWED = "BROKER_REJECT_SHORT_NOT_ALLOWED"
+BROKER_REJECT_ASSET_NOT_TRADABLE = "BROKER_REJECT_ASSET_NOT_TRADABLE"
+BROKER_REJECT_UNKNOWN = "BROKER_REJECT_UNKNOWN"
 
 
 def _is_truthy(value: object, default: bool = False) -> bool:
@@ -68,6 +77,111 @@ def _safe_str(value: Any) -> str:
         return str(value)
     except Exception:
         return ""
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    candidates = [raw]
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(raw[start : end + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def classify_alpaca_broker_reject(exc: Any) -> Dict[str, Any]:
+    raw_message = _safe_str(exc).strip()
+    parsed = _extract_json_object(raw_message)
+    code: int | None = None
+    if parsed.get("code") is not None:
+        try:
+            code = int(parsed.get("code"))
+        except Exception:
+            code = None
+    if code is None:
+        match = re.search(r'"code"\s*:\s*([0-9]+)', raw_message)
+        if match:
+            try:
+                code = int(match.group(1))
+            except Exception:
+                code = None
+
+    broker_message = _safe_str(parsed.get("message") or parsed.get("msg") or "").strip()
+    if not broker_message:
+        match = re.search(r'"message"\s*:\s*"([^"]+)"', raw_message)
+        if match:
+            broker_message = match.group(1).strip()
+    if not broker_message:
+        broker_message = raw_message or "unknown broker submission failure"
+
+    normalized = broker_message.lower()
+    if code == 40310000 or "pattern day trading" in normalized:
+        classification = BROKER_REJECT_PDT
+    elif "buying power" in normalized:
+        classification = BROKER_REJECT_BUYING_POWER
+    elif "not tradable" in normalized or "asset is not tradable" in normalized:
+        classification = BROKER_REJECT_ASSET_NOT_TRADABLE
+    elif "short" in normalized and (
+        "not allowed" in normalized
+        or "unable to open" in normalized
+        or "trade denied" in normalized
+        or "cannot" in normalized
+    ):
+        classification = BROKER_REJECT_SHORT_NOT_ALLOWED
+    else:
+        classification = BROKER_REJECT_UNKNOWN
+
+    return {
+        "classification": classification,
+        "code": code,
+        "message": broker_message,
+        "raw_message": raw_message or broker_message,
+    }
+
+
+class AlpacaSubmissionRejectError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        classification: str,
+        broker_message: str,
+        raw_message: str,
+        broker_code: int | None = None,
+        order_id: str | None = None,
+        symbol: str | None = None,
+        side: str | None = None,
+        quantity: float | None = None,
+    ) -> None:
+        self.classification = str(classification or BROKER_REJECT_UNKNOWN)
+        self.broker_message = str(broker_message or raw_message or "unknown broker submission failure")
+        self.raw_message = str(raw_message or self.broker_message)
+        self.broker_code = broker_code
+        self.order_id = str(order_id or "")
+        self.symbol = str(symbol or "")
+        self.side = str(side or "")
+        self.quantity = float(quantity) if quantity is not None else None
+        super().__init__(f"{self.classification}: {self.broker_message}")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "classification": self.classification,
+            "message": self.broker_message,
+            "raw_message": self.raw_message,
+            "code": self.broker_code,
+            "order_id": self.order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "quantity": self.quantity,
+        }
 
 
 def alpaca_client_order_id(order_id: str) -> str:

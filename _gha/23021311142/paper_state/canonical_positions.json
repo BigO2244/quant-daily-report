@@ -1,0 +1,21 @@
+{
+  "cash": 551.16,
+  "equity": 9812.86,
+  "position_count": 12,
+  "positions": {
+    "AAPL": 3.0,
+    "ABBV": 4.0,
+    "ABNB": 7.0,
+    "FDX": 2.0,
+    "GLW": 7.0,
+    "HWM": 1.0,
+    "KMI": 29.0,
+    "LMT": 1.0,
+    "MPC": 2.0,
+    "ROST": 4.0,
+    "VZ": 19.0,
+    "WMB": 13.0
+  },
+  "reason": "posttrade_refresh_from_broker",
+  "timestamp_utc": "2026-03-12T20:03:38.857509+00:00"
+}

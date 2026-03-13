@@ -1,0 +1,10 @@
+{
+  "block_reason": "account_status_not_active:ACCOUNTSTATUS.ACTIVE",
+  "halt_reason": "pretrade_reconcile_failed:account_status_not_active:ACCOUNTSTATUS.ACTIVE",
+  "halt_stage": "pretrade_reconciliation",
+  "recommended_action": "Review reconciliation report details and resolve pre-trade gate failure before rerun.",
+  "recon_report": "outputs/runs/20260312T195150Z_23020925111_1/broker/recon_pretrade_2026-03-12.json",
+  "run_date": "2026-03-12",
+  "source_state_notes": [],
+  "timestamp_utc": "2026-03-12T19:53:40.820473+00:00"
+}

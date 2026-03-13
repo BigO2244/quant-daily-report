@@ -1,0 +1,10 @@
+{
+  "run_id": "20260312T205703Z_23023511728_1",
+  "broker_name": "alpaca",
+  "probe_attempted": true,
+  "probe_ok": true,
+  "as_of": "2026-03-12T20:58:48.130844+00:00",
+  "source_type": "authoritative_live",
+  "base_url": "https://paper-api.alpaca.markets",
+  "error": null
+}

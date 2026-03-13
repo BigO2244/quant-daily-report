@@ -1,0 +1,46 @@
+{
+  "root": "outputs/runs/20260312T195150Z_23020925111_1",
+  "file_count": 8,
+  "files": [
+    {
+      "path": "broker/pretrade_account_snapshot.json",
+      "size": 1676,
+      "sha256": "1d2ec3a6dbcaa2b88bd8411e3e53e62db24ea9f00956bd1e038bf4888cae4613"
+    },
+    {
+      "path": "broker/pretrade_positions.json",
+      "size": 11041,
+      "sha256": "66b40fe13aab4b11ce3c6ccc70ab47e8ddaaa883ba6b14459f3b02d45c6d3f8b"
+    },
+    {
+      "path": "broker/recon_execution_blocked_2026-03-12.json",
+      "size": 485,
+      "sha256": "2a29c015fb0ea01edec21881eb00a9c5632cf7ab233c8423609035c5e45b5af5"
+    },
+    {
+      "path": "broker/recon_pretrade_2026-03-12.json",
+      "size": 4252,
+      "sha256": "85c0ab8b1824124fc19ee5edd83dcd0bab6b14cedecd36e235b675e92943df31"
+    },
+    {
+      "path": "logs/planner_failure.json",
+      "size": 256,
+      "sha256": "5db01e37e2633373ac451727f4ca1e86993b40cf00042cdbdf95fd4fa6857256"
+    },
+    {
+      "path": "logs/preflight_failure.json",
+      "size": 534,
+      "sha256": "a6754610570011f555417eaf5c34a8e8804ffa70ccc52be1954ebf20cae8f853"
+    },
+    {
+      "path": "meta.json",
+      "size": 358,
+      "sha256": "d96af982fede7dd0dd65cf38010724930e8e39523679ad5a13a13972ada427f6"
+    },
+    {
+      "path": "operator_summary.json",
+      "size": 1069,
+      "sha256": "dede6d6a879d249e46b9f4e11db9bf816b1a2ad677260453664ccb2f4ec59863"
+    }
+  ]
+}

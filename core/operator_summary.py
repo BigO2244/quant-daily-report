@@ -61,6 +61,22 @@ def write_operator_summary(
     broker_pretrade_snapshot_ok: bool | None = None,
     broker_posttrade_snapshot_ok: bool | None = None,
     broker_authoritative_state: bool | None = None,
+    post_execution_recon_status: str | None = None,
+    post_execution_recon_path: str | None = None,
+    duplicate_guard_status: str | None = None,
+    duplicate_guard_reason: str | None = None,
+    affected_symbols: list[str] | None = None,
+    repair_suggestions: list[str] | None = None,
+    duplicate_fill_suspicions_count: int | None = None,
+    broker_reject_status: str | None = None,
+    broker_reject_message: str | None = None,
+    broker_preflight_status: str | None = None,
+    broker_preflight_account_status: str | None = None,
+    broker_preflight_cash: Any = None,
+    broker_preflight_equity: Any = None,
+    broker_preflight_buying_power: Any = None,
+    broker_preflight_restriction_flags: Dict[str, Any] | None = None,
+    broker_preflight_warning_flags: list[str] | None = None,
 ) -> Path:
     """
     Write or update operator_summary.json in run root.
@@ -125,6 +141,76 @@ def write_operator_summary(
         if model_proposed_trades_count is not None
         else int(existing.get("model_proposed_trades_count", 0))
     )
+    duplicate_guard_value = (
+        str(duplicate_guard_status).strip()
+        if duplicate_guard_status is not None and str(duplicate_guard_status).strip()
+        else str(existing.get("duplicate_guard_status") or ("SKIPPED_DUPLICATE" if skipped_duplicate else "CLEAR"))
+    )
+    affected_symbols_value = (
+        sorted({str(sym).strip().upper() for sym in (affected_symbols or []) if str(sym).strip()})
+        if affected_symbols is not None
+        else list(existing.get("affected_symbols") or [])
+    )
+    repair_suggestions_value = (
+        [str(item).strip() for item in (repair_suggestions or []) if str(item).strip()]
+        if repair_suggestions is not None
+        else list(existing.get("repair_suggestions") or [])
+    )
+    duplicate_fill_suspicions_value = (
+        int(duplicate_fill_suspicions_count)
+        if duplicate_fill_suspicions_count is not None
+        else int(existing.get("duplicate_fill_suspicions_count", 0))
+    )
+    duplicate_guard_reason_value = (
+        duplicate_guard_reason
+        if (duplicate_guard_status is not None or duplicate_guard_reason is not None)
+        else existing.get("duplicate_guard_reason")
+    )
+    broker_reject_status_value = (
+        str(broker_reject_status).strip()
+        if broker_reject_status is not None and str(broker_reject_status).strip()
+        else str(existing.get("broker_reject_status") or "")
+    )
+    broker_reject_message_value = (
+        broker_reject_message
+        if (broker_reject_status is not None or broker_reject_message is not None)
+        else existing.get("broker_reject_message")
+    )
+    broker_preflight_status_value = (
+        str(broker_preflight_status).strip()
+        if broker_preflight_status is not None and str(broker_preflight_status).strip()
+        else str(existing.get("broker_preflight_status") or "")
+    )
+    broker_preflight_warning_flags_value = (
+        [str(item).strip() for item in (broker_preflight_warning_flags or []) if str(item).strip()]
+        if broker_preflight_warning_flags is not None
+        else list(existing.get("broker_preflight_warning_flags") or [])
+    )
+    broker_preflight_restriction_flags_value = (
+        dict(broker_preflight_restriction_flags or {})
+        if broker_preflight_restriction_flags is not None
+        else dict(existing.get("broker_preflight_restriction_flags") or {})
+    )
+    broker_preflight_account_status_value = (
+        broker_preflight_account_status
+        if broker_preflight_account_status is not None
+        else existing.get("broker_preflight_account_status")
+    )
+    broker_preflight_cash_value = (
+        broker_preflight_cash
+        if broker_preflight_cash is not None
+        else existing.get("broker_preflight_cash")
+    )
+    broker_preflight_equity_value = (
+        broker_preflight_equity
+        if broker_preflight_equity is not None
+        else existing.get("broker_preflight_equity")
+    )
+    broker_preflight_buying_power_value = (
+        broker_preflight_buying_power
+        if broker_preflight_buying_power is not None
+        else existing.get("broker_preflight_buying_power")
+    )
 
     payload = {
         "run_id": run_id,
@@ -164,6 +250,22 @@ def write_operator_summary(
         "broker_pretrade_snapshot_ok": broker_pretrade_snapshot_ok if broker_pretrade_snapshot_ok is not None else existing.get("broker_pretrade_snapshot_ok"),
         "broker_posttrade_snapshot_ok": broker_posttrade_snapshot_ok if broker_posttrade_snapshot_ok is not None else existing.get("broker_posttrade_snapshot_ok"),
         "broker_authoritative_state": broker_authoritative_state if broker_authoritative_state is not None else existing.get("broker_authoritative_state"),
+        "post_execution_recon_status": post_execution_recon_status or existing.get("post_execution_recon_status"),
+        "post_execution_recon_path": post_execution_recon_path or existing.get("post_execution_recon_path"),
+        "duplicate_guard_status": duplicate_guard_value,
+        "duplicate_guard_reason": duplicate_guard_reason_value,
+        "affected_symbols": affected_symbols_value,
+        "repair_suggestions": repair_suggestions_value,
+        "duplicate_fill_suspicions_count": duplicate_fill_suspicions_value,
+        "broker_reject_status": broker_reject_status_value or None,
+        "broker_reject_message": broker_reject_message_value,
+        "broker_preflight_status": broker_preflight_status_value or None,
+        "broker_preflight_account_status": broker_preflight_account_status_value,
+        "broker_preflight_cash": broker_preflight_cash_value,
+        "broker_preflight_equity": broker_preflight_equity_value,
+        "broker_preflight_buying_power": broker_preflight_buying_power_value,
+        "broker_preflight_restriction_flags": broker_preflight_restriction_flags_value,
+        "broker_preflight_warning_flags": broker_preflight_warning_flags_value,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
@@ -235,4 +337,42 @@ def format_operator_summary_log(summary: Dict[str, Any]) -> str:
         f"accepted={summary.get('accepted_count',0)} "
         f"rejected={summary.get('rejected_count',0)} "
         f"confirmation_email={summary.get('confirmation_email_sent',False)}"
+    )
+
+
+def format_execution_health_banner(summary: Dict[str, Any]) -> str:
+    affected_symbols = list(summary.get("affected_symbols") or [])
+    repair_suggestions = list(summary.get("repair_suggestions") or [])
+    broker_reject_status = str(summary.get("broker_reject_status") or "").strip() or "none"
+    broker_reject_message = str(summary.get("broker_reject_message") or "").strip() or "none"
+    broker_preflight_status = str(summary.get("broker_preflight_status") or "").strip() or "none"
+    broker_preflight_warning_flags = list(summary.get("broker_preflight_warning_flags") or [])
+    return (
+        "[EXECUTION_HEALTH] "
+        f"run_id={summary.get('run_id','')} "
+        f"duplicate_guard={summary.get('duplicate_guard_status') or 'CLEAR'} "
+        f"broker_preflight={broker_preflight_status} "
+        f"broker_preflight_warnings={','.join(broker_preflight_warning_flags) if broker_preflight_warning_flags else 'none'} "
+        f"broker_reject={broker_reject_status} "
+        f"broker_reject_message={broker_reject_message} "
+        f"post_execution_recon={summary.get('post_execution_recon_status') or 'UNKNOWN'} "
+        f"affected_symbols={','.join(affected_symbols) if affected_symbols else 'none'} "
+        f"duplicate_fill_suspicions={int(summary.get('duplicate_fill_suspicions_count') or 0)} "
+        f"repairs={'; '.join(repair_suggestions) if repair_suggestions else 'none'}"
+    )
+
+
+def format_broker_preflight_banner(preflight: Dict[str, Any]) -> str:
+    warning_flags = list(preflight.get("broker_preflight_warning_flags") or [])
+    restriction_flags = dict(preflight.get("broker_preflight_restriction_flags") or {})
+    restriction_tokens = ",".join(f"{k}={v}" for k, v in sorted(restriction_flags.items()))
+    return (
+        "[BROKER_PREFLIGHT] "
+        f"status={preflight.get('broker_preflight_status') or 'UNKNOWN'} "
+        f"account_status={preflight.get('broker_preflight_account_status') or 'unknown'} "
+        f"cash={preflight.get('broker_preflight_cash')} "
+        f"equity={preflight.get('broker_preflight_equity')} "
+        f"buying_power={preflight.get('broker_preflight_buying_power')} "
+        f"warnings={','.join(warning_flags) if warning_flags else 'none'} "
+        f"restrictions={restriction_tokens or 'none'}"
     )

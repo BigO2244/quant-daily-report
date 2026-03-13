@@ -1,0 +1,9 @@
+{
+  "block_reason": "positions_mismatch",
+  "note": "Pre-trade reconcile gate blocked order submission. Strategy signal was not evaluated; intended orders are unknown. See recon_report for full details.",
+  "orders_intended_count": null,
+  "recon_report": "outputs/runs/20260310T165333Z_22914066138_1/broker/recon_pretrade_2026-03-10.json",
+  "run_date": "2026-03-10",
+  "status": "blocked_by_recon",
+  "timestamp_utc": "2026-03-10T16:55:28.138037+00:00"
+}

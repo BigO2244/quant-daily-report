@@ -1,0 +1,10 @@
+{
+  "block_reason": "positions_mismatch",
+  "halt_reason": "pretrade_reconcile_failed:positions_mismatch",
+  "halt_stage": "pretrade_reconciliation",
+  "recommended_action": "Review model vs broker positions and resolve drift before submitting orders. Use reconciliation report details to identify offending symbols.",
+  "recon_report": "outputs/runs/20260310T165333Z_22914066138_1/broker/recon_pretrade_2026-03-10.json",
+  "run_date": "2026-03-10",
+  "source_state_notes": [],
+  "timestamp_utc": "2026-03-10T16:55:28.138213+00:00"
+}

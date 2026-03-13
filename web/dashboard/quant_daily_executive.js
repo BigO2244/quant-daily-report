@@ -121,6 +121,18 @@ function mergeData(dash, summary) {
   }
 
   d._summary = s;
+  const brokerCtx = s.broker_context || {};
+  d.execution_integrity = Object.assign(
+    {},
+    d.execution_integrity || {},
+    {
+      duplicate_guard_status: brokerCtx.duplicate_guard_status ?? (d.execution_integrity || {}).duplicate_guard_status ?? null,
+      post_execution_recon_status: brokerCtx.post_execution_recon_status ?? (d.execution_integrity || {}).post_execution_recon_status ?? null,
+      affected_symbols: brokerCtx.affected_symbols ?? (d.execution_integrity || {}).affected_symbols ?? [],
+      repair_suggestions: brokerCtx.repair_suggestions ?? (d.execution_integrity || {}).repair_suggestions ?? [],
+      duplicate_fill_suspicions_count: brokerCtx.duplicate_fill_suspicions_count ?? (d.execution_integrity || {}).duplicate_fill_suspicions_count ?? 0,
+    }
+  );
   return d;
 }
 
@@ -787,6 +799,55 @@ function renderBrokerStats(d) {
   el.innerHTML = html;
 }
 
+function integrityTier(status) {
+  const s = String(status || '').toUpperCase();
+  if (s === 'UNEXPECTED_SHORT' || s === 'MANUAL_INTERVENTION_REQUIRED') return 'fail';
+  if (s === 'DRIFT_DETECTED') return 'warn';
+  if (s === 'OK_RECONCILED') return 'ok';
+  return '';
+}
+
+function renderExecutionIntegrity(d) {
+  const integrity = d.execution_integrity || {};
+  const el = document.getElementById('execution-integrity');
+  if (!el) return;
+
+  const duplicateGuard = integrity.duplicate_guard_status || 'CLEAR';
+  const reconStatus = integrity.post_execution_recon_status || 'UNKNOWN';
+  const affected = Array.isArray(integrity.affected_symbols) ? integrity.affected_symbols : [];
+  const repairs = Array.isArray(integrity.repair_suggestions) ? integrity.repair_suggestions : [];
+  const dupSuspicions = Number(integrity.duplicate_fill_suspicions_count || 0);
+  const tier = integrityTier(reconStatus) || (duplicateGuard !== 'CLEAR' ? 'warn' : 'ok');
+  const alertText =
+    reconStatus === 'UNEXPECTED_SHORT'
+      ? 'Unexpected short position detected. Manual paper repair review required.'
+      : reconStatus === 'DRIFT_DETECTED'
+        ? 'Post-execution drift detected. Review affected symbols and repair suggestions.'
+        : duplicateGuard !== 'CLEAR'
+          ? 'Duplicate-submission protection activated for this run.'
+          : 'Execution integrity checks clear.';
+
+  const rows = [
+    { label: 'Duplicate Guard', val: esc(String(duplicateGuard)) },
+    { label: 'Post-Trade Recon', val: `<span class="${tier}">${esc(String(reconStatus))}</span>` },
+    { label: 'Affected Symbols', val: affected.length ? `<div class="integrity-tags">${affected.map(sym => `<span class="integrity-tag ${tier}">${esc(String(sym))}</span>`).join('')}</div>` : 'none' },
+    { label: 'Repair Suggestions', val: repairs.length ? `<div class="integrity-tags">${repairs.map(item => `<span class="integrity-tag ${tier}">${esc(String(item))}</span>`).join('')}</div>` : 'none' },
+    { label: 'Dup Fill Suspicions', val: esc(String(dupSuspicions)) },
+  ];
+
+  el.innerHTML = `
+    <div class="integrity-alert ${tier || 'ok'}">${esc(alertText)}</div>
+    <div class="integrity-list">
+      ${rows.map(r => `
+        <div class="integrity-row">
+          <span class="integrity-label">${esc(r.label)}</span>
+          <span class="integrity-val">${r.val}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function alignCls(s) {
   switch ((s || '').toLowerCase()) {
     case 'aligned': return 'pos';
@@ -1034,6 +1095,7 @@ async function boot() {
     renderExecStats(d);
     renderOrderFlow(d);
     renderBrokerStats(d);
+    renderExecutionIntegrity(d);
     renderTopChanges(d);
     renderAllocBars(d);
     renderChecks(d);

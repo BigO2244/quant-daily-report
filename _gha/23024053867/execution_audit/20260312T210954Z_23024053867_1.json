@@ -1,0 +1,98 @@
+{
+  "run_id": "20260312T210954Z_23024053867_1",
+  "trade_date": "2026-03-12",
+  "mode": "ALPACA",
+  "written_at": "2026-03-12T21:12:41.842488+00:00",
+  "planner": {
+    "gates": {
+      "today_et": "2026-03-12",
+      "trade_date": "2026-03-12",
+      "is_planning_run": false,
+      "is_planning_run_reason": "trade_date matches today",
+      "market_is_open": false,
+      "market_guard_status": "CLOSED",
+      "market_guard_reason": "AFTER_MARKET_CUTOFF",
+      "should_execute": false,
+      "should_execute_verdict": "FAIL"
+    },
+    "execution_status": "PLANNED",
+    "halt_reason": null,
+    "validation_reason": "market_closed_or_not_session",
+    "signals_generated": 0,
+    "proposed_trades_count": 0,
+    "executable_trades_count": 8,
+    "buy_orders_count": 4,
+    "sell_orders_count": 4,
+    "buy_orders": [
+      {
+        "ticker": "HCA",
+        "shares": 1,
+        "notional": 532.5800170898438
+      },
+      {
+        "ticker": "HWM",
+        "shares": 2,
+        "notional": 487.6400146484375
+      },
+      {
+        "ticker": "MPC",
+        "shares": 2,
+        "notional": 460.1400146484375
+      },
+      {
+        "ticker": "PSX",
+        "shares": 5,
+        "notional": 870.4499816894531
+      }
+    ],
+    "sell_orders": [
+      {
+        "ticker": "GLW",
+        "shares": 7,
+        "notional": 921.8588015670778
+      },
+      {
+        "ticker": "KMI",
+        "shares": 29,
+        "notional": 958.8403930740357
+      },
+      {
+        "ticker": "LMT",
+        "shares": 1,
+        "notional": 649.1452357177735
+      },
+      {
+        "ticker": "WMB",
+        "shares": 13,
+        "notional": 966.7164198265076
+      }
+    ],
+    "blocked_reasons": [
+      "market_guard:AFTER_MARKET_CUTOFF",
+      "max_trades_per_day exceeded (11 > 10)"
+    ],
+    "target_positions": null,
+    "cash_analysis": null
+  },
+  "broker_state_before": {
+    "cash": null,
+    "positions": null
+  },
+  "canonical_state_before": {
+    "positions": {
+      "AAPL": 3.0,
+      "ABBV": 4.0,
+      "ABNB": 7.0,
+      "FDX": 2.0,
+      "GLW": 7.0,
+      "HWM": 1.0,
+      "KMI": 29.0,
+      "LMT": 1.0,
+      "MPC": 2.0,
+      "ROST": 4.0,
+      "VZ": 19.0,
+      "WMB": 13.0
+    }
+  },
+  "executor": null
+}

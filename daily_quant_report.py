@@ -52,13 +52,21 @@ from paper.run_manager import (
 )
 from brokers.alpaca_snapshot import (
     fetch_pretrade_snapshot,
+    summarize_pretrade_broker_policy,
     write_pretrade_snapshot_artifacts,
 )
+from brokers.alpaca_broker import AlpacaSubmissionRejectError
 from core.run_pointer import write_latest_run_pointer as write_canonical_run_pointer
 from core.execution_payload import write_canonical_execution_payload, normalize_status
 from core.execution_audit import write_planner_audit
 from core.execution_summary import write_execution_artifacts
-from core.operator_summary import write_operator_summary, format_operator_summary_log
+from core.operator_summary import (
+    format_broker_preflight_banner,
+    write_operator_summary,
+    format_operator_summary_log,
+    format_execution_health_banner,
+    load_operator_summary,
+)
 from core.step_summary import append_step_summary
 from core.trade_count_contract import compute_trade_count_contract
 from paper.nav2 import update_nav
@@ -165,6 +173,8 @@ _RUN_CONTEXT_FINALIZED = False
 # reaches its natural terminal point.  Atexit reads this to write the correct
 # status to latest_run.json and to produce failure artifacts.
 _RUN_TERMINAL_STATUS: str = "failed_unknown"
+_RUN_TERMINAL_SUBSTATUS: str | None = None
+_RUN_TERMINAL_MESSAGE: str | None = None
 # Stage flags: used to produce a precise failure classification on early exit.
 _RUN_STAGE_PAYLOAD_WRITTEN: bool = False    # True after execution_payload.json written
 _RUN_STAGE_EXECUTION_REACHED: bool = False  # True when run_paper_day() is invoked
@@ -4002,6 +4012,8 @@ def _finalize_run_context(run_ctx: RunContext) -> None:
             mode=run_ctx.mode,
             run_root=str(run_ctx.run_root),
             status=_RUN_TERMINAL_STATUS,
+            substatus=_RUN_TERMINAL_SUBSTATUS,
+            status_message=_RUN_TERMINAL_MESSAGE,
         )
         logger.info(
             "[RUN_ARCHIVE] canonical run pointer written: outputs/latest_run.json status=%s",
@@ -4019,6 +4031,7 @@ def _is_run_complete(status: str) -> bool:
 def _write_failure_artifacts_on_exit(run_ctx: RunContext) -> None:
     """Write operator_summary and planner_failure.json on early exit. Non-blocking."""
     try:
+        global _RUN_TERMINAL_MESSAGE
         # Refine generic failed_unknown into a more precise classification.
         terminal = _RUN_TERMINAL_STATUS
         if terminal == "failed_unknown":
@@ -4040,18 +4053,23 @@ def _write_failure_artifacts_on_exit(run_ctx: RunContext) -> None:
             run_id=run_ctx.run_id,
             stage=stage,
             terminal_status=terminal,
+            exception_type=_RUN_TERMINAL_SUBSTATUS,
+            exception_message=_RUN_TERMINAL_MESSAGE,
         )
-        op_summary_path = run_ctx.run_root / "operator_summary.json"
-        if not op_summary_path.exists():
-            write_operator_summary(
-                run_ctx.run_root,
-                run_id=run_ctx.run_id,
-                trade_date=run_ctx.report_date or run_ctx.report_date_env or "",
-                mode=run_ctx.mode.upper(),
-                terminal_status=terminal,
-                execution_payload_written=_RUN_STAGE_PAYLOAD_WRITTEN,
-                execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
-            )
+        write_operator_summary(
+            run_ctx.run_root,
+            run_id=run_ctx.run_id,
+            trade_date=run_ctx.report_date or run_ctx.report_date_env or "",
+            mode=run_ctx.mode.upper(),
+            terminal_status=terminal,
+            pretrade_halt_reason=_RUN_TERMINAL_MESSAGE,
+            execution_payload_written=_RUN_STAGE_PAYLOAD_WRITTEN,
+            execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
+            exception_type=_RUN_TERMINAL_SUBSTATUS,
+            exception_message=_RUN_TERMINAL_MESSAGE,
+            broker_reject_status=_RUN_TERMINAL_SUBSTATUS,
+            broker_reject_message=_RUN_TERMINAL_MESSAGE,
+        )
     except Exception as e:
         logger.warning("[RUN_ARCHIVE][WARN] failure artifacts write failed: %s", e)
 
@@ -4190,6 +4208,8 @@ def _run_backtest_mode(args: argparse.Namespace) -> None:
     )
 def main(argv: list[str] | None = None):
     global _RUN_CONTEXT
+    global _RUN_STAGE_EXECUTION_REACHED, _RUN_STAGE_PAYLOAD_WRITTEN
+    global _RUN_TERMINAL_STATUS, _RUN_TERMINAL_SUBSTATUS, _RUN_TERMINAL_MESSAGE
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
     mode_norm, trading_mode_norm, alpaca_requested = _resolve_exec_modes()
@@ -4478,6 +4498,11 @@ def main(argv: list[str] | None = None):
         trade_date=trade_date_str,
         alpaca_requested=alpaca_requested,
     )
+    pretrade_broker_policy = summarize_pretrade_broker_policy(
+        ((pretrade_broker_capture or {}).get("snapshot") or {}) if pretrade_broker_capture else {}
+    )
+    if alpaca_requested:
+        logger.info("%s", format_broker_preflight_banner(pretrade_broker_policy))
     if offline_fixture and not portfolio_fixture.empty:
         portfolio_equity_for_alpha = portfolio_fixture
     else:
@@ -4680,7 +4705,6 @@ def main(argv: list[str] | None = None):
                         ledger_path=paper_ledger_path,
                         sent_ledger_path=sent_ledger_path,
                     )
-            global _RUN_STAGE_EXECUTION_REACHED
             _RUN_STAGE_EXECUTION_REACHED = True
             paper_summary = run_paper_day(
                 run_date=trade_date_str,
@@ -4703,6 +4727,13 @@ def main(argv: list[str] | None = None):
                 trade_date_str,
                 signals_path_exec,
             )
+            if alpaca_requested and (paper_summary or {}).get("posttrade_recon_status"):
+                logger.info(
+                    "[POSTTRADE_DRIFT] status=%s report=%s repairs=%s",
+                    (paper_summary or {}).get("posttrade_recon_status"),
+                    (paper_summary or {}).get("posttrade_recon_path"),
+                    ",".join(list((paper_summary or {}).get("posttrade_repair_suggestions") or [])) or "none",
+                )
             if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
                 # Refresh canonical snapshot from broker to ensure model matches reality after execution
                 posttrade_positions_path = (paper_summary or {}).get("posttrade_positions_snapshot_path")
@@ -4737,6 +4768,53 @@ def main(argv: list[str] | None = None):
                     ledger_path=paper_ledger_path,
                     sent_ledger_path=sent_ledger_path,
                 )
+        except AlpacaSubmissionRejectError as e:
+            _RUN_TERMINAL_STATUS = "failed_pre_execution"
+            _RUN_TERMINAL_SUBSTATUS = str(e.classification or "")
+            _RUN_TERMINAL_MESSAGE = str(e.broker_message or e.raw_message or e)
+            logger.error(
+                "[ALPACA][REJECT] classification=%s order_id=%s symbol=%s side=%s qty=%s message=%s",
+                e.classification,
+                e.order_id or "unknown",
+                e.symbol or "unknown",
+                e.side or "unknown",
+                e.quantity if e.quantity is not None else "unknown",
+                e.broker_message,
+            )
+            if _RUN_CONTEXT is not None:
+                write_operator_summary(
+                    _RUN_CONTEXT.run_root,
+                    run_id=str(_RUN_CONTEXT.run_id),
+                    trade_date=trade_date_str,
+                    mode=str(os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+                    terminal_status=_RUN_TERMINAL_STATUS,
+                    pretrade_halt_reason=_RUN_TERMINAL_MESSAGE,
+                    execution_payload_written=_RUN_STAGE_PAYLOAD_WRITTEN,
+                    execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
+                    broker_preflight_status=pretrade_broker_policy.get("broker_preflight_status"),
+                    broker_preflight_account_status=pretrade_broker_policy.get("broker_preflight_account_status"),
+                    broker_preflight_cash=pretrade_broker_policy.get("broker_preflight_cash"),
+                    broker_preflight_equity=pretrade_broker_policy.get("broker_preflight_equity"),
+                    broker_preflight_buying_power=pretrade_broker_policy.get("broker_preflight_buying_power"),
+                    broker_preflight_restriction_flags=pretrade_broker_policy.get("broker_preflight_restriction_flags"),
+                    broker_preflight_warning_flags=pretrade_broker_policy.get("broker_preflight_warning_flags"),
+                    broker_reject_status=_RUN_TERMINAL_SUBSTATUS,
+                    broker_reject_message=_RUN_TERMINAL_MESSAGE,
+                )
+                try:
+                    print(format_execution_health_banner(load_operator_summary(_RUN_CONTEXT.run_root) or {}))
+                except Exception as _banner_exc:
+                    logger.warning("[EXECUTION_HEALTH][WARN] failed to render banner: %s", _banner_exc)
+                try:
+                    from core.trading_day_summary import write_trading_day_summary
+                    write_trading_day_summary(
+                        run_root=_RUN_CONTEXT.run_root,
+                        run_id=str(_RUN_CONTEXT.run_id),
+                        trade_date=trade_date_str,
+                    )
+                except Exception as _summary_exc:
+                    logger.warning("[SUMMARY] trading_day_summary skipped after broker reject: %s", _summary_exc)
+            raise
         except Exception as e:
             msg = repr(e)
             if "Ledger already contains run_date" in msg:
@@ -4911,7 +4989,6 @@ def main(argv: list[str] | None = None):
         trade_date_str,
         run_root=_RUN_CONTEXT.run_root if _RUN_CONTEXT is not None else None,
     )
-    global _RUN_STAGE_PAYLOAD_WRITTEN
     _RUN_STAGE_PAYLOAD_WRITTEN = True
 
     # Write operator summary after planner completes
@@ -4950,7 +5027,43 @@ def main(argv: list[str] | None = None):
             broker_pretrade_snapshot_ok=bool(((pretrade_broker_capture or {}).get("snapshot") or {}).get("ok")) if pretrade_broker_capture else None,
             broker_posttrade_snapshot_ok=bool((paper_summary or {}).get("posttrade_account_snapshot_path") and (paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else None,
             broker_authoritative_state=bool((paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else False,
+            broker_preflight_status=pretrade_broker_policy.get("broker_preflight_status"),
+            broker_preflight_account_status=pretrade_broker_policy.get("broker_preflight_account_status"),
+            broker_preflight_cash=pretrade_broker_policy.get("broker_preflight_cash"),
+            broker_preflight_equity=pretrade_broker_policy.get("broker_preflight_equity"),
+            broker_preflight_buying_power=pretrade_broker_policy.get("broker_preflight_buying_power"),
+            broker_preflight_restriction_flags=pretrade_broker_policy.get("broker_preflight_restriction_flags"),
+            broker_preflight_warning_flags=pretrade_broker_policy.get("broker_preflight_warning_flags"),
+            post_execution_recon_status=(paper_summary or {}).get("posttrade_recon_status"),
+            post_execution_recon_path=(paper_summary or {}).get("posttrade_recon_path"),
+            duplicate_guard_status=(
+                "BLOCKED_SAME_DAY_LOCK"
+                if bool(((paper_summary or {}).get("alpaca_submission_summary") or {}).get("same_day_submission_lock"))
+                else "REMOTE_IDEMPOTENT_REPLAY"
+                if int(((paper_summary or {}).get("alpaca_submission_summary") or {}).get("idempotent_skips_total") or 0) > 0
+                else "CLEAR"
+            ),
+            duplicate_guard_reason=(
+                "; ".join(
+                    [
+                        str(reason)
+                        for reason in list((paper_summary or {}).get("blocked_reasons") or [])
+                        if "same_day_submission_lock" in str(reason)
+                    ]
+                )
+                or None
+            ),
+            affected_symbols=list((paper_summary or {}).get("posttrade_affected_symbols") or []),
+            repair_suggestions=list((paper_summary or {}).get("posttrade_repair_suggestions") or []),
+            duplicate_fill_suspicions_count=int(
+                (paper_summary or {}).get("posttrade_duplicate_fill_suspicions_count") or 0
+            ),
         )
+        try:
+            _op_summary = load_operator_summary(_RUN_CONTEXT.run_root) or {}
+            print(format_execution_health_banner(_op_summary))
+        except Exception as _banner_exc:
+            logger.warning("[EXECUTION_HEALTH][WARN] failed to render banner: %s", _banner_exc)
         # Log pretrade summary
         print(
             f"[PRETRADE_SUMMARY] run_id={_RUN_CONTEXT.run_id} "
@@ -4970,6 +5083,10 @@ def main(argv: list[str] | None = None):
                 f"- model_proposed_trades_count: `{int(trade_count_contract['model_proposed_trades_count'])}`",
                 f"- planner_intended_trades_count: `{int(trade_count_contract['planner_intended_trades_count'])}`",
                 f"- execution_eligible_trades_count: `{int(trade_count_contract['execution_eligible_trades_count'])}`",
+                f"- duplicate_guard_status: `{('BLOCKED_SAME_DAY_LOCK' if bool(((paper_summary or {}).get('alpaca_submission_summary') or {}).get('same_day_submission_lock')) else 'REMOTE_IDEMPOTENT_REPLAY' if int(((paper_summary or {}).get('alpaca_submission_summary') or {}).get('idempotent_skips_total') or 0) > 0 else 'CLEAR')}`",
+                f"- post_execution_recon_status: `{(paper_summary or {}).get('posttrade_recon_status') or 'UNKNOWN'}`",
+                f"- affected_symbols: `{','.join(list((paper_summary or {}).get('posttrade_affected_symbols') or [])) or 'none'}`",
+                f"- repair_suggestions: `{' ; '.join(list((paper_summary or {}).get('posttrade_repair_suggestions') or [])) or 'none'}`",
                 f"- proposed_trades_count (legacy alias): `{int(trade_count_contract['planner_intended_trades_count'])}`",
                 f"- executable_trades_count (legacy alias): `{int(trade_count_contract['execution_eligible_trades_count'])}`",
                 f"- operator_summary_path: `{_RUN_CONTEXT.run_root / 'operator_summary.json'}`",
@@ -5318,7 +5435,6 @@ def main(argv: list[str] | None = None):
         except Exception as e:
             logger.warning("[RUN_ARCHIVE][WARN] snapshot failed src=%s err=%s", src, e)
     # All critical pipeline steps completed — classify terminal status and finalize.
-    global _RUN_TERMINAL_STATUS
     try:
         _op_path = (_RUN_CONTEXT.run_root / "operator_summary.json") if _RUN_CONTEXT else None
         if _op_path and _op_path.exists():

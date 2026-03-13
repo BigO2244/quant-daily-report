@@ -14,7 +14,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
+from brokers.alpaca_broker import (
+    AlpacaBroker,
+    alpaca_client_order_id,
+    classify_alpaca_broker_reject,
+)
 from core.execution_payload import (
     STATUS_READY,
     STATUS_HALTED,
@@ -24,7 +28,12 @@ from core.execution_payload import (
     STATUS_IDEMPOTENT_REPLAY,
 )
 from core.execution_audit import write_early_halt_audit, write_executor_audit
-from core.operator_summary import write_operator_summary, format_operator_summary_log
+from core.operator_summary import (
+    write_operator_summary,
+    format_operator_summary_log,
+    format_execution_health_banner,
+    load_operator_summary,
+)
 from core.trading_day_summary import write_trading_day_summary
 from core.run_pointer import LATEST_RUN_POINTER, read_latest_run_pointer
 from core.step_summary import append_step_summary
@@ -298,6 +307,8 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
     rejected = 0
     duplicates = 0
     submitted = 0
+    broker_reject_status: str | None = None
+    broker_reject_message: str | None = None
 
     broker_endpoint = os.getenv("APCA_API_BASE_URL", "unknown")
     logger.info(f"[EXECUTION] Alpaca endpoint: {broker_endpoint}")
@@ -372,7 +383,11 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
             accepted += 1
             logger.info(f"[EXECUTION] Order {idx} ACCEPTED: {symbol} {side} {qty}")
         except Exception as exc:
-            reason = f"broker_error:{str(exc)}"
+            reject = classify_alpaca_broker_reject(exc)
+            if broker_reject_status is None:
+                broker_reject_status = str(reject.get("classification") or "")
+                broker_reject_message = str(reject.get("message") or "")
+            reason = f"broker_reject:{reject.get('classification')}:{reject.get('message')}"
             logger.error(f"[EXECUTION] Order {idx} REJECTED: {symbol} {side} {qty} - {exc}")
             rejected_reasons.append(reason)
             responses.append(
@@ -382,6 +397,7 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
                     "shares": qty,
                     "client_order_id": client_order_id,
                     "status": "REJECTED",
+                    "broker_reject_status": reject.get("classification"),
                     "error": str(exc),
                 }
             )
@@ -395,6 +411,8 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
         "order_ids": order_ids,
         "broker_responses": responses,
         "rejected_reasons": rejected_reasons,
+        "broker_reject_status": broker_reject_status,
+        "broker_reject_message": broker_reject_message,
     }
 
 
@@ -527,7 +545,10 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
                 mode=str(existing.get("mode") or ""),
                 skipped_duplicate=True,
                 executor_completed=True,
+                duplicate_guard_status="BLOCKED_DUPLICATE_SUBMISSION",
+                duplicate_guard_reason="existing execution_results.json with submitted_count > 0",
             )
+            print(format_execution_health_banner(load_operator_summary(run_root) or {}))
             _write_execution_step_summary(
                 run_root=run_root,
                 run_id=str(existing.get("run_id") or ""),
@@ -739,7 +760,10 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             mode=mode,
             skipped_duplicate=True,
             executor_completed=True,
+            duplicate_guard_status="BLOCKED_DUPLICATE_SUBMISSION",
+            duplicate_guard_reason=out["halt_reason"],
         )
+        print(format_execution_health_banner(load_operator_summary(run_root) or {}))
         _write_execution_step_summary(
             run_root=run_root,
             run_id=str(out.get("run_id") or ""),
@@ -809,7 +833,20 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
         accepted_count=int(out.get("accepted_count", 0)),
         rejected_count=int(out.get("rejected_count", 0)),
         executor_completed=True,
+        duplicate_guard_status=(
+            "REMOTE_IDEMPOTENT_REPLAY"
+            if int(out.get("duplicate_count") or 0) > 0
+            else "CLEAR"
+        ),
+        duplicate_guard_reason=(
+            "broker client_order_id replay detected"
+            if int(out.get("duplicate_count") or 0) > 0
+            else None
+        ),
+        broker_reject_status=str(out.get("broker_reject_status") or "") or None,
+        broker_reject_message=str(out.get("broker_reject_message") or "") or None,
     )
+    print(format_execution_health_banner(load_operator_summary(run_root) or {}))
     
     # Write operator summary log
     op_summary = {

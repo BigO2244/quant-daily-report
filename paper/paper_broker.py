@@ -16,7 +16,13 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
+from brokers.alpaca_broker import (
+    AlpacaBroker,
+    AlpacaSubmissionRejectError,
+    alpaca_client_order_id,
+    classify_alpaca_broker_reject,
+)
+from reconciliation import write_post_execution_drift_report
 from paper.run_manager import safe_write_text
 from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
@@ -1035,10 +1041,12 @@ def _same_day_submission_lock(sent_ledger_path: str, trade_date: str) -> Tuple[i
     return order_count, prior_run_ids
 
 
-def _coerce_float(value: object, default: float = 0.0) -> float:
+def _coerce_float(value: object, default: float | None = 0.0) -> float | None:
     try:
         return float(value)
     except Exception:
+        if default is None:
+            return None
         return float(default)
 
 
@@ -1208,6 +1216,281 @@ def _write_alpaca_orders(run_date: str, submissions: List[Dict[str, object]]) ->
         allow_overwrite=_allow_overwrite(),
     )
     return str(out_path)
+
+
+def _write_broker_account_snapshot(
+    filename: str,
+    run_date: str,
+    account: Dict[str, object] | None,
+) -> str:
+    root = _run_output_root()
+    out_path = root / "broker" / filename
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "trade_date": str(run_date),
+        "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "account": dict(account or {}),
+        "cash": _coerce_float((account or {}).get("cash"), None),
+        "equity": _coerce_float(
+            (account or {}).get("equity") or (account or {}).get("portfolio_value"),
+            None,
+        ),
+        "buying_power": _coerce_float((account or {}).get("buying_power"), None),
+        "status": str((account or {}).get("status") or ""),
+    }
+    safe_write_text(
+        out_path,
+        json.dumps(payload, indent=2) + "\n",
+        allow_overwrite=_allow_overwrite(),
+    )
+    return str(out_path)
+
+
+def _write_broker_positions_snapshot(
+    filename: str,
+    run_date: str,
+    positions: List[Dict[str, object]] | None,
+) -> str:
+    root = _run_output_root()
+    out_path = root / "broker" / filename
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = _positions_to_quantity_map(positions or [])
+    payload = {
+        "trade_date": str(run_date),
+        "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "positions_count": int(len(positions or [])),
+        "normalized_positions": normalized,
+        "positions": list(positions or []),
+    }
+    safe_write_text(
+        out_path,
+        json.dumps(payload, indent=2) + "\n",
+        allow_overwrite=_allow_overwrite(),
+    )
+    return str(out_path)
+
+
+def _split_orders_for_execution(
+    orders: List[Dict[str, object]],
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    sell_orders: List[Dict[str, object]] = []
+    buy_orders: List[Dict[str, object]] = []
+    for order in orders or []:
+        side = str(order.get("side", "")).upper()
+        if side in {"SELL", "CLOSE", "REDUCE"}:
+            sell_orders.append(order)
+        else:
+            buy_orders.append(order)
+    return sell_orders, buy_orders
+
+
+def _order_notional(order: Dict[str, object]) -> float:
+    notional = _coerce_float(order.get("notional"), 0.0)
+    if notional > 0:
+        return float(abs(notional))
+    qty = abs(_coerce_float(order.get("quantity"), 0.0))
+    price = abs(_coerce_float(order.get("price"), 0.0))
+    return float(qty * price)
+
+
+def _positions_to_quantity_map(positions: List[Dict[str, object]]) -> Dict[str, float]:
+    normalized: Dict[str, float] = {}
+    for pos in positions or []:
+        symbol = str(pos.get("symbol") or "").upper().strip()
+        if not symbol:
+            continue
+        normalized[symbol] = abs(_coerce_float(pos.get("qty"), 0.0) or 0.0)
+    return normalized
+
+
+def _holdings_to_quantity_map(holdings: pd.DataFrame) -> Dict[str, float]:
+    if holdings is None or holdings.empty:
+        return {}
+    normalized: Dict[str, float] = {}
+    for _, row in holdings.iterrows():
+        symbol = str(row.get("ticker") or "").upper().strip()
+        if not symbol:
+            continue
+        normalized[symbol] = normalized.get(symbol, 0.0) + abs(_coerce_float(row.get("shares"), 0.0) or 0.0)
+    return normalized
+
+
+def _expected_positions_after_orders(
+    starting_positions: Dict[str, float],
+    orders: List[Dict[str, object]],
+) -> Dict[str, float]:
+    expected = {str(k): float(v) for k, v in (starting_positions or {}).items()}
+    for order in orders or []:
+        symbol = str(order.get("ticker") or "").upper().strip()
+        if not symbol:
+            continue
+        qty = abs(_coerce_float(order.get("quantity"), 0.0) or 0.0)
+        side = str(order.get("side") or "").upper()
+        current = expected.get(symbol, 0.0)
+        if side in {"SELL", "CLOSE", "REDUCE"}:
+            new_qty = max(0.0, current - qty)
+        else:
+            new_qty = current + qty
+        if new_qty <= 1e-12:
+            expected.pop(symbol, None)
+        else:
+            expected[symbol] = float(new_qty)
+    return expected
+
+
+def _compute_buy_budget(account: Dict[str, object], cfg: PaperConfig) -> float:
+    cash = max(0.0, _coerce_float(account.get("cash"), 0.0))
+    buying_power = max(0.0, _coerce_float(account.get("buying_power"), cash))
+    confirmed_base = min(cash, buying_power) if buying_power > 0 else cash
+    buffer_pct = max(0.0, float(cfg.cash_buffer_bps) / 10000.0)
+    return max(0.0, confirmed_base * (1.0 - buffer_pct))
+
+
+def _apply_buy_budget(
+    buy_orders: List[Dict[str, object]],
+    buy_budget: float,
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    kept: List[Dict[str, object]] = []
+    skipped: List[Dict[str, object]] = []
+    spent = 0.0
+    for order in buy_orders or []:
+        notional = _order_notional(order)
+        if spent + notional <= float(buy_budget) + 1e-9:
+            kept.append(order)
+            spent += notional
+        else:
+            skipped.append(order)
+    return kept, skipped
+
+
+def _submit_alpaca_orders(
+    *,
+    alpaca: AlpacaBroker,
+    orders: List[Dict[str, object]],
+    run_date: str,
+    alpaca_submissions: List[Dict[str, object]],
+    submission_metadata: Dict[str, Dict[str, object]],
+    idempotent_skips: List[str],
+    idempotent_drop_reasons: Counter[str],
+    alpaca_submission_summary: Dict[str, object],
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]], int, int, int]:
+    submitted_orders: List[Dict[str, object]] = []
+    remote_existing_orders: List[Dict[str, object]] = []
+    submit_attempts = 0
+    submit_success = 0
+    submit_failed = 0
+
+    for order in orders:
+        internal_order_id = str(order.get("order_id", ""))
+        ticker = str(order.get("ticker", "")).upper()
+        side = str(order.get("side", "")).upper()
+        quantity = abs(_coerce_float(order.get("quantity"), 0.0))
+        order_type = str(order.get("order_type", "MKT")).upper()
+        tif = str(order.get("time_in_force", "DAY")).lower()
+        if quantity <= 0:
+            continue
+
+        client_order_id = alpaca_client_order_id(internal_order_id)
+        existing_remote = alpaca.find_order_by_client_id(client_order_id)
+        if existing_remote:
+            idempotent_skips.append(internal_order_id)
+            idempotent_drop_reasons["remote_existing"] += 1
+            remote_existing_orders.append(order)
+            alpaca_submission_summary["remote_existing_orders"] = int(
+                alpaca_submission_summary.get("remote_existing_orders", 0)
+            ) + 1
+            submission_metadata[internal_order_id] = {
+                "client_order_id": client_order_id,
+                "alpaca_order_id": str(existing_remote.get("id") or ""),
+                "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+            }
+            alpaca_submissions.append(
+                {
+                    "trade_date": run_date,
+                    "order_id": internal_order_id,
+                    "client_order_id": client_order_id,
+                    "alpaca_order_id": str(existing_remote.get("id") or ""),
+                    "ticker": ticker,
+                    "side": side,
+                    "quantity": float(quantity),
+                    "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                    "submitted_at": str(existing_remote.get("submitted_at") or ""),
+                    "mode": "alpaca",
+                }
+            )
+            logger.info(
+                "[ALPACA][IDEMPOTENT] skipped remote-existing order_id=%s client_order_id=%s",
+                internal_order_id,
+                client_order_id,
+            )
+            continue
+
+        submit_attempts += 1
+        try:
+            if order_type == "MKT":
+                submitted = alpaca.submit_market_order(
+                    symbol=ticker,
+                    qty=float(quantity),
+                    side=side,
+                    client_order_id=client_order_id,
+                    tif=tif,
+                )
+            else:
+                submitted = alpaca.submit_limit_order(
+                    symbol=ticker,
+                    qty=float(quantity),
+                    side=side,
+                    limit_price=_coerce_float(order.get("notional"), 0.0) / max(float(quantity), 1.0),
+                    client_order_id=client_order_id,
+                    tif=tif,
+                )
+        except Exception as exc:
+            submit_failed += 1
+            reject = classify_alpaca_broker_reject(exc)
+            raise AlpacaSubmissionRejectError(
+                classification=str(reject.get("classification") or ""),
+                broker_message=str(reject.get("message") or ""),
+                raw_message=str(reject.get("raw_message") or reject.get("message") or exc),
+                broker_code=reject.get("code"),
+                order_id=internal_order_id,
+                symbol=ticker,
+                side=side,
+                quantity=float(quantity),
+            ) from exc
+        submit_success += 1
+
+        alpaca_order_id = str(submitted.get("id") or "")
+        status = str(submitted.get("status") or "SUBMITTED")
+        submitted_at = str(submitted.get("submitted_at") or "")
+        submission_metadata[internal_order_id] = {
+            "client_order_id": client_order_id,
+            "alpaca_order_id": alpaca_order_id,
+            "status": status,
+        }
+        alpaca_submissions.append(
+            {
+                "trade_date": run_date,
+                "order_id": internal_order_id,
+                "client_order_id": client_order_id,
+                "alpaca_order_id": alpaca_order_id,
+                "ticker": ticker,
+                "side": side,
+                "quantity": float(quantity),
+                "status": status,
+                "submitted_at": submitted_at,
+                "mode": "alpaca",
+            }
+        )
+        submitted_orders.append(order)
+        logger.info(
+            "[ALPACA][SUBMIT] order_id=%s client_order_id=%s alpaca_order_id=%s status=%s",
+            internal_order_id,
+            client_order_id,
+            alpaca_order_id,
+            status,
+        )
+
+    return submitted_orders, remote_existing_orders, submit_attempts, submit_success, submit_failed
 
 
 def _alpaca_positions_to_holdings(
@@ -1700,6 +1983,19 @@ def run_paper_day(
     sent_ledger_path: str = cfg.sent_ledger_path
     alpaca_account_snapshot: Dict[str, object] | None = None
     alpaca_positions_snapshot: List[Dict[str, object]] = []
+    postsell_account_snapshot: Dict[str, object] | None = None
+    postsell_account_snapshot_path: str | None = None
+    postsell_cash_confirmed: float | None = None
+    postsell_buying_power_confirmed: float | None = None
+    buy_budget_computed: float | None = None
+    budget_skipped_orders: List[Dict[str, object]] = []
+    posttrade_account_snapshot_path: str | None = None
+    posttrade_positions_snapshot_path: str | None = None
+    posttrade_recon_path: str | None = None
+    posttrade_recon_status: str | None = None
+    posttrade_repair_suggestions: List[str] = []
+    posttrade_affected_symbols: List[str] = []
+    posttrade_duplicate_fill_suspicions_count: int = 0
     execution_enabled = bool(mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only and not blocked and not is_weekend)
     logger.info(
         "[EXEC_GATE] mode=%s allow=%s market_open=%s plan_only=%s blocked=%s is_weekend=%s reason=%s",
@@ -1786,108 +2082,87 @@ def run_paper_day(
                 )
             submitted_orders: List[Dict[str, object]] = []
             remote_existing_orders: List[Dict[str, object]] = []
-            for order in orders:
-                internal_order_id = str(order.get("order_id", ""))
-                ticker = str(order.get("ticker", "")).upper()
-                side = str(order.get("side", "")).upper()
-                quantity = abs(_coerce_float(order.get("quantity"), 0.0))
-                order_type = str(order.get("order_type", "MKT")).upper()
-                tif = str(order.get("time_in_force", "DAY")).lower()
-                if quantity <= 0:
-                    continue
+            sell_orders, buy_orders = _split_orders_for_execution(orders)
+            logger.info(
+                "[ALPACA][PHASE] sell_phase_orders=%d buy_phase_orders=%d",
+                len(sell_orders),
+                len(buy_orders),
+            )
 
-                client_order_id = alpaca_client_order_id(internal_order_id)
-                existing_remote = alpaca.find_order_by_client_id(client_order_id)
-                if existing_remote:
-                    idempotent_skips.append(internal_order_id)
-                    idempotent_drop_reasons["remote_existing"] += 1
-                    remote_existing_orders.append(order)
-                    alpaca_submission_summary["remote_existing_orders"] = int(
-                        alpaca_submission_summary["remote_existing_orders"]
-                    ) + 1
-                    submission_metadata[internal_order_id] = {
-                        "client_order_id": client_order_id,
-                        "alpaca_order_id": str(existing_remote.get("id") or ""),
-                        "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
-                    }
-                    alpaca_submissions.append(
-                        {
-                            "trade_date": run_date,
-                            "order_id": internal_order_id,
-                            "client_order_id": client_order_id,
-                            "alpaca_order_id": str(existing_remote.get("id") or ""),
-                            "ticker": ticker,
-                            "side": side,
-                            "quantity": float(quantity),
-                            "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
-                            "submitted_at": str(existing_remote.get("submitted_at") or ""),
-                            "mode": "alpaca",
-                        }
-                    )
-                    logger.info(
-                        "[ALPACA][IDEMPOTENT] skipped remote-existing order_id=%s client_order_id=%s",
-                        internal_order_id,
-                        client_order_id,
-                    )
-                    continue
+            phase_submitted, phase_existing, phase_attempts, phase_success, phase_failed = _submit_alpaca_orders(
+                alpaca=alpaca,
+                orders=sell_orders,
+                run_date=run_date,
+                alpaca_submissions=alpaca_submissions,
+                submission_metadata=submission_metadata,
+                idempotent_skips=idempotent_skips,
+                idempotent_drop_reasons=idempotent_drop_reasons,
+                alpaca_submission_summary=alpaca_submission_summary,
+            )
+            submitted_orders.extend(phase_submitted)
+            remote_existing_orders.extend(phase_existing)
+            submit_attempts += phase_attempts
+            submit_success += phase_success
+            submit_failed += phase_failed
+            alpaca_submission_summary["sell_phase_submitted"] = int(len(phase_submitted))
 
-                submit_attempts += 1
-                try:
-                    if order_type == "MKT":
-                        submitted = alpaca.submit_market_order(
-                            symbol=ticker,
-                            qty=float(quantity),
-                            side=side,
-                            client_order_id=client_order_id,
-                            tif=tif,
-                        )
-                    else:
-                        submitted = alpaca.submit_limit_order(
-                            symbol=ticker,
-                            qty=float(quantity),
-                            side=side,
-                            limit_price=_coerce_float(order.get("notional"), 0.0)
-                            / max(float(quantity), 1.0),
-                            client_order_id=client_order_id,
-                            tif=tif,
-                        )
-                except Exception as exc:
-                    submit_failed += 1
-                    raise RuntimeError(
-                        f"Alpaca submission failed order_id={internal_order_id}: {exc}"
-                    ) from exc
-                submit_success += 1
-
-                alpaca_order_id = str(submitted.get("id") or "")
-                status = str(submitted.get("status") or "SUBMITTED")
-                submitted_at = str(submitted.get("submitted_at") or "")
-                submission_metadata[internal_order_id] = {
-                    "client_order_id": client_order_id,
-                    "alpaca_order_id": alpaca_order_id,
-                    "status": status,
-                }
-                alpaca_submissions.append(
-                    {
-                        "trade_date": run_date,
-                        "order_id": internal_order_id,
-                        "client_order_id": client_order_id,
-                        "alpaca_order_id": alpaca_order_id,
-                        "ticker": ticker,
-                        "side": side,
-                        "quantity": float(quantity),
-                        "status": status,
-                        "submitted_at": submitted_at,
-                        "mode": "alpaca",
-                    }
+            try:
+                postsell_account_snapshot = alpaca.get_account()
+                postsell_account_snapshot_path = _write_broker_account_snapshot(
+                    "postsell_account_snapshot.json",
+                    run_date,
+                    postsell_account_snapshot,
                 )
-                submitted_orders.append(order)
+                postsell_cash_confirmed = _coerce_float(
+                    postsell_account_snapshot.get("cash"),
+                    None,
+                )
+                postsell_buying_power_confirmed = _coerce_float(
+                    postsell_account_snapshot.get("buying_power"),
+                    postsell_cash_confirmed,
+                )
+                buy_budget_computed = _compute_buy_budget(postsell_account_snapshot, cfg)
+                alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
+                alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
                 logger.info(
-                    "[ALPACA][SUBMIT] order_id=%s client_order_id=%s alpaca_order_id=%s status=%s",
-                    internal_order_id,
-                    client_order_id,
-                    alpaca_order_id,
-                    status,
+                    "[ALPACA][POSTSELL] snapshot=%s cash=%s buying_power=%s buy_budget=%.2f",
+                    postsell_account_snapshot_path,
+                    postsell_cash_confirmed,
+                    postsell_buying_power_confirmed,
+                    float(buy_budget_computed),
                 )
+            except Exception as exc:
+                raise RuntimeError(f"Failed to capture post-sell account snapshot: {exc}") from exc
+
+            buy_orders_budgeted, budget_skipped_orders = _apply_buy_budget(
+                buy_orders,
+                float(buy_budget_computed or 0.0),
+            )
+            if budget_skipped_orders:
+                logger.info(
+                    "[ALPACA][BUY_BUDGET] skipped_orders=%d buy_budget=%.2f",
+                    len(budget_skipped_orders),
+                    float(buy_budget_computed or 0.0),
+                )
+            alpaca_submission_summary["budget_skipped_orders"] = int(len(budget_skipped_orders))
+            alpaca_submission_summary["buy_phase_planned"] = int(len(buy_orders_budgeted))
+
+            phase_submitted, phase_existing, phase_attempts, phase_success, phase_failed = _submit_alpaca_orders(
+                alpaca=alpaca,
+                orders=buy_orders_budgeted,
+                run_date=run_date,
+                alpaca_submissions=alpaca_submissions,
+                submission_metadata=submission_metadata,
+                idempotent_skips=idempotent_skips,
+                idempotent_drop_reasons=idempotent_drop_reasons,
+                alpaca_submission_summary=alpaca_submission_summary,
+            )
+            submitted_orders.extend(phase_submitted)
+            remote_existing_orders.extend(phase_existing)
+            submit_attempts += phase_attempts
+            submit_success += phase_success
+            submit_failed += phase_failed
+            alpaca_submission_summary["buy_phase_submitted"] = int(len(phase_submitted))
 
             orders_for_execution = submitted_orders
             alpaca_submission_summary["submitted_orders"] = int(len(submitted_orders))
@@ -1908,9 +2183,45 @@ def run_paper_day(
             except Exception as exc:
                 raise RuntimeError(f"Failed to refresh Alpaca account/positions: {exc}") from exc
 
+            posttrade_account_snapshot_path = _write_broker_account_snapshot(
+                "posttrade_account_snapshot.json",
+                run_date,
+                alpaca_account_snapshot,
+            )
+            posttrade_positions_snapshot_path = _write_broker_positions_snapshot(
+                "posttrade_positions.json",
+                run_date,
+                alpaca_positions_snapshot,
+            )
+            expected_positions = _expected_positions_after_orders(
+                _holdings_to_quantity_map(holdings_prev),
+                submitted_orders,
+            )
+            actual_positions = _positions_to_quantity_map(alpaca_positions_snapshot)
+            posttrade_recon = write_post_execution_drift_report(
+                run_date=run_date,
+                expected_positions=expected_positions,
+                actual_positions=actual_positions,
+                actual_cash=_coerce_float(
+                    alpaca_account_snapshot.get("cash"),
+                    None,
+                ),
+                actual_equity=_coerce_float(
+                    alpaca_account_snapshot.get("equity") or alpaca_account_snapshot.get("portfolio_value"),
+                    None,
+                ),
+            )
+            posttrade_recon_path = str(posttrade_recon.get("report_path") or "")
+            posttrade_recon_status = str(posttrade_recon.get("drift_status") or "")
+            posttrade_repair_suggestions = list(posttrade_recon.get("repair_suggestions") or [])
+            posttrade_affected_symbols = list(posttrade_recon.get("affected_symbols") or [])
+            posttrade_duplicate_fill_suspicions_count = int(
+                posttrade_recon.get("duplicate_fill_suspicions_count") or 0
+            )
+
             alpaca_orders_path = _write_alpaca_orders(run_date, alpaca_submissions)
             orders = submitted_orders
-        else:
+        elif execution_enabled:
             alpaca_submission_summary["submitted_orders"] = int(len(orders))
             _persist_sent_orders(orders, sent_ledger_path, run_date, run_id)
 
@@ -2207,6 +2518,21 @@ def run_paper_day(
         "alpaca_submissions": alpaca_submissions,
         "alpaca_orders_path": alpaca_orders_path,
         "alpaca_submission_summary": alpaca_submission_summary,
+        "alpaca_account_snapshot": alpaca_account_snapshot,
+        "alpaca_positions_snapshot": alpaca_positions_snapshot,
+        "postsell_account_snapshot": postsell_account_snapshot,
+        "postsell_account_snapshot_path": postsell_account_snapshot_path,
+        "postsell_cash_confirmed": postsell_cash_confirmed,
+        "postsell_buying_power_confirmed": postsell_buying_power_confirmed,
+        "buy_budget_computed": buy_budget_computed,
+        "budget_skipped_orders": budget_skipped_orders,
+        "posttrade_account_snapshot_path": posttrade_account_snapshot_path,
+        "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
+        "posttrade_recon_path": posttrade_recon_path,
+        "posttrade_recon_status": posttrade_recon_status,
+        "posttrade_repair_suggestions": posttrade_repair_suggestions,
+        "posttrade_affected_symbols": posttrade_affected_symbols,
+        "posttrade_duplicate_fill_suspicions_count": posttrade_duplicate_fill_suspicions_count,
         "run_id": run_id,
         "broker_reconciliation": recon,
         "breaker": {

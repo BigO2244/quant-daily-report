@@ -1,0 +1,110 @@
+{
+  "run_id": "2026-03-12:main:growth_engine_v4",
+  "trade_date": "2026-03-12",
+  "mode": "ALPACA",
+  "status": "READY",
+  "halt_reason": null,
+  "trades": [
+    {
+      "ticker": "GLW",
+      "side": "SELL",
+      "shares": 7,
+      "entry_price": 131.69411450958253,
+      "stop_loss": null,
+      "take_profit": null,
+      "notional": 921.8588015670778,
+      "reason": "removed_from_targets",
+      "notes": "removed_from_targets",
+      "order_id": null
+    },
+    {
+      "ticker": "HCA",
+      "side": "BUY",
+      "shares": 1,
+      "entry_price": 532.5800170898438,
+      "stop_loss": 502.9400198800223,
+      "take_profit": 577.0400129045759,
+      "notional": 532.5800170898438,
+      "reason": "rebalance_to_target",
+      "notes": "rebalance_to_target",
+      "order_id": null
+    },
+    {
+      "ticker": "HWM",
+      "side": "BUY",
+      "shares": 2,
+      "entry_price": 243.82000732421875,
+      "stop_loss": 228.5685795375279,
+      "take_profit": 266.69714900425504,
+      "notional": 487.6400146484375,
+      "reason": "rebalance_to_target",
+      "notes": "rebalance_to_target",
+      "order_id": null
+    },
+    {
+      "ticker": "KMI",
+      "side": "SELL",
+      "shares": 29,
+      "entry_price": 33.06346183013916,
+      "stop_loss": null,
+      "take_profit": null,
+      "notional": 958.8403930740357,
+      "reason": "removed_from_targets",
+      "notes": "removed_from_targets",
+      "order_id": null
+    },
+    {
+      "ticker": "LMT",
+      "side": "SELL",
+      "shares": 1,
+      "entry_price": 649.1452357177735,
+      "stop_loss": null,
+      "take_profit": null,
+      "notional": 649.1452357177735,
+      "reason": "removed_from_targets",
+      "notes": "removed_from_targets",
+      "order_id": null
+    },
+    {
+      "ticker": "MPC",
+      "side": "BUY",
+      "shares": 2,
+      "entry_price": 230.07000732421875,
+      "stop_loss": 211.25929478236608,
+      "take_profit": 258.28607613699774,
+      "notional": 460.1400146484375,
+      "reason": "rebalance_to_target",
+      "notes": "rebalance_to_target",
+      "order_id": null
+    },
+    {
+      "ticker": "PSX",
+      "side": "BUY",
+      "shares": 5,
+      "entry_price": 174.08999633789062,
+      "stop_loss": 162.35142081124442,
+      "take_profit": 191.69785962785994,
+      "notional": 870.4499816894531,
+      "reason": "rebalance_to_target",
+      "notes": "rebalance_to_target",
+      "order_id": null
+    },
+    {
+      "ticker": "WMB",
+      "side": "SELL",
+      "shares": 13,
+      "entry_price": 74.36280152511597,
+      "stop_loss": null,
+      "take_profit": null,
+      "notional": 966.7164198265076,
+      "reason": "removed_from_targets",
+      "notes": "removed_from_targets",
+      "order_id": null
+    }
+  ],
+  "executable_trades_count": 8,
+  "execution_status": "READY",
+  "status_label": null,
+  "status_reason": null,
+  "created_at": "2026-03-12T20:58:48.131099+00:00"
+}

@@ -1,0 +1,150 @@
+{
+  "allow_empty": false,
+  "block_reason": "positions_mismatch",
+  "broker_snapshot": {
+    "cash": 551.16,
+    "equity": 9857.92,
+    "position_count": 12,
+    "positions": {
+      "AAPL": 3.0,
+      "ABBV": 4.0,
+      "ABNB": 7.0,
+      "FDX": 2.0,
+      "GLW": 7.0,
+      "HWM": 1.0,
+      "KMI": 29.0,
+      "LMT": 1.0,
+      "MPC": 2.0,
+      "ROST": 4.0,
+      "VZ": 19.0,
+      "WMB": 13.0
+    },
+    "raw_account_fields_found": [
+      "buying_power",
+      "cash",
+      "equity",
+      "id",
+      "portfolio_value",
+      "raw",
+      "status"
+    ],
+    "source": "alpaca_adapter"
+  },
+  "cash_delta": -5449.22,
+  "config": {
+    "cash_tol": 5.0,
+    "equity_hard_fail": false,
+    "equity_tol_abs": 10.0,
+    "equity_tol_pct": 0.001,
+    "max_qty_diff": 0.0
+  },
+  "diffs": {
+    "errors": [],
+    "max_abs_qty_diff": 15.0,
+    "missing_in_broker": [],
+    "missing_in_model": [
+      "LMT",
+      "WMB"
+    ],
+    "qty_mismatches": [
+      {
+        "abs_diff": 2.0,
+        "broker_qty": 3.0,
+        "model_qty": 1.0,
+        "symbol": "AAPL"
+      },
+      {
+        "abs_diff": 2.0,
+        "broker_qty": 4.0,
+        "model_qty": 2.0,
+        "symbol": "ABBV"
+      },
+      {
+        "abs_diff": 4.0,
+        "broker_qty": 7.0,
+        "model_qty": 3.0,
+        "symbol": "ABNB"
+      },
+      {
+        "abs_diff": 1.0,
+        "broker_qty": 2.0,
+        "model_qty": 1.0,
+        "symbol": "FDX"
+      },
+      {
+        "abs_diff": 4.0,
+        "broker_qty": 7.0,
+        "model_qty": 3.0,
+        "symbol": "GLW"
+      },
+      {
+        "abs_diff": 15.0,
+        "broker_qty": 29.0,
+        "model_qty": 14.0,
+        "symbol": "KMI"
+      },
+      {
+        "abs_diff": 2.0,
+        "broker_qty": 4.0,
+        "model_qty": 2.0,
+        "symbol": "ROST"
+      },
+      {
+        "abs_diff": 10.0,
+        "broker_qty": 19.0,
+        "model_qty": 9.0,
+        "symbol": "VZ"
+      }
+    ]
+  },
+  "equity_delta": -55.469999999999345,
+  "model_snapshot": {
+    "cash": 6000.38,
+    "equity": 9913.39,
+    "parse_error": null,
+    "parser": "canonical_json",
+    "path": "outputs/paper_state/canonical_positions.json",
+    "path_exists": true,
+    "position_count": 10,
+    "positions": {
+      "AAPL": 1.0,
+      "ABBV": 2.0,
+      "ABNB": 3.0,
+      "FDX": 1.0,
+      "GLW": 3.0,
+      "HWM": 1.0,
+      "KMI": 14.0,
+      "MPC": 2.0,
+      "ROST": 2.0,
+      "VZ": 9.0
+    },
+    "reason": "posttrade_refresh_from_broker",
+    "source_state_notes": []
+  },
+  "phase": "pretrade",
+  "recon_summary": {
+    "cash_breach": true,
+    "equity_breach": true,
+    "equity_drift_only": false,
+    "equity_hard_fail_enabled": false,
+    "positions_ok": false
+  },
+  "run_date": "2026-03-12",
+  "sent_ledger": {
+    "headers": [
+      "date",
+      "run_id",
+      "order_id",
+      "ticker",
+      "side"
+    ],
+    "path": "outputs/orders_sent/orders_sent.csv",
+    "path_exists": true,
+    "row_count": 0
+  },
+  "stage": "pretrade",
+  "strict": true,
+  "timestamp_utc": "2026-03-12T19:33:48.347564+00:00",
+  "trading_mode": "alpaca",
+  "verdict": "FAIL"
+}

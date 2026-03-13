@@ -16,6 +16,78 @@ def _utc_now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
+def _coerce_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def summarize_pretrade_broker_policy(snapshot: Dict[str, Any] | None) -> Dict[str, Any]:
+    account = dict((snapshot or {}).get("account") or {})
+    raw_account = dict(account.get("raw") or {})
+
+    def _field(name: str) -> Any:
+        value = account.get(name)
+        if value is None:
+            value = raw_account.get(name)
+        return value
+
+    account_status = str(_field("status") or "").strip() or None
+    cash = _field("cash")
+    equity = _field("equity") or _field("portfolio_value")
+    buying_power = _field("buying_power")
+
+    restriction_flags: Dict[str, Any] = {}
+    for key in (
+        "trading_blocked",
+        "account_blocked",
+        "transfers_blocked",
+        "shorting_enabled",
+        "pattern_day_trader",
+        "daytrade_count",
+        "daytrading_buying_power",
+    ):
+        value = _field(key)
+        if value is not None:
+            restriction_flags[key] = value
+
+    warning_flags: List[str] = []
+    status_norm = str(account_status or "").strip().upper()
+    if account_status and status_norm != "ACTIVE":
+        warning_flags.append(f"account_status_not_active:{account_status}")
+    for key in ("trading_blocked", "account_blocked", "transfers_blocked", "pattern_day_trader"):
+        value = restriction_flags.get(key)
+        if isinstance(value, bool) and value:
+            warning_flags.append(f"{key}:true")
+        elif isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "y", "on"}:
+            warning_flags.append(f"{key}:true")
+
+    buying_power_value = _coerce_float(buying_power)
+    if buying_power_value is not None and buying_power_value <= 0:
+        warning_flags.append("buying_power_non_positive")
+
+    if not account:
+        status = "UNKNOWN"
+    elif warning_flags:
+        status = "WARN"
+    else:
+        status = "CLEAR"
+
+    return {
+        "broker_preflight_status": status,
+        "broker_preflight_account_status": account_status,
+        "broker_preflight_cash": cash,
+        "broker_preflight_equity": equity,
+        "broker_preflight_buying_power": buying_power,
+        "broker_preflight_restriction_flags": restriction_flags,
+        "broker_preflight_warning_flags": warning_flags,
+        "broker_preflight_warning_count": int(len(warning_flags)),
+    }
+
+
 def fetch_pretrade_snapshot() -> Dict[str, Any]:
     """
     Best-effort Alpaca snapshot captured before run_paper_day().

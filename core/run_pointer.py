@@ -44,6 +44,8 @@ def write_latest_run_pointer(
     mode: str,
     run_root: str,
     status: str = 'success',
+    substatus: str | None = None,
+    status_message: str | None = None,
     workspace_root: str = None,
 ) -> str:
     """
@@ -75,6 +77,8 @@ def write_latest_run_pointer(
         'mode': mode,
         'run_root': run_root,
         'status': status,
+        'substatus': substatus,
+        'status_message': status_message,
         'created_at': datetime.utcnow().isoformat() + 'Z',
     }
     

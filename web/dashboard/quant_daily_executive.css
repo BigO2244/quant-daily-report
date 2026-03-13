@@ -309,10 +309,10 @@ body { font-family: var(--font-sans); color: var(--c-text); min-height: 100vh; }
 /* ── Health row ──────────────────────────────────────────────── */
 .health-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: var(--gap);
 }
-@media (max-width: 700px) { .health-row { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .health-row { grid-template-columns: 1fr; } }
 
 /* ── Checks list ─────────────────────────────────────────────── */
 .checks-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
@@ -358,6 +358,45 @@ body { font-family: var(--font-sans); color: var(--c-text); min-height: 100vh; }
 .exc-item.warning { background: var(--c-yellow-dim); border-color: var(--c-yellow); }
 .exc-cat { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700; flex-shrink: 0; width: 110px; color: var(--c-text-2); }
 .exc-msg { flex: 1; color: var(--c-text); line-height: 1.4; }
+
+/* ── Execution integrity ─────────────────────────────────────── */
+.execution-integrity { display: flex; flex-direction: column; gap: 8px; }
+.integrity-alert {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.integrity-alert.ok   { border-color: var(--c-green);  background: var(--c-green-dim); }
+.integrity-alert.warn { border-color: var(--c-yellow); background: var(--c-yellow-dim); color: var(--c-yellow); }
+.integrity-alert.fail { border-color: var(--c-red);    background: var(--c-red-dim); color: var(--c-red); }
+.integrity-list { display: flex; flex-direction: column; gap: 2px; }
+.integrity-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--c-border-soft);
+  font-size: 0.83rem;
+}
+.integrity-row:last-child { border-bottom: none; }
+.integrity-label { color: var(--c-text-2); }
+.integrity-val { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+.integrity-tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.integrity-tag {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+}
+.integrity-tag.warn { border-color: var(--c-yellow); color: var(--c-yellow); }
+.integrity-tag.fail { border-color: var(--c-red); color: var(--c-red); }
 
 /* ── Footer ──────────────────────────────────────────────────── */
 .dash-footer {

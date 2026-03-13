@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from brokers.alpaca_snapshot import summarize_pretrade_broker_policy
 from core.execution_audit import safe_artifact_name
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,44 @@ def _build_dashboard(workspace_root: Path) -> Dict[str, Any]:
     return {"generated": generated, "path": found_path}
 
 
+def _build_broker_context(run_root: Path, operator_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    broker_dir = run_root / "broker"
+    pretrade_account = _read_json(broker_dir / "pretrade_account_snapshot.json") or {}
+    pretrade_positions = _read_json(broker_dir / "pretrade_positions.json") or {}
+    posttrade_account = _read_json(broker_dir / "posttrade_account_snapshot.json") or {}
+    posttrade_positions = _read_json(broker_dir / "posttrade_positions.json") or {}
+    pretrade_account_obj = dict(pretrade_account.get("account") or {})
+    preflight = summarize_pretrade_broker_policy({"account": pretrade_account_obj}) if pretrade_account_obj else {}
+
+    return {
+        "broker_authoritative_state": bool((operator_summary or {}).get("broker_authoritative_state")),
+        "broker_pretrade_snapshot_ok": (operator_summary or {}).get("broker_pretrade_snapshot_ok"),
+        "broker_posttrade_snapshot_ok": (operator_summary or {}).get("broker_posttrade_snapshot_ok"),
+        "duplicate_guard_status": (operator_summary or {}).get("duplicate_guard_status"),
+        "broker_preflight_status": (operator_summary or {}).get("broker_preflight_status") or preflight.get("broker_preflight_status"),
+        "broker_preflight_account_status": (operator_summary or {}).get("broker_preflight_account_status") or preflight.get("broker_preflight_account_status"),
+        "broker_preflight_cash": (operator_summary or {}).get("broker_preflight_cash") if (operator_summary or {}).get("broker_preflight_cash") is not None else preflight.get("broker_preflight_cash"),
+        "broker_preflight_equity": (operator_summary or {}).get("broker_preflight_equity") if (operator_summary or {}).get("broker_preflight_equity") is not None else preflight.get("broker_preflight_equity"),
+        "broker_preflight_buying_power": (operator_summary or {}).get("broker_preflight_buying_power") if (operator_summary or {}).get("broker_preflight_buying_power") is not None else preflight.get("broker_preflight_buying_power"),
+        "broker_preflight_restriction_flags": dict((operator_summary or {}).get("broker_preflight_restriction_flags") or preflight.get("broker_preflight_restriction_flags") or {}),
+        "broker_preflight_warning_flags": list((operator_summary or {}).get("broker_preflight_warning_flags") or preflight.get("broker_preflight_warning_flags") or []),
+        "broker_reject_status": (operator_summary or {}).get("broker_reject_status"),
+        "broker_reject_message": (operator_summary or {}).get("broker_reject_message"),
+        "post_execution_recon_status": (operator_summary or {}).get("post_execution_recon_status"),
+        "affected_symbols": list((operator_summary or {}).get("affected_symbols") or []),
+        "repair_suggestions": list((operator_summary or {}).get("repair_suggestions") or []),
+        "duplicate_fill_suspicions_count": int((operator_summary or {}).get("duplicate_fill_suspicions_count") or 0),
+        "pretrade_positions_count": pretrade_positions.get("positions_count"),
+        "pretrade_account_status": pretrade_account_obj.get("status"),
+        "pretrade_cash": pretrade_account_obj.get("cash"),
+        "pretrade_equity": pretrade_account_obj.get("equity") or pretrade_account_obj.get("portfolio_value"),
+        "pretrade_buying_power": pretrade_account_obj.get("buying_power"),
+        "posttrade_positions_count": posttrade_positions.get("positions_count"),
+        "posttrade_cash": posttrade_account.get("cash"),
+        "posttrade_equity": posttrade_account.get("equity"),
+    }
+
+
 def _build_benchmark(workspace_root: Path) -> Dict[str, Any]:
     null_result: Dict[str, Any] = {
         "portfolio_value": None,
@@ -279,6 +318,7 @@ def build_trading_day_summary(
     email_summary = _build_email_summary(operator_summary)
     dashboard = _build_dashboard(ws)
     benchmark = _build_benchmark(ws)
+    broker_context = _build_broker_context(run_root, operator_summary)
 
     return {
         "run_id": run_id,
@@ -286,6 +326,7 @@ def build_trading_day_summary(
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "execution_summary": exec_summary,
         "portfolio_state": portfolio_state,
+        "broker_context": broker_context,
         "email_summary": email_summary,
         "dashboard": dashboard,
         "benchmark": benchmark,

@@ -201,6 +201,43 @@ class DashboardBuilder:
                 return rel, payload
         return None, None
 
+    def _load_trading_day_summary(self, run_id: str | None) -> dict[str, Any] | None:
+        candidate_paths: list[str] = []
+        if run_id:
+            candidate_paths.append(f"outputs/runs/{run_id}/trading_day_summary.json")
+        candidate_paths.append("outputs/trading_day_summary.json")
+
+        for rel in candidate_paths:
+            payload = self._read_json(rel, required=False, used=True)
+            if isinstance(payload, dict):
+                return payload
+        return None
+
+    @staticmethod
+    def _build_execution_integrity(summary_obj: dict[str, Any] | None) -> dict[str, Any]:
+        broker_context = (summary_obj or {}).get("broker_context") if isinstance(summary_obj, dict) else {}
+        if not isinstance(broker_context, dict):
+            broker_context = {}
+        affected_symbols = [str(sym).strip().upper() for sym in list(broker_context.get("affected_symbols") or []) if str(sym).strip()]
+        repair_suggestions = [str(item).strip() for item in list(broker_context.get("repair_suggestions") or []) if str(item).strip()]
+        duplicate_guard_status = str(broker_context.get("duplicate_guard_status") or "").strip() or None
+        recon_status = str(broker_context.get("post_execution_recon_status") or "").strip() or None
+        duplicate_fill_suspicions_count = int(broker_context.get("duplicate_fill_suspicions_count") or 0)
+        return {
+            "duplicate_guard_status": duplicate_guard_status,
+            "post_execution_recon_status": recon_status,
+            "affected_symbols": affected_symbols,
+            "repair_suggestions": repair_suggestions,
+            "duplicate_fill_suspicions_count": duplicate_fill_suspicions_count,
+            "visible": bool(
+                duplicate_guard_status
+                or recon_status
+                or affected_symbols
+                or repair_suggestions
+                or duplicate_fill_suspicions_count
+            ),
+        }
+
     def _artifact_broker_snapshot(self, run_id: str | None, report_date: str | None) -> tuple[dict[str, Any] | None, str]:
         candidate_paths: list[str] = [
             "outputs/broker/broker_snapshot_latest.json",
@@ -208,6 +245,8 @@ class DashboardBuilder:
         if run_id:
             candidate_paths.extend(
                 [
+                    f"outputs/runs/{run_id}/broker/posttrade_account_snapshot.json",
+                    f"outputs/runs/{run_id}/broker/pretrade_account_snapshot.json",
                     f"outputs/runs/{run_id}/broker/broker_snapshot_latest.json",
                     f"outputs/runs/{run_id}/broker/broker_snapshot.json",
                 ]
@@ -934,6 +973,8 @@ class DashboardBuilder:
         _, execution_payload = self._find_latest_execution_payload(report_date, run_id=run_id)
         exec_payload_obj: dict[str, Any] = execution_payload if isinstance(execution_payload, dict) else {}
         health_obj, integrity_obj, _, _ = self._find_latest_health_integrity(run_id, report_date)
+        trading_day_summary_obj = self._load_trading_day_summary(run_id)
+        execution_integrity = self._build_execution_integrity(trading_day_summary_obj)
 
         canonical_positions_path, positions_obj = self._read_first_existing_json(
             [
@@ -1784,6 +1825,7 @@ class DashboardBuilder:
             },
             "governed_snapshot": governed_snapshot,
             "broker_snapshot": broker_snapshot,
+            "execution_integrity": execution_integrity,
             "data_freshness": data_freshness,
             "top_changes": top_changes,
             "exceptions": exceptions,
@@ -1802,6 +1844,7 @@ class DashboardBuilder:
                     "trust_level": broker_snapshot.get("trust_level", "missing"),
                     "source_detail": broker_snapshot.get("source_detail", "missing"),
                     "suspicious": bool(broker_snapshot.get("suspicious")),
+                    "broker_authoritative_state": bool(broker_snapshot.get("trust_level") == "authoritative"),
                 },
             },
         }

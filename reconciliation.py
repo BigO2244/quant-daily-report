@@ -772,6 +772,171 @@ def refresh_canonical_snapshot_from_posttrade_snapshot(
         return False
 
 
+def write_post_execution_drift_report(
+    *,
+    run_date: str,
+    expected_positions: dict[str, float],
+    actual_positions: dict[str, float],
+    expected_cash: float | None = None,
+    expected_equity: float | None = None,
+    actual_cash: float | None = None,
+    actual_equity: float | None = None,
+) -> dict[str, Any]:
+    expected = _normalize_positions(expected_positions or {})
+    actual = _normalize_positions(actual_positions or {})
+    missing_in_actual = sorted([sym for sym in expected if sym not in actual])
+    missing_in_expected = sorted([sym for sym in actual if sym not in expected])
+    qty_mismatches: list[dict[str, Any]] = []
+    matching_positions: list[str] = []
+    share_deltas: list[dict[str, Any]] = []
+    unexpected_short_positions: list[dict[str, Any]] = []
+    repair_suggestions: list[str] = []
+    duplicate_fill_suspicions: list[str] = []
+
+    for sym in sorted(set(expected) | set(actual)):
+        expected_qty = float(expected.get(sym, 0.0))
+        actual_qty = float(actual.get(sym, 0.0))
+        delta_qty = float(actual_qty - expected_qty)
+        classification = "MATCH"
+        if sym in expected and sym in actual and abs(delta_qty) <= 1e-9:
+            matching_positions.append(sym)
+        elif sym in expected and sym not in actual:
+            classification = "MISSING_BROKER_POSITION"
+        elif sym not in expected and sym in actual:
+            classification = "UNEXPECTED_BROKER_POSITION"
+        else:
+            classification = "QTY_MISMATCH"
+            qty_mismatches.append(
+                {
+                    "symbol": sym,
+                    "expected_qty": expected_qty,
+                    "actual_qty": actual_qty,
+                    "abs_diff": abs(delta_qty),
+                }
+            )
+
+        if sym in expected or sym in actual:
+            share_deltas.append(
+                {
+                    "symbol": sym,
+                    "expected_qty": expected_qty,
+                    "broker_qty": actual_qty,
+                    "delta_qty": delta_qty,
+                    "classification": classification,
+                }
+            )
+
+        if actual_qty < -1e-9:
+            repair_qty = abs(actual_qty)
+            unexpected_short_positions.append(
+                {
+                    "symbol": sym,
+                    "expected_qty": expected_qty,
+                    "broker_qty": actual_qty,
+                    "delta_qty": delta_qty,
+                    "repair_suggestion": f"BUY {int(repair_qty) if float(repair_qty).is_integer() else repair_qty} {sym}",
+                }
+            )
+            repair_suggestions.append(
+                f"BUY {int(repair_qty) if float(repair_qty).is_integer() else repair_qty} {sym}"
+            )
+            if expected_qty >= -1e-9:
+                duplicate_fill_suspicions.append(sym)
+
+    cash_delta = (
+        float(actual_cash) - float(expected_cash)
+        if actual_cash is not None and expected_cash is not None
+        else None
+    )
+    equity_delta = (
+        float(actual_equity) - float(expected_equity)
+        if actual_equity is not None and expected_equity is not None
+        else None
+    )
+
+    input_issues: list[str] = []
+    if not isinstance(expected_positions, dict):
+        input_issues.append("expected_positions_unavailable")
+    if not isinstance(actual_positions, dict):
+        input_issues.append("actual_positions_unavailable")
+
+    if input_issues:
+        drift_status = "MANUAL_INTERVENTION_REQUIRED"
+    elif unexpected_short_positions:
+        drift_status = "UNEXPECTED_SHORT"
+    elif missing_in_actual or missing_in_expected or qty_mismatches:
+        drift_status = "DRIFT_DETECTED"
+    elif (cash_delta is not None and abs(float(cash_delta)) > 1e-9) or (
+        equity_delta is not None and abs(float(equity_delta)) > 1e-9
+    ):
+        drift_status = "DRIFT_DETECTED"
+    else:
+        drift_status = "OK_RECONCILED"
+
+    if drift_status == "OK_RECONCILED":
+        operator_message = "Broker positions match expected post-execution state."
+    elif drift_status == "UNEXPECTED_SHORT":
+        operator_message = (
+            "Unexpected short position(s) detected after execution; inspect broker orders and repair before next run."
+        )
+    elif drift_status == "DRIFT_DETECTED":
+        operator_message = (
+            "Post-execution broker drift detected; expected and actual positions differ."
+        )
+    else:
+        operator_message = (
+            "Post-execution drift check could not be completed from local artifacts; manual review required."
+        )
+
+    payload = {
+        "trade_date": str(run_date),
+        "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "verdict": "PASS" if drift_status == "OK_RECONCILED" else "WARN",
+        "drift_status": drift_status,
+        "operator_message": operator_message,
+        "manual_intervention_required": drift_status in {"UNEXPECTED_SHORT", "MANUAL_INTERVENTION_REQUIRED"},
+        "expected_positions": expected,
+        "actual_positions": actual,
+        "matching_positions": matching_positions,
+        "missing_in_actual": missing_in_actual,
+        "missing_in_expected": missing_in_expected,
+        "qty_mismatches": qty_mismatches,
+        "share_deltas": share_deltas,
+        "unexpected_short_positions": unexpected_short_positions,
+        "repair_suggestions": repair_suggestions,
+        "duplicate_fill_suspicions": duplicate_fill_suspicions,
+        "duplicate_fill_suspicions_count": int(len(duplicate_fill_suspicions)),
+        "affected_symbols": sorted(
+            set(
+                list(missing_in_actual)
+                + list(missing_in_expected)
+                + [str(item.get("symbol") or "") for item in qty_mismatches]
+                + [str(item.get("symbol") or "") for item in unexpected_short_positions]
+            )
+            - {""}
+        ),
+        "expected_cash": expected_cash,
+        "broker_cash": actual_cash,
+        "cash_delta": cash_delta,
+        "expected_equity": expected_equity,
+        "broker_equity": actual_equity,
+        "equity_delta": equity_delta,
+        "input_issues": input_issues,
+    }
+    report_path = _write_report(phase="posttrade", run_date=run_date, payload=payload)
+    payload["report_path"] = report_path
+    logger.info(
+        "[POSTTRADE_DRIFT] status=%s shorts=%d qty_mismatches=%d extra=%d missing=%d report=%s",
+        drift_status,
+        len(unexpected_short_positions),
+        len(qty_mismatches),
+        len(missing_in_expected),
+        len(missing_in_actual),
+        report_path,
+    )
+    return payload
+
+
 def pre_trade_reconcile_and_classify(
     *,
     run_date: str,
@@ -831,6 +996,7 @@ def pre_trade_reconcile_and_classify(
             )
             classification["reconciliation_decision"] = "BLOCK"
             classification["block_reason"] = "canonical_self_heal_write_failed"
+            decision = "BLOCK"
             repair_actions.append(f"canonical_refresh_failed:{type(exc).__name__}: {exc}")
 
     payload = {
@@ -1268,6 +1434,20 @@ def post_trade_validate(
     if not _is_truthy(os.getenv("RECON_ENABLE"), default=True):
         return
     strict_post = _is_truthy(os.getenv("RECON_STRICT_POST"), default=False)
+    existing_report = _recon_out_path(run_date=run_date, phase="posttrade")
+    if existing_report.exists():
+        try:
+            payload = json.loads(existing_report.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and "expected_positions" in payload and "actual_positions" in payload:
+                verdict = str(payload.get("verdict") or "UNKNOWN").upper()
+                logger.info("[RECON][POSTTRADE] using existing broker-authoritative report=%s verdict=%s", existing_report, verdict)
+                if strict_post and verdict != "PASS":
+                    raise RuntimeError(
+                        f"Post-trade reconciliation failed strict mode verdict={verdict} report={existing_report}"
+                    )
+                return
+        except Exception:
+            pass
     verdict, report_path, _block_reason = _reconcile(
         stage="posttrade",
         run_date=run_date,

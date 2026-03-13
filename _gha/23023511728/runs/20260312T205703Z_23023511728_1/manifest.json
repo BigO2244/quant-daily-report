@@ -1,0 +1,91 @@
+{
+  "root": "outputs/runs/20260312T205703Z_23023511728_1",
+  "file_count": 17,
+  "files": [
+    {
+      "path": "broker/account_probe.json",
+      "size": 276,
+      "sha256": "87e1626d0cd9449be740ab7277dfc245d5ef985d51c9170e107c63d25138262c"
+    },
+    {
+      "path": "broker/intended_orders_2026-03-12.json",
+      "size": 1903,
+      "sha256": "58d75d172d9a9fdb9184c2e4cb3b52ed1ed508e5eb0ac136980e6c2a0cd60959"
+    },
+    {
+      "path": "broker/pretrade_account_snapshot.json",
+      "size": 1676,
+      "sha256": "d4a0e2c3da54e3f4ccbb0c7d5312dfe69db925febbcd9edba536a982d6c19c6f"
+    },
+    {
+      "path": "broker/pretrade_positions.json",
+      "size": 11048,
+      "sha256": "1c653fe6cb5e0802a3be505cc966fb70c3e0b67dc3c0612905443b1e19885c55"
+    },
+    {
+      "path": "broker/recon_posttrade_2026-03-12.json",
+      "size": 2142,
+      "sha256": "fa06dbb44f502c8d90531c60cc9cab66a7021252353dbc62da4cb9134463bd6c"
+    },
+    {
+      "path": "broker/recon_pretrade_2026-03-12.json",
+      "size": 4286,
+      "sha256": "0a6c00386fffebb68b232cad10df6908500c1be35c0444aa7df1d135d92cd3a5"
+    },
+    {
+      "path": "execution_payload.json",
+      "size": 2894,
+      "sha256": "31c6370e0dc8028576e9c1fcc268131a310b092ba455f6de10befb2932e974f4"
+    },
+    {
+      "path": "ledger/orders_sent.csv",
+      "size": 34,
+      "sha256": "c25dd7bafdac930299d481a7a583b3a595631337bf8db48479a742e949502183"
+    },
+    {
+      "path": "meta.json",
+      "size": 358,
+      "sha256": "c4145d1ae3b0141e1ef9ebf0ce085572f7f898d973d9ccc23314bdc21d69439f"
+    },
+    {
+      "path": "operator_summary.json",
+      "size": 1050,
+      "sha256": "b7d95a2230f73ac9cd441e0aad622949a749596734f35acbc1ce267c0f8a7758"
+    },
+    {
+      "path": "reports/quant_report_2026-03-12.html",
+      "size": 16468,
+      "sha256": "6b199496646b7f684f63fcfcaf0b3c2c27f86f9c814bc19734191c108564e2d9"
+    },
+    {
+      "path": "reports/trade_execution_2026-03-12.txt",
+      "size": 2146,
+      "sha256": "95e874cfe53e9f29d753702718b220f9de1b364b518c54a3ae60efadba48d761"
+    },
+    {
+      "path": "reports/trade_rundown_2026-03-12.txt",
+      "size": 2974,
+      "sha256": "c54a68bfab4e8e99fc9a0a2cee1a7613bebfa111c8c138bc0f5592abb27a17ae"
+    },
+    {
+      "path": "reports/trade_snapshot_2026-03-12.txt",
+      "size": 2974,
+      "sha256": "c54a68bfab4e8e99fc9a0a2cee1a7613bebfa111c8c138bc0f5592abb27a17ae"
+    },
+    {
+      "path": "snapshots/execution_email_2026-03-12.json",
+      "size": 5015,
+      "sha256": "52117e51e384ff5f628abd557ee86daf0aa7490938b640019525b7c8e248d9aa"
+    },
+    {
+      "path": "snapshots/health_2026-03-12.json",
+      "size": 1104,
+      "sha256": "db36bf51f6629fd5bcece97b753c6e0ee4907d17b67672193394d903f968fb90"
+    },
+    {
+      "path": "snapshots/integrity_2026-03-11.json",
+      "size": 722,
+      "sha256": "c0fc2d32203d403cfd5d2407dd1283bc4b5146fdfea1608e627faa3f54d3ff1b"
+    }
+  ]
+}

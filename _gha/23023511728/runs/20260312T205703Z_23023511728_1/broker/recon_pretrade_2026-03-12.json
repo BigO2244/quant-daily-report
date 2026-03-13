@@ -1,0 +1,209 @@
+{
+  "allowed_to_execute": true,
+  "block_reason": "none",
+  "broker_snapshot": {
+    "account_error": null,
+    "account_status": "AccountStatus.ACTIVE",
+    "cash": 551.16,
+    "equity": 9818.99,
+    "errors": [],
+    "position_count": 12,
+    "positions": {
+      "AAPL": 3.0,
+      "ABBV": 4.0,
+      "ABNB": 7.0,
+      "FDX": 2.0,
+      "GLW": 7.0,
+      "HWM": 1.0,
+      "KMI": 29.0,
+      "LMT": 1.0,
+      "MPC": 2.0,
+      "ROST": 4.0,
+      "VZ": 19.0,
+      "WMB": 13.0
+    },
+    "positions_error": null,
+    "raw_account_fields_found": [
+      "buying_power",
+      "cash",
+      "equity",
+      "id",
+      "portfolio_value",
+      "raw",
+      "status"
+    ],
+    "source": "alpaca_adapter"
+  },
+  "cash_delta": -5449.22,
+  "diffs": {
+    "errors": [],
+    "max_abs_qty_diff": 15.0,
+    "missing_in_broker": [],
+    "missing_in_model": [
+      "LMT",
+      "WMB"
+    ],
+    "qty_mismatches": [
+      {
+        "abs_diff": 2.0,
+        "broker_qty": 3.0,
+        "model_qty": 1.0,
+        "symbol": "AAPL"
+      },
+      {
+        "abs_diff": 2.0,
+        "broker_qty": 4.0,
+        "model_qty": 2.0,
+        "symbol": "ABBV"
+      },
+      {
+        "abs_diff": 4.0,
+        "broker_qty": 7.0,
+        "model_qty": 3.0,
+        "symbol": "ABNB"
+      },
+      {
+        "abs_diff": 1.0,
+        "broker_qty": 2.0,
+        "model_qty": 1.0,
+        "symbol": "FDX"
+      },
+      {
+        "abs_diff": 4.0,
+        "broker_qty": 7.0,
+        "model_qty": 3.0,
+        "symbol": "GLW"
+      },
+      {
+        "abs_diff": 15.0,
+        "broker_qty": 29.0,
+        "model_qty": 14.0,
+        "symbol": "KMI"
+      },
+      {
+        "abs_diff": 2.0,
+        "broker_qty": 4.0,
+        "model_qty": 2.0,
+        "symbol": "ROST"
+      },
+      {
+        "abs_diff": 10.0,
+        "broker_qty": 19.0,
+        "model_qty": 9.0,
+        "symbol": "VZ"
+      }
+    ]
+  },
+  "equity_delta": -94.39999999999964,
+  "hard_blocks": [],
+  "missing_in_broker": [],
+  "missing_in_model": [
+    "LMT",
+    "WMB"
+  ],
+  "model_snapshot": {
+    "cash": 6000.38,
+    "equity": 9913.39,
+    "parse_error": null,
+    "parser": "canonical_json",
+    "path": "outputs/paper_state/canonical_positions.json",
+    "path_exists": true,
+    "position_count": 10,
+    "positions": {
+      "AAPL": 1.0,
+      "ABBV": 2.0,
+      "ABNB": 3.0,
+      "FDX": 1.0,
+      "GLW": 3.0,
+      "HWM": 1.0,
+      "KMI": 14.0,
+      "MPC": 2.0,
+      "ROST": 2.0,
+      "VZ": 9.0
+    },
+    "reason": "posttrade_refresh_from_broker",
+    "source_state_notes": [],
+    "timestamp_utc": "2026-03-10T21:41:25.724242+00:00"
+  },
+  "phase": "pretrade",
+  "qty_mismatches": [
+    {
+      "abs_diff": 2.0,
+      "broker_qty": 3.0,
+      "model_qty": 1.0,
+      "symbol": "AAPL"
+    },
+    {
+      "abs_diff": 2.0,
+      "broker_qty": 4.0,
+      "model_qty": 2.0,
+      "symbol": "ABBV"
+    },
+    {
+      "abs_diff": 4.0,
+      "broker_qty": 7.0,
+      "model_qty": 3.0,
+      "symbol": "ABNB"
+    },
+    {
+      "abs_diff": 1.0,
+      "broker_qty": 2.0,
+      "model_qty": 1.0,
+      "symbol": "FDX"
+    },
+    {
+      "abs_diff": 4.0,
+      "broker_qty": 7.0,
+      "model_qty": 3.0,
+      "symbol": "GLW"
+    },
+    {
+      "abs_diff": 15.0,
+      "broker_qty": 29.0,
+      "model_qty": 14.0,
+      "symbol": "KMI"
+    },
+    {
+      "abs_diff": 2.0,
+      "broker_qty": 4.0,
+      "model_qty": 2.0,
+      "symbol": "ROST"
+    },
+    {
+      "abs_diff": 10.0,
+      "broker_qty": 19.0,
+      "model_qty": 9.0,
+      "symbol": "VZ"
+    }
+  ],
+  "reconciliation_decision": "SELF_HEAL",
+  "refreshed_canonical_path": "outputs/paper_state/canonical_positions.json",
+  "repair_actions": [
+    "canonical_refreshed_from_broker:outputs/paper_state/canonical_positions.json"
+  ],
+  "run_date": "2026-03-12",
+  "self_heals": [
+    "canonical_snapshot_stale",
+    "quantity_mismatch",
+    "symbol_set_drift"
+  ],
+  "sent_ledger": {
+    "headers": [
+      "date",
+      "run_id",
+      "order_id",
+      "ticker",
+      "side"
+    ],
+    "path": "outputs/orders_sent/orders_sent.csv",
+    "path_exists": true,
+    "row_count": 0
+  },
+  "stage": "pretrade",
+  "timestamp_utc": "2026-03-12T20:58:45.525943+00:00",
+  "trading_mode": "alpaca",
+  "warnings": [
+    "cash_drift_gte_1pct_equity",
+    "equity_drift_lt_1pct_equity"
+  ]
+}
