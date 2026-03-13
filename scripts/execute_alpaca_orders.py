@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -103,6 +104,81 @@ def _results_path(run_root: Path) -> Path:
     return run_root / "execution_results.json"
 
 
+def _count_recorded_orders(path: Path) -> int:
+    if not path.exists() or path.stat().st_size <= 0:
+        return 0
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            order_ids = {
+                str(row.get("order_id") or "").strip()
+                for row in reader
+                if any(str(value or "").strip() for value in row.values())
+            }
+    except Exception as exc:
+        logger.warning("[EXECUTION][LOCK] failed reading broker order artifact %s: %s", path, exc)
+        return 0
+    normalized = {order_id for order_id in order_ids if order_id}
+    return int(len(normalized))
+
+
+def _detect_same_trade_date_sent_ledger_lock(trade_date: str) -> Tuple[int, str | None]:
+    ledger_path = Path("outputs") / "orders_sent" / "orders_sent.csv"
+    if not ledger_path.exists() or ledger_path.stat().st_size <= 0:
+        return 0, None
+    try:
+        with ledger_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            matching_rows = [
+                row
+                for row in reader
+                if str(row.get("date") or row.get("trade_date") or "").strip() == str(trade_date)
+            ]
+    except Exception as exc:
+        logger.warning("[EXECUTION][LOCK] failed reading sent ledger %s: %s", ledger_path, exc)
+        return 0, None
+
+    order_ids = {
+        str(row.get("order_id") or "").strip()
+        for row in matching_rows
+        if str(row.get("order_id") or "").strip()
+    }
+    if not order_ids:
+        return 0, None
+
+    prior_run_ids = sorted(
+        {
+            str(row.get("run_id") or "").strip()
+            for row in matching_rows
+            if str(row.get("run_id") or "").strip()
+        }
+    )
+    source = f"sent_ledger:{ledger_path}"
+    if prior_run_ids:
+        source = f"{source}:prior_runs={','.join(prior_run_ids)}"
+    return int(len(order_ids)), source
+
+
+def _detect_existing_submission_lock(run_root: Path, trade_date: str) -> Tuple[int, str | None]:
+    results_path = _results_path(run_root)
+    if results_path.exists():
+        existing = _load_json(results_path)
+        submitted_count = int(existing.get("submitted_count") or 0)
+        if submitted_count > 0:
+            return submitted_count, f"execution_results:{results_path}"
+
+    broker_orders_path = run_root / "broker" / f"orders_{trade_date}.csv"
+    recorded_orders = _count_recorded_orders(broker_orders_path)
+    if recorded_orders > 0:
+        return recorded_orders, f"broker_orders:{broker_orders_path}"
+
+    same_day_recorded_orders, same_day_source = _detect_same_trade_date_sent_ledger_lock(trade_date)
+    if same_day_recorded_orders > 0:
+        return same_day_recorded_orders, same_day_source
+
+    return 0, None
+
+
 def _new_results(pointer: Dict[str, Any], payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
     payload = payload or {}
     return {
@@ -183,6 +259,26 @@ def _normalize_side(side: str) -> str:
     return "BUY"
 
 
+def _deterministic_internal_order_id(payload: Dict[str, Any], trade: Dict[str, Any]) -> str:
+    existing = str(trade.get("order_id") or "").strip()
+    if existing:
+        return existing
+
+    trade_date = str(payload.get("trade_date") or "").strip() or "UNKNOWN_DATE"
+    symbol = str(trade.get("ticker") or "").upper().strip() or "UNKNOWN_TICKER"
+    side = _normalize_side(str(trade.get("side") or ""))
+    qty_value = trade.get("shares") or trade.get("qty") or 0
+    try:
+        qty = float(qty_value)
+    except (TypeError, ValueError):
+        qty = 0.0
+    qty_token = format(abs(qty), "g")
+
+    # Same-day fresh-runner idempotency depends on this fallback being stable
+    # across different workflow RUN_IDs when the planner payload omitted order_id.
+    return f"{trade_date}:ALPACA:{symbol}:{side}:{qty_token}"
+
+
 def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path) -> Dict[str, Any]:
     """
     Submit orders to Alpaca broker with per-order validation.
@@ -229,7 +325,7 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
         symbol = str(trade.get("ticker") or "").upper().strip()
         side = _normalize_side(str(trade.get("side") or ""))
         qty = float(trade.get("shares") or trade.get("qty") or 0)
-        internal_order_id = str(trade.get("order_id") or f"{payload.get('run_id','')}_{symbol}_{side}_{qty}")
+        internal_order_id = _deterministic_internal_order_id(payload, trade)
 
         client_order_id = alpaca_client_order_id(internal_order_id)
         existing = broker.find_order_by_client_id(client_order_id)
@@ -616,6 +712,69 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             rejected_count=0,
             duplicate_skip_reason=None,
         )
+        return out
+
+    duplicate_count, duplicate_source = _detect_existing_submission_lock(
+        run_root,
+        str(out.get("trade_date") or payload.get("trade_date") or ""),
+    )
+    if duplicate_count > 0 and not force_resubmit:
+        out["status"] = STATUS_SKIPPED_DUPLICATE
+        out["duplicate_count"] = int(duplicate_count)
+        out["halt_reason"] = (
+            "EXECUTION_ALREADY_RECORDED — refusing duplicate Alpaca submission for "
+            f"run_id={out.get('run_id','')} trade_date={out.get('trade_date','')} "
+            f"source={duplicate_source} recorded_orders={duplicate_count}"
+        )
+        _write_json(results_path, out)
+        logger.warning("[EXECUTION][LOCK] %s", out["halt_reason"])
+        print(
+            "[EXECUTION_SUMMARY] "
+            f"run_id={out.get('run_id','')} submitted=0 accepted=0 rejected=0 status={STATUS_SKIPPED_DUPLICATE}"
+        )
+        write_operator_summary(
+            run_root,
+            run_id=str(out.get("run_id") or ""),
+            trade_date=str(out.get("trade_date") or ""),
+            mode=mode,
+            skipped_duplicate=True,
+            executor_completed=True,
+        )
+        _write_execution_step_summary(
+            run_root=run_root,
+            run_id=str(out.get("run_id") or ""),
+            trade_date=str(out.get("trade_date") or ""),
+            mode=mode,
+            pretrade_status=execution_status,
+            proposed_count=len(payload.get("trades", [])),
+            executable_count=int(payload.get("executable_trades_count") or len(payload.get("trades", []))),
+            execution_status=STATUS_SKIPPED_DUPLICATE,
+            submitted_count=0,
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_skip_reason=out["halt_reason"],
+        )
+        write_executor_audit(
+            run_id=str(out.get("run_id") or "UNKNOWN"),
+            pretrade_status=execution_status,
+            halt_reason=out.get("halt_reason"),
+            submitted_count=0,
+            accepted_count=0,
+            rejected_count=0,
+            duplicate_count=int(out.get("duplicate_count") or 0),
+            broker_responses=[],
+            broker_cash_after=None,
+            broker_positions_after=None,
+            execution_status=STATUS_SKIPPED_DUPLICATE,
+        )
+        try:
+            write_trading_day_summary(
+                run_root=run_root,
+                run_id=str(out.get("run_id") or "UNKNOWN"),
+                trade_date=str(out.get("trade_date") or "UNKNOWN"),
+            )
+        except Exception as _summary_exc:
+            logger.warning("[SUMMARY] trading_day_summary skipped: %s", _summary_exc)
         return out
 
     broker = AlpacaBroker.from_env()

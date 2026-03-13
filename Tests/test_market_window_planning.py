@@ -328,6 +328,51 @@ def test_alpaca_mode_invariant_raises_when_executable_but_zero_submit_attempts(
         )
 
 
+def test_alpaca_mode_same_day_sent_ledger_lock_blocks_submission(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _mock_open_market(monkeypatch, trading_mode="alpaca")
+
+    sent_ledger = tmp_path / "outputs" / "orders_sent" / "orders_sent.csv"
+    sent_ledger.parent.mkdir(parents=True, exist_ok=True)
+    sent_ledger.write_text(
+        "\n".join(
+            [
+                "date,run_id,order_id,ticker,side,client_order_id,alpaca_order_id,status",
+                "2026-02-10,prior-run,2026-02-10:main:v1:AAPL:BUY,AAPL,BUY,cid-1,alpaca-1,accepted",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class _StubAlpaca:
+        paper = True
+
+        @classmethod
+        def from_env(cls):
+            raise AssertionError("from_env should not be called when same-day sent ledger lock is active")
+
+    monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+    )
+
+    assert result["trading_mode"] == "alpaca"
+    assert result["execution_status"] == "HALTED"
+    assert result["execution_enabled"] is False
+    assert result["alpaca_submissions"] == []
+    assert result["alpaca_submission_summary"]["same_day_submission_lock"] is True
+    assert result["alpaca_submission_summary"]["same_day_recorded_orders"] == 1
+    assert any("same_day_submission_lock:2026-02-10:recorded_orders=1" in reason for reason in result["blocked_reasons"])
+
+
 
 
 

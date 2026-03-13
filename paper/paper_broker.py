@@ -1009,6 +1009,32 @@ def _filter_idempotent_orders(orders: List[Dict[str, object]], sent_ledger_path:
     return out, skipped
 
 
+def _same_day_submission_lock(sent_ledger_path: str, trade_date: str) -> Tuple[int, List[str]]:
+    sent = _read_csv(sent_ledger_path)
+    if sent.empty:
+        return 0, []
+
+    date_col = "date" if "date" in sent.columns else ("trade_date" if "trade_date" in sent.columns else None)
+    if date_col is None:
+        return 0, []
+
+    matching = sent[sent[date_col].astype(str) == str(trade_date)].copy()
+    if matching.empty:
+        return 0, []
+
+    order_count = (
+        int(len(set(matching["order_id"].astype(str).str.strip()) - {""}))
+        if "order_id" in matching.columns
+        else int(len(matching))
+    )
+    prior_run_ids = (
+        sorted({str(value).strip() for value in matching["run_id"].tolist() if str(value).strip()})
+        if "run_id" in matching.columns
+        else []
+    )
+    return order_count, prior_run_ids
+
+
 def _coerce_float(value: object, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -1705,16 +1731,45 @@ def run_paper_day(
     if execution_enabled:
         initial_orders = _build_shadow_orders(execution_trades, run_id)
         alpaca_submission_summary["initial_intended_orders"] = int(len(initial_orders))
-        orders, local_idempotent_skips = _filter_idempotent_orders(initial_orders, sent_ledger_path)
-        idempotent_skips.extend(local_idempotent_skips)
-        if local_idempotent_skips:
-            idempotent_drop_reasons["local_ledger"] += int(len(local_idempotent_skips))
-        alpaca_submission_summary["local_idempotent_skips"] = int(len(local_idempotent_skips))
-        alpaca_submission_summary["post_local_idempotent_orders"] = int(len(orders))
-        submission_metadata: Dict[str, Dict[str, object]] = {}
-        orders_for_execution = list(orders)
-
+        same_day_locked_orders = 0
+        same_day_prior_run_ids: List[str] = []
         if mode == "alpaca":
+            same_day_locked_orders, same_day_prior_run_ids = _same_day_submission_lock(
+                sent_ledger_path,
+                run_date,
+            )
+        if same_day_locked_orders > 0:
+            blocked = True
+            execution_enabled = False
+            lock_reason = (
+                f"same_day_submission_lock:{run_date}:recorded_orders={same_day_locked_orders}"
+            )
+            if same_day_prior_run_ids:
+                lock_reason = f"{lock_reason}:prior_runs={','.join(same_day_prior_run_ids)}"
+            blocked_reasons.append(lock_reason)
+            alpaca_submission_summary["same_day_submission_lock"] = True
+            alpaca_submission_summary["same_day_recorded_orders"] = int(same_day_locked_orders)
+            alpaca_submission_summary["same_day_prior_run_ids"] = list(same_day_prior_run_ids)
+            orders = []
+            orders_for_execution = []
+            logger.warning(
+                "[ALPACA][LOCK] refusing same-day duplicate submission trade_date=%s recorded_orders=%d prior_runs=%s ledger=%s",
+                run_date,
+                int(same_day_locked_orders),
+                ",".join(same_day_prior_run_ids) if same_day_prior_run_ids else "unknown",
+                sent_ledger_path,
+            )
+        else:
+            orders, local_idempotent_skips = _filter_idempotent_orders(initial_orders, sent_ledger_path)
+            idempotent_skips.extend(local_idempotent_skips)
+            if local_idempotent_skips:
+                idempotent_drop_reasons["local_ledger"] += int(len(local_idempotent_skips))
+            alpaca_submission_summary["local_idempotent_skips"] = int(len(local_idempotent_skips))
+            alpaca_submission_summary["post_local_idempotent_orders"] = int(len(orders))
+            submission_metadata: Dict[str, Dict[str, object]] = {}
+            orders_for_execution = list(orders)
+
+        if mode == "alpaca" and execution_enabled:
             alpaca = AlpacaBroker.from_env()
             broker_cls = alpaca.__class__
             logger.info(

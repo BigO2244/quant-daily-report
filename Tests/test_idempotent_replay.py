@@ -27,7 +27,11 @@ from core.execution_payload import (
     STATUS_IDEMPOTENT_REPLAY,
     STATUS_NO_ACTION,
 )
-from scripts.execute_alpaca_orders import _submit_orders, _write_json
+from scripts.execute_alpaca_orders import (
+    _deterministic_internal_order_id,
+    _submit_orders,
+    _write_json,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +101,7 @@ class TestDuplicateOnlyReplay:
             symbol = t["ticker"].upper()
             side = "BUY"
             qty = 10.0
-            internal = f"{payload['run_id']}_{symbol}_{side}_{qty}"
+            internal = _deterministic_internal_order_id(payload, t)
             cid = alpaca_client_order_id(internal)
             existing[cid] = _fake_order(symbol, side, qty)
 
@@ -148,7 +152,7 @@ class TestMixedOutcome:
 
         from brokers.alpaca_broker import alpaca_client_order_id
 
-        spy_internal = f"{payload['run_id']}_SPY_BUY_5.0"
+        spy_internal = _deterministic_internal_order_id(payload, trades[0])
         spy_cid = alpaca_client_order_id(spy_internal)
         existing = {spy_cid: _fake_order("SPY", "BUY", 5.0)}
 
@@ -176,7 +180,7 @@ class TestMixedOutcome:
         payload = _make_payload(trades)
 
         from brokers.alpaca_broker import alpaca_client_order_id
-        spy_internal = f"{payload['run_id']}_SPY_BUY_5.0"
+        spy_internal = _deterministic_internal_order_id(payload, trades[0])
         spy_cid = alpaca_client_order_id(spy_internal)
         existing = {spy_cid: _fake_order("SPY", "BUY", 5.0)}
 
@@ -207,6 +211,39 @@ class TestNoAction:
         assert summary["rejected_count"] == 0
         assert summary["duplicate_count"] == 0
         assert summary["broker_responses"] == []
+
+
+class TestDeterministicFallbackIdempotency:
+    def test_same_trade_same_day_different_run_ids_share_fallback_order_id(self):
+        trade = {"ticker": "SPY", "side": "BUY", "shares": 5.0}
+        payload_a = _make_payload([trade], run_id="run-a")
+        payload_b = _make_payload([trade], run_id="run-b")
+
+        internal_a = _deterministic_internal_order_id(payload_a, trade)
+        internal_b = _deterministic_internal_order_id(payload_b, trade)
+
+        assert internal_a == "2026-03-10:ALPACA:SPY:BUY:5"
+        assert internal_b == internal_a
+
+    def test_fresh_runner_duplicate_replay_resolves_via_remote_existing(self):
+        trade = {"ticker": "SPY", "side": "BUY", "shares": 5.0}
+        original_payload = _make_payload([trade], run_id="original-run")
+        replay_payload = _make_payload([trade], run_id="fresh-runner-replay")
+
+        from brokers.alpaca_broker import alpaca_client_order_id
+
+        stable_internal = _deterministic_internal_order_id(original_payload, trade)
+        stable_cid = alpaca_client_order_id(stable_internal)
+        existing = {stable_cid: _fake_order("SPY", "BUY", 5.0)}
+
+        broker = _make_broker(existing_orders=existing)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary = _submit_orders(replay_payload, broker, Path(tmpdir))
+
+        assert summary["submitted_count"] == 0
+        assert summary["duplicate_count"] == 1
+        assert summary["accepted_count"] == 0
+        assert summary["broker_responses"][0]["status"] == "IDEMPOTENT_REPLAY"
 
 
 # ---------------------------------------------------------------------------
