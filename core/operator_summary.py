@@ -77,6 +77,16 @@ def write_operator_summary(
     broker_preflight_buying_power: Any = None,
     broker_preflight_restriction_flags: Dict[str, Any] | None = None,
     broker_preflight_warning_flags: list[str] | None = None,
+    broker_cash_at_planning: Any = None,
+    broker_equity_at_planning: Any = None,
+    broker_buying_power_at_planning: Any = None,
+    reserve_cash_policy: Dict[str, Any] | None = None,
+    expected_sell_proceeds: Any = None,
+    expected_sell_proceeds_conservative: Any = None,
+    requested_buy_notional: Any = None,
+    allowed_buy_notional: Any = None,
+    capital_constraint_triggered: bool | None = None,
+    clipped_or_deferred_buys_count: int | None = None,
 ) -> Path:
     """
     Write or update operator_summary.json in run root.
@@ -211,6 +221,56 @@ def write_operator_summary(
         if broker_preflight_buying_power is not None
         else existing.get("broker_preflight_buying_power")
     )
+    broker_cash_at_planning_value = (
+        broker_cash_at_planning
+        if broker_cash_at_planning is not None
+        else existing.get("broker_cash_at_planning")
+    )
+    broker_equity_at_planning_value = (
+        broker_equity_at_planning
+        if broker_equity_at_planning is not None
+        else existing.get("broker_equity_at_planning")
+    )
+    broker_buying_power_at_planning_value = (
+        broker_buying_power_at_planning
+        if broker_buying_power_at_planning is not None
+        else existing.get("broker_buying_power_at_planning")
+    )
+    reserve_cash_policy_value = (
+        dict(reserve_cash_policy or {})
+        if reserve_cash_policy is not None
+        else dict(existing.get("reserve_cash_policy") or {})
+    )
+    expected_sell_proceeds_value = (
+        expected_sell_proceeds
+        if expected_sell_proceeds is not None
+        else existing.get("expected_sell_proceeds")
+    )
+    expected_sell_proceeds_conservative_value = (
+        expected_sell_proceeds_conservative
+        if expected_sell_proceeds_conservative is not None
+        else existing.get("expected_sell_proceeds_conservative")
+    )
+    requested_buy_notional_value = (
+        requested_buy_notional
+        if requested_buy_notional is not None
+        else existing.get("requested_buy_notional")
+    )
+    allowed_buy_notional_value = (
+        allowed_buy_notional
+        if allowed_buy_notional is not None
+        else existing.get("allowed_buy_notional")
+    )
+    capital_constraint_triggered_value = (
+        capital_constraint_triggered
+        if capital_constraint_triggered is not None
+        else existing.get("capital_constraint_triggered")
+    )
+    clipped_or_deferred_buys_count_value = (
+        int(clipped_or_deferred_buys_count)
+        if clipped_or_deferred_buys_count is not None
+        else existing.get("clipped_or_deferred_buys_count")
+    )
 
     payload = {
         "run_id": run_id,
@@ -266,6 +326,16 @@ def write_operator_summary(
         "broker_preflight_buying_power": broker_preflight_buying_power_value,
         "broker_preflight_restriction_flags": broker_preflight_restriction_flags_value,
         "broker_preflight_warning_flags": broker_preflight_warning_flags_value,
+        "broker_cash_at_planning": broker_cash_at_planning_value,
+        "broker_equity_at_planning": broker_equity_at_planning_value,
+        "broker_buying_power_at_planning": broker_buying_power_at_planning_value,
+        "reserve_cash_policy": reserve_cash_policy_value,
+        "expected_sell_proceeds": expected_sell_proceeds_value,
+        "expected_sell_proceeds_conservative": expected_sell_proceeds_conservative_value,
+        "requested_buy_notional": requested_buy_notional_value,
+        "allowed_buy_notional": allowed_buy_notional_value,
+        "capital_constraint_triggered": capital_constraint_triggered_value,
+        "clipped_or_deferred_buys_count": clipped_or_deferred_buys_count_value,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
@@ -347,6 +417,12 @@ def format_execution_health_banner(summary: Dict[str, Any]) -> str:
     broker_reject_message = str(summary.get("broker_reject_message") or "").strip() or "none"
     broker_preflight_status = str(summary.get("broker_preflight_status") or "").strip() or "none"
     broker_preflight_warning_flags = list(summary.get("broker_preflight_warning_flags") or [])
+    capital_constraint = (
+        "TRIGGERED" if summary.get("capital_constraint_triggered") else "CLEAR"
+    )
+    allowed_buy_notional = summary.get("allowed_buy_notional")
+    requested_buy_notional = summary.get("requested_buy_notional")
+    clipped_or_deferred_buys_count = int(summary.get("clipped_or_deferred_buys_count") or 0)
     return (
         "[EXECUTION_HEALTH] "
         f"run_id={summary.get('run_id','')} "
@@ -355,6 +431,10 @@ def format_execution_health_banner(summary: Dict[str, Any]) -> str:
         f"broker_preflight_warnings={','.join(broker_preflight_warning_flags) if broker_preflight_warning_flags else 'none'} "
         f"broker_reject={broker_reject_status} "
         f"broker_reject_message={broker_reject_message} "
+        f"capital_constraint={capital_constraint} "
+        f"requested_buys={requested_buy_notional if requested_buy_notional is not None else 'none'} "
+        f"allowed_buys={allowed_buy_notional if allowed_buy_notional is not None else 'none'} "
+        f"clipped_buys={clipped_or_deferred_buys_count} "
         f"post_execution_recon={summary.get('post_execution_recon_status') or 'UNKNOWN'} "
         f"affected_symbols={','.join(affected_symbols) if affected_symbols else 'none'} "
         f"duplicate_fill_suspicions={int(summary.get('duplicate_fill_suspicions_count') or 0)} "

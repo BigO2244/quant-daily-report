@@ -42,6 +42,10 @@ SENT_LEDGER_COLUMNS = [
     "status",
 ]
 
+CAPITAL_RESERVE_MIN_CASH = 1000.0
+CAPITAL_RESERVE_EQUITY_PCT = 0.01
+CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
+
 
 def _load_yfinance():
     """Lazy import so non-price-fetching paths and CLI help avoid yfinance startup."""
@@ -62,6 +66,31 @@ def _format_reason_counts(counts: Counter[str]) -> str:
     if not counts:
         return "none"
     return ",".join(f"{k}:{int(v)}" for k, v in sorted(counts.items()))
+
+
+def _default_reserve_cash_policy() -> Dict[str, float | None]:
+    return {
+        "min_cash_dollars": float(CAPITAL_RESERVE_MIN_CASH),
+        "equity_reserve_pct": float(CAPITAL_RESERVE_EQUITY_PCT),
+        "sell_proceeds_haircut": float(CAPITAL_SELL_PROCEEDS_HAIRCUT),
+        "reserve_cash": None,
+        "available_for_buys": None,
+    }
+
+
+def _default_capital_budget_meta() -> Dict[str, object]:
+    return {
+        "broker_cash_at_planning": None,
+        "broker_equity_at_planning": None,
+        "broker_buying_power_at_planning": None,
+        "reserve_cash_policy": _default_reserve_cash_policy(),
+        "expected_sell_proceeds": 0.0,
+        "expected_sell_proceeds_conservative": 0.0,
+        "requested_buy_notional": 0.0,
+        "allowed_buy_notional": 0.0,
+        "capital_constraint_triggered": False,
+        "clipped_or_deferred_buys_count": 0,
+    }
 
 
 def _run_output_root() -> Path:
@@ -1139,6 +1168,7 @@ def _write_intended_orders_artifact(
     execution_trades: "pd.DataFrame",
     execution_enabled: bool,
     block_reasons: List[str],
+    capital_budget: Dict[str, object] | None = None,
 ) -> str:
     """Persist intended orders before submission so run outcome is always diagnosable.
 
@@ -1174,6 +1204,7 @@ def _write_intended_orders_artifact(
         # artifact (written by reconciliation.py) covers the case where
         # recon blocked before run_paper_day was called.
         "reconcile_report": None,
+        "capital_budget": dict(capital_budget or _default_capital_budget_meta()),
         "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
     out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -1338,12 +1369,137 @@ def _expected_positions_after_orders(
     return expected
 
 
+def _build_capital_budget(
+    *,
+    broker_cash: object,
+    broker_equity: object,
+    broker_buying_power: object,
+    expected_sell_proceeds: float,
+    requested_buy_notional: float,
+) -> Dict[str, object]:
+    cash_value = _coerce_float(broker_cash, None)
+    equity_value = _coerce_float(broker_equity, None)
+    buying_power_value = _coerce_float(broker_buying_power, None)
+    reserve_cash = max(
+        float(CAPITAL_RESERVE_MIN_CASH),
+        max(0.0, float(equity_value or 0.0)) * float(CAPITAL_RESERVE_EQUITY_PCT),
+    )
+    expected_sell_proceeds_value = max(0.0, float(expected_sell_proceeds or 0.0))
+    expected_sell_proceeds_conservative = float(
+        expected_sell_proceeds_value * float(CAPITAL_SELL_PROCEEDS_HAIRCUT)
+    )
+    requested_buy_notional_value = max(0.0, float(requested_buy_notional or 0.0))
+    available_for_buys = max(
+        0.0,
+        float(cash_value or 0.0) + expected_sell_proceeds_conservative - reserve_cash,
+    )
+    allowed_buy_notional = min(requested_buy_notional_value, available_for_buys)
+    return {
+        "broker_cash_at_planning": cash_value,
+        "broker_equity_at_planning": equity_value,
+        "broker_buying_power_at_planning": buying_power_value,
+        "reserve_cash_policy": {
+            "min_cash_dollars": float(CAPITAL_RESERVE_MIN_CASH),
+            "equity_reserve_pct": float(CAPITAL_RESERVE_EQUITY_PCT),
+            "sell_proceeds_haircut": float(CAPITAL_SELL_PROCEEDS_HAIRCUT),
+            "reserve_cash": float(reserve_cash),
+            "available_for_buys": float(available_for_buys),
+        },
+        "expected_sell_proceeds": float(expected_sell_proceeds_value),
+        "expected_sell_proceeds_conservative": float(expected_sell_proceeds_conservative),
+        "requested_buy_notional": float(requested_buy_notional_value),
+        "allowed_buy_notional": float(allowed_buy_notional),
+        "capital_constraint_triggered": bool(
+            requested_buy_notional_value > allowed_buy_notional + 1e-9
+        ),
+        "clipped_or_deferred_buys_count": 0,
+    }
+
+
+def _apply_capital_budget_to_trades(
+    trades: pd.DataFrame,
+    cfg: PaperConfig,
+    capital_budget: Dict[str, object],
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    if trades is None or trades.empty:
+        out = dict(capital_budget)
+        out["allowed_buy_notional"] = 0.0
+        out["clipped_or_deferred_buys_count"] = 0
+        return pd.DataFrame(columns=trades.columns if trades is not None else []), out
+
+    cols = list(trades.columns)
+    available_for_buys = float(
+        ((capital_budget.get("reserve_cash_policy") or {}).get("available_for_buys")) or 0.0
+    )
+    spent = 0.0
+    clipped_or_deferred = 0
+    kept_rows: List[Dict[str, object]] = []
+
+    for _, row in trades.iterrows():
+        row_dict = row.to_dict()
+        side = str(row_dict.get("side", "")).upper()
+        if side != "BUY":
+            kept_rows.append(row_dict)
+            continue
+
+        requested_shares = abs(float(row_dict.get("shares", 0.0) or 0.0))
+        price = abs(float(row_dict.get("price", 0.0) or 0.0))
+        requested_notional = abs(float(row_dict.get("notional", 0.0) or 0.0))
+        remaining_budget = max(0.0, available_for_buys - spent)
+
+        if requested_notional <= remaining_budget + 1e-9:
+            kept_rows.append(row_dict)
+            spent += requested_notional
+            continue
+
+        clipped_or_deferred += 1
+        if remaining_budget <= 1e-9 or price <= 0 or requested_shares <= 1e-12:
+            continue
+
+        if cfg.allow_fractional:
+            allowed_shares = min(requested_shares, remaining_budget / price)
+        else:
+            allowed_shares = min(requested_shares, float(math.floor(remaining_budget / price)))
+            if allowed_shares > 0:
+                allowed_shares = float(math.floor(allowed_shares))
+
+        allowed_notional = allowed_shares * price
+        if allowed_shares <= 1e-12 or allowed_notional + 1e-9 < float(cfg.min_trade_dollars):
+            continue
+
+        scale = allowed_shares / requested_shares if requested_shares > 0 else 0.0
+        row_dict["shares"] = float(allowed_shares)
+        row_dict["notional"] = float(allowed_notional)
+        if row_dict.get("slippage_cost") is not None:
+            row_dict["slippage_cost"] = float(float(row_dict.get("slippage_cost") or 0.0) * scale)
+        row_dict["reason"] = (
+            f"{row_dict.get('reason')}_capital_clipped"
+            if allowed_shares + 1e-9 < requested_shares
+            else row_dict.get("reason")
+        )
+        kept_rows.append(row_dict)
+        spent += allowed_notional
+
+    out = dict(capital_budget)
+    out["allowed_buy_notional"] = float(spent)
+    out["capital_constraint_triggered"] = bool(
+        float(out.get("requested_buy_notional") or 0.0) > spent + 1e-9
+    )
+    out["clipped_or_deferred_buys_count"] = int(clipped_or_deferred)
+    frame = pd.DataFrame(kept_rows, columns=cols) if kept_rows else pd.DataFrame(columns=cols)
+    return frame, out
+
+
 def _compute_buy_budget(account: Dict[str, object], cfg: PaperConfig) -> float:
-    cash = max(0.0, _coerce_float(account.get("cash"), 0.0))
-    buying_power = max(0.0, _coerce_float(account.get("buying_power"), cash))
-    confirmed_base = min(cash, buying_power) if buying_power > 0 else cash
-    buffer_pct = max(0.0, float(cfg.cash_buffer_bps) / 10000.0)
-    return max(0.0, confirmed_base * (1.0 - buffer_pct))
+    del cfg
+    capital_budget = _build_capital_budget(
+        broker_cash=account.get("cash"),
+        broker_equity=account.get("equity") or account.get("portfolio_value"),
+        broker_buying_power=account.get("buying_power"),
+        expected_sell_proceeds=0.0,
+        requested_buy_notional=float("inf"),
+    )
+    return float(((capital_budget.get("reserve_cash_policy") or {}).get("available_for_buys")) or 0.0)
 
 
 def _apply_buy_budget(
@@ -1620,6 +1776,7 @@ def run_paper_day(
     # Use effective_mode for the rest of the function
     mode = effective_mode
     alpaca_requested = (mode == "alpaca")
+    planning_account_snapshot: Dict[str, object] | None = None
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
 
@@ -1672,6 +1829,7 @@ def run_paper_day(
             if mode == "alpaca":
                 try:
                     _acct = alpaca.get_account() or {}
+                    planning_account_snapshot = dict(_acct)
                     _live_equity = _coerce_float(_acct.get("equity") or _acct.get("portfolio_value"))
                     _live_cash = _coerce_float(_acct.get("cash"))
                     if _live_equity is not None and _live_equity > 0:
@@ -1683,7 +1841,7 @@ def run_paper_day(
                             equity_prev,
                         )
                         equity_prev = _live_equity
-                        if _live_cash is not None and _live_cash >= 0:
+                        if _live_cash is not None:
                             cash_prev = _live_cash
                 except Exception as _acct_exc:
                     logger.warning(
@@ -1957,6 +2115,57 @@ def run_paper_day(
         if dropped_non_sell > 0:
             blocked_reasons.append(f"breaker_lock_filtered_non_sell:{dropped_non_sell}")
 
+    capital_budget_meta = _default_capital_budget_meta()
+    if mode == "alpaca" and planning_account_snapshot is not None:
+        requested_buy_notional = (
+            float(
+                trades.loc[
+                    trades["side"].astype(str).str.upper() == "BUY",
+                    "notional",
+                ].astype(float).sum()
+            )
+            if trades is not None and not trades.empty and "side" in trades.columns and "notional" in trades.columns
+            else 0.0
+        )
+        expected_sell_proceeds = (
+            float(
+                trades.loc[
+                    trades["side"].astype(str).str.upper().isin({"SELL", "CLOSE", "REDUCE"}),
+                    "notional",
+                ].astype(float).sum()
+            )
+            if trades is not None and not trades.empty and "side" in trades.columns and "notional" in trades.columns
+            else 0.0
+        )
+        capital_budget_meta = _build_capital_budget(
+            broker_cash=planning_account_snapshot.get("cash"),
+            broker_equity=planning_account_snapshot.get("equity") or planning_account_snapshot.get("portfolio_value"),
+            broker_buying_power=planning_account_snapshot.get("buying_power"),
+            expected_sell_proceeds=expected_sell_proceeds,
+            requested_buy_notional=requested_buy_notional,
+        )
+        trades, capital_budget_meta = _apply_capital_budget_to_trades(
+            trades,
+            cfg,
+            capital_budget_meta,
+        )
+        reserve_policy = capital_budget_meta.get("reserve_cash_policy") or {}
+        log_level = logging.WARNING if capital_budget_meta.get("capital_constraint_triggered") else logging.INFO
+        logger.log(
+            log_level,
+            "[CAPITAL_BUDGET] broker_cash=%s equity=%s buying_power=%s reserve_cash=%.2f expected_sells=%.2f expected_sells_conservative=%.2f requested_buys=%.2f allowed_buys=%.2f clipped_or_deferred=%d triggered=%s",
+            capital_budget_meta.get("broker_cash_at_planning"),
+            capital_budget_meta.get("broker_equity_at_planning"),
+            capital_budget_meta.get("broker_buying_power_at_planning"),
+            float(reserve_policy.get("reserve_cash") or 0.0),
+            float(capital_budget_meta.get("expected_sell_proceeds") or 0.0),
+            float(capital_budget_meta.get("expected_sell_proceeds_conservative") or 0.0),
+            float(capital_budget_meta.get("requested_buy_notional") or 0.0),
+            float(capital_budget_meta.get("allowed_buy_notional") or 0.0),
+            int(capital_budget_meta.get("clipped_or_deferred_buys_count") or 0),
+            bool(capital_budget_meta.get("capital_constraint_triggered")),
+        )
+
     executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(trades, cfg)
     execution_trades = executable_trades.copy()
     filter_drop_reasons: Counter[str] = Counter()
@@ -2020,6 +2229,7 @@ def run_paper_day(
             execution_trades=execution_trades,
             execution_enabled=execution_enabled,
             block_reasons=list(blocked_reasons),
+            capital_budget=capital_budget_meta,
         )
     except Exception as _art_exc:
         logger.warning("[INTENDED_ORDERS] Failed to write artifact: %s", _art_exc)
@@ -2511,6 +2721,7 @@ def run_paper_day(
         "exec_trace": exec_trace,
         "execution_enabled": bool(execution_enabled),
         "risk_meta": risk_meta,
+        "capital_budget": capital_budget_meta,
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
         "shadow_orders": orders,

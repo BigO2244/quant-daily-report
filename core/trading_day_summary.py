@@ -211,6 +211,28 @@ def _build_broker_context(run_root: Path, operator_summary: Optional[Dict[str, A
         "broker_reject_status": (operator_summary or {}).get("broker_reject_status"),
         "broker_reject_message": (operator_summary or {}).get("broker_reject_message"),
         "post_execution_recon_status": (operator_summary or {}).get("post_execution_recon_status"),
+        "broker_cash_at_planning": (
+            (operator_summary or {}).get("broker_cash_at_planning")
+            if (operator_summary or {}).get("broker_cash_at_planning") is not None
+            else preflight.get("broker_preflight_cash")
+        ),
+        "broker_equity_at_planning": (
+            (operator_summary or {}).get("broker_equity_at_planning")
+            if (operator_summary or {}).get("broker_equity_at_planning") is not None
+            else preflight.get("broker_preflight_equity")
+        ),
+        "broker_buying_power_at_planning": (
+            (operator_summary or {}).get("broker_buying_power_at_planning")
+            if (operator_summary or {}).get("broker_buying_power_at_planning") is not None
+            else preflight.get("broker_preflight_buying_power")
+        ),
+        "reserve_cash_policy": dict((operator_summary or {}).get("reserve_cash_policy") or {}),
+        "expected_sell_proceeds": (operator_summary or {}).get("expected_sell_proceeds"),
+        "expected_sell_proceeds_conservative": (operator_summary or {}).get("expected_sell_proceeds_conservative"),
+        "requested_buy_notional": (operator_summary or {}).get("requested_buy_notional"),
+        "allowed_buy_notional": (operator_summary or {}).get("allowed_buy_notional"),
+        "capital_constraint_triggered": (operator_summary or {}).get("capital_constraint_triggered"),
+        "clipped_or_deferred_buys_count": int((operator_summary or {}).get("clipped_or_deferred_buys_count") or 0),
         "affected_symbols": list((operator_summary or {}).get("affected_symbols") or []),
         "repair_suggestions": list((operator_summary or {}).get("repair_suggestions") or []),
         "duplicate_fill_suspicions_count": int((operator_summary or {}).get("duplicate_fill_suspicions_count") or 0),
