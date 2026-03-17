@@ -88,12 +88,61 @@ def _float(val: Any, default: Optional[float] = None) -> Optional[float]:
 # Section builders
 # ---------------------------------------------------------------------------
 
-def _build_execution_summary(execution_results: Dict[str, Any]) -> Dict[str, Any]:
+def _build_execution_summary(
+    execution_results: Dict[str, Any],
+    operator_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    responses = execution_results.get("broker_responses") or []
+    submitted = int(execution_results.get("submitted_count") or 0)
     accepted = int(execution_results.get("accepted_count") or 0)
+    rejected = int(execution_results.get("rejected_count") or 0)
     duplicates = int(execution_results.get("duplicate_count") or 0)
     status = str(execution_results.get("status") or "UNKNOWN")
+    halt_reason = str(execution_results.get("halt_reason") or "")
+    execution_outcome = None
+    execution_reason = None
+    cash_rebalance_status = None
+    operator_execution_status = None
+    timing_status = None
 
-    responses = execution_results.get("broker_responses") or []
+    if (
+        submitted == 0
+        and accepted == 0
+        and rejected == 0
+        and not responses
+        and operator_summary
+        and (
+            int(operator_summary.get("orders_submitted_count") or 0) > 0
+            or int(operator_summary.get("submitted_count") or 0) > 0
+            or str(operator_summary.get("broker_reject_status") or "").strip()
+        )
+    ):
+        submitted = int(
+            operator_summary.get("orders_submitted_count")
+            or operator_summary.get("submitted_count")
+            or 0
+        )
+        accepted = int(operator_summary.get("accepted_count") or submitted)
+        rejected = int(operator_summary.get("rejected_count") or 0)
+        status = str(
+            operator_summary.get("terminal_status")
+            or operator_summary.get("broker_reject_status")
+            or "HALTED"
+        )
+        halt_reason = str(
+            operator_summary.get("halt_reason")
+            or operator_summary.get("pretrade_halt_reason")
+            or halt_reason
+            or ""
+        )
+
+    if operator_summary:
+        execution_outcome = operator_summary.get("execution_outcome")
+        execution_reason = operator_summary.get("execution_reason")
+        cash_rebalance_status = operator_summary.get("cash_rebalance_status")
+        operator_execution_status = operator_summary.get("operator_execution_status")
+        timing_status = operator_summary.get("timing_status")
+
     buy_orders = sum(
         1 for r in responses
         if str(r.get("side", "")).upper() == "BUY"
@@ -107,15 +156,28 @@ def _build_execution_summary(execution_results: Dict[str, Any]) -> Dict[str, Any
 
     # executed = broker actually has accepted orders (either this run or prior replay)
     executed = accepted > 0 or status == "IDEMPOTENT_REPLAY"
+    partial_execution = executed and (
+        str(execution_outcome or "").strip() == "partial_execution_broker_abort"
+        or rejected > 0
+        or str(status).upper() in {"HALTED", "FAILED_PRE_EXECUTION"}
+    )
 
     return {
-        "orders_submitted": int(execution_results.get("submitted_count") or 0),
+        "orders_submitted": submitted,
         "orders_accepted": accepted,
+        "orders_rejected": rejected,
         "duplicate_orders": duplicates,
         "buy_orders": buy_orders,
         "sell_orders": sell_orders,
         "executed": executed,
+        "partial_execution": partial_execution,
         "status": status,
+        "halt_reason": halt_reason or None,
+        "execution_outcome": execution_outcome,
+        "execution_reason": execution_reason,
+        "cash_rebalance_status": cash_rebalance_status,
+        "operator_execution_status": operator_execution_status,
+        "timing_status": timing_status,
     }
 
 
@@ -208,8 +270,24 @@ def _build_broker_context(run_root: Path, operator_summary: Optional[Dict[str, A
         "broker_preflight_buying_power": (operator_summary or {}).get("broker_preflight_buying_power") if (operator_summary or {}).get("broker_preflight_buying_power") is not None else preflight.get("broker_preflight_buying_power"),
         "broker_preflight_restriction_flags": dict((operator_summary or {}).get("broker_preflight_restriction_flags") or preflight.get("broker_preflight_restriction_flags") or {}),
         "broker_preflight_warning_flags": list((operator_summary or {}).get("broker_preflight_warning_flags") or preflight.get("broker_preflight_warning_flags") or []),
+        "broker_pdt_risk_status": (operator_summary or {}).get("broker_pdt_risk_status") or preflight.get("broker_pdt_risk_status"),
+        "broker_pdt_daytrade_count": (
+            (operator_summary or {}).get("broker_pdt_daytrade_count")
+            if (operator_summary or {}).get("broker_pdt_daytrade_count") is not None
+            else preflight.get("broker_pdt_daytrade_count")
+        ),
+        "broker_pdt_daytrading_buying_power": (
+            (operator_summary or {}).get("broker_pdt_daytrading_buying_power")
+            if (operator_summary or {}).get("broker_pdt_daytrading_buying_power") is not None
+            else preflight.get("broker_pdt_daytrading_buying_power")
+        ),
+        "broker_pdt_flags": list((operator_summary or {}).get("broker_pdt_flags") or preflight.get("broker_pdt_flags") or []),
+        "broker_pdt_warning_message": (operator_summary or {}).get("broker_pdt_warning_message") or preflight.get("broker_pdt_warning_message"),
         "broker_reject_status": (operator_summary or {}).get("broker_reject_status"),
         "broker_reject_message": (operator_summary or {}).get("broker_reject_message"),
+        "execution_outcome": (operator_summary or {}).get("execution_outcome"),
+        "execution_reason": (operator_summary or {}).get("execution_reason"),
+        "cash_rebalance_status": (operator_summary or {}).get("cash_rebalance_status"),
         "post_execution_recon_status": (operator_summary or {}).get("post_execution_recon_status"),
         "broker_cash_at_planning": (
             (operator_summary or {}).get("broker_cash_at_planning")
@@ -335,7 +413,7 @@ def build_trading_day_summary(
     operator_summary = _read_json(run_root / "operator_summary.json")
 
     # Build sections
-    exec_summary = _build_execution_summary(execution_results)
+    exec_summary = _build_execution_summary(execution_results, operator_summary)
     portfolio_state = _build_portfolio_state(audit)
     email_summary = _build_email_summary(operator_summary)
     dashboard = _build_dashboard(ws)

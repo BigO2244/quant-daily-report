@@ -21,6 +21,9 @@ def test_execution_health_banner_includes_duplicate_and_recon_details():
         {
             "run_id": "run-123",
             "duplicate_guard_status": "BLOCKED_DUPLICATE_SUBMISSION",
+            "broker_pdt_risk_status": "WARN",
+            "broker_pdt_flags": ["pattern_day_trader:true", "daytrading_buying_power_non_positive"],
+            "broker_pdt_warning_message": "PDT risk signaled by broker account fields",
             "post_execution_recon_status": "UNEXPECTED_SHORT",
             "affected_symbols": ["HCA", "ROST"],
             "duplicate_fill_suspicions_count": 2,
@@ -30,6 +33,7 @@ def test_execution_health_banner_includes_duplicate_and_recon_details():
 
     assert "[EXECUTION_HEALTH]" in banner
     assert "duplicate_guard=BLOCKED_DUPLICATE_SUBMISSION" in banner
+    assert "broker_pdt=WARN" in banner
     assert "post_execution_recon=UNEXPECTED_SHORT" in banner
     assert "affected_symbols=HCA,ROST" in banner
     assert "duplicate_fill_suspicions=2" in banner

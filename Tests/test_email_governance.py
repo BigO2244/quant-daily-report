@@ -54,6 +54,24 @@ class TestEmailConfig:
         finally:
             os.environ.pop('EMAIL_INTERNAL_DEBUG', None)
 
+    @pytest.mark.parametrize("raw_value", ["1", "true", "TRUE", "yes", "on", "y"])
+    def test_get_bool_true_tokens_enable_flag(self, raw_value):
+        os.environ['EMAIL_PRETRADE'] = raw_value
+        try:
+            config = EmailConfig()
+            assert config.send_pre_trade_analysis is True
+        finally:
+            os.environ.pop('EMAIL_PRETRADE', None)
+
+    @pytest.mark.parametrize("raw_value", ["0", "false", "FALSE", "no", "off", "n"])
+    def test_get_bool_false_tokens_disable_flag(self, raw_value):
+        os.environ['EMAIL_PRETRADE'] = raw_value
+        try:
+            config = EmailConfig()
+            assert config.send_pre_trade_analysis is False
+        finally:
+            os.environ.pop('EMAIL_PRETRADE', None)
+
 
 class TestEmailEvent:
     """Test EmailEvent decision logic."""

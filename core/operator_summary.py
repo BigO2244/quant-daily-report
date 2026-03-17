@@ -70,6 +70,9 @@ def write_operator_summary(
     duplicate_fill_suspicions_count: int | None = None,
     broker_reject_status: str | None = None,
     broker_reject_message: str | None = None,
+    execution_outcome: str | None = None,
+    execution_reason: str | None = None,
+    cash_rebalance_status: str | None = None,
     broker_preflight_status: str | None = None,
     broker_preflight_account_status: str | None = None,
     broker_preflight_cash: Any = None,
@@ -77,6 +80,11 @@ def write_operator_summary(
     broker_preflight_buying_power: Any = None,
     broker_preflight_restriction_flags: Dict[str, Any] | None = None,
     broker_preflight_warning_flags: list[str] | None = None,
+    broker_pdt_risk_status: str | None = None,
+    broker_pdt_daytrade_count: Any = None,
+    broker_pdt_daytrading_buying_power: Any = None,
+    broker_pdt_flags: list[str] | None = None,
+    broker_pdt_warning_message: str | None = None,
     broker_cash_at_planning: Any = None,
     broker_equity_at_planning: Any = None,
     broker_buying_power_at_planning: Any = None,
@@ -87,6 +95,19 @@ def write_operator_summary(
     allowed_buy_notional: Any = None,
     capital_constraint_triggered: bool | None = None,
     clipped_or_deferred_buys_count: int | None = None,
+    timing_status: str | None = None,
+    preferred_target_et: str | None = None,
+    degraded_auto_trade_deadline_et: str | None = None,
+    actual_workflow_start_et: str | None = None,
+    actual_execution_start_et: str | None = None,
+    first_submit_et: str | None = None,
+    operator_execution_status: str | None = None,
+    retry_attempt_count: int | None = None,
+    retry_eligible: bool | None = None,
+    retry_reason: str | None = None,
+    continuation_eligible: bool | None = None,
+    continuation_reason: str | None = None,
+    pending_buy_count: int | None = None,
 ) -> Path:
     """
     Write or update operator_summary.json in run root.
@@ -186,6 +207,21 @@ def write_operator_summary(
         if (broker_reject_status is not None or broker_reject_message is not None)
         else existing.get("broker_reject_message")
     )
+    execution_outcome_value = (
+        execution_outcome
+        if execution_outcome is not None
+        else existing.get("execution_outcome")
+    )
+    execution_reason_value = (
+        execution_reason
+        if execution_reason is not None
+        else existing.get("execution_reason")
+    )
+    cash_rebalance_status_value = (
+        cash_rebalance_status
+        if cash_rebalance_status is not None
+        else existing.get("cash_rebalance_status")
+    )
     broker_preflight_status_value = (
         str(broker_preflight_status).strip()
         if broker_preflight_status is not None and str(broker_preflight_status).strip()
@@ -220,6 +256,31 @@ def write_operator_summary(
         broker_preflight_buying_power
         if broker_preflight_buying_power is not None
         else existing.get("broker_preflight_buying_power")
+    )
+    broker_pdt_risk_status_value = (
+        str(broker_pdt_risk_status).strip()
+        if broker_pdt_risk_status is not None and str(broker_pdt_risk_status).strip()
+        else str(existing.get("broker_pdt_risk_status") or "")
+    )
+    broker_pdt_daytrade_count_value = (
+        broker_pdt_daytrade_count
+        if broker_pdt_daytrade_count is not None
+        else existing.get("broker_pdt_daytrade_count")
+    )
+    broker_pdt_daytrading_buying_power_value = (
+        broker_pdt_daytrading_buying_power
+        if broker_pdt_daytrading_buying_power is not None
+        else existing.get("broker_pdt_daytrading_buying_power")
+    )
+    broker_pdt_flags_value = (
+        [str(item).strip() for item in (broker_pdt_flags or []) if str(item).strip()]
+        if broker_pdt_flags is not None
+        else list(existing.get("broker_pdt_flags") or [])
+    )
+    broker_pdt_warning_message_value = (
+        broker_pdt_warning_message
+        if (broker_pdt_risk_status is not None or broker_pdt_warning_message is not None)
+        else existing.get("broker_pdt_warning_message")
     )
     broker_cash_at_planning_value = (
         broker_cash_at_planning
@@ -319,6 +380,9 @@ def write_operator_summary(
         "duplicate_fill_suspicions_count": duplicate_fill_suspicions_value,
         "broker_reject_status": broker_reject_status_value or None,
         "broker_reject_message": broker_reject_message_value,
+        "execution_outcome": execution_outcome_value,
+        "execution_reason": execution_reason_value,
+        "cash_rebalance_status": cash_rebalance_status_value,
         "broker_preflight_status": broker_preflight_status_value or None,
         "broker_preflight_account_status": broker_preflight_account_status_value,
         "broker_preflight_cash": broker_preflight_cash_value,
@@ -326,6 +390,11 @@ def write_operator_summary(
         "broker_preflight_buying_power": broker_preflight_buying_power_value,
         "broker_preflight_restriction_flags": broker_preflight_restriction_flags_value,
         "broker_preflight_warning_flags": broker_preflight_warning_flags_value,
+        "broker_pdt_risk_status": broker_pdt_risk_status_value or None,
+        "broker_pdt_daytrade_count": broker_pdt_daytrade_count_value,
+        "broker_pdt_daytrading_buying_power": broker_pdt_daytrading_buying_power_value,
+        "broker_pdt_flags": broker_pdt_flags_value,
+        "broker_pdt_warning_message": broker_pdt_warning_message_value,
         "broker_cash_at_planning": broker_cash_at_planning_value,
         "broker_equity_at_planning": broker_equity_at_planning_value,
         "broker_buying_power_at_planning": broker_buying_power_at_planning_value,
@@ -336,6 +405,51 @@ def write_operator_summary(
         "allowed_buy_notional": allowed_buy_notional_value,
         "capital_constraint_triggered": capital_constraint_triggered_value,
         "clipped_or_deferred_buys_count": clipped_or_deferred_buys_count_value,
+        "timing_status": timing_status if timing_status is not None else existing.get("timing_status"),
+        "preferred_target_et": preferred_target_et if preferred_target_et is not None else existing.get("preferred_target_et"),
+        "degraded_auto_trade_deadline_et": (
+            degraded_auto_trade_deadline_et
+            if degraded_auto_trade_deadline_et is not None
+            else existing.get("degraded_auto_trade_deadline_et")
+        ),
+        "actual_workflow_start_et": (
+            actual_workflow_start_et
+            if actual_workflow_start_et is not None
+            else existing.get("actual_workflow_start_et")
+        ),
+        "actual_execution_start_et": (
+            actual_execution_start_et
+            if actual_execution_start_et is not None
+            else existing.get("actual_execution_start_et")
+        ),
+        "first_submit_et": first_submit_et if first_submit_et is not None else existing.get("first_submit_et"),
+        "operator_execution_status": (
+            operator_execution_status
+            if operator_execution_status is not None
+            else existing.get("operator_execution_status")
+        ),
+        "retry_attempt_count": (
+            int(retry_attempt_count)
+            if retry_attempt_count is not None
+            else int(existing.get("retry_attempt_count", 0))
+        ),
+        "retry_eligible": retry_eligible if retry_eligible is not None else existing.get("retry_eligible"),
+        "retry_reason": retry_reason if retry_reason is not None else existing.get("retry_reason"),
+        "continuation_eligible": (
+            continuation_eligible
+            if continuation_eligible is not None
+            else existing.get("continuation_eligible")
+        ),
+        "continuation_reason": (
+            continuation_reason
+            if continuation_reason is not None
+            else existing.get("continuation_reason")
+        ),
+        "pending_buy_count": (
+            int(pending_buy_count)
+            if pending_buy_count is not None
+            else int(existing.get("pending_buy_count", 0))
+        ),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
@@ -392,9 +506,14 @@ def load_operator_summary(run_root: Path) -> Dict[str, Any] | None:
 
 def format_operator_summary_log(summary: Dict[str, Any]) -> str:
     """Format operator summary as machine-readable log line."""
-    status = summary.get("pretrade_status") or "UNKNOWN"
+    status = summary.get("operator_execution_status") or summary.get("pretrade_status") or "UNKNOWN"
     if summary.get("skipped_duplicate"):
         status = "SKIPPED_DUPLICATE"
+    elif (
+        (summary.get("broker_reject_status") or summary.get("execution_outcome"))
+        and summary.get("submitted_count", 0) > 0
+    ):
+        status = "PARTIAL_EXECUTION_ABORTED"
     elif summary.get("submitted_count", 0) > 0:
         status = "EXECUTED"
     
@@ -406,6 +525,7 @@ def format_operator_summary_log(summary: Dict[str, Any]) -> str:
         f"submitted={summary.get('submitted_count',0)} "
         f"accepted={summary.get('accepted_count',0)} "
         f"rejected={summary.get('rejected_count',0)} "
+        f"timing={summary.get('timing_status','unknown')} "
         f"confirmation_email={summary.get('confirmation_email_sent',False)}"
     )
 
@@ -415,8 +535,14 @@ def format_execution_health_banner(summary: Dict[str, Any]) -> str:
     repair_suggestions = list(summary.get("repair_suggestions") or [])
     broker_reject_status = str(summary.get("broker_reject_status") or "").strip() or "none"
     broker_reject_message = str(summary.get("broker_reject_message") or "").strip() or "none"
+    execution_outcome = str(summary.get("execution_outcome") or "").strip() or "none"
+    execution_reason = str(summary.get("execution_reason") or "").strip() or "none"
+    cash_rebalance_status = str(summary.get("cash_rebalance_status") or "").strip() or "none"
     broker_preflight_status = str(summary.get("broker_preflight_status") or "").strip() or "none"
     broker_preflight_warning_flags = list(summary.get("broker_preflight_warning_flags") or [])
+    broker_pdt_status = str(summary.get("broker_pdt_risk_status") or "").strip() or "none"
+    broker_pdt_flags = list(summary.get("broker_pdt_flags") or [])
+    broker_pdt_warning_message = str(summary.get("broker_pdt_warning_message") or "").strip() or "none"
     capital_constraint = (
         "TRIGGERED" if summary.get("capital_constraint_triggered") else "CLEAR"
     )
@@ -429,6 +555,12 @@ def format_execution_health_banner(summary: Dict[str, Any]) -> str:
         f"duplicate_guard={summary.get('duplicate_guard_status') or 'CLEAR'} "
         f"broker_preflight={broker_preflight_status} "
         f"broker_preflight_warnings={','.join(broker_preflight_warning_flags) if broker_preflight_warning_flags else 'none'} "
+        f"broker_pdt={broker_pdt_status} "
+        f"broker_pdt_flags={','.join(broker_pdt_flags) if broker_pdt_flags else 'none'} "
+        f"broker_pdt_message={broker_pdt_warning_message} "
+        f"execution_outcome={execution_outcome} "
+        f"execution_reason={execution_reason} "
+        f"cash_rebalance={cash_rebalance_status} "
         f"broker_reject={broker_reject_status} "
         f"broker_reject_message={broker_reject_message} "
         f"capital_constraint={capital_constraint} "
@@ -446,6 +578,7 @@ def format_broker_preflight_banner(preflight: Dict[str, Any]) -> str:
     warning_flags = list(preflight.get("broker_preflight_warning_flags") or [])
     restriction_flags = dict(preflight.get("broker_preflight_restriction_flags") or {})
     restriction_tokens = ",".join(f"{k}={v}" for k, v in sorted(restriction_flags.items()))
+    pdt_flags = list(preflight.get("broker_pdt_flags") or [])
     return (
         "[BROKER_PREFLIGHT] "
         f"status={preflight.get('broker_preflight_status') or 'UNKNOWN'} "
@@ -454,5 +587,7 @@ def format_broker_preflight_banner(preflight: Dict[str, Any]) -> str:
         f"equity={preflight.get('broker_preflight_equity')} "
         f"buying_power={preflight.get('broker_preflight_buying_power')} "
         f"warnings={','.join(warning_flags) if warning_flags else 'none'} "
-        f"restrictions={restriction_tokens or 'none'}"
+        f"restrictions={restriction_tokens or 'none'} "
+        f"pdt_status={preflight.get('broker_pdt_risk_status') or 'UNKNOWN'} "
+        f"pdt_flags={','.join(pdt_flags) if pdt_flags else 'none'}"
     )

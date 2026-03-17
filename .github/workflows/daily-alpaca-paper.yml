@@ -1,14 +1,5 @@
 name: Daily Alpaca Paper Run
 
-# Auto-Bootstrap Feature:
-# When PRETRADE reconciliation fails (broker/model position drift), the workflow can
-# automatically refresh the canonical model snapshot from broker positions.
-# - Controlled by repo variable: AUTO_BOOTSTRAP_ON_RECON_FAIL (default: 0 = disabled)
-# - When enabled: auto-bootstraps, sends email with drift details, next run succeeds
-# - When disabled: workflow fails with exit 2, requires manual bootstrap via workflow_dispatch
-# - Safety: Never places orders when drift detected
-# - See docs/OPERATIONS.md for full details
-
 on:
   workflow_dispatch:
     inputs:
@@ -16,140 +7,208 @@ on:
         description: "Override REPORT_DATE (YYYY-MM-DD). Leave blank for today ET."
         required: false
         type: string
-      bootstrap_model_ledger_from_broker:
-        description: "Run bootstrap-only mode (writes canonical model snapshot from broker, exits without orders)."
+      workflow_stage:
+        description: "auto | precompute | live"
         required: false
-        type: boolean
-        default: false
-      force_bootstrap_flat:
-        description: "Bypass empty-position safety guard during bootstrap. Use when account is genuinely flat (0 positions, all cash) after a manual reset."
+        type: string
+        default: auto
+      continuation_mode:
+        description: "none | buy_only"
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: none
   schedule:
-    # 9:35 AM America/New_York is 14:35 UTC in EST and 13:35 UTC in EDT.
-    # Keep both cron entries to handle DST shifts.
-    - cron: "35 14 * * 1-5"
-    - cron: "35 13 * * 1-5"
+    # Precompute target: 7:30 AM America/New_York.
+    # EST weekdays use 12:30 UTC, EDT weekdays use 11:30 UTC.
+    - cron: "30 12 * 1,2,12 1-5"
+    - cron: "30 12 1-7 3 1-5"
+    - cron: "30 11 8-31 3 1-5"
+    - cron: "30 11 * 4-10 1-5"
+    - cron: "30 11 1-7 11 1-5"
+    - cron: "30 12 8-30 11 1-5"
+    # Live execution target: 9:35 AM America/New_York.
+    # EST weekdays use 14:35 UTC, EDT weekdays use 13:35 UTC.
+    - cron: "35 14 * 1,2,12 1-5"
+    - cron: "35 14 1-7 3 1-5"
+    - cron: "35 13 8-31 3 1-5"
+    - cron: "35 13 * 4-10 1-5"
+    - cron: "35 13 1-7 11 1-5"
+    - cron: "35 14 8-30 11 1-5"
 
 jobs:
-  engine_run:
+  classify_stage:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     outputs:
-      report_date: ${{ steps.set_meta.outputs.report_date }}
-      run_id: ${{ steps.set_meta.outputs.run_id }}
+      workflow_stage: ${{ steps.meta.outputs.workflow_stage }}
+      report_date: ${{ steps.meta.outputs.report_date }}
+      workflow_started_at_utc: ${{ steps.meta.outputs.workflow_started_at_utc }}
+    steps:
+      - name: Resolve workflow stage and trade date
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.report_date }}" ]; then
+            REPORT_DATE="${{ inputs.report_date }}"
+          else
+            REPORT_DATE="$(TZ=America/New_York date +%F)"
+          fi
+          WORKFLOW_STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          MANUAL_STAGE="${{ inputs.workflow_stage }}"
+          SCHEDULE="${{ github.event.schedule }}"
 
+          PRECOMPUTE_CRONS=(
+            "30 12 * 1,2,12 1-5"
+            "30 12 1-7 3 1-5"
+            "30 11 8-31 3 1-5"
+            "30 11 * 4-10 1-5"
+            "30 11 1-7 11 1-5"
+            "30 12 8-30 11 1-5"
+          )
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$MANUAL_STAGE" ] && [ "$MANUAL_STAGE" != "auto" ]; then
+            STAGE="$MANUAL_STAGE"
+          else
+            STAGE="live"
+            for cron in "${PRECOMPUTE_CRONS[@]}"; do
+              if [ "$SCHEDULE" = "$cron" ]; then
+                STAGE="precompute"
+                break
+              fi
+            done
+          fi
+
+          echo "workflow_stage=$STAGE" >> "$GITHUB_OUTPUT"
+          echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
+          echo "workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC" >> "$GITHUB_OUTPUT"
+          echo "[META] workflow_stage=$STAGE report_date=$REPORT_DATE workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC"
+
+  precompute:
+    needs: classify_stage
+    if: ${{ needs.classify_stage.outputs.workflow_stage == 'precompute' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      PLAN_ONLY: "1"
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.classify_stage.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.classify_stage.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+          restore-keys: |
+            canonical-model-snapshot-v2-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run precompute planner
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 daily_quant_report.py --plan-only --write-precompute-bundle
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v1-${{ env.REPORT_DATE }}
+
+      - name: Upload precompute artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-precompute
+          if-no-files-found: warn
+          path: |
+            outputs/precompute/${{ env.REPORT_DATE }}/**
+            outputs/latest_run.json
+            outputs/runs/**
+
+  live_primary:
+    needs: classify_stage
+    if: ${{ needs.classify_stage.outputs.workflow_stage == 'live' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      run_id: ${{ steps.meta.outputs.run_id }}
+      retry_eligible: ${{ steps.decision.outputs.retry_eligible }}
+      retry_reason: ${{ steps.decision.outputs.retry_reason }}
+      continuation_eligible: ${{ steps.decision.outputs.continuation_eligible }}
+      continuation_reason: ${{ steps.decision.outputs.continuation_reason }}
     env:
       TRADING_MODE: alpaca
       MODE: alpaca
       RECON_V2: 1
       ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
       ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
-
-      # Secrets (do not print these)
       ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
       ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
-
-      # If user passed an override date via workflow_dispatch
-      REPORT_DATE: ${{ inputs.report_date }}
-
-      # Bootstrap only allowed via workflow_dispatch; never via schedule
-      BOOTSTRAP_MODEL_LEDGER_FROM_BROKER: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_model_ledger_from_broker || 'false' }}
-      FORCE_BOOTSTRAP_FLAT: ${{ github.event_name == 'workflow_dispatch' && inputs.force_bootstrap_flat || 'false' }}
-
-      # Ensure date calculations use Eastern if REPORT_DATE isn't provided
+      REPORT_DATE: ${{ needs.classify_stage.outputs.report_date }}
       TZ: America/New_York
-      EMAIL_STRICT: "0"
-      
-      # Email Governance Configuration (production defaults: all enabled)
-      EMAIL_MARKET_CONDITIONS: ${{ vars.EMAIL_MARKET_CONDITIONS || '1' }}
-      EMAIL_PRETRADE: ${{ vars.EMAIL_PRETRADE || '1' }}
-      EMAIL_TRADING_CONFIRMATION: ${{ vars.EMAIL_TRADING_CONFIRMATION || '1' }}
-      EMAIL_INTERNAL_DEBUG: ${{ vars.EMAIL_INTERNAL_DEBUG || '0' }}
-
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.classify_stage.outputs.workflow_started_at_utc }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Print commit info
+      - name: Set run metadata
+        id: meta
         shell: bash
         run: |
           set -euo pipefail
-          echo "[GIT] Current commit:"
-          git rev-parse HEAD
-          git log -1 --oneline
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_live"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Restore canonical model snapshot (cache)
-        uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: outputs/paper_state/canonical_positions.json
-          # Date-scoped key: creates a new cache entry each calendar day so GitHub
-          # can always write (immutable-key constraint satisfied). restore-keys
-          # prefix-matches the most recent prior day's entry if today's doesn't
-          # exist yet, ensuring the snapshot survives weekends and holidays without
-          # a 7-day eviction risk. Bumped to v2 to clear the stale v1 entry.
-          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE || github.run_id }}
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
           restore-keys: |
             canonical-model-snapshot-v2-
 
-      - name: Debug trigger + inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "event_name=${{ github.event_name }}"
-          echo "report_date_input='${{ inputs.report_date }}'"
-          echo "bootstrap_input='${{ inputs.bootstrap_model_ledger_from_broker }}'"
-          echo "BOOTSTRAP_MODEL_LEDGER_FROM_BROKER='${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER}'"
-          echo "REPORT_DATE='${REPORT_DATE}'"
-          echo "TZ='${TZ}'"
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v1-${{ env.REPORT_DATE }}
 
-      - name: Set run metadata
-        id: set_meta
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if [ -z "${REPORT_DATE:-}" ]; then
-            REPORT_DATE="$(TZ=America/New_York date +%F)"
-          fi
-          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
-          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
-          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
-
-          # Write a preliminary latest_run.json immediately so execute_orders can
-          # resolve run_root even if the planner step fails before writing one.
-          # The planner (_init_run_context) will overwrite with status="running",
-          # and _finalize_run_context will overwrite with status="success".
-          # NOTE: do NOT mkdir outputs/runs/${RUN_ID} here — upload-artifact@v4
-          # silently drops empty directories, so an empty dir would not survive
-          # the artifact upload. The run directory is only created (and populated)
-          # by _init_run_context inside daily_quant_report.py.
-          mkdir -p outputs
-          printf '{\n  "run_id": "%s",\n  "trade_date": "%s",\n  "mode": "ALPACA",\n  "run_root": "outputs/runs/%s",\n  "status": "initializing",\n  "created_at": "%s"\n}\n' \
-            "$RUN_ID" "$REPORT_DATE" "$RUN_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            > outputs/latest_run.json
-          echo "[RUN_POINTER] created outputs/latest_run.json:"
-          cat outputs/latest_run.json
-
-      - name: Assert meta outputs present
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "[META] report_date='${{ steps.set_meta.outputs.report_date }}' run_id='${RUN_ID}'"
-          if [ -z "${{ steps.set_meta.outputs.report_date }}" ]; then
-            echo "[META][ERROR] report_date is empty"
-            exit 1
-          fi
-          if [ -z "${RUN_ID:-}" ]; then
-            echo "[META][ERROR] RUN_ID env is empty"
-            exit 1
-          fi
-          echo "[META][OK] All metadata outputs validated"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -161,315 +220,86 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Alpaca smoke test (non-fatal)
-        shell: bash
-        run: |
-          source .venv/bin/activate
-          python3 alpaca_smoke_test.py || true
-
-      - name: Alpaca raw /v2/account probe
-        env:
-          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
-          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
-          ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
-          ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
-        shell: bash
-        run: |
-          .venv/bin/python - <<'PY'
-          import os
-          import ssl
-          import urllib.request
-
-          base = (os.environ.get("ALPACA_BASE_URL") or "").rstrip("/")
-          key = os.environ.get("ALPACA_API_KEY_ID")
-          sec = os.environ.get("ALPACA_API_SECRET_KEY")
-
-          if base.endswith("/v2"):
-              base = base[:-3]
-          print("BASE", base)
-          print("key_set", bool(key), "secret_set", bool(sec))
-          url = base + "/v2/account"
-
-          req = urllib.request.Request(
-              url,
-              headers={
-                  "APCA-API-KEY-ID": key or "",
-                  "APCA-API-SECRET-KEY": sec or "",
-              },
-          )
-          ctx = ssl.create_default_context()
-          with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
-              body = resp.read().decode("utf-8", errors="replace")
-              print("GET", url, "->", resp.status, body[:200])
-          PY
-
-      - name: Verify Alpaca env presence (no values)
-        shell: bash
-        env:
-          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
-          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
-          ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
-        run: |
-          python3 - <<'PY'
-          import os
-          for k in ["ALPACA_API_KEY_ID","ALPACA_API_SECRET_KEY","ALPACA_PAPER"]:
-              v = os.environ.get(k, "")
-              leading_ws = bool(v) and v[:1].isspace()
-              trailing_ws = bool(v) and v[-1:].isspace()
-              has_newline = ("\n" in v) or ("\r" in v)
-              print(f"{k}: set={'YES' if v else 'NO'} len={len(v)} leading_ws={leading_ws} trailing_ws={trailing_ws} has_newline={has_newline}")
-          PY
-
-      - name: Diag Alpaca auth (safe)
-        shell: bash
-        env:
-          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
-          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
-          ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
-          ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
-        run: |
-          set -euo pipefail
-          mkdir -p outputs
-          .venv/bin/python scripts/diag_alpaca_auth.py | tee outputs/diag_alpaca_auth.log
-          grep -q "\[DIAG\]\[CURL\] HTTP code: 200" outputs/diag_alpaca_auth.log
-          grep -q "\[DIAG\]\[PY\] OK" outputs/diag_alpaca_auth.log
-
-      - name: Check critical env vars (SET/MISSING only, no values)
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os
-          critical_vars = [
-              "ALPACA_API_KEY_ID",
-              "ALPACA_API_SECRET_KEY",
-              "ALPACA_PAPER",
-              "ALPACA_BASE_URL",
-              "MODE",
-              "TRADING_MODE",
-              "REPORT_DATE",
-              "TZ",
-          ]
-          print("[ENV_CHECK] Critical variable status (DO NOT PRINT VALUES):")
-          all_set = True
-          for var in critical_vars:
-              status = "SET" if os.environ.get(var) else "MISSING"
-              print(f"  {var}={status}")
-              if status == "MISSING":
-                  all_set = False
-          if not all_set:
-              print("\n[ENV_CHECK][ERROR] Some critical env vars are missing!")
-              raise SystemExit(1)
-          print("\n[ENV_CHECK][OK] All critical env vars are set")
-          PY
-
-      - name: Verify canonical model snapshot exists (unless bootstrap)
-        shell: bash
-        run: |
-          set -euo pipefail
-          bootstrap="${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}"
-          if [ "$bootstrap" = "true" ]; then
-            echo "[RECON] Bootstrap mode enabled; skipping canonical snapshot precheck"
-            exit 0
-          fi
-          if [ ! -f outputs/paper_state/canonical_positions.json ]; then
-            echo "[RECON][ERROR] Missing outputs/paper_state/canonical_positions.json"
-            echo "[RECON][ACTION] Run workflow_dispatch once with bootstrap_model_ledger_from_broker=true"
-            exit 1
-          fi
-
-      - name: Run daily quant execution
-        shell: bash
-        run: |
-          set -euxo pipefail
-          source .venv/bin/activate
-          mkdir -p outputs
-          echo "[ENV] RECON_V2=${RECON_V2:-<unset>}"
-          cmd=(python3 daily_quant_report.py)
-          if [ "${BOOTSTRAP_MODEL_LEDGER_FROM_BROKER:-false}" = "true" ]; then
-            cmd+=(--bootstrap-model-ledger-from-broker)
-          fi
-          if [ "${FORCE_BOOTSTRAP_FLAT:-false}" = "true" ]; then
-            cmd+=(--force-bootstrap-flat)
-          fi
-          set +e
-          "${cmd[@]}" 2>&1 | tee outputs/ci_alpaca_run.log
-          status=${PIPESTATUS[0]}
-          set -e
-          mkdir -p "outputs/runs/${RUN_ID}/logs"
-          cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
-          echo "$status" > outputs/exit_status.txt
-          exit "$status"
-
-      - name: Auto-bootstrap on reconciliation failure (if enabled)
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          
-          # Read the exit status from previous step
-          if [ ! -f outputs/exit_status.txt ]; then
-            echo "[AUTO_BOOTSTRAP] No exit status file found; skipping auto-bootstrap check"
-            exit 0
-          fi
-          
-          exit_status=$(cat outputs/exit_status.txt)
-          echo "[AUTO_BOOTSTRAP] Previous step exit status: $exit_status"
-          
-          # Exit code 2 means PRETRADE reconciliation failed
-          if [ "$exit_status" != "2" ]; then
-            echo "[AUTO_BOOTSTRAP] Exit status is not 2 (recon FAIL); skipping auto-bootstrap"
-            exit 0
-          fi
-          
-          echo "[AUTO_BOOTSTRAP] PRETRADE reconciliation failure detected (exit code 2)"
-
-          # Safety sentinel: exit code 2 is a general POSIX error code, not exclusively
-          # produced by pre-trade reconciliation.  Before triggering any broker API call
-          # or snapshot write, confirm the reconciliation report file was actually written
-          # by the reconciliation module.  If it is absent, a different code path produced
-          # the exit 2 (e.g. argparse misuse, library error) and bootstrapping would
-          # silently overwrite a correct canonical snapshot with stale or empty broker data.
-          recon_sentinel="outputs/runs/${RUN_ID}/broker/recon_pretrade_${REPORT_DATE:-unknown}.json"
-          if [ ! -f "$recon_sentinel" ]; then
-            echo "[AUTO_BOOTSTRAP][SAFETY] Sentinel not found: $recon_sentinel"
-            echo "[AUTO_BOOTSTRAP][SAFETY] exit code 2 did NOT originate from pre-trade reconciliation"
-            echo "[AUTO_BOOTSTRAP][SAFETY] Refusing to bootstrap — manual investigation required"
-            echo "[AUTO_BOOTSTRAP][SAFETY] Check outputs/ci_alpaca_run.log for the actual failure cause"
-            exit 2
-          fi
-          echo "[AUTO_BOOTSTRAP] Sentinel confirmed: $recon_sentinel"
-
-          # Check if auto-bootstrap is enabled via repo variable (default: disabled)
-          auto_bootstrap="${{ vars.AUTO_BOOTSTRAP_ON_RECON_FAIL || '0' }}"
-          echo "[AUTO_BOOTSTRAP] AUTO_BOOTSTRAP_ON_RECON_FAIL setting: $auto_bootstrap"
-          
-          if [ "$auto_bootstrap" != "1" ] && [ "$auto_bootstrap" != "true" ]; then
-            echo "[AUTO_BOOTSTRAP] Auto-bootstrap is DISABLED; workflow will fail with exit 2"
-            echo "[AUTO_BOOTSTRAP] To enable: Set repository variable AUTO_BOOTSTRAP_ON_RECON_FAIL=1"
-            echo "[AUTO_BOOTSTRAP] Or manually run with workflow_dispatch input: bootstrap_model_ledger_from_broker=true"
-            exit 2
-          fi
-          
-          echo "[AUTO_BOOTSTRAP] Auto-bootstrap is ENABLED; attempting to bootstrap canonical snapshot from broker..."
-          
-          # Activate venv and run bootstrap
-          source .venv/bin/activate
-          
-          if python3 daily_quant_report.py --bootstrap-model-ledger-from-broker 2>&1 | tee -a outputs/ci_alpaca_run.log; then
-            echo "[AUTO_BOOTSTRAP][SUCCESS] Canonical snapshot refreshed from broker positions"
-            echo "[AUTO_BOOTSTRAP] Next scheduled run should pass PRETRADE reconciliation"
-            
-            # Update run log with bootstrap success
-            mkdir -p "outputs/runs/${RUN_ID}/logs"
-            cp -f outputs/ci_alpaca_run.log "outputs/runs/${RUN_ID}/logs/ci_alpaca_run.log" || true
-            
-            # Create a marker file to indicate auto-bootstrap was triggered
-            echo "{\"auto_bootstrap_triggered\": true, \"reason\": \"pretrade_recon_fail\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "outputs/runs/${RUN_ID}/auto_bootstrap.json"
-            
-            # Create execution email payload with recon failure info
-            echo "[AUTO_BOOTSTRAP] Creating execution email payload with recon failure info..."
-            mkdir -p "outputs/execution_email"
-            
-            # Try to read recon report for details
-            recon_report_path="outputs/runs/${RUN_ID}/broker/recon_pretrade_${REPORT_DATE}.json"
-            export recon_data="{}"
-            if [ -f "$recon_report_path" ]; then
-              echo "[AUTO_BOOTSTRAP] Found recon report: $recon_report_path"
-              recon_data=$(cat "$recon_report_path" | python3 -c "import json, sys; data = json.load(sys.stdin); print(json.dumps({'verdict': data.get('verdict'), 'diffs': data.get('diffs')}))" 2>/dev/null || echo "{}")
-              export recon_data
-            else
-              echo "[AUTO_BOOTSTRAP] Recon report not found at $recon_report_path"
-            fi
-            
-            # Create execution email payload with recon failure info.
-            # Logic lives in scripts/generate_bootstrap_email_payload.py to avoid
-            # embedding unindented Python inside a YAML block scalar (breaks YAML parsers).
-            mkdir -p "outputs/execution_email"
-            python3 scripts/generate_bootstrap_email_payload.py
-            
-            # Exit 0 to mark this run as "recovered" (not a hard failure)
-            exit 0
-          else
-            bootstrap_status=$?
-            echo "[AUTO_BOOTSTRAP][ERROR] Bootstrap failed with exit code: $bootstrap_status"
-            echo "[AUTO_BOOTSTRAP] Manual intervention required"
-            exit 1
-          fi
-
-      - name: Save updated canonical snapshot to cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: outputs/paper_state/canonical_positions.json
-          # Must match the restore key exactly so each day gets its own entry.
-          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE || github.run_id }}
+      - name: Execute from precompute bundle
+        id: live_run
         continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 0
 
-      - name: Validate run pointer and list files before upload
+      - name: Capture retry and continuation decision
+        id: decision
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          # Hard validation: latest_run.json MUST exist — it was written in Set run metadata.
-          # Failure here means Set run metadata itself failed, which is a workflow bug.
-          if [ ! -f outputs/latest_run.json ]; then
-            echo "[RUN_POINTER] ERROR — outputs/latest_run.json is missing before upload."
-            echo "[RUN_POINTER] This means Set run metadata failed to write the preliminary pointer."
-            echo "[RUN_POINTER] Contents of outputs/ (if it exists):"
-            ls -la outputs/ || echo "(outputs/ does not exist)"
-            exit 1
-          fi
-          echo "[RUN_POINTER] validated outputs/latest_run.json:"
-          cat outputs/latest_run.json
-          echo "[RUN_POINTER] uploaded — included in alpaca-paper artifact"
-          echo "[UPLOAD_PREP] Run directory: outputs/runs/${RUN_ID:-<unset>}/"
-          ls -laR "outputs/runs/${RUN_ID:-}/" 2>/dev/null || echo "[UPLOAD_PREP] Run directory not found (planner may have failed early)"
-          echo "[UPLOAD_PREP] Execution email payload: outputs/execution_email/${REPORT_DATE:-<unset>}.json"
-          ls -la "outputs/execution_email/${REPORT_DATE:-}.json" 2>/dev/null || echo "[UPLOAD_PREP] Execution email payload not found"
-          echo "[UPLOAD_PREP] Canonical positions: outputs/paper_state/canonical_positions.json"
-          ls -la "outputs/paper_state/canonical_positions.json" 2>/dev/null || echo "[UPLOAD_PREP] Canonical positions not found"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          run_id = "${{ steps.meta.outputs.run_id }}"
+          path = Path("outputs/runs") / run_id / "operator_summary.json"
+          data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"retry_eligible={str(bool(data.get('retry_eligible'))).lower()}\n")
+              fh.write(f"retry_reason={str(data.get('retry_reason') or '')}\n")
+              fh.write(f"continuation_eligible={str(bool(data.get('continuation_eligible'))).lower()}\n")
+              fh.write(f"continuation_reason={str(data.get('continuation_reason') or '')}\n")
+          PY
 
-      - name: Upload canonical model snapshot artifact
+      - name: Upload live primary artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: canonical-model-snapshot
+          name: alpaca-live-primary
           if-no-files-found: warn
           path: |
-            outputs/paper_state/canonical_positions.json
-
-      - name: Upload outputs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: alpaca-paper
-          if-no-files-found: warn
-          path: |
-            outputs/runs/**
-            outputs/runs/*/broker/**
-            outputs/runs/*/trading_day_summary.json
-            outputs/paper_state/canonical_positions.json
             outputs/latest_run.json
-            outputs/trading_day_summary.json
             outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/runs/${{ steps.meta.outputs.run_id }}/**
             outputs/execution_audit/**
+            outputs/trading_day_summary.json
 
-  execute_orders:
-    needs: engine_run
-    if: always()
+      - name: Fail job when live execution failed
+        if: steps.live_run.outcome != 'success'
+        shell: bash
+        run: exit 1
+
+  retry_precompute:
+    needs: [classify_stage, live_primary]
+    if: ${{ always() && needs.classify_stage.outputs.workflow_stage == 'live' && needs.live_primary.outputs.retry_eligible == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      PLAN_ONLY: "1"
       ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
       ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
       ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
       ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.classify_stage.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.classify_stage.outputs.workflow_started_at_utc }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+          restore-keys: |
+            canonical-model-snapshot-v2-
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -481,87 +311,206 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Download engine artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: alpaca-paper
-          path: downloaded
-
-      - name: Prepare canonical execution inputs
+      - name: Rebuild precompute bundle for retry
         shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p outputs/runs
-
-          # Locate latest_run.json.  upload-artifact@v4 preserves the full relative
-          # path (outputs/latest_run.json) when multiple files survive the path spec,
-          # but strips the common ancestor when only one file survives (artifact root
-          # becomes the file's parent).  Search by name to handle both layouts.
-          latest_src="$(find downloaded -type f -name 'latest_run.json' | head -n1 || true)"
-          if [ -n "$latest_src" ]; then
-            cp -f "$latest_src" outputs/latest_run.json
-            echo "[RUN_POINTER] validated — restored outputs/latest_run.json from artifact ($latest_src):"
-            cat outputs/latest_run.json
-          else
-            echo "[EXECUTION][ERROR] latest_run.json missing in artifact — engine_run may have failed before writing it"
-            echo "[EXECUTION][ERROR] Artifact contents:"
-            find downloaded -maxdepth 6 -type f | sort || true
-            echo "[EXECUTION][ERROR] Cannot resolve canonical run_root; halting executor"
-            exit 1
-          fi
-
-          # Locate the run root directory.  Same prefix-stripping concern applies.
-          run_root_src="$(find downloaded -type d | grep -E '/runs/[^/]+$' | head -n1 || true)"
-          if [ -n "$run_root_src" ]; then
-            run_id="$(basename "$run_root_src")"
-            cp -R "$run_root_src" "outputs/runs/$run_id"
-            echo "[EXECUTION] restored run root: outputs/runs/$run_id"
-          else
-            echo "[EXECUTION][WARN] run root directory not found in artifact (engine may have failed before _init_run_context)"
-          fi
-
-      - name: Derive REPORT_DATE from artifact pointer
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f outputs/latest_run.json ]; then
-            TRADE_DATE="$(python3 -c "import json; d=json.load(open('outputs/latest_run.json')); print(d.get('trade_date',''))")"
-            if [ -n "$TRADE_DATE" ]; then
-              echo "REPORT_DATE=$TRADE_DATE" >> "$GITHUB_ENV"
-              echo "[EXECUTION_META] derived REPORT_DATE=$TRADE_DATE from outputs/latest_run.json"
-            else
-              echo "[EXECUTION_META][WARN] trade_date missing in outputs/latest_run.json"
-            fi
-          else
-            echo "[EXECUTION_META][WARN] outputs/latest_run.json absent; REPORT_DATE not set"
-          fi
-
-      - name: Execute canonical broker stage
-        shell: bash
-        env:
-          PYTHONPATH: "."
         run: |
           set -euo pipefail
           source .venv/bin/activate
-          .venv/bin/python scripts/execute_alpaca_orders.py
+          python3 daily_quant_report.py --plan-only --write-precompute-bundle
 
-      - name: Upload execution outputs
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v1-${{ env.REPORT_DATE }}
+
+      - name: Upload retry precompute artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: alpaca-execution
+          name: alpaca-retry-precompute
+          if-no-files-found: warn
+          path: |
+            outputs/precompute/${{ env.REPORT_DATE }}/**
+            outputs/latest_run.json
+            outputs/runs/**
+
+  live_retry:
+    needs: [classify_stage, live_primary, retry_precompute]
+    if: ${{ always() && needs.classify_stage.outputs.workflow_stage == 'live' && needs.live_primary.outputs.retry_eligible == 'true' && needs.retry_precompute.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      run_id: ${{ steps.meta.outputs.run_id }}
+      continuation_eligible: ${{ steps.decision.outputs.continuation_eligible }}
+      continuation_reason: ${{ steps.decision.outputs.continuation_reason }}
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.classify_stage.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.classify_stage.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set retry run metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_retry"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v1-${{ env.REPORT_DATE }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute retry from refreshed precompute bundle
+        id: retry_run
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 1
+
+      - name: Capture continuation decision
+        id: decision
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          run_id = "${{ steps.meta.outputs.run_id }}"
+          path = Path("outputs/runs") / run_id / "operator_summary.json"
+          data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"continuation_eligible={str(bool(data.get('continuation_eligible'))).lower()}\n")
+              fh.write(f"continuation_reason={str(data.get('continuation_reason') or '')}\n")
+          PY
+
+      - name: Upload live retry artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-retry
           if-no-files-found: warn
           path: |
             outputs/latest_run.json
-            outputs/runs/*/broker/**
-            outputs/runs/*/execution_results.json
-            outputs/runs/*/trading_day_summary.json
+            outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/runs/${{ steps.meta.outputs.run_id }}/**
+            outputs/execution_audit/**
             outputs/trading_day_summary.json
-            outputs/execution_audit/
+
+      - name: Fail job when retry execution failed
+        if: steps.retry_run.outcome != 'success'
+        shell: bash
+        run: exit 1
+
+  continue_buys:
+    needs: [classify_stage, live_primary, live_retry]
+    if: ${{ always() && needs.classify_stage.outputs.workflow_stage == 'live' && (needs.live_retry.outputs.continuation_eligible == 'true' || needs.live_primary.outputs.continuation_eligible == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.classify_stage.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.classify_stage.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select continuation run id
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.live_retry.outputs.continuation_eligible }}" = "true" ]; then
+            RUN_ID="${{ needs.live_retry.outputs.run_id }}"
+          else
+            RUN_ID="${{ needs.live_primary.outputs.run_id }}"
+          fi
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v1-${{ env.REPORT_DATE }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Continue outstanding buys
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 1 --continuation-mode buy_only
+
+      - name: Upload continuation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-continuation
+          if-no-files-found: warn
+          path: |
+            outputs/latest_run.json
+            outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/runs/${{ steps.meta.outputs.run_id }}/**
+            outputs/execution_audit/**
+            outputs/trading_day_summary.json
 
   email:
-    needs: [engine_run, execute_orders]
-    if: always()   # must run even when engine_run fails (recon failure, auto-bootstrap) so operator is always notified
+    needs: [classify_stage, live_primary, retry_precompute, live_retry, continue_buys]
+    if: ${{ always() && needs.classify_stage.outputs.workflow_stage == 'live' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -575,87 +524,15 @@ jobs:
       REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
       EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
       EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN || '0' }}
-      
-      # Email Governance Configuration
-      # Controls which operator-facing emails are sent (default: all enabled)
-      EMAIL_MARKET_CONDITIONS: ${{ vars.EMAIL_MARKET_CONDITIONS || '1' }}
-      EMAIL_PRETRADE: ${{ vars.EMAIL_PRETRADE || '1' }}
-      EMAIL_TRADING_CONFIRMATION: ${{ vars.EMAIL_TRADING_CONFIRMATION || '1' }}
-      # Internal debug emails (default: disabled)
-      EMAIL_INTERNAL_DEBUG: ${{ vars.EMAIL_INTERNAL_DEBUG || '0' }}
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "1"
+      EMAIL_TRADING_CONFIRMATION: "1"
+      EMAIL_INTERNAL_DEBUG: "0"
+      REPORT_DATE: ${{ needs.classify_stage.outputs.report_date }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Print commit info
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "[GIT] Current commit:"
-          git rev-parse HEAD
-          git log -1 --oneline
-
-      - name: Assert email job env vars present
-        shell: bash
-        run: |
-          set -euo pipefail
-          # REPORT_DATE is not available yet — it is derived from the downloaded artifact
-          # in the "Infer RUN_ID and REPORT_DATE" step below. This step just confirms
-          # the artifact name is deterministic.
-          echo "[EMAIL_META][OK] Artifact name will be: alpaca-paper"
-
-      - name: Download engine artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: alpaca-paper
-          path: downloaded
-
-      - name: Download execution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: alpaca-execution
-          path: downloaded_exec
-        continue-on-error: true
-
-      - name: Infer RUN_ID and REPORT_DATE from downloaded artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Derive REPORT_DATE and RUN_ID from latest_run.json.
-          # Search by name (not path) — robust against upload-artifact@v4 prefix-stripping.
-          LATEST_JSON="$(find downloaded -type f -name 'latest_run.json' | head -n1 || true)"
-          if [ -n "$LATEST_JSON" ]; then
-            TRADE_DATE="$(python3 -c "import json; d=json.load(open('$LATEST_JSON')); print(d.get('trade_date',''))")"
-            POINTER_RUN_ID="$(python3 -c "import json; d=json.load(open('$LATEST_JSON')); print(d.get('run_id',''))")"
-            if [ -n "$TRADE_DATE" ]; then
-              echo "REPORT_DATE=$TRADE_DATE" >> "$GITHUB_ENV"
-              echo "[EMAIL_META] derived REPORT_DATE=$TRADE_DATE from $LATEST_JSON"
-            else
-              echo "[EMAIL_META][WARN] trade_date missing in $LATEST_JSON"
-            fi
-          else
-            echo "[EMAIL_META][WARN] latest_run.json not found in artifact; REPORT_DATE not set"
-            POINTER_RUN_ID=""
-          fi
-
-          # Prefer a run directory found in the artifact; fall back to run_id from pointer.
-          RUN_DIR="$(find downloaded -type d | grep -E '/runs/[^/]+$' | head -n 1 || true)"
-          if [ -n "$RUN_DIR" ]; then
-            RUN_ID="$(basename "$RUN_DIR")"
-            echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-            echo "[EMAIL_META] inferred RUN_ID=$RUN_ID from run directory"
-          elif [ -n "${POINTER_RUN_ID:-}" ]; then
-            echo "RUN_ID=$POINTER_RUN_ID" >> "$GITHUB_ENV"
-            echo "[EMAIL_META] inferred RUN_ID=$POINTER_RUN_ID from latest_run.json (no run dir in artifact)"
-          else
-            echo "[EMAIL_META][WARN] Cannot determine RUN_ID — engine_run may have failed before writing any artifacts"
-            echo "[EMAIL_META][WARN] Artifact contents:"
-            find downloaded -maxdepth 6 -type f | sort || true
-          fi
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -667,29 +544,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Download live primary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-live-primary
+          path: downloaded_primary
+        continue-on-error: true
+
+      - name: Download live retry artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-live-retry
+          path: downloaded_retry
+        continue-on-error: true
+
+      - name: Download live continuation artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-live-continuation
+          path: downloaded_continuation
+        continue-on-error: true
+
       - name: Prepare persisted email inputs
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p outputs/execution_email outputs/daily outputs/runs downloaded_exec
-          payload_src="$(find downloaded -type f -path "*/execution_email/${REPORT_DATE}.json" | head -n1 || true)"
-          if [ -n "$payload_src" ]; then
-            cp -f "$payload_src" "outputs/execution_email/${REPORT_DATE}.json"
-          else
-            echo "[EMAIL][WARN] execution payload not found for ${REPORT_DATE}"
-          fi
+          mkdir -p outputs/execution_email outputs/runs
 
-          latest_src="$(find downloaded downloaded_exec -type f -path '*/latest_run.json' 2>/dev/null | head -n1 || true)"
+          latest_src="$(find downloaded_primary downloaded_retry downloaded_continuation -type f -name 'latest_run.json' 2>/dev/null | tail -n1 || true)"
           if [ -n "$latest_src" ]; then
             mkdir -p outputs
             cp -f "$latest_src" outputs/latest_run.json
           fi
 
-          run_root_src="$(find downloaded downloaded_exec -type d -path '*/runs/*' 2>/dev/null | grep -E '/runs/[^/]+$' | head -n1 || true)"
-          if [ -n "$run_root_src" ]; then
-            run_id="$(basename "$run_root_src")"
-            cp -R "$run_root_src" "outputs/runs/$run_id" || true
+          payload_src="$(find downloaded_primary downloaded_retry downloaded_continuation -type f -path "*/execution_email/${REPORT_DATE}.json" 2>/dev/null | tail -n1 || true)"
+          if [ -n "$payload_src" ]; then
+            cp -f "$payload_src" "outputs/execution_email/${REPORT_DATE}.json"
           fi
+
+          while IFS= read -r run_root_src; do
+            run_id="$(basename "$run_root_src")"
+            mkdir -p "outputs/runs/$run_id"
+            cp -R "$run_root_src"/. "outputs/runs/$run_id"/ || true
+          done < <(find downloaded_primary downloaded_retry downloaded_continuation -type d -path '*/runs/*' 2>/dev/null | grep -E '/runs/[^/]+$' || true)
 
       - name: Guard email credentials (auto dry-run when missing)
         shell: bash
@@ -698,27 +595,17 @@ jobs:
           missing=0
           for key in SMTP_USER SMTP_PASSWORD REPORT_TO_EMAIL; do
             if [ -z "${!key:-}" ]; then
-              echo "[EMAIL][WARN] ${key} is empty"
               missing=1
             fi
           done
           if [ "$missing" -eq 1 ]; then
-            echo "[EMAIL][WARN] Missing SMTP credentials/recipient; forcing EMAIL_DRY_RUN=1"
             echo "EMAIL_DRY_RUN=1" >> "$GITHUB_ENV"
-            if [ -z "${SMTP_USER:-}" ]; then
-              echo "SMTP_USER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
-              echo "EMAIL_SENDER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
-            fi
-            if [ -z "${SMTP_PASSWORD:-}" ]; then
-              echo "SMTP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
-              echo "EMAIL_APP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
-            fi
-            if [ -z "${REPORT_TO_EMAIL:-}" ]; then
-              echo "REPORT_TO_EMAIL=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
-              echo "EMAIL_RECIPIENT=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
-            fi
-          else
-            echo "[EMAIL] Credentials present — live send enabled"
+            echo "SMTP_USER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
+            echo "SMTP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
+            echo "EMAIL_SENDER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
+            echo "EMAIL_APP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
+            echo "REPORT_TO_EMAIL=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
+            echo "EMAIL_RECIPIENT=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
           fi
 
       - name: Send pre-trade execution status email
@@ -738,48 +625,10 @@ jobs:
           set -euo pipefail
           source .venv/bin/activate
           if [ ! -f outputs/latest_run.json ]; then
-            echo "[EMAIL][WARN] latest_run.json missing; skip confirmation email"
             exit 0
           fi
           run_root="$(.venv/bin/python -c "import json, pathlib; p=pathlib.Path('outputs/latest_run.json'); print((json.loads(p.read_text(encoding='utf-8')).get('run_root','') if p.exists() else ''))")"
           if [ -z "$run_root" ] || [ ! -f "$run_root/execution_results.json" ]; then
-            echo "[EMAIL][WARN] execution_results.json missing; skip confirmation email"
             exit 0
           fi
           .venv/bin/python scripts/send_trading_confirmation_email.py
-
-      - name: Send snapshot email from persisted artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          source .venv/bin/activate
-          .venv/bin/python - <<'PY'
-          import os
-          from pathlib import Path
-          from core.quant_report import send_email
-
-          report_date = os.environ.get("REPORT_DATE", "").strip()
-          if not report_date:
-              raise RuntimeError("REPORT_DATE is required")
-
-          if os.environ.get("EMAIL_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "y", "on"}:
-              print("[EMAIL][DRY_RUN] skipping snapshot email send")
-              raise SystemExit(0)
-
-          root = Path("downloaded")
-          snapshot_candidates = list(root.glob(f"**/reports/trade_snapshot_{report_date}.txt"))
-          html_candidates = list(root.glob(f"**/reports/quant_report_{report_date}.html"))
-
-          if not snapshot_candidates:
-              print(f"[EMAIL][SKIP] No snapshot text found for {report_date} — bootstrap or pre-recon run; skipping snapshot email")
-              raise SystemExit(0)
-          if not html_candidates:
-              print(f"[EMAIL][SKIP] No HTML report found for {report_date} — bootstrap or pre-recon run; skipping snapshot email")
-              raise SystemExit(0)
-
-          body_text = snapshot_candidates[0].read_text(encoding="utf-8")
-          body_html = html_candidates[0].read_text(encoding="utf-8")
-          subject = f"Daily Quant Snapshot {report_date}"
-          send_email(subject=subject, body_html=body_html, body_text=body_text)
-          print("[EMAIL] snapshot email sent")
-          PY

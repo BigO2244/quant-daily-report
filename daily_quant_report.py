@@ -55,11 +55,16 @@ from brokers.alpaca_snapshot import (
     summarize_pretrade_broker_policy,
     write_pretrade_snapshot_artifacts,
 )
-from brokers.alpaca_broker import AlpacaSubmissionRejectError
+from brokers.alpaca_broker import (
+    AlpacaSubmissionRejectError,
+    EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
+    EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
+)
 from core.run_pointer import write_latest_run_pointer as write_canonical_run_pointer
 from core.execution_payload import write_canonical_execution_payload, normalize_status
 from core.execution_audit import write_planner_audit
 from core.execution_summary import write_execution_artifacts
+from core.precompute_contract import write_precompute_bundle
 from core.operator_summary import (
     format_broker_preflight_banner,
     write_operator_summary,
@@ -1331,6 +1336,16 @@ def build_execution_email_payload(
         if any("signal_date_mismatch" in str(r) for r in blocked):
             status = "HALTED"
             halted_reason = "SIGNAL DATE MISMATCH"
+        execution_outcome_code = str(paper_summary.get("execution_outcome") or "").strip()
+        if execution_outcome_code in {
+            EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
+            EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
+        }:
+            status = "HALTED"
+            halted_reason = str(
+                paper_summary.get("halt_reason")
+                or f"{execution_outcome_code}:execution_aborted"
+            )
     paper_breaker = (paper_summary or {}).get("breaker") if isinstance(paper_summary, dict) else {}
     snapshot_breaker = (daily_snapshot or {}).get("breaker") if isinstance(daily_snapshot, dict) else {}
     breaker_mode = str(
@@ -1452,6 +1467,17 @@ def build_execution_email_payload(
     sell_count = sum(1 for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"})
     status_label = None
     status_reason = None
+    if str((paper_summary or {}).get("execution_outcome") or "").strip() in {
+        EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
+        EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
+    }:
+        status_label = "PARTIAL EXECUTION"
+        status_reason = (
+            halted_reason
+            or str((paper_summary or {}).get("broker_reject_message") or "")
+            or str((paper_summary or {}).get("artifact_failure_message") or "")
+            or str((paper_summary or {}).get("execution_reason") or "")
+        )
     if breaker_mode == "lock":
         if trades and buy_count == 0 and sell_count > 0:
             status_label = "EXIT ORDERS (BREAKER LOCK)"
@@ -1583,6 +1609,14 @@ def build_execution_email_payload(
     )
     sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
     total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
+    payload_submitted_count = int(
+        ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_success")
+        or 0
+    )
+    payload_rejected_count = int(
+        ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_failed")
+        or 0
+    )
 
     payload = {
         "trade_date": trade_date,
@@ -1591,6 +1625,11 @@ def build_execution_email_payload(
         "halt_reason": halted_reason,
         "status_label": status_label,
         "status_reason": status_reason,
+        "execution_outcome": (paper_summary or {}).get("execution_outcome"),
+        "execution_reason": (paper_summary or {}).get("execution_reason"),
+        "cash_rebalance_status": (paper_summary or {}).get("cash_rebalance_status"),
+        "broker_reject_status": (paper_summary or {}).get("broker_reject_status"),
+        "broker_reject_message": (paper_summary or {}).get("broker_reject_message"),
         "market_status": (paper_summary or {}).get("market_status"),
         "market_reason": (paper_summary or {}).get("market_reason"),
         "planned_for": planned_for,
@@ -1611,6 +1650,9 @@ def build_execution_email_payload(
         "execution_eligible_trades_count": int(trade_count_contract["execution_eligible_trades_count"]),
         "orders_submitted_count": int(trade_count_contract["orders_submitted_count"]),
         "orders_filled_count": int(trade_count_contract["orders_filled_count"]),
+        "submitted_count": payload_submitted_count,
+        "accepted_count": payload_submitted_count,
+        "rejected_count": payload_rejected_count,
         "proposed_trades_intent_count": int(trade_count_contract["planner_intended_trades_count"]),
         "proposed_trades_intent": int(trade_count_contract["planner_intended_trades_count"]),
         "executable_trades_count": int(trade_count_contract["execution_eligible_trades_count"]),
@@ -3798,6 +3840,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Allow overwriting existing files for the same RUN_ID (emergency use only).",
     )
+    parser.add_argument(
+        "--write-precompute-bundle",
+        dest="write_precompute_bundle",
+        action="store_true",
+        help="Persist today's plan-only daily snapshot and signals as a live-execution precompute bundle.",
+    )
     return parser.parse_args(argv)
 
 
@@ -3815,6 +3863,10 @@ def _email_strict_enabled() -> bool:
 
 def _email_dry_run_enabled() -> bool:
     return _is_truthy(os.getenv("EMAIL_DRY_RUN"), default=False)
+
+
+def _inline_report_emails_enabled() -> bool:
+    return _is_truthy(os.getenv("EMAIL_INLINE_REPORTS"), default=True)
 
 
 def _try_send_email(*, subject: str, body_html: str | None, body_text: str | None, label: str) -> bool:
@@ -3863,6 +3915,31 @@ def _send_report_emails(
         label="snapshot",
     )
     return execution_ok, snapshot_ok
+
+
+def _deliver_inline_report_emails(
+    *,
+    exec_subject: str,
+    exec_body_html: str,
+    exec_body_text: str,
+    snapshot_subject: str,
+    snapshot_body_html: str,
+    snapshot_body_text: str,
+) -> tuple[bool, bool]:
+    if not _inline_report_emails_enabled():
+        logger.info(
+            "[EMAIL] inline report delivery disabled; persisted workflow email job is authoritative"
+        )
+        return False, False
+
+    return _send_report_emails(
+        exec_subject=exec_subject,
+        exec_body_html=exec_body_html,
+        exec_body_text=exec_body_text,
+        snapshot_subject=snapshot_subject,
+        snapshot_body_html=snapshot_body_html,
+        snapshot_body_text=snapshot_body_text,
+    )
 
 
 def _normalize_exec_mode(value: str | None, default: str) -> str:
@@ -4503,6 +4580,12 @@ def main(argv: list[str] | None = None):
     )
     if alpaca_requested:
         logger.info("%s", format_broker_preflight_banner(pretrade_broker_policy))
+        if pretrade_broker_policy.get("broker_pdt_warning_message"):
+            logger.warning(
+                "[BROKER_PREFLIGHT][PDT] status=%s message=%s",
+                pretrade_broker_policy.get("broker_pdt_risk_status"),
+                pretrade_broker_policy.get("broker_pdt_warning_message"),
+            )
     if offline_fixture and not portfolio_fixture.empty:
         portfolio_equity_for_alpha = portfolio_fixture
     else:
@@ -4772,6 +4855,8 @@ def main(argv: list[str] | None = None):
             _RUN_TERMINAL_STATUS = "failed_pre_execution"
             _RUN_TERMINAL_SUBSTATUS = str(e.classification or "")
             _RUN_TERMINAL_MESSAGE = str(e.broker_message or e.raw_message or e)
+            _partial_submitted_count = int(getattr(e, "successful_submissions", 0) or 0)
+            _partial_rejected_count = int(getattr(e, "failed_submissions", 0) or 0)
             logger.error(
                 "[ALPACA][REJECT] classification=%s order_id=%s symbol=%s side=%s qty=%s message=%s",
                 e.classification,
@@ -4787,10 +4872,16 @@ def main(argv: list[str] | None = None):
                     run_id=str(_RUN_CONTEXT.run_id),
                     trade_date=trade_date_str,
                     mode=str(os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+                    submitted_count=_partial_submitted_count,
+                    accepted_count=_partial_submitted_count,
+                    rejected_count=_partial_rejected_count,
+                    orders_submitted_count=_partial_submitted_count,
                     terminal_status=_RUN_TERMINAL_STATUS,
                     pretrade_halt_reason=_RUN_TERMINAL_MESSAGE,
                     execution_payload_written=_RUN_STAGE_PAYLOAD_WRITTEN,
                     execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
+                    exception_type=_RUN_TERMINAL_SUBSTATUS,
+                    exception_message=_RUN_TERMINAL_MESSAGE,
                     broker_preflight_status=pretrade_broker_policy.get("broker_preflight_status"),
                     broker_preflight_account_status=pretrade_broker_policy.get("broker_preflight_account_status"),
                     broker_preflight_cash=pretrade_broker_policy.get("broker_preflight_cash"),
@@ -4798,6 +4889,11 @@ def main(argv: list[str] | None = None):
                     broker_preflight_buying_power=pretrade_broker_policy.get("broker_preflight_buying_power"),
                     broker_preflight_restriction_flags=pretrade_broker_policy.get("broker_preflight_restriction_flags"),
                     broker_preflight_warning_flags=pretrade_broker_policy.get("broker_preflight_warning_flags"),
+                    broker_pdt_risk_status=pretrade_broker_policy.get("broker_pdt_risk_status"),
+                    broker_pdt_daytrade_count=pretrade_broker_policy.get("broker_pdt_daytrade_count"),
+                    broker_pdt_daytrading_buying_power=pretrade_broker_policy.get("broker_pdt_daytrading_buying_power"),
+                    broker_pdt_flags=pretrade_broker_policy.get("broker_pdt_flags"),
+                    broker_pdt_warning_message=pretrade_broker_policy.get("broker_pdt_warning_message"),
                     broker_reject_status=_RUN_TERMINAL_SUBSTATUS,
                     broker_reject_message=_RUN_TERMINAL_MESSAGE,
                 )
@@ -4993,6 +5089,8 @@ def main(argv: list[str] | None = None):
 
     # Write operator summary after planner completes
     if _RUN_CONTEXT is not None and _RUN_CONTEXT.run_root:
+        pdt_pretrade_summary = dict(pretrade_broker_policy or {})
+        pdt_pretrade_summary.update(dict((paper_summary or {}).get("pdt_pretrade") or {}))
         normalized_status = normalize_status(
             execution_status=execution_payload.get("execution_status"),
             halt_reason=execution_payload.get("halt_reason"),
@@ -5004,6 +5102,28 @@ def main(argv: list[str] | None = None):
                 execution_payload.get("halt_reason")
                 or execution_payload.get("no_action_reason")
                 or "no_executable_trades_after_constraints"
+            )
+        execution_outcome_code = str((paper_summary or {}).get("execution_outcome") or "").strip()
+        partial_execution_abort = bool(
+            execution_outcome_code
+            and int(
+                ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_success")
+                or 0
+            ) > 0
+        )
+        if partial_execution_abort:
+            _RUN_TERMINAL_STATUS = "failed_pre_execution"
+            _RUN_TERMINAL_SUBSTATUS = str(
+                (paper_summary or {}).get("broker_reject_status")
+                or (paper_summary or {}).get("execution_reason")
+                or execution_outcome_code
+                or "partial_execution_abort"
+            )
+            _RUN_TERMINAL_MESSAGE = str(
+                execution_payload.get("halt_reason")
+                or (paper_summary or {}).get("broker_reject_message")
+                or (paper_summary or {}).get("artifact_failure_message")
+                or "partial_execution_broker_abort"
             )
         write_operator_summary(
             _RUN_CONTEXT.run_root,
@@ -5022,8 +5142,17 @@ def main(argv: list[str] | None = None):
             planner_completed=True,
             execution_payload_written=True,
             execution_stage_reached=_RUN_STAGE_EXECUTION_REACHED,
+            terminal_status="failed_pre_execution" if partial_execution_abort else None,
             suggested_order_count=int(trade_count_contract["execution_eligible_trades_count"]),
             no_trade_reason=_no_trade_reason,
+            exception_type=(
+                (paper_summary or {}).get("broker_reject_status")
+                or (paper_summary or {}).get("artifact_failure_stage")
+            ),
+            exception_message=(
+                (paper_summary or {}).get("artifact_failure_message")
+                or execution_payload.get("halt_reason")
+            ),
             broker_pretrade_snapshot_ok=bool(((pretrade_broker_capture or {}).get("snapshot") or {}).get("ok")) if pretrade_broker_capture else None,
             broker_posttrade_snapshot_ok=bool((paper_summary or {}).get("posttrade_account_snapshot_path") and (paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else None,
             broker_authoritative_state=bool((paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else False,
@@ -5034,6 +5163,11 @@ def main(argv: list[str] | None = None):
             broker_preflight_buying_power=pretrade_broker_policy.get("broker_preflight_buying_power"),
             broker_preflight_restriction_flags=pretrade_broker_policy.get("broker_preflight_restriction_flags"),
             broker_preflight_warning_flags=pretrade_broker_policy.get("broker_preflight_warning_flags"),
+            broker_pdt_risk_status=pdt_pretrade_summary.get("broker_pdt_risk_status"),
+            broker_pdt_daytrade_count=pdt_pretrade_summary.get("broker_pdt_daytrade_count"),
+            broker_pdt_daytrading_buying_power=pdt_pretrade_summary.get("broker_pdt_daytrading_buying_power"),
+            broker_pdt_flags=pdt_pretrade_summary.get("broker_pdt_flags"),
+            broker_pdt_warning_message=pdt_pretrade_summary.get("broker_pdt_warning_message"),
             broker_cash_at_planning=((paper_summary or {}).get("capital_budget") or {}).get("broker_cash_at_planning"),
             broker_equity_at_planning=((paper_summary or {}).get("capital_budget") or {}).get("broker_equity_at_planning"),
             broker_buying_power_at_planning=((paper_summary or {}).get("capital_budget") or {}).get("broker_buying_power_at_planning"),
@@ -5063,11 +5197,21 @@ def main(argv: list[str] | None = None):
                 )
                 or None
             ),
-            affected_symbols=list((paper_summary or {}).get("posttrade_affected_symbols") or []),
+            affected_symbols=sorted(
+                set(
+                    list((paper_summary or {}).get("posttrade_affected_symbols") or [])
+                    + list((paper_summary or {}).get("execution_submitted_symbols") or [])
+                )
+            ),
             repair_suggestions=list((paper_summary or {}).get("posttrade_repair_suggestions") or []),
             duplicate_fill_suspicions_count=int(
                 (paper_summary or {}).get("posttrade_duplicate_fill_suspicions_count") or 0
             ),
+            broker_reject_status=(paper_summary or {}).get("broker_reject_status"),
+            broker_reject_message=(paper_summary or {}).get("broker_reject_message"),
+            execution_outcome=(paper_summary or {}).get("execution_outcome"),
+            execution_reason=(paper_summary or {}).get("execution_reason"),
+            cash_rebalance_status=(paper_summary or {}).get("cash_rebalance_status"),
         )
         try:
             _op_summary = load_operator_summary(_RUN_CONTEXT.run_root) or {}
@@ -5090,6 +5234,8 @@ def main(argv: list[str] | None = None):
                 f"- trade_date: `{trade_date_str}`",
                 f"- mode: `{str((paper_summary or {}).get('trading_mode') or os.getenv('TRADING_MODE', DEFAULT_TRADING_MODE)).upper()}`",
                 f"- pretrade_status: `{normalized_status}`",
+                f"- broker_pdt_risk_status: `{pdt_pretrade_summary.get('broker_pdt_risk_status') or 'UNKNOWN'}`",
+                f"- broker_pdt_warning_message: `{pdt_pretrade_summary.get('broker_pdt_warning_message') or 'none'}`",
                 f"- model_proposed_trades_count: `{int(trade_count_contract['model_proposed_trades_count'])}`",
                 f"- planner_intended_trades_count: `{int(trade_count_contract['planner_intended_trades_count'])}`",
                 f"- execution_eligible_trades_count: `{int(trade_count_contract['execution_eligible_trades_count'])}`",
@@ -5105,6 +5251,28 @@ def main(argv: list[str] | None = None):
         )
 
     execution_payload_path, payload_preserved, preserved_path = _write_execution_email_payload(execution_payload, trade_date_str)
+    if bool(getattr(args, "write_precompute_bundle", False)):
+        try:
+            signals_payload = {}
+            if signals_path_exec and os.path.exists(signals_path_exec):
+                with open(signals_path_exec, "r", encoding="utf-8") as _signals_f:
+                    signals_payload = json.load(_signals_f)
+            precompute_contract_path = write_precompute_bundle(
+                trade_date=trade_date_str,
+                run_id=str((paper_summary or {}).get("run_id") or (_RUN_CONTEXT.run_id if _RUN_CONTEXT is not None else "")),
+                mode=str((paper_summary or {}).get("trading_mode") or trading_mode_norm).upper(),
+                daily_snapshot=daily_snapshot,
+                signals_payload=signals_payload,
+                execution_payload=execution_payload,
+                allow_overwrite=True,
+            )
+            logger.info(
+                "[PRECOMPUTE] bundle written trade_date=%s contract=%s",
+                trade_date_str,
+                precompute_contract_path,
+            )
+        except Exception as _precompute_exc:
+            logger.warning("[PRECOMPUTE][WARN] failed writing bundle: %s", _precompute_exc)
     integrity = {
         "trade_date": trade_date_str,
         "asof_date": str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str)),
@@ -5414,7 +5582,7 @@ def main(argv: list[str] | None = None):
     logger.info("\n[EMAIL PREVIEW]\n")
     logger.info("%s", snapshot_body)
     try:
-        execution_email_ok, snapshot_email_ok = _send_report_emails(
+        execution_email_ok, snapshot_email_ok = _deliver_inline_report_emails(
             exec_subject=exec_subject,
             exec_body_html=exec_body_html,
             exec_body_text=exec_body,
@@ -5446,15 +5614,44 @@ def main(argv: list[str] | None = None):
             logger.warning("[RUN_ARCHIVE][WARN] snapshot failed src=%s err=%s", src, e)
     # All critical pipeline steps completed — classify terminal status and finalize.
     try:
-        _op_path = (_RUN_CONTEXT.run_root / "operator_summary.json") if _RUN_CONTEXT else None
-        if _op_path and _op_path.exists():
-            _op_data = json.loads(_op_path.read_text(encoding="utf-8"))
-            _pretrade = str(_op_data.get("pretrade_status") or "").upper()
-            _RUN_TERMINAL_STATUS = "no_action" if _pretrade == "NO_ACTION" else "success"
-        else:
-            _RUN_TERMINAL_STATUS = "success"
+        if _RUN_TERMINAL_STATUS == "failed_unknown":
+            _op_path = (_RUN_CONTEXT.run_root / "operator_summary.json") if _RUN_CONTEXT else None
+            if _op_path and _op_path.exists():
+                _op_data = json.loads(_op_path.read_text(encoding="utf-8"))
+                _pretrade = str(_op_data.get("pretrade_status") or "").upper()
+                _op_terminal = str(_op_data.get("terminal_status") or "").strip()
+                _submitted = int(
+                    _op_data.get("orders_submitted_count")
+                    or _op_data.get("submitted_count")
+                    or 0
+                )
+                _broker_reject = str(_op_data.get("broker_reject_status") or "").strip()
+                _execution_outcome = str(_op_data.get("execution_outcome") or "").strip()
+                _execution_reason = str(_op_data.get("execution_reason") or "").strip()
+                if _op_terminal.startswith("failed_"):
+                    _RUN_TERMINAL_STATUS = _op_terminal
+                    _RUN_TERMINAL_SUBSTATUS = _broker_reject or _RUN_TERMINAL_SUBSTATUS
+                    _RUN_TERMINAL_MESSAGE = str(
+                        _op_data.get("halt_reason")
+                        or _op_data.get("broker_reject_message")
+                        or _RUN_TERMINAL_MESSAGE
+                    )
+                elif (_broker_reject or _execution_outcome) and _submitted > 0:
+                    _RUN_TERMINAL_STATUS = "failed_pre_execution"
+                    _RUN_TERMINAL_SUBSTATUS = _broker_reject or _execution_reason or _execution_outcome
+                    _RUN_TERMINAL_MESSAGE = str(
+                        _op_data.get("halt_reason")
+                        or _op_data.get("broker_reject_message")
+                        or _op_data.get("exception_message")
+                        or _RUN_TERMINAL_MESSAGE
+                    )
+                else:
+                    _RUN_TERMINAL_STATUS = "no_action" if _pretrade == "NO_ACTION" else "success"
+            else:
+                _RUN_TERMINAL_STATUS = "success"
     except Exception:
-        _RUN_TERMINAL_STATUS = "success"
+        if _RUN_TERMINAL_STATUS == "failed_unknown":
+            _RUN_TERMINAL_STATUS = "success"
     _finalize_run_context_once()
 if __name__ == "__main__":
     main()

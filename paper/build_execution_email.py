@@ -160,6 +160,8 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     turnover_note = payload.get("turnover_note")
     status_label = payload.get("status_label")
     status_reason = payload.get("status_reason")
+    operator_execution_status = str(payload.get("operator_execution_status", "")).strip().lower()
+    timing_status = str(payload.get("timing_status", "")).strip().lower()
     recon_failure = bool(payload.get("recon_failure", False))
     auto_bootstrap_triggered = bool(payload.get("auto_bootstrap_triggered", False))
 
@@ -169,6 +171,10 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         f"Mode: {mode}",
         f"Trade Date: {trade_date}",
     ]
+    if operator_execution_status:
+        lines.append(f"Execution Outcome: {operator_execution_status.upper()}")
+    if timing_status:
+        lines.append(f"Timing Status: {timing_status}")
 
     if status == "HALTED":
         suffix = f" — {reason}" if reason else ""

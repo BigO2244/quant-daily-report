@@ -108,6 +108,23 @@ def test_execution_email_includes_portfolio_risk_summary_values():
     assert "Turnover cap ($)" in html
 
 
+def test_execution_email_surfaces_operator_execution_and_timing_status():
+    payload = {
+        "trade_date": "2026-02-05",
+        "mode": "ALPACA",
+        "execution_status": "HALTED",
+        "operator_execution_status": "partial",
+        "timing_status": "degraded_late",
+        "halt_reason": "post_submit_artifact_failure",
+        "trades": [],
+    }
+
+    _, body = build_execution_email_text(payload)
+
+    assert "Execution Outcome: PARTIAL" in body
+    assert "Timing Status: degraded_late" in body
+
+
 
 def test_execution_email_no_trades_includes_drop_diagnostics_when_present():
     payload = {

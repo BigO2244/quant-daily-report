@@ -9,6 +9,9 @@ from brokers.alpaca_broker import (
     BROKER_REJECT_BUYING_POWER,
     BROKER_REJECT_PDT,
     BROKER_REJECT_SHORT_NOT_ALLOWED,
+    CASH_REBALANCE_INCOMPLETE,
+    EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
+    broker_reject_policy_outcome,
     classify_alpaca_broker_reject,
 )
 from core.operator_summary import format_execution_health_banner, write_operator_summary
@@ -31,6 +34,14 @@ def test_classify_other_known_rejects() -> None:
     short = classify_alpaca_broker_reject("trade denied because short selling is not allowed")
     assert bp["classification"] == BROKER_REJECT_BUYING_POWER
     assert short["classification"] == BROKER_REJECT_SHORT_NOT_ALLOWED
+
+
+def test_policy_outcome_marks_partial_abort_when_submissions_already_succeeded() -> None:
+    outcome = broker_reject_policy_outcome(BROKER_REJECT_PDT, successful_submissions=2)
+    assert outcome["execution_outcome"] == EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT
+    assert outcome["execution_reason"] == "broker_reject_pdt"
+    assert outcome["cash_rebalance_status"] == CASH_REBALANCE_INCOMPLETE
+    assert outcome["halt_remaining_buys"] is True
 
 
 def test_submit_alpaca_orders_raises_structured_reject_for_pdt() -> None:
@@ -60,7 +71,58 @@ def test_submit_alpaca_orders_raises_structured_reject_for_pdt() -> None:
         assert exc.symbol == "AAPL"
         assert exc.side == "BUY"
         assert exc.quantity == 1.0
+        assert exc.attempted_submissions == 1
+        assert exc.successful_submissions == 0
+        assert exc.failed_submissions == 1
         assert "pattern day trading protection" in exc.broker_message
+    else:
+        raise AssertionError("Expected AlpacaSubmissionRejectError")
+
+
+def test_submit_alpaca_orders_preserves_partial_submission_context_on_reject() -> None:
+    class FakeBroker:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def find_order_by_client_id(self, _client_id):
+            return None
+
+        def submit_market_order(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "id": "alpaca-1",
+                    "client_order_id": kwargs["client_order_id"],
+                    "symbol": kwargs["symbol"],
+                    "side": kwargs["side"],
+                    "status": "ACCEPTED",
+                    "submitted_at": "2026-03-13T14:13:42Z",
+                }
+            raise Exception(
+                '{"code":40310000,"message":"trade denied due to pattern day trading protection"}'
+            )
+
+    alpaca_submissions: list[dict] = []
+    try:
+        _submit_alpaca_orders(
+            alpaca=FakeBroker(),
+            orders=[
+                {"order_id": "oid-1", "ticker": "AAPL", "side": "BUY", "quantity": 1, "order_type": "MKT"},
+                {"order_id": "oid-2", "ticker": "MSFT", "side": "BUY", "quantity": 1, "order_type": "MKT"},
+            ],
+            run_date="2026-03-13",
+            alpaca_submissions=alpaca_submissions,
+            submission_metadata={},
+            idempotent_skips=[],
+            idempotent_drop_reasons=Counter(),
+            alpaca_submission_summary={},
+        )
+    except AlpacaSubmissionRejectError as exc:
+        assert exc.attempted_submissions == 2
+        assert exc.successful_submissions == 1
+        assert exc.failed_submissions == 1
+        assert len(exc.submitted_orders) == 1
+        assert exc.submitted_orders[0]["order_id"] == "oid-1"
     else:
         raise AssertionError("Expected AlpacaSubmissionRejectError")
 

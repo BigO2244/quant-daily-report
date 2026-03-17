@@ -64,6 +64,52 @@ def test_send_report_emails_non_strict_main_path_continues(monkeypatch) -> None:
     assert snapshot_ok is False
 
 
+def test_deliver_inline_report_emails_skips_duplicate_sender_when_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("EMAIL_INLINE_REPORTS", "0")
+
+    called = {"value": False}
+
+    def _track(**kwargs):
+        called["value"] = True
+        return True, True
+
+    monkeypatch.setattr(dqr, "_send_report_emails", _track)
+
+    execution_ok, snapshot_ok = dqr._deliver_inline_report_emails(
+        exec_subject="exec",
+        exec_body_html="<p>exec</p>",
+        exec_body_text="exec",
+        snapshot_subject="snapshot",
+        snapshot_body_html="<p>snapshot</p>",
+        snapshot_body_text="snapshot",
+    )
+
+    assert execution_ok is False
+    assert snapshot_ok is False
+    assert called["value"] is False
+
+
+def test_deliver_inline_report_emails_delegates_when_enabled(monkeypatch) -> None:
+    monkeypatch.delenv("EMAIL_INLINE_REPORTS", raising=False)
+
+    def _track(**kwargs):
+        return True, False
+
+    monkeypatch.setattr(dqr, "_send_report_emails", _track)
+
+    execution_ok, snapshot_ok = dqr._deliver_inline_report_emails(
+        exec_subject="exec",
+        exec_body_html="<p>exec</p>",
+        exec_body_text="exec",
+        snapshot_subject="snapshot",
+        snapshot_body_html="<p>snapshot</p>",
+        snapshot_body_text="snapshot",
+    )
+
+    assert execution_ok is True
+    assert snapshot_ok is False
+
+
 def test_try_send_email_dry_run_short_circuits_send(monkeypatch) -> None:
     monkeypatch.setenv("EMAIL_STRICT", "1")
     monkeypatch.setenv("EMAIL_DRY_RUN", "1")

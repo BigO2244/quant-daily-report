@@ -156,6 +156,60 @@ class TestBuildExecutionSummary:
         assert s["orders_submitted"] == 0
         assert s["executed"] is False
 
+    def test_operator_summary_fallback_surfaces_partial_broker_submission(self):
+        s = _build_execution_summary(
+            {},
+            {
+                "terminal_status": "failed_pre_execution",
+                "orders_submitted_count": 2,
+                "accepted_count": 2,
+                "rejected_count": 1,
+                "broker_reject_status": "BROKER_REJECT_PDT",
+            },
+        )
+        assert s["orders_submitted"] == 2
+        assert s["orders_accepted"] == 2
+        assert s["executed"] is True
+        assert s["status"] == "failed_pre_execution"
+
+    def test_operator_summary_fallback_surfaces_cash_rebalance_incomplete(self):
+        s = _build_execution_summary(
+            {},
+            {
+                "terminal_status": "failed_pre_execution",
+                "orders_submitted_count": 2,
+                "accepted_count": 2,
+                "rejected_count": 1,
+                "broker_reject_status": "BROKER_REJECT_PDT",
+                "execution_outcome": "partial_execution_broker_abort",
+                "execution_reason": "broker_reject_pdt",
+                "cash_rebalance_status": "cash_rebalance_incomplete",
+                "halt_reason": "partial_execution_broker_abort:broker_reject_pdt:cash_rebalance_incomplete",
+            },
+        )
+        assert s["partial_execution"] is True
+        assert s["execution_outcome"] == "partial_execution_broker_abort"
+        assert s["cash_rebalance_status"] == "cash_rebalance_incomplete"
+
+    def test_operator_summary_fallback_surfaces_post_submit_artifact_failure(self):
+        s = _build_execution_summary(
+            {},
+            {
+                "terminal_status": "failed_pre_execution",
+                "orders_submitted_count": 4,
+                "accepted_count": 4,
+                "rejected_count": 0,
+                "execution_outcome": "post_submit_artifact_failure",
+                "execution_reason": "post_sell_account_snapshot_write_failed",
+                "cash_rebalance_status": "cash_rebalance_incomplete",
+                "halt_reason": "post_submit_artifact_failure:post_sell_account_snapshot_write_failed:cash_rebalance_incomplete",
+            },
+        )
+        assert s["executed"] is True
+        assert s["partial_execution"] is True
+        assert s["execution_outcome"] == "post_submit_artifact_failure"
+        assert s["execution_reason"] == "post_sell_account_snapshot_write_failed"
+
 
 # ---------------------------------------------------------------------------
 # _build_portfolio_state

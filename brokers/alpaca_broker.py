@@ -16,6 +16,9 @@ BROKER_REJECT_BUYING_POWER = "BROKER_REJECT_BUYING_POWER"
 BROKER_REJECT_SHORT_NOT_ALLOWED = "BROKER_REJECT_SHORT_NOT_ALLOWED"
 BROKER_REJECT_ASSET_NOT_TRADABLE = "BROKER_REJECT_ASSET_NOT_TRADABLE"
 BROKER_REJECT_UNKNOWN = "BROKER_REJECT_UNKNOWN"
+EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT = "partial_execution_broker_abort"
+EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE = "post_submit_artifact_failure"
+CASH_REBALANCE_INCOMPLETE = "cash_rebalance_incomplete"
 
 
 def _is_truthy(value: object, default: bool = False) -> bool:
@@ -77,6 +80,43 @@ def _safe_str(value: Any) -> str:
         return str(value)
     except Exception:
         return ""
+
+
+def json_safe_primitive(value: Any) -> Any:
+    """Normalize Alpaca SDK payloads into deterministic JSON-safe primitives."""
+    import decimal
+    import uuid
+    from datetime import date, datetime
+    from enum import Enum
+    from pathlib import Path
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return json_safe_primitive(value.value if hasattr(value, "value") else str(value))
+    if isinstance(value, decimal.Decimal):
+        return str(value)
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {
+            _safe_str(key): json_safe_primitive(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [json_safe_primitive(item) for item in value]
+    if isinstance(value, set):
+        normalized = [json_safe_primitive(item) for item in value]
+        return sorted(normalized, key=lambda item: json.dumps(item, sort_keys=True))
+
+    obj_dict = _as_dict(value)
+    if obj_dict:
+        return json_safe_primitive(obj_dict)
+    return _safe_str(value)
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -148,6 +188,35 @@ def classify_alpaca_broker_reject(exc: Any) -> Dict[str, Any]:
     }
 
 
+def broker_reject_policy_outcome(
+    classification: str,
+    *,
+    successful_submissions: int = 0,
+) -> Dict[str, Any]:
+    classification_norm = str(classification or BROKER_REJECT_UNKNOWN).strip() or BROKER_REJECT_UNKNOWN
+    reason_code = classification_norm.lower()
+    partial_execution = int(successful_submissions or 0) > 0
+
+    halt_reason_parts = [
+        EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT if partial_execution else "broker_reject_abort",
+        reason_code,
+    ]
+    if partial_execution:
+        halt_reason_parts.append(CASH_REBALANCE_INCOMPLETE)
+
+    return {
+        "execution_outcome": (
+            EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT if partial_execution else "broker_reject_abort"
+        ),
+        "execution_reason": reason_code,
+        "cash_rebalance_status": CASH_REBALANCE_INCOMPLETE if partial_execution else None,
+        "halt_reason": ":".join(halt_reason_parts),
+        "halt_remaining_orders": True,
+        "halt_remaining_buys": True,
+        "partial_execution": partial_execution,
+    }
+
+
 class AlpacaSubmissionRejectError(RuntimeError):
     def __init__(
         self,
@@ -160,6 +229,10 @@ class AlpacaSubmissionRejectError(RuntimeError):
         symbol: str | None = None,
         side: str | None = None,
         quantity: float | None = None,
+        attempted_submissions: int | None = None,
+        successful_submissions: int | None = None,
+        failed_submissions: int | None = None,
+        submitted_orders: list[dict[str, Any]] | None = None,
     ) -> None:
         self.classification = str(classification or BROKER_REJECT_UNKNOWN)
         self.broker_message = str(broker_message or raw_message or "unknown broker submission failure")
@@ -169,6 +242,10 @@ class AlpacaSubmissionRejectError(RuntimeError):
         self.symbol = str(symbol or "")
         self.side = str(side or "")
         self.quantity = float(quantity) if quantity is not None else None
+        self.attempted_submissions = int(attempted_submissions or 0)
+        self.successful_submissions = int(successful_submissions or 0)
+        self.failed_submissions = int(failed_submissions or 0)
+        self.submitted_orders = [dict(item) for item in (submitted_orders or [])]
         super().__init__(f"{self.classification}: {self.broker_message}")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -181,6 +258,10 @@ class AlpacaSubmissionRejectError(RuntimeError):
             "symbol": self.symbol,
             "side": self.side,
             "quantity": self.quantity,
+            "attempted_submissions": self.attempted_submissions,
+            "successful_submissions": self.successful_submissions,
+            "failed_submissions": self.failed_submissions,
+            "submitted_orders": [dict(item) for item in self.submitted_orders],
         }
 
 

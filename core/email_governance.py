@@ -60,7 +60,9 @@ class EmailConfig:
         value = os.getenv(env_var, '').strip().lower()
         if value in ('1', 'true', 'yes', 'y', 'on'):
             return True
-        elif value in ('0', 'false', 'no', 'n', 'off', ''):
+        if value in ('0', 'false', 'no', 'n', 'off'):
+            return False
+        if value == '':
             return default
         return default
     

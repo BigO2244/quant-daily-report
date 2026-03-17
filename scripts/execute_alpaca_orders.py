@@ -16,6 +16,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from brokers.alpaca_broker import (
     AlpacaBroker,
+    EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
     alpaca_client_order_id,
     classify_alpaca_broker_reject,
 )
@@ -567,50 +568,107 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
 
     payload_path = run_root / "execution_payload.json"
     if not payload_path.exists():
+        existing_summary = load_operator_summary(run_root) or {}
+        prior_submitted = int(
+            existing_summary.get("orders_submitted_count")
+            or existing_summary.get("submitted_count")
+            or 0
+        )
+        prior_accepted = int(existing_summary.get("accepted_count") or prior_submitted)
+        prior_rejected = int(existing_summary.get("rejected_count") or 0)
+        prior_reject_status = str(existing_summary.get("broker_reject_status") or "").strip()
+        prior_reject_message = str(existing_summary.get("broker_reject_message") or "").strip()
         out = _new_results(latest)
         out["status"] = STATUS_HALTED
-        out["halt_reason"] = f"MISSING_EXECUTION_PAYLOAD:{payload_path}"
+        if prior_reject_status or prior_submitted > 0:
+            out["submitted_count"] = prior_submitted
+            out["accepted_count"] = prior_accepted
+            out["rejected_count"] = prior_rejected
+            out["broker_reject_status"] = prior_reject_status or None
+            out["broker_reject_message"] = prior_reject_message or None
+            out["halt_reason"] = (
+                "ENGINE_RUN_ABORTED_BEFORE_PAYLOAD:"
+                f"{prior_reject_status or 'PARTIAL_SUBMISSION'}:"
+                f"{prior_reject_message or payload_path}"
+            )
+        else:
+            out["halt_reason"] = f"MISSING_EXECUTION_PAYLOAD:{payload_path}"
         _write_json(results_path, out)
         print(
             "[EXECUTION_SUMMARY] "
-            f"run_id={out.get('run_id','')} submitted=0 accepted=0 rejected=0 status={STATUS_HALTED}"
+            f"run_id={out.get('run_id','')} submitted={out.get('submitted_count',0)} "
+            f"accepted={out.get('accepted_count',0)} rejected={out.get('rejected_count',0)} "
+            f"status={STATUS_HALTED}"
         )
-        logger.error(
-            "[EXEC_DECISION] HALTED — execution_payload.json not found at %s. "
-            "This means engine_run either failed before writing the payload, or the artifact "
-            "was not restored into the expected path. Check engine_run job logs.",
-            payload_path,
-        )
+        if prior_reject_status or prior_submitted > 0:
+            logger.error(
+                "[EXEC_DECISION] HALTED — engine_run aborted before writing execution_payload.json. "
+                "prior_submitted=%d prior_accepted=%d prior_rejected=%d broker_reject_status=%s broker_reject_message=%s",
+                prior_submitted,
+                prior_accepted,
+                prior_rejected,
+                prior_reject_status or "none",
+                prior_reject_message or "none",
+            )
+        else:
+            logger.error(
+                "[EXEC_DECISION] HALTED — execution_payload.json not found at %s. "
+                "This means engine_run either failed before writing the payload, or the artifact "
+                "was not restored into the expected path. Check engine_run job logs.",
+                payload_path,
+            )
         # Update operator summary
         write_operator_summary(
             run_root,
             run_id=str(out.get("run_id") or ""),
             trade_date=str(out.get("trade_date") or ""),
             mode=str(out.get("mode") or ""),
+            submitted_count=int(out.get("submitted_count") or 0),
+            accepted_count=int(out.get("accepted_count") or 0),
+            rejected_count=int(out.get("rejected_count") or 0),
+            orders_submitted_count=int(out.get("submitted_count") or 0),
             pretrade_halt_reason=out["halt_reason"],
+            terminal_status=str(existing_summary.get("terminal_status") or out.get("status") or STATUS_HALTED),
             executor_completed=True,
+            broker_reject_status=prior_reject_status or None,
+            broker_reject_message=prior_reject_message or None,
         )
         _write_execution_step_summary(
             run_root=run_root,
             run_id=str(out.get("run_id") or ""),
             trade_date=str(out.get("trade_date") or ""),
             mode=str(out.get("mode") or ""),
-            pretrade_status=STATUS_HALTED,
+            pretrade_status=str(existing_summary.get("pretrade_status") or STATUS_HALTED),
             proposed_count=0,
             executable_count=0,
             execution_status=STATUS_HALTED,
-            submitted_count=0,
-            accepted_count=0,
-            rejected_count=0,
+            submitted_count=int(out.get("submitted_count") or 0),
+            accepted_count=int(out.get("accepted_count") or 0),
+            rejected_count=int(out.get("rejected_count") or 0),
             duplicate_skip_reason=None,
         )
-        write_early_halt_audit(
-            run_id=str(out.get("run_id") or latest.get("run_id") or "UNKNOWN"),
-            trade_date=str(out.get("trade_date") or latest.get("trade_date") or "UNKNOWN"),
-            mode=str(out.get("mode") or latest.get("mode") or "UNKNOWN"),
-            halt_reason=out["halt_reason"],
-            stage="missing_execution_payload",
-        )
+        if prior_reject_status or prior_submitted > 0:
+            write_executor_audit(
+                run_id=str(out.get("run_id") or latest.get("run_id") or "UNKNOWN"),
+                pretrade_status=str(existing_summary.get("pretrade_status") or STATUS_HALTED),
+                halt_reason=out["halt_reason"],
+                submitted_count=int(out.get("submitted_count") or 0),
+                accepted_count=int(out.get("accepted_count") or 0),
+                rejected_count=int(out.get("rejected_count") or 0),
+                duplicate_count=0,
+                broker_responses=[],
+                broker_cash_after=None,
+                broker_positions_after=None,
+                execution_status=STATUS_HALTED,
+            )
+        else:
+            write_early_halt_audit(
+                run_id=str(out.get("run_id") or latest.get("run_id") or "UNKNOWN"),
+                trade_date=str(out.get("trade_date") or latest.get("trade_date") or "UNKNOWN"),
+                mode=str(out.get("mode") or latest.get("mode") or "UNKNOWN"),
+                halt_reason=out["halt_reason"],
+                stage="missing_execution_payload",
+            )
         return out
 
     payload = _load_json(payload_path)
@@ -653,12 +711,69 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     # Accept both 'status' (canonical) and 'execution_status' (legacy)
     execution_status = str(payload.get("status") or payload.get("execution_status") or "").upper()
     if execution_status != STATUS_READY.upper():
+        existing_summary = load_operator_summary(run_root) or {}
+        prior_submitted = int(
+            payload.get("submitted_count")
+            or payload.get("orders_submitted_count")
+            or existing_summary.get("orders_submitted_count")
+            or existing_summary.get("submitted_count")
+            or 0
+        )
+        prior_accepted = int(
+            payload.get("accepted_count")
+            or existing_summary.get("accepted_count")
+            or prior_submitted
+        )
+        prior_rejected = int(
+            payload.get("rejected_count")
+            or existing_summary.get("rejected_count")
+            or 0
+        )
+        prior_reject_status = str(
+            payload.get("broker_reject_status")
+            or existing_summary.get("broker_reject_status")
+            or ""
+        ).strip()
+        prior_reject_message = str(
+            payload.get("broker_reject_message")
+            or existing_summary.get("broker_reject_message")
+            or ""
+        ).strip()
+        prior_execution_outcome = str(
+            payload.get("execution_outcome")
+            or existing_summary.get("execution_outcome")
+            or ""
+        ).strip()
+        prior_execution_reason = str(
+            payload.get("execution_reason")
+            or existing_summary.get("execution_reason")
+            or ""
+        ).strip()
+        prior_cash_rebalance_status = str(
+            payload.get("cash_rebalance_status")
+            or existing_summary.get("cash_rebalance_status")
+            or ""
+        ).strip()
         out["status"] = STATUS_HALTED
         out["halt_reason"] = str(payload.get("halt_reason") or f"status_not_ready:{execution_status}")
+        if (
+            prior_submitted > 0
+            or prior_reject_status
+            or prior_execution_outcome == EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT
+        ):
+            out["submitted_count"] = prior_submitted
+            out["accepted_count"] = prior_accepted
+            out["rejected_count"] = prior_rejected
+            out["broker_reject_status"] = prior_reject_status or None
+            out["broker_reject_message"] = prior_reject_message or None
+            out["execution_outcome"] = prior_execution_outcome or None
+            out["execution_reason"] = prior_execution_reason or None
+            out["cash_rebalance_status"] = prior_cash_rebalance_status or None
         _write_json(results_path, out)
         print(
             "[EXECUTION_SUMMARY] "
-            f"run_id={out.get('run_id','')} submitted=0 accepted=0 rejected=0 status={STATUS_HALTED}"
+            f"run_id={out.get('run_id','')} submitted={out.get('submitted_count',0)} "
+            f"accepted={out.get('accepted_count',0)} rejected={out.get('rejected_count',0)} status={STATUS_HALTED}"
         )
         logger.error(
             "[EXEC_DECISION] HALTED — payload status is %s (expected READY). "
@@ -675,8 +790,18 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             run_id=str(out.get("run_id") or ""),
             trade_date=str(out.get("trade_date") or ""),
             mode=str(out.get("mode") or ""),
+            submitted_count=int(out.get("submitted_count") or 0),
+            accepted_count=int(out.get("accepted_count") or 0),
+            rejected_count=int(out.get("rejected_count") or 0),
+            orders_submitted_count=int(out.get("submitted_count") or 0),
             pretrade_halt_reason=out["halt_reason"],
+            terminal_status=str(existing_summary.get("terminal_status") or ""),
             executor_completed=True,
+            broker_reject_status=prior_reject_status or None,
+            broker_reject_message=prior_reject_message or None,
+            execution_outcome=prior_execution_outcome or None,
+            execution_reason=prior_execution_reason or None,
+            cash_rebalance_status=prior_cash_rebalance_status or None,
         )
         _write_execution_step_summary(
             run_root=run_root,
@@ -687,18 +812,45 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
             proposed_count=len(payload.get("trades", [])),
             executable_count=int(payload.get("executable_trades_count") or len(payload.get("trades", []))),
             execution_status=STATUS_HALTED,
-            submitted_count=0,
-            accepted_count=0,
-            rejected_count=0,
+            submitted_count=int(out.get("submitted_count") or 0),
+            accepted_count=int(out.get("accepted_count") or 0),
+            rejected_count=int(out.get("rejected_count") or 0),
             duplicate_skip_reason=None,
         )
-        write_early_halt_audit(
-            run_id=str(out.get("run_id") or "UNKNOWN"),
-            trade_date=str(out.get("trade_date") or "UNKNOWN"),
-            mode=str(out.get("mode") or "UNKNOWN"),
-            halt_reason=out["halt_reason"],
-            stage=f"status_not_ready:{execution_status}",
-        )
+        if (
+            prior_submitted > 0
+            or prior_reject_status
+            or prior_execution_outcome == EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT
+        ):
+            write_executor_audit(
+                run_id=str(out.get("run_id") or "UNKNOWN"),
+                pretrade_status=execution_status,
+                halt_reason=out.get("halt_reason"),
+                submitted_count=int(out.get("submitted_count") or 0),
+                accepted_count=int(out.get("accepted_count") or 0),
+                rejected_count=int(out.get("rejected_count") or 0),
+                duplicate_count=0,
+                broker_responses=[],
+                broker_cash_after=None,
+                broker_positions_after=None,
+                execution_status=STATUS_HALTED,
+            )
+        else:
+            write_early_halt_audit(
+                run_id=str(out.get("run_id") or "UNKNOWN"),
+                trade_date=str(out.get("trade_date") or "UNKNOWN"),
+                mode=str(out.get("mode") or "UNKNOWN"),
+                halt_reason=out["halt_reason"],
+                stage=f"status_not_ready:{execution_status}",
+            )
+        try:
+            write_trading_day_summary(
+                run_root=run_root,
+                run_id=str(out.get("run_id") or "UNKNOWN"),
+                trade_date=str(out.get("trade_date") or "UNKNOWN"),
+            )
+        except Exception as _summary_exc:
+            logger.warning("[SUMMARY] trading_day_summary skipped: %s", _summary_exc)
         return out
 
     mode = str(payload.get("mode") or "").upper()

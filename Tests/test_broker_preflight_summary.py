@@ -38,6 +38,29 @@ def test_summarize_pretrade_broker_policy_surfaces_account_fields_and_warnings()
     assert summary["broker_preflight_restriction_flags"]["pattern_day_trader"] is True
     assert "pattern_day_trader:true" in summary["broker_preflight_warning_flags"]
     assert "buying_power_non_positive" in summary["broker_preflight_warning_flags"]
+    assert summary["broker_pdt_risk_status"] == "WARN"
+    assert summary["broker_pdt_daytrade_count"] == 3
+    assert summary["broker_pdt_daytrading_buying_power"] is None
+    assert "daytrade_count:3" in summary["broker_pdt_flags"]
+    assert summary["broker_pdt_warning_message"] is not None
+
+
+def test_active_account_status_normalization_does_not_warn() -> None:
+    summary = summarize_pretrade_broker_policy(
+        {"account": {"status": "AccountStatus.ACTIVE", "raw": {}}}
+    )
+
+    assert summary["broker_preflight_account_status"] == "ACTIVE"
+    assert "account_status_not_active:ACTIVE" not in summary["broker_preflight_warning_flags"]
+
+
+def test_non_active_account_status_normalization_warns() -> None:
+    summary = summarize_pretrade_broker_policy(
+        {"account": {"status": "accountstatus.blocked", "raw": {}}}
+    )
+
+    assert summary["broker_preflight_account_status"] == "BLOCKED"
+    assert "account_status_not_active:BLOCKED" in summary["broker_preflight_warning_flags"]
 
 
 def test_broker_preflight_banner_is_operator_readable() -> None:
@@ -50,6 +73,8 @@ def test_broker_preflight_banner_is_operator_readable() -> None:
             "broker_preflight_buying_power": "0",
             "broker_preflight_restriction_flags": {"pattern_day_trader": True},
             "broker_preflight_warning_flags": ["pattern_day_trader:true", "buying_power_non_positive"],
+            "broker_pdt_risk_status": "WARN",
+            "broker_pdt_flags": ["pattern_day_trader:true", "daytrade_count:3", "daytrading_buying_power_non_positive"],
         }
     )
 
@@ -58,6 +83,7 @@ def test_broker_preflight_banner_is_operator_readable() -> None:
     assert "account_status=ACTIVE" in banner
     assert "buying_power=0" in banner
     assert "warnings=pattern_day_trader:true,buying_power_non_positive" in banner
+    assert "pdt_status=WARN" in banner
 
 
 def test_operator_summary_and_trading_day_summary_include_preflight_fields(tmp_path: Path) -> None:
@@ -77,12 +103,25 @@ def test_operator_summary_and_trading_day_summary_include_preflight_fields(tmp_p
         broker_preflight_buying_power="0",
         broker_preflight_restriction_flags={"pattern_day_trader": True},
         broker_preflight_warning_flags=["pattern_day_trader:true", "buying_power_non_positive"],
+        broker_pdt_risk_status="BLOCKED",
+        broker_pdt_daytrade_count=3,
+        broker_pdt_daytrading_buying_power="0",
+        broker_pdt_flags=[
+            "pattern_day_trader:true",
+            "daytrade_count:3",
+            "daytrading_buying_power_non_positive",
+            "pre_submit_local_same_day_sell_block",
+        ],
+        broker_pdt_warning_message="PDT risk signaled by broker account fields: pattern_day_trader=true, daytrade_count=3, daytrading_buying_power=0; deferred planned sells before submit because Alpaca reported PDT status with non-positive daytrading_buying_power: AEP",
     )
 
     op_payload = json.loads((run_root / "operator_summary.json").read_text(encoding="utf-8"))
     assert op_payload["broker_preflight_status"] == "WARN"
     assert op_payload["broker_preflight_account_status"] == "ACTIVE"
     assert op_payload["broker_preflight_warning_flags"] == ["pattern_day_trader:true", "buying_power_non_positive"]
+    assert op_payload["broker_pdt_risk_status"] == "BLOCKED"
+    assert op_payload["broker_pdt_daytrade_count"] == 3
+    assert "pre_submit_local_same_day_sell_block" in op_payload["broker_pdt_flags"]
 
     _write_json(
         broker_dir / "pretrade_account_snapshot.json",
@@ -92,7 +131,11 @@ def test_operator_summary_and_trading_day_summary_include_preflight_fields(tmp_p
                 "cash": "1000.00",
                 "equity": "25000.00",
                 "buying_power": "0",
-                "raw": {"pattern_day_trader": True},
+                "raw": {
+                    "pattern_day_trader": True,
+                    "daytrade_count": 3,
+                    "daytrading_buying_power": "0",
+                },
             }
         },
     )
@@ -114,3 +157,8 @@ def test_operator_summary_and_trading_day_summary_include_preflight_fields(tmp_p
     assert broker_context["broker_preflight_buying_power"] == "0"
     assert broker_context["broker_preflight_restriction_flags"] == {"pattern_day_trader": True}
     assert broker_context["broker_preflight_warning_flags"] == ["pattern_day_trader:true", "buying_power_non_positive"]
+    assert broker_context["broker_pdt_risk_status"] == "BLOCKED"
+    assert broker_context["broker_pdt_daytrade_count"] == 3
+    assert broker_context["broker_pdt_daytrading_buying_power"] == "0"
+    assert "daytrading_buying_power_non_positive" in broker_context["broker_pdt_flags"]
+    assert "deferred planned sells before submit" in broker_context["broker_pdt_warning_message"]

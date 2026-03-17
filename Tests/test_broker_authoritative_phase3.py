@@ -136,15 +136,16 @@ def test_phase3_sell_first_postsell_snapshot_and_buy_budget(tmp_path, monkeypatc
         monkeypatch,
         trades_df=trades,
         trade_meta={"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
     )
     fake = _SequencedAlpaca(
         account_sequence=[
-            {"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0", "status": "ACTIVE"},
-            {"cash": "1200.0", "equity": "10100.0", "buying_power": "1200.0", "status": "ACTIVE"},
-            {"cash": "1020.0", "equity": "10120.0", "buying_power": "1020.0", "status": "ACTIVE"},
+            {"cash": "2000.0", "equity": "10000.0", "buying_power": "2000.0", "status": "ACTIVE"},
+            {"cash": "2200.0", "equity": "10100.0", "buying_power": "2200.0", "status": "ACTIVE"},
+            {"cash": "2020.0", "equity": "10120.0", "buying_power": "2020.0", "status": "ACTIVE"},
         ],
         positions_sequence=[
-            [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
+            [],
             [{"symbol": "BBB", "qty": "2", "current_price": "90.0", "market_value": "180.0"}],
         ],
     )
@@ -161,12 +162,13 @@ def test_phase3_sell_first_postsell_snapshot_and_buy_budget(tmp_path, monkeypatc
     )
 
     assert [side for side, _, _, _ in fake.submitted] == ["SELL", "BUY"]
-    assert float(result["postsell_cash_confirmed"]) == pytest.approx(1200.0)
+    assert result["sell_phase_status"] == "COMPLETED"
+    assert float(result["postsell_cash_confirmed"]) == pytest.approx(2200.0)
     assert float(result["buy_budget_computed"]) == pytest.approx(1200.0)
     postsell_path = Path(result["postsell_account_snapshot_path"])
     assert postsell_path.exists()
     payload = json.loads(postsell_path.read_text(encoding="utf-8"))
-    assert float(payload["cash"]) == pytest.approx(1200.0)
+    assert float(payload["cash"]) == pytest.approx(2200.0)
     assert int(result["alpaca_submission_summary"]["sell_phase_submitted"]) == 1
     assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 1
 
@@ -185,15 +187,16 @@ def test_phase3_buy_budget_reduces_buys_when_confirmed_cash_is_lower(tmp_path, m
         monkeypatch,
         trades_df=trades,
         trade_meta={"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
     )
     fake = _SequencedAlpaca(
         account_sequence=[
-            {"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0", "status": "ACTIVE"},
+            {"cash": "2500.0", "equity": "10000.0", "buying_power": "2500.0", "status": "ACTIVE"},
+            {"cash": "1900.0", "equity": "10100.0", "buying_power": "1900.0", "status": "ACTIVE"},
             {"cash": "1000.0", "equity": "10100.0", "buying_power": "1000.0", "status": "ACTIVE"},
-            {"cash": "100.0", "equity": "10100.0", "buying_power": "100.0", "status": "ACTIVE"},
         ],
         positions_sequence=[
-            [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
+            [],
             [{"symbol": "BBB", "qty": "10", "current_price": "90.0", "market_value": "900.0"}],
         ],
     )
@@ -228,6 +231,7 @@ def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
         monkeypatch,
         trades_df=trades,
         trade_meta={"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
     )
 
     class _IdemAlpaca(_SequencedAlpaca):
@@ -244,7 +248,7 @@ def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
             {"cash": "1020.0", "equity": "10120.0", "buying_power": "1020.0", "status": "ACTIVE"},
         ],
         positions_sequence=[
-            [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
+            [],
             [{"symbol": "BBB", "qty": "2", "current_price": "90.0", "market_value": "180.0"}],
         ],
     )
@@ -263,3 +267,108 @@ def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
     assert [side for side, _, _, _ in fake.submitted] == ["BUY"]
     assert "AAA" not in [symbol for _, symbol, _, _ in fake.submitted]
     assert int(result["alpaca_submission_summary"]["remote_existing_orders"]) == 1
+
+
+def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-timeout"))
+    monkeypatch.setenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS", "0")
+    trades = pd.DataFrame(
+        [
+            {"ticker": "AAA", "side": "SELL", "shares": 1.0, "quantity": 1.0, "price": 100.0, "notional": 100.0, "slippage_cost": 0.0, "reason": "trim"},
+            {"ticker": "BBB", "side": "BUY", "shares": 2.0, "quantity": 2.0, "price": 90.0, "notional": 180.0, "slippage_cost": 0.0, "reason": "add"},
+        ]
+    )
+    _mock_open_market(
+        monkeypatch,
+        trades_df=trades,
+        trade_meta={"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+    )
+
+    class _PendingSellAlpaca(_SequencedAlpaca):
+        def __init__(self, *, account_sequence, positions_sequence):
+            super().__init__(account_sequence=account_sequence, positions_sequence=positions_sequence)
+            self._client_lookup_calls = 0
+
+        def find_order_by_client_id(self, client_id):
+            self.find_calls.append(client_id)
+            self._client_lookup_calls += 1
+            if self._client_lookup_calls == 1:
+                return None
+            return {"id": "pending-sell", "status": "accepted", "submitted_at": "2026-03-11T10:00:00-05:00"}
+
+    fake = _PendingSellAlpaca(
+        account_sequence=[
+            {"cash": "2000.0", "equity": "10000.0", "buying_power": "2000.0", "status": "ACTIVE"},
+            {"cash": "2000.0", "equity": "10000.0", "buying_power": "2000.0", "status": "ACTIVE"},
+            {"cash": "2000.0", "equity": "10000.0", "buying_power": "2000.0", "status": "ACTIVE"},
+        ],
+        positions_sequence=[
+            [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
+            [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
+        ],
+    )
+    monkeypatch.setattr(_PendingSellAlpaca, "from_env", classmethod(lambda cls: fake), raising=False)
+    monkeypatch.setattr(broker, "AlpacaBroker", _PendingSellAlpaca)
+
+    result = broker.run_paper_day(
+        run_date="2026-03-11",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 3, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
+    assert result["sell_phase_status"] == "TIMEOUT"
+    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "sell_phase_timeout"
+    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 0
+    assert [order["ticker"] for order in result["budget_skipped_orders"]] == ["BBB"]
+
+
+def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-reserve"))
+    trades = pd.DataFrame(
+        [
+            {"ticker": "AAA", "side": "SELL", "shares": 1.0, "quantity": 1.0, "price": 100.0, "notional": 100.0, "slippage_cost": 0.0, "reason": "trim"},
+            {"ticker": "BBB", "side": "BUY", "shares": 2.0, "quantity": 2.0, "price": 90.0, "notional": 180.0, "slippage_cost": 0.0, "reason": "add"},
+        ]
+    )
+    _mock_open_market(
+        monkeypatch,
+        trades_df=trades,
+        trade_meta={"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+    )
+    fake = _SequencedAlpaca(
+        account_sequence=[
+            {"cash": "1200.0", "equity": "10000.0", "buying_power": "1200.0", "status": "ACTIVE"},
+            {"cash": "950.0", "equity": "10000.0", "buying_power": "950.0", "status": "ACTIVE"},
+            {"cash": "950.0", "equity": "10000.0", "buying_power": "950.0", "status": "ACTIVE"},
+        ],
+        positions_sequence=[
+            [],
+            [],
+        ],
+    )
+    monkeypatch.setattr(_SequencedAlpaca, "from_env", classmethod(lambda cls: fake), raising=False)
+    monkeypatch.setattr(broker, "AlpacaBroker", _SequencedAlpaca)
+
+    result = broker.run_paper_day(
+        run_date="2026-03-11",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 3, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
+    assert result["sell_phase_status"] == "COMPLETED"
+    assert float(result["buy_budget_computed"]) == pytest.approx(0.0)
+    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "post_sell_cash_below_reserve"
+    assert [order["ticker"] for order in result["budget_skipped_orders"]] == ["BBB"]

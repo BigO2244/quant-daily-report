@@ -51,11 +51,15 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     accepted = int(results.get("accepted_count") or 0)
     rejected = int(results.get("rejected_count") or 0)
     halt_reason = results.get("halt_reason")
+    operator_execution_status = str(results.get("operator_execution_status") or "").strip().lower()
     
     # Determine status display
     if status == STATUS_SKIPPED_DUPLICATE or (submitted > 0 and halt_reason and "duplicate" in halt_reason.lower()):
         status_display = "SKIPPED_DUPLICATE"
         status_emoji = "⏭️"
+    elif operator_execution_status == "partial":
+        status_display = "PARTIAL"
+        status_emoji = "⚠️"
     elif status == STATUS_HALTED or halt_reason:
         status_display = "HALTED"
         status_emoji = "🛑"

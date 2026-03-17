@@ -308,7 +308,12 @@ def _compute_verdict(audit: dict) -> dict:
     is_idempotent_replay = executor_status == "IDEMPOTENT_REPLAY"
     _duplicate_count = int(executor.get("duplicate_count") or 0)
     # Idempotent replay means work was attempted and orders existed from a prior run.
-    execution_attempted = executor_status not in {None, "HALTED", "NO_ACTION"} or is_idempotent_replay
+    execution_attempted = (
+        submitted > 0
+        or accepted > 0
+        or executor_status not in {None, "HALTED", "NO_ACTION"}
+        or is_idempotent_replay
+    )
 
     # When this is an idempotent replay, the duplicate_count is reliable evidence
     # that trades existed and were previously submitted, even if the planner block

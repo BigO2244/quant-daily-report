@@ -208,3 +208,24 @@ class TestAuditWriteSafeFilenames:
             assert files[0].name == f"{run_id}.json"
         finally:
             ea._AUDIT_DIR = original
+
+    def test_executor_audit_marks_halted_run_with_submissions_as_attempted(self, tmp_path):
+        import core.execution_audit as ea
+        original = ea._AUDIT_DIR
+        ea._AUDIT_DIR = tmp_path / "execution_audit"
+        try:
+            path = write_executor_audit(
+                run_id="20260310T093500Z_paper_1",
+                pretrade_status="READY",
+                halt_reason="ENGINE_RUN_ABORTED_BEFORE_PAYLOAD:BROKER_REJECT_PDT:test",
+                submitted_count=2,
+                accepted_count=2,
+                rejected_count=1,
+                execution_status="HALTED",
+            )
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            assert payload["verdict"]["execution_attempted"] is True
+            assert payload["verdict"]["orders_submitted"] == 2
+            assert payload["verdict"]["orders_accepted"] == 2
+        finally:
+            ea._AUDIT_DIR = original

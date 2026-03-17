@@ -355,6 +355,131 @@ class TestNoActionDay:
             )
             assert status == STATUS_NO_ACTION
 
+    def test_halted_partial_execution_payload_preserves_prior_submission_truth(self):
+        """HALTED payload with prior submissions stays partial, not zero-execution."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            run_root.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "run_id": "test123",
+                "trade_date": "2024-01-15",
+                "mode": "ALPACA",
+                "status": STATUS_HALTED,
+                "halt_reason": "partial_execution_broker_abort:broker_reject_pdt:cash_rebalance_incomplete",
+                "execution_outcome": "partial_execution_broker_abort",
+                "cash_rebalance_status": "cash_rebalance_incomplete",
+                "broker_reject_status": "BROKER_REJECT_PDT",
+                "broker_reject_message": "trade denied due to pattern day trading protection",
+                "orders_submitted_count": 2,
+                "submitted_count": 2,
+                "accepted_count": 2,
+                "rejected_count": 1,
+                "trades": [{"ticker": "DELL", "side": "SELL", "shares": 1}],
+                "executable_trades_count": 4,
+            }
+            (run_root / "execution_payload.json").write_text(json.dumps(payload, indent=2))
+
+            write_operator_summary(
+                run_root,
+                run_id="test123",
+                trade_date="2024-01-15",
+                mode="ALPACA",
+                terminal_status="failed_pre_execution",
+                submitted_count=2,
+                accepted_count=2,
+                rejected_count=1,
+                orders_submitted_count=2,
+                broker_reject_status="BROKER_REJECT_PDT",
+                broker_reject_message="trade denied due to pattern day trading protection",
+                execution_outcome="partial_execution_broker_abort",
+                cash_rebalance_status="cash_rebalance_incomplete",
+            )
+
+            with patch("scripts.execute_alpaca_orders.read_latest_run_pointer") as mock_pointer:
+                mock_pointer.return_value = {
+                    "run_id": "test123",
+                    "run_root": str(run_root),
+                    "trade_date": "2024-01-15",
+                    "mode": "ALPACA",
+                }
+                from scripts.execute_alpaca_orders import run_execution
+                results = run_execution()
+
+            assert results["status"] == STATUS_HALTED
+            assert results["submitted_count"] == 2
+            assert results["accepted_count"] == 2
+            assert results["rejected_count"] == 1
+            assert results["broker_reject_status"] == "BROKER_REJECT_PDT"
+
+            summary = load_operator_summary(run_root)
+            assert summary is not None
+            assert summary["submitted_count"] == 2
+            assert summary["execution_outcome"] == "partial_execution_broker_abort"
+            assert summary["cash_rebalance_status"] == "cash_rebalance_incomplete"
+
+    def test_halted_post_submit_artifact_failure_preserves_prior_submission_truth(self):
+        """HALTED payload with post-submit artifact failure keeps nonzero submission truth."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            run_root.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "run_id": "test123",
+                "trade_date": "2024-01-15",
+                "mode": "ALPACA",
+                "status": STATUS_HALTED,
+                "halt_reason": "post_submit_artifact_failure:post_sell_account_snapshot_write_failed:cash_rebalance_incomplete",
+                "execution_outcome": "post_submit_artifact_failure",
+                "execution_reason": "post_sell_account_snapshot_write_failed",
+                "cash_rebalance_status": "cash_rebalance_incomplete",
+                "orders_submitted_count": 4,
+                "submitted_count": 4,
+                "accepted_count": 4,
+                "rejected_count": 0,
+                "trades": [{"ticker": "AEP", "side": "SELL", "shares": 1}],
+                "executable_trades_count": 5,
+            }
+            (run_root / "execution_payload.json").write_text(json.dumps(payload, indent=2))
+
+            write_operator_summary(
+                run_root,
+                run_id="test123",
+                trade_date="2024-01-15",
+                mode="ALPACA",
+                terminal_status="failed_pre_execution",
+                submitted_count=4,
+                accepted_count=4,
+                rejected_count=0,
+                orders_submitted_count=4,
+                execution_outcome="post_submit_artifact_failure",
+                execution_reason="post_sell_account_snapshot_write_failed",
+                cash_rebalance_status="cash_rebalance_incomplete",
+            )
+
+            with patch("scripts.execute_alpaca_orders.read_latest_run_pointer") as mock_pointer:
+                mock_pointer.return_value = {
+                    "run_id": "test123",
+                    "run_root": str(run_root),
+                    "trade_date": "2024-01-15",
+                    "mode": "ALPACA",
+                }
+                from scripts.execute_alpaca_orders import run_execution
+                results = run_execution()
+
+            assert results["status"] == STATUS_HALTED
+            assert results["submitted_count"] == 4
+            assert results["accepted_count"] == 4
+            assert results["rejected_count"] == 0
+            assert results["execution_outcome"] == "post_submit_artifact_failure"
+            assert results["execution_reason"] == "post_sell_account_snapshot_write_failed"
+
+            summary = load_operator_summary(run_root)
+            assert summary is not None
+            assert summary["submitted_count"] == 4
+            assert summary["execution_outcome"] == "post_submit_artifact_failure"
+            assert summary["execution_reason"] == "post_sell_account_snapshot_write_failed"
+
 
 class TestConfirmationEmail:
     """Test confirmation email traceability."""
