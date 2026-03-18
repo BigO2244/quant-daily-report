@@ -584,6 +584,12 @@ def main(argv: list[str] | None = None) -> int:
 
     write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
 
+    try:
+        from core.benchmark_tracking import update_benchmark_vs_spy
+        update_benchmark_vs_spy(trade_date=trade_date)
+    except Exception as _bench_exc:
+        logger.warning("[BENCHMARK] benchmark update skipped: %s", _bench_exc)
+
     exec_subject, exec_body = build_execution_email_text(execution_payload)
     safe_write_text(
         run_root / "reports" / f"trade_execution_{trade_date}.txt",

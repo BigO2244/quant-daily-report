@@ -1062,6 +1062,12 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
     except Exception as _summary_exc:
         logger.warning("[SUMMARY] trading_day_summary skipped: %s", _summary_exc)
 
+    try:
+        from core.benchmark_tracking import update_benchmark_vs_spy
+        update_benchmark_vs_spy()
+    except Exception as _bench_exc:
+        logger.warning("[BENCHMARK] benchmark update skipped: %s", _bench_exc)
+
     return out
 
 
