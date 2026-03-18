@@ -210,6 +210,32 @@ class TestBuildExecutionSummary:
         assert s["execution_outcome"] == "post_submit_artifact_failure"
         assert s["execution_reason"] == "post_sell_account_snapshot_write_failed"
 
+    def test_operator_summary_fallback_surfaces_workflow_window_fields(self):
+        s = _build_execution_summary(
+            {},
+            {
+                "orders_submitted_count": 0,
+                "accepted_count": 0,
+                "rejected_count": 0,
+                "workflow_kind": "live",
+                "event_freshness_status": "live_schedule_event",
+                "bundle_status": "VALID",
+                "bundle_source": "artifact",
+                "precompute_bundle_required": True,
+                "precompute_bundle_found": True,
+                "bundle_report_date": "2026-03-10",
+                "execution_window_status": "degraded_late",
+            },
+        )
+        assert s["workflow_kind"] == "live"
+        assert s["event_freshness_status"] == "live_schedule_event"
+        assert s["bundle_status"] == "VALID"
+        assert s["bundle_source"] == "artifact"
+        assert s["precompute_bundle_required"] is True
+        assert s["precompute_bundle_found"] is True
+        assert s["bundle_report_date"] == "2026-03-10"
+        assert s["execution_window_status"] == "degraded_late"
+
 
 # ---------------------------------------------------------------------------
 # _build_portfolio_state

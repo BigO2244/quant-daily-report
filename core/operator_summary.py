@@ -108,6 +108,14 @@ def write_operator_summary(
     continuation_eligible: bool | None = None,
     continuation_reason: str | None = None,
     pending_buy_count: int | None = None,
+    workflow_kind: str | None = None,
+    event_freshness_status: str | None = None,
+    bundle_status: str | None = None,
+    bundle_source: str | None = None,
+    precompute_bundle_required: bool | None = None,
+    precompute_bundle_found: bool | None = None,
+    bundle_report_date: str | None = None,
+    execution_window_status: str | None = None,
 ) -> Path:
     """
     Write or update operator_summary.json in run root.
@@ -450,6 +458,46 @@ def write_operator_summary(
             if pending_buy_count is not None
             else int(existing.get("pending_buy_count", 0))
         ),
+        "workflow_kind": (
+            workflow_kind
+            if workflow_kind is not None
+            else existing.get("workflow_kind")
+        ),
+        "event_freshness_status": (
+            event_freshness_status
+            if event_freshness_status is not None
+            else existing.get("event_freshness_status")
+        ),
+        "bundle_status": (
+            bundle_status
+            if bundle_status is not None
+            else existing.get("bundle_status")
+        ),
+        "bundle_source": (
+            bundle_source
+            if bundle_source is not None
+            else existing.get("bundle_source")
+        ),
+        "precompute_bundle_required": (
+            precompute_bundle_required
+            if precompute_bundle_required is not None
+            else existing.get("precompute_bundle_required")
+        ),
+        "precompute_bundle_found": (
+            precompute_bundle_found
+            if precompute_bundle_found is not None
+            else existing.get("precompute_bundle_found")
+        ),
+        "bundle_report_date": (
+            bundle_report_date
+            if bundle_report_date is not None
+            else existing.get("bundle_report_date")
+        ),
+        "execution_window_status": (
+            execution_window_status
+            if execution_window_status is not None
+            else existing.get("execution_window_status")
+        ),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
@@ -526,6 +574,10 @@ def format_operator_summary_log(summary: Dict[str, Any]) -> str:
         f"accepted={summary.get('accepted_count',0)} "
         f"rejected={summary.get('rejected_count',0)} "
         f"timing={summary.get('timing_status','unknown')} "
+        f"workflow_kind={summary.get('workflow_kind','unknown')} "
+        f"bundle_status={summary.get('bundle_status','unknown')} "
+        f"bundle_source={summary.get('bundle_source','unknown')} "
+        f"window={summary.get('execution_window_status','unknown')} "
         f"confirmation_email={summary.get('confirmation_email_sent',False)}"
     )
 

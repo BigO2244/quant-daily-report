@@ -5485,6 +5485,11 @@ def main(argv: list[str] | None = None):
     # ── Execution Summary & Rolling Export (non-blocking) ─────────────
     try:
         if _RUN_CONTEXT is not None:
+            broker_reconciliation = (
+                (paper_summary or {}).get("broker_reconciliation")
+                if isinstance((paper_summary or {}).get("broker_reconciliation"), dict)
+                else {}
+            )
             # Gather NAV snapshot for summary
             nav_snapshot_data = {
                 "position_count": len([h for h in (daily_snapshot.get("holdings") or []) if str(h.get("ticker", "")).upper() != "CASH"]),

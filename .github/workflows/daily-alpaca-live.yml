@@ -1,0 +1,879 @@
+name: Daily Alpaca Live
+
+permissions:
+  actions: read
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Override REPORT_DATE (YYYY-MM-DD). Leave blank for today ET."
+        required: false
+        type: string
+      force_live_outside_window:
+        description: "Allow manual live execution outside the normal ET window."
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Live execution target: 9:35 AM America/New_York.
+    # EST weekdays use 14:35 UTC, EDT weekdays use 13:35 UTC.
+    - cron: "35 14 * 1,2,12 1-5"
+    - cron: "35 14 1-7 3 1-5"
+    - cron: "35 13 8-31 3 1-5"
+    - cron: "35 13 * 4-10 1-5"
+    - cron: "35 13 1-7 11 1-5"
+    - cron: "35 14 8-30 11 1-5"
+
+jobs:
+  resolve_context:
+    runs-on: ubuntu-latest
+    outputs:
+      report_date: ${{ steps.meta.outputs.report_date }}
+      workflow_started_at_utc: ${{ steps.meta.outputs.workflow_started_at_utc }}
+      force_live_outside_window: ${{ steps.meta.outputs.force_live_outside_window }}
+    steps:
+      - name: Resolve workflow metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT_DATE="${{ inputs.report_date }}"
+          if [ -z "$REPORT_DATE" ]; then
+            REPORT_DATE="$(TZ=America/New_York date +%F)"
+          fi
+          WORKFLOW_STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          FORCE_LIVE_OUTSIDE_WINDOW="${{ inputs.force_live_outside_window }}"
+          if [ "$FORCE_LIVE_OUTSIDE_WINDOW" != "true" ]; then
+            FORCE_LIVE_OUTSIDE_WINDOW="false"
+          fi
+          echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
+          echo "workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC" >> "$GITHUB_OUTPUT"
+          echo "force_live_outside_window=$FORCE_LIVE_OUTSIDE_WINDOW" >> "$GITHUB_OUTPUT"
+          echo "[WORKFLOW_META] workflow_kind=live report_date=$REPORT_DATE workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC force_live_outside_window=$FORCE_LIVE_OUTSIDE_WINDOW"
+
+  live_primary:
+    needs: resolve_context
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      run_id: ${{ steps.meta.outputs.run_id }}
+      retry_eligible: ${{ steps.decision.outputs.retry_eligible }}
+      retry_reason: ${{ steps.decision.outputs.retry_reason }}
+      continuation_eligible: ${{ steps.decision.outputs.continuation_eligible }}
+      continuation_reason: ${{ steps.decision.outputs.continuation_reason }}
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.resolve_context.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.resolve_context.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set run metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_live"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+          restore-keys: |
+            canonical-model-snapshot-v2-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-bootstrap
+          restore-keys: |
+            alpaca-precompute-v2-${{ env.REPORT_DATE }}-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Evaluate live execution window
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(python3 scripts/workflow_time_guard.py live --report-date "$REPORT_DATE" --event-name "${{ github.event_name }}")
+          if [ "${{ needs.resolve_context.outputs.force_live_outside_window }}" = "true" ]; then
+            args+=(--force-live-outside-window)
+          fi
+          "${args[@]}"
+
+      - name: Download authoritative precompute artifact
+        id: artifact
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/fetch_precompute_artifact.py --report-date "$REPORT_DATE" --destination downloaded_precompute
+
+      - name: Validate downloaded precompute bundle
+        id: bundle
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE" --require-valid
+
+      - name: Fail when live window disallows execution
+        if: steps.guard.outputs.allow_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error::workflow_kind=live report_date=${REPORT_DATE} now_et=${{ steps.guard.outputs.now_et }} execution_window_status=${{ steps.guard.outputs.execution_window_status }} reason=${{ steps.guard.outputs.reason }}"
+          exit 1
+
+      - name: Gate live execution on authoritative precompute bundle
+        id: bundle_gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRECOMPUTE_BUNDLE_FOUND="${{ steps.artifact.outputs.precompute_bundle_found }}"
+          BUNDLE_SOURCE="${{ steps.artifact.outputs.bundle_source }}"
+          BUNDLE_STATUS="${{ steps.artifact.outputs.bundle_status }}"
+          if [ "${PRECOMPUTE_BUNDLE_FOUND}" != "true" ]; then
+            FINAL_BUNDLE_STATUS="bundle_missing"
+            if [ "${BUNDLE_STATUS}" = "bundle_download_failed" ]; then
+              FINAL_BUNDLE_STATUS="bundle_download_failed"
+            elif [ "${BUNDLE_STATUS}" = "MISSING_PRECOMPUTE_BUNDLE" ]; then
+              FINAL_BUNDLE_STATUS="bundle_missing"
+            fi
+            BUNDLE_READY="false"
+          elif [ "${{ steps.bundle.outcome }}" != "success" ]; then
+            FINAL_BUNDLE_STATUS="bundle_invalid"
+            BUNDLE_READY="false"
+          else
+            FINAL_BUNDLE_STATUS="bundle_ready"
+            BUNDLE_READY="true"
+          fi
+          export FINAL_BUNDLE_STATUS
+          mkdir -p "outputs/workflow_status/${REPORT_DATE}"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_date = os.environ["REPORT_DATE"]
+          out_path = Path("outputs/workflow_status") / report_date / "live_bundle_gate.json"
+          payload = {
+              "workflow_kind": "live",
+              "precompute_bundle_required": True,
+              "precompute_bundle_found": os.environ["PRECOMPUTE_BUNDLE_FOUND"] == "true",
+              "bundle_source": os.environ["BUNDLE_SOURCE"] or "none",
+              "bundle_report_date": report_date,
+              "bundle_status": os.environ["FINAL_BUNDLE_STATUS"],
+              "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}",
+              "event_freshness_status": "${{ steps.guard.outputs.event_freshness_status }}",
+          }
+          out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+          echo "precompute_bundle_required=true" >> "$GITHUB_OUTPUT"
+          echo "precompute_bundle_found=${PRECOMPUTE_BUNDLE_FOUND:-false}" >> "$GITHUB_OUTPUT"
+          echo "bundle_source=${BUNDLE_SOURCE:-none}" >> "$GITHUB_OUTPUT"
+          echo "bundle_report_date=${REPORT_DATE}" >> "$GITHUB_OUTPUT"
+          echo "bundle_status=${FINAL_BUNDLE_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "bundle_ready=${BUNDLE_READY}" >> "$GITHUB_OUTPUT"
+          if [ "${BUNDLE_READY}" != "true" ]; then
+            echo "::error::MISSING_PRECOMPUTE_BUNDLE workflow_kind=live report_date=${REPORT_DATE} bundle_status=${FINAL_BUNDLE_STATUS} bundle_source=${BUNDLE_SOURCE:-none}"
+            exit 1
+          fi
+        env:
+          PRECOMPUTE_BUNDLE_FOUND: ${{ steps.artifact.outputs.precompute_bundle_found }}
+          BUNDLE_SOURCE: ${{ steps.artifact.outputs.bundle_source }}
+
+      - name: Install dependencies
+        if: steps.bundle_gate.outputs.bundle_ready == 'true'
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute from precompute bundle
+        id: live_run
+        if: steps.bundle_gate.outputs.bundle_ready == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          WORKFLOW_KIND: live
+          EVENT_FRESHNESS_STATUS: ${{ steps.guard.outputs.event_freshness_status }}
+          BUNDLE_STATUS: ${{ steps.bundle_gate.outputs.bundle_status }}
+          BUNDLE_SOURCE: ${{ steps.bundle_gate.outputs.bundle_source }}
+          PRECOMPUTE_BUNDLE_REQUIRED: ${{ steps.bundle_gate.outputs.precompute_bundle_required }}
+          PRECOMPUTE_BUNDLE_FOUND: ${{ steps.bundle_gate.outputs.precompute_bundle_found }}
+          BUNDLE_REPORT_DATE: ${{ steps.bundle_gate.outputs.bundle_report_date }}
+          EXECUTION_WINDOW_STATUS: ${{ steps.guard.outputs.execution_window_status }}
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 0
+
+      - name: Capture retry and continuation decision
+        id: decision
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_id = "${{ steps.meta.outputs.run_id }}"
+          path = Path("outputs/runs") / run_id / "operator_summary.json"
+          gate_path = Path("outputs/workflow_status") / "${{ env.REPORT_DATE }}" / "live_bundle_gate.json"
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+          elif gate_path.exists():
+              gate = json.loads(gate_path.read_text(encoding="utf-8"))
+              data = {
+                  "retry_eligible": False,
+                  "retry_reason": str(gate.get("bundle_status") or ""),
+                  "continuation_eligible": False,
+                  "continuation_reason": "",
+              }
+          else:
+              data = {}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"retry_eligible={str(bool(data.get('retry_eligible'))).lower()}\n")
+              fh.write(f"retry_reason={str(data.get('retry_reason') or '')}\n")
+              fh.write(f"continuation_eligible={str(bool(data.get('continuation_eligible'))).lower()}\n")
+              fh.write(f"continuation_reason={str(data.get('continuation_reason') or '')}\n")
+          PY
+
+      - name: Upload live primary status artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-status-${{ env.REPORT_DATE }}
+          if-no-files-found: warn
+          path: |
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+      - name: Upload live primary artifacts
+        if: always() && steps.bundle_gate.outputs.bundle_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-primary
+          if-no-files-found: warn
+          path: |
+            outputs/latest_run.json
+            outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/runs/${{ steps.meta.outputs.run_id }}/**
+            outputs/execution_audit/**
+            outputs/trading_day_summary.json
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+      - name: Fail job when live execution failed
+        if: steps.live_run.outcome != 'success'
+        shell: bash
+        run: exit 1
+
+  retry_precompute:
+    needs: [resolve_context, live_primary]
+    if: ${{ always() && needs.live_primary.outputs.retry_eligible == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      PLAN_ONLY: "1"
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.resolve_context.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.resolve_context.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+          restore-keys: |
+            canonical-model-snapshot-v2-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Rebuild precompute bundle for live retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[LIVE_RETRY_PRECOMPUTE] report_date=${REPORT_DATE} retry_reason=${{ needs.live_primary.outputs.retry_reason }}"
+          source .venv/bin/activate
+          python3 daily_quant_report.py --plan-only --write-precompute-bundle
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-${{ github.run_id }}-${{ github.run_attempt }}-retry
+
+      - name: Upload retry precompute artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-precompute-${{ env.REPORT_DATE }}
+          if-no-files-found: warn
+          path: |
+            outputs/precompute/${{ env.REPORT_DATE }}/**
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+  live_retry:
+    needs: [resolve_context, live_primary, retry_precompute]
+    if: ${{ always() && needs.live_primary.outputs.retry_eligible == 'true' && needs.retry_precompute.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      run_id: ${{ steps.meta.outputs.run_id }}
+      continuation_eligible: ${{ steps.decision.outputs.continuation_eligible }}
+      continuation_reason: ${{ steps.decision.outputs.continuation_reason }}
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.resolve_context.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.resolve_context.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set retry run metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_retry"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-bootstrap
+          restore-keys: |
+            alpaca-precompute-v2-${{ env.REPORT_DATE }}-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Evaluate live retry window
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/workflow_time_guard.py live --report-date "$REPORT_DATE" --event-name retry
+
+      - name: Download refreshed retry precompute artifact
+        id: artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-precompute-${{ env.REPORT_DATE }}
+          path: .
+
+      - name: Validate retry precompute bundle
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE" --require-valid
+
+      - name: Fail when retry window disallows execution
+        if: steps.guard.outputs.allow_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error::workflow_kind=live_retry report_date=${REPORT_DATE} now_et=${{ steps.guard.outputs.now_et }} execution_window_status=${{ steps.guard.outputs.execution_window_status }}"
+          exit 1
+
+      - name: Gate retry execution on authoritative precompute bundle
+        id: bundle_gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          FINAL_BUNDLE_STATUS="bundle_ready"
+          if [ "${{ steps.bundle.outcome }}" != "success" ]; then
+            FINAL_BUNDLE_STATUS="bundle_invalid"
+          fi
+          echo "FINAL_BUNDLE_STATUS=$FINAL_BUNDLE_STATUS" >> "$GITHUB_ENV"
+          export FINAL_BUNDLE_STATUS
+          mkdir -p "outputs/workflow_status/${REPORT_DATE}"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_date = os.environ["REPORT_DATE"]
+          out_path = Path("outputs/workflow_status") / report_date / "live_retry_bundle_gate.json"
+          payload = {
+              "workflow_kind": "live_retry",
+              "precompute_bundle_required": True,
+              "precompute_bundle_found": True,
+              "bundle_source": "artifact",
+              "bundle_report_date": report_date,
+              "bundle_status": os.environ["FINAL_BUNDLE_STATUS"],
+              "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}",
+              "event_freshness_status": "${{ steps.guard.outputs.event_freshness_status }}",
+          }
+          out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+          echo "precompute_bundle_required=true" >> "$GITHUB_OUTPUT"
+          echo "precompute_bundle_found=true" >> "$GITHUB_OUTPUT"
+          echo "bundle_source=artifact" >> "$GITHUB_OUTPUT"
+          echo "bundle_report_date=${REPORT_DATE}" >> "$GITHUB_OUTPUT"
+          echo "bundle_status=${FINAL_BUNDLE_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "bundle_ready=true" >> "$GITHUB_OUTPUT"
+          if [ "${FINAL_BUNDLE_STATUS}" != "bundle_ready" ]; then
+            echo "::error::bundle_invalid workflow_kind=live_retry report_date=${REPORT_DATE}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        if: steps.bundle_gate.outputs.bundle_ready == 'true'
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute retry from refreshed precompute bundle
+        id: retry_run
+        if: steps.bundle_gate.outputs.bundle_ready == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          WORKFLOW_KIND: live_retry
+          EVENT_FRESHNESS_STATUS: ${{ steps.guard.outputs.event_freshness_status }}
+          BUNDLE_STATUS: ${{ steps.bundle_gate.outputs.bundle_status }}
+          BUNDLE_SOURCE: artifact
+          PRECOMPUTE_BUNDLE_REQUIRED: true
+          PRECOMPUTE_BUNDLE_FOUND: true
+          BUNDLE_REPORT_DATE: ${{ env.REPORT_DATE }}
+          EXECUTION_WINDOW_STATUS: ${{ steps.guard.outputs.execution_window_status }}
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 1
+
+      - name: Capture continuation decision
+        id: decision
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_id = "${{ steps.meta.outputs.run_id }}"
+          path = Path("outputs/runs") / run_id / "operator_summary.json"
+          gate_path = Path("outputs/workflow_status") / "${{ env.REPORT_DATE }}" / "live_retry_bundle_gate.json"
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+          elif gate_path.exists():
+              gate = json.loads(gate_path.read_text(encoding="utf-8"))
+              data = {
+                  "continuation_eligible": False,
+                  "continuation_reason": str(gate.get("bundle_status") or ""),
+              }
+          else:
+              data = {}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"continuation_eligible={str(bool(data.get('continuation_eligible'))).lower()}\n")
+              fh.write(f"continuation_reason={str(data.get('continuation_reason') or '')}\n")
+          PY
+
+      - name: Upload live retry status artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-retry-status-${{ env.REPORT_DATE }}
+          if-no-files-found: warn
+          path: |
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+      - name: Upload live retry artifacts
+        if: always() && steps.bundle_gate.outputs.bundle_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-retry
+          if-no-files-found: warn
+          path: |
+            outputs/latest_run.json
+            outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/runs/${{ steps.meta.outputs.run_id }}/**
+            outputs/execution_audit/**
+            outputs/trading_day_summary.json
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+      - name: Fail job when retry execution failed
+        if: steps.retry_run.outcome != 'success'
+        shell: bash
+        run: exit 1
+
+  continue_buys:
+    needs: [resolve_context, live_primary, live_retry]
+    if: ${{ always() && (needs.live_retry.outputs.continuation_eligible == 'true' || needs.live_primary.outputs.continuation_eligible == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      REPORT_DATE: ${{ needs.resolve_context.outputs.report_date }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+      WORKFLOW_STARTED_AT_UTC: ${{ needs.resolve_context.outputs.workflow_started_at_utc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select continuation run id
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.live_retry.outputs.continuation_eligible }}" = "true" ]; then
+            RUN_ID="${{ needs.live_retry.outputs.run_id }}"
+          else
+            RUN_ID="${{ needs.live_primary.outputs.run_id }}"
+          fi
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-bootstrap
+          restore-keys: |
+            alpaca-precompute-v2-${{ env.REPORT_DATE }}-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download authoritative precompute artifact for continuation
+        id: artifact
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/fetch_precompute_artifact.py --report-date "$REPORT_DATE" --destination downloaded_precompute
+
+      - name: Validate continuation precompute bundle
+        id: bundle
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE" --require-valid
+
+      - name: Evaluate buy continuation window
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/workflow_time_guard.py live --report-date "$REPORT_DATE" --event-name continuation
+
+      - name: Fail when continuation window disallows execution
+        if: steps.guard.outputs.allow_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error::workflow_kind=continue_buys report_date=${REPORT_DATE} now_et=${{ steps.guard.outputs.now_et }} execution_window_status=${{ steps.guard.outputs.execution_window_status }}"
+          exit 1
+
+      - name: Gate continuation on authoritative precompute bundle
+        id: bundle_gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRECOMPUTE_BUNDLE_FOUND="${{ steps.artifact.outputs.precompute_bundle_found }}"
+          BUNDLE_SOURCE="${{ steps.artifact.outputs.bundle_source }}"
+          if [ "${PRECOMPUTE_BUNDLE_FOUND}" != "true" ]; then
+            FINAL_BUNDLE_STATUS="bundle_missing"
+            BUNDLE_READY="false"
+          elif [ "${{ steps.bundle.outcome }}" != "success" ]; then
+            FINAL_BUNDLE_STATUS="bundle_invalid"
+            BUNDLE_READY="false"
+          else
+            FINAL_BUNDLE_STATUS="bundle_ready"
+            BUNDLE_READY="true"
+          fi
+          export FINAL_BUNDLE_STATUS
+          mkdir -p "outputs/workflow_status/${REPORT_DATE}"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_date = os.environ["REPORT_DATE"]
+          out_path = Path("outputs/workflow_status") / report_date / "continue_buys_bundle_gate.json"
+          payload = {
+              "workflow_kind": "continue_buys",
+              "precompute_bundle_required": True,
+              "precompute_bundle_found": os.environ["PRECOMPUTE_BUNDLE_FOUND"] == "true",
+              "bundle_source": os.environ["BUNDLE_SOURCE"] or "none",
+              "bundle_report_date": report_date,
+              "bundle_status": os.environ["FINAL_BUNDLE_STATUS"],
+              "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}",
+              "event_freshness_status": "continuation_path",
+          }
+          out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+          echo "precompute_bundle_required=true" >> "$GITHUB_OUTPUT"
+          echo "precompute_bundle_found=${PRECOMPUTE_BUNDLE_FOUND:-false}" >> "$GITHUB_OUTPUT"
+          echo "bundle_source=${BUNDLE_SOURCE:-none}" >> "$GITHUB_OUTPUT"
+          echo "bundle_report_date=${REPORT_DATE}" >> "$GITHUB_OUTPUT"
+          echo "bundle_status=${FINAL_BUNDLE_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "bundle_ready=${BUNDLE_READY}" >> "$GITHUB_OUTPUT"
+          if [ "${BUNDLE_READY}" != "true" ]; then
+            echo "::error::bundle_missing workflow_kind=continue_buys report_date=${REPORT_DATE}"
+            exit 1
+          fi
+        env:
+          PRECOMPUTE_BUNDLE_FOUND: ${{ steps.artifact.outputs.precompute_bundle_found }}
+          BUNDLE_SOURCE: ${{ steps.artifact.outputs.bundle_source }}
+          FINAL_BUNDLE_STATUS: bundle_ready
+
+      - name: Install dependencies
+        if: steps.bundle_gate.outputs.bundle_ready == 'true'
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Continue outstanding buys
+        if: steps.bundle_gate.outputs.bundle_ready == 'true'
+        shell: bash
+        env:
+          WORKFLOW_KIND: continue_buys
+          EVENT_FRESHNESS_STATUS: continuation_path
+          BUNDLE_STATUS: ${{ steps.bundle_gate.outputs.bundle_status }}
+          BUNDLE_SOURCE: ${{ steps.bundle_gate.outputs.bundle_source }}
+          PRECOMPUTE_BUNDLE_REQUIRED: true
+          PRECOMPUTE_BUNDLE_FOUND: ${{ steps.bundle_gate.outputs.precompute_bundle_found }}
+          BUNDLE_REPORT_DATE: ${{ env.REPORT_DATE }}
+          EXECUTION_WINDOW_STATUS: ${{ steps.guard.outputs.execution_window_status }}
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 1 --continuation-mode buy_only
+
+      - name: Upload continuation status artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-continuation-status-${{ env.REPORT_DATE }}
+          if-no-files-found: warn
+          path: |
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+      - name: Upload continuation artifacts
+        if: always() && steps.bundle_gate.outputs.bundle_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-live-continuation
+          if-no-files-found: warn
+          path: |
+            outputs/latest_run.json
+            outputs/execution_email/${{ env.REPORT_DATE }}.json
+            outputs/runs/${{ steps.meta.outputs.run_id }}/**
+            outputs/execution_audit/**
+            outputs/trading_day_summary.json
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+  email:
+    needs: [resolve_context, live_primary, retry_precompute, live_retry, continue_buys]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: ${{ secrets.EMAIL_SENDER }}
+      SMTP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+      EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+      EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+      REPORT_TO_EMAIL: ${{ secrets.EMAIL_RECIPIENT }}
+      EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+      EMAIL_DRY_RUN: ${{ vars.EMAIL_DRY_RUN || '0' }}
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "1"
+      EMAIL_TRADING_CONFIRMATION: "1"
+      EMAIL_INTERNAL_DEBUG: "0"
+      REPORT_DATE: ${{ needs.resolve_context.outputs.report_date }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download live primary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-live-primary
+          path: downloaded_primary
+        continue-on-error: true
+
+      - name: Download live retry artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-live-retry
+          path: downloaded_retry
+        continue-on-error: true
+
+      - name: Download live continuation artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpaca-live-continuation
+          path: downloaded_continuation
+        continue-on-error: true
+
+      - name: Prepare persisted email inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p outputs/execution_email outputs/runs
+
+          latest_src="$(find downloaded_primary downloaded_retry downloaded_continuation -type f -name 'latest_run.json' 2>/dev/null | tail -n1 || true)"
+          if [ -n "$latest_src" ]; then
+            mkdir -p outputs
+            cp -f "$latest_src" outputs/latest_run.json
+          fi
+
+          payload_src="$(find downloaded_primary downloaded_retry downloaded_continuation -type f -path "*/execution_email/${REPORT_DATE}.json" 2>/dev/null | tail -n1 || true)"
+          if [ -n "$payload_src" ]; then
+            cp -f "$payload_src" "outputs/execution_email/${REPORT_DATE}.json"
+          fi
+
+          while IFS= read -r run_root_src; do
+            run_id="$(basename "$run_root_src")"
+            mkdir -p "outputs/runs/$run_id"
+            cp -R "$run_root_src"/. "outputs/runs/$run_id"/ || true
+          done < <(find downloaded_primary downloaded_retry downloaded_continuation -type d -path '*/runs/*' 2>/dev/null | grep -E '/runs/[^/]+$' || true)
+
+      - name: Guard email credentials (auto dry-run when missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in SMTP_USER SMTP_PASSWORD REPORT_TO_EMAIL; do
+            if [ -z "${!key:-}" ]; then
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "EMAIL_DRY_RUN=1" >> "$GITHUB_ENV"
+            echo "SMTP_USER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
+            echo "SMTP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
+            echo "EMAIL_SENDER=dryrun-sender@example.invalid" >> "$GITHUB_ENV"
+            echo "EMAIL_APP_PASSWORD=dryrun-password" >> "$GITHUB_ENV"
+            echo "REPORT_TO_EMAIL=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
+            echo "EMAIL_RECIPIENT=dryrun-recipient@example.invalid" >> "$GITHUB_ENV"
+          fi
+
+      - name: Send pre-trade execution status email
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          cmd=(.venv/bin/python daily_trade_execution_email.py)
+          if [ "${EMAIL_DRY_RUN:-0}" = "1" ] || [ "${EMAIL_DRY_RUN:-}" = "true" ]; then
+            cmd+=(--dry-run)
+          fi
+          "${cmd[@]}"
+
+      - name: Send trading confirmation email from execution results
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          if [ ! -f outputs/latest_run.json ]; then
+            exit 0
+          fi
+          run_root="$(.venv/bin/python -c "import json, pathlib; p=pathlib.Path('outputs/latest_run.json'); print((json.loads(p.read_text(encoding='utf-8')).get('run_root','') if p.exists() else ''))")"
+          if [ -z "$run_root" ] || [ ! -f "$run_root/execution_results.json" ]; then
+            exit 0
+          fi
+          .venv/bin/python scripts/send_trading_confirmation_email.py

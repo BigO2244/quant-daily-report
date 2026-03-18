@@ -1,0 +1,192 @@
+name: Daily Alpaca Precompute
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Override REPORT_DATE (YYYY-MM-DD). Leave blank for today ET."
+        required: false
+        type: string
+      force_refresh_precompute:
+        description: "Force precompute refresh even if bundle exists or event is stale."
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Precompute target: 7:30 AM America/New_York.
+    # EST weekdays use 12:30 UTC, EDT weekdays use 11:30 UTC.
+    - cron: "30 12 * 1,2,12 1-5"
+    - cron: "30 12 1-7 3 1-5"
+    - cron: "30 11 8-31 3 1-5"
+    - cron: "30 11 * 4-10 1-5"
+    - cron: "30 11 1-7 11 1-5"
+    - cron: "30 12 8-30 11 1-5"
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TRADING_MODE: alpaca
+      MODE: alpaca
+      RECON_V2: 1
+      PLAN_ONLY: "1"
+      ALPACA_PAPER: ${{ secrets.ALPACA_PAPER }}
+      ALPACA_BASE_URL: "https://paper-api.alpaca.markets"
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      TZ: America/New_York
+      EMAIL_INLINE_REPORTS: "0"
+      EMAIL_MARKET_CONDITIONS: "0"
+      EMAIL_PRETRADE: "0"
+      EMAIL_TRADING_CONFIRMATION: "0"
+      EMAIL_INTERNAL_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve workflow metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT_DATE="${{ inputs.report_date }}"
+          if [ -z "$REPORT_DATE" ]; then
+            REPORT_DATE="$(TZ=America/New_York date +%F)"
+          fi
+          WORKFLOW_STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          FORCE_REFRESH_PRECOMPUTE="${{ inputs.force_refresh_precompute }}"
+          if [ "$FORCE_REFRESH_PRECOMPUTE" != "true" ]; then
+            FORCE_REFRESH_PRECOMPUTE="false"
+          fi
+          echo "REPORT_DATE=$REPORT_DATE" >> "$GITHUB_ENV"
+          echo "WORKFLOW_STARTED_AT_UTC=$WORKFLOW_STARTED_AT_UTC" >> "$GITHUB_ENV"
+          echo "FORCE_REFRESH_PRECOMPUTE=$FORCE_REFRESH_PRECOMPUTE" >> "$GITHUB_ENV"
+          echo "report_date=$REPORT_DATE" >> "$GITHUB_OUTPUT"
+          echo "workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC" >> "$GITHUB_OUTPUT"
+          echo "[WORKFLOW_META] workflow_kind=precompute report_date=$REPORT_DATE workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC force_refresh_precompute=$FORCE_REFRESH_PRECOMPUTE"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+          restore-keys: |
+            canonical-model-snapshot-v2-
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-bootstrap
+          restore-keys: |
+            alpaca-precompute-v2-${{ env.REPORT_DATE }}-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Evaluate precompute stale guard
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(python3 scripts/workflow_time_guard.py precompute --report-date "$REPORT_DATE" --event-name "${{ github.event_name }}")
+          if [ "${FORCE_REFRESH_PRECOMPUTE}" = "true" ]; then
+            args+=(--force-refresh-precompute)
+          fi
+          "${args[@]}"
+
+      - name: Inspect existing precompute bundle
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE")
+          if [ "${FORCE_REFRESH_PRECOMPUTE}" = "true" ]; then
+            args+=(--force-refresh)
+          fi
+          "${args[@]}"
+
+      - name: Log stale precompute decision
+        if: steps.guard.outputs.allow_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[PRECOMPUTE] workflow_kind=precompute report_date=${REPORT_DATE} now_et=${{ steps.guard.outputs.now_et }} intended_schedule_class=precompute event_freshness_status=${{ steps.guard.outputs.event_freshness_status }} execution_window_status=${{ steps.guard.outputs.execution_window_status }} bundle_status=SKIPPED_AS_STALE"
+
+      - name: Install dependencies
+        if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run precompute planner
+        if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+          python3 daily_quant_report.py --plan-only --write-precompute-bundle
+
+      - name: Resolve final precompute bundle status
+        if: always()
+        id: final
+        shell: bash
+        run: |
+          set -euo pipefail
+          FINAL_BUNDLE_STATUS="REUSED"
+          if [ "${{ steps.guard.outputs.allow_run }}" != "true" ]; then
+            FINAL_BUNDLE_STATUS="SKIPPED_AS_STALE"
+          elif [ "${{ steps.bundle.outputs.bundle_should_rebuild }}" = "true" ]; then
+            if [ "${{ steps.bundle.outputs.bundle_status }}" = "MISSING" ]; then
+              FINAL_BUNDLE_STATUS="CREATED"
+            else
+              FINAL_BUNDLE_STATUS="REFRESHED"
+            fi
+          fi
+          echo "final_bundle_status=$FINAL_BUNDLE_STATUS" >> "$GITHUB_OUTPUT"
+          echo "FINAL_BUNDLE_STATUS=$FINAL_BUNDLE_STATUS" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_date = os.environ["REPORT_DATE"]
+          out_dir = Path("outputs/workflow_status") / report_date
+          out_dir.mkdir(parents=True, exist_ok=True)
+          payload = {
+              "workflow_kind": "precompute",
+              "report_date": report_date,
+              "event_freshness_status": "${{ steps.guard.outputs.event_freshness_status }}",
+              "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}",
+              "bundle_status": os.environ["FINAL_BUNDLE_STATUS"],
+              "bundle_reason": "${{ steps.bundle.outputs.bundle_reason }}",
+              "workflow_started_at_utc": "${{ steps.meta.outputs.workflow_started_at_utc }}",
+              "now_et": "${{ steps.guard.outputs.now_et }}",
+              "intended_schedule_class": "precompute",
+          }
+          (out_dir / "precompute_workflow_summary.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - uses: actions/cache/save@v4
+        if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
+        with:
+          path: outputs/paper_state/canonical_positions.json
+          key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
+
+      - uses: actions/cache/save@v4
+        if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
+        with:
+          path: outputs/precompute/${{ env.REPORT_DATE }}
+          key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload precompute artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-precompute-${{ env.REPORT_DATE }}
+          if-no-files-found: warn
+          path: |
+            outputs/precompute/${{ env.REPORT_DATE }}/**
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**

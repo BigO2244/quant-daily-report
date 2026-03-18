@@ -104,6 +104,14 @@ def _build_execution_summary(
     cash_rebalance_status = None
     operator_execution_status = None
     timing_status = None
+    workflow_kind = None
+    event_freshness_status = None
+    bundle_status = None
+    bundle_source = None
+    precompute_bundle_required = None
+    precompute_bundle_found = None
+    bundle_report_date = None
+    execution_window_status = None
 
     if (
         submitted == 0
@@ -142,6 +150,14 @@ def _build_execution_summary(
         cash_rebalance_status = operator_summary.get("cash_rebalance_status")
         operator_execution_status = operator_summary.get("operator_execution_status")
         timing_status = operator_summary.get("timing_status")
+        workflow_kind = operator_summary.get("workflow_kind")
+        event_freshness_status = operator_summary.get("event_freshness_status")
+        bundle_status = operator_summary.get("bundle_status")
+        bundle_source = operator_summary.get("bundle_source")
+        precompute_bundle_required = operator_summary.get("precompute_bundle_required")
+        precompute_bundle_found = operator_summary.get("precompute_bundle_found")
+        bundle_report_date = operator_summary.get("bundle_report_date")
+        execution_window_status = operator_summary.get("execution_window_status")
 
     buy_orders = sum(
         1 for r in responses
@@ -178,6 +194,14 @@ def _build_execution_summary(
         "cash_rebalance_status": cash_rebalance_status,
         "operator_execution_status": operator_execution_status,
         "timing_status": timing_status,
+        "workflow_kind": workflow_kind,
+        "event_freshness_status": event_freshness_status,
+        "bundle_status": bundle_status,
+        "bundle_source": bundle_source,
+        "precompute_bundle_required": precompute_bundle_required,
+        "precompute_bundle_found": precompute_bundle_found,
+        "bundle_report_date": bundle_report_date,
+        "execution_window_status": execution_window_status,
     }
 
 

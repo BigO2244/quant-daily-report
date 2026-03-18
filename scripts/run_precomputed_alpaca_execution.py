@@ -184,6 +184,7 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
 
 
 def _failure_payload(*, trade_date: str, run_id: str, reason: str, timing: dict[str, object]) -> dict[str, object]:
+    workflow_context = _workflow_context()
     payload = {
         "run_id": run_id,
         "trade_date": trade_date,
@@ -201,8 +202,22 @@ def _failure_payload(*, trade_date: str, run_id: str, reason: str, timing: dict[
         "orders_filled_count": 0,
         "operator_execution_status": "failed",
         **timing,
+        **workflow_context,
     }
     return payload
+
+
+def _workflow_context() -> dict[str, object]:
+    return {
+        "workflow_kind": str(os.getenv("WORKFLOW_KIND", "")).strip() or None,
+        "event_freshness_status": str(os.getenv("EVENT_FRESHNESS_STATUS", "")).strip() or None,
+        "bundle_status": str(os.getenv("BUNDLE_STATUS", "")).strip() or None,
+        "bundle_source": str(os.getenv("BUNDLE_SOURCE", "")).strip() or None,
+        "precompute_bundle_required": str(os.getenv("PRECOMPUTE_BUNDLE_REQUIRED", "")).strip().lower() == "true",
+        "precompute_bundle_found": str(os.getenv("PRECOMPUTE_BUNDLE_FOUND", "")).strip().lower() == "true",
+        "bundle_report_date": str(os.getenv("BUNDLE_REPORT_DATE", "")).strip() or None,
+        "execution_window_status": str(os.getenv("EXECUTION_WINDOW_STATUS", "")).strip() or None,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -259,6 +274,10 @@ def main(argv: list[str] | None = None) -> int:
             retry_attempt_count=retry_attempt,
             retry_eligible=bool(retry.get("retry_allowed")),
             retry_reason=str(retry.get("retry_reason") or ""),
+            workflow_kind=payload.get("workflow_kind"),
+            event_freshness_status=payload.get("event_freshness_status"),
+            bundle_status=payload.get("bundle_status"),
+            execution_window_status=payload.get("execution_window_status"),
             **timing,
         )
         write_latest_run_pointer(
@@ -332,6 +351,10 @@ def main(argv: list[str] | None = None) -> int:
             retry_attempt_count=retry_attempt,
             retry_eligible=bool(retry.get("retry_allowed")),
             retry_reason=str(retry.get("retry_reason") or ""),
+            workflow_kind=str(os.getenv("WORKFLOW_KIND", "")).strip() or "live",
+            event_freshness_status=str(os.getenv("EVENT_FRESHNESS_STATUS", "")).strip() or None,
+            bundle_status=str(os.getenv("BUNDLE_STATUS", "")).strip() or None,
+            execution_window_status=str(os.getenv("EXECUTION_WINDOW_STATUS", "")).strip() or None,
             **timing,
         )
         write_latest_run_pointer(
@@ -379,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     execution_payload["run_id"] = run_id
     execution_payload.update(timing)
+    execution_payload.update(_workflow_context())
     execution_payload["retry_attempt_count"] = retry_attempt
 
     submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
@@ -517,6 +541,10 @@ def main(argv: list[str] | None = None) -> int:
         continuation_eligible=continuation_eligible,
         continuation_reason=str(execution_payload.get("continuation_reason") or ""),
         pending_buy_count=pending_buy_count,
+        workflow_kind=execution_payload.get("workflow_kind"),
+        event_freshness_status=execution_payload.get("event_freshness_status"),
+        bundle_status=execution_payload.get("bundle_status"),
+        execution_window_status=execution_payload.get("execution_window_status"),
     )
 
     print(format_operator_summary_log(load_operator_summary(run_root) or {}))

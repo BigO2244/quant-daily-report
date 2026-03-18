@@ -161,6 +161,34 @@ class TestOperatorSummary:
         assert "rejected=1" in log_line
         assert "confirmation_email=True" in log_line
 
+    def test_operator_summary_persists_workflow_window_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            write_operator_summary(
+                run_root,
+                run_id="test123",
+                trade_date="2024-01-15",
+                mode="ALPACA",
+                workflow_kind="live",
+                event_freshness_status="live_schedule_event",
+                bundle_status="VALID",
+                bundle_source="artifact",
+                precompute_bundle_required=True,
+                precompute_bundle_found=True,
+                bundle_report_date="2024-01-15",
+                execution_window_status="degraded_late",
+            )
+            summary = load_operator_summary(run_root)
+            assert summary is not None
+            assert summary["workflow_kind"] == "live"
+            assert summary["event_freshness_status"] == "live_schedule_event"
+            assert summary["bundle_status"] == "VALID"
+            assert summary["bundle_source"] == "artifact"
+            assert summary["precompute_bundle_required"] is True
+            assert summary["precompute_bundle_found"] is True
+            assert summary["bundle_report_date"] == "2024-01-15"
+            assert summary["execution_window_status"] == "degraded_late"
+
 
 class TestExecutionGuardrails:
     """Test executor validation and rejection logic."""
