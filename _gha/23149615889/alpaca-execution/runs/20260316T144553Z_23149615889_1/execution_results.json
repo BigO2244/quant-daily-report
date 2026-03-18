@@ -1,0 +1,14 @@
+{
+  "run_id": "20260316T144553Z_23149615889_1",
+  "trade_date": "2026-03-16",
+  "mode": "alpaca",
+  "submitted_count": 0,
+  "accepted_count": 0,
+  "rejected_count": 0,
+  "duplicate_count": 0,
+  "order_ids": [],
+  "status": "HALTED",
+  "halt_reason": "MISSING_EXECUTION_PAYLOAD:outputs/runs/20260316T144553Z_23149615889_1/execution_payload.json",
+  "broker_responses": [],
+  "rejected_reasons": []
+}

@@ -22,6 +22,10 @@ def _run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=True, capture_output=True, text=True)
 
 
+def _log(msg: str) -> None:
+    print(f"[ARTIFACT_FETCH] {msg}", flush=True)
+
+
 def _write_outputs(payload: dict[str, object]) -> None:
     target = str(os.getenv("GITHUB_OUTPUT", "")).strip()
     if not target:
@@ -45,6 +49,19 @@ def _copy_tree(src: Path, dst: Path) -> None:
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def _log_file_tree(root: Path, label: str) -> None:
+    """Emit the full file tree under root, one path per line."""
+    entries = sorted(root.rglob("*"))
+    if not entries:
+        _log(f"  {label}: (empty)")
+        return
+    _log(f"  {label}:")
+    for entry in entries:
+        rel = entry.relative_to(root)
+        kind = "DIR " if entry.is_dir() else "FILE"
+        _log(f"    {kind} {rel}")
 
 
 def _find_download_root(download_dir: Path, report_date: str) -> Path | None:
@@ -78,6 +95,15 @@ def fetch_precompute_artifact(
     }
     destination.mkdir(parents=True, exist_ok=True)
 
+    _log(
+        f"report_date={report_date} "
+        f"artifact_name={artifact_name} "
+        f"repo={repo or '(not set)'} "
+        f"branch={branch or '(not set)'} "
+        f"destination={destination} "
+        f"workflow={PRECOMPUTE_WORKFLOW_FILE}"
+    )
+
     run_list_cmd = [
         "gh",
         "run",
@@ -91,14 +117,28 @@ def fetch_precompute_artifact(
         "--limit",
         "50",
     ]
+    _log(f"querying runs: {' '.join(run_list_cmd)}")
     try:
         completed = _run_command(run_list_cmd)
         runs = json.loads(completed.stdout or "[]")
-    except Exception:
+    except Exception as exc:
+        _log(f"run list failed: {exc}")
         return payload
 
+    _log(f"total runs returned: {len(runs)}")
+    for i, run in enumerate(runs):
+        _log(
+            f"  run[{i}] id={run.get('databaseId')} "
+            f"status={run.get('status')} "
+            f"conclusion={run.get('conclusion')} "
+            f"branch={run.get('headBranch')} "
+            f"createdAt={run.get('createdAt')}"
+        )
+
     if branch:
+        before = len(runs)
         runs = [run for run in runs if str(run.get("headBranch") or "") == branch]
+        _log(f"branch filter '{branch}': {before} -> {len(runs)} runs")
 
     successful_runs = [
         run
@@ -106,32 +146,108 @@ def fetch_precompute_artifact(
         if str(run.get("status") or "") == "completed"
         and str(run.get("conclusion") or "") == "success"
     ]
+    _log(f"eligible runs (completed+success): {len(successful_runs)}")
+    for i, run in enumerate(successful_runs):
+        _log(
+            f"  eligible[{i}] id={run.get('databaseId')} "
+            f"createdAt={run.get('createdAt')} "
+            f"branch={run.get('headBranch')}"
+        )
+
+    if not successful_runs:
+        _log("no eligible runs found — cannot proceed")
+        payload["bundle_status"] = "MISSING_PRECOMPUTE_BUNDLE"
+        return payload
+
+    # Once we find the exact same-day artifact, stop — do not fall through to older runs.
+    same_day_attempted = False
 
     for run in successful_runs:
         run_id = str(run.get("databaseId") or "").strip()
         if not run_id:
+            _log(f"  skipping run with no databaseId: {run}")
             continue
+
+        download_cmd = [
+            "gh",
+            "run",
+            "download",
+            run_id,
+            "--repo",
+            repo,
+            "--name",
+            artifact_name,
+            "--dir",
+            str(destination),
+        ]
+        _log(
+            f"attempting download: run_id={run_id} "
+            f"artifact={artifact_name} "
+            f"dir={destination} "
+            f"cmd={' '.join(download_cmd)}"
+        )
         try:
-            _run_command(
-                [
-                    "gh",
-                    "run",
-                    "download",
-                    run_id,
-                    "--repo",
-                    repo,
-                    "--name",
-                    artifact_name,
-                    "--dir",
-                    str(destination),
-                ]
+            _run_command(download_cmd)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            _log(
+                f"  download rejected: run_id={run_id} "
+                f"returncode={exc.returncode} "
+                f"reason=artifact_not_found_on_run "
+                f"stderr={stderr!r}"
             )
-        except Exception:
             continue
+        except Exception as exc:
+            _log(f"  download error: run_id={run_id} error={exc}")
+            continue
+
+        # Artifact with the exact same-day name was found on this run — do not search further.
+        same_day_attempted = True
+        _log(f"  download succeeded: run_id={run_id} destination={destination}")
+
+        _log(f"  extracted file tree under {destination}:")
+        _log_file_tree(destination, str(destination))
+
+        contract_direct = destination / artifact_name / "outputs" / "precompute" / report_date / "contract.json"
+        _log(
+            f"  contract.json probe: path={contract_direct} "
+            f"exists={contract_direct.exists()}"
+        )
+
         download_root = _find_download_root(destination, report_date)
+        _log(
+            f"  _find_download_root result: {'found at ' + str(download_root) if download_root else 'None (no contract.json under destination)'}"
+        )
+
         if download_root is None:
-            payload["bundle_status"] = "bundle_invalid"
-            continue
+            summary_match = next(
+                iter(destination.glob(f"**/workflow_status/{report_date}/precompute_workflow_summary.json")),
+                None,
+            )
+            if summary_match is not None:
+                _log(f"  workflow summary found at: {summary_match}")
+                try:
+                    summary = json.loads(summary_match.read_text(encoding="utf-8"))
+                    skip_status = str(summary.get("bundle_status") or "").upper()
+                    _log(f"  workflow summary bundle_status: {skip_status}")
+                    if skip_status in {"SKIPPED_AS_STALE", "GUARD_FAILED"}:
+                        payload["bundle_status"] = f"bundle_{skip_status.lower()}"
+                        _log(f"  verdict: {payload['bundle_status']} — precompute was blocked, no bundle built")
+                    else:
+                        payload["bundle_status"] = "bundle_invalid"
+                        _log(f"  verdict: bundle_invalid (summary present but no contract.json)")
+                except Exception as exc:
+                    payload["bundle_status"] = "bundle_invalid"
+                    _log(f"  verdict: bundle_invalid (summary parse error: {exc})")
+            else:
+                payload["bundle_status"] = "bundle_invalid"
+                _log(f"  verdict: bundle_invalid (no contract.json and no workflow summary)")
+
+            # Exact same-day artifact found but unusable — stop here, do not fall through.
+            _log(f"  stopping search: same-day artifact found on run_id={run_id} but bundle is not usable")
+            break
+
+        _log(f"  contract.json confirmed at: {download_root / 'outputs' / 'precompute' / report_date / 'contract.json'}")
         _copy_tree(
             download_root / "outputs" / "precompute" / report_date,
             Path("outputs/precompute") / report_date,
@@ -139,6 +255,10 @@ def fetch_precompute_artifact(
         _copy_tree(
             download_root / "outputs" / "workflow_status" / report_date,
             Path("outputs/workflow_status") / report_date,
+        )
+        _log(
+            f"  bundle extracted to outputs/precompute/{report_date}/ "
+            f"and outputs/workflow_status/{report_date}/"
         )
         payload.update(
             {
@@ -148,9 +268,23 @@ def fetch_precompute_artifact(
                 "artifact_run_id": run_id,
             }
         )
+        _log(
+            f"  verdict: bundle_downloaded — accepted run_id={run_id}"
+        )
         return payload
 
-    payload["bundle_status"] = "MISSING_PRECOMPUTE_BUNDLE"
+    if not same_day_attempted:
+        # No run had an artifact with the expected name — network failures only.
+        _log(
+            f"no run yielded artifact '{artifact_name}' "
+            f"(all download attempts rejected — artifact name not present on any eligible run)"
+        )
+        payload["bundle_status"] = "MISSING_PRECOMPUTE_BUNDLE"
+
+    _log(
+        f"final: precompute_bundle_found={payload['precompute_bundle_found']} "
+        f"bundle_status={payload['bundle_status']}"
+    )
     return payload
 
 

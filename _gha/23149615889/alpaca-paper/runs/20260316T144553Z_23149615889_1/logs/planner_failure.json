@@ -1,0 +1,9 @@
+{
+  "run_id": "20260316T144553Z_23149615889_1",
+  "stage": "execution",
+  "terminal_status": "failed_pre_execution",
+  "exception_type": "BROKER_REJECT_PDT",
+  "exception_message": "trade denied due to pattern day trading protection",
+  "traceback_excerpt": null,
+  "generated_at": "2026-03-16T14:48:10.096701+00:00"
+}

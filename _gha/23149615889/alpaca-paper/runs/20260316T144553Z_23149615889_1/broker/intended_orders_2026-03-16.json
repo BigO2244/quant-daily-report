@@ -1,0 +1,86 @@
+{
+  "report_date": "2026-03-16",
+  "run_id": "2026-03-16:main:growth_engine_v4",
+  "orders_intended_count": 7,
+  "orders_intended": [
+    {
+      "ticker": "DELL",
+      "side": "SELL",
+      "shares": 5.0,
+      "price": 152.97347805023193,
+      "notional": 764.8673902511597,
+      "reason": "rebalance_to_target"
+    },
+    {
+      "ticker": "LRCX",
+      "side": "SELL",
+      "shares": 3.0,
+      "price": 217.84102194976808,
+      "notional": 653.5230658493042,
+      "reason": "rebalance_to_target"
+    },
+    {
+      "ticker": "AEP",
+      "side": "SELL",
+      "shares": 6.0,
+      "price": 134.69261450958254,
+      "notional": 808.1556870574952,
+      "reason": "removed_from_targets"
+    },
+    {
+      "ticker": "HWM",
+      "side": "SELL",
+      "shares": 2.0,
+      "price": 241.1093807296753,
+      "notional": 482.2187614593506,
+      "reason": "removed_from_targets"
+    },
+    {
+      "ticker": "PSX",
+      "side": "SELL",
+      "shares": 4.0,
+      "price": 173.1333912200928,
+      "notional": 692.5335648803712,
+      "reason": "removed_from_targets"
+    },
+    {
+      "ticker": "ROST",
+      "side": "SELL",
+      "shares": 3.0,
+      "price": 207.72608683013917,
+      "notional": 623.1782604904175,
+      "reason": "removed_from_targets"
+    },
+    {
+      "ticker": "CVX",
+      "side": "BUY",
+      "shares": 2.0,
+      "price": 196.69830610656737,
+      "notional": 393.39661221313474,
+      "reason": "rebalance_to_target_capital_clipped"
+    }
+  ],
+  "execution_blocked": false,
+  "block_reasons": [],
+  "execution_enabled": true,
+  "reconcile_report": null,
+  "capital_budget": {
+    "broker_cash_at_planning": -2279.3,
+    "broker_equity_at_planning": 9816.75,
+    "broker_buying_power_at_planning": 7537.45,
+    "reserve_cash_policy": {
+      "min_cash_dollars": 1000.0,
+      "equity_reserve_pct": 0.01,
+      "sell_proceeds_haircut": 0.95,
+      "reserve_cash": 1000.0,
+      "available_for_buys": 543.9528934886926
+    },
+    "expected_sell_proceeds": 4024.4767299880978,
+    "expected_sell_proceeds_conservative": 3823.2528934886927,
+    "requested_buy_notional": 786.7932244262695,
+    "allowed_buy_notional": 543.9528934886926,
+    "capital_constraint_triggered": true,
+    "clipped_or_deferred_buys_count": 1
+  },
+  "timestamp_utc": "2026-03-16T14:48:09.980063+00:00"
+}
