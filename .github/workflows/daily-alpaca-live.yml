@@ -1,5 +1,8 @@
 name: Daily Alpaca Live
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   actions: read
   contents: read
