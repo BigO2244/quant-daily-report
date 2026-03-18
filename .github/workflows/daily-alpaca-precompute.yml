@@ -88,7 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(python3 scripts/workflow_time_guard.py precompute --report-date "$REPORT_DATE" --event-name "${{ github.event_name }}")
+          args=(python3 -m scripts.workflow_time_guard precompute --report-date "$REPORT_DATE" --event-name "${{ github.event_name }}")
           if [ "${FORCE_REFRESH_PRECOMPUTE}" = "true" ]; then
             args+=(--force-refresh-precompute)
           fi
@@ -99,7 +99,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE")
+          args=(python3 -m scripts.precompute_bundle_status --report-date "$REPORT_DATE")
           if [ "${FORCE_REFRESH_PRECOMPUTE}" = "true" ]; then
             args+=(--force-refresh)
           fi
@@ -135,36 +135,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FINAL_BUNDLE_STATUS="REUSED"
-          if [ "${{ steps.guard.outputs.allow_run }}" != "true" ]; then
-            FINAL_BUNDLE_STATUS="SKIPPED_AS_STALE"
-          elif [ "${{ steps.bundle.outputs.bundle_should_rebuild }}" = "true" ]; then
-            if [ "${{ steps.bundle.outputs.bundle_status }}" = "MISSING" ]; then
-              FINAL_BUNDLE_STATUS="CREATED"
-            else
-              FINAL_BUNDLE_STATUS="REFRESHED"
-            fi
-          fi
+          FINAL_BUNDLE_STATUS="$(
+            python3 - <<'PY'
+          from core.workflow_status import resolve_precompute_final_status
+
+          print(
+              resolve_precompute_final_status(
+                  guard_outcome="${{ steps.guard.outcome }}",
+                  bundle_outcome="${{ steps.bundle.outcome }}",
+                  guard_allow_run="${{ steps.guard.outputs.allow_run }}",
+                  prior_bundle_status="${{ steps.bundle.outputs.bundle_status }}",
+              )
+          )
+          PY
+          )"
           echo "final_bundle_status=$FINAL_BUNDLE_STATUS" >> "$GITHUB_OUTPUT"
-          echo "FINAL_BUNDLE_STATUS=$FINAL_BUNDLE_STATUS" >> "$GITHUB_ENV"
-          python3 - <<'PY'
+          FINAL_BUNDLE_STATUS="$FINAL_BUNDLE_STATUS" python3 - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          report_date = os.environ["REPORT_DATE"]
+          report_date = "${{ env.REPORT_DATE }}"
+          final_bundle_status = os.environ["FINAL_BUNDLE_STATUS"]
           out_dir = Path("outputs/workflow_status") / report_date
           out_dir.mkdir(parents=True, exist_ok=True)
           payload = {
               "workflow_kind": "precompute",
               "report_date": report_date,
-              "event_freshness_status": "${{ steps.guard.outputs.event_freshness_status }}",
-              "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}",
-              "bundle_status": os.environ["FINAL_BUNDLE_STATUS"],
-              "bundle_reason": "${{ steps.bundle.outputs.bundle_reason }}",
+              "event_freshness_status": "${{ steps.guard.outputs.event_freshness_status }}" or "guard_step_failed",
+              "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}" or "guard_step_failed",
+              "bundle_status": final_bundle_status,
+              "bundle_reason": "${{ steps.bundle.outputs.bundle_reason }}" or "${{ steps.bundle.outcome }}" or "bundle_status_unknown",
               "workflow_started_at_utc": "${{ steps.meta.outputs.workflow_started_at_utc }}",
-              "now_et": "${{ steps.guard.outputs.now_et }}",
+              "now_et": "${{ steps.guard.outputs.now_et }}" or "",
               "intended_schedule_class": "precompute",
+              "guard_outcome": "${{ steps.guard.outcome }}",
+              "bundle_outcome": "${{ steps.bundle.outcome }}",
           }
           (out_dir / "precompute_workflow_summary.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
           PY

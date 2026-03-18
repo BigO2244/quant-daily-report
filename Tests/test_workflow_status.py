@@ -3,7 +3,11 @@ from __future__ import annotations
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from core.workflow_status import classify_live_window, classify_precompute_window
+from core.workflow_status import (
+    classify_live_window,
+    classify_precompute_window,
+    resolve_precompute_final_status,
+)
 
 
 ET = ZoneInfo("America/New_York")
@@ -68,3 +72,25 @@ def test_live_window_handles_dst_dates_in_et() -> None:
 
     assert est["live_window_start_et"].endswith("-05:00")
     assert edt["live_window_start_et"].endswith("-04:00")
+
+
+def test_precompute_final_status_still_resolves_when_guard_step_failed() -> None:
+    status = resolve_precompute_final_status(
+        guard_outcome="failure",
+        bundle_outcome="skipped",
+        guard_allow_run="",
+        prior_bundle_status="",
+    )
+
+    assert status == "GUARD_FAILED"
+
+
+def test_precompute_final_status_reused_when_valid_bundle_already_exists() -> None:
+    status = resolve_precompute_final_status(
+        guard_outcome="success",
+        bundle_outcome="success",
+        guard_allow_run="true",
+        prior_bundle_status="VALID",
+    )
+
+    assert status == "REUSED"

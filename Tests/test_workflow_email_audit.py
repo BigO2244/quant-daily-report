@@ -56,8 +56,8 @@ def test_precompute_and_live_workflows_are_stage_separated() -> None:
     assert "classify_stage" not in live
     assert "python3 daily_quant_report.py --plan-only --write-precompute-bundle" in precompute
     assert live.count("python3 daily_quant_report.py --plan-only --write-precompute-bundle") == 1
-    assert "python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 0" not in precompute
-    assert "python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 0" in live
+    assert "python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0" not in precompute
+    assert "python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0" in live
 
 
 def test_precompute_artifact_handoff_is_report_date_specific_and_always_uploaded() -> None:
@@ -72,11 +72,22 @@ def test_precompute_artifact_handoff_is_report_date_specific_and_always_uploaded
 def test_live_workflow_requires_authoritative_precompute_artifact_before_execution() -> None:
     live = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
 
-    assert "python3 scripts/fetch_precompute_artifact.py --report-date \"$REPORT_DATE\" --destination downloaded_precompute" in live
-    assert "python3 scripts/precompute_bundle_status.py --report-date \"$REPORT_DATE\" --require-valid" in live
+    assert "python3 -m scripts.fetch_precompute_artifact --report-date \"$REPORT_DATE\" --destination downloaded_precompute" in live
+    assert "python3 -m scripts.precompute_bundle_status --report-date \"$REPORT_DATE\" --require-valid" in live
     assert "Gate live execution on authoritative precompute bundle" in live
     assert "MISSING_PRECOMPUTE_BUNDLE" in live
     assert "if: always() && steps.bundle_gate.outputs.bundle_ready == 'true'" in live
+
+
+def test_workflow_helpers_use_module_invocation() -> None:
+    precompute = Path(".github/workflows/daily-alpaca-precompute.yml").read_text(encoding="utf-8")
+    live = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    assert "python3 -m scripts.workflow_time_guard" in precompute
+    assert "python3 -m scripts.precompute_bundle_status" in precompute
+    assert "python3 -m scripts.workflow_time_guard" in live
+    assert "python3 -m scripts.precompute_bundle_status" in live
+    assert "python3 -m scripts.fetch_precompute_artifact" in live
 
 
 def test_daily_quant_report_has_inline_email_guard_for_workflow_dedupe() -> None:

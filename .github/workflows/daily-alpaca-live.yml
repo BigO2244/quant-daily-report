@@ -114,7 +114,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(python3 scripts/workflow_time_guard.py live --report-date "$REPORT_DATE" --event-name "${{ github.event_name }}")
+          args=(python3 -m scripts.workflow_time_guard live --report-date "$REPORT_DATE" --event-name "${{ github.event_name }}")
           if [ "${{ needs.resolve_context.outputs.force_live_outside_window }}" = "true" ]; then
             args+=(--force-live-outside-window)
           fi
@@ -128,7 +128,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/fetch_precompute_artifact.py --report-date "$REPORT_DATE" --destination downloaded_precompute
+          python3 -m scripts.fetch_precompute_artifact --report-date "$REPORT_DATE" --destination downloaded_precompute
 
       - name: Validate downloaded precompute bundle
         id: bundle
@@ -137,7 +137,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE" --require-valid
+          python3 -m scripts.precompute_bundle_status --report-date "$REPORT_DATE" --require-valid
 
       - name: Fail when live window disallows execution
         if: steps.guard.outputs.allow_run != 'true'
@@ -232,7 +232,7 @@ jobs:
         run: |
           set -euo pipefail
           source .venv/bin/activate
-          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 0
+          python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0
 
       - name: Capture retry and continuation decision
         id: decision
@@ -416,7 +416,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/workflow_time_guard.py live --report-date "$REPORT_DATE" --event-name retry
+          python3 -m scripts.workflow_time_guard live --report-date "$REPORT_DATE" --event-name retry
 
       - name: Download refreshed retry precompute artifact
         id: artifact
@@ -430,7 +430,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE" --require-valid
+          python3 -m scripts.precompute_bundle_status --report-date "$REPORT_DATE" --require-valid
 
       - name: Fail when retry window disallows execution
         if: steps.guard.outputs.allow_run != 'true'
@@ -509,7 +509,7 @@ jobs:
         run: |
           set -euo pipefail
           source .venv/bin/activate
-          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 1
+          python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 1
 
       - name: Capture continuation decision
         id: decision
@@ -624,7 +624,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/fetch_precompute_artifact.py --report-date "$REPORT_DATE" --destination downloaded_precompute
+          python3 -m scripts.fetch_precompute_artifact --report-date "$REPORT_DATE" --destination downloaded_precompute
 
       - name: Validate continuation precompute bundle
         id: bundle
@@ -633,14 +633,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/precompute_bundle_status.py --report-date "$REPORT_DATE" --require-valid
+          python3 -m scripts.precompute_bundle_status --report-date "$REPORT_DATE" --require-valid
 
       - name: Evaluate buy continuation window
         id: guard
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/workflow_time_guard.py live --report-date "$REPORT_DATE" --event-name continuation
+          python3 -m scripts.workflow_time_guard live --report-date "$REPORT_DATE" --event-name continuation
 
       - name: Fail when continuation window disallows execution
         if: steps.guard.outputs.allow_run != 'true'
@@ -728,7 +728,7 @@ jobs:
         run: |
           set -euo pipefail
           source .venv/bin/activate
-          python3 scripts/run_precomputed_alpaca_execution.py --retry-attempt 1 --continuation-mode buy_only
+          python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 1 --continuation-mode buy_only
 
       - name: Upload continuation status artifacts
         if: always()
@@ -876,4 +876,4 @@ jobs:
           if [ -z "$run_root" ] || [ ! -f "$run_root/execution_results.json" ]; then
             exit 0
           fi
-          .venv/bin/python scripts/send_trading_confirmation_email.py
+          .venv/bin/python -m scripts.send_trading_confirmation_email

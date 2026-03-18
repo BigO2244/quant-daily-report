@@ -132,3 +132,30 @@ def classify_live_window(
 
 def workflow_status_dir(report_date: str) -> Path:
     return Path("outputs/workflow_status") / str(report_date)
+
+
+def resolve_precompute_final_status(
+    *,
+    guard_outcome: str,
+    bundle_outcome: str,
+    guard_allow_run: str | bool | None,
+    prior_bundle_status: str | None,
+) -> str:
+    guard_ok = str(guard_outcome or "").strip().lower() == "success"
+    bundle_ok = str(bundle_outcome or "").strip().lower() == "success"
+    allow_run = str(guard_allow_run or "").strip().lower() == "true"
+    prior = str(prior_bundle_status or "").strip().upper()
+
+    if not guard_ok:
+        return "GUARD_FAILED"
+    if not allow_run:
+        return "SKIPPED_AS_STALE"
+    if not bundle_ok and not prior:
+        return "BUNDLE_STATUS_UNKNOWN"
+    if prior == "MISSING":
+        return "CREATED"
+    if prior in {"INVALID", "REFRESH_REQUESTED"}:
+        return "REFRESHED"
+    if prior == "VALID":
+        return "REUSED"
+    return "REUSED"
