@@ -189,12 +189,49 @@ jobs:
           path: outputs/precompute/${{ env.REPORT_DATE }}
           key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Upload precompute artifacts
+      - name: Verify precompute bundle integrity before upload
+        id: bundle_integrity
         if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="outputs/precompute/${REPORT_DATE}"
+          FINAL_STATUS="${{ steps.final.outputs.final_bundle_status }}"
+          if [ "$FINAL_STATUS" = "SKIPPED_AS_STALE" ] || [ "$FINAL_STATUS" = "GUARD_FAILED" ]; then
+            echo "bundle_uploadable=false" >> "$GITHUB_OUTPUT"
+            echo "[PRECOMPUTE_INTEGRITY] status=$FINAL_STATUS — bundle not built, skipping upload"
+            exit 0
+          fi
+          MISSING=""
+          for f in contract.json daily_snapshot.json signals.json planned_execution_payload.json; do
+            if [ ! -f "$BUNDLE_DIR/$f" ]; then
+              MISSING="$MISSING $f"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "bundle_uploadable=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Pre-upload integrity check failed: missing files:$MISSING in $BUNDLE_DIR"
+            echo "[PRECOMPUTE_INTEGRITY] FAILED missing_files=$MISSING"
+            exit 1
+          fi
+          echo "bundle_uploadable=true" >> "$GITHUB_OUTPUT"
+          echo "[PRECOMPUTE_INTEGRITY] PASSED all required files present in $BUNDLE_DIR"
+
+      - name: Upload precompute artifacts
+        if: always() && steps.bundle_integrity.outputs.bundle_uploadable == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: alpaca-precompute-${{ env.REPORT_DATE }}
-          if-no-files-found: warn
+          if-no-files-found: error
           path: |
             outputs/precompute/${{ env.REPORT_DATE }}/**
+            outputs/workflow_status/${{ env.REPORT_DATE }}/**
+
+      - name: Upload workflow status (always, for diagnostics)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpaca-precompute-status-${{ env.REPORT_DATE }}
+          if-no-files-found: warn
+          path: |
             outputs/workflow_status/${{ env.REPORT_DATE }}/**

@@ -156,12 +156,13 @@ jobs:
           PRECOMPUTE_BUNDLE_FOUND="${{ steps.artifact.outputs.precompute_bundle_found }}"
           BUNDLE_SOURCE="${{ steps.artifact.outputs.bundle_source }}"
           BUNDLE_STATUS="${{ steps.artifact.outputs.bundle_status }}"
+          ARTIFACT_RUN_ID="${{ steps.artifact.outputs.artifact_run_id }}"
+          NORMALIZED_ROOT="${{ steps.artifact.outputs.normalized_bundle_root }}"
           if [ "${PRECOMPUTE_BUNDLE_FOUND}" != "true" ]; then
-            FINAL_BUNDLE_STATUS="bundle_missing"
-            if [ "${BUNDLE_STATUS}" = "bundle_download_failed" ]; then
+            # Preserve the specific status from fetch (bundle_skipped_as_stale, bundle_invalid, etc.)
+            FINAL_BUNDLE_STATUS="${BUNDLE_STATUS}"
+            if [ -z "${FINAL_BUNDLE_STATUS}" ] || [ "${FINAL_BUNDLE_STATUS}" = "bundle_download_failed" ]; then
               FINAL_BUNDLE_STATUS="bundle_download_failed"
-            elif [ "${BUNDLE_STATUS}" = "MISSING_PRECOMPUTE_BUNDLE" ]; then
-              FINAL_BUNDLE_STATUS="bundle_missing"
             fi
             BUNDLE_READY="false"
           elif [ "${{ steps.bundle.outcome }}" != "success" ]; then
@@ -189,6 +190,8 @@ jobs:
               "bundle_status": os.environ["FINAL_BUNDLE_STATUS"],
               "execution_window_status": "${{ steps.guard.outputs.execution_window_status }}",
               "event_freshness_status": "${{ steps.guard.outputs.event_freshness_status }}",
+              "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
+              "normalized_bundle_root": os.environ.get("NORMALIZED_ROOT", ""),
           }
           out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
           PY
@@ -199,12 +202,14 @@ jobs:
           echo "bundle_status=${FINAL_BUNDLE_STATUS}" >> "$GITHUB_OUTPUT"
           echo "bundle_ready=${BUNDLE_READY}" >> "$GITHUB_OUTPUT"
           if [ "${BUNDLE_READY}" != "true" ]; then
-            echo "::error::MISSING_PRECOMPUTE_BUNDLE workflow_kind=live report_date=${REPORT_DATE} bundle_status=${FINAL_BUNDLE_STATUS} bundle_source=${BUNDLE_SOURCE:-none}"
+            echo "::error::MISSING_PRECOMPUTE_BUNDLE workflow_kind=live report_date=${REPORT_DATE} bundle_status=${FINAL_BUNDLE_STATUS} bundle_source=${BUNDLE_SOURCE:-none} artifact_run_id=${ARTIFACT_RUN_ID:-none}"
             exit 1
           fi
         env:
           PRECOMPUTE_BUNDLE_FOUND: ${{ steps.artifact.outputs.precompute_bundle_found }}
           BUNDLE_SOURCE: ${{ steps.artifact.outputs.bundle_source }}
+          ARTIFACT_RUN_ID: ${{ steps.artifact.outputs.artifact_run_id }}
+          NORMALIZED_ROOT: ${{ steps.artifact.outputs.normalized_bundle_root }}
 
       - name: Install dependencies
         if: steps.bundle_gate.outputs.bundle_ready == 'true'

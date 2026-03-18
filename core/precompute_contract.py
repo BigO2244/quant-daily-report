@@ -175,6 +175,86 @@ def validate_precompute_contract(
     return True, None
 
 
+# ---------------------------------------------------------------------------
+# Bundle file discovery: shared between precompute upload and live download.
+# ---------------------------------------------------------------------------
+
+# The required bundle files (relative to the bundle dir for a given trade_date).
+BUNDLE_REQUIRED_FILES = ("contract.json", "daily_snapshot.json", "signals.json", "planned_execution_payload.json")
+
+
+def discover_bundle_root(search_root: Path, report_date: str) -> Path | None:
+    """Find the bundle directory containing contract.json for *report_date*.
+
+    Handles multiple extraction layouts:
+      1. ``<search_root>/outputs/precompute/<date>/contract.json``  (full prefix preserved)
+      2. ``<search_root>/precompute/<date>/contract.json``          (outputs/ stripped by upload-artifact)
+      3. ``<search_root>/<date>/contract.json``                     (flat extraction)
+      4. ``<search_root>/<anything>/**/precompute/<date>/contract.json``  (wrapped in artifact-name dir)
+
+    Returns the directory that directly contains contract.json, or None.
+    """
+    # Try explicit known layouts first (fast, no recursion).
+    for candidate in (
+        search_root / "outputs" / "precompute" / report_date,
+        search_root / "precompute" / report_date,
+        search_root / report_date,
+    ):
+        if (candidate / "contract.json").is_file():
+            return candidate
+
+    # Fallback: recursive glob — handles arbitrary wrapper directories.
+    match = next(
+        iter(search_root.glob(f"**/precompute/{report_date}/contract.json")),
+        None,
+    )
+    if match is not None:
+        return match.parent
+
+    # Final fallback: contract.json anywhere under a date-named directory.
+    match = next(
+        iter(search_root.glob(f"**/{report_date}/contract.json")),
+        None,
+    )
+    if match is not None:
+        return match.parent
+
+    return None
+
+
+def check_bundle_completeness(bundle_dir: Path) -> tuple[bool, list[str], list[str]]:
+    """Verify all required files exist in *bundle_dir*.
+
+    Returns (complete, present_files, missing_files).
+    """
+    present: list[str] = []
+    missing: list[str] = []
+    for name in BUNDLE_REQUIRED_FILES:
+        if (bundle_dir / name).is_file():
+            present.append(name)
+        else:
+            missing.append(name)
+    return len(missing) == 0, present, missing
+
+
+def normalize_bundle_to_canonical(bundle_dir: Path, report_date: str) -> Path:
+    """Copy bundle files from *bundle_dir* to the canonical location and return it.
+
+    If *bundle_dir* is already the canonical location, this is a no-op.
+    """
+    import shutil
+
+    canonical = precompute_bundle_dir(report_date)
+    if bundle_dir.resolve() == canonical.resolve():
+        return canonical
+    canonical.mkdir(parents=True, exist_ok=True)
+    for name in BUNDLE_REQUIRED_FILES:
+        src = bundle_dir / name
+        if src.is_file():
+            shutil.copy2(str(src), str(canonical / name))
+    return canonical
+
+
 def load_precompute_inputs(
     *,
     trade_date: str,
