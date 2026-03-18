@@ -59,3 +59,4 @@ paper/holdings_latest.csv
 
 # Internal dashboard artifacts (not part of repo)
 Dashboard/
+_gha/

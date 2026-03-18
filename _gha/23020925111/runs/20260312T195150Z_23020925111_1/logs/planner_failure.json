@@ -1,9 +1,0 @@
-{
-  "run_id": "20260312T195150Z_23020925111_1",
-  "stage": "pre_payload",
-  "terminal_status": "failed_pre_payload",
-  "exception_type": null,
-  "exception_message": null,
-  "traceback_excerpt": null,
-  "generated_at": "2026-03-12T19:53:40.822503+00:00"
-}
