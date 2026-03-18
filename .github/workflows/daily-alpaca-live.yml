@@ -58,7 +58,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
-      run_id: ${{ steps.meta.outputs.run_id }}
       retry_eligible: ${{ steps.decision.outputs.retry_eligible }}
       retry_reason: ${{ steps.decision.outputs.retry_reason }}
       continuation_eligible: ${{ steps.decision.outputs.continuation_eligible }}
@@ -374,7 +373,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
-      run_id: ${{ steps.meta.outputs.run_id }}
       continuation_eligible: ${{ steps.decision.outputs.continuation_eligible }}
       continuation_reason: ${{ steps.decision.outputs.continuation_reason }}
     env:
@@ -597,16 +595,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select continuation run id
+      - name: Set continuation run metadata
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ needs.live_retry.outputs.continuation_eligible }}" = "true" ]; then
-            RUN_ID="${{ needs.live_retry.outputs.run_id }}"
-          else
-            RUN_ID="${{ needs.live_primary.outputs.run_id }}"
-          fi
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_continuation"
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
@@ -795,6 +789,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Download live primary artifacts
+        id: dl_primary
+        if: ${{ needs.live_primary.result != 'skipped' && needs.live_primary.result != 'cancelled' }}
         uses: actions/download-artifact@v4
         with:
           name: alpaca-live-primary
@@ -802,6 +798,8 @@ jobs:
         continue-on-error: true
 
       - name: Download live retry artifacts
+        id: dl_retry
+        if: ${{ needs.live_retry.result == 'success' || needs.live_retry.result == 'failure' }}
         uses: actions/download-artifact@v4
         with:
           name: alpaca-live-retry
@@ -809,6 +807,8 @@ jobs:
         continue-on-error: true
 
       - name: Download live continuation artifacts
+        id: dl_continuation
+        if: ${{ needs.continue_buys.result == 'success' || needs.continue_buys.result == 'failure' }}
         uses: actions/download-artifact@v4
         with:
           name: alpaca-live-continuation
@@ -821,13 +821,23 @@ jobs:
           set -euo pipefail
           mkdir -p outputs/execution_email outputs/runs
 
-          latest_src="$(find downloaded_primary downloaded_retry downloaded_continuation -type f -name 'latest_run.json' 2>/dev/null | tail -n1 || true)"
+          # Only search directories that were actually downloaded.
+          DIRS=()
+          for d in downloaded_primary downloaded_retry downloaded_continuation; do
+            [ -d "$d" ] && DIRS+=("$d")
+          done
+          if [ ${#DIRS[@]} -eq 0 ]; then
+            echo "[EMAIL_PREP] No execution artifacts downloaded — email will use defaults"
+            exit 0
+          fi
+
+          latest_src="$(find "${DIRS[@]}" -type f -name 'latest_run.json' 2>/dev/null | tail -n1 || true)"
           if [ -n "$latest_src" ]; then
             mkdir -p outputs
             cp -f "$latest_src" outputs/latest_run.json
           fi
 
-          payload_src="$(find downloaded_primary downloaded_retry downloaded_continuation -type f -path "*/execution_email/${REPORT_DATE}.json" 2>/dev/null | tail -n1 || true)"
+          payload_src="$(find "${DIRS[@]}" -type f -path "*/execution_email/${REPORT_DATE}.json" 2>/dev/null | tail -n1 || true)"
           if [ -n "$payload_src" ]; then
             cp -f "$payload_src" "outputs/execution_email/${REPORT_DATE}.json"
           fi
@@ -836,7 +846,7 @@ jobs:
             run_id="$(basename "$run_root_src")"
             mkdir -p "outputs/runs/$run_id"
             cp -R "$run_root_src"/. "outputs/runs/$run_id"/ || true
-          done < <(find downloaded_primary downloaded_retry downloaded_continuation -type d -path '*/runs/*' 2>/dev/null | grep -E '/runs/[^/]+$' || true)
+          done < <(find "${DIRS[@]}" -type d -path '*/runs/*' 2>/dev/null | grep -E '/runs/[^/]+$' || true)
 
       - name: Guard email credentials (auto dry-run when missing)
         shell: bash

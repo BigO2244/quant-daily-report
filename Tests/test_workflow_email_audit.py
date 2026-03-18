@@ -96,3 +96,73 @@ def test_daily_quant_report_has_inline_email_guard_for_workflow_dedupe() -> None
     assert "def _deliver_inline_report_emails(" in source
     assert 'os.getenv("EMAIL_INLINE_REPORTS")' in source
     assert "[EMAIL] inline report delivery disabled; persisted workflow email job is authoritative" in source
+
+
+# ---------------------------------------------------------------------------
+# Email job: conditional artifact downloads and run_id suppression fix
+# ---------------------------------------------------------------------------
+
+
+def test_email_job_download_primary_is_conditional_on_live_primary_result() -> None:
+    """Primary download should not attempt when live_primary was skipped/cancelled."""
+    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    assert "id: dl_primary" in workflow
+    assert "needs.live_primary.result != 'skipped'" in workflow
+    assert "needs.live_primary.result != 'cancelled'" in workflow
+
+
+def test_email_job_download_retry_is_conditional_on_live_retry_result() -> None:
+    """Retry download should only attempt when live_retry actually ran."""
+    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    assert "id: dl_retry" in workflow
+    assert "needs.live_retry.result == 'success' || needs.live_retry.result == 'failure'" in workflow
+
+
+def test_email_job_download_continuation_is_conditional_on_continue_buys_result() -> None:
+    """Continuation download should only attempt when continue_buys actually ran."""
+    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    assert "id: dl_continuation" in workflow
+    assert "needs.continue_buys.result == 'success' || needs.continue_buys.result == 'failure'" in workflow
+
+
+def test_email_job_prepare_step_guards_against_missing_download_dirs() -> None:
+    """find must only scan directories that exist, not hardcoded paths."""
+    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    # Must build DIRS array from existing directories
+    assert 'DIRS=()' in workflow
+    assert '[ -d "$d" ] && DIRS+=("$d")' in workflow
+    assert 'find "${DIRS[@]}"' in workflow
+    # Must NOT reference hardcoded directory list in find
+    assert "find downloaded_primary downloaded_retry downloaded_continuation" not in workflow
+
+
+def test_no_run_id_in_cross_job_outputs() -> None:
+    """run_id must not appear in any job-level outputs block to avoid GitHub secret suppression."""
+    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    # run_id should only appear as step-level outputs (steps.meta.outputs.run_id),
+    # never as a job-level output (which triggers GitHub's secret masking).
+    import yaml
+
+    parsed = yaml.safe_load(workflow)
+    for job_name, job_def in parsed.get("jobs", {}).items():
+        job_outputs = job_def.get("outputs") or {}
+        assert "run_id" not in job_outputs, (
+            f"Job '{job_name}' exposes run_id as a job output — "
+            f"GitHub will suppress this. Use step-local outputs only."
+        )
+
+
+def test_continue_buys_generates_own_run_id() -> None:
+    """continue_buys must generate its own run_id, not inherit from upstream."""
+    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+
+    # Must NOT reference needs.live_primary.outputs.run_id or needs.live_retry.outputs.run_id
+    assert "needs.live_primary.outputs.run_id" not in workflow
+    assert "needs.live_retry.outputs.run_id" not in workflow
+    # Must generate its own continuation run_id
+    assert "_continuation" in workflow
