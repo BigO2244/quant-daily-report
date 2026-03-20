@@ -108,13 +108,18 @@ jobs:
           fi
           "${args[@]}"
 
-      - name: Fail when precompute stale guard blocks execution
+      - name: Evaluate stale guard with bundle awareness
         if: steps.guard.outputs.allow_run != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          echo "[PRECOMPUTE] workflow_kind=precompute report_date=${REPORT_DATE} now_et=${{ steps.guard.outputs.now_et }} intended_schedule_class=precompute event_freshness_status=${{ steps.guard.outputs.event_freshness_status }} execution_window_status=${{ steps.guard.outputs.execution_window_status }} bundle_status=SKIPPED_AS_STALE"
-          echo "::error::Precompute bundle was not built: stale guard blocked execution (event_freshness_status=${{ steps.guard.outputs.event_freshness_status }} execution_window_status=${{ steps.guard.outputs.execution_window_status }}). To override, re-run precompute with force_refresh_precompute=true."
+          PRIOR_BUNDLE_STATUS="${{ steps.bundle.outputs.bundle_status }}"
+          echo "[PRECOMPUTE] workflow_kind=precompute report_date=${REPORT_DATE} now_et=${{ steps.guard.outputs.now_et }} intended_schedule_class=precompute event_freshness_status=${{ steps.guard.outputs.event_freshness_status }} execution_window_status=${{ steps.guard.outputs.execution_window_status }} prior_bundle_status=${PRIOR_BUNDLE_STATUS} bundle_status=SKIPPED_AS_STALE"
+          if [ "${PRIOR_BUNDLE_STATUS}" = "VALID" ]; then
+            echo "::notice::Precompute skipped (stale window) but valid bundle already exists for ${REPORT_DATE}. No rebuild needed."
+            exit 0
+          fi
+          echo "::error::Precompute bundle was not built: stale guard blocked execution (event_freshness_status=${{ steps.guard.outputs.event_freshness_status }} execution_window_status=${{ steps.guard.outputs.execution_window_status }}) and no valid bundle exists. To override, re-run precompute with force_refresh_precompute=true."
           exit 1
 
       - name: Install dependencies

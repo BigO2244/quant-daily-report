@@ -120,12 +120,29 @@ def summarize_broker_pdt_risk(snapshot: Dict[str, Any] | None) -> Dict[str, Any]
         if details:
             warning_message = f"{warning_message}: {', '.join(details)}"
 
+    # Detect the specific high-risk combination: near PDT limit with no
+    # daytrading buying power.  This is the condition that warrants an
+    # operator-visible alert in the email subject.
+    pdt_constrained = bool(
+        daytrade_count is not None
+        and daytrade_count >= 3
+        and daytrading_buying_power_value is not None
+        and daytrading_buying_power_value <= 0
+    )
+    if pdt_constrained:
+        logger.warning(
+            "[PDT][WARN] daytrade_count=%s daytrading_buying_power=%s — pdt_constrained=true",
+            daytrade_count,
+            daytrading_buying_power,
+        )
+
     return {
         "broker_pdt_risk_status": status,
         "broker_pdt_daytrade_count": daytrade_count,
         "broker_pdt_daytrading_buying_power": daytrading_buying_power,
         "broker_pdt_flags": flags,
         "broker_pdt_warning_message": warning_message,
+        "pdt_constrained": pdt_constrained,
     }
 
 
@@ -196,6 +213,7 @@ def summarize_pretrade_broker_policy(snapshot: Dict[str, Any] | None) -> Dict[st
         "broker_pdt_daytrading_buying_power": pdt_summary.get("broker_pdt_daytrading_buying_power"),
         "broker_pdt_flags": list(pdt_summary.get("broker_pdt_flags") or []),
         "broker_pdt_warning_message": pdt_summary.get("broker_pdt_warning_message"),
+        "pdt_constrained": bool(pdt_summary.get("pdt_constrained")),
     }
 
 

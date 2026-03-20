@@ -147,8 +147,16 @@ def resolve_precompute_final_status(
     prior = str(prior_bundle_status or "").strip().upper()
 
     if not guard_ok:
+        # Guard step itself failed — but if a valid bundle already existed,
+        # this is a benign stale-skip, not a hard failure.
+        if prior == "VALID":
+            return "SKIPPED_STALE_VALID"
         return "GUARD_FAILED"
     if not allow_run:
+        # Guard ran successfully but disallowed the run (stale window).
+        # If bundle is already valid, this is a safe skip.
+        if prior == "VALID":
+            return "SKIPPED_STALE_VALID"
         return "SKIPPED_AS_STALE"
     if not bundle_ok and not prior:
         return "BUNDLE_STATUS_UNKNOWN"

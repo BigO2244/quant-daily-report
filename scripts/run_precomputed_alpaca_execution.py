@@ -348,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             broker_pdt_daytrading_buying_power=pretrade_policy.get("broker_pdt_daytrading_buying_power"),
             broker_pdt_flags=pretrade_policy.get("broker_pdt_flags"),
             broker_pdt_warning_message=pretrade_policy.get("broker_pdt_warning_message"),
+            pdt_constrained=bool(pretrade_policy.get("pdt_constrained")),
             retry_attempt_count=retry_attempt,
             retry_eligible=bool(retry.get("retry_allowed")),
             retry_reason=str(retry.get("retry_reason") or ""),
@@ -435,14 +436,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     execution_payload["operator_execution_status"] = _operator_execution_status(execution_payload)
 
+    # Extract capital budget metadata for operator summary and retry decisions.
+    _capital_budget = dict((paper_summary or {}).get("capital_budget") or {})
+    capital_constrained_no_trades = bool(_capital_budget.get("capital_constrained_no_trades"))
+
     retry = evaluate_live_retry(
         submitted_count=submitted_count,
         retry_attempt_count=retry_attempt,
         reason=execution_payload.get("execution_reason") or execution_payload.get("halt_reason"),
         now=current_et(),
     )
+    # Override: when capital constraint clipped all orders to zero and no orders
+    # were submitted, signal retry so the next window can try with refreshed cash.
+    if (
+        capital_constrained_no_trades
+        and submitted_count == 0
+        and retry_attempt == 0
+        and not bool(retry.get("retry_allowed"))
+    ):
+        retry["retry_allowed"] = True
+        retry["retry_reason"] = "capital_constrained_no_trades"
+        logger.warning("[CAPITAL_BUDGET] overriding retry_eligible=true — all buys clipped to zero")
+
     execution_payload["retry_eligible"] = bool(retry.get("retry_allowed"))
     execution_payload["retry_reason"] = str(retry.get("retry_reason") or "")
+    execution_payload["pdt_constrained"] = bool(pretrade_policy.get("pdt_constrained"))
+    execution_payload["capital_constrained_no_trades"] = capital_constrained_no_trades
 
     write_planner_audit(
         run_id=run_id,
@@ -528,6 +547,18 @@ def main(argv: list[str] | None = None) -> int:
         broker_pdt_daytrading_buying_power=pretrade_policy.get("broker_pdt_daytrading_buying_power"),
         broker_pdt_flags=pretrade_policy.get("broker_pdt_flags"),
         broker_pdt_warning_message=pretrade_policy.get("broker_pdt_warning_message"),
+        pdt_constrained=bool(pretrade_policy.get("pdt_constrained")),
+        broker_cash_at_planning=_capital_budget.get("broker_cash_at_planning"),
+        broker_equity_at_planning=_capital_budget.get("broker_equity_at_planning"),
+        broker_buying_power_at_planning=_capital_budget.get("broker_buying_power_at_planning"),
+        reserve_cash_policy=_capital_budget.get("reserve_cash_policy"),
+        expected_sell_proceeds=_capital_budget.get("expected_sell_proceeds"),
+        expected_sell_proceeds_conservative=_capital_budget.get("expected_sell_proceeds_conservative"),
+        requested_buy_notional=_capital_budget.get("requested_buy_notional"),
+        allowed_buy_notional=_capital_budget.get("allowed_buy_notional"),
+        capital_constraint_triggered=bool(_capital_budget.get("capital_constraint_triggered")),
+        capital_constrained_no_trades=capital_constrained_no_trades,
+        clipped_or_deferred_buys_count=int(_capital_budget.get("clipped_or_deferred_buys_count") or 0),
         timing_status=str(timing.get("timing_status") or ""),
         preferred_target_et=str(timing.get("preferred_target_et") or ""),
         degraded_auto_trade_deadline_et=str(timing.get("degraded_auto_trade_deadline_et") or ""),

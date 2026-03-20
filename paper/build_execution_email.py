@@ -166,6 +166,10 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     auto_bootstrap_triggered = bool(payload.get("auto_bootstrap_triggered", False))
 
     subject = f"TRADE EXECUTION — {trade_date} ({mode})"
+    if bool(payload.get("pdt_constrained")):
+        subject += " [PDT WARN]"
+    if bool(payload.get("capital_constrained_no_trades")):
+        subject += " [CAPITAL CONSTRAINED]"
 
     lines: list[str] = [
         f"Mode: {mode}",

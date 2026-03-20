@@ -85,6 +85,7 @@ def write_operator_summary(
     broker_pdt_daytrading_buying_power: Any = None,
     broker_pdt_flags: list[str] | None = None,
     broker_pdt_warning_message: str | None = None,
+    pdt_constrained: bool | None = None,
     broker_cash_at_planning: Any = None,
     broker_equity_at_planning: Any = None,
     broker_buying_power_at_planning: Any = None,
@@ -94,6 +95,7 @@ def write_operator_summary(
     requested_buy_notional: Any = None,
     allowed_buy_notional: Any = None,
     capital_constraint_triggered: bool | None = None,
+    capital_constrained_no_trades: bool | None = None,
     clipped_or_deferred_buys_count: int | None = None,
     timing_status: str | None = None,
     preferred_target_et: str | None = None,
@@ -290,6 +292,11 @@ def write_operator_summary(
         if (broker_pdt_risk_status is not None or broker_pdt_warning_message is not None)
         else existing.get("broker_pdt_warning_message")
     )
+    pdt_constrained_value = (
+        pdt_constrained
+        if pdt_constrained is not None
+        else existing.get("pdt_constrained")
+    )
     broker_cash_at_planning_value = (
         broker_cash_at_planning
         if broker_cash_at_planning is not None
@@ -334,6 +341,11 @@ def write_operator_summary(
         capital_constraint_triggered
         if capital_constraint_triggered is not None
         else existing.get("capital_constraint_triggered")
+    )
+    capital_constrained_no_trades_value = (
+        capital_constrained_no_trades
+        if capital_constrained_no_trades is not None
+        else existing.get("capital_constrained_no_trades")
     )
     clipped_or_deferred_buys_count_value = (
         int(clipped_or_deferred_buys_count)
@@ -403,6 +415,7 @@ def write_operator_summary(
         "broker_pdt_daytrading_buying_power": broker_pdt_daytrading_buying_power_value,
         "broker_pdt_flags": broker_pdt_flags_value,
         "broker_pdt_warning_message": broker_pdt_warning_message_value,
+        "pdt_constrained": pdt_constrained_value,
         "broker_cash_at_planning": broker_cash_at_planning_value,
         "broker_equity_at_planning": broker_equity_at_planning_value,
         "broker_buying_power_at_planning": broker_buying_power_at_planning_value,
@@ -412,6 +425,7 @@ def write_operator_summary(
         "requested_buy_notional": requested_buy_notional_value,
         "allowed_buy_notional": allowed_buy_notional_value,
         "capital_constraint_triggered": capital_constraint_triggered_value,
+        "capital_constrained_no_trades": capital_constrained_no_trades_value,
         "clipped_or_deferred_buys_count": clipped_or_deferred_buys_count_value,
         "timing_status": timing_status if timing_status is not None else existing.get("timing_status"),
         "preferred_target_et": preferred_target_et if preferred_target_et is not None else existing.get("preferred_target_et"),

@@ -1680,10 +1680,25 @@ def _apply_capital_budget_to_trades(
 
     out = dict(capital_budget)
     out["allowed_buy_notional"] = float(spent)
-    out["capital_constraint_triggered"] = bool(
+    constraint_triggered = bool(
         float(out.get("requested_buy_notional") or 0.0) > spent + 1e-9
     )
+    out["capital_constraint_triggered"] = constraint_triggered
     out["clipped_or_deferred_buys_count"] = int(clipped_or_deferred)
+
+    # Detect when capital constraint drops ALL buy orders to zero.
+    buy_rows = [r for r in kept_rows if str(r.get("side", "")).upper() == "BUY"]
+    requested_had_buys = any(
+        str(r.get("side", "")).upper() == "BUY"
+        for _, r in trades.iterrows()
+    ) if trades is not None and not trades.empty else False
+    all_buys_clipped = bool(constraint_triggered and requested_had_buys and not buy_rows)
+    out["capital_constrained_no_trades"] = all_buys_clipped
+    if all_buys_clipped:
+        logger.warning(
+            "[CAPITAL_BUDGET][WARN] all orders clipped to zero — retry eligible"
+        )
+
     frame = pd.DataFrame(kept_rows, columns=cols) if kept_rows else pd.DataFrame(columns=cols)
     return frame, out
 

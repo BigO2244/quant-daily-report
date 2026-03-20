@@ -23,6 +23,7 @@ RETRY_ELIGIBLE_REASONS = {
     "artifact_write_failed",
     "non_trading_infrastructure_failure",
     "execution_payload_write_failed",
+    "capital_constrained_no_trades",
 }
 
 
