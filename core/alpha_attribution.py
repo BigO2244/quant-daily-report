@@ -131,7 +131,19 @@ def load_benchmark_prices(
     start: Optional[pd.Timestamp] = None,
     end: Optional[pd.Timestamp] = None,
     offline_fixture: bool = False,
+    cache_path: str = "outputs/perf/benchmark_close_history.csv",
 ) -> pd.Series:
+    """
+    Load SPY benchmark prices for alpha attribution.
+
+    Resolution order:
+      1. Offline fixture (tests only)
+      2. benchmark_close_history.csv — the daily-maintained cache written by
+         perf_artifact_producers.update_benchmark_close_history().
+         This is preferred: no network call, aligned to paper inception date.
+      3. Fresh yfinance download — fallback when the cache doesn't exist or
+         doesn't cover the requested date range.
+    """
     if offline_fixture:
         try:
             df = pd.read_csv("tests/fixtures/spy_prices.csv")
@@ -143,6 +155,22 @@ def load_benchmark_prices(
             logger.warning("[WARN] Offline benchmark fixture load failed: %s", exc)
             return pd.Series(dtype=float)
 
+    # ── 1. Try the maintained cache ───────────────────────────────────
+    # benchmark_close_history.csv has columns: date, spy_close, spy_return
+    # It is written daily by perf_artifact_producers and covers inception → today.
+    cache_series = _load_benchmark_cache(cache_path, ticker, start, end)
+    if cache_series is not None and not cache_series.dropna().empty:
+        logger.info(
+            "[BENCH] Loaded SPY benchmark from cache (%d rows, %s→%s)",
+            len(cache_series.dropna()),
+            cache_series.dropna().index.min().date(),
+            cache_series.dropna().index.max().date(),
+        )
+        return cache_series
+
+    logger.info("[BENCH] Cache miss or empty — fetching SPY from yfinance")
+
+    # ── 2. Fall back to fresh yfinance download ───────────────────────
     try:
         prices = download_prices([ticker], period="5y", interval="1d")
     except Exception as exc:
@@ -173,3 +201,47 @@ def load_benchmark_prices(
         return pd.Series(dtype=float)
 
     return series.dropna()
+
+
+def _load_benchmark_cache(
+    cache_path: str,
+    ticker: str,
+    start: Optional[pd.Timestamp],
+    end: Optional[pd.Timestamp],
+) -> Optional[pd.Series]:
+    """
+    Load SPY close prices from the daily-maintained benchmark_close_history.csv.
+    Returns None if the file is missing, unreadable, or doesn't cover the range.
+    """
+    import os
+    from pathlib import Path
+
+    path = Path(cache_path)
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+
+    try:
+        df = pd.read_csv(path)
+    except Exception as exc:
+        logger.warning("[BENCH] Cache read failed (%s): %s", cache_path, exc)
+        return None
+
+    # Expected columns: date, spy_close, spy_return
+    if "date" not in df.columns or "spy_close" not in df.columns:
+        logger.warning("[BENCH] Cache missing expected columns: %s", list(df.columns))
+        return None
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).sort_values("date")
+    df["spy_close"] = pd.to_numeric(df["spy_close"], errors="coerce")
+
+    if start is not None:
+        df = df[df["date"] >= pd.to_datetime(start)]
+    if end is not None:
+        df = df[df["date"] <= pd.to_datetime(end)]
+
+    if df.empty:
+        return None
+
+    series = pd.Series(df["spy_close"].values, index=df["date"], name=ticker)
+    return series.dropna() if not series.dropna().empty else None

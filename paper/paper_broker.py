@@ -2132,6 +2132,127 @@ def _is_weekend_et(now_et: dt.datetime) -> bool:
     return weekday in (5, 6)  # Saturday = 5, Sunday = 6
 
 
+def _get_peak_equity_from_ledger(ledger_path: str) -> float | None:
+    """
+    Scan the full ledger CSV and return the maximum total_equity observed.
+    Returns None if the ledger is missing or has no equity data.
+    Used by the circuit-breaker check in _risk_controls_preflight().
+    """
+    try:
+        if not os.path.exists(ledger_path) or os.path.getsize(ledger_path) == 0:
+            return None
+        led = pd.read_csv(ledger_path)
+        if led.empty or "total_equity" not in led.columns:
+            return None
+        peak = pd.to_numeric(led["total_equity"], errors="coerce").dropna().max()
+        return float(peak) if not math.isnan(peak) else None
+    except Exception:
+        return None
+
+
+def _risk_controls_preflight(
+    execution_trades: pd.DataFrame,
+    equity: float,
+    ledger_path: str,
+) -> Dict[str, object]:
+    """
+    Run portfolio risk controls before order submission.
+
+    Checks:
+      1. Circuit breaker — if portfolio drawdown from peak ≥ threshold, block ALL new buys.
+      2. Position caps   — if any single BUY order would exceed max_position_pct of equity,
+                           scale it down.
+
+    Parameters
+    ----------
+    execution_trades : DataFrame with [ticker, side, shares, price, notional, reason]
+    equity           : Current portfolio equity (used for weight computation and drawdown base)
+    ledger_path      : Path to the CSV ledger for peak-equity lookup
+
+    Returns
+    -------
+    dict with keys:
+        blocked         : bool  — True if circuit breaker fired (suppress all buys)
+        block_reason    : str or None
+        trimmed_tickers : list[str]  — tickers whose BUY notional was scaled down
+        drawdown        : float  — current drawdown from peak (negative means loss)
+        risk_summary    : dict  — full RiskResult exposure report
+    """
+    result: Dict[str, object] = {
+        "blocked": False,
+        "block_reason": None,
+        "trimmed_tickers": [],
+        "drawdown": 0.0,
+        "risk_summary": {},
+    }
+
+    if equity <= 0:
+        return result
+
+    try:
+        from core.risk_controls import RiskControls
+
+        rc = RiskControls()
+
+        # ── Circuit breaker: compare current equity to historical peak ──
+        peak_equity = _get_peak_equity_from_ledger(ledger_path)
+        if peak_equity is None or peak_equity <= 0:
+            peak_equity = equity  # no history yet → 0% drawdown
+
+        drawdown = (equity - peak_equity) / peak_equity  # negative if below peak
+        result["drawdown"] = round(drawdown, 6)
+
+        if abs(drawdown) >= rc.circuit_breaker_pct:
+            result["blocked"] = True
+            result["block_reason"] = (
+                f"risk_controls_circuit_breaker:drawdown={drawdown:.1%}_exceeds_threshold={rc.circuit_breaker_pct:.1%}"
+            )
+            logger.warning(
+                "[RISK_CONTROLS] CIRCUIT BREAKER FIRED — drawdown=%.1f%% >= threshold=%.1f%%. Blocking all new buys.",
+                drawdown * 100,
+                rc.circuit_breaker_pct * 100,
+            )
+            return result
+
+        # ── Position cap check on BUY orders ──────────────────────────
+        if execution_trades is None or execution_trades.empty:
+            return result
+
+        buy_mask = execution_trades["side"].astype(str).str.upper() == "BUY"
+        buy_trades = execution_trades[buy_mask].copy()
+        if buy_trades.empty:
+            return result
+
+        trimmed: List[str] = []
+        for idx, row in buy_trades.iterrows():
+            notional = float(row.get("notional") or 0.0)
+            weight = notional / equity
+            if weight > rc.max_position_pct:
+                old_notional = notional
+                execution_trades.loc[idx, "notional"] = rc.max_position_pct * equity
+                price = float(row.get("price") or 0.0)
+                if price > 0:
+                    new_shares = math.floor((rc.max_position_pct * equity) / price)
+                    execution_trades.loc[idx, "shares"] = float(new_shares)
+                    execution_trades.loc[idx, "notional"] = new_shares * price
+                ticker = str(row.get("ticker", ""))
+                trimmed.append(ticker)
+                logger.warning(
+                    "[RISK_CONTROLS] Position cap triggered: %s notional=%.2f (%.1f%% of equity) trimmed to max=%.1f%%",
+                    ticker,
+                    old_notional,
+                    weight * 100,
+                    rc.max_position_pct * 100,
+                )
+
+        result["trimmed_tickers"] = trimmed
+
+    except Exception as exc:
+        logger.warning("[RISK_CONTROLS] Preflight check failed (non-blocking): %s", exc)
+
+    return result
+
+
 def run_paper_day(
     run_date: str,
     signals_path: str,
@@ -2596,6 +2717,38 @@ def run_paper_day(
         filter_drop_reasons["zero_shares"] = int(execution_filter_stats.get("dropped_zero_shares", 0))
     if int(execution_filter_stats.get("dropped_min_notional", 0)) > 0:
         filter_drop_reasons["min_notional"] = int(execution_filter_stats.get("dropped_min_notional", 0))
+
+    # ── Risk controls preflight ────────────────────────────────────
+    # Runs circuit-breaker and per-position cap checks before any
+    # order is submitted.  Non-blocking on error (warnings only).
+    # Circuit-breaker: blocks ALL new buys if drawdown ≥ threshold.
+    # Position caps: scales down any single BUY that exceeds max_pct.
+    _rc_equity = float(
+        (planning_account_snapshot or {}).get("equity")
+        or (planning_account_snapshot or {}).get("portfolio_value")
+        or equity_prev
+        or 0.0
+    )
+    _rc_result = _risk_controls_preflight(execution_trades, _rc_equity, ledger_path)
+    if _rc_result.get("blocked"):
+        blocked = True
+        _cb_reason = str(_rc_result.get("block_reason") or "risk_controls_circuit_breaker")
+        blocked_reasons.append(_cb_reason)
+        execution_enabled = False
+        logger.warning("[RISK_CONTROLS] Execution blocked by circuit breaker: %s", _cb_reason)
+    elif _rc_result.get("trimmed_tickers"):
+        logger.info(
+            "[RISK_CONTROLS] Position caps applied to: %s",
+            ", ".join(str(t) for t in _rc_result["trimmed_tickers"]),
+        )
+    logger.info(
+        "[RISK_CONTROLS] drawdown=%.2f%% blocked=%s trimmed=%d",
+        float(_rc_result.get("drawdown", 0.0)) * 100,
+        bool(_rc_result.get("blocked")),
+        len(_rc_result.get("trimmed_tickers") or []),
+    )
+    # ─────────────────────────────────────────────────────────────
+
     run_id = _run_id(run_date, cfg)
     shadow_orders_path = None
     alpaca_orders_path = None

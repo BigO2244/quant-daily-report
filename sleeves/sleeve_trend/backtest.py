@@ -212,14 +212,21 @@ class RiskManager:
 # ============================================================
 
 
-def prepare_data(period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+def prepare_data(
+    period: str = "1y",
+    interval: str = "1d",
+    prices: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """
     Download prices and compute trend signals.
 
     Returns DataFrame with: date, ticker, OHLCV, atr, adx, signals, sector
     """
     # Download prices using existing platform utility
-    prices = download_prices(TICKERS, period=period, interval=interval)
+    if prices is None:
+        prices = download_prices(TICKERS, period=period, interval=interval)
+    else:
+        prices = prices.copy()
 
     if prices.empty:
         raise ValueError("No price data downloaded")

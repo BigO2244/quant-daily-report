@@ -1,69 +1,55 @@
-# Alpha Stack Documentation Baseline
+# Alpha Stack Documentation
 
-Purpose
-- Establish the program baseline for Alpha Stack research, shadow validation, and staged promotion without changing current production behavior.
+This directory tracks the current Alpha Stack design, implementation status, and promotion path.
 
-Scope
-- Defines what Alpha Stack is, what gets built first, and what is intentionally deferred.
-- Covers architecture, sleeves, regime allocator, data standards, and research validation.
-- Applies only to the Alpha Stack namespace and research/shadow workflows.
+## Current State
 
-Assumptions
-- Source of truth is `docs/Alpha_Stack_Architecture_Reference.md`.
-- Current production engine remains active and frozen except bug fixes and operational hardening.
-- Canonical production artifacts and broker reconciliation assumptions remain unchanged.
+- Alpha Stack is a regime-switching multi-sleeve platform.
+- It produces a daily HTML email report.
+- Current baseline allocation is 80% Sleeve 1 and 20% Sleeve 2 on a $10,000 notional baseline.
+- Sleeve 1 is partially implemented.
+- Sleeve 2 is fully implemented but its historical backtests are not point-in-time safe.
+- Sleeves 3 and 4 are planned only.
 
-Status
-- Baseline documentation complete.
-- Implementation pending.
+## Source of Truth
 
-Future Work
-- Add portfolio construction spec as a separate document before allocator implementation.
-- Add change log and decision record for threshold revisions.
+Primary reference:
 
-## Program Boundaries
+- `docs/Alpha_Stack_Architecture_Reference.md`
 
-Production engine (current)
-- Live paper execution path is unchanged.
-- Existing workflows, artifacts, and reconciliation contracts remain authoritative.
+Supporting documents:
 
-Alpha Stack program (new)
-- Separate namespace, config path, workflow path, and output root.
-- Research-first delivery path: design -> backtest -> shadow -> paper -> cutover.
-- No writes to production canonical artifacts during research or shadow.
+- `docs/alpha_stack/architecture_overview.md`
+- `docs/alpha_stack/sleeve_specifications.md`
+- `docs/alpha_stack/regime_allocator_spec.md`
+- `docs/alpha_stack/data_standards.md`
+- `docs/alpha_stack/research_validation_spec.md`
+- `docs/alpha_stack/implementation_status.md`
+- `docs/alpha_stack/alpha_stack_v1_deliverables.md`
 
-## Documentation Map
+## Promotion Ladder
 
-- `docs/alpha_stack/architecture_overview.md`: Layered system design, interfaces, and phase order.
-- `docs/alpha_stack/sleeve_specifications.md`: Sleeve formulas, thresholds, holding logic, and promotion criteria.
-- `docs/alpha_stack/regime_allocator_spec.md`: State machine, transition thresholds, hysteresis, and sleeve budget mapping.
-- `docs/alpha_stack/data_standards.md`: Point-in-time data contracts, as-of semantics, and quality gates.
-- `docs/alpha_stack/research_validation_spec.md`: Backtest/shadow validation metrics, promotion gates, and failure criteria.
+`research -> backtest -> shadow -> paper -> live`
 
-## Build Order (Baseline)
+Alpha Stack should continue alongside the frozen legacy model until promotion criteria are met.
 
-1. Data foundation (PIT-safe stores, as-of APIs, data quality checks)
-2. Regime engine (explicit state machine + hysteresis)
-3. Trend sleeve upgrade
-4. Value sleeve rebuild (after PIT enforcement)
-5. Attribution lab (IC/IR, decay, turnover/cost)
-6. Allocator v1 (rules-based, interpretable)
-7. Quality sleeve
-8. Mean reversion sleeve
-9. 60+ trading day shadow run
-10. Promotion decision and cutover plan
+## Known Issues / Technical Debt
 
-## Explicit Deferrals
+1. Sleeve 2 uses snapshot yfinance P/E and therefore introduces look-ahead bias in backtests.
+2. Sleeve 2 backtest output needs a full daily curve.
+3. Sleeve 1 factor functions remain stubs in `core/quant_report.py`.
+4. The regime layer is not yet a coded hysteresis-driven state machine.
+5. Backtests are gross only.
 
-Deferred to future phases, not current capabilities
-- Options overlays: covered calls, cash-secured puts, protective hedges
-- Event/news sleeves and discretionary overlays
-- Optimization-first allocator (rules-first required)
-- Any production cutover changes before shadow success criteria are met
+## Planned Sequence
 
-## Production Safety Principles
-
-- Never alter production execution semantics as part of Alpha Stack build-out.
-- Never allow Alpha Stack research outputs to overwrite production canonical state.
-- Keep Alpha Stack and production run artifacts physically separated.
-- Require documented go/no-go decisions for every promotion stage.
+1. Data foundation.
+2. Regime state machine.
+3. Trend sleeve extension.
+4. Value sleeve PIT refactor.
+5. Attribution module.
+6. Allocator v1.
+7. Quality sleeve.
+8. Mean Reversion sleeve.
+9. Shadow mode validation.
+10. Production cutover.

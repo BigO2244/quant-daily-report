@@ -1,140 +1,61 @@
 # Alpha Stack Architecture Overview
 
-Purpose
-- Define the target Alpha Stack platform architecture and implementation sequence before coding.
+## Purpose
 
-Scope
-- Covers layer responsibilities, interface contracts, state and artifact boundaries, and staged delivery.
-- Does not modify production workflows, current canonical artifacts, or reconciliation assumptions.
+This document describes the current Alpha Stack platform layout and the intended next steps for the architecture.
 
-Assumptions
-- Source of truth is `docs/Alpha_Stack_Architecture_Reference.md`.
-- Existing production engine remains the live strategy until explicit promotion.
+## Seven Layers
 
-Status
-- Baseline architecture for implementation planning.
+1. Data Layer
+   yfinance OHLCV plus snapshot fundamentals today; FRED macro integration is planned.
+2. Feature Layer
+   Derived indicators built from raw price and fundamental inputs.
+3. Signal Layer
+   Per-sleeve entry/exit scores and ranking outputs.
+4. Regime Layer
+   Trend, volatility, breadth, and macro classification. The final state machine and hysteresis rules are still planned work.
+5. Portfolio Construction Layer
+   Sleeve weighting and symbol-level position sizing.
+6. Execution Layer
+   Order generation, order tracking, and downstream trade handling.
+7. Attribution Layer
+   IC/IR measurement and performance reporting.
 
-Future Work
-- Add concrete module/package names after namespace review.
-- Add portfolio construction spec and execution translator interface schema.
+## Current Operating Baseline
 
-## 1. Operating Model
+- Baseline capital: $10,000
+- Baseline sleeve mix: 80% Sleeve 1 / 20% Sleeve 2
+- Report builder and orchestrator: `daily_quant_report.py`
+- Shared utilities: `core/quant_report.py`
+- Allocator baseline: `core/portfolio_alloc.py`
 
-Target flow
-- Raw data -> normalized feature store -> sleeve signal engines -> regime engine -> sleeve allocator -> portfolio constructor -> target book -> execution translator -> reconciliation/attribution.
+## Sleeve Status
 
-Design principles
-- Layer isolation: each layer has one responsibility and explicit inputs/outputs.
-- Interpretable first: rules-based decisions before optimization.
-- Point-in-time correctness over speed.
-- Production isolation by default.
+| Sleeve | Status | Current State |
+|---|---|---|
+| Sleeve 1 | Partial | Factor pipeline stubs remain in `core/quant_report.py`; handoff does not include the complete sleeve signal implementation. |
+| Sleeve 2 | Implemented | yfinance snapshot P/E versus industry, rank- and threshold-driven holds/exits, SGOV cash proxy. |
+| Sleeve 3 | Planned | Not implemented. |
+| Sleeve 4 | Planned | Not implemented. |
 
-## 2. Production vs Alpha Stack Split
+## Architecture Notes
 
-Production engine (current)
-- Remains operational, unchanged except bug fixes/hardening.
-- Uses existing workflow and canonical artifact contracts.
+- The platform should be described as multi-sleeve, not as a single script.
+- The current regime layer is conceptual plus partial scaffolding, not a completed state machine.
+- Point-in-time correctness is the main blocker for trusting Sleeve 2 historical results.
+- Attribution is part of the target architecture, but not yet complete enough to serve as a promotion gate.
 
-Alpha Stack program (new)
-- Runs in separate namespace, config path, workflow path, and outputs.
-- Generates independent research/shadow artifacts.
-- Cannot write to production canonical files.
+## Promotion Ladder
 
-Required separation controls
-- Distinct root output path: `outputs/alpha_stack/` (research/shadow only).
-- Distinct run pointer: `outputs/alpha_stack/latest.json`.
-- Distinct config root: `configs/alpha_stack/`.
-- Distinct workflow entry points (no reuse of production write paths).
+`research -> backtest -> shadow -> paper -> live`
 
-## 3. Core Layers and Contracts
+## Planned Build Sequence
 
-Data layer
-- Responsibility: ingest OHLCV, fundamentals, macro, breadth.
-- Output contract: point-in-time raw datasets keyed by `(symbol, as_of_date, source_timestamp)`.
-- Hard rule: all joins must honor `as_of_date`.
-
-Feature layer
-- Responsibility: transform raw data to reusable features.
-- Output contract: feature store keyed by `(symbol, feature_date)` with provenance metadata.
-- Hard rule: no forward-filled fundamentals past known filed date.
-
-Sleeve layer
-- Responsibility: compute sleeve scores, candidate sets, provisional target weights.
-- Output contract per sleeve:
-  - `score`
-  - `rank`
-  - `candidate_flag`
-  - `provisional_weight`
-  - `diagnostics`
-
-Regime layer
-- Responsibility: classify market regime with hysteresis.
-- Output contract: regime context object containing trend/vol/breadth/macro states and confidence.
-
-Allocator layer
-- Responsibility: map regime context to sleeve budgets.
-- Output contract: normalized sleeve weights summing to `<= 0.95` net long target.
-
-Portfolio construction layer
-- Responsibility: merge sleeve targets under caps and turnover rules.
-- Output contract: final target book with symbol-level weights and constraint diagnostics.
-
-Execution/audit layer
-- Responsibility: translate target book to executable instructions and produce full attribution trail.
-- Output contract: order intents, realized fills, recon status, sleeve/regime attribution.
-
-## 4. Stage Promotion Ladder
-
-Required progression
-1. Design complete
-2. Backtest validated
-3. Shadow run validated
-4. Paper promotion
-5. Production cutover decision
-
-Promotion rule
-- No stage skip. Any failed gate reverts to prior stage until remediated.
-
-## 5. Delivery Sequence (Baseline)
-
-Phase 0
-- Freeze and document production contract.
-
-Phase 1
-- Build DataStore and PIT data foundations.
-
-Phase 2
-- Implement regime state machine and hysteresis diagnostics.
-
-Phase 3
-- Upgrade trend sleeve.
-
-Phase 4
-- Rebuild value sleeve with PIT-safe fundamentals.
-
-Phase 5
-- Build attribution lab (IC/IR, decay, costs, turnover).
-
-Phase 6
-- Add allocator v1 (rules-based overrides + smoothing).
-
-Phase 7
-- Add quality sleeve.
-
-Phase 8
-- Add mean reversion sleeve.
-
-Phase 9
-- Shadow Alpha Stack for minimum 60 trading days.
-
-Phase 10
-- Promotion memo and cutover decision.
-
-## 6. Deferred Capabilities
-
-Future phases only
-- Options overlays (covered calls, cash-secured puts, protective hedges)
-- Event/news sleeves
-- Optimization-led allocator search
-
-These are intentionally deferred until v1 sleeves and allocator pass shadow gates.
+1. Data foundation: FRED plus point-in-time fundamentals.
+2. Regime state machine with hysteresis.
+3. Sleeve 1 extension.
+4. Sleeve 2 PIT-safe refactor.
+5. Attribution build-out.
+6. Allocator v1 regime overrides.
+7. Quality sleeve.
+8. Mean Reversion sleeve.

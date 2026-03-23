@@ -1,136 +1,58 @@
-# Quick Reference: Value Sleeve Backtest Status
+# Quick Start
 
-## Current State: 70% Complete ✅
+This repository hosts Alpha Stack, a regime-switching multi-sleeve equity platform with a daily HTML report and staged promotion controls.
 
-**What's Done**: Full backtest framework built and validated  
-**What's Left**: Execute the backtest (10-20 min), analyze results (2-3 hours)  
-**Blocker Status**: 🟢 NO BLOCKERS — Ready to execute
+## Current Baseline
 
----
+- Sleeve 1: Trend/Momentum, partially implemented
+- Sleeve 2: Value, fully implemented
+- Baseline portfolio mix: 80% Sleeve 1 / 20% Sleeve 2
+- Capital baseline: $10,000
+- Cash proxy for Sleeve 2: `SGOV`
 
-## One-Liner Summary
+## Run Locally
 
-You can now run a comparative backtest of Trend vs Value sleeves. All code is built, tested, and ready to generate the metrics needed to decide whether to proceed with the Value sleeve.
-
----
-
-## Execute Backtest (5 minutes)
+Setup:
 
 ```bash
-cd /Users/brettolson/Documents/Caerus/quant-daily-report-main
-
-# Activate venv
-source quant_research_agent/.venv/bin/activate
-
-# Run backtest (one command, ~10-20 minutes runtime)
-python scripts/run_comparative_backtest.py
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-**What you'll get**:
-- 4 equity curves (Trend, Value, Combined 50/50, Combined Allocator)
-- Metrics CSV: Sharpe, Sortino, MaxDD, CAGR, Turnover, Win Rate
-- Summary report: outputs/backtests/COMPARATIVE_BACKTEST_SUMMARY.md
+Shadow mode:
 
----
-
-## Files You Need to Know About
-
-###📊 To Run Backtest
-- **[scripts/run_comparative_backtest.py](scripts/run_comparative_backtest.py)** — Main entry point
-- **[scripts/comparative_backtest_runner.py](scripts/comparative_backtest_runner.py)** — Orchestrator (4 configs)
-- **[sleeves/sleeve_value/backtest.py](sleeves/sleeve_value/backtest.py)** — Value sleeve logic
-
-### 📋 Documentation
-- **[BACKTEST_NEXT_STEPS.md](BACKTEST_NEXT_STEPS.md)** — Full execution guide (READ THIS FIRST)
-- **[BACKTEST_EXECUTION_STATUS.md](BACKTEST_EXECUTION_STATUS.md)** — Detailed status & issues
-- **[BACKTEST_EXECUTION_PLAN.md](BACKTEST_EXECUTION_PLAN.md)** — 5-phase roadmap
-
-### 🔧 Supporting Code
-- **[alpha_stack/datastore/fundamentals.py](alpha_stack/datastore/fundamentals.py)** — Enhanced with get_filing_metadata()
-- **[alpha_stack/research/filing_lag_audit.py](alpha_stack/research/filing_lag_audit.py)** — Filing lag validator
-
----
-
-## What the Value Sleeve Does
-
-**Strategy**: Monthly rebalance, top 20% of stocks by Value Score  
-**Value Score**: Equal blend of Earnings Yield, FCF Yield, Book-to-Price percentiles  
-**Data**: PIT-safe fundamental data from SEC EDGAR (no lookahead)  
-**Risk Controls**: Max 1.5% per name, 5% per sector, $1 min price
-
----
-
-## Expected Results
-
-### Trend Sleeve (Baseline)
-- Sharpe: ~0.30-0.35
-- CAGR: ~8-10%
-
-### Value Sleeve (New)
-- Sharpe: ~0.20-0.35 (TBD)
-- CAGR: ~5-12% (TBD)
-
-### Combined 50/50
-- Sharpe: ~0.35-0.40 (if diversification works)
-- Better risk-adjusted returns than Trend alone
-
----
-
-## Success Criteria (To Proceed to Quality)
-
-All must be true:
-
-```
-✓ Value IC > 0.02                 (meaningful signal)
-✓ Value Sharpe > 0.20             (positive attribution)  
-✓ Combined Sharpe > Trend × 0.95  (diversification benefit)
-✓ Filing lag drag < 2%            (acceptable staleness cost)
-✓ Sector concentration HHI < 0.15 (reasonable risk)
+```bash
+REPORT_DATE=$(TZ=America/New_York date +%F) MODE=shadow TRADING_MODE=shadow python3 daily_quant_report.py
 ```
 
-If all gates pass → **Proceed to Quality sleeve**
+Alpaca paper mode:
 
----
-
-## Known Issues & Status
-
-| Issue | Status | Impact | Action |
-|-------|--------|--------|--------|
-| EdgarClient sec.gov API 404 | 🔴 Broken | Can't do live filing lag check | Use pre-cached data (p90=65d) |
-| ValueSleeveBacktest | ✅ Fixed | None | Code complete |
-| backtest_engine interface | ✅ Verified | None | Signature matches |
-| Data store access | ✅ Verified | None | All caches available |
-
----
-
-## Next 3 Hours
-
-```
-0:00 — Execute: python scripts/run_comparative_backtest.py
-0:20 — Wait for backtest to complete
-0:35 — Review: outputs/backtests/COMPARATIVE_BACKTEST_SUMMARY.md
-1:00 — Analyze: Check Value metrics vs success gates
-2:00 — Optional: Compute IC and factor decay (frameworks ready)
-3:00 — Decision: Proceed to Quality, keep hardening, or research mode
+```bash
+REPORT_DATE=$(TZ=America/New_York date +%F) MODE=alpaca TRADING_MODE=alpaca ALPACA_PAPER=1 ALPACA_API_KEY_ID=... ALPACA_API_SECRET_KEY=... ALPACA_BASE_URL=https://paper-api.alpaca.markets python3 daily_quant_report.py
 ```
 
----
+## Files to Know
 
-## Contact/Questions
+- `daily_quant_report.py`
+- `core/quant_report.py`
+- `core/portfolio_alloc.py`
+- `sleeves/sleeve_2/config.py`
+- `sleeves/sleeve_2/valuation.py`
+- `sleeves/sleeve_2/signals.py`
+- `sleeves/sleeve_2/backtest.py`
+- `data/universe.csv`
 
-- **"How do I run the backtest?"** → See "Execute Backtest" section above
-- **"What if it fails?"** → Check [BACKTEST_EXECUTION_STATUS.md](BACKTEST_EXECUTION_STATUS.md) for troubleshooting
-- **"What happens after?"** → Read [BACKTEST_NEXT_STEPS.md](BACKTEST_NEXT_STEPS.md) for decision framework
-- **"Why is SEC API broken?"** → Network environment issue; doesn't block backtest (using cached data instead)
+## Known Issues
 
----
+- Sleeve 2 backtests are not point-in-time safe because P/E comes from yfinance snapshot `.info`.
+- Sleeve 2 backtests need a full daily equity curve, not only a terminal equity result.
+- Sleeve 1 factor functions in `core/quant_report.py` remain stubs.
+- The regime layer is still conceptual and not yet a hysteresis-driven state machine.
+- Backtests are gross only; transaction costs are not modeled.
 
-## TL;DR
+## Promotion Ladder
 
-1. Run: `python scripts/run_comparative_backtest.py`
-2. Get: 4 equity curves + metrics table
-3. Decide: Proceed to Quality or harden Value?
-4. Deploy: If metrics pass gates → activate Value sleeve
+`research -> backtest -> shadow -> paper -> live`
 
-**Status**: ✅ Ready. No blockers. Go!
-
+Alpha Stack should continue alongside the frozen legacy model until validation gates are satisfied.

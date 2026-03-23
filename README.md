@@ -1,365 +1,125 @@
-# Caerus Quant — Daily Execution & Research System
+# Alpha Stack
 
-**Owner:** Brett Olson
-**Last reviewed:** March 2026
-**Status:** Active production (paper trading via Alpaca)
+Alpha Stack is a regime-switching quantitative trading platform for US equities. It produces a daily HTML email report and manages a multi-sleeve portfolio construction process with a current baseline allocation of 80% Sleeve 1 and 20% Sleeve 2 on a $10,000 notional book.
 
----
+The project is still in staged promotion. The legacy model remains frozen for production safety while Alpha Stack is validated through research, backtest, shadow, paper, and live-readiness gates.
 
-## Project Overview
+## Current State
 
-Caerus is a quantitative equity trading and research platform. It generates daily long-only stock selections via a technical trend-following strategy, executes paper trades through Alpaca's paper API, and maintains a full audit trail of every run. A secondary research sleeve (Sleeve 1) runs daily for backtesting purposes but does not drive live orders.
+- Sleeve 1 (Trend/Momentum): partially implemented
+- Sleeve 2 (Value: P/E vs. industry): fully implemented
+- Sleeve 3 (Quality): planned, not implemented
+- Sleeve 4 (Mean Reversion): planned, not implemented
+- Daily orchestrator: `daily_quant_report.py`
+- Portfolio allocator baseline: `core/portfolio_alloc.py`
+- Universe file: `data/universe.csv`
 
-The system is operated via three GitHub Actions workflows and can also be run locally.
+## Seven-Layer Architecture
 
----
+1. Data Layer: yfinance OHLCV plus snapshot fundamentals; FRED macro integration is planned.
+2. Feature Layer: derived indicators computed from raw data.
+3. Signal Layer: per-sleeve entry and exit scores.
+4. Regime Layer: four-dimension classifier across trend, volatility, breadth, and macro. A state machine with hysteresis is planned.
+5. Portfolio Construction Layer: sleeve weighting and position sizing.
+6. Execution Layer: order generation and trade tracking.
+7. Attribution Layer: IC/IR measurement and performance reporting.
 
-## Alpha Stack Program (Research/Shadow, Not Production)
+## Sleeve Status
 
-Alpha Stack is the forward architecture program for a modular, multi-sleeve platform with regime-aware allocation. It is intentionally separated from the current production engine.
-
-Production safety boundaries
-- Current production engine remains active and frozen except bug fixes and operational hardening.
-- Alpha Stack work is documentation-first, then implemented in separate namespaces, configs, workflows, and output roots.
-- Alpha Stack research/shadow outputs must not overwrite production canonical artifacts.
-- No production cutover occurs until staged promotion gates are passed: design -> backtest -> shadow -> paper -> go/no-go.
-
-Current status
-- Baseline specifications are documented.
-- Implementation has not started.
-- Options overlays are explicitly deferred to future phases (not current capabilities).
-
-Alpha Stack docs
-- Program index: [`docs/alpha_stack/README.md`](docs/alpha_stack/README.md)
-- Architecture: [`docs/alpha_stack/architecture_overview.md`](docs/alpha_stack/architecture_overview.md)
-- Sleeves: [`docs/alpha_stack/sleeve_specifications.md`](docs/alpha_stack/sleeve_specifications.md)
-- Regime allocator: [`docs/alpha_stack/regime_allocator_spec.md`](docs/alpha_stack/regime_allocator_spec.md)
-- Data standards: [`docs/alpha_stack/data_standards.md`](docs/alpha_stack/data_standards.md)
-- Research validation: [`docs/alpha_stack/research_validation_spec.md`](docs/alpha_stack/research_validation_spec.md)
-- Source of truth: [`docs/Alpha_Stack_Architecture_Reference.md`](docs/Alpha_Stack_Architecture_Reference.md)
-
----
-
-## What This System Does
-
-1. **Generates daily signals** — EMA crossover + ADX filter applied to a configured universe of US equities, with a VIX-driven position-scaling overlay.
-2. **Executes paper trades** — Orders are sent to Alpaca Paper at 9:35 AM ET on weekdays via the `daily-alpaca-paper` workflow.
-3. **Reconciles model vs broker state** — Before any orders are placed, the canonical model snapshot is compared against actual Alpaca positions. Trades are blocked if drift is detected.
-4. **Emails reports** — An execution summary email (HTML + text) is sent after each run. A separate alpha performance report is sent after the pre-market alpha workflow.
-5. **Runs a nightly research digest** — A separate AI-powered research digest emails macro and market signals at 7:00 AM ET.
-6. **Archives all artifacts** — Every run produces an immutable artifact bundle under `outputs/runs/<RUN_ID>/`.
-
----
-
-## Current Trading / Research Objective
-
-**Mode:** Alpaca Paper (not live money)
-**Universe:** Long-only US equities (no options, no leverage, no short positions in production)
-**Active sleeve:** `sleeve_trend` (EMA crossover + ADX + VIX regime scaling)
-**Research sleeve:** `sleeve_1` (cross-sectional momentum — output currently discarded in production)
-
-The system targets capturing intermediate-term equity trends with controlled drawdown via circuit breakers and VIX-based regime scaling.
-
----
-
-## System Architecture
-
-```
-GitHub Actions
-├── daily-alpaca-paper.yml     9:35 AM ET   Main execution workflow
-├── alpha_daily.yml            6:15 AM ET   Pre-market alpha research + NAV update
-└── research-digest.yml        7:00 AM ET   Nightly macro/market research digest
-
-daily_quant_report.py          Main orchestrator (Python)
-├── sleeves/sleeve_trend/      Active production strategy
-│   ├── selection.py           select_and_weight() — scores and selects tickers
-│   ├── indicators.py          EMA, ATR, ADX, volatility functions
-│   ├── backtest.py            prepare_data() — OHLCV enrichment pipeline
-│   ├── build_sleeve_output.py Bridge: signals → SleeveOutput for allocator
-│   └── config.py              All tunable parameters
-├── sleeves/sleeve_1/          Research-only (output discarded in production)
-├── core/portfolio_alloc.py    PortfolioAllocator — combines sleeves, enforces caps
-├── engine/breaker.py          Portfolio exposure overlay (FULL/PARTIAL/LOCK modes)
-├── reconciliation.py          Pre-trade recon + canonical snapshot management
-├── paper/paper_broker.py      Alpaca order execution layer
-└── research/vix_regime.py     VIX fetcher and four-regime classifier
-```
-
----
-
-## Strategy Overview
-
-The active strategy is a **technical trend-following system** on US equities.
-
-**Entry criteria (all must pass):**
-- Price above 200-day EMA (trend filter)
-- EMA(20) > EMA(50) (short-term above medium-term)
-- ADX ≥ 20 (market is trending, not ranging)
-- Price ≥ $5 and average volume ≥ 100K shares/day (liquidity gates)
-
-**Ranking:** Passing stocks are scored on a 0–100 composite across five factors (trend strength 30%, momentum 25%, ADX 25%, relative volume 10%, inverse-volatility bonus 10%).
-
-**Position sizing:** Inverse-volatility weighting — lower-volatility names receive more capital. Volatility clipped to [5%, 80%] to prevent blow-ups.
-
-**VIX regime overlay:** A four-tier volatility regime (LOW/ELEVATED/HIGH/CRISIS) automatically scales position count and gross exposure based on the current VIX reading.
-
-**Risk limits:** Max 10% per position, max 2 positions per sector, 5% minimum cash buffer, drawdown circuit breakers at 10% (soft) and 15% (hard).
-
-See [`docs/model_strategy.md`](docs/model_strategy.md) for full detail.
-
----
-
-## Where the "Brains" Live
-
-| Concern | File(s) |
-|---|---|
-| Entry gates & ticker scoring | `sleeves/sleeve_trend/selection.py` |
-| Indicator math (EMA, ADX, ATR) | `sleeves/sleeve_trend/indicators.py` |
-| All tunable strategy params | `sleeves/sleeve_trend/config.py` |
-| Portfolio allocation & caps | `core/portfolio_alloc.py` |
-| Exposure / drawdown breaker | `engine/breaker.py` |
-| VIX regime detection | `research/vix_regime.py` |
-| Main daily orchestrator | `daily_quant_report.py` |
-| Pre-trade reconciliation | `reconciliation.py` |
-| Alpaca order execution | `paper/paper_broker.py` |
-
----
-
-## Daily Operating Workflows
-
-### 1. Alpha Daily (`alpha_daily.yml`) — 6:15 AM ET
-- Runs `scripts/alpha_report.py` to refresh alpha analysis from market data (25 bps cost assumption)
-- Runs `scripts/daily_alpha_run.py` to update shadow NAV (`data/live_nav.csv`)
-- Commits updated `live_nav.csv` back to the repo
-- Emails alpha report (if `ENABLE_EMAIL != '0'`)
-- Archives artifacts to `outputs/runs/<RUN_ID>/`
-
-### 2. Daily Alpaca Paper (`daily-alpaca-paper.yml`) — 9:35 AM ET
-1. Restores canonical model snapshot from GitHub Actions cache
-2. Runs Alpaca connectivity smoke test and credential validation
-3. Executes `daily_quant_report.py`:
-   - Checks broker connectivity
-   - Runs `sleeve_trend` signal generation
-   - Applies VIX regime scaling
-   - Runs `PortfolioAllocator`
-   - Applies exposure/breaker overlay
-   - **Pre-trade reconciliation**: compares canonical snapshot vs Alpaca positions → halts if drift detected
-   - Sends paper orders to Alpaca
-   - Writes execution email payload, run artifacts, canonical snapshot
-4. If pre-trade recon fails and `AUTO_BOOTSTRAP_ON_RECON_FAIL=1`: auto-bootstraps canonical snapshot from broker, sends drift-alert email, marks run as recovered
-5. Saves canonical snapshot back to cache
-6. Uploads artifacts (run dir, canonical snapshot, execution email payload)
-7. **Email job** (always runs): downloads artifacts, sends execution email + daily snapshot email
-
-### 3. Research Digest (`research-digest.yml`) — 7:00 AM ET
-- Runs `quant_research_agent/main.py` — AI-driven macro/market signal digest
-- Uses Anthropic (Claude) and FRED APIs for signal scoring
-- Maintains a dedup store (`quant_research_agent/store/seen_ids.json`) via cache to avoid re-emailing seen items
-- Emails HTML digest; saves to `outputs/runs/<RUN_ID>/`
-- Completely isolated from trading workflows — failures here do not affect execution
-
----
-
-## Execution and Broker Integration
-
-**Broker:** Alpaca Markets (paper endpoint: `https://paper-api.alpaca.markets`)
-**Mode control:** `TRADING_MODE=alpaca`, `ALPACA_PAPER=1`
-**Order type:** Market orders at open (next-day fill assumption)
-
-**Required secrets (GitHub Actions):**
-- `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY`, `ALPACA_PAPER`
-- `EMAIL_SENDER`, `EMAIL_APP_PASSWORD`, `EMAIL_RECIPIENT`
-- `ANTHROPIC_API_KEY`, `FRED_API_KEY` (research digest only)
-
-**Bootstrap (first run or after manual reset):**
-```bash
-# Via GitHub Actions workflow_dispatch:
-# Set bootstrap_model_ledger_from_broker = true
-# This writes the canonical snapshot from broker state and exits without orders.
-```
-
----
-
-## Reconciliation / Canonical State
-
-The canonical model snapshot (`outputs/paper_state/canonical_positions.json`) is the authoritative record of what positions the model believes the broker holds.
-
-**Pre-trade reconciliation** compares this snapshot against actual Alpaca positions before any orders are sent. If mismatch is detected (missing positions or quantity differences), trades are blocked and an alert is sent.
-
-**Recovery paths:**
-- `AUTO_BOOTSTRAP_ON_RECON_FAIL=1` — automatic recovery on next recon failure (opt-in)
-- Manual: run `workflow_dispatch` with `bootstrap_model_ledger_from_broker=true`
-
-**Canonical snapshot is persisted** between workflow runs via GitHub Actions cache (date-scoped key `canonical-model-snapshot-v2-<date>`).
-
-See [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for full reconciliation failure recovery procedures.
-
----
-
-## Risk Controls and Safeguards
-
-| Control | Mechanism | Location |
+| Sleeve | Status | Notes |
 |---|---|---|
-| VIX regime scaling | 4-tier position scale (100%/75%/50%/25%) + position count cap | `research/vix_regime.py`, `sleeves/sleeve_trend/config.py` |
-| Drawdown circuit breaker (soft) | 10% DD → reduce all sizes by `BREAKER_PARTIAL_EXPOSURE` (default 50%) | `engine/breaker.py` |
-| Drawdown circuit breaker (hard) | 15% DD → `LOCK` mode — no new entries | `engine/breaker.py` |
-| Sector concentration cap | Max 2 positions per sector | `sleeves/sleeve_trend/selection.py` |
-| Position size cap | Max 10% per position (`MAX_POSITION_PCT`) | `sleeves/sleeve_trend/config.py` |
-| Gross exposure cap | Max 50% gross | `sleeves/sleeve_trend/config.py` |
-| Pre-trade reconciliation | Block all trades on model/broker drift | `reconciliation.py` |
-| IC monitor (signal health) | Alert when rolling 60d IC < 0.03 or IC < 0 for 20+ consecutive days | `research/ic_monitor.py` |
-| Liquidity gates | Price ≥ $5, volume ≥ 100K avg shares | `sleeves/sleeve_trend/selection.py` |
-| No leveraged/inverse ETFs | Universe exclusion rule | `core/universe_v4.py` |
-| Minimum cash buffer | 5% always in cash (`MIN_CASH_PCT`) | `sleeves/sleeve_trend/config.py` |
+| Sleeve 1 | Partial | Factor pipeline stubs remain in `core/quant_report.py`; signal logic under `sleeves/sleeve_1/` is not part of this handoff. |
+| Sleeve 2 | Implemented | Uses yfinance `.info` snapshot P/E, z-score thresholds, score ranks, hold-day limits, and SGOV as cash proxy. |
+| Sleeve 3 | Planned | Signals not yet defined. |
+| Sleeve 4 | Planned | Signals not yet defined. |
 
----
+## Key Files
 
-## Artifacts and Output Directories
-
-| Path | Contents |
+| File | Role |
 |---|---|
-| `outputs/runs/<RUN_ID>/` | Immutable per-run archive (reports, broker, ledger, snapshots, meta.json, checksums.sha256) |
-| `outputs/latest.json` | Mutable pointer to most recent run |
-| `outputs/paper_state/canonical_positions.json` | Canonical broker position snapshot |
-| `outputs/paper_state/ledger2.csv` | Cumulative trade ledger |
-| `outputs/paper_state/nav2.csv` | NAV time series |
-| `outputs/execution_email/<DATE>.json` | Persisted execution email payload |
-| `outputs/alpha_report/` | Daily alpha attribution outputs |
-| `outputs/perf/nav_timeseries.csv` | Mark-to-market NAV with daily return + turnover |
-| `outputs/ic_monitor/` | Daily IC log, 60d rolling IC, alerts JSON |
-| `outputs/vix_regime/` | Current regime JSON + history CSV |
-| `outputs/broker/recon_pretrade_<DATE>.json` | Pre-trade reconciliation report |
-| `outputs/audit/` | Deterministic audit bundles (policy backtest, Monte Carlo) |
-| `data/live_nav.csv` | Shadow NAV committed to repo by alpha_daily workflow |
-| `reports/ai_runs/<RUN_ID>/` | AIOps spec-driven run artifacts |
-| `signals/<DATE>.json` | Daily signal snapshot |
+| `daily_quant_report.py` | Daily orchestrator: runs sleeves, builds HTML report, optionally emails |
+| `core/quant_report.py` | Shared utilities: universe loader, price download, ATR, SMTP sender |
+| `core/portfolio_alloc.py` | Sleeve scaling and portfolio combining |
+| `sleeves/sleeve_2/config.py` | Sleeve 2 parameters |
+| `sleeves/sleeve_2/valuation.py` | yfinance `.info` snapshot fetch and cache |
+| `sleeves/sleeve_2/signals.py` | Valuation and trend composite score computation |
+| `sleeves/sleeve_2/backtest.py` | Sleeve 2 realized-PnL backtest |
+| `data/universe.csv` | 200-ticker trading universe with sector tags |
 
----
+## Running the System
 
-## Canonical Performance and Alpha Assessment Layer
+Environment setup:
 
-The **canonical performance pipeline** integrates strategy NAV, benchmark returns, VIX data, and premarket analyzer scores into a unified analysis artifact:
-
-- **Canonical CSV:** `outputs/alpha_assessment/canonical_performance.csv` (schema: date, strategy_nav, strategy_return, spy_close, spy_return, excess_return, vix_close, vix_regime, premarket_score, ...)
-- **Automated producers:**
-  - `update_benchmark_close_history()` → `outputs/perf/benchmark_close_history.csv` (SPY closes via yfinance)
-  - `update_vix_close_history()` → `outputs/perf/vix_close_history.csv` (VIX closes via yfinance)
-  - `rebuild_premarket_analyzer_scores()` → `outputs/perf/premarket_analyzer_scores.csv` (market analyzer payload score from daily runs)
-- **Build command:**
-  ```bash
-  python -m research.alpha_assessment.build_alpha_assessment --rebuild-canonical
-  ```
-- **Downstream:** Canonical performance feeds into overlay engine backtests and analyzer validation metrics.
-- **Data fill rates** (latest build, 17 evaluation rows):
-  - strategy_nav: 5.9%, strategy_return: 5.9% (awaiting additional paper trading runs)
-  - spy_close: 29.4%, spy_return: 23.5%
-  - vix_close: 5.9% (auto-producer, improves with more runs)
-  - premarket_score: 47.1% (real data from daily runs)
-- **Evaluation metrics** (3 rows with both score and spy_return):
-  - Accuracy: 0.33, Precision: 0.33, Recall: 1.0 (sample size limited; confidence interval very wide)
-
-See [`docs/alpha_assessment.md`](docs/alpha_assessment.md) and [`docs/canonical_performance_runbook.md`](docs/canonical_performance_runbook.md).
-
----
-
-## AIOps / Governance Model
-
-The `aiops/` module provides a CLI for spec-driven development and validation. Specs are markdown files in `specs/` that define a build contract; AIOps parses them, generates deterministic plans, and can dispatch Codex (or a fallback) to execute.
-
-```bash
-aiops parse specs/my_spec.md           # Validate spec headers
-aiops plan  --spec specs/my_spec.md --mode BUILD   # Generate plan artifacts
-aiops run-all --spec specs/my_spec.md --mode BUILD  # Full lifecycle
-```
-
-**Exit codes:** 0=OK, 2=needs_operator, 3=verify_failed, 4=parse_plan_failed, 5=dispatch_failed, 6=run_failed
-
-See [`specs/aiops_system_contract_v0_1.md`](specs/aiops_system_contract_v0_1.md) and [`docs/aiops_workflow.md`](docs/aiops_workflow.md).
-
----
-
-## Testing and Verification
-
-```bash
-# Full test suite
-pytest -q
-
-# AIOps contract tests only
-pytest Tests/test_aiops_contracts.py -v
-
-# Local green loop (smoke run without broker)
-bash scripts/local_green_loop.sh
-
-# Alpha report (local, no email)
-python3 scripts/alpha_report.py --apply-costs --cost-bps 25
-
-# Audit export (2022 + Monte Carlo worst window)
-python3 scripts/run_audit_2022_and_worst.py
-```
-
-Test coverage includes: AIOps CLI contracts, allocation logic, breaker policy, canonical ledger health, attribution reporting, email coherency, reconciliation, alpha lab schemas, and drawdown/turnover constraints.
-
----
-
-## How to Run the System
-
-### Local setup
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Shadow mode (no broker)
+Shadow run:
+
 ```bash
 REPORT_DATE=$(TZ=America/New_York date +%F) MODE=shadow TRADING_MODE=shadow python3 daily_quant_report.py
 ```
 
-### Alpaca paper mode
+Alpaca paper run:
+
 ```bash
-REPORT_DATE=$(TZ=America/New_York date +%F) \
-  MODE=alpaca TRADING_MODE=alpaca ALPACA_PAPER=1 \
-  ALPACA_API_KEY_ID=... ALPACA_API_SECRET_KEY=... \
-  ALPACA_BASE_URL=https://paper-api.alpaca.markets \
-  python3 daily_quant_report.py
+REPORT_DATE=$(TZ=America/New_York date +%F) MODE=alpaca TRADING_MODE=alpaca ALPACA_PAPER=1 ALPACA_API_KEY_ID=... ALPACA_API_SECRET_KEY=... ALPACA_BASE_URL=https://paper-api.alpaca.markets python3 daily_quant_report.py
 ```
 
-### Email controls
-- `EMAIL_STRICT=0` (default) — SMTP failures are warnings, run continues
-- `EMAIL_STRICT=1` — SMTP failures are fatal
-- `EMAIL_DRY_RUN=1` — skips sending but still produces email artifacts
+## Environment Variables
 
-See [`README_PROD.md`](README_PROD.md) for quick-reference production commands.
+- `REPORT_DATE`
+- `MODE`
+- `TRADING_MODE`
+- `ALPACA_PAPER`
+- `ALPACA_API_KEY_ID`
+- `ALPACA_API_SECRET_KEY`
+- `ALPACA_BASE_URL`
+- `EMAIL_SENDER`
+- `EMAIL_APP_PASSWORD`
+- `EMAIL_RECIPIENT`
 
----
+## Promotion Ladder
 
-## Known Limitations / Watch Items
+All new strategies and features follow this path:
 
-- **Yahoo Finance dependency** — All market data (prices, VIX) fetched via `yfinance`. No fallback data provider. Network failures during CI degrade to VIX fallback (25.0 = ELEVATED regime) and may cause partial signal generation.
-- **Sleeve 1 is research-only** — It runs daily but its output is explicitly discarded (`_, _ = run_sleeve_1()`). Decision to integrate or formally archive is open.
-- **Sleeve 2 and Charlie Munger stubs** — Dead code remains in `daily_quant_report.py`. Should be removed.
-- **No live money** — System is paper-trading only. Live brokerage execution is not wired.
-- **macOS venv** — The local `.venv` Python binary is macOS-only. Use `source .venv/bin/activate` on Mac; CI creates its own venv on Linux.
-- **Walk-forward validation** — Extended WFO run (2015–present, ~36 windows) is backlog; short 4-window result shows OOS Sharpe elevated due to bull-market artifact.
-- **Transaction cost model** — Fixed at ~25 bps in alpha_report runs. Actual costs vary by order size and liquidity.
-- **Short selling** — Config defines short parameters but no short positions are placed in production.
+`research -> backtest -> shadow -> paper -> live`
 
----
+The legacy model remains frozen while Alpha Stack runs alongside it until the promotion gates are met.
 
-## Related Documentation
+## Known Issues / Technical Debt
 
-| Document | Purpose |
-|---|---|
-| [`docs/model_strategy.md`](docs/model_strategy.md) | Investment strategy, alpha hypotheses, portfolio construction |
-| [`docs/runbook.md`](docs/runbook.md) | Day-to-day operator guide, checklists, failure recovery |
-| [`CHANGELOG.md`](CHANGELOG.md) | Material change history |
-| [`docs/MODEL_AUDIT.md`](docs/MODEL_AUDIT.md) | Deep-dive: signal generation, weighting, backtest harness |
-| [`docs/MODEL_CHANGES.md`](docs/MODEL_CHANGES.md) | Engineering change log (commit-level) |
-| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Reconciliation failure recovery, auto-bootstrap procedures |
-| [`docs/run_archiving.md`](docs/run_archiving.md) | Run artifact structure and integrity verification |
-| [`docs/audit.md`](docs/audit.md) | Audit export, policy backtest, Monte Carlo workflows |
-| [`docs/performance_reporting.md`](docs/performance_reporting.md) | Ledger schema, NAV computation, attribution artifacts |
-| [`docs/aiops_workflow.md`](docs/aiops_workflow.md) | AIOps CLI commands, lifecycle, troubleshooting |
-| [`specs/aiops_system_contract_v0_1.md`](specs/aiops_system_contract_v0_1.md) | AIOps CLI contracts and exit codes |
-| [`ARCHIVING.md`](ARCHIVING.md) | Archiving policy for legacy code and sleeves |
-| [`README_PROD.md`](README_PROD.md) | Quick-reference production commands |
+1. Sleeve 2 has look-ahead bias in backtests because it uses yfinance snapshot P/E rather than point-in-time fundamentals.
+2. Sleeve 2 backtests currently return only the final equity point instead of a full daily equity curve.
+3. Sleeve 1 factor functions in `core/quant_report.py` are still stubs: `fetch_factor_data`, `build_factor_scores`, and `compute_full_signals`.
+4. The regime layer is not yet a fully defined state machine with explicit thresholds and hysteresis rules.
+5. No transaction cost model is applied in current backtests.
+6. No portfolio-level risk controls are yet defined for position caps, sector limits, or drawdown circuit breakers.
+7. Report outputs do not yet include benchmark comparison versus SPY or the S&P 500 total return series.
+8. The repository has a `requirements.txt`, but dependency pinning and environment-governance standards still need review as part of production hardening.
+
+## Planned Implementation Sequence
+
+1. Data foundation: FRED macro integration plus point-in-time correct fundamental caching.
+2. Regime state machine: four-dimension classifier with hysteresis.
+3. Trend sleeve: extend Sleeve 1 with sector-relative signals and ATR-based sizing.
+4. Value sleeve: refactor Sleeve 2 with point-in-time correct fundamentals and multi-metric composite.
+5. Attribution module: IC/IR measurement before adding more sleeves.
+6. Allocator v1: static weights with regime overrides.
+7. Quality sleeve.
+8. Mean Reversion sleeve.
+9. Shadow mode: 60+ trading days alongside the legacy model.
+10. Production cutover and legacy archive.
+
+## Documentation Map
+
+- [Architecture Reference](docs/Alpha_Stack_Architecture_Reference.md)
+- [Alpha Stack Docs Index](docs/alpha_stack/README.md)
+- [Architecture Overview](docs/alpha_stack/architecture_overview.md)
+- [Sleeve Specifications](docs/alpha_stack/sleeve_specifications.md)
+- [Regime Allocator Spec](docs/alpha_stack/regime_allocator_spec.md)
+- [Data Standards](docs/alpha_stack/data_standards.md)
+- [Research Validation Spec](docs/alpha_stack/research_validation_spec.md)
+- [Model Strategy](docs/model_strategy.md)

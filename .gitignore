@@ -60,3 +60,18 @@ paper/holdings_latest.csv
 # Internal dashboard artifacts (not part of repo)
 Dashboard/
 _gha/
+# Data files and caches (runtime only)
+data/fundamental/
+data/macro/
+data/cache/
+*.csv
+*.parquet
+# Loose root-level scripts and artifacts
+cik_mapper.py
+cik_mapping_results.csv
+datastore.py
+edgar_ingestion.py
+fred_ingestion.py
+macro_store.py
+test_datastore.py
+validate_regime_history.py

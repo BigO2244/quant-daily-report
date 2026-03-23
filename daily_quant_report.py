@@ -94,6 +94,7 @@ from reconciliation import (
     refresh_canonical_snapshot_from_posttrade_snapshot,
     refresh_canonical_snapshot_from_broker,
 )
+from regime.regime_engine import RegimeEngine
 
 from sleeves.sleeve_trend.build_sleeve_output import build_trend_sleeve_output
 from sleeves.sleeve_trend import config as trend_cfg
@@ -133,6 +134,7 @@ write_audit_bundle = None
 audit_default_run_id = None
 load_sleeve1_dataset = None
 run_window_backtest = None
+quant_tickers = None
 
 logger = logging.getLogger(__name__)
 # Backward-compatible alias for tests/patch points
@@ -296,13 +298,19 @@ def _ensure_paper_broker_imports() -> None:
 
 def _ensure_quant_report_imports() -> None:
     """Load quant report helpers lazily to avoid yfinance import at module load."""
-    global send_email, download_prices, add_atr
-    if send_email is not None and download_prices is not None and add_atr is not None:
+    global send_email, download_prices, add_atr, quant_tickers
+    if (
+        send_email is not None
+        and download_prices is not None
+        and add_atr is not None
+        and quant_tickers is not None
+    ):
         return
     from core.quant_report import (
         send_email as _send_email,
         download_prices as _download_prices,
         add_atr as _add_atr,
+        TICKERS as _quant_tickers,
     )
     if send_email is None:
         send_email = _send_email
@@ -310,6 +318,8 @@ def _ensure_quant_report_imports() -> None:
         download_prices = _download_prices
     if add_atr is None:
         add_atr = _add_atr
+    if quant_tickers is None:
+        quant_tickers = list(_quant_tickers)
 
 
 def _ensure_sleeve_backtest_imports() -> None:
@@ -2296,16 +2306,16 @@ def _inactive_input_hint(details: dict | None) -> str:
 # ============================================================
 # Sleeve runners
 # ============================================================
-def run_sleeve_1():
+def run_sleeve_1(prices: pd.DataFrame | None = None):
     _ensure_sleeve_backtest_imports()
     logger.info("[SLEEVE 1] Preparing data...")
-    signals = s1_prepare_data()
+    signals = s1_prepare_data(prices=prices)
     logger.info("[SLEEVE 1] Running backtest...")
     return s1_backtest(signals)
-def run_sleeve_trend():
+def run_sleeve_trend(prices: pd.DataFrame | None = None):
     _ensure_sleeve_backtest_imports()
     logger.info("[SLEEVE TREND] Preparing data...")
-    signals = st_prepare_data()
+    signals = st_prepare_data(prices=prices)
     logger.info("[SLEEVE TREND] Running backtest...")
     equity_df, trades_df = st_backtest(signals)
     return equity_df, trades_df, signals
@@ -2320,6 +2330,77 @@ def run_charlie_munger():
 def run_sleeve_charlie_munger():
     """Backward-compatible alias."""
     return run_charlie_munger()
+
+
+def run_sleeve_quality(prices: pd.DataFrame | None = None) -> "SleeveOutput":
+    """
+    Build and return a SleeveOutput for the Quality sleeve.
+
+    Requires a populated DataStore (data/fundamental/ from EDGAR XBRL ingestion).
+    Returns an empty SleeveOutput if the DataStore is unavailable or signal
+    build fails — never raises so the orchestrator can continue.
+    """
+    from core.portfolio_alloc import create_sleeve_output
+    try:
+        from datastore import DataStore
+        from sleeves.sleeve_quality.selection import build_quality_sleeve_output
+
+        ds = DataStore("data/fundamental")
+        _tickers = list(quant_tickers or [])
+        if not _tickers:
+            logger.warning("[QUALITY] No universe tickers available — skipping")
+            return create_sleeve_output([], "sleeve_quality", 0.0, "No tickers")
+
+        as_of = pd.Timestamp("today").normalize()
+        logger.info("[QUALITY] Building quality signals for %d tickers", len(_tickers))
+        result = build_quality_sleeve_output(
+            tickers=_tickers,
+            as_of_date=as_of,
+            ds=ds,
+            prices=prices,
+            sectors=None,
+            top_n=10,
+            base_strength=1.0,
+        )
+        logger.info(
+            "[QUALITY] SleeveOutput: %d positions, strength=%.3f",
+            len(result.positions_df) if result.positions_df is not None else 0,
+            result.meta.strength if result.meta else 0.0,
+        )
+        return result
+    except Exception as exc:
+        logger.warning("[QUALITY] Sleeve build failed (non-blocking): %s", exc)
+        return create_sleeve_output([], "sleeve_quality", 0.0, f"Build error: {exc}")
+
+
+def run_sleeve_mean_reversion(prices: pd.DataFrame | None = None) -> "SleeveOutput":
+    """
+    Build and return a SleeveOutput for the Mean Reversion sleeve.
+
+    Uses only price data (no DataStore / EDGAR dependency).
+    Returns an empty SleeveOutput if price data is missing or signals fail.
+    """
+    from core.portfolio_alloc import create_sleeve_output
+    try:
+        from sleeves.sleeve_mean_reversion.selection import build_mean_reversion_sleeve_output
+
+        if prices is None or prices.empty:
+            logger.warning("[MEAN_REV] No price data — skipping")
+            return create_sleeve_output([], "sleeve_mean_reversion", 0.0, "No price data")
+
+        logger.info("[MEAN_REV] Building mean-reversion signals")
+        result = build_mean_reversion_sleeve_output(prices=prices, top_n=10, base_strength=1.0)
+        logger.info(
+            "[MEAN_REV] SleeveOutput: %d positions, strength=%.3f",
+            len(result.positions_df) if result.positions_df is not None else 0,
+            result.meta.strength if result.meta else 0.0,
+        )
+        return result
+    except Exception as exc:
+        logger.warning("[MEAN_REV] Sleeve build failed (non-blocking): %s", exc)
+        return create_sleeve_output([], "sleeve_mean_reversion", 0.0, f"Build error: {exc}")
+
+
 # ============================================================
 # Sleeve output extraction (for dynamic allocation)
 # ============================================================
@@ -2429,6 +2510,281 @@ def extract_sleeve_output(
         else "Inactive"
     )
     return create_sleeve_output(positions, sleeve_name, strength, notes)
+
+
+def _prepare_shared_regime_market_data(
+    period: str = "1y",
+    interval: str = "1d",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Download the universe plus SPY/VIX once, then split it for sleeves and regime.
+    This keeps the regime path read-only and avoids a second price download.
+    """
+    _ensure_quant_report_imports()
+    tickers = list(dict.fromkeys(list(quant_tickers or []) + ["SPY", "^VIX"]))
+    shared_prices = download_prices(tickers, period=period, interval=interval)
+    if shared_prices.empty:
+        raise ValueError("Shared market price download returned no rows")
+
+    universe_prices = shared_prices[
+        ~shared_prices["ticker"].astype(str).isin(["SPY", "^VIX"])
+    ].copy()
+    spy_prices = shared_prices[
+        shared_prices["ticker"].astype(str) == "SPY"
+    ][["date", "close"]].copy()
+    vix_prices = shared_prices[
+        shared_prices["ticker"].astype(str) == "^VIX"
+    ][["date", "close"]].copy()
+
+    if spy_prices.empty or vix_prices.empty or universe_prices.empty:
+        raise ValueError(
+            "Shared market price set missing SPY, ^VIX, or universe rows"
+        )
+
+    return universe_prices, spy_prices, vix_prices
+
+
+def _build_regime_summary_payload(regime_result) -> dict:
+    today = dict((regime_result.today or {}))
+    weights = {
+        str(name): float(value)
+        for name, value in dict(today.get("weights") or {}).items()
+    }
+    return {
+        "composite_regime": str(today.get("composite_regime") or "unknown"),
+        "trend_state": str(today.get("trend_state") or "unknown"),
+        "volatility_state": str(today.get("volatility_state") or "unknown"),
+        "breadth_state": str(today.get("breadth_state") or "unknown"),
+        "macro_state": str(today.get("macro_state") or "unknown"),
+        "target_weights": weights,
+    }
+
+
+def _build_regime_html_block(regime_summary: dict) -> str:
+    """
+    Build an HTML summary block for today's macro regime.
+    Displayed above sleeve tables. Informational only — does not affect allocation.
+    Fails gracefully: returns empty string on missing/incomplete data.
+    """
+    if not regime_summary:
+        return ""
+    try:
+        composite = str(regime_summary.get("composite_regime") or "unknown")
+        trend_state = str(regime_summary.get("trend_state") or "unknown")
+        vol_state = str(regime_summary.get("volatility_state") or "unknown")
+        breadth_state = str(regime_summary.get("breadth_state") or "unknown")
+        macro_state = str(regime_summary.get("macro_state") or "unknown")
+        weights = dict(regime_summary.get("target_weights") or {})
+
+        _regime_colors = {
+            "risk_on_trending":   "#d4edda",
+            "neutral_mixed":      "#fff3cd",
+            "risk_off_defensive": "#f8d7da",
+            "high_volatility":    "#f8d7da",
+            "breadth_washout":    "#fde8d8",
+        }
+        bg = _regime_colors.get(composite, "#f0f0f0")
+        label = composite.replace("_", " ").title()
+
+        dim_rows = "".join(
+            f"<tr><td style='padding:3px 10px'>{dim}</td>"
+            f"<td style='padding:3px 10px'>{state.replace('_',' ').title()}</td></tr>"
+            for dim, state in [
+                ("Trend", trend_state),
+                ("Volatility", vol_state),
+                ("Breadth", breadth_state),
+                ("Macro", macro_state),
+            ]
+        )
+        weight_rows = "".join(
+            f"<tr><td style='padding:3px 10px'>{s.replace('_',' ').title()}</td>"
+            f"<td style='padding:3px 10px;text-align:right'>{w:.0%}</td></tr>"
+            for s, w in sorted(weights.items(), key=lambda kv: -kv[1])
+        )
+
+        return f"""
+<div style="border:1px solid #ced4da;border-radius:6px;padding:14px 18px;
+            margin-bottom:20px;background:{bg}">
+  <h3 style="margin:0 0 10px 0;font-size:15px;font-weight:700">
+    Macro Regime &mdash; {label}
+  </h3>
+  <div style="display:flex;gap:32px;flex-wrap:wrap">
+    <div>
+      <h4 style="margin:0 0 4px 0;font-size:12px;color:#6c757d;
+                 text-transform:uppercase;letter-spacing:.05em">Dimension States</h4>
+      <table style="border-collapse:collapse;font-size:13px">
+        <tbody>{dim_rows}</tbody>
+      </table>
+    </div>
+    <div>
+      <h4 style="margin:0 0 4px 0;font-size:12px;color:#6c757d;
+                 text-transform:uppercase;letter-spacing:.05em">Target Sleeve Weights</h4>
+      <table style="border-collapse:collapse;font-size:13px">
+        <tbody>{weight_rows}</tbody>
+      </table>
+    </div>
+  </div>
+  <p style="margin:10px 0 0 0;font-size:11px;color:#6c757d;font-style:italic">
+    Informational only &mdash; these target weights do not yet affect the live allocation.
+  </p>
+</div>
+""".strip()
+    except Exception as _regime_html_err:
+        logger.warning("[REGIME_HTML] Could not build regime block: %s", _regime_html_err)
+        return ""
+
+
+def resolve_regime_strengths(
+    regime_today: "dict | None",
+    available_sleeves: "list[str]",
+) -> "dict[str, float]":
+    """
+    Map regime weights to production sleeve names and renormalize.
+
+    Regime columns (from RegimeAllocator):
+        trend, value, quality, mean_reversion, cash
+
+    Production sleeves handled here:
+        sleeve_trend  ← trend
+        sleeve_2      ← value
+
+    Cash weight is dropped and the remaining mapped weights are
+    renormalized so they sum to 1.0.
+
+    Fallback: if regime_today is None, mapping is empty, or any error
+    occurs, returns equal weight across available_sleeves so allocation
+    remains valid.
+    """
+    _REGIME_TO_SLEEVE: "dict[str, str]" = {
+        "trend":           "sleeve_trend",
+        "value":           "sleeve_2",
+        "quality":         "sleeve_quality",
+        "mean_reversion":  "sleeve_mean_reversion",
+    }
+    try:
+        if not regime_today:
+            raise ValueError("No regime_today data")
+        weights = dict(regime_today.get("weights") or {})
+        if not weights:
+            raise ValueError("No weights in regime_today")
+
+        mapped: "dict[str, float]" = {}
+        for regime_col, sleeve_name in _REGIME_TO_SLEEVE.items():
+            if sleeve_name in available_sleeves and regime_col in weights:
+                mapped[sleeve_name] = float(weights[regime_col])
+
+        if not mapped:
+            raise ValueError("No regime weights mapped to active sleeves")
+
+        total = sum(mapped.values())
+        if total < 1e-9:
+            raise ValueError("Mapped regime weights sum to zero")
+
+        return {k: v / total for k, v in mapped.items()}
+
+    except Exception as exc:
+        logger.debug("[REGIME_STRENGTHS] Fallback to equal weights: %s", exc)
+        n = len(available_sleeves)
+        if n == 0:
+            return {}
+        eq = 1.0 / n
+        return {s: eq for s in available_sleeves}
+
+
+def compute_sleeve_drift(
+    broker_positions: "list | None",
+    broker_equity: "float | None",
+    sleeve_outputs: "list[SleeveOutput]",
+    regime_strengths: "dict[str, float]",
+) -> "dict[str, bool]":
+    """
+    Determine per-sleeve rebalance necessity from live broker positions.
+
+    Compares current sleeve weights (derived from live Alpaca market values)
+    against regime-target weights.  Uses TRANSITION["min_rebalance_threshold"]
+    (3%) from regime_config as the minimum drift before rebalancing.
+
+    Falls back to rebalancing all sleeves when broker data is unavailable —
+    safe for shadow mode, offline fixture, and FRED-missing runs.
+
+    Parameters
+    ----------
+    broker_positions : list of position dicts from fetch_pretrade_snapshot()["positions"].
+        Each has "symbol" (str) and "market_value" (str or float).
+    broker_equity : total portfolio equity from Alpaca account.
+    sleeve_outputs : SleeveOutput list used to map tickers → sleeve names.
+    regime_strengths : target weights from resolve_regime_strengths().
+
+    Returns
+    -------
+    dict[str, bool]  {sleeve_name: should_rebalance}
+        True  = drift ≥ threshold → REBALANCE
+        False = drift < threshold → HOLD (already near target)
+    """
+    from regime.regime_config import TRANSITION
+    _THRESHOLD = float(TRANSITION.get("min_rebalance_threshold", 0.03))
+    sleeve_names = list(regime_strengths.keys())
+
+    # Fallback: no usable broker data → always rebalance all sleeves
+    if (
+        not sleeve_names
+        or broker_positions is None
+        or broker_equity is None
+        or broker_equity < 1.0
+    ):
+        for name in sleeve_names:
+            logger.info(
+                "[DRIFT] %s: current=n/a target=%.2f drift=n/a \u2192 REBALANCE (no broker data)",
+                name, regime_strengths.get(name, 0.0),
+            )
+        return {name: True for name in sleeve_names}
+
+    # Build ticker → sleeve_name lookup from sleeve_outputs
+    ticker_to_sleeve: "dict[str, str]" = {}
+    for so in (sleeve_outputs or []):
+        if so is None or so.positions_df is None or so.positions_df.empty:
+            continue
+        if "ticker" not in so.positions_df.columns:
+            continue
+        sname = so.meta.sleeve_name
+        for t in so.positions_df["ticker"].astype(str).str.upper():
+            ticker_to_sleeve[t] = sname
+
+    # Accumulate current market value per sleeve from broker positions
+    sleeve_mv: "dict[str, float]" = {name: 0.0 for name in sleeve_names}
+    for pos in (broker_positions or []):
+        symbol = str((pos or {}).get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        mv_raw = (pos or {}).get("market_value")
+        try:
+            mv = float(mv_raw) if mv_raw not in (None, "") else 0.0
+        except (ValueError, TypeError):
+            mv = 0.0
+        sname = ticker_to_sleeve.get(symbol)
+        if sname in sleeve_mv:
+            sleeve_mv[sname] += mv
+
+    # Compute drift and emit one log line per sleeve
+    result: "dict[str, bool]" = {}
+    for sname, target in regime_strengths.items():
+        current = sleeve_mv.get(sname, 0.0) / broker_equity
+        drift = abs(current - target)
+        rebalance = drift >= _THRESHOLD
+        result[sname] = rebalance
+        if rebalance:
+            logger.info(
+                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f \u2192 REBALANCE",
+                sname, current, target, drift,
+            )
+        else:
+            logger.info(
+                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f \u2192 HOLD (below %.0f%% threshold)",
+                sname, current, target, drift, _THRESHOLD * 100,
+            )
+    return result
+
+
 # ============================================================
 # Portfolio equity computation (FIXED)
 # ============================================================
@@ -2761,6 +3117,7 @@ def build_daily_snapshot(
     s2_details: dict,
     cm_details: dict | None = None,
     vix_regime: dict | None = None,
+    regime_summary: dict | None = None,
     risk_off: bool = False,
 ) -> dict:
     stop_atr_mult = _snapshot_risk_value("STOP_ATR_MULT", STOP_ATR_MULT_DEFAULT)
@@ -3245,6 +3602,7 @@ def build_daily_snapshot(
         "signals_snapshot_path": signals_path,
         "charlie_munger": (cm_details or {}).get("signals", {}),
         "charlie_munger_benchmark": {**((cm_details or {}).get("benchmark", {}) or {}), "sleeve_cumulative_return": ((cm_details or {}).get("sleeve_stats", {}) or {}).get("cumulative_return")},
+        "regime_summary": regime_summary or {},
     }
 # ============================================================
 # Report builder (FIXED)
@@ -3263,6 +3621,7 @@ def build_html_report(
     cm_details: dict | None = None,
     inception_metrics: dict | None = None,
     allocation_diagnostics: dict | None = None,
+    regime_summary: dict | None = None,
 ) -> str:
     """
     Build HTML report with CORRECT portfolio math.
@@ -3527,6 +3886,47 @@ def build_html_report(
         pd.DataFrame(performance_rows), "Performance Summary (Portfolio)", 10
     )
     performance_section = f'<div class="card">{performance_html}</div>'
+    regime_section = ""
+    if isinstance(regime_summary, dict) and regime_summary:
+        regime_rows = pd.DataFrame(
+            [
+                {"Metric": "Composite Regime", "Value": str(regime_summary.get("composite_regime", "n/a"))},
+                {"Metric": "Trend State", "Value": str(regime_summary.get("trend_state", "n/a"))},
+                {"Metric": "Volatility State", "Value": str(regime_summary.get("volatility_state", "n/a"))},
+                {"Metric": "Breadth State", "Value": str(regime_summary.get("breadth_state", "n/a"))},
+                {"Metric": "Macro State", "Value": str(regime_summary.get("macro_state", "n/a"))},
+            ]
+        )
+        weight_label_map = {
+            "trend": "Trend",
+            "value": "Value",
+            "quality": "Quality",
+            "mean_reversion": "Mean Reversion",
+            "cash": "Cash",
+        }
+        weight_rows = pd.DataFrame(
+            [
+                {
+                    "Sleeve": weight_label_map.get(str(name), str(name)),
+                    "Target Weight": _fmt_pct(value),
+                }
+                for name, value in dict(regime_summary.get("target_weights") or {}).items()
+            ]
+        )
+        regime_body = html_table(regime_rows, "Regime Summary", 10)
+        regime_weights = html_table(
+            weight_rows,
+            "Regime Target Sleeve Weights",
+            10,
+            "No regime weights available.",
+        )
+        regime_section = (
+            '<div class="card">'
+            f"{regime_body}"
+            f"{regime_weights}"
+            "<p><em>Read-only preview only. Regime output does not yet drive live sleeve allocation.</em></p>"
+            "</div>"
+        )
     def _fmt_float(value: float | None) -> str:
         try:
             return f"{float(value):.2f}"
@@ -3698,6 +4098,7 @@ def build_html_report(
         {proposed_section}
         <div class="card">{html_table(summary_df, "Portfolio Snapshot")}</div>
         {performance_section}
+        {regime_section}
         {alpha_section}
         {alloc_section}
         {alloc_diag_section}
@@ -4337,11 +4738,50 @@ def main(argv: list[str] | None = None):
     )
     if offline_fixture and not portfolio_fixture.empty:
         today = portfolio_fixture.index.max().strftime("%Y-%m-%d")
+
+    # ── Early Alpaca snapshot for turnover-aware allocation ───────
+    # Pulled here so that broker positions are available before sleeve
+    # signal generation and allocation.  Capital sizing is unaffected —
+    # paper_broker.run_paper_day() fetches live equity again at execution
+    # time via its own AlpacaBroker.get_account() call.
+    _pretrade_raw_snapshot: "dict | None" = None
+    _broker_positions_for_drift: "list | None" = None
+    _broker_equity_for_drift: "float | None" = None
+    if alpaca_requested and not offline_fixture:
+        try:
+            _pretrade_raw_snapshot = fetch_pretrade_snapshot()
+            if (_pretrade_raw_snapshot or {}).get("ok"):
+                _acct = (_pretrade_raw_snapshot or {}).get("account") or {}
+                _eq_raw = _acct.get("equity") or _acct.get("portfolio_value")
+                if _eq_raw not in (None, ""):
+                    _broker_equity_for_drift = float(_eq_raw)
+                _broker_positions_for_drift = list(
+                    (_pretrade_raw_snapshot or {}).get("positions") or []
+                )
+                logger.info(
+                    "[DRIFT_SNAPSHOT] equity=%.2f positions=%d",
+                    _broker_equity_for_drift or 0.0,
+                    len(_broker_positions_for_drift),
+                )
+            else:
+                logger.info(
+                    "[DRIFT_SNAPSHOT] broker snapshot not ok — drift gate defaults to REBALANCE all"
+                )
+        except Exception as _early_snap_err:
+            logger.warning(
+                "[DRIFT_SNAPSHOT] early broker snapshot failed (non-blocking): %s",
+                _early_snap_err,
+            )
+    # ─────────────────────────────────────────────────────────────
+
     # ── Run sleeves ───────────────────────────────────────────────
     if offline_fixture:
         logger.warning(
             "[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches."
         )
+        shared_universe_prices = pd.DataFrame()
+        regime_spy_prices = pd.DataFrame()
+        regime_vix_prices = pd.DataFrame()
         _, _ = pd.DataFrame(), pd.DataFrame()
         st_equity, st_trades, st_signals = (
             pd.DataFrame(),
@@ -4352,14 +4792,38 @@ def main(argv: list[str] | None = None):
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
         cm_details = {}
         cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
+        quality_output = None
+        mr_output = None
     else:
+        shared_universe_prices = pd.DataFrame()
+        regime_spy_prices = pd.DataFrame()
+        regime_vix_prices = pd.DataFrame()
         try:
-            _, _ = run_sleeve_1()
+            shared_universe_prices, regime_spy_prices, regime_vix_prices = (
+                _prepare_shared_regime_market_data(period="2y", interval="1d")
+            )
+            logger.info(
+                "[REGIME] Reusing shared market data: universe_rows=%d spy_rows=%d vix_rows=%d",
+                len(shared_universe_prices),
+                len(regime_spy_prices),
+                len(regime_vix_prices),
+            )
+        except Exception as _shared_market_err:
+            logger.warning(
+                "[REGIME] Shared market preload failed; falling back to sleeve-local downloads: %s",
+                _shared_market_err,
+            )
+        try:
+            _, _ = run_sleeve_1(
+                prices=shared_universe_prices if not shared_universe_prices.empty else None
+            )
         except Exception as e:
             logger.warning("[WARN] Sleeve 1 failed: %s", e)
             _, _ = pd.DataFrame(), pd.DataFrame()
         try:
-            st_equity, st_trades, st_signals = run_sleeve_trend()
+            st_equity, st_trades, st_signals = run_sleeve_trend(
+                prices=shared_universe_prices if not shared_universe_prices.empty else None
+            )
         except Exception as e:
             logger.warning("[WARN] Sleeve Trend failed: %s", e)
             st_equity, st_trades, st_signals = (
@@ -4367,6 +4831,14 @@ def main(argv: list[str] | None = None):
                 pd.DataFrame(),
                 pd.DataFrame(),
             )
+        # ── Quality sleeve (non-blocking) ────────────────────────────
+        quality_output = run_sleeve_quality(
+            prices=shared_universe_prices if not shared_universe_prices.empty else None
+        )
+        # ── Mean Reversion sleeve (non-blocking) ─────────────────────
+        mr_output = run_sleeve_mean_reversion(
+            prices=shared_universe_prices if not shared_universe_prices.empty else None
+        )
         # ── Rolling IC monitor (non-blocking) ────────────────────────
         try:
             from research.ic_monitor import compute_and_log_ic
@@ -4414,6 +4886,36 @@ def main(argv: list[str] | None = None):
         logger.warning("[VIX_REGIME] Skipped (defaulting to full deployment): %s", _vix_err)
     # ─────────────────────────────────────────────────────────────
 
+    # ── Run macro regime engine (feeds sleeve allocation weights) ──
+    regime_summary: dict = {}
+    _regime_today: "dict | None" = None
+    if (
+        not offline_fixture
+        and not shared_universe_prices.empty
+        and not regime_spy_prices.empty
+        and not regime_vix_prices.empty
+    ):
+        try:
+            regime_engine = RegimeEngine()
+            regime_result = regime_engine.run(
+                spy_prices=regime_spy_prices,
+                vix_prices=regime_vix_prices,
+                universe_prices=shared_universe_prices[["date", "ticker", "close"]].copy(),
+            )
+            regime_summary = _build_regime_summary_payload(regime_result)
+            _regime_today = regime_result.today
+            logger.info(
+                "[REGIME] composite=%s trend=%s volatility=%s breadth=%s macro=%s",
+                regime_summary.get("composite_regime"),
+                regime_summary.get("trend_state"),
+                regime_summary.get("volatility_state"),
+                regime_summary.get("breadth_state"),
+                regime_summary.get("macro_state"),
+            )
+        except Exception as _regime_err:
+            logger.warning("[REGIME] Live regime summary skipped: %s", _regime_err)
+    # ─────────────────────────────────────────────────────────────
+
     # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = build_trend_sleeve_output(st_signals, st_equity, top_n=10, regime=_vix_regime)
     val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
@@ -4457,7 +4959,33 @@ def main(argv: list[str] | None = None):
         target_cash_weight=0.0,
         ranked_candidates=_ranked_signal_tickers(st_signals),
     )
-    alloc_result = allocator.allocate([trend_output])
+
+    # ── Apply regime-driven sleeve strengths with drift gate ──────
+    _active_sleeve_outputs = [
+        so for so in [trend_output, val_output, quality_output, mr_output]
+        if so is not None
+    ]
+    _active_sleeve_names = [so.meta.sleeve_name for so in _active_sleeve_outputs]
+    _regime_strengths = resolve_regime_strengths(_regime_today, _active_sleeve_names)
+    _drift_flags = compute_sleeve_drift(
+        broker_positions=_broker_positions_for_drift,
+        broker_equity=_broker_equity_for_drift,
+        sleeve_outputs=_active_sleeve_outputs,
+        regime_strengths=_regime_strengths,
+    )
+    for _so in _active_sleeve_outputs:
+        _sname = _so.meta.sleeve_name
+        _target_strength = _regime_strengths.get(_sname)
+        if _target_strength is not None and _drift_flags.get(_sname, True):
+            # Drift exceeds threshold — apply regime target weight
+            _so.meta.strength = _target_strength
+        # else: drift below threshold — keep existing meta.strength (HOLD)
+    logger.info(
+        "[REGIME_ALLOC] %s (regime: %s)",
+        ", ".join(f"{k}={v:.3f}" for k, v in sorted(_regime_strengths.items())),
+        regime_summary.get("composite_regime", "unknown"),
+    )
+    alloc_result = allocator.allocate(_active_sleeve_outputs)
     alloc_result.sleeve_allocations = derive_actual_sleeve_allocations(alloc_result)
     _old_allocs = dict(alloc_result.sleeve_allocations)
 
@@ -4661,6 +5189,7 @@ def main(argv: list[str] | None = None):
             s2_details=s2_details,
             cm_details=cm_details,
             vix_regime=_vix_regime,
+            regime_summary=regime_summary,
             risk_off=risk_off,
         )
     except RuntimeError as e:
@@ -4954,6 +5483,27 @@ def main(argv: list[str] | None = None):
             )
         except Exception as e:
             logger.warning("[PAPER][WARN] Paper report HTML build failed: %s", repr(e))
+
+        # ── Prepend regime block above sleeve tables (informational) ──────
+        if paper_html and regime_summary:
+            try:
+                _regime_block = _build_regime_html_block(regime_summary)
+                if _regime_block:
+                    paper_html = _regime_block + "\n" + paper_html
+            except Exception as _rb_err:
+                logger.warning("[REGIME_HTML] Skipped: %s", _rb_err)
+
+        # ── Append attribution blocks below sleeve tables (collapsible) ───
+        try:
+            from core.attribution import compute_attribution, build_attribution_html
+            _attr_blocks = ""
+            if st_signals is not None and not st_signals.empty:
+                _st_attr = compute_attribution(st_signals, st_signals, "sleeve_trend")
+                _attr_blocks += build_attribution_html(_st_attr, "Sleeve Trend")
+            if _attr_blocks and paper_html:
+                paper_html = paper_html + "\n<hr>\n" + _attr_blocks
+        except Exception as _attr_err:
+            logger.info("[ATTRIBUTION_HTML] Skipped: %s", _attr_err)
     else:
         logger.warning(
             "[PAPER][WARN] Missing signals for execution: %s", signals_path_exec
@@ -5495,7 +6045,7 @@ def main(argv: list[str] | None = None):
                 "position_count": len([h for h in (daily_snapshot.get("holdings") or []) if str(h.get("ticker", "")).upper() != "CASH"]),
                 "equity": portfolio_stats.get("equity"),
                 "cash": float(portfolio_stats.get("equity", 0.0)) if portfolio_stats.get("cash") is None else portfolio_stats.get("cash"),
-                "turnover_pct": float((execution_payload or {}).get("turnover_pct", 0.0)) or float((daily_snapshot.get("nav_metrics") or {}).get("turnover_pct", 0.0)),
+                "turnover_pct": float((execution_payload or {}).get("turnover_pct") or 0.0) or float((daily_snapshot.get("nav_metrics") or {}).get("turnover_pct") or 0.0),
                 "holdings": (daily_snapshot.get("holdings") or []),
             }
             
@@ -5571,6 +6121,7 @@ def main(argv: list[str] | None = None):
         cm_details=cm_details,
         inception_metrics=daily_snapshot.get("inception_metrics"),
         allocation_diagnostics=daily_snapshot.get("allocation_diagnostics"),
+        regime_summary=daily_snapshot.get("regime_summary"),
     )
     # Append paper trading HTML section (if available)
     if paper_html:

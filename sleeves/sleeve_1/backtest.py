@@ -77,8 +77,11 @@ class Position:
         self.hold_days = 0
 
 
-def prepare_data():
-    prices = download_prices(TICKERS, period="1y", interval="1d")
+def prepare_data(prices: pd.DataFrame | None = None):
+    if prices is None:
+        prices = download_prices(TICKERS, period="1y", interval="1d")
+    else:
+        prices = prices.copy()
     factor_df = fetch_factor_data(prices)
     scored = build_factor_scores(factor_df)
     signals = compute_full_signals(scored)
