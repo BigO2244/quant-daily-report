@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+
 from brokers.alpaca_broker import (
     EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
     EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
@@ -72,6 +74,164 @@ def _workflow_start_utc() -> dt.datetime | None:
         return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _coerce_float(value: object) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _read_last_ledger_equity(ledger_path: str) -> float | None:
+    try:
+        ledger = pd.read_csv(ledger_path)
+    except Exception:
+        return None
+    if ledger.empty or "total_equity" not in ledger.columns:
+        return None
+    values = pd.to_numeric(ledger["total_equity"], errors="coerce").dropna()
+    if values.empty:
+        return None
+    return float(values.iloc[-1])
+
+
+def _load_signals_payload(path: str) -> dict[str, object]:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Signals payload must be a JSON object: {path}")
+    return payload
+
+
+def _write_risk_adjusted_signals(
+    *,
+    run_root: Path,
+    trade_date: str,
+    original_payload: dict[str, object],
+    adjusted_weights: pd.DataFrame,
+    cash_target_weight: float,
+) -> Path:
+    payload = dict(original_payload)
+    meta = dict(payload.get("meta") or {})
+    meta["trade_date"] = trade_date
+    meta["risk_controls_applied"] = True
+    meta["risk_controls_generated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    payload["meta"] = meta
+    payload["snapshot_date"] = trade_date
+    payload["cash_target_weight"] = float(cash_target_weight)
+    payload["signals"] = (
+        adjusted_weights[["ticker", "sleeve", "target_weight"]]
+        .assign(
+            ticker=lambda df: df["ticker"].astype(str).str.upper(),
+            sleeve=lambda df: df["sleeve"].astype(str),
+            target_weight=lambda df: df["target_weight"].astype(float),
+        )
+        .to_dict(orient="records")
+    )
+
+    out_path = run_root / "snapshots" / f"risk_adjusted_{trade_date}.json"
+    safe_write_text(
+        out_path,
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        allow_overwrite=True,
+    )
+    return out_path
+
+
+def _apply_pre_execution_risk_controls(
+    *,
+    run_root: Path,
+    trade_date: str,
+    snapshot: dict[str, object],
+    pretrade_policy: dict[str, object],
+    ledger_path: str,
+) -> tuple[str, float]:
+    from core.risk_controls import (
+        RiskControls,
+        load_sector_map,
+        peak_equity_path,
+        update_peak_equity_state,
+    )
+    from paper.paper_broker import load_targets
+
+    signals_path = str(snapshot.get("signals_snapshot_path") or "").strip()
+    if not signals_path:
+        raise ValueError("daily snapshot missing signals_snapshot_path")
+
+    cash_target_weight_default = float(snapshot.get("target_cash_weight") or 0.0)
+    original_payload = _load_signals_payload(signals_path)
+    targets, cash_target_weight, _, _ = load_targets(
+        signals_path,
+        cash_target_weight_default=cash_target_weight_default,
+    )
+
+    current_equity = (
+        _coerce_float(pretrade_policy.get("broker_preflight_equity"))
+        or _read_last_ledger_equity(ledger_path)
+        or 0.0
+    )
+    equity_source = (
+        "broker_preflight_equity"
+        if _coerce_float(pretrade_policy.get("broker_preflight_equity")) is not None
+        else "ledger"
+    )
+    peak_state = update_peak_equity_state(
+        current_equity=current_equity,
+        trade_date=trade_date,
+        source=equity_source,
+        path=peak_equity_path(),
+    )
+
+    controls = RiskControls()
+    result = controls.apply_to_targets(
+        targets,
+        sector_map=load_sector_map(),
+        cash_target_weight=cash_target_weight,
+        current_equity=current_equity,
+        peak_equity=_coerce_float(peak_state.get("peak_equity")),
+    )
+
+    adjusted_signals_path = _write_risk_adjusted_signals(
+        run_root=run_root,
+        trade_date=trade_date,
+        original_payload=original_payload,
+        adjusted_weights=result.weights,
+        cash_target_weight=result.cash_target_weight,
+    )
+
+    artifact = {
+        "trade_date": trade_date,
+        "original_signals_path": signals_path,
+        "adjusted_signals_path": str(adjusted_signals_path),
+        "peak_equity_path": str(peak_equity_path()),
+        "peak_equity_state": peak_state,
+        "result": result.to_artifact(),
+    }
+    safe_write_text(
+        run_root / "audit" / "risk_controls.json",
+        json.dumps(artifact, indent=2, sort_keys=True) + "\n",
+        allow_overwrite=True,
+    )
+
+    if result.actions:
+        logger.warning(
+            "[RISK_CONTROLS] adjusted targets before execution: actions=%d cash_target_weight=%.2f",
+            len(result.actions),
+            result.cash_target_weight,
+        )
+    else:
+        logger.info(
+            "[RISK_CONTROLS] no target adjustments required; cash_target_weight=%.2f",
+            result.cash_target_weight,
+        )
+
+    snapshot["signals_snapshot_path"] = str(adjusted_signals_path)
+    snapshot["target_cash_weight"] = float(result.cash_target_weight)
+    snapshot["risk_controls"] = artifact["result"]
+    return str(adjusted_signals_path), float(result.cash_target_weight)
 
 
 def _init_run_root(run_root: Path, trade_date: str) -> None:
@@ -374,16 +534,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.continuation_mode == "buy_only":
         os.environ["ALLOW_PARTIAL_BUY_CONTINUATION"] = "1"
 
+    adjusted_signals_path, adjusted_cash_target_weight = _apply_pre_execution_risk_controls(
+        run_root=run_root,
+        trade_date=trade_date,
+        snapshot=snapshot,
+        pretrade_policy=pretrade_policy,
+        ledger_path=paper_ledger_path,
+    )
+
     paper_summary = run_paper_day(
         run_date=trade_date,
-        signals_path=str(snapshot.get("signals_snapshot_path") or ""),
+        signals_path=adjusted_signals_path,
         ledger_path=paper_ledger_path,
         trades_path=paper_trades_path,
         config_path="paper/config_paper.json",
         force=False,
         plan_only=False,
         constraints={
-            "cash_target_weight": float(snapshot.get("target_cash_weight") or 0.0),
+            "cash_target_weight": adjusted_cash_target_weight,
         },
     )
     paper_summary["run_id"] = run_id
