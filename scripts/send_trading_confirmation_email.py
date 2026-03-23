@@ -11,6 +11,18 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# Load .env explicitly so direct SSH/python invocations have the same email
+# credentials as cron jobs that source the file before execution.
+_env_path = _REPO_ROOT / ".env"
+if _env_path.exists():
+    with _env_path.open("r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
 from core.email_governance import EmailEvent
 from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED, STATUS_SKIPPED_DUPLICATE
 from core.operator_summary import write_operator_summary, load_operator_summary, format_operator_summary_log
