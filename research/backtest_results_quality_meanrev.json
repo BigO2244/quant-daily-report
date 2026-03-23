@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-03-23T18:27:05.801383+00:00",
+  "price_history_years": 3,
+  "implementation_notes": {
+    "quality_current": [
+      "Backtest uses the actual implemented PIT DataStore factors in sleeves/sleeve_quality.",
+      "Monthly rebalances are used because quality signals move on filing cadence, not daily."
+    ],
+    "quality_enhanced": [
+      "Research variant adds sector-relative ROE plus stability/trend factors using PIT EDGAR history only.",
+      "Gross-margin stability is modeled as mean quarterly gross margin minus quarterly margin volatility.",
+      "Revenue-growth consistency is modeled as mean quarterly YoY growth minus its volatility.",
+      "Debt/equity trend rewards deleveraging via a falling multi-quarter debt/equity slope."
+    ],
+    "mean_reversion": [
+      "Backtest uses the actual implemented mean-reversion panel in sleeves/sleeve_mean_reversion.",
+      "Current code does not implement a healthy-breadth regime gate.",
+      "Current code uses 20d and 60d price z-scores, not a 20-day return z-score versus a 252-day distribution."
+    ],
+    "execution_assumption": "Weights activate on the next trading day and daily PnL is measured close-to-close."
+  },
+  "quality_current": {
+    "start_date": "2023-05-22",
+    "end_date": "2026-03-23",
+    "annualized_return": 0.1601374596332512,
+    "sharpe_ratio": 0.8177982198027999,
+    "max_drawdown": -0.26361923173234736,
+    "win_rate": 0.6666666666666666,
+    "avg_holding_period_days": 182.05128205128204,
+    "ic_summary": {
+      "accruals": -0.006077614087338356,
+      "debt_equity": -0.02120730660484793,
+      "gross_margin": -0.021480536326850232,
+      "quality_score": -0.025512896904195462,
+      "revenue_growth": 0.0017709565941162538,
+      "roe": -0.012445014277401266
+    },
+    "lookahead_bias_flags": [],
+    "trade_count": 39
+  },
+  "quality_enhanced": {
+    "start_date": "2023-05-22",
+    "end_date": "2026-03-23",
+    "annualized_return": 0.18617320797905057,
+    "sharpe_ratio": 1.099329709867473,
+    "max_drawdown": -0.20796738279829097,
+    "win_rate": 0.6808510638297872,
+    "avg_holding_period_days": 151.06382978723406,
+    "ic_summary": {
+      "accruals": -0.006051086662798298,
+      "debt_equity_trend": -0.026866518698213458,
+      "gross_margin_stability": -0.052901319728560325,
+      "quality_score": -0.01438283172605524,
+      "revenue_growth_consistency": -0.002003946805663357,
+      "sector_roe": -0.011813605909050038
+    },
+    "lookahead_bias_flags": [],
+    "trade_count": 47
+  },
+  "mean_reversion": {
+    "start_date": "2024-01-10",
+    "end_date": "2026-03-23",
+    "annualized_return": 0.14371836045446762,
+    "sharpe_ratio": 0.8494105708372115,
+    "max_drawdown": -0.19417096257895172,
+    "win_rate": 0.5803244374672946,
+    "avg_holding_period_days": 2.6483516483516483,
+    "ic_summary": {},
+    "lookahead_bias_flags": [],
+    "trade_count": 1911
+  },
+  "spy": {
+    "start_date": "2023-05-22",
+    "end_date": "2026-03-23",
+    "annualized_return": 0.1887671017038135,
+    "sharpe_ratio": 1.2219165340790417,
+    "max_drawdown": -0.18755238717833667
+  },
+  "artifacts": {
+    "results_json": "research/backtest_results_quality_meanrev.json",
+    "equity_plot": "research/backtest_equity_curves_quality_meanrev.png"
+  }
+}

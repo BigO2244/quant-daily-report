@@ -2332,6 +2332,29 @@ def run_sleeve_charlie_munger():
     return run_charlie_munger()
 
 
+def run_sleeve_value(prices: pd.DataFrame | None = None) -> "SleeveOutput":
+    """
+    Build and return a SleeveOutput for the Value sleeve (Sleeve 2 / EDGAR XBRL P/E).
+
+    Never raises — returns an empty SleeveOutput on any failure so the
+    orchestrator can continue.
+    """
+    from core.portfolio_alloc import create_sleeve_output
+    try:
+        from sleeves.sleeve_2.selection import build_value_sleeve_output
+        if prices is None or (hasattr(prices, "empty") and prices.empty):
+            logger.warning("[VALUE] No price data — skipping value sleeve")
+            return create_sleeve_output([], "sleeve_2", 0.0, "No price data")
+        result = build_value_sleeve_output(prices=prices, top_n=10, base_strength=1.0)
+        n_pos = len(result.positions_df) if result.positions_df is not None else 0
+        strength = result.meta.strength if result.meta else 0.0
+        logger.info("[VALUE] SleeveOutput: %d positions, strength=%.3f", n_pos, strength)
+        return result
+    except Exception as exc:
+        logger.warning("[VALUE] Sleeve build failed (non-blocking): %s", exc)
+        return create_sleeve_output([], "sleeve_2", 0.0, f"Build error: {exc}")
+
+
 def run_sleeve_quality(prices: pd.DataFrame | None = None) -> "SleeveOutput":
     """
     Build and return a SleeveOutput for the Quality sleeve.
@@ -3348,6 +3371,40 @@ def build_daily_snapshot(
             stop_loss = None
             take_profit = None
             atr = None
+        # ── TP/SL sanity guard ────────────────────────────────────────
+        # For long positions (weight > 0): take_profit > entry_px > stop_loss
+        # For short positions (weight < 0): take_profit < entry_px < stop_loss
+        if entry_px is not None and take_profit is not None and stop_loss is not None:
+            if weight > 0:
+                if take_profit <= entry_px:
+                    logger.warning(
+                        "[SNAPSHOT][TP_SL_INVALID] %s LONG: take_profit=%.4f <= entry=%.4f; "
+                        "clipping to entry * 1.01",
+                        ticker, take_profit, entry_px,
+                    )
+                    take_profit = entry_px * 1.01
+                if stop_loss >= entry_px:
+                    logger.warning(
+                        "[SNAPSHOT][TP_SL_INVALID] %s LONG: stop_loss=%.4f >= entry=%.4f; "
+                        "clipping to entry * 0.99",
+                        ticker, stop_loss, entry_px,
+                    )
+                    stop_loss = entry_px * 0.99
+            elif weight < 0:
+                if take_profit >= entry_px:
+                    logger.warning(
+                        "[SNAPSHOT][TP_SL_INVALID] %s SHORT: take_profit=%.4f >= entry=%.4f; "
+                        "clipping to entry * 0.99",
+                        ticker, take_profit, entry_px,
+                    )
+                    take_profit = entry_px * 0.99
+                if stop_loss <= entry_px:
+                    logger.warning(
+                        "[SNAPSHOT][TP_SL_INVALID] %s SHORT: stop_loss=%.4f <= entry=%.4f; "
+                        "clipping to entry * 1.01",
+                        ticker, stop_loss, entry_px,
+                    )
+                    stop_loss = entry_px * 1.01
         risk_levels.append(
             {
                 "ticker": ticker,
@@ -4775,6 +4832,7 @@ def main(argv: list[str] | None = None):
     # ─────────────────────────────────────────────────────────────
 
     # ── Run sleeves ───────────────────────────────────────────────
+    _val_output_direct = None  # set by run_sleeve_value() in the live path below
     if offline_fixture:
         logger.warning(
             "[OFFLINE] Fixture mode enabled; skipping sleeve runs and live data fetches."
@@ -4845,6 +4903,10 @@ def main(argv: list[str] | None = None):
             compute_and_log_ic(report_date=today)
         except Exception as _ic_err:
             logger.info("[IC_MONITOR] Skipped: %s", _ic_err)
+        # ── Value sleeve (non-blocking) ───────────────────────────────
+        _val_output_direct = run_sleeve_value(
+            prices=shared_universe_prices if not shared_universe_prices.empty else None
+        )
         # ─────────────────────────────────────────────────────────────
         s2_details = {}
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
@@ -4854,7 +4916,14 @@ def main(argv: list[str] | None = None):
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
     trend_valid, trend_reason = _sleeve_is_valid(st_equity)
-    s2_valid, s2_reason = _sleeve_is_valid(s2_equity)
+    # s2 validity derived from SleeveOutput positions (not legacy equity_df)
+    _s2_pos_df = _val_output_direct.positions_df if _val_output_direct is not None else None
+    s2_valid = _s2_pos_df is not None and not _s2_pos_df.empty
+    s2_reason = (
+        (_val_output_direct.meta.notes if _val_output_direct and _val_output_direct.meta else "inactive")
+        if not s2_valid
+        else ""
+    )
     cm_valid, cm_reason = _sleeve_is_valid(cm_equity)
     if not trend_valid:
         logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
@@ -4918,13 +4987,19 @@ def main(argv: list[str] | None = None):
 
     # ── Extract sleeve outputs for dynamic allocation ─────────────
     trend_output = build_trend_sleeve_output(st_signals, st_equity, top_n=10, regime=_vix_regime)
-    val_output = extract_sleeve_output(s2_equity, s2_trades, "sleeve_2", 1.0)
-    val_output = extract_sleeve_output(
-        s2_equity,
-        s2_trades,
-        "sleeve_2",
-        1.0,
-        target_weights=s2_details.get("target_weights") if s2_details else None,
+    # Use the directly-built SleeveOutput from run_sleeve_value() when available;
+    # fall back to the legacy extract path (always empty) otherwise.
+    from core.portfolio_alloc import create_sleeve_output as _cso
+    val_output = (
+        _val_output_direct
+        if _val_output_direct is not None
+        else extract_sleeve_output(
+            s2_equity,
+            s2_trades,
+            "sleeve_2",
+            1.0,
+            target_weights=s2_details.get("target_weights") if s2_details else None,
+        )
     )
     cm_output = extract_sleeve_output(
         cm_equity,

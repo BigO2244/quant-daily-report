@@ -9,6 +9,23 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# Load .env explicitly so Alpaca credentials are available regardless of how
+# this module is invoked (cron, SSH one-liner, direct python call).
+_env_path = _REPO_ROOT / ".env"
+if _env_path.exists():
+    with open(_env_path, "r", encoding="utf-8") as _env_file:
+        for _line in _env_file:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _key, _, _value = _line.partition("=")
+            _value = _value.strip().strip('"').strip("'")
+            os.environ.setdefault(_key.strip(), _value)
+
 import pandas as pd
 
 from brokers.alpaca_broker import (
@@ -74,6 +91,17 @@ def _workflow_start_utc() -> dt.datetime | None:
         return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _operator_summary_timing_kwargs(timing: dict[str, object]) -> dict[str, str]:
+    return {
+        "timing_status": str(timing.get("timing_status") or ""),
+        "preferred_target_et": str(timing.get("preferred_target_et") or ""),
+        "degraded_auto_trade_deadline_et": str(timing.get("degraded_auto_trade_deadline_et") or ""),
+        "actual_workflow_start_et": str(timing.get("actual_workflow_start_et") or ""),
+        "actual_execution_start_et": str(timing.get("actual_execution_start_et") or ""),
+        "first_submit_et": str(timing.get("first_submit_et") or ""),
+    }
 
 
 def _coerce_float(value: object) -> float | None:
@@ -380,10 +408,39 @@ def _workflow_context() -> dict[str, object]:
     }
 
 
+def _acquire_execution_lock(trade_date: str) -> Path:
+    """Atomic single-flight guard: only one execution process per trade date.
+
+    Uses O_CREAT|O_EXCL (open with 'x' mode) so the file-create is atomic on
+    POSIX filesystems.  If the lock file already exists, raises SystemExit so
+    the caller can log and terminate without proceeding to order submission.
+    """
+    lock_dir = _REPO_ROOT / "outputs" / "execution_locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"{trade_date}.lock"
+    try:
+        with open(lock_path, "x") as fh:
+            fh.write(f"pid={os.getpid()} started_at={dt.datetime.now(ZoneInfo('UTC')).isoformat()}\n")
+    except FileExistsError:
+        logger.error(
+            "[LOCK] Execution lock already held for %s (%s) — "
+            "a second process attempted to run. Aborting to prevent duplicate orders.",
+            trade_date,
+            lock_path,
+        )
+        raise SystemExit(75)  # EX_TEMPFAIL — safe exit code, cron will not retry
+    logger.info("[LOCK] Acquired execution lock: %s", lock_path)
+    return lock_path
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
     trade_date = _trade_date()
+
+    # --- Atomic single-flight guard (prevents TOCTOU duplicate submissions) ---
+    _acquire_execution_lock(trade_date)
+
     run_id = get_run_id()
     run_root = get_run_dir(run_id)
     _init_run_root(run_root, trade_date)
@@ -438,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
             event_freshness_status=payload.get("event_freshness_status"),
             bundle_status=payload.get("bundle_status"),
             execution_window_status=payload.get("execution_window_status"),
-            **timing,
+            **_operator_summary_timing_kwargs(timing),
         )
         write_latest_run_pointer(
             run_id=run_id,
@@ -516,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
             event_freshness_status=str(os.getenv("EVENT_FRESHNESS_STATUS", "")).strip() or None,
             bundle_status=str(os.getenv("BUNDLE_STATUS", "")).strip() or None,
             execution_window_status=str(os.getenv("EXECUTION_WINDOW_STATUS", "")).strip() or None,
-            **timing,
+            **_operator_summary_timing_kwargs(timing),
         )
         write_latest_run_pointer(
             run_id=run_id,
