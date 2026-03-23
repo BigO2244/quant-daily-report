@@ -74,7 +74,21 @@ def update_benchmark_close_history(
     if closes.empty:
         return pd.DataFrame(columns=["date", "spy_close", "spy_return"])
 
-    close_index = pd.DatetimeIndex(pd.to_datetime(closes.index, errors="coerce"))
+    closes.index = pd.DatetimeIndex(pd.to_datetime(closes.index, errors="coerce")).normalize()
+    closes = closes.sort_index()
+    closes = closes.groupby(closes.index).last()
+    target_dates = pd.date_range(start, asof, freq="D")
+    closes = (
+        closes.reindex(closes.index.union(target_dates))
+        .sort_index()
+        .ffill()
+        .reindex(target_dates)
+        .dropna()
+    )
+    if closes.empty:
+        return pd.DataFrame(columns=["date", "spy_close", "spy_return"])
+
+    close_index = pd.DatetimeIndex(closes.index)
     out = pd.DataFrame({"date": close_index.strftime("%Y-%m-%d"), "spy_close": closes.to_numpy()})
     out["spy_close"] = pd.to_numeric(out["spy_close"], errors="coerce")
     out = out.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)

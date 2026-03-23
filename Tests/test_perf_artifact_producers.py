@@ -44,6 +44,27 @@ def test_benchmark_producer_schema_and_determinism(tmp_path: Path):
     assert df1.equals(df2)
 
 
+def test_benchmark_producer_carries_forward_to_non_trading_asof(tmp_path: Path):
+    out = tmp_path / "outputs" / "perf" / "benchmark_close_history.csv"
+
+    idx = pd.to_datetime(["2026-03-19", "2026-03-20"])
+    vals = pd.Series([659.80, 648.57], index=idx)
+
+    def fake_fetch(_start: str, _end: str) -> pd.Series:
+        return vals
+
+    df = update_benchmark_close_history(
+        asof_date="2026-03-21",
+        output_path=out,
+        inception_date="2026-03-19",
+        fetch_spy_close_fn=fake_fetch,
+    )
+
+    assert df["date"].tolist() == ["2026-03-19", "2026-03-20", "2026-03-21"]
+    assert float(df.loc[df["date"] == "2026-03-21", "spy_close"].iloc[0]) == 648.57
+    assert float(df.loc[df["date"] == "2026-03-21", "spy_return"].iloc[0]) == 0.0
+
+
 def test_analyzer_producer_schema_and_one_row_per_date(tmp_path: Path):
     signals_dir = tmp_path / "signals"
     exec_dir = tmp_path / "outputs" / "execution_email"

@@ -617,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         from core.benchmark_tracking import update_benchmark_vs_spy
-        update_benchmark_vs_spy(trade_date=trade_date)
+        update_benchmark_vs_spy(trade_date=trade_date, run_root=run_root)
     except Exception as _bench_exc:
         logger.warning("[BENCHMARK] benchmark update skipped: %s", _bench_exc)
 

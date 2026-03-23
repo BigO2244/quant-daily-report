@@ -31,13 +31,49 @@ def load_existing_benchmark(path: Path = BENCHMARK_PATH) -> list[dict[str, Any]]
     return []
 
 
+def resolve_broker_snapshot_path(
+    *,
+    broker_snapshot_path: Path = BROKER_SNAPSHOT_PATH,
+    run_root: Path | str | None = None,
+) -> Path | None:
+    candidates: list[Path] = []
+
+    if broker_snapshot_path:
+        candidates.append(Path(broker_snapshot_path))
+
+    if run_root:
+        broker_dir = Path(run_root) / "broker"
+        candidates.extend(
+            [
+                broker_dir / "posttrade_account_snapshot.json",
+                broker_dir / "pretrade_account_snapshot.json",
+            ]
+        )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    if candidates:
+        _warn(
+            "missing broker snapshot"
+            + f" (checked: {', '.join(str(path) for path in candidates)})"
+        )
+    else:
+        _warn("missing broker snapshot")
+    return None
+
+
 def read_broker_equity(path: Path = BROKER_SNAPSHOT_PATH) -> float | None:
     if not path.exists():
         _warn("missing broker snapshot")
         return None
     try:
         snap = json.loads(path.read_text(encoding="utf-8"))
-        equity = snap.get("equity")
+        equity = snap.get("equity") or snap.get("portfolio_value")
+        if equity is None:
+            account = snap.get("account") or {}
+            equity = account.get("equity") or account.get("portfolio_value")
         if equity is not None:
             return float(equity)
         _warn("broker snapshot has no equity field")
@@ -106,6 +142,7 @@ def update_benchmark_vs_spy(
     trade_date: str | None = None,
     broker_snapshot_path: Path = BROKER_SNAPSHOT_PATH,
     benchmark_path: Path = BENCHMARK_PATH,
+    run_root: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """Append today's benchmark record and recompute all returns.
 
@@ -125,7 +162,14 @@ def update_benchmark_vs_spy(
         _log(f"already recorded for {trade_date}, skipping")
         return None
 
-    equity = read_broker_equity(broker_snapshot_path)
+    resolved_snapshot = resolve_broker_snapshot_path(
+        broker_snapshot_path=broker_snapshot_path,
+        run_root=run_root,
+    )
+    if resolved_snapshot is None:
+        return None
+
+    equity = read_broker_equity(resolved_snapshot)
     if equity is None:
         return None
 

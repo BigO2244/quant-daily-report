@@ -26,6 +26,21 @@ def _write_broker(path: Path, equity: float) -> None:
     path.write_text(json.dumps({"equity": equity, "cash": 1000.0}), encoding="utf-8")
 
 
+def _write_nested_broker(path: Path, equity: float) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "account": {
+                    "equity": equity,
+                    "portfolio_value": equity,
+                    "cash": 1000.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _mock_spy(price: float):
     return patch("core.benchmark_tracking.fetch_spy_close", return_value=price)
 
@@ -68,6 +83,11 @@ class TestReadBrokerEquity:
         p = tmp_path / "snap.json"
         p.write_text('{"cash": 1000}', encoding="utf-8")
         assert read_broker_equity(p) is None
+
+    def test_reads_nested_account_equity(self, tmp_path: Path) -> None:
+        p = tmp_path / "snap.json"
+        _write_nested_broker(p, 99853.01)
+        assert read_broker_equity(p) == 99853.01
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +278,27 @@ class TestUpdateBenchmarkVsSpy:
         data = json.loads(benchmark.read_text(encoding="utf-8"))
         dates = [r["date"] for r in data]
         assert dates == ["2026-03-14", "2026-03-17", "2026-03-18"]
+
+    def test_run_root_fallback_to_pretrade_snapshot(self, tmp_path: Path) -> None:
+        run_root = tmp_path / "runs" / "2026-03-18T093500"
+        pretrade = run_root / "broker" / "pretrade_account_snapshot.json"
+        pretrade.parent.mkdir(parents=True, exist_ok=True)
+        _write_nested_broker(pretrade, 101250.0)
+        benchmark = tmp_path / "benchmark_vs_spy.json"
+
+        with _mock_spy(505.0):
+            result = update_benchmark_vs_spy(
+                trade_date="2026-03-18",
+                broker_snapshot_path=tmp_path / "missing_latest.json",
+                benchmark_path=benchmark,
+                run_root=run_root,
+            )
+
+        assert result is not None
+        assert result["portfolio_value"] == 101250.0
+        data = json.loads(benchmark.read_text(encoding="utf-8"))
+        assert data[0]["date"] == "2026-03-18"
+        assert data[0]["spy_price"] == 505.0
 
 
 # ---------------------------------------------------------------------------
