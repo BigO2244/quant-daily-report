@@ -395,6 +395,17 @@ def _failure_payload(*, trade_date: str, run_id: str, reason: str, timing: dict[
     return payload
 
 
+def _precompute_reconciliation_halt_reason(recon_result: dict[str, object] | None) -> str | None:
+    decision = str((recon_result or {}).get("reconciliation_decision") or "PASS").strip().upper()
+    if decision == "PASS":
+        return None
+    if decision == "BLOCK":
+        return str((recon_result or {}).get("block_reason") or "pretrade_blocked_reconciliation")
+    if decision == "SELF_HEAL":
+        return "precompute_reconciliation_self_heal"
+    return f"precompute_reconciliation_{decision.lower()}"
+
+
 def _workflow_context() -> dict[str, object]:
     return {
         "workflow_kind": str(os.getenv("WORKFLOW_KIND", "")).strip() or None,
@@ -529,9 +540,16 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path=paper_ledger_path,
         sent_ledger_path="outputs/orders_sent/orders_sent.csv",
     )
-    if str((recon_result or {}).get("reconciliation_decision") or "PASS") == "BLOCK":
-        reason = str((recon_result or {}).get("block_reason") or "pretrade_blocked_reconciliation")
+    recon_halt_reason = _precompute_reconciliation_halt_reason(recon_result)
+    if recon_halt_reason is not None:
+        reason = str(recon_halt_reason)
         payload = _failure_payload(trade_date=trade_date, run_id=run_id, reason=reason, timing=timing)
+        payload["pretrade_reconciliation_decision"] = str(
+            (recon_result or {}).get("reconciliation_decision") or ""
+        )
+        payload["pretrade_reconciliation_report_path"] = str(
+            (recon_result or {}).get("report_path") or ""
+        )
         write_canonical_execution_payload(payload, trade_date, run_root=run_root, allow_overwrite=True)
         _write_execution_email_payload(trade_date, payload)
         retry = evaluate_live_retry(
@@ -585,7 +603,12 @@ def main(argv: list[str] | None = None) -> int:
             status_message=reason,
         )
         write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
-        logger.error("[LIVE_EXECUTION] blocked by pretrade reconciliation reason=%s", reason)
+        logger.error(
+            "[LIVE_EXECUTION] blocked by pretrade reconciliation decision=%s reason=%s report=%s",
+            str((recon_result or {}).get("reconciliation_decision") or "UNKNOWN"),
+            reason,
+            str((recon_result or {}).get("report_path") or ""),
+        )
         return 1
 
     if args.continuation_mode == "buy_only":

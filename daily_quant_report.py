@@ -65,6 +65,7 @@ from core.execution_payload import write_canonical_execution_payload, normalize_
 from core.execution_audit import write_planner_audit
 from core.execution_summary import write_execution_artifacts
 from core.precompute_contract import write_precompute_bundle
+from core.research_context import write_research_context
 from core.operator_summary import (
     format_broker_preflight_banner,
     write_operator_summary,
@@ -1375,6 +1376,7 @@ def build_execution_email_payload(
     execution_trades = (paper_summary or {}).get("execution_trades", []) or []
     planned_trades = (paper_summary or {}).get("trade_plan", []) or []
     execution_filter = (paper_summary or {}).get("execution_filter", {}) or {}
+    alpaca_submissions = (paper_summary or {}).get("alpaca_submissions", []) or []
     min_trade_dollars_raw = (paper_summary or {}).get("min_trade_dollars")
     min_trade_dollars = float(min_trade_dollars_raw) if min_trade_dollars_raw is not None else None
     filter_stats = _coerce_filter_stats(execution_filter)
@@ -1390,6 +1392,65 @@ def build_execution_email_payload(
     turnover_pct = _coerce_float_or_none((paper_summary or {}).get("turnover_pct"))
     trades = []
     source_rows = []
+    row_reason_lookup: dict[tuple[str, str, str], dict[str, object]] = {}
+
+    def _register_reason_source(rows: list[dict] | list[object], *, source_key: str) -> None:
+        for item in rows or []:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker", "")).upper()
+            side = str(item.get("side", "")).upper()
+            order_id = str(item.get("order_id", "") or "")
+            if not ticker or not side:
+                continue
+            row_reason_lookup[(ticker, side, order_id)] = {
+                "reason": item.get("reason"),
+                "price": item.get("price"),
+                "notional": item.get("notional"),
+                "source": source_key,
+            }
+            if order_id:
+                continue
+            row_reason_lookup[(ticker, side, "")] = {
+                "reason": item.get("reason"),
+                "price": item.get("price"),
+                "notional": item.get("notional"),
+                "source": source_key,
+            }
+
+    _register_reason_source(planned_trades, source_key="trade_plan_lookup")
+    _register_reason_source(execution_trades, source_key="execution_trades_lookup")
+    _register_reason_source(orders, source_key="shadow_orders_lookup")
+
+    payload_submitted_count = int(
+        ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_success")
+        or 0
+    )
+    payload_rejected_count = int(
+        ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_failed")
+        or 0
+    )
+
+    if mode == "ALPACA" and payload_submitted_count > 0 and alpaca_submissions:
+        for submission in alpaca_submissions:
+            if not isinstance(submission, dict):
+                continue
+            ticker = str(submission.get("ticker", "")).upper()
+            side = str(submission.get("side", "")).upper()
+            order_id = str(submission.get("order_id", "") or "")
+            lookup = row_reason_lookup.get((ticker, side, order_id)) or row_reason_lookup.get((ticker, side, ""))
+            source_rows.append(
+                {
+                    "ticker": ticker,
+                    "side": side,
+                    "shares": submission.get("quantity"),
+                    "price": (lookup or {}).get("price"),
+                    "reason": (lookup or {}).get("reason"),
+                    "order_id": order_id or None,
+                    "notional": (lookup or {}).get("notional"),
+                    "source": "alpaca_submissions",
+                }
+            )
     if status == "PLANNED" and planned_trades:
         for tr in planned_trades:
             source_rows.append(
@@ -1404,7 +1465,7 @@ def build_execution_email_payload(
                     "source": "trade_plan",
                 }
             )
-    elif execution_trades:
+    elif execution_trades and not source_rows:
         for tr in execution_trades:
             source_rows.append(
                 {
@@ -1418,7 +1479,7 @@ def build_execution_email_payload(
                     "source": "execution_trades",
                 }
             )
-    elif status == "READY":
+    elif status == "READY" and not source_rows:
         for order in orders:
             source_rows.append(
                 {
@@ -1437,7 +1498,7 @@ def build_execution_email_payload(
         side = str(row.get("side", "")).upper()
         risk = risk_map.get(ticker, {})
         shares = _coerce_whole_shares(row.get("shares"))
-        if side in {"SELL", "CLOSE", "REDUCE"}:
+        if side in {"SELL", "CLOSE", "REDUCE"} and str(row.get("source") or "") != "alpaca_submissions":
             available = holdings_shares.get(str(ticker))
             if available is not None:
                 shares = min(shares, available)
@@ -1619,14 +1680,6 @@ def build_execution_email_payload(
     )
     sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
     total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
-    payload_submitted_count = int(
-        ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_success")
-        or 0
-    )
-    payload_rejected_count = int(
-        ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_failed")
-        or 0
-    )
 
     payload = {
         "trade_date": trade_date,
@@ -2396,12 +2449,24 @@ def run_sleeve_quality(prices: pd.DataFrame | None = None) -> "SleeveOutput":
         return create_sleeve_output([], "sleeve_quality", 0.0, f"Build error: {exc}")
 
 
-def run_sleeve_mean_reversion(prices: pd.DataFrame | None = None) -> "SleeveOutput":
+def run_sleeve_mean_reversion(
+    prices: pd.DataFrame | None = None,
+    regime_state: "dict | None" = None,
+) -> "SleeveOutput":
     """
     Build and return a SleeveOutput for the Mean Reversion sleeve.
 
     Uses only price data (no DataStore / EDGAR dependency).
     Returns an empty SleeveOutput if price data is missing or signals fail.
+
+    Parameters
+    ----------
+    prices       : Raw OHLCV universe prices from download_prices().
+    regime_state : Optional dict of today's regime state (regime_result.today).
+                   When breadth_state is in {deteriorating, washed_out} OR
+                   composite_regime is in {risk_off_defensive, high_volatility,
+                   breadth_washout}, the breadth gate fires and reduces the
+                   candidate count by 50%.  Pass None to disable the gate.
     """
     from core.portfolio_alloc import create_sleeve_output
     try:
@@ -2411,8 +2476,17 @@ def run_sleeve_mean_reversion(prices: pd.DataFrame | None = None) -> "SleeveOutp
             logger.warning("[MEAN_REV] No price data — skipping")
             return create_sleeve_output([], "sleeve_mean_reversion", 0.0, "No price data")
 
-        logger.info("[MEAN_REV] Building mean-reversion signals")
-        result = build_mean_reversion_sleeve_output(prices=prices, top_n=10, base_strength=1.0)
+        logger.info(
+            "[MEAN_REV] Building mean-reversion signals (regime breadth_state=%s composite=%s)",
+            (regime_state or {}).get("breadth_state", "unknown"),
+            (regime_state or {}).get("composite_regime", "unknown"),
+        )
+        result = build_mean_reversion_sleeve_output(
+            prices=prices,
+            top_n=10,
+            base_strength=1.0,
+            breadth_gate=regime_state,
+        )
         logger.info(
             "[MEAN_REV] SleeveOutput: %d positions, strength=%.3f",
             len(result.positions_df) if result.positions_df is not None else 0,
@@ -3149,6 +3223,22 @@ def build_daily_snapshot(
     )
     stop_pct = _snapshot_risk_value("STOP_PCT", STOP_PCT_DEFAULT)
     take_profit_pct = _snapshot_risk_value("TAKE_PROFIT_PCT", TAKE_PROFIT_PCT_DEFAULT)
+    # Regime-aware ATR multipliers and position sizing
+    _regime_composite = (regime_summary or {}).get("composite_regime", "")
+    _elevated_defensive = _regime_composite in ("risk_off_defensive", "high_volatility")
+    if _elevated_defensive:
+        _stop_atr_mult = 2.5
+        _take_atr_mult = 3.75
+        _size_scale = 0.80
+        logger.info(
+            "[TPSL] Elevated/defensive regime (%s): widening stops to %.2f ATR, "
+            "TP to %.2f ATR, sizing at %.0f%% of target notional",
+            _regime_composite, _stop_atr_mult, _take_atr_mult, _size_scale * 100,
+        )
+    else:
+        _stop_atr_mult = stop_atr_mult
+        _take_atr_mult = take_profit_atr_mult
+        _size_scale = 1.0
     target_cash_weight_today = float(max(0.0, min(1.0, getattr(alloc_result, "cash_weight", 0.0))))
     breaker_cfg = get_breaker_config()
     exposure_today = float(breaker_cfg.get("exposure_multiplier", 1.0))
@@ -3349,11 +3439,11 @@ def build_daily_snapshot(
                 take_profit = None
             elif atr is not None:
                 if weight > 0:
-                    stop_loss = entry_px - stop_atr_mult * atr
-                    take_profit = entry_px + take_profit_atr_mult * atr
+                    stop_loss = entry_px - _stop_atr_mult * atr
+                    take_profit = entry_px + _take_atr_mult * atr
                 else:
-                    stop_loss = entry_px + stop_atr_mult * atr
-                    take_profit = entry_px - take_profit_atr_mult * atr
+                    stop_loss = entry_px + _stop_atr_mult * atr
+                    take_profit = entry_px - _take_atr_mult * atr
             else:
                 if weight > 0:
                     stop_loss = entry_px * (1 - stop_pct)
@@ -3442,7 +3532,7 @@ def build_daily_snapshot(
             shares = None
             notional = None
             if exec_px and model_equity > 0:
-                notional = abs(weight) * model_equity
+                notional = abs(weight) * model_equity * _size_scale
                 shares = round(notional / exec_px, 2) if exec_px > 0 else None
             orders.append(
                 {
@@ -4893,10 +4983,9 @@ def main(argv: list[str] | None = None):
         quality_output = run_sleeve_quality(
             prices=shared_universe_prices if not shared_universe_prices.empty else None
         )
-        # ── Mean Reversion sleeve (non-blocking) ─────────────────────
-        mr_output = run_sleeve_mean_reversion(
-            prices=shared_universe_prices if not shared_universe_prices.empty else None
-        )
+        # ── Mean Reversion sleeve — built after regime engine so the
+        # breadth gate can be wired with _regime_today (set below).
+        mr_output = None  # populated after regime engine runs
         # ── Rolling IC monitor (non-blocking) ────────────────────────
         try:
             from research.ic_monitor import compute_and_log_ic
@@ -4983,6 +5072,16 @@ def main(argv: list[str] | None = None):
             )
         except Exception as _regime_err:
             logger.warning("[REGIME] Live regime summary skipped: %s", _regime_err)
+    # ─────────────────────────────────────────────────────────────
+
+    # ── Mean Reversion sleeve (non-blocking, breadth-gated) ───────
+    # Built here (after regime engine) so _regime_today is available to
+    # fire the breadth gate when market internals are unhealthy.
+    if mr_output is None:
+        mr_output = run_sleeve_mean_reversion(
+            prices=shared_universe_prices if not shared_universe_prices.empty else None,
+            regime_state=_regime_today,
+        )
     # ─────────────────────────────────────────────────────────────
 
     # ── Extract sleeve outputs for dynamic allocation ─────────────
@@ -5649,6 +5748,26 @@ def main(argv: list[str] | None = None):
             execution_payload.get("status_label") or ("NO TRADES" if not exec_trades else "TRADES READY"),
         )
 
+    try:
+        research_context_paths = write_research_context(
+            trade_date=trade_date_str,
+            run_id=str(_RUN_CONTEXT.run_id) if _RUN_CONTEXT is not None else None,
+            mode=trading_mode_norm,
+            daily_snapshot=daily_snapshot,
+            execution_payload=execution_payload,
+            paper_summary=paper_summary,
+            run_root=_RUN_CONTEXT.run_root if _RUN_CONTEXT is not None else None,
+            allow_overwrite=True,
+        )
+        daily_snapshot["research_context_path"] = research_context_paths.get("canonical_path")
+        logger.info(
+            "[RESEARCH_CONTEXT] canonical=%s run=%s",
+            research_context_paths.get("canonical_path"),
+            research_context_paths.get("run_path", ""),
+        )
+    except Exception as exc:
+        logger.warning("[RESEARCH_CONTEXT] write skipped (non-blocking): %s", exc)
+
     # ── Write execution audit artifact (non-blocking) ─────────────────
     if _RUN_CONTEXT is not None:
         try:
@@ -5885,7 +6004,7 @@ def main(argv: list[str] | None = None):
             precompute_contract_path = write_precompute_bundle(
                 trade_date=trade_date_str,
                 run_id=str((paper_summary or {}).get("run_id") or (_RUN_CONTEXT.run_id if _RUN_CONTEXT is not None else "")),
-                mode=str((paper_summary or {}).get("trading_mode") or trading_mode_norm).upper(),
+                mode=trading_mode_norm.upper(),  # always use TRADING_MODE env var; paper_summary may report "PAPER" during plan-only runs
                 daily_snapshot=daily_snapshot,
                 signals_payload=signals_payload,
                 execution_payload=execution_payload,

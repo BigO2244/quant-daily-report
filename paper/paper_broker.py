@@ -1281,7 +1281,7 @@ def _write_broker_account_snapshot(
     safe_write_text(
         out_path,
         json.dumps(json_safe_primitive(payload), indent=2) + "\n",
-        allow_overwrite=_allow_overwrite(),
+        allow_overwrite=True,
     )
     return str(out_path)
 
@@ -1305,7 +1305,7 @@ def _write_broker_positions_snapshot(
     safe_write_text(
         out_path,
         json.dumps(json_safe_primitive(payload), indent=2) + "\n",
-        allow_overwrite=_allow_overwrite(),
+        allow_overwrite=True,
     )
     return str(out_path)
 

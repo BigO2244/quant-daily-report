@@ -216,6 +216,25 @@ def test_write_broker_account_snapshot_normalizes_uuid(tmp_path, monkeypatch):
     assert payload["account"]["raw"]["account_uuid"] == str(account_uuid)
 
 
+def test_write_broker_account_snapshot_overwrites_latest_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs"))
+
+    path = broker._write_broker_account_snapshot(
+        "postsell_account_snapshot.json",
+        "2026-03-17",
+        {"cash": "3000.0", "equity": "25000.0", "buying_power": "8000.0", "status": "ACTIVE"},
+    )
+    broker._write_broker_account_snapshot(
+        "postsell_account_snapshot.json",
+        "2026-03-17",
+        {"cash": "4000.0", "equity": "25500.0", "buying_power": "9000.0", "status": "ACTIVE"},
+    )
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert payload["cash"] == 4000.0
+    assert payload["equity"] == 25500.0
+
+
 def test_run_paper_day_handles_uuid_in_postsell_snapshot(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-uuid-postsell"))
