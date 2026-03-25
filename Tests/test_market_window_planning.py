@@ -204,6 +204,71 @@ def test_shadow_idempotent_skip_prevents_same_day_reexecution(monkeypatch):
     assert len(result["idempotent_skips"]) == 1
 
 
+def test_shadow_can_use_explicit_precomputed_trade_plan(monkeypatch):
+    _mock_open_market(monkeypatch)
+    monkeypatch.setattr(
+        broker,
+        "build_rebalance_trades",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not rebuild trades")),
+    )
+    monkeypatch.setattr(
+        broker,
+        "apply_risk_guards",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not mutate exact plan")),
+    )
+    monkeypatch.setattr(
+        broker,
+        "_risk_controls_preflight",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not mutate exact plan")),
+    )
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    precomputed_trade_plan = [
+        {
+            "ticker": "AAPL",
+            "side": "BUY",
+            "shares": 7,
+            "entry_price": 100.0,
+            "notional": 700.0,
+            "reason": "precomputed_exact_plan",
+        }
+    ]
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+        precomputed_trade_plan=precomputed_trade_plan,
+    )
+
+    assert result["execution_status"] == "READY"
+    assert result["precomputed_trade_plan_used"] is True
+    assert result["execution_trades"] == [
+        {
+            "ticker": "AAPL",
+            "side": "BUY",
+            "shares": 7.0,
+            "price": 100.0,
+            "notional": 700.0,
+            "reason": "precomputed_exact_plan",
+        }
+    ]
+    assert result["trade_plan"] == [
+        {
+            "ticker": "AAPL",
+            "side": "BUY",
+            "shares": 7.0,
+            "price": 100.0,
+            "slippage_cost": 0.0,
+            "notional": 700.0,
+            "reason": "precomputed_exact_plan",
+            "quantity": 7.0,
+        }
+    ]
+
+
 def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     _mock_open_market(monkeypatch, trading_mode="alpaca")

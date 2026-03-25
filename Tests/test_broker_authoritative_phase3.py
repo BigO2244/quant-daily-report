@@ -218,6 +218,78 @@ def test_phase3_buy_budget_reduces_buys_when_confirmed_cash_is_lower(tmp_path, m
     assert [o["ticker"] for o in result["budget_skipped_orders"]] == ["CCC"]
 
 
+def test_phase3_exact_precomputed_plan_bypasses_buy_budget_clipping(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-exact"))
+    trades = pd.DataFrame(
+        [
+            {"ticker": "AAA", "side": "SELL", "shares": 1.0, "quantity": 1.0, "price": 100.0, "notional": 100.0, "slippage_cost": 0.0, "reason": "trim"},
+            {"ticker": "BBB", "side": "BUY", "shares": 10.0, "quantity": 10.0, "price": 90.0, "notional": 900.0, "slippage_cost": 0.0, "reason": "add"},
+            {"ticker": "CCC", "side": "BUY", "shares": 3.0, "quantity": 3.0, "price": 100.0, "notional": 300.0, "slippage_cost": 0.0, "reason": "add"},
+        ]
+    )
+    _mock_open_market(
+        monkeypatch,
+        trades_df=trades,
+        trade_meta={"target_investable_dollars": 10000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+    )
+    monkeypatch.setattr(
+        broker,
+        "build_rebalance_trades",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not rebuild trades")),
+    )
+    monkeypatch.setattr(
+        broker,
+        "apply_risk_guards",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not mutate exact plan")),
+    )
+    monkeypatch.setattr(
+        broker,
+        "_risk_controls_preflight",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not mutate exact plan")),
+    )
+    fake = _SequencedAlpaca(
+        account_sequence=[
+            {"cash": "2500.0", "equity": "10000.0", "buying_power": "2500.0", "status": "ACTIVE"},
+            {"cash": "1900.0", "equity": "10100.0", "buying_power": "1900.0", "status": "ACTIVE"},
+            {"cash": "700.0", "equity": "10100.0", "buying_power": "700.0", "status": "ACTIVE"},
+        ],
+        positions_sequence=[
+            [],
+            [
+                {"symbol": "BBB", "qty": "10", "current_price": "90.0", "market_value": "900.0"},
+                {"symbol": "CCC", "qty": "3", "current_price": "100.0", "market_value": "300.0"},
+            ],
+        ],
+    )
+    monkeypatch.setattr(_SequencedAlpaca, "from_env", classmethod(lambda cls: fake), raising=False)
+    monkeypatch.setattr(broker, "AlpacaBroker", _SequencedAlpaca)
+
+    result = broker.run_paper_day(
+        run_date="2026-03-11",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 3, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+        precomputed_trade_plan=[
+            {"ticker": "AAA", "side": "SELL", "shares": 1.0, "entry_price": 100.0, "notional": 100.0, "reason": "trim"},
+            {"ticker": "BBB", "side": "BUY", "shares": 10.0, "entry_price": 90.0, "notional": 900.0, "reason": "add"},
+            {"ticker": "CCC", "side": "BUY", "shares": 3.0, "entry_price": 100.0, "notional": 300.0, "reason": "add"},
+        ],
+    )
+
+    submitted_symbols = [symbol for _, symbol, _, _ in fake.submitted]
+    assert submitted_symbols == ["AAA", "BBB", "CCC"]
+    assert result["precomputed_trade_plan_used"] is True
+    assert result["alpaca_submission_summary"]["exact_plan_buy_budget_bypassed"] is True
+    assert int(result["alpaca_submission_summary"]["budget_skipped_orders"]) == 0
+    assert result["budget_skipped_orders"] == []
+    assert int(result["alpaca_submission_summary"]["buy_phase_planned"]) == 2
+    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 2
+
+
 def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-idem"))

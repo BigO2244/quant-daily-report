@@ -113,6 +113,10 @@ def _coerce_float(value: object) -> float | None:
         return None
 
 
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _read_last_ledger_equity(ledger_path: str) -> float | None:
     try:
         ledger = pd.read_csv(ledger_path)
@@ -614,6 +618,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.continuation_mode == "buy_only":
         os.environ["ALLOW_PARTIAL_BUY_CONTINUATION"] = "1"
 
+    exact_precomputed_execution = _env_truthy("PRECOMPUTE_EXECUTE_EXACT_PLAN")
     adjusted_signals_path, adjusted_cash_target_weight = _apply_pre_execution_risk_controls(
         run_root=run_root,
         trade_date=trade_date,
@@ -633,8 +638,17 @@ def main(argv: list[str] | None = None) -> int:
         constraints={
             "cash_target_weight": adjusted_cash_target_weight,
         },
+        precomputed_trade_plan=(
+            list((planned_payload or {}).get("trades") or [])
+            if exact_precomputed_execution
+            else None
+        ),
     )
     paper_summary["run_id"] = run_id
+    paper_summary["precomputed_execution_mode"] = (
+        "exact_payload" if exact_precomputed_execution else "rebuilt_from_signals"
+    )
+    paper_summary["planned_payload_trade_count"] = int(len((planned_payload or {}).get("trades") or []))
     first_submit_et = _first_submit_et(paper_summary)
     timing = classify_timing(
         now=current_et(),

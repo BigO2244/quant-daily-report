@@ -973,6 +973,53 @@ def _build_shadow_orders(trades: pd.DataFrame, run_id: str) -> List[Dict[str, ob
     return orders
 
 
+def _normalize_precomputed_trade_plan(
+    precomputed_trade_plan: List[Dict[str, object]] | None,
+) -> pd.DataFrame:
+    cols = ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
+    rows: List[Dict[str, object]] = []
+    for item in precomputed_trade_plan or []:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        side_raw = str(item.get("side") or "").strip().upper()
+        side = "SELL" if side_raw in {"SELL", "CLOSE", "REDUCE"} else "BUY"
+        try:
+            shares = float(item.get("shares", item.get("quantity")) or 0.0)
+        except Exception:
+            shares = 0.0
+        try:
+            price = float(
+                item.get("price")
+                or item.get("entry_price")
+                or 0.0
+            )
+        except Exception:
+            price = 0.0
+        try:
+            notional = float(item.get("notional") or 0.0)
+        except Exception:
+            notional = 0.0
+        if price <= 0.0 and shares > 0.0 and notional > 0.0:
+            price = abs(float(notional)) / abs(float(shares))
+        rows.append(
+            {
+                "ticker": ticker,
+                "side": side,
+                "shares": abs(float(shares)),
+                "price": float(price),
+                "slippage_cost": float(item.get("slippage_cost") or 0.0),
+                "notional": abs(float(notional)) if notional else abs(float(shares) * float(price)),
+                "reason": str(item.get("reason") or item.get("notes") or "precomputed_execution_payload"),
+            }
+        )
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows).reindex(columns=cols)
+
+
 def _normalize_and_filter_executable_trades(
     trades: pd.DataFrame,
     cfg: PaperConfig,
@@ -2263,6 +2310,7 @@ def run_paper_day(
     now_et: dt.datetime | None = None,
     constraints: Dict[str, float] | None = None,
     plan_only: bool = False,
+    precomputed_trade_plan: List[Dict[str, object]] | None = None,
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
@@ -2401,6 +2449,7 @@ def run_paper_day(
     )
 
     runtime_constraints = constraints or {}
+    use_precomputed_trade_plan = bool(precomputed_trade_plan)
     cash_target_weight_default = float(
         runtime_constraints.get("cash_target_weight", cfg.cash_target_weight_default)
     )
@@ -2578,15 +2627,29 @@ def run_paper_day(
         "overspend_prevented": False,
     }
     if not blocked:
-        trades, trade_meta = build_rebalance_trades(
-            holdings=holdings_prev,
-            targets=targets,
-            prices=pricing_series,
-            total_equity=equity_prev,
-            starting_cash=cash_prev,
-            target_cash_weight=target_cash_weight,
-            cfg=cfg,
-        )
+        if use_precomputed_trade_plan:
+            trades = _normalize_precomputed_trade_plan(precomputed_trade_plan)
+            trade_meta = {
+                "target_cash_weight": float(target_cash_weight),
+                "target_investable_dollars": float(equity_prev * investable_weight),
+                "scaled_tickers": [],
+                "overspend_prevented": False,
+                "precomputed_trade_plan_used": True,
+            }
+            logger.info(
+                "[PRECOMPUTE_EXECUTION] using explicit precomputed trade plan orders=%d",
+                int(len(trades)),
+            )
+        else:
+            trades, trade_meta = build_rebalance_trades(
+                holdings=holdings_prev,
+                targets=targets,
+                prices=pricing_series,
+                total_equity=equity_prev,
+                starting_cash=cash_prev,
+                target_cash_weight=target_cash_weight,
+                cfg=cfg,
+            )
     else:
         trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
 
@@ -2604,20 +2667,25 @@ def run_paper_day(
         "turnover_scale": 1.0,
     }
     if not blocked:
-        trades, risk_blocked, hard_stop = apply_risk_guards(trades, equity_prev, cfg)
-        risk_meta.update((trades.attrs or {}).get("risk_meta", {}))
-        blocked_reasons.extend(risk_blocked)
-        if hard_stop:
-            logger.error("[HALT] risk guard hard stop: %s", "; ".join(risk_blocked))
+        if use_precomputed_trade_plan:
             logger.info(
-                "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
-                run_date,
-                "risk_guard_hard_stop",
+                "[PRECOMPUTE_EXECUTION] bypassing risk guard mutation for explicit precomputed trade plan"
             )
-            blocked = True
-            trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
+        else:
+            trades, risk_blocked, hard_stop = apply_risk_guards(trades, equity_prev, cfg)
+            risk_meta.update((trades.attrs or {}).get("risk_meta", {}))
+            blocked_reasons.extend(risk_blocked)
+            if hard_stop:
+                logger.error("[HALT] risk guard hard stop: %s", "; ".join(risk_blocked))
+                logger.info(
+                    "[PAPER][VALIDATION] FAIL trade_date=%s reason=%s",
+                    run_date,
+                    "risk_guard_hard_stop",
+                )
+                blocked = True
+                trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
 
-    if breaker_mode == "lock" and trades is not None and not trades.empty:
+    if breaker_mode == "lock" and trades is not None and not trades.empty and not use_precomputed_trade_plan:
         side_series = (
             trades["side"].astype(str).str.upper()
             if "side" in trades.columns
@@ -2636,7 +2704,7 @@ def run_paper_day(
 
     capital_budget_meta = _default_capital_budget_meta()
     pdt_pretrade_meta = _default_pdt_pretrade_meta()
-    if mode == "alpaca" and planning_account_snapshot is not None:
+    if mode == "alpaca" and planning_account_snapshot is not None and not use_precomputed_trade_plan:
         trades, pdt_pretrade_meta, pdt_blocked_reasons = _apply_pdt_pretrade_guard(
             trades,
             planning_account_snapshot=planning_account_snapshot,
@@ -2659,7 +2727,7 @@ def run_paper_day(
                 pdt_pretrade_meta.get("broker_pdt_warning_message"),
             )
 
-    if mode == "alpaca" and planning_account_snapshot is not None:
+    if mode == "alpaca" and planning_account_snapshot is not None and not use_precomputed_trade_plan:
         requested_buy_notional = (
             float(
                 trades.loc[
@@ -2729,24 +2797,30 @@ def run_paper_day(
         or equity_prev
         or 0.0
     )
-    _rc_result = _risk_controls_preflight(execution_trades, _rc_equity, ledger_path)
-    if _rc_result.get("blocked"):
-        blocked = True
-        _cb_reason = str(_rc_result.get("block_reason") or "risk_controls_circuit_breaker")
-        blocked_reasons.append(_cb_reason)
-        execution_enabled = False
-        logger.warning("[RISK_CONTROLS] Execution blocked by circuit breaker: %s", _cb_reason)
-    elif _rc_result.get("trimmed_tickers"):
+    if use_precomputed_trade_plan:
+        _rc_result = {"drawdown": 0.0, "blocked": False, "trimmed_tickers": []}
         logger.info(
-            "[RISK_CONTROLS] Position caps applied to: %s",
-            ", ".join(str(t) for t in _rc_result["trimmed_tickers"]),
+            "[PRECOMPUTE_EXECUTION] bypassing risk-controls preflight mutation for explicit precomputed trade plan"
         )
-    logger.info(
-        "[RISK_CONTROLS] drawdown=%.2f%% blocked=%s trimmed=%d",
-        float(_rc_result.get("drawdown", 0.0)) * 100,
-        bool(_rc_result.get("blocked")),
-        len(_rc_result.get("trimmed_tickers") or []),
-    )
+    else:
+        _rc_result = _risk_controls_preflight(execution_trades, _rc_equity, ledger_path)
+        if _rc_result.get("blocked"):
+            blocked = True
+            _cb_reason = str(_rc_result.get("block_reason") or "risk_controls_circuit_breaker")
+            blocked_reasons.append(_cb_reason)
+            execution_enabled = False
+            logger.warning("[RISK_CONTROLS] Execution blocked by circuit breaker: %s", _cb_reason)
+        elif _rc_result.get("trimmed_tickers"):
+            logger.info(
+                "[RISK_CONTROLS] Position caps applied to: %s",
+                ", ".join(str(t) for t in _rc_result["trimmed_tickers"]),
+            )
+        logger.info(
+            "[RISK_CONTROLS] drawdown=%.2f%% blocked=%s trimmed=%d",
+            float(_rc_result.get("drawdown", 0.0)) * 100,
+            bool(_rc_result.get("blocked")),
+            len(_rc_result.get("trimmed_tickers") or []),
+        )
     # ─────────────────────────────────────────────────────────────
 
     run_id = _run_id(run_date, cfg)
@@ -3030,32 +3104,43 @@ def run_paper_day(
                         len(buy_orders),
                     )
                 else:
-                    buy_orders_budgeted, budget_skipped_orders = _apply_buy_budget(
-                        buy_orders,
-                        float(buy_budget_computed or 0.0),
-                    )
-                    if buy_orders and not buy_orders_budgeted:
-                        buy_phase_block_reason = "post_sell_cash_below_reserve"
-                    if budget_skipped_orders:
+                    if use_precomputed_trade_plan:
+                        buy_orders_budgeted = list(buy_orders)
+                        budget_skipped_orders = []
+                        alpaca_submission_summary["exact_plan_buy_budget_bypassed"] = True
                         logger.info(
-                            "[ALPACA][BUY_BUDGET] skipped_orders=%d buy_budget=%.2f",
-                            len(budget_skipped_orders),
-                            float(buy_budget_computed or 0.0),
-                        )
-                    if buy_phase_block_reason:
-                        logger.warning(
-                            "[ALPACA][BUY_PHASE] blocked reason=%s refreshed_cash=%s planned_orders=%d",
-                            buy_phase_block_reason,
+                            "[PRECOMPUTE_EXECUTION] exact plan preserving planned buy orders=%d despite refreshed_cash=%s computed_buy_budget=%.2f",
+                            len(buy_orders_budgeted),
                             postsell_cash_confirmed,
-                            len(buy_orders),
+                            float(buy_budget_computed or 0.0),
                         )
                     else:
-                        logger.info(
-                            "[ALPACA][BUY_PHASE] allowed refreshed_cash=%s buy_budget=%.2f planned_orders=%d",
-                            postsell_cash_confirmed,
+                        buy_orders_budgeted, budget_skipped_orders = _apply_buy_budget(
+                            buy_orders,
                             float(buy_budget_computed or 0.0),
-                            len(buy_orders_budgeted),
                         )
+                        if buy_orders and not buy_orders_budgeted:
+                            buy_phase_block_reason = "post_sell_cash_below_reserve"
+                        if budget_skipped_orders:
+                            logger.info(
+                                "[ALPACA][BUY_BUDGET] skipped_orders=%d buy_budget=%.2f",
+                                len(budget_skipped_orders),
+                                float(buy_budget_computed or 0.0),
+                            )
+                        if buy_phase_block_reason:
+                            logger.warning(
+                                "[ALPACA][BUY_PHASE] blocked reason=%s refreshed_cash=%s planned_orders=%d",
+                                buy_phase_block_reason,
+                                postsell_cash_confirmed,
+                                len(buy_orders),
+                            )
+                        else:
+                            logger.info(
+                                "[ALPACA][BUY_PHASE] allowed refreshed_cash=%s buy_budget=%.2f planned_orders=%d",
+                                postsell_cash_confirmed,
+                                float(buy_budget_computed or 0.0),
+                                len(buy_orders_budgeted),
+                            )
                 if not buy_phase_allowed:
                     buy_orders_budgeted = []
                 alpaca_submission_summary["budget_skipped_orders"] = int(len(budget_skipped_orders))
@@ -3508,6 +3593,7 @@ def run_paper_day(
         "execution_filter": execution_filter_stats,
         "exec_trace": exec_trace,
         "execution_enabled": bool(execution_enabled),
+        "precomputed_trade_plan_used": bool(use_precomputed_trade_plan),
         "risk_meta": risk_meta,
         "capital_budget": capital_budget_meta,
         "pdt_pretrade": pdt_pretrade_meta,
