@@ -7,7 +7,7 @@ import os
 import argparse
 from pathlib import Path
 
-from core.email_governance import should_email_pre_trade_status, suppress_internal_state_email
+from core.email_governance import should_email_pre_trade_status
 from core.run_pointer import read_latest_run_pointer
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.paper_broker import load_config, reset_orders_sent_ledger_for_date
@@ -94,21 +94,12 @@ def main(argv: list[str] | None = None) -> None:
     out_txt.write_text(body_text.rstrip() + "\n", encoding="utf-8")
     logger.info("[EXECUTION_EMAIL] wrote artifact: %s", out_txt)
 
-    # --- Email Governance: Check if this execution state should generate an email ---
+    # --- Email Governance: This script is the operator-facing pre-trade status email ---
     execution_status = payload.get("execution_status", "UNKNOWN")
     halt_reason = payload.get("halt_reason")
-    
-    # Suppress internal state emails (PLANNED, READY, HALTED, MISSING_EXECUTION_PAYLOAD, etc.)
-    # These are recorded in the artifact but do not generate operator emails.
-    if suppress_internal_state_email(execution_status):
-        logger.info(
-            "[EXECUTION_EMAIL] suppressed internal state email: status=%s reason=%s (recorded in artifact only)",
-            execution_status,
-            halt_reason or "none"
-        )
-        return
-    
-    # Check if pre-trade analysis email is enabled in configuration
+
+    # Check if pre-trade analysis email is enabled in configuration.
+    # The normalized status (READY / HALTED / NO_ACTION) is the operator message.
     if not should_email_pre_trade_status(execution_status, halt_reason):
         logger.info("[EXECUTION_EMAIL] email governance suppressed: event_type=pre_trade_analysis")
         return
