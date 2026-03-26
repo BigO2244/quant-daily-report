@@ -24,12 +24,20 @@ Position sizing: inverse-vol weighted (higher-vol names get smaller sizes
 because mean-reversion trades carry more gap risk).
 
 Output format mirrors sleeve_1/selection.py so portfolio_alloc.py works unchanged.
+
+Breadth gate:
+    When market breadth is unhealthy (breadth_state in {deteriorating,
+    washed_out} OR composite_regime in {risk_off_defensive, high_volatility,
+    breadth_washout}), mean-reversion signals are suppressed by halving the
+    number of candidates returned.  Oversold stocks in weak-breadth regimes
+    can continue falling; the gate reduces but does not eliminate exposure so
+    the regime allocator retains final authority over sleeve weight.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -80,6 +88,59 @@ IVOL_CAP          = 1.50
 MAX_SINGLE_WEIGHT = 0.35    # tighter cap than momentum — MR carries more gap risk
 MIN_SINGLE_WEIGHT = 0.02
 
+# ── Breadth gate ────────────────────────────────────────────────────────
+# breadth_state values that indicate unhealthy market internals.
+# "deteriorating" and "washed_out" both increase false-positive risk for MR
+# because oversold names can remain oversold (or become more oversold) when
+# a majority of stocks are already in downtrends.
+UNHEALTHY_BREADTH_STATES = frozenset({"deteriorating", "washed_out"})
+
+# Composite regimes that imply unhealthy breadth even if breadth_state is
+# not individually available (provides a fallback check path).
+UNHEALTHY_COMPOSITE_REGIMES = frozenset({
+    "risk_off_defensive",
+    "high_volatility",
+    "breadth_washout",
+})
+
+# When the gate fires, reduce top_n to this fraction of the requested value.
+# 0.5 = take only the top half — tightest signals only, not a hard block.
+BREADTH_GATE_TOP_N_FRACTION = 0.5
+
+
+# ── Breadth gate helper ─────────────────────────────────────────────────
+
+def _breadth_gate_is_active(breadth_gate: Optional[Dict]) -> bool:
+    """
+    Return True if the supplied regime state indicates unhealthy breadth.
+
+    Parameters
+    ----------
+    breadth_gate : dict containing regime state keys (breadth_state,
+                   composite_regime), typically regime_result.today from
+                   the regime engine.  None → gate is inactive.
+
+    Logic:
+        1. If breadth_state is in UNHEALTHY_BREADTH_STATES → active.
+        2. Else if composite_regime is in UNHEALTHY_COMPOSITE_REGIMES → active.
+        3. Otherwise → inactive.
+
+    Returns False (gate inactive) on any missing / unexpected input so
+    the gate never accidentally suppresses output due to data absence.
+    """
+    if not breadth_gate or not isinstance(breadth_gate, dict):
+        return False
+
+    breadth_state = breadth_gate.get("breadth_state")
+    if breadth_state in UNHEALTHY_BREADTH_STATES:
+        return True
+
+    composite = breadth_gate.get("composite_regime")
+    if composite in UNHEALTHY_COMPOSITE_REGIMES:
+        return True
+
+    return False
+
 
 # ── Signal builder ─────────────────────────────────────────────────────
 
@@ -120,18 +181,25 @@ def build_mean_reversion_signals(prices: pd.DataFrame) -> pd.DataFrame:
 # ── Selection ─────────────────────────────────────────────────────────
 
 def select_and_weight(
-    signals:    pd.DataFrame,
-    asof_date:  Optional[str] = None,
-    top_n:      int = TOP_N_DEFAULT,
+    signals:      pd.DataFrame,
+    asof_date:    Optional[str] = None,
+    top_n:        int = TOP_N_DEFAULT,
+    breadth_gate: Optional[Dict] = None,
 ) -> pd.DataFrame:
     """
     Select the most oversold names and compute inverse-vol target weights.
 
     Parameters
     ----------
-    signals   : Output of build_mean_reversion_signals().
-    asof_date : Snapshot date. Defaults to the most recent date in signals.
-    top_n     : Maximum number of positions to hold.
+    signals      : Output of build_mean_reversion_signals().
+    asof_date    : Snapshot date. Defaults to the most recent date in signals.
+    top_n        : Maximum number of positions to hold.
+    breadth_gate : Optional regime-state dict (regime_result.today) used to
+                   fire the healthy-breadth gate.  When breadth is unhealthy
+                   (breadth_state in {deteriorating, washed_out} OR composite
+                   regime in {risk_off_defensive, high_volatility,
+                   breadth_washout}), top_n is reduced to the top 50% of
+                   candidates.  Pass None to disable the gate entirely.
 
     Returns
     -------
@@ -199,8 +267,22 @@ def select_and_weight(
         + W_STR        * str_rank
     )
 
+    # ── Breadth gate ─────────────────────────────────────────────────
+    gate_active = _breadth_gate_is_active(breadth_gate)
+    effective_top_n = top_n
+    if gate_active:
+        effective_top_n = max(1, int(top_n * BREADTH_GATE_TOP_N_FRACTION))
+        logger.info(
+            "[MR_SELECT] Breadth gate ACTIVE (breadth=%s composite=%s): "
+            "top_n %d → %d",
+            (breadth_gate or {}).get("breadth_state", "unknown"),
+            (breadth_gate or {}).get("composite_regime", "unknown"),
+            top_n,
+            effective_top_n,
+        )
+
     # ── Select top N ────────────────────────────────────────────────
-    selected = eligible.nlargest(top_n, 'score').copy()
+    selected = eligible.nlargest(effective_top_n, 'score').copy()
     selected = selected.reset_index(drop=True)
     selected['rank'] = range(1, len(selected) + 1)
 
@@ -228,18 +310,21 @@ def select_and_weight(
     # ── Output columns ───────────────────────────────────────────────
     selected['sleeve'] = SLEEVE_NAME
     selected['reason'] = 'mean_reversion_selection'
+    selected['breadth_gate_active'] = gate_active
 
-    out_cols = ['ticker', 'target_weight', 'sleeve', 'score', 'rank', 'reason']
+    out_cols = ['ticker', 'target_weight', 'sleeve', 'score', 'rank', 'reason',
+                'breadth_gate_active']
     for opt in ['sector', 'realized_vol', 'rsi_14', 'zscore_20d', 'bb_pct_b']:
         if opt in selected.columns:
             out_cols.append(opt)
 
     logger.info(
-        "[MR_SELECT] Selected %d positions on %s (top: %s, RSI=%.1f)",
+        "[MR_SELECT] Selected %d positions on %s (top: %s, RSI=%.1f, breadth_gate=%s)",
         len(selected),
         asof_date.date(),
         selected.iloc[0]['ticker'] if len(selected) > 0 else '—',
         selected.iloc[0].get('rsi_14', float('nan')),
+        gate_active,
     )
     return selected[out_cols].reset_index(drop=True)
 
@@ -250,6 +335,7 @@ def build_mean_reversion_sleeve_output(
     prices:         pd.DataFrame,
     top_n:          int = TOP_N_DEFAULT,
     base_strength:  float = 1.0,
+    breadth_gate:   Optional[Dict] = None,
 ) -> SleeveOutput:
     """
     Build a SleeveOutput for the Mean Reversion sleeve.
@@ -259,6 +345,10 @@ def build_mean_reversion_sleeve_output(
     prices        : Raw OHLCV DataFrame from download_prices().
     top_n         : Maximum positions.
     base_strength : Base sleeve strength for dynamic portfolio allocation.
+    breadth_gate  : Optional regime-state dict (regime_result.today).
+                    When breadth is unhealthy, candidate count is halved and
+                    'breadth_gate_active: True' is recorded in the output notes.
+                    Pass None (default) to run without the gate.
 
     Returns
     -------
@@ -273,9 +363,11 @@ def build_mean_reversion_sleeve_output(
         logger.warning("[MR] Signal build failed: %s", exc)
         return create_sleeve_output([], SLEEVE_NAME, 0.0, f'Signal build error: {exc}')
 
-    targets = select_and_weight(signals, top_n=top_n)
+    targets = select_and_weight(signals, top_n=top_n, breadth_gate=breadth_gate)
     if targets.empty:
         return create_sleeve_output([], SLEEVE_NAME, 0.0, 'No oversold stocks pass gates')
+
+    gate_active = bool(targets.iloc[0].get('breadth_gate_active', False))
 
     positions = [
         {
@@ -290,8 +382,9 @@ def build_mean_reversion_sleeve_output(
     n_pos      = len(positions)
     top_ticker = positions[0]['ticker'] if positions else '—'
     rsi_val    = targets.iloc[0].get('rsi_14', float('nan')) if len(targets) > 0 else float('nan')
+    gate_note  = "; breadth_gate_active=True (top_n halved)" if gate_active else ""
     notes = (
         f"Active: {n_pos} positions (top: {top_ticker}, RSI={rsi_val:.1f}), "
-        "RSI + z-score + Bollinger %B, inverse-vol weighted"
+        f"RSI + z-score + Bollinger %B, inverse-vol weighted{gate_note}"
     )
     return create_sleeve_output(positions, SLEEVE_NAME, base_strength, notes)
