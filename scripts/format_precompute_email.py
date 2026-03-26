@@ -32,6 +32,8 @@ def main() -> None:
     t_cap      = (p.get("risk_meta") or {}).get("turnover_cap", 0)
     t_req      = (p.get("risk_meta") or {}).get("turnover_requested", 0)
     t_scaled   = (p.get("risk_meta") or {}).get("turnover_scaled", False)
+    t_scope    = str((p.get("risk_meta") or {}).get("turnover_cap_scope") or "").strip().lower()
+    turnover_label = "Buy turnover" if t_scope == "buys_only" else "Turnover"
     pricing_dt = p.get("pricing_asof", "?")
 
     lines = []
@@ -68,9 +70,14 @@ def main() -> None:
         lines.append("")
 
     if t_scaled:
-        lines.append(f"RISK NOTE: Turnover capped at ${t_cap:,.2f} (requested ${t_req:,.2f}). Orders scaled to {p['risk_meta']['turnover_scale']:.2%}.")
+        scope_suffix = " Sells were left intact." if t_scope == "buys_only" else ""
+        lines.append(
+            f"RISK NOTE: {turnover_label} capped at ${t_cap:,.2f} "
+            f"(requested ${t_req:,.2f}). Orders scaled to {p['risk_meta']['turnover_scale']:.2%}."
+            f"{scope_suffix}"
+        )
     else:
-        lines.append(f"Turnover: ${t_req:,.2f} (no cap applied)")
+        lines.append(f"{turnover_label}: ${t_req:,.2f} (no cap applied)")
 
     print("\n".join(lines))
 

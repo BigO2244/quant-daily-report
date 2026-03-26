@@ -791,27 +791,36 @@ def apply_risk_guards(
     out = trades.copy()
 
     max_turnover_notional = equity * cfg.max_turnover_pct
+    side_series = out["side"].astype(str).str.upper() if "side" in out.columns else pd.Series("", index=out.index)
+    buy_mask = side_series.eq("BUY")
+    buy_turnover = float(out.loc[buy_mask, "notional"].astype(float).sum()) if "notional" in out.columns else 0.0
     current_turnover = float(out["notional"].sum())
+    sell_turnover = float(current_turnover - buy_turnover)
     risk_meta = {
-        "turnover_requested": float(current_turnover),
+        "turnover_requested": float(buy_turnover),
+        "turnover_requested_buys": float(buy_turnover),
+        "turnover_requested_sells": float(sell_turnover),
+        "turnover_requested_total": float(current_turnover),
         "turnover_cap": float(max_turnover_notional),
         "turnover_scaled": False,
         "turnover_scale": 1.0,
+        "turnover_cap_scope": "buys_only",
     }
-    if cfg.max_turnover_pct > 0 and current_turnover > max_turnover_notional + 1e-9:
-        scale = max_turnover_notional / current_turnover if current_turnover > 0 else 0.0
+    if cfg.max_turnover_pct > 0 and buy_turnover > max_turnover_notional + 1e-9:
+        scale = max_turnover_notional / buy_turnover if buy_turnover > 0 else 0.0
         scale = max(0.0, min(1.0, float(scale)))
         logger.warning(
-            "[RISK] turnover cap hit; scaling orders (requested=%.2f cap=%.2f scale=%.4f)",
-            current_turnover,
+            "[RISK] buy turnover cap hit; scaling BUY orders only (requested=%.2f cap=%.2f scale=%.4f sells_exempt=%.2f)",
+            buy_turnover,
             max_turnover_notional,
             scale,
+            sell_turnover,
         )
-        out["shares"] = out["shares"].astype(float) * scale
+        out.loc[buy_mask, "shares"] = out.loc[buy_mask, "shares"].astype(float) * scale
         if "notional" in out.columns:
-            out["notional"] = out["notional"].astype(float) * scale
+            out.loc[buy_mask, "notional"] = out.loc[buy_mask, "notional"].astype(float) * scale
         if "slippage_cost" in out.columns:
-            out["slippage_cost"] = out["slippage_cost"].astype(float) * scale
+            out.loc[buy_mask, "slippage_cost"] = out.loc[buy_mask, "slippage_cost"].astype(float) * scale
 
         scaled_rows: List[Dict[str, object]] = []
         for _, row in out.iterrows():

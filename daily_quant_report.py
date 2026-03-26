@@ -1385,6 +1385,8 @@ def build_execution_email_payload(
     turnover_requested_raw = risk_meta.get("turnover_requested")
     turnover_cap_raw = risk_meta.get("turnover_cap")
     turnover_scale_raw = risk_meta.get("turnover_scale")
+    turnover_cap_scope = str(risk_meta.get("turnover_cap_scope") or "").strip().lower()
+    turnover_scope_label = "buy turnover" if turnover_cap_scope == "buys_only" else "turnover"
     turnover_requested = _coerce_float_or_none(turnover_requested_raw)
     turnover_cap = _coerce_float_or_none(turnover_cap_raw)
     turnover_scale = _coerce_float_or_none(turnover_scale_raw)
@@ -1730,9 +1732,13 @@ def build_execution_email_payload(
         },
         "risk_meta": {
             "turnover_requested": turnover_requested,
+            "turnover_requested_buys": _coerce_float_or_none(risk_meta.get("turnover_requested_buys")),
+            "turnover_requested_sells": _coerce_float_or_none(risk_meta.get("turnover_requested_sells")),
+            "turnover_requested_total": _coerce_float_or_none(risk_meta.get("turnover_requested_total")),
             "turnover_cap": turnover_cap,
             "turnover_scaled": turnover_scaled,
             "turnover_scale": turnover_scale,
+            "turnover_cap_scope": turnover_cap_scope or None,
             "turnover_dollars": turnover_dollars,
             "turnover_pct": turnover_pct,
         },
@@ -1768,12 +1774,12 @@ def build_execution_email_payload(
             payload["no_trades_reason"] = "BREAKER_MODE=lock — already at cash"
         if turnover_scaled and turnover_requested is not None and turnover_cap is not None and turnover_scale is not None:
             payload["no_trades_reason"] = (
-                f"Turnover cap scaling applied (requested ${turnover_requested:,.2f} vs cap ${turnover_cap:,.2f}, "
+                f"{turnover_scope_label.capitalize()} cap scaling applied (requested ${turnover_requested:,.2f} vs cap ${turnover_cap:,.2f}, "
                 f"scale={turnover_scale:.4f}); no trades remained after rounding/minimum filters"
             )
     if turnover_scaled and turnover_requested is not None and turnover_cap is not None and turnover_scale is not None:
         payload["turnover_note"] = (
-            f"Turnover cap applied: requested ${turnover_requested:,.2f}, "
+            f"{turnover_scope_label.capitalize()} cap applied: requested ${turnover_requested:,.2f}, "
             f"cap ${turnover_cap:,.2f}, scale {turnover_scale:.4f}."
         )
     if status == "PLANNED":

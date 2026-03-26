@@ -741,9 +741,14 @@ def test_apply_risk_guards_turnover_cap_scales_without_hard_stop_and_drops_dust(
 
     expected_scale = 3000.0 / 3400.0
     assert guarded.attrs["risk_meta"]["turnover_scaled"] is True
+    assert guarded.attrs["risk_meta"]["turnover_cap_scope"] == "buys_only"
+    assert guarded.attrs["risk_meta"]["turnover_requested"] == pytest.approx(3400.0)
+    assert guarded.attrs["risk_meta"]["turnover_requested_buys"] == pytest.approx(3400.0)
+    assert guarded.attrs["risk_meta"]["turnover_requested_sells"] == pytest.approx(0.0)
+    assert guarded.attrs["risk_meta"]["turnover_requested_total"] == pytest.approx(3400.0)
     assert guarded.attrs["risk_meta"]["turnover_scale"] == pytest.approx(expected_scale, rel=1e-6)
 
-    # Shares should be reduced by turnover scale, then rounded for executable orders.
+    # BUY shares should be reduced by turnover scale, then rounded for executable orders.
     assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == pytest.approx(10.0 * expected_scale, abs=1.0)
     assert float(guarded.loc[guarded["ticker"] == "MSFT", "shares"].iloc[0]) == pytest.approx(5.0 * expected_scale, abs=1.0)
 
@@ -755,6 +760,47 @@ def test_apply_risk_guards_turnover_cap_scales_without_hard_stop_and_drops_dust(
     assert set(normalized["ticker"].tolist()) == {"AAPL", "MSFT"}
     assert stats["dropped_zero_shares"] == 0
     assert stats["dropped_min_notional"] == 0
+
+
+def test_apply_risk_guards_turnover_cap_exempts_sells_and_preserves_full_exits():
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=100.0,
+        max_turnover_pct=0.30,
+        max_position_change_pct=1.0,
+        risk_action="hard_stop",
+    )
+    trades = pd.DataFrame(
+        [
+            {"ticker": "MU", "side": "SELL", "shares": 2.0, "price": 200.0, "slippage_cost": 0.0, "notional": 400.0, "reason": "removed_from_targets"},
+            {"ticker": "AAPL", "side": "BUY", "shares": 10.0, "price": 200.0, "slippage_cost": 0.0, "notional": 2000.0, "reason": "rebalance"},
+            {"ticker": "MSFT", "side": "BUY", "shares": 10.0, "price": 200.0, "slippage_cost": 0.0, "notional": 2000.0, "reason": "rebalance"},
+        ]
+    )
+
+    guarded, blocked, hard_stop = broker.apply_risk_guards(trades=trades, equity=10000.0, cfg=cfg)
+
+    assert hard_stop is False
+    assert blocked == []
+    assert guarded.attrs["risk_meta"]["turnover_scaled"] is True
+    assert guarded.attrs["risk_meta"]["turnover_cap_scope"] == "buys_only"
+    assert guarded.attrs["risk_meta"]["turnover_requested"] == pytest.approx(4000.0)
+    assert guarded.attrs["risk_meta"]["turnover_requested_buys"] == pytest.approx(4000.0)
+    assert guarded.attrs["risk_meta"]["turnover_requested_sells"] == pytest.approx(400.0)
+    assert guarded.attrs["risk_meta"]["turnover_requested_total"] == pytest.approx(4400.0)
+    assert guarded.attrs["risk_meta"]["turnover_scale"] == pytest.approx(0.75, rel=1e-6)
+
+    mu_row = guarded.loc[guarded["ticker"] == "MU"].iloc[0]
+    assert str(mu_row["side"]).upper() == "SELL"
+    assert float(mu_row["shares"]) == 2.0
+    assert float(mu_row["notional"]) == 400.0
+    assert str(mu_row["reason"]) == "removed_from_targets"
+
+    assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == 7.0
+    assert float(guarded.loc[guarded["ticker"] == "MSFT", "shares"].iloc[0]) == 7.0
 
 
 def test_run_paper_day_raises_on_signal_date_mismatch(monkeypatch):
