@@ -87,8 +87,9 @@ def _portfolio_value_from_summary(summary: dict[str, Any]) -> float | None:
     )
 
     for candidate in (
-        benchmark.get("portfolio_value"),
         broker_context.get("broker_preflight_equity"),
+        broker_context.get("broker_equity_at_planning"),
+        benchmark.get("portfolio_value"),
     ):
         value = _coerce_float(candidate)
         if value is not None and value > 0:

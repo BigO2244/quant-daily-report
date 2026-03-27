@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from core.benchmark_tracking import (
+    _portfolio_value_from_summary,
     _recompute_returns,
     load_existing_benchmark,
     read_broker_equity,
@@ -141,6 +142,23 @@ class TestRecomputeReturns:
 
     def test_empty_records(self) -> None:
         assert _recompute_returns([]) == []
+
+
+class TestPortfolioValueFromSummary:
+    def test_prefers_broker_preflight_equity_over_benchmark_placeholder(self) -> None:
+        summary = {
+            "benchmark": {"portfolio_value": 10000.0},
+            "broker_context": {
+                "broker_preflight_equity": "9569.05",
+                "broker_equity_at_planning": 9568.25,
+            },
+            "portfolio_state": {
+                "cash_after": 4090.95,
+                "portfolio_market_value": 5473.12,
+            },
+        }
+
+        assert _portfolio_value_from_summary(summary) == pytest.approx(9569.05)
 
 
 # ---------------------------------------------------------------------------
