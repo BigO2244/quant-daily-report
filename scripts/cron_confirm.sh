@@ -32,8 +32,8 @@ fi
 
 # --- Compute report date ---
 export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
-export MODE="alpaca"
-export TRADING_MODE="alpaca"
+export MODE="paper"
+export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
 export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
 

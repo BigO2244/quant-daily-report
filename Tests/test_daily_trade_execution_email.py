@@ -6,16 +6,20 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _load_module_with_stubs(tmp_path: Path):
+    original_modules: dict[str, object] = {}
     for name in list(sys.modules):
         if name == "core" or name.startswith("core."):
+            original_modules[name] = sys.modules.get(name)
             sys.modules.pop(name, None)
         if name == "paper" or name.startswith("paper."):
+            original_modules[name] = sys.modules.get(name)
             sys.modules.pop(name, None)
 
     paper_pkg = ModuleType("paper")
@@ -29,7 +33,7 @@ def _load_module_with_stubs(tmp_path: Path):
         build_execution_email_html=lambda payload: ("subject", "<p>body</p>"),
     )
     broker_mod = SimpleNamespace(
-        load_config=lambda _path: SimpleNamespace(trading_mode="alpaca"),
+        load_config=lambda _path: SimpleNamespace(trading_mode="paper"),
         reset_orders_sent_ledger_for_date=lambda *_args, **_kwargs: None,
     )
     send_mod = SimpleNamespace(send_execution_email=lambda **kwargs: None)
@@ -45,6 +49,10 @@ def _load_module_with_stubs(tmp_path: Path):
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    for name in ("paper", "paper.build_execution_email", "paper.paper_broker", "paper.send_execution_email"):
+        sys.modules.pop(name, None)
+    for name, original in original_modules.items():
+        sys.modules[name] = original
     return module
 
 
@@ -59,7 +67,7 @@ def test_halted_execution_status_sends_operator_email(tmp_path, monkeypatch) -> 
         {
             "run_id": "run-halted",
             "trade_date": "2026-03-26",
-            "mode": "ALPACA",
+            "mode": "PAPER",
             "run_root": str(run_root),
             "status": "failed_pre_execution",
         },
@@ -69,7 +77,7 @@ def test_halted_execution_status_sends_operator_email(tmp_path, monkeypatch) -> 
         {
             "run_id": "run-halted",
             "trade_date": "2026-03-26",
-            "mode": "ALPACA",
+            "mode": "PAPER",
             "execution_status": "HALTED",
             "halt_reason": "precompute_reconciliation_self_heal",
             "trades": [],

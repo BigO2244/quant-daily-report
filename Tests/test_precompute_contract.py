@@ -24,7 +24,7 @@ def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
     contract_path = write_precompute_bundle(
         trade_date=trade_date,
         run_id="run123",
-        mode="ALPACA",
+        mode="PAPER",
         daily_snapshot={
             "asof": trade_date,
             "signals_snapshot_path": "signals/2026-03-17.json",
@@ -61,7 +61,7 @@ def test_validate_precompute_contract_wrong_date() -> None:
         {
             "artifact_type": "alpaca_precompute_bundle",
             "trade_date": "2026-03-16",
-            "mode": "ALPACA",
+            "mode": "PAPER",
             "status": "complete",
             "validated_for_execution": True,
             "files": {"daily_snapshot": "x", "signals": "y", "planned_execution_payload": "z"},
@@ -79,7 +79,7 @@ def test_validate_precompute_contract_incomplete(tmp_path: Path, monkeypatch) ->
     contract = {
         "artifact_type": "alpaca_precompute_bundle",
         "trade_date": "2026-03-17",
-        "mode": "ALPACA",
+        "mode": "PAPER",
         "status": "complete",
         "validated_for_execution": True,
         "files": {
@@ -93,7 +93,7 @@ def test_validate_precompute_contract_incomplete(tmp_path: Path, monkeypatch) ->
     assert reason == REASON_PRECOMPUTE_INCOMPLETE
 
 
-def test_validate_precompute_contract_accepts_paper_mode_for_alpaca(tmp_path: Path, monkeypatch) -> None:
+def test_validate_precompute_contract_accepts_legacy_alpaca_mode_alias(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     bundle_dir = Path("outputs/precompute/2026-03-17")
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +102,7 @@ def test_validate_precompute_contract_accepts_paper_mode_for_alpaca(tmp_path: Pa
     contract = {
         "artifact_type": "alpaca_precompute_bundle",
         "trade_date": "2026-03-17",
-        "mode": "PAPER",
+        "mode": "ALPACA",
         "status": "complete",
         "validated_for_execution": True,
         "files": {
@@ -112,7 +112,7 @@ def test_validate_precompute_contract_accepts_paper_mode_for_alpaca(tmp_path: Pa
         },
     }
 
-    valid, reason = validate_precompute_contract(contract, expected_trade_date="2026-03-17", expected_mode="ALPACA")
+    valid, reason = validate_precompute_contract(contract, expected_trade_date="2026-03-17", expected_mode="PAPER")
 
     assert valid is True
     assert reason is None

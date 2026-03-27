@@ -9,16 +9,16 @@ from paper.build_execution_email import build_execution_email_text
 import paper.paper_broker as broker
 
 
-def test_shadow_market_closed_generates_planning_email():
+def test_paper_market_closed_generates_planning_email():
     payload = dqr.build_execution_email_payload(
         trade_date="2026-02-09",
         daily_snapshot={"risk_levels": [], "holdings": []},
         paper_summary={
-            "trading_mode": "shadow",
+            "trading_mode": "paper",
             "market_status": "CLOSED",
             "planned_for": "2026-02-10T09:30:00-05:00",
             "plan_only": False,
-            "shadow_orders": [],
+            "orders": [],
             "blocked_reasons": [],
             "run_id": "rid-1",
         },
@@ -41,7 +41,7 @@ def test_live_market_closed_halts_and_generates_no_plan():
             "trading_mode": "live",
             "market_status": "CLOSED",
             "planned_for": "2026-02-10T09:30:00-05:00",
-            "shadow_orders": [{"ticker": "AAPL"}],
+            "orders": [{"ticker": "AAPL"}],
             "blocked_reasons": [],
             "run_id": "rid-2",
         },
@@ -52,7 +52,7 @@ def test_live_market_closed_halts_and_generates_no_plan():
     assert payload["trades"] == []
 
 
-def _mock_open_market(monkeypatch, trading_mode: str = "shadow"):
+def _mock_open_market(monkeypatch, trading_mode: str = "paper"):
     cfg = broker.PaperConfig(
         initial_equity=10000.0,
         benchmark_ticker="SPY",
@@ -62,6 +62,41 @@ def _mock_open_market(monkeypatch, trading_mode: str = "shadow"):
         trading_mode=trading_mode,
     )
     monkeypatch.setattr(broker, "load_config", lambda path: cfg)
+
+    class _StubAlpaca:
+        paper = True
+
+        @classmethod
+        def from_env(cls):
+            return cls()
+
+        def find_order_by_client_id(self, client_id):
+            _ = client_id
+            return None
+
+        def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
+            _ = (symbol, qty, side, client_order_id, tif)
+            return {
+                "id": f"stub-{symbol}-{side}",
+                "status": "accepted",
+                "submitted_at": "2026-02-10T10:00:00-05:00",
+            }
+
+        def submit_limit_order(self, symbol, qty, side, limit_price, client_order_id, tif="day"):
+            _ = (symbol, qty, side, limit_price, client_order_id, tif)
+            return {
+                "id": f"stub-limit-{symbol}-{side}",
+                "status": "accepted",
+                "submitted_at": "2026-02-10T10:00:00-05:00",
+            }
+
+        def get_account(self):
+            return {"cash": "10000.0", "equity": "10000.0", "buying_power": "20000.0"}
+
+        def get_positions(self):
+            return []
+
+    monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
     monkeypatch.setattr(
         broker,
         "read_latest_holdings_from_ledger",
@@ -142,7 +177,8 @@ def _mock_open_market(monkeypatch, trading_mode: str = "shadow"):
     monkeypatch.setattr(broker, "_write_shadow_orders", lambda run_date, orders: f"outputs/shadow_orders/{run_date}.json")
 
 
-def test_shadow_market_open_not_halted(monkeypatch):
+def test_paper_market_open_not_halted(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     _mock_open_market(monkeypatch)
 
     now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
@@ -163,7 +199,8 @@ def test_shadow_market_open_not_halted(monkeypatch):
     assert str(result["execution_trades"][0]["side"]).upper() == "BUY"
 
 
-def test_shadow_idempotent_skip_prevents_same_day_reexecution(monkeypatch):
+def test_paper_idempotent_skip_prevents_same_day_reexecution(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     _mock_open_market(monkeypatch)
     monkeypatch.setattr(
         broker,
@@ -200,11 +237,12 @@ def test_shadow_idempotent_skip_prevents_same_day_reexecution(monkeypatch):
     assert int(result["num_trades"]) == 0
     assert float(result["turnover_notional"]) == 0.0
     assert result["execution_trades"] == []
-    assert result["shadow_orders"] == []
+    assert result["orders"] == []
     assert len(result["idempotent_skips"]) == 1
 
 
-def test_shadow_can_use_explicit_precomputed_trade_plan(monkeypatch):
+def test_paper_can_use_explicit_precomputed_trade_plan(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     _mock_open_market(monkeypatch)
     monkeypatch.setattr(
         broker,
@@ -269,9 +307,9 @@ def test_shadow_can_use_explicit_precomputed_trade_plan(monkeypatch):
     ]
 
 
-def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
+def test_paper_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    _mock_open_market(monkeypatch, trading_mode="alpaca")
+    _mock_open_market(monkeypatch, trading_mode="paper")
 
     class _StubAlpaca:
         paper = True
@@ -318,7 +356,7 @@ def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path)
     monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
 
     def _unexpected_apply_trades(*args, **kwargs):
-        raise AssertionError("apply_trades_to_holdings should not be used in alpaca mode")
+        raise AssertionError("apply_trades_to_holdings should not be used in paper execution mode")
 
     monkeypatch.setattr(broker, "apply_trades_to_holdings", _unexpected_apply_trades)
 
@@ -332,7 +370,7 @@ def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path)
         now_et=now_et,
     )
 
-    assert result["trading_mode"] == "alpaca"
+    assert result["trading_mode"] == "paper"
     assert result["execution_status"] == "READY"
     assert int(result["num_trades"]) == 1
     assert float(result["cash"]) == pytest.approx(9000.0, abs=1e-9)
@@ -343,11 +381,11 @@ def test_alpaca_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path)
     assert (tmp_path / result["alpaca_orders_path"]).exists()
 
 
-def test_alpaca_mode_invariant_raises_when_executable_but_zero_submit_attempts(
+def test_paper_mode_remote_existing_orders_are_treated_as_idempotent_replay(
     monkeypatch, tmp_path
 ):
     monkeypatch.chdir(tmp_path)
-    _mock_open_market(monkeypatch, trading_mode="alpaca")
+    _mock_open_market(monkeypatch, trading_mode="paper")
 
     class _StubAlpaca:
         paper = True
@@ -379,23 +417,25 @@ def test_alpaca_mode_invariant_raises_when_executable_but_zero_submit_attempts(
     monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
 
     now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
-    with pytest.raises(
-        RuntimeError,
-        match="\\[INVARIANT\\] ALPACA mode had executable trades but 0 submit attempts",
-    ):
-        broker.run_paper_day(
-            run_date="2026-02-10",
-            signals_path="signals/2026-02-10.json",
-            ledger_path="paper/ledger.csv",
-            trades_path="paper/trades.csv",
-            config_path="paper/config_paper.json",
-            now_et=now_et,
-        )
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+    )
+
+    assert result["execution_status"] == "READY"
+    assert result["alpaca_submission_summary"]["remote_existing_orders"] == 1
+    assert result["alpaca_submission_summary"]["submit_attempts"] == 0
+    assert result["alpaca_submission_summary"]["submit_success"] == 0
+    assert len(result["alpaca_submissions"]) == 1
 
 
-def test_alpaca_mode_same_day_sent_ledger_lock_blocks_submission(monkeypatch, tmp_path):
+def test_paper_mode_same_day_sent_ledger_lock_blocks_submission(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    _mock_open_market(monkeypatch, trading_mode="alpaca")
+    _mock_open_market(monkeypatch, trading_mode="paper")
 
     sent_ledger = tmp_path / "outputs" / "orders_sent" / "orders_sent.csv"
     sent_ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -429,7 +469,7 @@ def test_alpaca_mode_same_day_sent_ledger_lock_blocks_submission(monkeypatch, tm
         now_et=now_et,
     )
 
-    assert result["trading_mode"] == "alpaca"
+    assert result["trading_mode"] == "paper"
     assert result["execution_status"] == "HALTED"
     assert result["execution_enabled"] is False
     assert result["alpaca_submissions"] == []
@@ -459,7 +499,7 @@ def test_market_closed_validation_does_not_log_market_open(monkeypatch, caplog):
     assert any("market_guard:" in reason for reason in result["blocked_reasons"])
     assert "reason=market_open" not in caplog.text
     assert "market_closed_or_not_session" in caplog.text
-def test_shadow_market_closed_uses_prev_close_and_renders_trades(monkeypatch):
+def test_paper_market_closed_uses_prev_close_and_renders_trades(monkeypatch):
     _mock_open_market(monkeypatch)
 
     now_et = dt.datetime(2026, 2, 10, 8, 0, tzinfo=ZoneInfo("America/New_York"))
@@ -474,7 +514,7 @@ def test_shadow_market_closed_uses_prev_close_and_renders_trades(monkeypatch):
 
     assert result["execution_status"] == "PLANNED"
     assert result["pricing_source"] == "PREV_CLOSE"
-    assert result["shadow_orders"] == []
+    assert result["orders"] == []
 
     payload = dqr.build_execution_email_payload(
         trade_date="2026-02-10",
@@ -504,7 +544,7 @@ def test_plan_only_open_generates_plan_without_orders(monkeypatch):
     assert result["plan_only"] is True
     assert result["execution_status"] == "PLANNED"
     assert result["pricing_source"] == "PREV_CLOSE"
-    assert result["shadow_orders"] == []
+    assert result["orders"] == []
 
     payload = dqr.build_execution_email_payload(
         trade_date="2026-02-10",
@@ -810,7 +850,7 @@ def test_run_paper_day_raises_on_signal_date_mismatch(monkeypatch):
         slippage_bps=0.0,
         allow_fractional=True,
         min_trade_dollars=1.0,
-        trading_mode="shadow",
+        trading_mode="paper",
     )
     monkeypatch.setattr(broker, "load_config", lambda path: cfg)
     monkeypatch.setattr(

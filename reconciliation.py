@@ -9,6 +9,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from core.trading_mode import canonical_trading_mode
+
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -370,7 +372,7 @@ def _classify_block_reason(
 
 
 def _load_broker_snapshot(trading_mode: str) -> dict[str, Any]:
-    mode = str(trading_mode or "").strip().lower()
+    mode = canonical_trading_mode(trading_mode, field_name="trading_mode")
     broker_snapshot_path = str(os.getenv("RECON_BROKER_SNAPSHOT_JSON", "")).strip()
     if broker_snapshot_path:
         path = Path(broker_snapshot_path)
@@ -390,9 +392,9 @@ def _load_broker_snapshot(trading_mode: str) -> dict[str, Any]:
             "raw_account_fields_found": sorted(account.keys()),
         }
 
-    if mode != "alpaca":
+    if mode != "paper":
         return {
-            "source": "mode_not_alpaca",
+            "source": "mode_not_paper",
             "positions": {},
             "position_count": 0,
             "cash": None,
@@ -580,10 +582,10 @@ def _normalize_account_status(value: object) -> str:
 
 
 def _load_broker_snapshot_v2(trading_mode: str) -> dict[str, Any]:
-    mode = str(trading_mode or "").strip().lower()
-    if mode != "alpaca":
+    mode = canonical_trading_mode(trading_mode, field_name="trading_mode")
+    if mode != "paper":
         return {
-            "source": "mode_not_alpaca",
+            "source": "mode_not_paper",
             "positions": {},
             "position_count": 0,
             "cash": None,
@@ -1316,7 +1318,7 @@ def _attempt_auto_bootstrap_recovery(
     """
     if not _auto_bootstrap_enabled():
         return False, "FAIL", "", "stale_state"
-    if str(trading_mode or "").strip().lower() != "alpaca":
+    if canonical_trading_mode(trading_mode, field_name="trading_mode") != "paper":
         return False, "FAIL", "", "stale_state"
 
     logger.warning("[RECON][AUTO_BOOTSTRAP] Attempting recovery from stale_state pre-trade failure")
@@ -1486,7 +1488,7 @@ def bootstrap_model_ledger_from_broker(
     force: bool = False,
 ) -> bool:
     """
-    Bootstrap model ledger from current broker positions (ALPACA only).
+    Bootstrap model ledger from current broker positions (paper-broker mode only).
     Should only be called once to initialize model snapshot from broker.
 
     Args:
@@ -1500,8 +1502,8 @@ def bootstrap_model_ledger_from_broker(
 
     Returns True if bootstrap succeeded, False otherwise.
     """
-    if str(trading_mode or "").strip().lower() != "alpaca":
-        logger.error("[BOOTSTRAP] Bootstrap only supported in alpaca mode, got %s", trading_mode)
+    if canonical_trading_mode(trading_mode, field_name="trading_mode") != "paper":
+        logger.error("[BOOTSTRAP] Bootstrap only supported in paper mode, got %s", trading_mode)
         return False
 
     try:
@@ -1548,7 +1550,7 @@ def bootstrap_model_ledger_from_broker(
         
         # Ensure sent ledgers exist
         ensure_sent_ledger_exists(sent_ledger_path)
-        ensure_sent_ledger_exists("outputs/shadow_orders/orders_sent.csv")
+        ensure_sent_ledger_exists("outputs/orders_sent/orders_sent.csv")
         
         logger.info(
             "[BOOTSTRAP] Bootstrap complete: positions=%d cash=%s equity=%s",
@@ -1571,15 +1573,15 @@ def refresh_canonical_snapshot_from_broker(
     Should be called after successful order execution to align model state with broker reality.
     
     Args:
-        trading_mode: The trading mode (e.g., "alpaca")
+        trading_mode: The trading mode (e.g., "paper")
         run_date: Optional run date for logging
     
     Returns:
         True if refresh succeeded, False otherwise.
     """
-    if str(trading_mode or "").strip().lower() != "alpaca":
+    if canonical_trading_mode(trading_mode, field_name="trading_mode") != "paper":
         logger.warning(
-            "[POSTTRADE] Canonical refresh only supported in alpaca mode, got %s",
+            "[POSTTRADE] Canonical refresh only supported in paper mode, got %s",
             trading_mode,
         )
         return False

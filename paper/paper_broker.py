@@ -34,6 +34,7 @@ from paper.run_manager import safe_write_text
 from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
 from paper.reporting_consistency import compute_exposure
+from core.trading_mode import canonical_trading_mode, legacy_shadow_mode_requested
 from core.universe_v4 import is_allowed_etf_symbol
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,10 @@ def load_config(path: str) -> PaperConfig:
     safety_cfg = cfg.get("safety", {})
     risk_cfg = cfg.get("risk", {})
 
-    trading_mode = os.getenv("TRADING_MODE", str(mode_cfg.get("trading_mode", "paper"))).strip().lower()
+    trading_mode = canonical_trading_mode(
+        os.getenv("TRADING_MODE", str(mode_cfg.get("trading_mode", "paper"))).strip().lower(),
+        field_name="TRADING_MODE",
+    )
 
     initial_equity = float(
         os.getenv("PAPER_START_CASH", cfg.get("initial_equity", 10000.0))
@@ -2323,35 +2327,27 @@ def run_paper_day(
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
-    # Mode resolution: env MODE overrides config, then fall back to config
-    cfg_mode = str(cfg.trading_mode).strip().lower()
+    # Mode resolution: env MODE overrides config, then falls back to config.
+    # Legacy aliases are normalized so the runtime only executes in paper/live.
+    cfg_mode = canonical_trading_mode(cfg.trading_mode, field_name="config trading_mode")
     env_mode = str(os.getenv("MODE", "")).strip().lower()
     env_trading_mode = str(os.getenv("TRADING_MODE", "")).strip().lower()
-    
-    allowed_modes = {"paper", "shadow", "alpaca", "live"}
-    
-    # Validate all mode inputs
-    if cfg_mode not in allowed_modes:
-        raise RuntimeError(f"Unsupported config trading_mode={cfg_mode}")
-    if env_mode and env_mode not in allowed_modes:
-        raise RuntimeError(f"Unsupported MODE={env_mode}")
-    if env_trading_mode and env_trading_mode not in allowed_modes:
-        raise RuntimeError(f"Unsupported TRADING_MODE={env_trading_mode}")
-    
-    # Determine effective mode: MODE env var takes precedence over config
-    effective_mode = env_mode if env_mode else cfg_mode
-    
-    # Reject live mode
-    if effective_mode == "live":
+    mode = canonical_trading_mode(
+        env_mode if env_mode else cfg_mode,
+        field_name="MODE" if env_mode else "config trading_mode",
+    )
+    trading_mode_env = canonical_trading_mode(
+        env_trading_mode if env_trading_mode else mode,
+        field_name="TRADING_MODE" if env_trading_mode else "config trading_mode",
+    )
+    if mode != trading_mode_env:
+        raise RuntimeError(
+            f"[INVARIANT] MODE={mode} and TRADING_MODE={trading_mode_env} must resolve to the same canonical mode"
+        )
+    if mode == "live":
         raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
-    
-    # Ensure effective mode is allowed at runtime
-    if effective_mode not in {"paper", "shadow", "alpaca"}:
-        raise RuntimeError(f"Unsupported effective TRADING_MODE={effective_mode}")
-    
-    # Use effective_mode for the rest of the function
-    mode = effective_mode
-    alpaca_requested = (mode == "alpaca")
+    legacy_shadow_requested = legacy_shadow_mode_requested(cfg.trading_mode, env_mode, env_trading_mode)
+    paper_execution_requested = mode == "paper"
     planning_account_snapshot: Dict[str, object] | None = None
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
@@ -2371,7 +2367,15 @@ def run_paper_day(
         raise ValueError("now_et must be timezone-aware")
 
     now_et = now_et.astimezone(ZoneInfo("America/New_York"))
-    plan_only = bool(plan_only or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"})
+    plan_only = bool(
+        plan_only
+        or legacy_shadow_requested
+        or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"}
+    )
+    if legacy_shadow_requested:
+        logger.warning(
+            "[MODE] legacy shadow alias detected; forcing plan_only under canonical paper mode"
+        )
 
     # Weekend pause — skip order submission on Sat/Sun
     # Early return BEFORE loading targets/signals to avoid failures on empty signals
@@ -2392,17 +2396,17 @@ def run_paper_day(
             "trades": pd.DataFrame(),
         }
 
-    # Sync holdings and valuation from Alpaca broker for weekday runs.
-    # For alpaca mode, broker account equity is the authoritative valuation base
+    # Sync holdings and valuation from the paper broker for weekday runs.
+    # In canonical paper mode, broker account equity is the authoritative valuation base
     # for position sizing — it reflects live market prices.  Canonical/ledger
     # equity is stale (recorded at prior execution) and is preserved only as an
     # audit field in the recon report.
-    if mode in {"paper", "alpaca"} and not is_weekend:
+    if paper_execution_requested and not is_weekend:
         try:
             alpaca = AlpacaBroker.from_env()
-            # Broker equity authority: in alpaca mode pull live account equity so
+            # Broker equity authority: in paper mode pull live account equity so
             # target-dollar sizing uses current portfolio value, not a stale snapshot.
-            if mode == "alpaca":
+            if paper_execution_requested:
                 try:
                     _acct = alpaca.get_account() or {}
                     planning_account_snapshot = dict(_acct)
@@ -2663,7 +2667,7 @@ def run_paper_day(
         trades = pd.DataFrame(columns=["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"])
 
     logger.info(
-        "[SHADOW] cash_target=%.2f%% investable=$%.2f equity=$%.2f",
+        "[PAPER] cash_target=%.2f%% investable=$%.2f equity=$%.2f",
         100.0 * float(target_cash_weight),
         float(trade_meta.get("target_investable_dollars", equity_prev * investable_weight)),
         float(equity_prev),
@@ -2713,7 +2717,7 @@ def run_paper_day(
 
     capital_budget_meta = _default_capital_budget_meta()
     pdt_pretrade_meta = _default_pdt_pretrade_meta()
-    if mode == "alpaca" and planning_account_snapshot is not None and not use_precomputed_trade_plan:
+    if paper_execution_requested and planning_account_snapshot is not None and not use_precomputed_trade_plan:
         trades, pdt_pretrade_meta, pdt_blocked_reasons = _apply_pdt_pretrade_guard(
             trades,
             planning_account_snapshot=planning_account_snapshot,
@@ -2736,7 +2740,7 @@ def run_paper_day(
                 pdt_pretrade_meta.get("broker_pdt_warning_message"),
             )
 
-    if mode == "alpaca" and planning_account_snapshot is not None and not use_precomputed_trade_plan:
+    if paper_execution_requested and planning_account_snapshot is not None and not use_precomputed_trade_plan:
         requested_buy_notional = (
             float(
                 trades.loc[
@@ -2878,7 +2882,9 @@ def run_paper_day(
     artifact_failure_message: str | None = None
     halt_remaining_buys = False
     execution_submitted_symbols: List[str] = []
-    execution_enabled = bool(mode in {"shadow", "alpaca"} and mkt.is_open_now and not plan_only and not blocked and not is_weekend)
+    execution_enabled = bool(
+        paper_execution_requested and mkt.is_open_now and not plan_only and not blocked and not is_weekend
+    )
     logger.info(
         "[EXEC_GATE] mode=%s allow=%s market_open=%s plan_only=%s blocked=%s is_weekend=%s reason=%s",
         mode,
@@ -2915,7 +2921,7 @@ def run_paper_day(
         allow_partial_buy_continuation = _is_truthy(
             os.getenv("ALLOW_PARTIAL_BUY_CONTINUATION")
         )
-        if mode == "alpaca":
+        if paper_execution_requested:
             same_day_locked_orders, same_day_prior_run_ids = _same_day_submission_lock(
                 sent_ledger_path,
                 run_date,
@@ -2959,7 +2965,7 @@ def run_paper_day(
             submission_metadata: Dict[str, Dict[str, object]] = {}
             orders_for_execution = list(orders)
 
-        if mode == "alpaca" and execution_enabled:
+        if paper_execution_requested and execution_enabled:
             alpaca = AlpacaBroker.from_env()
             broker_cls = alpaca.__class__
             logger.info(
@@ -2968,11 +2974,11 @@ def run_paper_day(
                 broker_cls.__name__,
                 mode,
                 env_mode or "n/a",
-                env_trading_mode,
+                env_trading_mode or "n/a",
             )
-            if alpaca_requested and not isinstance(alpaca, AlpacaBroker):
+            if paper_execution_requested and not isinstance(alpaca, AlpacaBroker):
                 raise RuntimeError(
-                    f"[INVARIANT] Expected AlpacaBroker in alpaca mode, got {broker_cls.__module__}.{broker_cls.__name__}"
+                    f"[INVARIANT] Expected AlpacaBroker in paper mode, got {broker_cls.__module__}.{broker_cls.__name__}"
                 )
             submitted_orders: List[Dict[str, object]] = []
             remote_existing_orders: List[Dict[str, object]] = []
@@ -3375,14 +3381,14 @@ def run_paper_day(
         int(submit_failed),
         bool(execution_enabled),
     )
-    if mode == "alpaca" and execution_enabled:
-        if trades_after_filter > 0 and submit_attempts == 0:
+    if paper_execution_requested and execution_enabled:
+        if trades_after_idempotency > 0 and submit_attempts == 0:
             raise RuntimeError(
-                "[INVARIANT] ALPACA mode had executable trades but 0 submit attempts"
+                "[INVARIANT] PAPER mode had executable trades but 0 submit attempts"
             )
         if submit_attempts > 0 and submit_success == 0:
             raise RuntimeError(
-                "[INVARIANT] ALPACA mode attempted submits but 0 success"
+                "[INVARIANT] PAPER mode attempted submits but 0 success"
             )
 
     trades_out = execution_trades.copy()
@@ -3403,7 +3409,7 @@ def run_paper_day(
     )
 
     if not blocked and not planning_mode:
-        if mode == "alpaca":
+        if paper_execution_requested:
             if alpaca_account_snapshot is None:
                 alpaca = AlpacaBroker.from_env()
                 alpaca_account_snapshot = alpaca.get_account()
@@ -3533,7 +3539,7 @@ def run_paper_day(
     turnover_pct = (turnover / turnover_denominator) if turnover_denominator > 0 else 0.0
 
     logger.info(
-        "[SHADOW] mode=%s market=%s orders=%d blocked=%d recon=%s",
+        "[PAPER] mode=%s market=%s orders=%d blocked=%d recon=%s",
         mode,
         "OPEN" if mkt.is_open_now else "CLOSED",
         len(orders),
@@ -3608,6 +3614,7 @@ def run_paper_day(
         "pdt_pretrade": pdt_pretrade_meta,
         "open_window_validation": validation_details,
         "idempotent_skips": idempotent_skips,
+        "orders": orders,
         "shadow_orders": orders,
         "shadow_orders_path": shadow_orders_path,
         "alpaca_submissions": alpaca_submissions,

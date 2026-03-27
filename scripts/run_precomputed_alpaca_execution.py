@@ -51,6 +51,7 @@ from core.precompute_contract import load_precompute_inputs
 from core.run_pointer import write_latest_run_pointer
 from core.timing_policy import classify_timing, current_et
 from core.trading_day_summary import write_trading_day_summary
+from core.trading_mode import canonical_trading_mode_label
 from paper.build_execution_email import build_execution_email_text
 from paper.paper_broker import run_paper_day
 from paper.run_manager import ensure_dir, get_run_dir, get_run_id, safe_write_text
@@ -272,7 +273,7 @@ def _init_run_root(run_root: Path, trade_date: str) -> None:
     write_latest_run_pointer(
         run_id=get_run_id(),
         trade_date=trade_date,
-        mode="ALPACA",
+        mode="PAPER",
         run_root=str(run_root),
         status="running",
     )
@@ -282,7 +283,7 @@ def _init_run_root(run_root: Path, trade_date: str) -> None:
             {
                 "run_id": get_run_id(),
                 "trade_date": trade_date,
-                "mode": "ALPACA",
+                "mode": "PAPER",
                 "run_root": str(run_root),
                 "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             },
@@ -354,7 +355,7 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
     results = {
         "run_id": str(payload.get("run_id") or get_run_id()),
         "trade_date": str(payload.get("trade_date") or _trade_date()),
-        "mode": str(payload.get("mode") or "ALPACA"),
+        "mode": canonical_trading_mode_label(payload.get("mode") or "paper"),
         "status": results_status,
         "halt_reason": payload.get("halt_reason"),
         "submitted_count": int(payload.get("submitted_count") or 0),
@@ -380,7 +381,7 @@ def _failure_payload(*, trade_date: str, run_id: str, reason: str, timing: dict[
     payload = {
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": "ALPACA",
+        "mode": "PAPER",
         "execution_status": "HALTED",
         "halt_reason": reason,
         "trades": [],
@@ -413,7 +414,7 @@ def _precompute_reconciliation_halt_reason(recon_result: dict[str, object] | Non
 def _run_pretrade_reconciliation(*, trade_date: str, paper_ledger_path: str) -> dict[str, object]:
     kwargs = {
         "run_date": trade_date,
-        "trading_mode": "alpaca",
+        "trading_mode": "paper",
         "ledger_path": paper_ledger_path,
         "sent_ledger_path": "outputs/orders_sent/orders_sent.csv",
     }
@@ -508,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
 
         snapshot, planned_payload, _contract, precompute_reason = load_precompute_inputs(
             trade_date=trade_date,
-            expected_mode="ALPACA",
+            expected_mode="PAPER",
         )
         if snapshot is None or planned_payload is None:
             payload = _failure_payload(
@@ -529,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
                 run_root,
                 run_id=run_id,
                 trade_date=trade_date,
-                mode="ALPACA",
+                mode="PAPER",
                 pretrade_status="HALTED",
                 pretrade_halt_reason=str(precompute_reason),
                 planner_completed=False,
@@ -550,7 +551,7 @@ def main(argv: list[str] | None = None) -> int:
             write_latest_run_pointer(
                 run_id=run_id,
                 trade_date=trade_date,
-                mode="ALPACA",
+                mode="PAPER",
                 run_root=str(run_root),
                 status="failed_pre_execution",
                 substatus=str(precompute_reason or ""),
@@ -600,7 +601,7 @@ def main(argv: list[str] | None = None) -> int:
                 run_root,
                 run_id=run_id,
                 trade_date=trade_date,
-                mode="ALPACA",
+                mode="PAPER",
                 pretrade_status="HALTED",
                 pretrade_halt_reason=reason,
                 planner_completed=True,
@@ -634,7 +635,7 @@ def main(argv: list[str] | None = None) -> int:
             write_latest_run_pointer(
                 run_id=run_id,
                 trade_date=trade_date,
-                mode="ALPACA",
+                mode="PAPER",
                 run_root=str(run_root),
                 status="failed_pre_execution",
                 substatus=reason,
@@ -763,7 +764,7 @@ def main(argv: list[str] | None = None) -> int:
         write_planner_audit(
             run_id=run_id,
             trade_date=trade_date,
-            mode="ALPACA",
+            mode="PAPER",
             today_et=trade_date,
             is_planning_run=False,
             market_is_open=str((paper_summary or {}).get("market_status") or "").upper() == "OPEN",
@@ -792,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
             run_root,
             run_id=run_id,
             trade_date=trade_date,
-            mode="ALPACA",
+            mode="PAPER",
             pretrade_status=normalize_status(
                 execution_status=execution_payload.get("execution_status"),
                 halt_reason=execution_payload.get("halt_reason"),
@@ -934,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
         write_latest_run_pointer(
             run_id=run_id,
             trade_date=trade_date,
-            mode="ALPACA",
+            mode="PAPER",
             run_root=str(run_root),
             status=terminal_status,
             substatus=str((paper_summary or {}).get("execution_reason") or ""),

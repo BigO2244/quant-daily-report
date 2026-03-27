@@ -9,8 +9,8 @@ echo "[GREEN_LOOP] Step 2/3: deterministic planning run (offline fixture)"
 # broker price fetches in local runs.
 REPORT_DATE=2099-01-01 \
 PAPER_TRADING=1 \
-MODE=SHADOW \
-TRADING_MODE=shadow \
+MODE=paper \
+TRADING_MODE=paper \
 OFFLINE_FIXTURE=1 \
 OFFLINE_FIXTURE_DATE=2099-01-01 \
 python3 daily_quant_report.py

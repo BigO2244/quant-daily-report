@@ -9,6 +9,7 @@ from pathlib import Path
 
 from core.email_governance import should_email_pre_trade_status
 from core.run_pointer import read_latest_run_pointer
+from core.trading_mode import canonical_trading_mode, canonical_trading_mode_label
 from paper.build_execution_email import build_execution_email_html, build_execution_email_text
 from paper.paper_broker import load_config, reset_orders_sent_ledger_for_date
 from paper.send_execution_email import send_execution_email
@@ -57,7 +58,7 @@ def _resolve_payload_path(trade_date: str) -> Path:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build and optionally send pre-trade execution-status email artifact")
     parser.add_argument("--dry-run", action="store_true", help="write artifact only; skip SMTP send")
-    parser.add_argument("--reset-ledger-date", default=None, help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution")
+    parser.add_argument("--reset-ledger-date", default=None, help="Delete execution idempotency ledger rows matching YYYY-MM-DD before execution")
     return parser.parse_args(argv)
 
 
@@ -66,22 +67,17 @@ def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
     cfg = load_config("paper/config_paper.json")
-    mode = cfg.trading_mode.lower()
+    mode = canonical_trading_mode(cfg.trading_mode, field_name="TRADING_MODE")
     if mode == "live":
         raise RuntimeError("TRADING_MODE=live is blocked for execution email.")
-    # "alpaca" is the live paper-trading mode — treat it the same as "paper"
-    if mode == "alpaca":
-        mode = "paper"
-    if mode not in {"paper", "shadow"}:
-        raise RuntimeError(f"Unsupported TRADING_MODE={mode}")
 
     trade_date = _resolve_trade_date()
     if args.reset_ledger_date:
-        reset_orders_sent_ledger_for_date("outputs/shadow_orders/orders_sent.csv", args.reset_ledger_date)
+        reset_orders_sent_ledger_for_date("outputs/orders_sent/orders_sent.csv", args.reset_ledger_date)
     payload_path = _resolve_payload_path(trade_date)
     payload = _load_payload(payload_path, trade_date=trade_date, mode=mode)
 
-    payload["mode"] = str(payload.get("mode") or mode).upper()
+    payload["mode"] = canonical_trading_mode_label(payload.get("mode") or mode)
     if payload["mode"] == "LIVE":
         payload["execution_status"] = "HALTED"
         payload["halt_reason"] = "LIVE MODE BLOCKED"

@@ -75,6 +75,11 @@ from core.operator_summary import (
 )
 from core.step_summary import append_step_summary
 from core.trade_count_contract import compute_trade_count_contract
+from core.trading_mode import (
+    canonical_trading_mode,
+    canonical_trading_mode_label,
+    legacy_shadow_mode_requested,
+)
 from paper.nav2 import update_nav
 from paper.perf_artifact_producers import (
     rebuild_premarket_analyzer_scores,
@@ -143,8 +148,9 @@ calc_alpha_stats = compute_alpha_attribution
 # ============================================================
 # Trading mode config
 # ============================================================
-# Default trading mode if TRADING_MODE env var is not set
-# "paper" = paper trading with Alpaca, "shadow" = planning only
+# Default trading mode if TRADING_MODE env var is not set.
+# "paper" is the paper-broker execution mode. Planning-only behavior is
+# controlled by PLAN_ONLY / --plan-only, not by a separate trading mode.
 DEFAULT_TRADING_MODE = "paper"
 # ============================================================
 # Output config
@@ -240,14 +246,14 @@ def _canonical_artifact_path(category: str, filename: str) -> Path:
     return base / filename
 
 
-def _capture_pretrade_broker_snapshot(*, trade_date: str, alpaca_requested: bool) -> dict | None:
+def _capture_pretrade_broker_snapshot(*, trade_date: str, paper_requested: bool) -> dict | None:
     """
     Capture authoritative broker state before any execution-path mutation.
 
     Phase 1 observability only: failures are recorded to artifacts/logs but do not
     change execution control flow.
     """
-    if not alpaca_requested or _RUN_CONTEXT is None or _RUN_CONTEXT.run_root is None:
+    if not paper_requested or _RUN_CONTEXT is None or _RUN_CONTEXT.run_root is None:
         return None
 
     try:
@@ -745,7 +751,7 @@ def _apply_paper_reset(
     ledger2_path = LEDGER_TRADES_PATH
     _ensure_csv_with_headers(ledger2_path, LEDGER2_COLUMNS)
     _ensure_csv_with_headers(
-        "outputs/shadow_orders/orders_sent.csv",
+        "outputs/orders_sent/orders_sent.csv",
         ["date", "run_id", "order_id", "ticker", "side"],
     )
 
@@ -774,7 +780,7 @@ def _apply_paper_reset(
         "paper_trades_path": str(paper_trades_path),
         "ledger2_path": str(ledger2_path),
         "nav_timeseries_path": str(nav_path),
-        "orders_sent_path": "outputs/shadow_orders/orders_sent.csv",
+        "orders_sent_path": "outputs/orders_sent/orders_sent.csv",
     }
 
 
@@ -1314,8 +1320,9 @@ def build_execution_email_payload(
     daily_snapshot: dict,
     paper_summary: dict | None,
 ) -> dict:
-    mode = (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
-    mode = str(mode).upper()
+    mode = canonical_trading_mode_label(
+        (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+    )
     if mode == "LIVE":
         return {
             "trade_date": trade_date,
@@ -1333,7 +1340,7 @@ def build_execution_email_payload(
     if paper_summary:
         market_open = str(paper_summary.get("market_status", "")).upper() == "OPEN"
         if not market_open:
-            if mode in {"SHADOW", "ALPACA"} or plan_only:
+            if mode == "PAPER" or plan_only:
                 status = "PLANNED"
             else:
                 status = "HALTED"
@@ -1372,7 +1379,7 @@ def build_execution_email_payload(
         for h in (daily_snapshot.get("holdings", []) or [])
         if h.get("ticker")
     }
-    orders = (paper_summary or {}).get("shadow_orders", []) or []
+    orders = (paper_summary or {}).get("orders") or (paper_summary or {}).get("shadow_orders", []) or []
     execution_trades = (paper_summary or {}).get("execution_trades", []) or []
     planned_trades = (paper_summary or {}).get("trade_plan", []) or []
     execution_filter = (paper_summary or {}).get("execution_filter", {}) or {}
@@ -1422,7 +1429,7 @@ def build_execution_email_payload(
 
     _register_reason_source(planned_trades, source_key="trade_plan_lookup")
     _register_reason_source(execution_trades, source_key="execution_trades_lookup")
-    _register_reason_source(orders, source_key="shadow_orders_lookup")
+    _register_reason_source(orders, source_key="orders_lookup")
 
     payload_submitted_count = int(
         ((paper_summary or {}).get("alpaca_submission_summary") or {}).get("submit_success")
@@ -1433,7 +1440,7 @@ def build_execution_email_payload(
         or 0
     )
 
-    if mode == "ALPACA" and payload_submitted_count > 0 and alpaca_submissions:
+    if mode == "PAPER" and payload_submitted_count > 0 and alpaca_submissions:
         for submission in alpaca_submissions:
             if not isinstance(submission, dict):
                 continue
@@ -1492,7 +1499,7 @@ def build_execution_email_payload(
                     "reason": order.get("reason"),
                     "order_id": order.get("order_id"),
                     "notional": order.get("notional"),
-                    "source": "shadow_orders",
+                    "source": "orders",
                 }
             )
     for row in source_rows:
@@ -2808,7 +2815,7 @@ def compute_sleeve_drift(
     (3%) from regime_config as the minimum drift before rebalancing.
 
     Falls back to rebalancing all sleeves when broker data is unavailable —
-    safe for shadow mode, offline fixture, and FRED-missing runs.
+    safe for plan-only paper mode, offline fixture, and FRED-missing runs.
 
     Parameters
     ----------
@@ -4287,7 +4294,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--paper_reset",
         dest="paper_reset",
         action="store_true",
-        help="Reset paper/shadow state to a clean start before running.",
+        help="Reset paper-mode state to a clean start before running.",
     )
     parser.add_argument(
         "--paper-start-cash",
@@ -4301,7 +4308,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--reset-ledger-date",
         dest="reset_ledger_date",
         default=None,
-        help="Delete shadow idempotency ledger rows matching YYYY-MM-DD before execution",
+        help="Delete execution idempotency ledger rows matching YYYY-MM-DD before execution",
     )
     parser.add_argument(
         "--force-execution",
@@ -4326,7 +4333,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Bootstrap canonical model snapshot from broker positions and exit without "
-            "submitting orders (alpaca only)."
+            "submitting orders (paper mode only)."
         ),
     )
     parser.add_argument(
@@ -4501,24 +4508,31 @@ def _normalize_exec_mode(value: str | None, default: str) -> str:
     return norm or str(default).strip().lower()
 
 
-def _resolve_exec_modes() -> tuple[str, str, bool]:
+def _resolve_exec_modes() -> tuple[str, str, bool, bool]:
     raw_mode = os.getenv("MODE")
     raw_trading_mode = os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
-    trading_mode_norm = _normalize_exec_mode(raw_trading_mode, DEFAULT_TRADING_MODE)
-    mode_norm = _normalize_exec_mode(raw_mode, trading_mode_norm)
-    allowed_modes = {"paper", "shadow", "alpaca", "live"}
-    if mode_norm not in allowed_modes:
-        raise RuntimeError(f"Unsupported MODE={mode_norm}")
-    if trading_mode_norm not in allowed_modes:
-        raise RuntimeError(f"Unsupported TRADING_MODE={trading_mode_norm}")
-    alpaca_requested = "alpaca" in {mode_norm, trading_mode_norm}
-    if alpaca_requested and trading_mode_norm != "alpaca":
+    trading_mode_norm = canonical_trading_mode(
+        _normalize_exec_mode(raw_trading_mode, DEFAULT_TRADING_MODE),
+        field_name="TRADING_MODE",
+    )
+    mode_norm = canonical_trading_mode(
+        _normalize_exec_mode(raw_mode, trading_mode_norm),
+        field_name="MODE",
+    )
+    if mode_norm != trading_mode_norm:
         raise RuntimeError(
-            "[INVARIANT] MODE/TRADING_MODE indicate alpaca but TRADING_MODE is not alpaca"
+            f"[INVARIANT] MODE={mode_norm} and TRADING_MODE={trading_mode_norm} must resolve to the same canonical mode"
         )
+    paper_requested = trading_mode_norm == "paper"
+    legacy_shadow_requested = legacy_shadow_mode_requested(raw_mode, raw_trading_mode)
     os.environ["MODE"] = mode_norm
     os.environ["TRADING_MODE"] = trading_mode_norm
-    return mode_norm, trading_mode_norm, alpaca_requested
+    if legacy_shadow_requested and not _is_truthy(os.getenv("PLAN_ONLY"), default=False):
+        os.environ["PLAN_ONLY"] = "1"
+        logger.warning(
+            "[MODE] legacy shadow alias detected; forcing PLAN_ONLY=1 under canonical paper mode"
+        )
+    return mode_norm, trading_mode_norm, paper_requested, legacy_shadow_requested
 
 
 def _init_run_context(
@@ -4546,7 +4560,7 @@ def _init_run_context(
         mode=mode,
         trading_mode=trading_mode,
         report_date_env=report_date_env or None,
-        paper_trading=str(os.getenv("ALPACA_PAPER", "")).strip().lower() in {"1", "true", "yes", "y", "on"},
+        paper_trading=(trading_mode == "paper"),
     )
     os.environ["RUN_ID"] = ctx.run_id
     os.environ["RUN_OUTPUT_ROOT"] = str(ctx.run_root)
@@ -4843,7 +4857,7 @@ def main(argv: list[str] | None = None):
     global _RUN_TERMINAL_STATUS, _RUN_TERMINAL_SUBSTATUS, _RUN_TERMINAL_MESSAGE
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
-    mode_norm, trading_mode_norm, alpaca_requested = _resolve_exec_modes()
+    mode_norm, trading_mode_norm, paper_requested, legacy_shadow_requested = _resolve_exec_modes()
     boot_now_utc = dt.datetime.now(dt.timezone.utc)
     boot_now_et = boot_now_utc.astimezone(ZoneInfo("America/New_York"))
     logger.info(
@@ -4900,7 +4914,7 @@ def main(argv: list[str] | None = None):
     _pretrade_raw_snapshot: "dict | None" = None
     _broker_positions_for_drift: "list | None" = None
     _broker_equity_for_drift: "float | None" = None
-    if alpaca_requested and not offline_fixture:
+    if paper_requested and not offline_fixture:
         try:
             _pretrade_raw_snapshot = fetch_pretrade_snapshot()
             if (_pretrade_raw_snapshot or {}).get("ok"):
@@ -5281,12 +5295,12 @@ def main(argv: list[str] | None = None):
         _RUN_CONTEXT.report_date = trade_date_str
     pretrade_broker_capture = _capture_pretrade_broker_snapshot(
         trade_date=trade_date_str,
-        alpaca_requested=alpaca_requested,
+        paper_requested=paper_requested,
     )
     pretrade_broker_policy = summarize_pretrade_broker_policy(
         ((pretrade_broker_capture or {}).get("snapshot") or {}) if pretrade_broker_capture else {}
     )
-    if alpaca_requested:
+    if paper_requested:
         logger.info("%s", format_broker_preflight_banner(pretrade_broker_policy))
         if pretrade_broker_policy.get("broker_pdt_warning_message"):
             logger.warning(
@@ -5423,9 +5437,9 @@ def main(argv: list[str] | None = None):
             "inception_date": trade_date_str,
         }
     if bool(getattr(args, "bootstrap_model_ledger_from_broker", False)):
-        if trading_mode_norm != "alpaca":
+        if trading_mode_norm != "paper":
             raise RuntimeError(
-                "--bootstrap-model-ledger-from-broker is only supported when TRADING_MODE=alpaca"
+                "--bootstrap-model-ledger-from-broker is only supported when TRADING_MODE=paper"
             )
         ok = bootstrap_model_ledger_from_broker(
             trading_mode=trading_mode_norm,
@@ -5450,22 +5464,21 @@ def main(argv: list[str] | None = None):
                         "CASH": alloc_result.cash_weight,
                     }.get("CASH", 0.0)
                 )
-            shadow_constraints = {
+            execution_constraints = {
                 "cash_target_weight": float(snapshot_cash_target_weight)
             }
             if bool(getattr(args, "exit_only", False)) or _is_truthy(os.getenv("EXIT_ONLY"), default=False):
-                shadow_constraints["exit_only"] = True
+                execution_constraints["exit_only"] = True
             trading_mode = trading_mode_norm
             force_execution = bool(
                 bool(getattr(args, "force_execution", False))
                 or _is_truthy(os.getenv("FORCE_EXECUTION"), default=False)
             )
             if force_execution:
-                if trading_mode == "shadow":
-                    sent_ledger_removed += reset_orders_sent_ledger_for_date(
-                        sent_ledger_path,
-                        trade_date_str,
-                    )
+                sent_ledger_removed += reset_orders_sent_ledger_for_date(
+                    sent_ledger_path,
+                    trade_date_str,
+                )
                 if args.reset_ledger_date:
                     sent_ledger_removed += reset_orders_sent_ledger_for_date(
                         sent_ledger_path,
@@ -5480,7 +5493,8 @@ def main(argv: list[str] | None = None):
                     logger.info(
                         "[ORDER] --reset-ledger-date ignored without force execution override"
                     )
-            if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+            effective_plan_only = bool(args.plan_only or legacy_shadow_requested)
+            if paper_requested and not effective_plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
                 if _is_truthy(os.getenv("RECON_V2"), default=False):
                     recon_result = pre_trade_reconcile_and_classify(
                         run_date=trade_date_str,
@@ -5505,28 +5519,28 @@ def main(argv: list[str] | None = None):
                 trades_path=paper_trades_path,
                 config_path="paper/config_paper.json",
                 force=force_execution,
-                constraints=shadow_constraints,
-                plan_only=args.plan_only,
+                constraints=execution_constraints,
+                plan_only=effective_plan_only,
             )
-            if alpaca_requested:
+            if paper_requested:
                 summary_mode = str((paper_summary or {}).get("trading_mode", "")).strip().lower()
-                if summary_mode != "alpaca":
+                if summary_mode != "paper":
                     raise RuntimeError(
-                        f"[INVARIANT] Alpaca requested but paper broker resolved trading_mode={summary_mode or 'unknown'}"
+                        f"[INVARIANT] Paper mode requested but paper broker resolved trading_mode={summary_mode or 'unknown'}"
                     )
             logger.info(
                 "[PAPER] Executed paper trading for %s using signals %s",
                 trade_date_str,
                 signals_path_exec,
             )
-            if alpaca_requested and (paper_summary or {}).get("posttrade_recon_status"):
+            if paper_requested and (paper_summary or {}).get("posttrade_recon_status"):
                 logger.info(
                     "[POSTTRADE_DRIFT] status=%s report=%s repairs=%s",
                     (paper_summary or {}).get("posttrade_recon_status"),
                     (paper_summary or {}).get("posttrade_recon_path"),
                     ",".join(list((paper_summary or {}).get("posttrade_repair_suggestions") or [])) or "none",
                 )
-            if alpaca_requested and not args.plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+            if paper_requested and not effective_plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
                 # Refresh canonical snapshot from broker to ensure model matches reality after execution
                 posttrade_positions_path = (paper_summary or {}).get("posttrade_positions_snapshot_path")
                 posttrade_account_path = (paper_summary or {}).get("posttrade_account_snapshot_path")
@@ -5627,7 +5641,7 @@ def main(argv: list[str] | None = None):
                     "[PAPER] Already executed for %s; rendering report from ledger.",
                     trade_date_str,
                 )
-            elif alpaca_requested:
+            elif paper_requested:
                 raise
             else:
                 logger.warning("[PAPER][WARN] Paper execution failed: %s", msg)
@@ -5653,10 +5667,16 @@ def main(argv: list[str] | None = None):
                 benchmark_ticker="SPY",
                 reconciliation=paper_summary,
                 shadow_status={
-                    "trading_mode": (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE).upper(),
+                    "trading_mode": canonical_trading_mode_label(
+                        (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+                    ),
                     "market_status": market_status,
                     "market_guard": (paper_summary or {}).get("market_guard"),
-                    "orders_generated": len((paper_summary or {}).get("shadow_orders", []) or []),
+                    "orders_generated": len(
+                        (paper_summary or {}).get("orders")
+                        or (paper_summary or {}).get("shadow_orders", [])
+                        or []
+                    ),
                     "orders_blocked": len((paper_summary or {}).get("blocked_reasons", []) or []),
                     "broker_recon_status": (paper_summary or {}).get("broker_recon_status", "UNKNOWN"),
                 },
@@ -5790,7 +5810,9 @@ def main(argv: list[str] | None = None):
             write_planner_audit(
                 run_id=str(_RUN_CONTEXT.run_id),
                 trade_date=trade_date_str,
-                mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+                mode=canonical_trading_mode_label(
+                    (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+                ),
                 today_et=today_et_str,
                 is_planning_run=is_planning_run,
                 market_is_open=market_is_open_for_trade_date,
@@ -5814,11 +5836,11 @@ def main(argv: list[str] | None = None):
             ).upper() not in {"FAIL", "ERROR"}
             _probe_payload = {
                 "run_id": str(_RUN_CONTEXT.run_id),
-                "broker_name": "alpaca" if alpaca_requested else "paper_simulated",
+                "broker_name": "paper_broker" if paper_requested else "paper_simulated",
                 "probe_attempted": True,
                 "probe_ok": _probe_ok,
                 "as_of": dt.datetime.now(dt.timezone.utc).isoformat(),
-                "source_type": "authoritative_live" if alpaca_requested else "derived",
+                "source_type": "authoritative_broker" if paper_requested else "derived",
                 "base_url": os.getenv("ALPACA_BASE_URL"),
                 "error": str((paper_summary or {}).get("broker_error") or "") or None,
             }
@@ -5879,7 +5901,9 @@ def main(argv: list[str] | None = None):
             _RUN_CONTEXT.run_root,
             run_id=str(_RUN_CONTEXT.run_id),
             trade_date=trade_date_str,
-            mode=str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+            mode=canonical_trading_mode_label(
+                (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+            ),
             pretrade_status=normalized_status,
             pretrade_halt_reason=execution_payload.get("halt_reason"),
             proposed_trades_count=int(trade_count_contract["planner_intended_trades_count"]),
@@ -5904,8 +5928,8 @@ def main(argv: list[str] | None = None):
                 or execution_payload.get("halt_reason")
             ),
             broker_pretrade_snapshot_ok=bool(((pretrade_broker_capture or {}).get("snapshot") or {}).get("ok")) if pretrade_broker_capture else None,
-            broker_posttrade_snapshot_ok=bool((paper_summary or {}).get("posttrade_account_snapshot_path") and (paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else None,
-            broker_authoritative_state=bool((paper_summary or {}).get("posttrade_positions_snapshot_path")) if alpaca_requested else False,
+            broker_posttrade_snapshot_ok=bool((paper_summary or {}).get("posttrade_account_snapshot_path") and (paper_summary or {}).get("posttrade_positions_snapshot_path")) if paper_requested else None,
+            broker_authoritative_state=bool((paper_summary or {}).get("posttrade_positions_snapshot_path")) if paper_requested else False,
             broker_preflight_status=pretrade_broker_policy.get("broker_preflight_status"),
             broker_preflight_account_status=pretrade_broker_policy.get("broker_preflight_account_status"),
             broker_preflight_cash=pretrade_broker_policy.get("broker_preflight_cash"),
@@ -6010,7 +6034,7 @@ def main(argv: list[str] | None = None):
             precompute_contract_path = write_precompute_bundle(
                 trade_date=trade_date_str,
                 run_id=str((paper_summary or {}).get("run_id") or (_RUN_CONTEXT.run_id if _RUN_CONTEXT is not None else "")),
-                mode=trading_mode_norm.upper(),  # always use TRADING_MODE env var; paper_summary may report "PAPER" during plan-only runs
+                mode=canonical_trading_mode_label(trading_mode_norm),
                 daily_snapshot=daily_snapshot,
                 signals_payload=signals_payload,
                 execution_payload=execution_payload,
@@ -6026,7 +6050,9 @@ def main(argv: list[str] | None = None):
     integrity = {
         "trade_date": trade_date_str,
         "asof_date": str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str)),
-        "mode": str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper(),
+        "mode": canonical_trading_mode_label(
+            (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+        ),
         "execution_status": execution_payload.get("execution_status"),
         "halt_reason": execution_payload.get("halt_reason"),
         "canonical_execution_payload_path": canonical_execution_payload_path,
@@ -6051,7 +6077,9 @@ def main(argv: list[str] | None = None):
         ledger2_error = None
         asof_date = integrity["asof_date"]
         ledger_run_id = str(uuid.uuid4())
-        ledger_source = str((paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper()
+        ledger_source = canonical_trading_mode_label(
+            (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+        )
         signal_hash = compute_signal_hash(signals_path_exec) if signals_path_exec and os.path.exists(signals_path_exec) else ""
         try:
             Path("outputs/ledger").mkdir(parents=True, exist_ok=True)

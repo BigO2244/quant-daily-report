@@ -10,11 +10,17 @@ from typing import Any
 
 import pandas as pd
 
+from core.trading_mode import normalize_trading_mode
+
 
 @dataclass
 class SourceRecord:
     path: str
     status: str
+
+
+def _canonical_mode_label(value: object, default: str = "paper") -> str:
+    return str(normalize_trading_mode(value, default=default) or default).upper()
 
 
 class DashboardBuilder:
@@ -749,7 +755,7 @@ class DashboardBuilder:
         - is_failed: Has preflight_failure or is sparse and incomplete
         - is_sparse: Only has meta.json/manifest
         - has_real_activity: Has trades/execution records
-        - mode: alpaca (live exec), shadow (simulated), paper, etc.
+        - mode: canonical paper/live with legacy aliases normalized
         - is_viable_executive: Meets criteria for executive dashboard display
         """
         runs_root = self._abs("outputs/runs")
@@ -825,7 +831,8 @@ class DashboardBuilder:
                 "run_id": run_id,
                 "report_date": meta_obj.get("report_date"),
                 "created_at": meta_obj.get("created_at"),
-                "mode": meta_obj.get("mode"),
+                "mode": normalize_trading_mode(meta_obj.get("mode"), default="paper"),
+                "raw_mode": str(meta_obj.get("mode") or "").strip().lower() or "paper",
                 "is_complete": is_complete,
                 "is_failed": is_failed,
                 "is_sparse": is_sparse,
@@ -844,7 +851,7 @@ class DashboardBuilder:
         1. Must be complete and not failed
         2. Must have real activity evidence (trades, execution records)
         3. Must not be sparse/meta-only
-        4. Prefer alpaca (live execution) over shadow (simulated)
+        4. Prefer live over paper
         5. Prefer latest viable run matching above criteria
         
         Returns tuple of (selected_run_id, selection_reason).
@@ -857,21 +864,17 @@ class DashboardBuilder:
         viable_runs = [r for r in discovered if r["is_viable_executive"] and not r["is_failed"]]
         
         if viable_runs:
-            # Among viable runs, prefer by mode: alpaca > paper > shadow
-            alpaca_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "alpaca"]
+            # Among viable runs, prefer by canonical mode: live > paper.
+            live_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "live"]
             paper_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "paper"]
-            shadow_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "shadow"]
             
             # Use highest-priority available mode
-            if alpaca_runs:
-                selected = alpaca_runs[0]
-                return selected["run_id"], "latest_viable_alpaca_executed_run"
-            elif paper_runs:
+            if live_runs:
+                selected = live_runs[0]
+                return selected["run_id"], "latest_viable_live_run"
+            if paper_runs:
                 selected = paper_runs[0]
-                return selected["run_id"], "latest_viable_paper_traced_run"
-            elif shadow_runs:
-                selected = shadow_runs[0]
-                return selected["run_id"], "latest_viable_shadow_simulated_run"
+                return selected["run_id"], "latest_viable_paper_run"
         
         # Fallback: No viable executive runs found. Use latest attempted if available.
         if latest_attempted_run_id:
@@ -892,7 +895,8 @@ class DashboardBuilder:
         # Latest attempted run from outputs/latest.json
         latest_attempted_run_id = str(latest_obj.get("run_id") or "").strip() or None
         latest_attempted_report_date = str(latest_obj.get("report_date") or "").strip() or None
-        latest_attempted_mode = str(latest_obj.get("mode") or "").strip().upper() or "UNKNOWN"
+        latest_attempted_mode = _canonical_mode_label(latest_obj.get("mode") or "paper")
+        latest_attempted_raw_mode = str(latest_obj.get("mode") or "").strip().lower() or "paper"
         latest_attempted_created_at = str(
             latest_obj.get("created_at")
             or latest_obj.get("last_updated")
@@ -949,6 +953,7 @@ class DashboardBuilder:
         report_date = latest_attempted_report_date if selected_run_id == latest_attempted_run_id else None
         run_id = selected_run_id
         mode = latest_attempted_mode
+        raw_mode = latest_attempted_raw_mode
         run_last_updated = latest_attempted_created_at if selected_run_id == latest_attempted_run_id else None
 
         # If selected run differs from latest attempted, read its metadata
@@ -956,7 +961,8 @@ class DashboardBuilder:
             selected_meta = self._read_json(f"outputs/runs/{selected_run_id}/meta.json", required=False, used=False)
             if isinstance(selected_meta,dict):
                 report_date = str(selected_meta.get("report_date") or "").strip() or None
-                mode = str(selected_meta.get("mode") or "").strip().upper() or "UNKNOWN"
+                mode = _canonical_mode_label(selected_meta.get("mode") or "paper")
+                raw_mode = str(selected_meta.get("mode") or "").strip().lower() or "paper"
                 run_last_updated = str(
                     selected_meta.get("created_at")
                     or selected_meta.get("last_updated")
@@ -1202,9 +1208,11 @@ class DashboardBuilder:
         if inferred_early_halt and execution_status in {"UNKNOWN", "", "N/A", "HALTED"}:
             execution_status = "HALTED_INFERRED_PREFLIGHT"
         
-        # For SHADOW mode runs, adjust status to be honest about simulation
-        run_mode_lower = str(mode or "").lower()
-        if run_mode_lower == "shadow":
+        # Legacy shadow aliases map into canonical paper mode, but should still
+        # be reported honestly as paper simulation rather than broker execution.
+        run_mode_lower = normalize_trading_mode(raw_mode, default="paper")
+        legacy_shadow_alias = str(raw_mode or "").strip().lower() == "shadow"
+        if legacy_shadow_alias:
             # Check if run has actual activity (trades recorded)
             has_run_activity = False
             if run_id:
@@ -1223,7 +1231,7 @@ class DashboardBuilder:
                 # Has activity despite PLANNED status - report as executed shadow sim
                 execution_status = "SIMULATED"
             elif execution_status == "PLANNED" and not has_run_activity:
-                execution_status = "SHADOW_PLANNED"
+                execution_status = "PAPER_PLANNED"
 
         # Performance summary metrics.
         mtd = qtd = si = si_alpha = best_day = worst_day = None
@@ -1479,9 +1487,8 @@ class DashboardBuilder:
                 exceptions.append({"category": "Reconciliation", "status": "fail", "message": msg})
         elif inferred_early_halt:
             exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status inferred from sparse run artifacts."})
-        elif run_mode_lower == "shadow":
-            # For shadow mode, reconciliation unavailability is informational, not a warning
-            exceptions.append({"category": "Reconciliation", "status": "pass", "message": "Reconciliation not applicable in shadow simulation mode."})
+        elif legacy_shadow_alias:
+            exceptions.append({"category": "Reconciliation", "status": "pass", "message": "Reconciliation not applicable in paper simulation mode."})
         else:
             exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status unavailable."})
 
@@ -1503,8 +1510,8 @@ class DashboardBuilder:
                 }
             )
         elif run_success:
-            if run_mode_lower == "shadow":
-                msg = f"Shadow simulation status: {execution_status}. (This is simulated activity, not live execution.)"
+            if legacy_shadow_alias:
+                msg = f"Paper simulation status: {execution_status}. (This is simulated activity, not broker execution.)"
             else:
                 msg = f"Execution status: {execution_status}."
             exceptions.append({"category": "Execution", "status": "pass", "message": msg})
@@ -1820,8 +1827,8 @@ class DashboardBuilder:
                 "source_run_id": selected_run_id,
                 "source_report_date": report_date,
                 "activity_source": activity_source,
-                "is_simulated": run_mode_lower == "shadow",
-                "note": f"Activity source: {activity_source} from {'shadow simulation' if run_mode_lower == 'shadow' else 'execution'} run {selected_run_id or 'unavailable'}",
+                "is_simulated": legacy_shadow_alias,
+                "note": f"Activity source: {activity_source} from {'paper simulation' if legacy_shadow_alias else 'execution'} run {selected_run_id or 'unavailable'}",
             },
             "governed_snapshot": governed_snapshot,
             "broker_snapshot": broker_snapshot,

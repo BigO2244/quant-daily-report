@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.trading_mode import canonical_trading_mode_label
 from paper.run_manager import safe_write_text
 
 PRECOMPUTE_ROOT = Path("outputs/precompute")
@@ -19,11 +20,6 @@ REASON_PRECOMPUTE_WRONG_TRADE_DATE = "precompute_wrong_trade_date"
 REASON_PRECOMPUTE_INCOMPLETE = "precompute_incomplete"
 REASON_PRECOMPUTE_INVALID = "precompute_invalid"
 REASON_PRECOMPUTE_VALIDATION_FAILED = "precompute_validation_failed"
-
-# "PAPER" is the internal name used by the plan-only paper broker; it is
-# semantically identical to "ALPACA" for bundle validation purposes.
-_CONTRACT_MODE_ALIASES: dict[str, str] = {"PAPER": "ALPACA"}
-
 
 def precompute_bundle_dir(trade_date: str) -> Path:
     return PRECOMPUTE_ROOT / str(trade_date)
@@ -71,14 +67,14 @@ def build_precompute_contract(
         "schema_version": PRECOMPUTE_SCHEMA_VERSION,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "trade_date": str(trade_date),
-        "mode": str(mode).upper(),
+        "mode": canonical_trading_mode_label(mode),
         "source_run_id": str(run_id),
         "status": PRECOMPUTE_STATUS_COMPLETE,
         "validation_reason": None,
         "validated_for_execution": True,
         "workflow_stage": "precompute",
         "compatibility": {
-            "trading_mode": str(mode).upper(),
+            "trading_mode": canonical_trading_mode_label(mode),
             "execution_flow": "precompute_before_open_v1",
         },
         "files": {
@@ -153,7 +149,7 @@ def validate_precompute_contract(
     contract: dict[str, Any] | None,
     *,
     expected_trade_date: str,
-    expected_mode: str = "ALPACA",
+    expected_mode: str = "PAPER",
 ) -> tuple[bool, str | None]:
     if not contract:
         return False, REASON_PRECOMPUTE_MISSING
@@ -161,11 +157,12 @@ def validate_precompute_contract(
         return False, REASON_PRECOMPUTE_INVALID
     if str(contract.get("trade_date") or "") != str(expected_trade_date):
         return False, REASON_PRECOMPUTE_WRONG_TRADE_DATE
-    contract_mode = _CONTRACT_MODE_ALIASES.get(
-        str(contract.get("mode") or "").upper(),
-        str(contract.get("mode") or "").upper(),
-    )
-    if contract_mode != str(expected_mode).upper():
+    try:
+        contract_mode = canonical_trading_mode_label(contract.get("mode"), field_name="contract.mode")
+        expected_mode_label = canonical_trading_mode_label(expected_mode, field_name="expected_mode")
+    except RuntimeError:
+        return False, REASON_PRECOMPUTE_INVALID
+    if contract_mode != expected_mode_label:
         return False, REASON_PRECOMPUTE_INVALID
     if str(contract.get("status") or "") != PRECOMPUTE_STATUS_COMPLETE:
         reason = str(contract.get("validation_reason") or "").strip()

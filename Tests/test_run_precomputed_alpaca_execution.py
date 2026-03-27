@@ -111,7 +111,7 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
             "order_id": "run:WBD:SELL",
         },
     ]
-    planned_payload = {"trade_date": "2026-03-26", "mode": "ALPACA", "trades": planned_trades}
+    planned_payload = {"trade_date": "2026-03-26", "mode": "PAPER", "trades": planned_trades}
     daily_snapshot = {
         "holdings": [
             {"ticker": "WBD", "shares": 14.0, "last_price": 27.27},
@@ -128,7 +128,7 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
         "performance_diagnostics": {"current_equity": 9608.38},
     }
     paper_summary = {
-        "trading_mode": "ALPACA",
+        "trading_mode": "PAPER",
         "market_status": "OPEN",
         "planned_for": "2026-03-26T09:35:15-04:00",
         "execution_trades": [dict(item) for item in planned_trades],

@@ -147,7 +147,7 @@ def _fmt_planned_for(value: Any) -> str:
 
 def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     trade_date = str(payload.get("trade_date", dt.date.today().isoformat()))
-    mode = str(payload.get("mode", "SHADOW")).upper()
+    mode = str(payload.get("mode", "PAPER")).upper()
     status = str(payload.get("execution_status", "READY")).upper()
     reason = payload.get("halt_reason")
     planned_for = payload.get("planned_for")
@@ -542,7 +542,7 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     subject, _ = build_execution_email_text(payload)
 
     status = str(payload.get("execution_status", "READY")).upper()
-    mode = str(payload.get("mode", "SHADOW")).upper()
+    mode = str(payload.get("mode", "PAPER")).upper()
     trade_date = str(payload.get("trade_date", dt.date.today().isoformat()))
     status_label = payload.get("status_label")
     status_reason = payload.get("status_reason")

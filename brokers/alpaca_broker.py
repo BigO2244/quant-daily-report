@@ -379,7 +379,7 @@ class AlpacaBroker:
             from alpaca.trading.client import TradingClient
         except Exception as exc:
             raise RuntimeError(
-                "alpaca-py is required for TRADING_MODE=alpaca. Install with `pip install alpaca-py`."
+                "alpaca-py is required for paper mode broker access. Install with `pip install alpaca-py`."
             ) from exc
         try:
             client = TradingClient(

@@ -3,7 +3,7 @@ Tests for:
   1. _write_intended_orders_artifact — written before submission gate,
      captures intended trades + execution_enabled flag
   2. Broker equity authority — live broker equity replaces ledger equity_prev
-     when mode=alpaca
+     when mode=paper
 """
 import json
 from pathlib import Path
@@ -105,9 +105,9 @@ def test_intended_orders_artifact_path(tmp_path, monkeypatch):
 # 2. Broker equity authority — unit test of the sync block logic
 # ---------------------------------------------------------------------------
 
-def test_broker_equity_replaces_ledger_equity_in_alpaca_mode(tmp_path, monkeypatch):
+def test_broker_equity_replaces_ledger_equity_in_paper_mode(tmp_path, monkeypatch):
     """
-    In alpaca mode, live broker equity from get_account() should be used for
+    In paper mode, live broker equity from get_account() should be used for
     portfolio sizing, not the stale ledger value.
 
     We test the effective state change by verifying that after the sync block
@@ -132,13 +132,13 @@ def test_broker_equity_replaces_ledger_equity_in_alpaca_mode(tmp_path, monkeypat
     # Simulate the sync block directly
     equity_prev = ledger_equity
     cash_prev = 800.0
-    mode = "alpaca"
+    mode = "paper"
     is_weekend = False
 
     # Replicate the sync block logic in isolation
     try:
         alpaca = pb.AlpacaBroker.from_env()
-        if mode == "alpaca":
+        if mode == "paper":
             try:
                 _acct = alpaca.get_account() or {}
                 _live_equity = pb._coerce_float(_acct.get("equity") or _acct.get("portfolio_value"))
@@ -174,11 +174,11 @@ def test_broker_equity_sync_falls_back_gracefully_on_error(monkeypatch):
     monkeypatch.setattr(pb.AlpacaBroker, "from_env", staticmethod(lambda: FailingBroker()))
 
     equity_prev = ledger_equity
-    mode = "alpaca"
+    mode = "paper"
 
     try:
         alpaca = pb.AlpacaBroker.from_env()
-        if mode == "alpaca":
+        if mode == "paper":
             try:
                 _acct = alpaca.get_account() or {}
                 _live_equity = pb._coerce_float(_acct.get("equity") or _acct.get("portfolio_value"))
@@ -194,8 +194,8 @@ def test_broker_equity_sync_falls_back_gracefully_on_error(monkeypatch):
     )
 
 
-def test_broker_equity_not_fetched_in_paper_mode(monkeypatch):
-    """In paper mode (not alpaca), equity_prev is NOT updated from broker account."""
+def test_broker_equity_not_fetched_in_live_mode(monkeypatch):
+    """In live mode, the paper broker sync block should not fetch broker equity."""
     import paper.paper_broker as pb
 
     live_equity = 9932.52
@@ -214,11 +214,11 @@ def test_broker_equity_not_fetched_in_paper_mode(monkeypatch):
     monkeypatch.setattr(pb.AlpacaBroker, "from_env", staticmethod(lambda: SpyBroker()))
 
     equity_prev = ledger_equity
-    mode = "paper"  # not alpaca
+    mode = "live"
 
     try:
         alpaca = pb.AlpacaBroker.from_env()
-        if mode == "alpaca":  # guard in sync block
+        if mode == "paper":  # guard in sync block
             _acct = alpaca.get_account() or {}
             _live_equity = pb._coerce_float(_acct.get("equity"))
             if _live_equity is not None and _live_equity > 0:
@@ -226,5 +226,5 @@ def test_broker_equity_not_fetched_in_paper_mode(monkeypatch):
     except Exception:
         pass
 
-    assert call_count["get_account"] == 0, "get_account should not be called in paper mode"
-    assert equity_prev == pytest.approx(ledger_equity), "equity_prev unchanged in paper mode"
+    assert call_count["get_account"] == 0, "get_account should not be called in live mode"
+    assert equity_prev == pytest.approx(ledger_equity), "equity_prev unchanged in live mode"

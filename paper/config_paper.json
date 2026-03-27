@@ -12,7 +12,7 @@
     "cash_buffer_bps": 10.0
   },
   "mode": {
-    "trading_mode": "alpaca",
+    "trading_mode": "paper",
     "portfolio_id": "main",
     "strategy_version": "growth_engine_v4"
   },
