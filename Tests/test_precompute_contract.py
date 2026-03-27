@@ -93,6 +93,31 @@ def test_validate_precompute_contract_incomplete(tmp_path: Path, monkeypatch) ->
     assert reason == REASON_PRECOMPUTE_INCOMPLETE
 
 
+def test_validate_precompute_contract_accepts_paper_mode_for_alpaca(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    bundle_dir = Path("outputs/precompute/2026-03-17")
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("daily_snapshot.json", "signals.json", "planned_execution_payload.json"):
+        (bundle_dir / name).write_text("{}\n", encoding="utf-8")
+    contract = {
+        "artifact_type": "alpaca_precompute_bundle",
+        "trade_date": "2026-03-17",
+        "mode": "PAPER",
+        "status": "complete",
+        "validated_for_execution": True,
+        "files": {
+            "daily_snapshot": "daily_snapshot.json",
+            "signals": "signals.json",
+            "planned_execution_payload": "planned_execution_payload.json",
+        },
+    }
+
+    valid, reason = validate_precompute_contract(contract, expected_trade_date="2026-03-17", expected_mode="ALPACA")
+
+    assert valid is True
+    assert reason is None
+
+
 def test_timing_classification_retry_window() -> None:
     timing = classify_timing(
         now=dt.datetime(2026, 3, 17, 10, 15, tzinfo=ET),

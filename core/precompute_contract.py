@@ -20,6 +20,10 @@ REASON_PRECOMPUTE_INCOMPLETE = "precompute_incomplete"
 REASON_PRECOMPUTE_INVALID = "precompute_invalid"
 REASON_PRECOMPUTE_VALIDATION_FAILED = "precompute_validation_failed"
 
+# "PAPER" is the internal name used by the plan-only paper broker; it is
+# semantically identical to "ALPACA" for bundle validation purposes.
+_CONTRACT_MODE_ALIASES: dict[str, str] = {"PAPER": "ALPACA"}
+
 
 def precompute_bundle_dir(trade_date: str) -> Path:
     return PRECOMPUTE_ROOT / str(trade_date)
@@ -157,7 +161,11 @@ def validate_precompute_contract(
         return False, REASON_PRECOMPUTE_INVALID
     if str(contract.get("trade_date") or "") != str(expected_trade_date):
         return False, REASON_PRECOMPUTE_WRONG_TRADE_DATE
-    if str(contract.get("mode") or "").upper() != str(expected_mode).upper():
+    contract_mode = _CONTRACT_MODE_ALIASES.get(
+        str(contract.get("mode") or "").upper(),
+        str(contract.get("mode") or "").upper(),
+    )
+    if contract_mode != str(expected_mode).upper():
         return False, REASON_PRECOMPUTE_INVALID
     if str(contract.get("status") or "") != PRECOMPUTE_STATUS_COMPLETE:
         reason = str(contract.get("validation_reason") or "").strip()
