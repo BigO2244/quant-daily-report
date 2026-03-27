@@ -33,6 +33,10 @@ fi
 
 # --- Compute report date ---
 export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
+export MODE="alpaca"
+export TRADING_MODE="alpaca"
+export ALPACA_PAPER="1"
+export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
 
 # --- Log setup ---
 LOG_DIR="${REPO_ROOT}/logs"
@@ -51,6 +55,7 @@ echo "=== PHASE 1: PRECOMPUTE ===" | tee -a "${LOG_FILE}"
 echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
 echo "repo_root=${REPO_ROOT}" | tee -a "${LOG_FILE}"
+echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
 
 # --- Run precompute planner ---
 EXIT_CODE=0

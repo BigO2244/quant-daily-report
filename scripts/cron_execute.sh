@@ -33,6 +33,10 @@ fi
 
 # --- Compute report date ---
 export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
+export MODE="alpaca"
+export TRADING_MODE="alpaca"
+export ALPACA_PAPER="1"
+export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
 
 # --- Log setup ---
 LOG_DIR="${REPO_ROOT}/logs"
@@ -53,6 +57,7 @@ export WORKFLOW_STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "=== PHASE 2: ORDER EXECUTION ===" | tee -a "${LOG_FILE}"
 echo "started_at=${WORKFLOW_STARTED_AT_UTC}" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
+echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
 
 # --- Verify precompute bundle exists ---
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
