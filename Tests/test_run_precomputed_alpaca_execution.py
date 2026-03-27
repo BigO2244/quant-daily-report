@@ -231,6 +231,7 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
     monkeypatch.setattr(live_exec, "write_execution_artifacts", lambda **kwargs: None)
     monkeypatch.setattr(live_exec, "write_trading_day_summary", lambda **kwargs: None)
     monkeypatch.setattr(live_exec, "write_latest_run_pointer", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "write_trade_stage_pointer", lambda **kwargs: None)
     monkeypatch.setattr(live_exec, "build_execution_email_text", lambda payload: ("subject", "body"))
     monkeypatch.setitem(
         sys.modules,

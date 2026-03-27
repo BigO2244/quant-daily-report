@@ -76,10 +76,21 @@ echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
 echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
 
-# --- Check that Phase 2 produced results ---
-LATEST_RUN="${REPO_ROOT}/outputs/latest_run.json"
-if [[ ! -f "${LATEST_RUN}" ]]; then
-    echo "WARN: ${LATEST_RUN} not found — Phase 2 may not have run" | tee -a "${LOG_FILE}"
+resolve_execution_run_root() {
+    python3 - <<'PYEOF'
+import os
+from core.run_pointer import read_trade_stage_pointer
+
+trade_date = str(os.getenv("REPORT_DATE", "")).strip()
+pointer = read_trade_stage_pointer(trade_date, "execution")
+print((pointer or {}).get("run_root", ""))
+PYEOF
+}
+
+# --- Check that Phase 2 produced execution-stage results ---
+EXECUTION_RUN_ROOT="$(resolve_execution_run_root 2>/dev/null || true)"
+if [[ -z "${EXECUTION_RUN_ROOT}" ]]; then
+    echo "WARN: execution workflow pointer missing for ${REPORT_DATE} — Phase 2 may not have completed" | tee -a "${LOG_FILE}"
 fi
 
 CONFIRM_EXIT=0
@@ -92,46 +103,43 @@ python3 daily_trade_execution_email.py >> "${LOG_FILE}" 2>&1 || {
 
 # --- Step 2: Send trading confirmation email ---
 echo "[CONFIRM] Sending trading confirmation email..." | tee -a "${LOG_FILE}"
-if [[ -f "${LATEST_RUN}" ]]; then
-    RUN_ROOT="$(python3 -c "import json, pathlib; p=pathlib.Path('${LATEST_RUN}'); print((json.loads(p.read_text(encoding='utf-8')).get('run_root','') if p.exists() else ''))" 2>/dev/null || true)"
-    if [[ -n "${RUN_ROOT}" ]] && [[ -f "${RUN_ROOT}/execution_results.json" ]]; then
-        python3 -m scripts.send_trading_confirmation_email >> "${LOG_FILE}" 2>&1 || {
-            echo "WARN: trading confirmation email failed (non-blocking)" | tee -a "${LOG_FILE}"
-            CONFIRM_EXIT=1
-            TAIL="$(tail -20 "${LOG_FILE}")"
-            send_failure_email \
-                "❌ [Alpha Stack] Trade confirmation FAILED — ${REPORT_DATE}" \
-                "Phase 3 confirmation FAILED at $(date).
+if [[ -n "${EXECUTION_RUN_ROOT}" ]] && [[ -f "${EXECUTION_RUN_ROOT}/execution_results.json" ]]; then
+    python3 -m scripts.send_trading_confirmation_email >> "${LOG_FILE}" 2>&1 || {
+        echo "WARN: trading confirmation email failed (non-blocking)" | tee -a "${LOG_FILE}"
+        CONFIRM_EXIT=1
+        TAIL="$(tail -20 "${LOG_FILE}")"
+        send_failure_email \
+            "❌ [Alpha Stack] Trade confirmation FAILED — ${REPORT_DATE}" \
+            "Phase 3 confirmation FAILED at $(date).
 
 Last 20 lines of log:
 ${TAIL}" >> "${LOG_FILE}" 2>&1 || {
-                    echo "WARN: failure alert email send failed (non-blocking)" | tee -a "${LOG_FILE}"
-                }
-        }
-    else
-        echo "WARN: execution_results.json not found — skipping confirmation email" | tee -a "${LOG_FILE}"
-    fi
+                echo "WARN: failure alert email send failed (non-blocking)" | tee -a "${LOG_FILE}"
+            }
+    }
 else
-    echo "WARN: latest_run.json missing — skipping confirmation email" | tee -a "${LOG_FILE}"
+    echo "WARN: execution_results.json not found for execution workflow pointer — skipping confirmation email" | tee -a "${LOG_FILE}"
 fi
 
-# --- Step 3: Verify execution status from operator summary ---
+# --- Step 3: Verify execution status from execution-stage operator summary ---
 echo "[CONFIRM] Checking execution status..." | tee -a "${LOG_FILE}"
 python3 - >> "${LOG_FILE}" 2>&1 <<'PYEOF'
 import json
+import os
 from pathlib import Path
+from core.run_pointer import read_trade_stage_pointer
 
-latest_path = Path("outputs/latest_run.json")
-if not latest_path.exists():
-    print("[CONFIRM] no latest_run.json — cannot verify")
+trade_date = str(os.getenv("REPORT_DATE", "")).strip()
+pointer = read_trade_stage_pointer(trade_date, "execution")
+if not pointer:
+    print("[CONFIRM] no execution workflow pointer — cannot verify")
     raise SystemExit(0)
 
-latest = json.loads(latest_path.read_text(encoding="utf-8"))
-run_root = latest.get("run_root", "")
-status = latest.get("status", "unknown")
+run_root = pointer.get("run_root", "")
+status = pointer.get("status", "unknown")
 
-print(f"[CONFIRM] run_id={latest.get('run_id', 'unknown')}")
-print(f"[CONFIRM] trade_date={latest.get('trade_date', 'unknown')}")
+print(f"[CONFIRM] run_id={pointer.get('run_id', 'unknown')}")
+print(f"[CONFIRM] trade_date={pointer.get('trade_date', 'unknown')}")
 print(f"[CONFIRM] terminal_status={status}")
 
 op_path = Path(run_root) / "operator_summary.json" if run_root else None

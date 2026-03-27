@@ -48,7 +48,7 @@ from core.operator_summary import (
     write_operator_summary,
 )
 from core.precompute_contract import load_precompute_inputs
-from core.run_pointer import write_latest_run_pointer
+from core.run_pointer import write_latest_run_pointer, write_trade_stage_pointer
 from core.timing_policy import classify_timing, current_et
 from core.trading_day_summary import write_trading_day_summary
 from core.trading_mode import canonical_trading_mode_label
@@ -267,21 +267,42 @@ def _apply_pre_execution_risk_controls(
     return str(adjusted_signals_path), float(result.cash_target_weight)
 
 
-def _init_run_root(run_root: Path, trade_date: str) -> None:
+def _write_execution_run_pointers(
+    *,
+    run_id: str,
+    trade_date: str,
+    run_root: Path,
+    status: str,
+    substatus: str | None = None,
+    status_message: str | None = None,
+) -> None:
+    pointer_kwargs = {
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "mode": "PAPER",
+        "run_root": str(run_root),
+        "status": status,
+        "substatus": substatus,
+        "status_message": status_message,
+    }
+    write_latest_run_pointer(**pointer_kwargs)
+    write_trade_stage_pointer(stage="execution", **pointer_kwargs)
+
+
+def _init_run_root(run_root: Path, trade_date: str, run_id: str) -> None:
     for subdir in ("logs", "reports", "broker", "ledger", "snapshots", "audit"):
         ensure_dir(run_root / subdir)
-    write_latest_run_pointer(
-        run_id=get_run_id(),
+    _write_execution_run_pointers(
+        run_id=run_id,
         trade_date=trade_date,
-        mode="PAPER",
-        run_root=str(run_root),
+        run_root=run_root,
         status="running",
     )
     safe_write_text(
         run_root / "meta.json",
         json.dumps(
             {
-                "run_id": get_run_id(),
+                "run_id": run_id,
                 "trade_date": trade_date,
                 "mode": "PAPER",
                 "run_root": str(run_root),
@@ -494,7 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run_id = get_run_id()
         run_root = get_run_dir(run_id)
-        _init_run_root(run_root, trade_date)
+        _init_run_root(run_root, trade_date, run_id)
 
         workflow_start_utc = _workflow_start_utc()
         workflow_start_et = workflow_start_utc.astimezone(ET) if workflow_start_utc else None
@@ -548,11 +569,10 @@ def main(argv: list[str] | None = None) -> int:
                 execution_window_status=payload.get("execution_window_status"),
                 **_operator_summary_timing_kwargs(timing),
             )
-            write_latest_run_pointer(
+            _write_execution_run_pointers(
                 run_id=run_id,
                 trade_date=trade_date,
-                mode="PAPER",
-                run_root=str(run_root),
+                run_root=run_root,
                 status="failed_pre_execution",
                 substatus=str(precompute_reason or ""),
                 status_message=str(precompute_reason or ""),
@@ -632,11 +652,10 @@ def main(argv: list[str] | None = None) -> int:
                 execution_window_status=str(os.getenv("EXECUTION_WINDOW_STATUS", "")).strip() or None,
                 **_operator_summary_timing_kwargs(timing),
             )
-            write_latest_run_pointer(
+            _write_execution_run_pointers(
                 run_id=run_id,
                 trade_date=trade_date,
-                mode="PAPER",
-                run_root=str(run_root),
+                run_root=run_root,
                 status="failed_pre_execution",
                 substatus=reason,
                 status_message=reason,
@@ -932,11 +951,10 @@ def main(argv: list[str] | None = None) -> int:
             if execution_payload["operator_execution_status"] in {"failed", "partial"}
             else ("no_action" if execution_payload["operator_execution_status"] == "skipped" else "success")
         )
-        write_latest_run_pointer(
+        _write_execution_run_pointers(
             run_id=run_id,
             trade_date=trade_date,
-            mode="PAPER",
-            run_root=str(run_root),
+            run_root=run_root,
             status=terminal_status,
             substatus=str((paper_summary or {}).get("execution_reason") or ""),
             status_message=str(execution_payload.get("halt_reason") or ""),

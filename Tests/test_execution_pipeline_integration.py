@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from core.execution_payload import write_canonical_execution_payload
+from core.run_pointer import write_trade_stage_pointer
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -72,7 +73,7 @@ def test_executor_reads_latest_run_and_loads_payload(tmp_path: Path, monkeypatch
 
     out = mod.run_execution()
     assert out["run_id"] == "run-abc"
-    assert out["status"] == "SKIPPED_NOT_READY"
+    assert out["status"] == "HALTED"
 
 
 def test_missing_canonical_payload_writes_halted_results(tmp_path: Path, monkeypatch) -> None:
@@ -89,7 +90,7 @@ def test_missing_canonical_payload_writes_halted_results(tmp_path: Path, monkeyp
     results = json.loads((run_root / "execution_results.json").read_text(encoding="utf-8"))
 
     assert out["status"] == "HALTED"
-    assert "MISSING_EXECUTION_PAYLOAD" in str(out.get("halt_reason"))
+    assert "ENGINE_RUN_NO_ARTIFACTS" in str(out.get("halt_reason"))
     assert results["submitted_count"] == 0
 
 
@@ -137,7 +138,7 @@ def test_valid_payload_calls_broker_submission(tmp_path: Path, monkeypatch) -> N
     out = mod.run_execution()
     assert out["submitted_count"] == 1
     assert out["accepted_count"] == 1
-    assert out["status"] == "SUBMITTED"
+    assert out["status"] == "EXECUTED"
     assert fake.submitted == 1
 
 
@@ -180,11 +181,17 @@ def test_duplicate_run_id_does_not_resubmit(tmp_path: Path, monkeypatch) -> None
 def test_confirmation_email_uses_execution_results(tmp_path: Path, monkeypatch) -> None:
     mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_1")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-09")
 
     run_root = tmp_path / "outputs" / "runs" / "run-confirm"
-    _write_json(
-        tmp_path / "outputs" / "latest_run.json",
-        {"run_id": "run-confirm", "trade_date": "2026-03-09", "mode": "ALPACA", "run_root": str(run_root)},
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-confirm",
+        trade_date="2026-03-09",
+        mode="ALPACA",
+        run_root=str(run_root),
+        status="success",
+        workspace_root=str(tmp_path),
     )
     _write_json(
         run_root / "execution_results.json",
@@ -218,3 +225,83 @@ def test_confirmation_email_uses_execution_results(tmp_path: Path, monkeypatch) 
     assert "Trading Confirmation 2026-03-09" in sent["subject"]
     assert "Submitted: 1" in sent["body_text"]
     assert "Run ID: run-confirm" in sent["body_text"]
+
+
+def test_confirmation_email_prefers_execution_stage_pointer_over_latest_run(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_2")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+    monkeypatch.setenv("EMAIL_TRADING_CONFIRMATION", "1")
+    monkeypatch.delenv("EMAIL_DRY_RUN", raising=False)
+
+    good_run_root = tmp_path / "outputs" / "runs" / "run-confirm-good"
+    bad_run_root = tmp_path / "outputs" / "runs" / "run-confirm-bad"
+
+    _write_json(
+        tmp_path / "outputs" / "latest_run.json",
+        {
+            "run_id": "run-confirm-bad",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "run_root": str(bad_run_root),
+            "status": "success",
+        },
+    )
+    _write_json(
+        bad_run_root / "execution_results.json",
+        {
+            "run_id": "run-confirm-bad",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "order_ids": [],
+            "status": "HALTED",
+            "halt_reason": "WRONG_RUN",
+            "broker_responses": [],
+        },
+    )
+
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-confirm-good",
+        trade_date="2026-03-09",
+        mode="ALPACA",
+        run_root=str(good_run_root),
+        status="success",
+        workspace_root=str(tmp_path),
+    )
+    _write_json(
+        good_run_root / "execution_results.json",
+        {
+            "run_id": "run-confirm-good",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "submitted_count": 2,
+            "accepted_count": 2,
+            "rejected_count": 0,
+            "order_ids": ["alpaca-1", "alpaca-2"],
+            "status": "EXECUTED",
+            "halt_reason": None,
+            "broker_responses": [],
+        },
+    )
+
+    sent = {}
+
+    def _fake_send_email(*, subject, body_text, body_html=None):
+        sent["subject"] = subject
+        sent["body_text"] = body_text
+        sent["body_html"] = body_html
+
+    monkeypatch.setattr(mod, "send_email", _fake_send_email)
+
+    mod.main()
+
+    assert "Trading Confirmation 2026-03-09" in sent["subject"]
+    assert "Submitted: 2" in sent["body_text"]
+    assert "Run ID: run-confirm-good" in sent["body_text"]

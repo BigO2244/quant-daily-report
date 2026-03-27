@@ -98,6 +98,7 @@ def _load_module(tmp_path: Path):
     sys.modules["core.run_pointer"] = _module(
         "core.run_pointer",
         write_latest_run_pointer=lambda **_kwargs: None,
+        write_trade_stage_pointer=lambda **_kwargs: None,
     )
     sys.modules["core.timing_policy"] = _module(
         "core.timing_policy",

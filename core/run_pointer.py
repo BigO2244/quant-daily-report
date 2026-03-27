@@ -1,11 +1,15 @@
 """
-Canonical run pointer management.
+Run pointer management.
 
-The latest_run.json file at outputs/latest_run.json is the single source of truth
-for where the current trading day's artifacts are located.
+Two pointer classes exist:
 
-Both the execution engine (daily_quant_report.py) and reporting systems must read
-this pointer before operating, ensuring they work against the same run.
+1. ``outputs/latest_run.json`` records the most recent run activity of any kind.
+   It is useful for dashboards and generic tooling, but it is mutable shared
+   state and should not be used as the only workflow handoff between critical
+   trading phases.
+2. ``outputs/workflow/<trade_date>/<stage>.json`` records trade-date-scoped,
+   stage-specific pointers (for example ``execution``). These are the
+   high-confidence handoff artifacts used by execution and confirmation flows.
 """
 
 import json
@@ -16,6 +20,8 @@ from typing import Optional
 
 
 LATEST_RUN_POINTER = 'outputs/latest_run.json'
+WORKFLOW_POINTER_ROOT = "outputs/workflow"
+VALID_WORKFLOW_STAGES = frozenset({"precompute", "execution", "confirmation"})
 
 # ── Terminal run status constants ─────────────────────────────────────────────
 # Use these instead of raw strings to ensure consistent classification across
@@ -36,6 +42,27 @@ def is_run_complete(status: str) -> bool:
 def is_run_failure(status: str) -> bool:
     """Return True if *status* represents a failure / incomplete state."""
     return not is_run_complete(status) and status not in {"running", "bootstrapped"}
+
+
+def _resolve_workspace_root(workspace_root: str | None) -> Path:
+    return Path(workspace_root) if workspace_root is not None else Path(os.getcwd())
+
+
+def _normalize_workflow_stage(stage: str) -> str:
+    normalized = str(stage or "").strip().lower()
+    if normalized not in VALID_WORKFLOW_STAGES:
+        raise ValueError(f"invalid workflow stage: {stage!r}")
+    return normalized
+
+
+def workflow_stage_pointer_path(
+    trade_date: str,
+    stage: str,
+    workspace_root: str | None = None,
+) -> Path:
+    root = _resolve_workspace_root(workspace_root)
+    normalized_stage = _normalize_workflow_stage(stage)
+    return root / WORKFLOW_POINTER_ROOT / str(trade_date) / f"{normalized_stage}.json"
 
 
 def write_latest_run_pointer(
@@ -65,10 +92,8 @@ def write_latest_run_pointer(
     Raises:
         IOError: If pointer cannot be written
     """
-    if workspace_root is None:
-        workspace_root = os.getcwd()
-    
-    pointer_path = Path(workspace_root) / LATEST_RUN_POINTER
+    workspace = _resolve_workspace_root(workspace_root)
+    pointer_path = workspace / LATEST_RUN_POINTER
     pointer_path.parent.mkdir(parents=True, exist_ok=True)
     
     pointer_data = {
@@ -102,14 +127,12 @@ def read_latest_run_pointer(workspace_root: str = None) -> Optional[dict]:
     Raises:
         json.JSONDecodeError: If pointer file is malformed
     """
-    if workspace_root is None:
-        workspace_root = os.getcwd()
-    
-    pointer_path = Path(workspace_root) / LATEST_RUN_POINTER
+    workspace = _resolve_workspace_root(workspace_root)
+    pointer_path = workspace / LATEST_RUN_POINTER
 
     if not pointer_path.exists():
         # Fallback: legacy outputs/latest.json uses 'path' key instead of 'run_root'.
-        legacy_path = Path(workspace_root) / "outputs/latest.json"
+        legacy_path = workspace / "outputs/latest.json"
         if legacy_path.exists():
             try:
                 data = json.loads(legacy_path.read_text(encoding="utf-8"))
@@ -130,6 +153,79 @@ def read_latest_run_pointer(workspace_root: str = None) -> Optional[dict]:
 
     with open(pointer_path, 'r') as f:
         return json.load(f)
+
+
+def write_trade_stage_pointer(
+    *,
+    stage: str,
+    run_id: str,
+    trade_date: str,
+    mode: str,
+    run_root: str,
+    status: str = "success",
+    substatus: str | None = None,
+    status_message: str | None = None,
+    workspace_root: str | None = None,
+) -> str:
+    pointer_path = workflow_stage_pointer_path(
+        trade_date=trade_date,
+        stage=stage,
+        workspace_root=workspace_root,
+    )
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    pointer_data = {
+        "stage": _normalize_workflow_stage(stage),
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "mode": mode,
+        "run_root": run_root,
+        "status": status,
+        "substatus": substatus,
+        "status_message": status_message,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+    with open(pointer_path, "w") as f:
+        json.dump(pointer_data, f, indent=2)
+    return str(pointer_path)
+
+
+def read_trade_stage_pointer(
+    trade_date: str,
+    stage: str,
+    workspace_root: str | None = None,
+) -> Optional[dict]:
+    pointer_path = workflow_stage_pointer_path(
+        trade_date=trade_date,
+        stage=stage,
+        workspace_root=workspace_root,
+    )
+    if not pointer_path.exists():
+        return None
+    with open(pointer_path, "r") as f:
+        return json.load(f)
+
+
+def resolve_trade_stage_pointer(
+    trade_date: str,
+    stage: str,
+    workspace_root: str | None = None,
+) -> Optional[dict]:
+    """Resolve the authoritative pointer for a trade-date workflow stage.
+
+    Stage-specific pointers are preferred. ``latest_run.json`` remains a
+    backward-compatible fallback only when it matches the requested trade date.
+    """
+    pointer = read_trade_stage_pointer(trade_date, stage, workspace_root)
+    if isinstance(pointer, dict):
+        return pointer
+
+    latest = read_latest_run_pointer(workspace_root)
+    if isinstance(latest, dict) and str(latest.get("trade_date") or "") == str(trade_date):
+        fallback = dict(latest)
+        fallback.setdefault("_source", "latest_run_json")
+        fallback.setdefault("stage", _normalize_workflow_stage(stage))
+        return fallback
+    return None
 
 
 def get_canonical_run_root(workspace_root: str = None) -> Optional[str]:

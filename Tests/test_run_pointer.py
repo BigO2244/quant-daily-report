@@ -12,8 +12,13 @@ from pathlib import Path
 import pytest
 
 from core.run_pointer import (
+    WORKFLOW_POINTER_ROOT,
     write_latest_run_pointer,
     read_latest_run_pointer,
+    write_trade_stage_pointer,
+    read_trade_stage_pointer,
+    resolve_trade_stage_pointer,
+    workflow_stage_pointer_path,
     get_canonical_run_root,
     get_canonical_run_id,
     is_pointer_fresh,
@@ -338,6 +343,75 @@ class TestWorkflowPointerHandoff:
         with tempfile.TemporaryDirectory() as tmpdir:
             result = read_latest_run_pointer(tmpdir)
             assert result is None
+
+
+class TestTradeStagePointers:
+    def test_write_and_read_execution_pointer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = write_trade_stage_pointer(
+                stage="execution",
+                run_id="run-exec-1",
+                trade_date="2026-03-30",
+                mode="PAPER",
+                run_root="outputs/runs/run-exec-1",
+                status="running",
+                workspace_root=tmpdir,
+            )
+
+            assert Path(path).exists()
+            assert Path(path) == workflow_stage_pointer_path("2026-03-30", "execution", tmpdir)
+
+            pointer = read_trade_stage_pointer("2026-03-30", "execution", tmpdir)
+            assert pointer is not None
+            assert pointer["stage"] == "execution"
+            assert pointer["run_id"] == "run-exec-1"
+            assert pointer["status"] == "running"
+
+    def test_trade_stage_pointer_path_uses_workflow_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = workflow_stage_pointer_path("2026-03-30", "execution", tmpdir)
+            expected = Path(tmpdir) / WORKFLOW_POINTER_ROOT / "2026-03-30" / "execution.json"
+            assert path == expected
+
+    def test_resolve_trade_stage_pointer_prefers_stage_pointer_over_latest_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_latest_run_pointer(
+                run_id="latest-run",
+                trade_date="2026-03-30",
+                mode="PAPER",
+                run_root="outputs/runs/latest-run",
+                status="success",
+                workspace_root=tmpdir,
+            )
+            write_trade_stage_pointer(
+                stage="execution",
+                run_id="execution-run",
+                trade_date="2026-03-30",
+                mode="PAPER",
+                run_root="outputs/runs/execution-run",
+                status="success",
+                workspace_root=tmpdir,
+            )
+
+            resolved = resolve_trade_stage_pointer("2026-03-30", "execution", tmpdir)
+            assert resolved is not None
+            assert resolved["run_id"] == "execution-run"
+
+    def test_resolve_trade_stage_pointer_falls_back_to_latest_run_when_stage_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_latest_run_pointer(
+                run_id="latest-run",
+                trade_date="2026-03-30",
+                mode="PAPER",
+                run_root="outputs/runs/latest-run",
+                status="success",
+                workspace_root=tmpdir,
+            )
+
+            resolved = resolve_trade_stage_pointer("2026-03-30", "execution", tmpdir)
+            assert resolved is not None
+            assert resolved["run_id"] == "latest-run"
+            assert resolved["_source"] == "latest_run_json"
 
 
 if __name__ == '__main__':
