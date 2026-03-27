@@ -35,6 +35,31 @@ def test_precompute_reconciliation_halt_reason_preserves_block_reason() -> None:
     )
 
 
+def test_run_pretrade_reconciliation_retries_once_after_self_heal(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    outcomes = [
+        {"reconciliation_decision": "SELF_HEAL", "report_path": "first.json"},
+        {"reconciliation_decision": "WARN", "report_path": "second.json"},
+    ]
+
+    def _fake_reconcile(**kwargs):
+        calls.append(dict(kwargs))
+        return outcomes[len(calls) - 1]
+
+    monkeypatch.setattr(live_exec, "pre_trade_reconcile_and_classify", _fake_reconcile)
+
+    result = live_exec._run_pretrade_reconciliation(
+        trade_date="2026-03-27",
+        paper_ledger_path="ledger.csv",
+    )
+
+    assert len(calls) == 2
+    assert result["reconciliation_decision"] == "WARN"
+    assert result["reconciliation_rechecked_after_self_heal"] is True
+    assert result["initial_reconciliation_decision"] == "SELF_HEAL"
+    assert result["initial_reconciliation_report_path"] == "first.json"
+
+
 def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-03-26")

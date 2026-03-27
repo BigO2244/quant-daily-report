@@ -410,6 +410,28 @@ def _precompute_reconciliation_halt_reason(recon_result: dict[str, object] | Non
     return f"precompute_reconciliation_{decision.lower()}"
 
 
+def _run_pretrade_reconciliation(*, trade_date: str, paper_ledger_path: str) -> dict[str, object]:
+    kwargs = {
+        "run_date": trade_date,
+        "trading_mode": "alpaca",
+        "ledger_path": paper_ledger_path,
+        "sent_ledger_path": "outputs/orders_sent/orders_sent.csv",
+    }
+    initial = pre_trade_reconcile_and_classify(**kwargs) or {}
+    initial_decision = str(initial.get("reconciliation_decision") or "PASS").strip().upper()
+    if initial_decision != "SELF_HEAL":
+        return initial
+
+    logger.warning(
+        "[LIVE_EXECUTION] pretrade reconciliation SELF_HEAL -> re-running reconciliation against refreshed canonical state"
+    )
+    followup = dict(pre_trade_reconcile_and_classify(**kwargs) or {})
+    followup["reconciliation_rechecked_after_self_heal"] = True
+    followup["initial_reconciliation_decision"] = initial_decision
+    followup["initial_reconciliation_report_path"] = str(initial.get("report_path") or "")
+    return followup
+
+
 def _workflow_context() -> dict[str, object]:
     return {
         "workflow_kind": str(os.getenv("WORKFLOW_KIND", "")).strip() or None,
@@ -552,11 +574,9 @@ def main(argv: list[str] | None = None) -> int:
 
         ensure_sent_ledger_exists("outputs/orders_sent/orders_sent.csv")
         paper_ledger_path, paper_trades_path = ensure_paper_state_files()
-        recon_result = pre_trade_reconcile_and_classify(
-            run_date=trade_date,
-            trading_mode="alpaca",
-            ledger_path=paper_ledger_path,
-            sent_ledger_path="outputs/orders_sent/orders_sent.csv",
+        recon_result = _run_pretrade_reconciliation(
+            trade_date=trade_date,
+            paper_ledger_path=paper_ledger_path,
         )
         recon_halt_reason = _precompute_reconciliation_halt_reason(recon_result)
         if recon_halt_reason is not None:
