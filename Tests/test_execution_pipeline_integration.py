@@ -305,3 +305,94 @@ def test_confirmation_email_prefers_execution_stage_pointer_over_latest_run(
     assert "Trading Confirmation 2026-03-09" in sent["subject"]
     assert "Submitted: 2" in sent["body_text"]
     assert "Run ID: run-confirm-good" in sent["body_text"]
+
+
+def test_confirmation_email_raises_when_execution_results_missing(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_missing_results")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+
+    run_root = tmp_path / "outputs" / "runs" / "run-missing-results"
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-missing-results",
+        trade_date="2026-03-09",
+        mode="PAPER",
+        run_root=str(run_root),
+        status="success",
+        workspace_root=str(tmp_path),
+    )
+
+    try:
+        mod.main()
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "Missing execution results artifact" in str(exc)
+
+
+def test_confirmation_email_rejects_running_execution_pointer(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_running_pointer")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+
+    run_root = tmp_path / "outputs" / "runs" / "run-running"
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-running",
+        trade_date="2026-03-09",
+        mode="PAPER",
+        run_root=str(run_root),
+        status="running",
+        workspace_root=str(tmp_path),
+    )
+    _write_json(
+        run_root / "execution_results.json",
+        {
+            "run_id": "run-running",
+            "trade_date": "2026-03-09",
+            "mode": "PAPER",
+            "submitted_count": 1,
+            "accepted_count": 1,
+            "rejected_count": 0,
+            "status": "EXECUTED",
+            "halt_reason": None,
+            "broker_responses": [],
+        },
+    )
+
+    try:
+        mod.main()
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "still running" in str(exc)
+
+
+def test_confirmation_email_raises_on_malformed_execution_pointer(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_malformed_pointer")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+
+    pointer_path = tmp_path / "outputs" / "workflow" / "2026-03-09" / "execution.json"
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    pointer_path.write_text("{ invalid json }", encoding="utf-8")
+
+    try:
+        mod.main()
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "Malformed execution workflow pointer" in str(exc)
+
+
+def test_confirmation_email_trade_date_uses_current_et(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_trade_date")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("REPORT_DATE", raising=False)
+
+    class _FakeNow:
+        def strftime(self, fmt: str) -> str:
+            assert fmt == "%Y-%m-%d"
+            return "2026-03-30"
+
+    monkeypatch.setattr(mod, "current_et", lambda: _FakeNow())
+
+    assert mod._resolve_trade_date() == "2026-03-30"

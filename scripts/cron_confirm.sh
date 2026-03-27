@@ -45,17 +45,20 @@ LOG_FILE="${LOG_DIR}/confirm_${REPORT_DATE}.log"
 send_failure_email() {
     local subject="$1"
     local body="$2"
-    python3 - <<PYEOF
+    FAILURE_EMAIL_SUBJECT="${subject}" FAILURE_EMAIL_BODY="${body}" python3 - <<'PYEOF'
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+subject = os.environ["FAILURE_EMAIL_SUBJECT"]
+body = os.environ["FAILURE_EMAIL_BODY"]
+
 msg = MIMEMultipart()
-msg["Subject"] = """${subject}"""
+msg["Subject"] = subject
 msg["From"] = os.environ["SMTP_USER"]
 msg["To"] = os.environ["REPORT_TO_EMAIL"]
-msg.attach(MIMEText("""${body}""", "plain"))
+msg.attach(MIMEText(body, "plain"))
 
 with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587"))) as smtp:
     smtp.starttls()
@@ -76,21 +79,33 @@ echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
 echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
 
-resolve_execution_run_root() {
-    python3 - <<'PYEOF'
+resolve_execution_pointer_field() {
+    local field="$1"
+    EXECUTION_POINTER_FIELD="${field}" python3 - <<'PYEOF'
+import json
 import os
+import sys
 from core.run_pointer import read_trade_stage_pointer
 
 trade_date = str(os.getenv("REPORT_DATE", "")).strip()
-pointer = read_trade_stage_pointer(trade_date, "execution")
-print((pointer or {}).get("run_root", ""))
+field = str(os.getenv("EXECUTION_POINTER_FIELD", "")).strip()
+try:
+    pointer = read_trade_stage_pointer(trade_date, "execution")
+except json.JSONDecodeError as exc:
+    print(f"[CONFIRM] malformed execution workflow pointer for {trade_date}: {exc}", file=sys.stderr)
+    raise
+print((pointer or {}).get(field, ""))
 PYEOF
 }
 
 # --- Check that Phase 2 produced execution-stage results ---
-EXECUTION_RUN_ROOT="$(resolve_execution_run_root 2>/dev/null || true)"
+EXECUTION_RUN_ROOT="$(resolve_execution_pointer_field run_root 2>>"${LOG_FILE}" || true)"
+EXECUTION_POINTER_STATUS="$(resolve_execution_pointer_field status 2>>"${LOG_FILE}" || true)"
 if [[ -z "${EXECUTION_RUN_ROOT}" ]]; then
     echo "WARN: execution workflow pointer missing for ${REPORT_DATE} — Phase 2 may not have completed" | tee -a "${LOG_FILE}"
+fi
+if [[ "${EXECUTION_POINTER_STATUS,,}" == "running" ]]; then
+    echo "WARN: execution workflow pointer still running for ${REPORT_DATE} — skipping confirmation until execution reaches a terminal state" | tee -a "${LOG_FILE}"
 fi
 
 CONFIRM_EXIT=0
@@ -103,7 +118,10 @@ python3 daily_trade_execution_email.py >> "${LOG_FILE}" 2>&1 || {
 
 # --- Step 2: Send trading confirmation email ---
 echo "[CONFIRM] Sending trading confirmation email..." | tee -a "${LOG_FILE}"
-if [[ -n "${EXECUTION_RUN_ROOT}" ]] && [[ -f "${EXECUTION_RUN_ROOT}/execution_results.json" ]]; then
+if [[ "${EXECUTION_POINTER_STATUS,,}" == "running" ]]; then
+    CONFIRM_EXIT=1
+    echo "WARN: execution still running — skipping confirmation email" | tee -a "${LOG_FILE}"
+elif [[ -n "${EXECUTION_RUN_ROOT}" ]] && [[ -f "${EXECUTION_RUN_ROOT}/execution_results.json" ]]; then
     python3 -m scripts.send_trading_confirmation_email >> "${LOG_FILE}" 2>&1 || {
         echo "WARN: trading confirmation email failed (non-blocking)" | tee -a "${LOG_FILE}"
         CONFIRM_EXIT=1
@@ -119,11 +137,12 @@ ${TAIL}" >> "${LOG_FILE}" 2>&1 || {
     }
 else
     echo "WARN: execution_results.json not found for execution workflow pointer — skipping confirmation email" | tee -a "${LOG_FILE}"
+    CONFIRM_EXIT=1
 fi
 
 # --- Step 3: Verify execution status from execution-stage operator summary ---
 echo "[CONFIRM] Checking execution status..." | tee -a "${LOG_FILE}"
-python3 - >> "${LOG_FILE}" 2>&1 <<'PYEOF'
+python3 - >> "${LOG_FILE}" 2>&1 <<'PYEOF' || CONFIRM_EXIT=1
 import json
 import os
 from pathlib import Path
@@ -151,8 +170,12 @@ if op_path and op_path.exists():
 else:
     print("[CONFIRM] operator_summary.json not found")
 
+if status == "running":
+    print(f"[CONFIRM] WARNING: run still in progress status={status}")
+    raise SystemExit(1)
 if status.startswith("failed"):
     print(f"[CONFIRM] WARNING: run ended with status={status}")
+    raise SystemExit(1)
 PYEOF
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${CONFIRM_EXIT}" | tee -a "${LOG_FILE}"

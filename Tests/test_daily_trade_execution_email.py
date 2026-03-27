@@ -61,6 +61,7 @@ def _load_module_with_stubs(tmp_path: Path):
 def test_halted_execution_status_sends_operator_email(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("EMAIL_PRETRADE", "1")
+    monkeypatch.setenv("REPORT_DATE", "2026-03-26")
     execution_email = _load_module_with_stubs(tmp_path)
 
     run_root = tmp_path / "outputs" / "runs" / "run-halted"
@@ -72,6 +73,7 @@ def test_halted_execution_status_sends_operator_email(tmp_path, monkeypatch) -> 
             "mode": "PAPER",
             "run_root": str(run_root),
             "status": "failed_pre_execution",
+            "workflow_stage": "execution",
         },
     )
     _write_json(
@@ -119,6 +121,7 @@ def test_execution_email_prefers_execution_stage_pointer_over_latest_run(tmp_pat
             "mode": "PAPER",
             "run_root": str(bad_run_root),
             "status": "success",
+            "workflow_stage": "execution",
         },
     )
     _write_json(
@@ -167,3 +170,66 @@ def test_execution_email_prefers_execution_stage_pointer_over_latest_run(tmp_pat
 
     assert "subject" in sent
     assert "EXPECTED_EXECUTION_POINTER" in str(sent["body_text"])
+
+
+def test_execution_email_ignores_latest_run_for_wrong_trade_date(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EMAIL_PRETRADE", "1")
+    execution_email = _load_module_with_stubs(tmp_path)
+
+    stale_run_root = tmp_path / "outputs" / "runs" / "run-stale"
+    _write_json(
+        tmp_path / "outputs" / "latest_run.json",
+        {
+            "run_id": "run-stale",
+            "trade_date": "2026-03-29",
+            "mode": "PAPER",
+            "run_root": str(stale_run_root),
+            "status": "success",
+            "workflow_stage": "execution",
+        },
+    )
+    _write_json(
+        stale_run_root / "execution_payload.json",
+        {
+            "run_id": "run-stale",
+            "trade_date": "2026-03-29",
+            "mode": "PAPER",
+            "execution_status": "READY",
+            "halt_reason": "SHOULD_NOT_USE_STALE_LATEST",
+            "trades": [],
+            "order_ids": [],
+        },
+    )
+
+    legacy_path = tmp_path / "outputs" / "execution_email" / "2026-03-30.json"
+    _write_json(
+        legacy_path,
+        {
+            "run_id": "legacy-current",
+            "trade_date": "2026-03-30",
+            "mode": "PAPER",
+            "execution_status": "HALTED",
+            "halt_reason": "LEGACY_FALLBACK",
+            "trades": [],
+            "order_ids": [],
+        },
+    )
+
+    resolved = execution_email._resolve_payload_path("2026-03-30")
+    assert resolved.resolve() == legacy_path.resolve()
+
+
+def test_execution_email_trade_date_uses_current_et(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("REPORT_DATE", raising=False)
+    execution_email = _load_module_with_stubs(tmp_path)
+
+    class _FakeNow:
+        def strftime(self, fmt: str) -> str:
+            assert fmt == "%Y-%m-%d"
+            return "2026-03-30"
+
+    monkeypatch.setattr(execution_email, "current_et", lambda: _FakeNow())
+
+    assert execution_email._resolve_trade_date() == "2026-03-30"

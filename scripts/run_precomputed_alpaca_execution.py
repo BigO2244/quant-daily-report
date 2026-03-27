@@ -84,6 +84,11 @@ def _trade_date() -> str:
     return current_et().strftime("%Y-%m-%d")
 
 
+def _execution_mode_label() -> str:
+    mode_value = str(os.getenv("TRADING_MODE", "")).strip() or str(os.getenv("MODE", "")).strip() or "paper"
+    return canonical_trading_mode_label(mode_value, field_name="TRADING_MODE")
+
+
 def _workflow_start_utc() -> dt.datetime | None:
     raw = str(os.getenv("WORKFLOW_STARTED_AT_UTC", "")).strip()
     if not raw:
@@ -276,20 +281,32 @@ def _write_execution_run_pointers(
     substatus: str | None = None,
     status_message: str | None = None,
 ) -> None:
-    pointer_kwargs = {
+    mode_label = _execution_mode_label()
+    latest_pointer_kwargs = {
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": "PAPER",
+        "mode": mode_label,
         "run_root": str(run_root),
         "status": status,
         "substatus": substatus,
         "status_message": status_message,
+        "workflow_stage": "execution",
     }
-    write_latest_run_pointer(**pointer_kwargs)
-    write_trade_stage_pointer(stage="execution", **pointer_kwargs)
+    write_latest_run_pointer(**latest_pointer_kwargs)
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id=run_id,
+        trade_date=trade_date,
+        mode=mode_label,
+        run_root=str(run_root),
+        status=status,
+        substatus=substatus,
+        status_message=status_message,
+    )
 
 
 def _init_run_root(run_root: Path, trade_date: str, run_id: str) -> None:
+    mode_label = _execution_mode_label()
     for subdir in ("logs", "reports", "broker", "ledger", "snapshots", "audit"):
         ensure_dir(run_root / subdir)
     _write_execution_run_pointers(
@@ -304,7 +321,7 @@ def _init_run_root(run_root: Path, trade_date: str, run_id: str) -> None:
             {
                 "run_id": run_id,
                 "trade_date": trade_date,
-                "mode": "PAPER",
+                "mode": mode_label,
                 "run_root": str(run_root),
                 "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             },
@@ -402,7 +419,7 @@ def _failure_payload(*, trade_date: str, run_id: str, reason: str, timing: dict[
     payload = {
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": "PAPER",
+        "mode": _execution_mode_label(),
         "execution_status": "HALTED",
         "halt_reason": reason,
         "trades": [],

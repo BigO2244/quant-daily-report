@@ -14,8 +14,9 @@ Two pointer classes exist:
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Optional
 
 
@@ -55,6 +56,16 @@ def _normalize_workflow_stage(stage: str) -> str:
     return normalized
 
 
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp_file:
+        json.dump(payload, tmp_file, indent=2)
+        tmp_file.flush()
+        os.fsync(tmp_file.fileno())
+        tmp_path = Path(tmp_file.name)
+    os.replace(tmp_path, path)
+
+
 def workflow_stage_pointer_path(
     trade_date: str,
     stage: str,
@@ -73,6 +84,7 @@ def write_latest_run_pointer(
     status: str = 'success',
     substatus: str | None = None,
     status_message: str | None = None,
+    workflow_stage: str | None = None,
     workspace_root: str = None,
 ) -> str:
     """
@@ -104,11 +116,15 @@ def write_latest_run_pointer(
         'status': status,
         'substatus': substatus,
         'status_message': status_message,
-        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'workflow_stage': (
+            _normalize_workflow_stage(workflow_stage)
+            if workflow_stage is not None and str(workflow_stage).strip()
+            else None
+        ),
+        'created_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    
-    with open(pointer_path, 'w') as f:
-        json.dump(pointer_data, f, indent=2)
+
+    _atomic_write_json(pointer_path, pointer_data)
     
     return str(pointer_path)
 
@@ -151,7 +167,7 @@ def read_latest_run_pointer(workspace_root: str = None) -> Optional[dict]:
                 pass
         return None
 
-    with open(pointer_path, 'r') as f:
+    with open(pointer_path, 'r', encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -182,10 +198,9 @@ def write_trade_stage_pointer(
         "status": status,
         "substatus": substatus,
         "status_message": status_message,
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    with open(pointer_path, "w") as f:
-        json.dump(pointer_data, f, indent=2)
+    _atomic_write_json(pointer_path, pointer_data)
     return str(pointer_path)
 
 
@@ -201,7 +216,7 @@ def read_trade_stage_pointer(
     )
     if not pointer_path.exists():
         return None
-    with open(pointer_path, "r") as f:
+    with open(pointer_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -220,10 +235,16 @@ def resolve_trade_stage_pointer(
         return pointer
 
     latest = read_latest_run_pointer(workspace_root)
-    if isinstance(latest, dict) and str(latest.get("trade_date") or "") == str(trade_date):
+    normalized_stage = _normalize_workflow_stage(stage)
+    latest_stage = str((latest or {}).get("workflow_stage") or "").strip().lower()
+    if (
+        isinstance(latest, dict)
+        and str(latest.get("trade_date") or "") == str(trade_date)
+        and latest_stage == normalized_stage
+    ):
         fallback = dict(latest)
         fallback.setdefault("_source", "latest_run_json")
-        fallback.setdefault("stage", _normalize_workflow_stage(stage))
+        fallback.setdefault("stage", normalized_stage)
         return fallback
     return None
 
@@ -271,8 +292,10 @@ def is_pointer_fresh(
     # Check recency
     created_at_str = latest.get('created_at', '')
     try:
-        created_at = datetime.fromisoformat(created_at_str.rstrip('Z'))
-        age = (datetime.utcnow() - created_at).total_seconds()
+        created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created_at.astimezone(timezone.utc)).total_seconds()
         return age <= max_age_seconds
     except (ValueError, TypeError):
         return False

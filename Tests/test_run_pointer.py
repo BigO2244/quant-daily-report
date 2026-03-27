@@ -405,6 +405,7 @@ class TestTradeStagePointers:
                 mode="PAPER",
                 run_root="outputs/runs/latest-run",
                 status="success",
+                workflow_stage="execution",
                 workspace_root=tmpdir,
             )
 
@@ -412,6 +413,20 @@ class TestTradeStagePointers:
             assert resolved is not None
             assert resolved["run_id"] == "latest-run"
             assert resolved["_source"] == "latest_run_json"
+
+    def test_resolve_trade_stage_pointer_does_not_fallback_when_latest_stage_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_latest_run_pointer(
+                run_id="latest-run",
+                trade_date="2026-03-30",
+                mode="PAPER",
+                run_root="outputs/runs/latest-run",
+                status="success",
+                workspace_root=tmpdir,
+            )
+
+            resolved = resolve_trade_stage_pointer("2026-03-30", "execution", tmpdir)
+            assert resolved is None
 
 
 if __name__ == '__main__':

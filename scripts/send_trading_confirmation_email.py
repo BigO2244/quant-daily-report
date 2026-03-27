@@ -28,6 +28,7 @@ from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED, STATUS_SKIPPE
 from core.operator_summary import write_operator_summary, load_operator_summary, format_operator_summary_log
 from core.quant_report import send_email
 from core.run_pointer import read_trade_stage_pointer
+from core.timing_policy import current_et
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +37,28 @@ def _resolve_trade_date() -> str:
     override = str(os.getenv("REPORT_DATE", "")).strip()
     if override:
         return override
-    from datetime import date
-
-    return date.today().isoformat()
+    return current_et().strftime("%Y-%m-%d")
 
 
 def _resolve_execution_pointer(trade_date: str) -> dict:
-    pointer = read_trade_stage_pointer(trade_date, "execution")
+    try:
+        pointer = read_trade_stage_pointer(trade_date, "execution")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Malformed execution workflow pointer for {trade_date}"
+        ) from exc
     if not pointer or not isinstance(pointer, dict):
         raise RuntimeError(
             f"Missing execution workflow pointer for {trade_date}; cannot resolve execution_results.json"
+        )
+    if str(pointer.get("trade_date") or "") != trade_date:
+        raise RuntimeError(
+            f"Execution workflow pointer trade_date mismatch for {trade_date}"
+        )
+    pointer_status = str(pointer.get("status") or "").strip().lower()
+    if pointer_status == "running":
+        raise RuntimeError(
+            f"Execution workflow pointer for {trade_date} is still running; confirmation must wait"
         )
     return pointer
 
