@@ -64,6 +64,19 @@ class TestLoadExistingBenchmark:
         p.write_text("NOT JSON", encoding="utf-8")
         assert load_existing_benchmark(p) == []
 
+    def test_object_format_returns_records(self, tmp_path: Path) -> None:
+        p = tmp_path / "b.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "inception_date": "2026-01-01",
+                    "records": [{"date": "2026-01-01"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert load_existing_benchmark(p) == [{"date": "2026-01-01"}]
+
 
 # ---------------------------------------------------------------------------
 # read_broker_equity
@@ -152,8 +165,8 @@ class TestUpdateBenchmarkVsSpy:
         assert result["portfolio_return_daily"] == 0.0
 
         data = json.loads(benchmark.read_text(encoding="utf-8"))
-        assert len(data) == 1
-        assert data[0]["date"] == "2026-03-18"
+        assert len(data["records"]) == 1
+        assert data["records"][0]["date"] == "2026-03-18"
 
     def test_append_new_day(self, tmp_paths) -> None:
         broker, benchmark = tmp_paths
@@ -181,10 +194,11 @@ class TestUpdateBenchmarkVsSpy:
             )
         assert result is not None
         data = json.loads(benchmark.read_text(encoding="utf-8"))
-        assert len(data) == 2
-        assert data[1]["date"] == "2026-03-18"
-        assert data[1]["portfolio_return_daily"] == pytest.approx(0.01, abs=1e-6)
-        assert data[1]["spy_return_daily"] == pytest.approx(0.01, abs=1e-6)
+        records = data["records"]
+        assert len(records) == 2
+        assert records[1]["date"] == "2026-03-18"
+        assert records[1]["portfolio_return_daily"] == pytest.approx(0.01, abs=1e-6)
+        assert records[1]["spy_return_daily"] == pytest.approx(0.01, abs=1e-6)
 
     def test_idempotent_same_day(self, tmp_paths) -> None:
         broker, benchmark = tmp_paths
@@ -212,7 +226,103 @@ class TestUpdateBenchmarkVsSpy:
             )
         assert result is None
         data = json.loads(benchmark.read_text(encoding="utf-8"))
-        assert len(data) == 1
+        assert len(data["records"]) == 1
+
+    def test_idempotent_same_day_recovers_history_from_run_summaries(self, tmp_path: Path) -> None:
+        benchmark = tmp_path / "outputs" / "benchmark" / "benchmark_vs_spy.json"
+        benchmark.parent.mkdir(parents=True, exist_ok=True)
+        benchmark.write_text(
+            json.dumps(
+                {
+                    "inception_date": "2026-03-27",
+                    "records": [
+                        {
+                            "date": "2026-03-27",
+                            "portfolio_value": 100500.0,
+                            "portfolio_return_daily": 0.0,
+                            "portfolio_return_cum": 0.0,
+                            "spy_price": 505.0,
+                            "spy_return_daily": 0.0,
+                            "spy_return_cum": 0.0,
+                            "excess_return_daily": 0.0,
+                            "excess_return_cum": 0.0,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        run_root = tmp_path / "outputs" / "runs" / "2026-03-26T093500-0400_abc123"
+        run_root.mkdir(parents=True, exist_ok=True)
+        (run_root / "trading_day_summary.json").write_text(
+            json.dumps(
+                {
+                    "trade_date": "2026-03-26",
+                    "generated_at": "2026-03-26T13:35:00+00:00",
+                    "broker_context": {"broker_preflight_equity": 100000.0},
+                    "benchmark": {"spy_value": 500.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = update_benchmark_vs_spy(
+            trade_date="2026-03-27",
+            broker_snapshot_path=tmp_path / "missing_snapshot.json",
+            benchmark_path=benchmark,
+            workspace_root=tmp_path,
+        )
+
+        assert result is None
+        data = json.loads(benchmark.read_text(encoding="utf-8"))
+        records = data["records"]
+        assert data["inception_date"] == "2026-03-27"
+        assert [record["date"] for record in records] == ["2026-03-26", "2026-03-27"]
+        assert records[1]["portfolio_return_daily"] == pytest.approx(0.005, abs=1e-6)
+        assert records[1]["spy_return_daily"] == pytest.approx(0.01, abs=1e-6)
+        assert records[1]["excess_return_daily"] == pytest.approx(-0.005, abs=1e-6)
+
+    def test_recovery_uses_benchmark_close_history_when_summary_missing_spy_value(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        benchmark = tmp_path / "benchmark_vs_spy.json"
+        perf_dir = tmp_path / "outputs" / "perf"
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        (perf_dir / "benchmark_close_history.csv").write_text(
+            "date,spy_close\n2026-03-18,505.0\n",
+            encoding="utf-8",
+        )
+
+        run_root = tmp_path / "outputs" / "runs" / "2026-03-18T093500-0400_abc123"
+        run_root.mkdir(parents=True, exist_ok=True)
+        (run_root / "trading_day_summary.json").write_text(
+            json.dumps(
+                {
+                    "trade_date": "2026-03-18",
+                    "generated_at": "2026-03-18T13:35:00+00:00",
+                    "broker_context": {"broker_preflight_equity": 101250.0},
+                    "benchmark": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = update_benchmark_vs_spy(
+            trade_date="2026-03-18",
+            broker_snapshot_path=tmp_path / "missing_snapshot.json",
+            benchmark_path=benchmark,
+            workspace_root=tmp_path,
+        )
+
+        assert result is None
+        data = json.loads(benchmark.read_text(encoding="utf-8"))
+        records = data["records"]
+        assert len(records) == 1
+        assert records[0]["date"] == "2026-03-18"
+        assert records[0]["portfolio_value"] == 101250.0
+        assert records[0]["spy_price"] == 505.0
 
     def test_missing_broker_snapshot_nonblocking(self, tmp_paths) -> None:
         _, benchmark = tmp_paths
@@ -276,7 +386,7 @@ class TestUpdateBenchmarkVsSpy:
             )
         assert result is not None
         data = json.loads(benchmark.read_text(encoding="utf-8"))
-        dates = [r["date"] for r in data]
+        dates = [r["date"] for r in data["records"]]
         assert dates == ["2026-03-14", "2026-03-17", "2026-03-18"]
 
     def test_run_root_fallback_to_pretrade_snapshot(self, tmp_path: Path) -> None:
@@ -297,8 +407,8 @@ class TestUpdateBenchmarkVsSpy:
         assert result is not None
         assert result["portfolio_value"] == 101250.0
         data = json.loads(benchmark.read_text(encoding="utf-8"))
-        assert data[0]["date"] == "2026-03-18"
-        assert data[0]["spy_price"] == 505.0
+        assert data["records"][0]["date"] == "2026-03-18"
+        assert data["records"][0]["spy_price"] == 505.0
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +421,13 @@ class TestWriteBenchmarkArtifact:
         p = tmp_path / "nested" / "dir" / "bench.json"
         write_benchmark_artifact([{"date": "2026-01-01"}], p)
         assert p.exists()
-        assert json.loads(p.read_text(encoding="utf-8")) == [{"date": "2026-01-01"}]
+        data = json.loads(p.read_text(encoding="utf-8"))
+        assert data["records"] == [{"date": "2026-01-01"}]
 
     def test_overwrites_existing(self, tmp_path: Path) -> None:
         p = tmp_path / "bench.json"
         p.write_text("[]", encoding="utf-8")
         write_benchmark_artifact([{"date": "2026-01-02"}], p)
         data = json.loads(p.read_text(encoding="utf-8"))
-        assert len(data) == 1
-        assert data[0]["date"] == "2026-01-02"
+        assert len(data["records"]) == 1
+        assert data["records"][0]["date"] == "2026-01-02"
