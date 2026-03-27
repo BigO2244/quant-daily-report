@@ -342,6 +342,62 @@ class TestUpdateBenchmarkVsSpy:
         assert records[0]["portfolio_value"] == 101250.0
         assert records[0]["spy_price"] == 505.0
 
+    def test_recovery_repairs_portfolio_value_but_keeps_existing_spy_close(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        benchmark = tmp_path / "outputs" / "benchmark" / "benchmark_vs_spy.json"
+        benchmark.parent.mkdir(parents=True, exist_ok=True)
+        benchmark.write_text(
+            json.dumps(
+                {
+                    "inception_date": "2026-03-27",
+                    "records": [
+                        {
+                            "date": "2026-03-27",
+                            "portfolio_value": 10000.0,
+                            "portfolio_return_daily": 0.0,
+                            "portfolio_return_cum": 0.0,
+                            "spy_price": 640.825,
+                            "spy_return_daily": 0.0,
+                            "spy_return_cum": 0.0,
+                            "excess_return_daily": 0.0,
+                            "excess_return_cum": 0.0,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        run_root = tmp_path / "outputs" / "runs" / "2026-03-27T094322-0400_abc123"
+        run_root.mkdir(parents=True, exist_ok=True)
+        (run_root / "trading_day_summary.json").write_text(
+            json.dumps(
+                {
+                    "trade_date": "2026-03-27",
+                    "generated_at": "2026-03-27T13:43:42.533675+00:00",
+                    "benchmark": {"portfolio_value": 10000.0, "spy_value": 645.09},
+                    "broker_context": {"broker_preflight_equity": "9569.05"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = update_benchmark_vs_spy(
+            trade_date="2026-03-27",
+            broker_snapshot_path=tmp_path / "missing_snapshot.json",
+            benchmark_path=benchmark,
+            workspace_root=tmp_path,
+        )
+
+        assert result is None
+        data = json.loads(benchmark.read_text(encoding="utf-8"))
+        records = data["records"]
+        assert len(records) == 1
+        assert records[0]["portfolio_value"] == pytest.approx(9569.05)
+        assert records[0]["spy_price"] == pytest.approx(640.825)
+
     def test_missing_broker_snapshot_nonblocking(self, tmp_paths) -> None:
         _, benchmark = tmp_paths
         broker = Path("/nonexistent/snap.json")

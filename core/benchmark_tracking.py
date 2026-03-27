@@ -153,15 +153,37 @@ def _merge_benchmark_records(
     existing_records: list[dict[str, Any]],
     recovered_records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    existing_by_date = {
+        str(record.get("date") or "").strip(): dict(record)
+        for record in existing_records
+        if str(record.get("date") or "").strip()
+    }
+    recovered_by_date = {
+        str(record.get("date") or "").strip(): dict(record)
+        for record in recovered_records
+        if str(record.get("date") or "").strip()
+    }
+
     merged: dict[str, dict[str, Any]] = {}
-    for record in recovered_records:
-        trade_date = str(record.get("date") or "").strip()
-        if trade_date:
-            merged[trade_date] = dict(record)
-    for record in existing_records:
-        trade_date = str(record.get("date") or "").strip()
-        if trade_date:
-            merged[trade_date] = dict(record)
+    for trade_date in sorted(set(existing_by_date) | set(recovered_by_date)):
+        existing = existing_by_date.get(trade_date)
+        recovered = recovered_by_date.get(trade_date)
+
+        if recovered and existing:
+            merged_record = dict(recovered)
+            existing_spy = _coerce_float(existing.get("spy_price"))
+            if existing_spy is not None and existing_spy > 0:
+                merged_record["spy_price"] = round(existing_spy, 4)
+            merged[trade_date] = merged_record
+            continue
+
+        if recovered:
+            merged[trade_date] = dict(recovered)
+            continue
+
+        if existing:
+            merged[trade_date] = dict(existing)
+
     ordered = [merged[key] for key in sorted(merged)]
     return _recompute_returns(ordered)
 
