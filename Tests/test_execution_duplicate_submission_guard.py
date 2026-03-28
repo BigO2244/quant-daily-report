@@ -47,6 +47,7 @@ def _write_latest(tmp_path: Path, run_root: Path, run_id: str, trade_date: str) 
             "mode": "ALPACA",
             "run_root": str(run_root),
             "status": "running",
+            "workflow_stage": "execution",
         },
     )
 

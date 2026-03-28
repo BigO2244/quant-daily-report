@@ -67,6 +67,14 @@ with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587"
 PYEOF
 }
 
+send_pointer_alert() {
+    local subject="$1"
+    local body="$2"
+    send_failure_email "${subject}" "${body}" >> "${LOG_FILE}" 2>&1 || {
+        echo "WARN: failure alert email send failed (non-blocking)" | tee -a "${LOG_FILE}"
+    }
+}
+
 # --- Enable email sending for confirmation phase ---
 export EMAIL_PRETRADE=1
 export EMAIL_TRADING_CONFIRMATION=1
@@ -103,9 +111,32 @@ EXECUTION_RUN_ROOT="$(resolve_execution_pointer_field run_root 2>>"${LOG_FILE}" 
 EXECUTION_POINTER_STATUS="$(resolve_execution_pointer_field status 2>>"${LOG_FILE}" || true)"
 if [[ -z "${EXECUTION_RUN_ROOT}" ]]; then
     echo "WARN: execution workflow pointer missing for ${REPORT_DATE} — Phase 2 may not have completed" | tee -a "${LOG_FILE}"
+    send_pointer_alert \
+        "❌ [Alpha Stack] Execution pointer missing — ${REPORT_DATE}" \
+        "Phase 3 confirmation skipped because no execution workflow pointer was found for ${REPORT_DATE}.
+
+Repo root: ${REPO_ROOT}
+Log file: ${LOG_FILE}
+
+Check:
+- outputs/workflow/${REPORT_DATE}/execution.json
+- logs/execute_${REPORT_DATE}.log
+- outputs/latest_run.json"
 fi
 if [[ "${EXECUTION_POINTER_STATUS,,}" == "running" ]]; then
     echo "WARN: execution workflow pointer still running for ${REPORT_DATE} — skipping confirmation until execution reaches a terminal state" | tee -a "${LOG_FILE}"
+    send_pointer_alert \
+        "⚠️ [Alpha Stack] Execution still running — ${REPORT_DATE}" \
+        "Phase 3 confirmation skipped because the execution workflow pointer for ${REPORT_DATE} is still marked running.
+
+run_root: ${EXECUTION_RUN_ROOT:-unknown}
+status: ${EXECUTION_POINTER_STATUS}
+log file: ${LOG_FILE}
+
+Inspect:
+- outputs/workflow/${REPORT_DATE}/execution.json
+- logs/execute_${REPORT_DATE}.log
+- outputs/latest_run.json"
 fi
 
 CONFIRM_EXIT=0

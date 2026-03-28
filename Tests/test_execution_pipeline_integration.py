@@ -57,7 +57,13 @@ def test_executor_reads_latest_run_and_loads_payload(tmp_path: Path, monkeypatch
     run_root = tmp_path / "outputs" / "runs" / "run-abc"
     _write_json(
         tmp_path / "outputs" / "latest_run.json",
-        {"run_id": "run-abc", "trade_date": "2026-03-09", "mode": "ALPACA", "run_root": str(run_root)},
+        {
+            "run_id": "run-abc",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "run_root": str(run_root),
+            "workflow_stage": "execution",
+        },
     )
     _write_json(
         run_root / "execution_payload.json",
@@ -83,7 +89,13 @@ def test_missing_canonical_payload_writes_halted_results(tmp_path: Path, monkeyp
     run_root = tmp_path / "outputs" / "runs" / "run-missing"
     _write_json(
         tmp_path / "outputs" / "latest_run.json",
-        {"run_id": "run-missing", "trade_date": "2026-03-09", "mode": "ALPACA", "run_root": str(run_root)},
+        {
+            "run_id": "run-missing",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "run_root": str(run_root),
+            "workflow_stage": "execution",
+        },
     )
 
     out = mod.run_execution()
@@ -101,7 +113,13 @@ def test_valid_payload_calls_broker_submission(tmp_path: Path, monkeypatch) -> N
     run_root = tmp_path / "outputs" / "runs" / "run-ready"
     _write_json(
         tmp_path / "outputs" / "latest_run.json",
-        {"run_id": "run-ready", "trade_date": "2026-03-09", "mode": "ALPACA", "run_root": str(run_root)},
+        {
+            "run_id": "run-ready",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "run_root": str(run_root),
+            "workflow_stage": "execution",
+        },
     )
     _write_json(
         run_root / "execution_payload.json",
@@ -149,7 +167,13 @@ def test_duplicate_run_id_does_not_resubmit(tmp_path: Path, monkeypatch) -> None
     run_root = tmp_path / "outputs" / "runs" / "run-dup"
     _write_json(
         tmp_path / "outputs" / "latest_run.json",
-        {"run_id": "run-dup", "trade_date": "2026-03-09", "mode": "ALPACA", "run_root": str(run_root)},
+        {
+            "run_id": "run-dup",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "run_root": str(run_root),
+            "workflow_stage": "execution",
+        },
     )
     _write_json(
         run_root / "execution_results.json",
@@ -225,6 +249,49 @@ def test_confirmation_email_uses_execution_results(tmp_path: Path, monkeypatch) 
     assert "Trading Confirmation 2026-03-09" in sent["subject"]
     assert "Submitted: 1" in sent["body_text"]
     assert "Run ID: run-confirm" in sent["body_text"]
+
+
+def test_executor_blocks_stage_less_latest_run_pointer(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_module(EXECUTE_SCRIPT, "execute_alpaca_orders_test_stage_less_latest")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+
+    run_root = tmp_path / "outputs" / "runs" / "run-stage-less"
+    _write_json(
+        tmp_path / "outputs" / "latest_run.json",
+        {
+            "run_id": "run-stage-less",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "run_root": str(run_root),
+            "status": "running",
+        },
+    )
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "run_id": "run-stage-less",
+            "trade_date": "2026-03-09",
+            "mode": "ALPACA",
+            "execution_status": "READY",
+            "halt_reason": None,
+            "trades": [{"ticker": "SPY", "side": "BUY", "shares": 1}],
+        },
+    )
+
+    try:
+        mod.run_execution()
+        raise AssertionError("expected SystemExit")
+    except SystemExit as exc:
+        assert int(getattr(exc, "code", 0) or 0) == 1
+
+    results = json.loads(
+        (tmp_path / "outputs" / "runs" / "MISSING_POINTER_2026-03-09" / "execution_results.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert results["status"] == "HALTED"
+    assert "LEGACY_POINTER_BLOCKED" in str(results.get("halt_reason"))
 
 
 def test_confirmation_email_prefers_execution_stage_pointer_over_latest_run(

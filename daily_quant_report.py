@@ -4594,6 +4594,7 @@ def _init_run_context(
             mode=ctx.mode,
             run_root=str(ctx.run_root),
             status="running",
+            workflow_stage="precompute",
         )
     except Exception as _e:
         # Non-blocking — finalize will write the canonical version later.
@@ -4659,6 +4660,7 @@ def _finalize_run_context(run_ctx: RunContext) -> None:
             status=_RUN_TERMINAL_STATUS,
             substatus=_RUN_TERMINAL_SUBSTATUS,
             status_message=_RUN_TERMINAL_MESSAGE,
+            workflow_stage="precompute",
         )
         logger.info(
             "[RUN_ARCHIVE] canonical run pointer written: outputs/latest_run.json status=%s",

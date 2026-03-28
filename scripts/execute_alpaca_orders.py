@@ -36,7 +36,7 @@ from core.operator_summary import (
     load_operator_summary,
 )
 from core.trading_day_summary import write_trading_day_summary
-from core.run_pointer import LATEST_RUN_POINTER, read_latest_run_pointer
+from core.run_pointer import LATEST_RUN_POINTER, read_latest_run_pointer, read_trade_stage_pointer
 from core.step_summary import append_step_summary
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,65 @@ def _write_execution_step_summary(
             f"- execution_results_path: `{run_root / 'execution_results.json'}`",
             "",
         ]
+    )
+
+
+def _resolve_execution_pointer() -> tuple[Dict[str, Any] | None, str | None]:
+    report_date = str(os.environ.get("REPORT_DATE") or "").strip()
+    try:
+        latest = read_latest_run_pointer()
+    except json.JSONDecodeError as exc:
+        return None, f"MALFORMED_POINTER — outputs/latest_run.json is invalid JSON: {exc}"
+
+    candidate_trade_date = report_date or str((latest or {}).get("trade_date") or "").strip()
+    if candidate_trade_date:
+        try:
+            stage_pointer = read_trade_stage_pointer(candidate_trade_date, "execution")
+        except json.JSONDecodeError as exc:
+            return None, (
+                "MALFORMED_EXECUTION_POINTER — "
+                f"outputs/workflow/{candidate_trade_date}/execution.json is invalid JSON: {exc}"
+            )
+        if isinstance(stage_pointer, dict):
+            return stage_pointer, None
+
+    if isinstance(latest, dict):
+        latest_stage = str((latest or {}).get("workflow_stage") or "").strip().lower()
+        latest_trade_date = str((latest or {}).get("trade_date") or "").strip()
+        if latest_stage == "execution" and (
+            not candidate_trade_date or latest_trade_date == candidate_trade_date
+        ):
+            return latest, None
+        if str(os.getenv("ALLOW_LEGACY_LATEST_RUN_EXECUTION_POINTER", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            logger.warning(
+                "[EXEC_POINTER] using deprecated legacy latest_run.json pointer without execution-stage guard"
+            )
+            return latest, None
+        if latest_stage:
+            return None, (
+                "LEGACY_POINTER_STAGE_MISMATCH — "
+                f"latest_run.json workflow_stage={latest_stage!r} does not identify an execution run"
+            )
+        return None, (
+            "LEGACY_POINTER_BLOCKED — latest_run.json lacks workflow_stage='execution'. "
+            "This legacy executor is deprecated; use the execution workflow pointer or "
+            "scripts.run_precomputed_alpaca_execution."
+        )
+
+    if report_date:
+        return None, (
+            "MISSING_EXECUTION_POINTER — "
+            f"outputs/workflow/{report_date}/execution.json not found and no compatible latest_run.json resolved."
+        )
+    return None, (
+        "MISSING_POINTER — outputs/latest_run.json not found and no execution workflow pointer resolved. "
+        "engine_run did not write the pointer (planner may have failed before "
+        "_init_run_context, or canonical_positions.json was missing). "
+        "Trigger workflow_dispatch with bootstrap_model_ledger_from_broker=true first."
     )
 
 
@@ -209,15 +268,15 @@ def _new_results(pointer: Dict[str, Any], payload: Dict[str, Any] | None = None)
 
 def _validate_payload(payload: Dict[str, Any]) -> Tuple[bool, str | None]:
     """Validate execution payload has required fields."""
+    # Normalize execution_status → status before required-field check
+    if "status" not in payload and "execution_status" in payload:
+        payload["status"] = payload["execution_status"]
+
     required = ["run_id", "trade_date", "mode", "status", "trades"]
     for key in required:
         if key not in payload:
             return False, f"missing_required_field:{key}"
-    
-    # Also accept execution_status for backward compatibility
-    if "status" not in payload and "execution_status" in payload:
-        payload["status"] = payload["execution_status"]
-    
+
     if not isinstance(payload.get("trades"), list):
         return False, "invalid_trades_type"
     return True, None
@@ -436,15 +495,10 @@ def run_execution(force_resubmit: bool = False) -> Dict[str, Any]:
         "[EXEC_POINTER] checking canonical pointer: exists=%s path=%s",
         _pointer_path.exists(), _pointer_path,
     )
-    latest = read_latest_run_pointer()
+    latest, pointer_error = _resolve_execution_pointer()
     if not latest or not isinstance(latest, dict):
         trade_date = os.environ.get("REPORT_DATE", "UNKNOWN")
-        halt_reason = (
-            "MISSING_POINTER — outputs/latest_run.json not found and no fallback resolved. "
-            "engine_run did not write the pointer (planner may have failed before "
-            "_init_run_context, or canonical_positions.json was missing). "
-            "Trigger workflow_dispatch with bootstrap_model_ledger_from_broker=true first."
-        )
+        halt_reason = str(pointer_error or "MISSING_POINTER")
         logger.error("[EXEC_POINTER] %s", halt_reason)
         fallback_run_id = f"MISSING_POINTER_{trade_date}"
         fallback_root = Path(f"outputs/runs/{fallback_run_id}")

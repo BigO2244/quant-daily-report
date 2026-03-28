@@ -283,6 +283,7 @@ class TestExecutionResults:
                         "run_id": "test123",
                         "run_root": str(run_root),
                         "trade_date": "2024-01-15",
+                        "workflow_stage": "execution",
                     }
                     
                     mock_broker = Mock()
@@ -345,6 +346,7 @@ class TestDuplicateExecution:
                     "run_id": "test123",
                     "run_root": str(run_root),
                     "trade_date": "2024-01-15",
+                    "workflow_stage": "execution",
                 }
                 
                 from scripts.execute_alpaca_orders import run_execution
@@ -430,6 +432,7 @@ class TestNoActionDay:
                     "run_root": str(run_root),
                     "trade_date": "2024-01-15",
                     "mode": "ALPACA",
+                    "workflow_stage": "execution",
                 }
                 from scripts.execute_alpaca_orders import run_execution
                 results = run_execution()
@@ -491,6 +494,7 @@ class TestNoActionDay:
                     "run_root": str(run_root),
                     "trade_date": "2024-01-15",
                     "mode": "ALPACA",
+                    "workflow_stage": "execution",
                 }
                 from scripts.execute_alpaca_orders import run_execution
                 results = run_execution()
