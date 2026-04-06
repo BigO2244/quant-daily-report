@@ -56,7 +56,12 @@ def _resolve_payload_path(trade_date: str) -> Path:
             candidate = Path(run_root) / "execution_payload.json"
             if candidate.exists():
                 logger.info("[EXECUTION_EMAIL] using execution phase pointer: %s", candidate)
-                return candidate
+            else:
+                logger.warning(
+                    "[EXECUTION_EMAIL] execution phase pointer payload missing, refusing legacy fallback: %s",
+                    candidate,
+                )
+            return candidate
 
     try:
         latest = read_latest_run_pointer()

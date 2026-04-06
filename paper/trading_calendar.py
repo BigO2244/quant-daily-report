@@ -1,24 +1,13 @@
 # paper/trading_calendar.py
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 from dataclasses import dataclass
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-
-
-_US_MARKET_HOLIDAYS_STUB = {
-    "2024-01-01",  # New Year's Day
-    "2024-07-04",  # Independence Day
-    "2024-12-25",  # Christmas
-    "2025-01-01",
-    "2025-07-04",
-    "2025-12-25",
-    "2026-01-01",
-    "2026-07-03",  # observed
-    "2026-12-25",
-}
 
 
 @dataclass
@@ -36,13 +25,80 @@ XNYS_CALENDAR_NAME = "XNYS"
 ET_TZ = ZoneInfo("America/New_York")
 
 
+def _observed_fixed_holiday(year: int, month: int, day: int) -> dt.date:
+    holiday = dt.date(year, month, day)
+    if holiday.weekday() == calendar.SATURDAY:
+        return holiday - dt.timedelta(days=1)
+    if holiday.weekday() == calendar.SUNDAY:
+        return holiday + dt.timedelta(days=1)
+    return holiday
+
+
+def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> dt.date:
+    first_day = dt.date(year, month, 1)
+    offset = (weekday - first_day.weekday()) % 7
+    return first_day + dt.timedelta(days=offset + (occurrence - 1) * 7)
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> dt.date:
+    last_dom = calendar.monthrange(year, month)[1]
+    last_day = dt.date(year, month, last_dom)
+    offset = (last_day.weekday() - weekday) % 7
+    return last_day - dt.timedelta(days=offset)
+
+
+def _easter_sunday(year: int) -> dt.date:
+    # Anonymous Gregorian algorithm.
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return dt.date(year, month, day)
+
+
+@lru_cache(maxsize=None)
+def _us_market_holiday_dates(year: int) -> frozenset[str]:
+    holidays = {
+        _observed_fixed_holiday(year, 1, 1),   # New Year's Day
+        _nth_weekday(year, 1, calendar.MONDAY, 3),   # MLK Day
+        _nth_weekday(year, 2, calendar.MONDAY, 3),   # Presidents Day
+        _easter_sunday(year) - dt.timedelta(days=2),   # Good Friday
+        _last_weekday(year, 5, calendar.MONDAY),   # Memorial Day
+        _observed_fixed_holiday(year, 7, 4),   # Independence Day
+        _nth_weekday(year, 9, calendar.MONDAY, 1),   # Labor Day
+        _nth_weekday(year, 11, calendar.THURSDAY, 4),   # Thanksgiving
+        _observed_fixed_holiday(year, 12, 25),   # Christmas
+    }
+    if year >= 2022:
+        holidays.add(_observed_fixed_holiday(year, 6, 19))   # Juneteenth
+    return frozenset(day.isoformat() for day in holidays)
+
+
 def _is_weekday(date_str: str) -> bool:
     return pd.Timestamp(date_str).weekday() < 5
 
 
 def is_trading_day(date_str: str) -> bool:
-    # TODO(PHASE-3): Replace holiday stub with full exchange calendar integration.
-    return _is_weekday(date_str) and date_str not in _US_MARKET_HOLIDAYS_STUB
+    if not _is_weekday(date_str):
+        return False
+
+    date_obj = pd.Timestamp(date_str).date()
+    holiday_dates = (
+        _us_market_holiday_dates(date_obj.year - 1)
+        | _us_market_holiday_dates(date_obj.year)
+        | _us_market_holiday_dates(date_obj.year + 1)
+    )
+    return date_obj.isoformat() not in holiday_dates
 
 
 def next_trading_day(date_str: str) -> str:

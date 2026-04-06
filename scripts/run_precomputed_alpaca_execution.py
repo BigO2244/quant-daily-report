@@ -520,6 +520,85 @@ def _release_execution_lock(lock_path: Path | None) -> None:
         logger.warning("[LOCK] Failed to release execution lock %s: %s", lock_path, exc)
 
 
+def _safe_to_release_lock_after_exception(exc: Exception) -> bool:
+    reason = str(exc or "").strip()
+    if reason.startswith("[HALT]"):
+        return True
+    return "no targets remain" in reason.lower()
+
+
+def _persist_terminal_exception_state(
+    *,
+    exc: Exception,
+    run_id: str,
+    trade_date: str,
+    run_root: Path,
+    timing: dict[str, object],
+    pretrade_policy: dict[str, object] | None,
+    retry_attempt: int,
+    planner_completed: bool,
+) -> None:
+    reason = str(exc).strip() or exc.__class__.__name__
+    payload = _failure_payload(
+        trade_date=trade_date,
+        run_id=run_id,
+        reason=reason,
+        timing=timing,
+    )
+    payload["exception_type"] = exc.__class__.__name__
+    payload["exception_message"] = reason
+    write_canonical_execution_payload(payload, trade_date, run_root=run_root, allow_overwrite=True)
+    _write_execution_email_payload(trade_date, payload)
+
+    policy = dict(pretrade_policy or {})
+    write_operator_summary(
+        run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        mode="PAPER",
+        pretrade_status="HALTED",
+        pretrade_halt_reason=reason,
+        planner_completed=planner_completed,
+        execution_payload_written=True,
+        execution_stage_reached=False,
+        terminal_status="failed_pre_execution",
+        exception_type=exc.__class__.__name__,
+        exception_message=reason,
+        execution_reason=reason,
+        operator_execution_status="failed",
+        broker_preflight_status=policy.get("broker_preflight_status"),
+        broker_preflight_account_status=policy.get("broker_preflight_account_status"),
+        broker_preflight_cash=policy.get("broker_preflight_cash"),
+        broker_preflight_equity=policy.get("broker_preflight_equity"),
+        broker_preflight_buying_power=policy.get("broker_preflight_buying_power"),
+        broker_preflight_restriction_flags=policy.get("broker_preflight_restriction_flags"),
+        broker_preflight_warning_flags=policy.get("broker_preflight_warning_flags"),
+        broker_pdt_risk_status=policy.get("broker_pdt_risk_status"),
+        broker_pdt_daytrade_count=policy.get("broker_pdt_daytrade_count"),
+        broker_pdt_daytrading_buying_power=policy.get("broker_pdt_daytrading_buying_power"),
+        broker_pdt_flags=policy.get("broker_pdt_flags"),
+        broker_pdt_warning_message=policy.get("broker_pdt_warning_message"),
+        pdt_constrained=bool(policy.get("pdt_constrained")),
+        retry_attempt_count=retry_attempt,
+        retry_eligible=False,
+        retry_reason="",
+        workflow_kind=payload.get("workflow_kind"),
+        event_freshness_status=payload.get("event_freshness_status"),
+        bundle_status=payload.get("bundle_status"),
+        execution_window_status=payload.get("execution_window_status"),
+        **_operator_summary_timing_kwargs(timing),
+    )
+    _write_execution_run_pointers(
+        run_id=run_id,
+        trade_date=trade_date,
+        run_root=run_root,
+        status="failed_pre_execution",
+        substatus=reason,
+        status_message=reason,
+    )
+    write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
@@ -528,6 +607,11 @@ def main(argv: list[str] | None = None) -> int:
     # --- Atomic single-flight guard (prevents TOCTOU duplicate submissions) ---
     lock_path = _acquire_execution_lock(trade_date)
     release_lock_on_exit = False
+    pretrade_policy: dict[str, object] | None = None
+    timing: dict[str, object] | None = None
+    run_id: str | None = None
+    run_root: Path | None = None
+    planner_completed = False
 
     try:
         run_id = get_run_id()
@@ -598,6 +682,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("[LIVE_EXECUTION] precompute unavailable reason=%s", precompute_reason)
             release_lock_on_exit = True
             return 1
+        planner_completed = True
 
         pretrade_snapshot = fetch_pretrade_snapshot()
         write_pretrade_snapshot_artifacts(
@@ -981,6 +1066,27 @@ def main(argv: list[str] | None = None) -> int:
         if execution_payload["operator_execution_status"] in {"failed", "partial"}:
             return 1
         return 0
+    except Exception as exc:
+        logger.exception("[LIVE_EXECUTION] unhandled exception")
+        if run_id is not None and run_root is not None:
+            try:
+                _persist_terminal_exception_state(
+                    exc=exc,
+                    run_id=run_id,
+                    trade_date=trade_date,
+                    run_root=run_root,
+                    timing=dict(timing or {}),
+                    pretrade_policy=pretrade_policy,
+                    retry_attempt=int(args.retry_attempt or 0),
+                    planner_completed=planner_completed,
+                )
+            except Exception as artifact_exc:
+                logger.error(
+                    "[LIVE_EXECUTION] failed to persist terminal exception state: %s",
+                    artifact_exc,
+                )
+        release_lock_on_exit = _safe_to_release_lock_after_exception(exc)
+        return 1
     finally:
         if release_lock_on_exit:
             _release_execution_lock(lock_path)

@@ -220,6 +220,44 @@ def test_execution_email_ignores_latest_run_for_wrong_trade_date(tmp_path, monke
     assert resolved.resolve() == legacy_path.resolve()
 
 
+def test_execution_email_uses_stage_pointer_even_when_payload_missing(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EMAIL_PRETRADE", "1")
+    monkeypatch.setenv("REPORT_DATE", "2026-03-30")
+    execution_email = _load_module_with_stubs(tmp_path)
+
+    run_root = tmp_path / "outputs" / "runs" / "run-missing-payload"
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-missing-payload",
+        trade_date="2026-03-30",
+        mode="PAPER",
+        run_root=str(run_root),
+        status="failed_pre_execution",
+        workspace_root=str(tmp_path),
+    )
+    legacy_path = tmp_path / "outputs" / "execution_email" / "2026-03-30.json"
+    _write_json(
+        legacy_path,
+        {
+            "run_id": "legacy-current",
+            "trade_date": "2026-03-30",
+            "mode": "PAPER",
+            "execution_status": "PLANNED",
+            "halt_reason": None,
+            "trades": [],
+            "order_ids": [],
+        },
+    )
+
+    resolved = execution_email._resolve_payload_path("2026-03-30")
+    payload = execution_email._load_payload(resolved, trade_date="2026-03-30", mode="paper")
+
+    assert resolved.resolve() == (run_root / "execution_payload.json").resolve()
+    assert payload["execution_status"] == "HALTED"
+    assert payload["halt_reason"] == "MISSING EXECUTION PAYLOAD"
+
+
 def test_execution_email_trade_date_uses_current_et(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("REPORT_DATE", raising=False)
