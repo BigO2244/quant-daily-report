@@ -39,6 +39,7 @@ def main() -> None:
     lines = []
     lines.append(f"Alpha Stack — Trade Plan for {trade_date}")
     lines.append(f"Prices from prior close ({pricing_dt}). No orders sent yet.")
+    lines.append("Live prices at execution may change share counts or substitute tickers.")
     lines.append("")
 
     lines.append("PORTFOLIO STATE")

@@ -22,13 +22,9 @@ else
 fi
 
 # --- Activate venv ---
-if [[ -f "${REPO_ROOT}/venv/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source "${REPO_ROOT}/venv/bin/activate"
-else
-    echo "FATAL: ${REPO_ROOT}/venv/bin/activate not found" >&2
-    exit 1
-fi
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/runtime_env.sh"
+activate_runtime_venv "${REPO_ROOT}" || exit 1
 
 # --- Compute report date ---
 export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"

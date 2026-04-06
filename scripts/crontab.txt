@@ -22,4 +22,4 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 10 * * 1-5 $HOME/quant-daily-report/scripts/cron_confirm.sh >> $HOME/quant-daily-report/logs/cron_confirm.log 2>&1
 
 # Weekly Model Review (Monday 8:00 AM ET)
-0 8 * * 1 cd $HOME/quant-daily-report && source venv/bin/activate && python3 scripts/weekly_model_review.py >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1
+0 8 * * 1 $HOME/quant-daily-report/scripts/cron_weekly_review.sh >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1
