@@ -445,6 +445,36 @@ class AlpacaBroker:
             return None
         return _normalize_order_obj(order)
 
+    def get_order(self, order_id: str) -> Optional[Dict[str, Any]]:
+        order_id_norm = str(order_id).strip()
+        if not order_id_norm:
+            return None
+        getter = getattr(self.trading_client, "get_order_by_id", None)
+        if not callable(getter):
+            getter = getattr(self.trading_client, "get_order", None)
+        if not callable(getter):
+            raise AttributeError("Alpaca trading client does not support single-order lookup")
+        try:
+            order = getter(order_id_norm)
+        except TypeError:
+            import uuid
+
+            try:
+                order = getter(uuid.UUID(order_id_norm))
+            except Exception as exc:
+                msg = _safe_str(exc).lower()
+                if "not found" in msg or "404" in msg:
+                    return None
+                raise
+        except Exception as exc:
+            msg = _safe_str(exc).lower()
+            if "not found" in msg or "404" in msg:
+                return None
+            raise
+        if order is None:
+            return None
+        return _normalize_order_obj(order)
+
     def submit_market_order(
         self,
         symbol: str,

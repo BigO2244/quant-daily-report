@@ -112,6 +112,10 @@ def _load_module(tmp_path: Path):
         },
         current_et=lambda: dt.datetime(2026, 3, 26, 9, 35, 15, tzinfo=ZoneInfo("America/New_York")),
     )
+    sys.modules["core.trading_mode"] = _module(
+        "core.trading_mode",
+        canonical_trading_mode_label=lambda value, field_name=None: str(value or field_name or "paper").upper(),
+    )
     sys.modules["core.trading_day_summary"] = _module(
         "core.trading_day_summary",
         write_trading_day_summary=lambda **_kwargs: None,

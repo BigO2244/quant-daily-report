@@ -24,9 +24,11 @@
     "require_benchmark_price": true
   },
   "risk": {
-    "max_turnover_pct": 0.75,
-    "max_trades_per_day": 10,
-    "max_position_change_pct": 0.15,
+    "max_turnover_pct": 0.95,
+    "max_trades_per_day": 25,
+    "max_position_change_pct": 0.25,
+    "max_position_pct": 0.20,
+    "min_position_pct": 0.05,
     "action": "scale_down"
   },
   "reporting": {

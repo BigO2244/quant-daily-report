@@ -50,7 +50,7 @@ SENT_LEDGER_COLUMNS = [
     "status",
 ]
 
-CAPITAL_RESERVE_MIN_CASH = 1000.0
+CAPITAL_RESERVE_MIN_CASH = 500.0
 CAPITAL_RESERVE_EQUITY_PCT = 0.01
 CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
 ALPACA_SELL_PHASE_TIMEOUT_SECONDS = 90.0
@@ -129,6 +129,7 @@ class PaperConfig:
     max_turnover_pct: float = 0.30
     max_trades_per_day: int = 10
     max_position_change_pct: float = 0.15
+    max_position_pct: float = 0.10
     risk_action: str = "hard_stop"
     halt_on_data_error: bool = True
     require_benchmark_price: bool = True
@@ -171,6 +172,7 @@ def load_config(path: str) -> PaperConfig:
         max_turnover_pct=float(risk_cfg.get("max_turnover_pct", 0.30)),
         max_trades_per_day=int(risk_cfg.get("max_trades_per_day", 10)),
         max_position_change_pct=float(risk_cfg.get("max_position_change_pct", 0.15)),
+        max_position_pct=float(risk_cfg.get("max_position_pct", 0.10)),
         risk_action=str(risk_cfg.get("action", "hard_stop")).strip().lower(),
         halt_on_data_error=bool(safety_cfg.get("halt_on_data_error", True)),
         require_benchmark_price=bool(safety_cfg.get("require_benchmark_price", True)),
@@ -832,9 +834,12 @@ def apply_risk_guards(
             shares = float(r.get("shares", 0.0))
             price = float(r.get("price", 0.0))
 
-            rounded_shares = float(math.floor(abs(shares)))
-            if rounded_shares < 1.0:
-                continue
+            if cfg.allow_fractional:
+                rounded_shares = abs(shares)
+            else:
+                rounded_shares = float(math.floor(abs(shares)))
+                if rounded_shares < 1.0:
+                    continue
 
             notional = rounded_shares * abs(price)
             if notional < float(cfg.min_trade_dollars):
@@ -1438,6 +1443,55 @@ def _expected_positions_after_orders(
     return expected
 
 
+def _resolve_filled_buy_orders(
+    alpaca: AlpacaBroker,
+    submitted_orders: List[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    buy_orders_submitted = 0
+    buy_orders_filled = 0
+    orders_for_recon: List[Dict[str, object]] = []
+    try:
+        for order in submitted_orders or []:
+            side = str(order.get("side") or "").upper()
+            if side in {"SELL", "CLOSE", "REDUCE"}:
+                orders_for_recon.append(order)
+                continue
+            buy_orders_submitted += 1
+            alpaca_order_id = str(order.get("alpaca_order_id") or "").strip()
+            current_order: Dict[str, object] | None = None
+            if alpaca_order_id:
+                current_order = alpaca.get_order(alpaca_order_id)
+            else:
+                internal_order_id = str(order.get("order_id") or "").strip()
+                if not internal_order_id:
+                    raise RuntimeError("missing internal order_id for submitted buy order")
+                current_order = alpaca.find_order_by_client_id(
+                    alpaca_client_order_id(internal_order_id)
+                )
+            if not current_order:
+                raise RuntimeError(
+                    f"missing current Alpaca status for buy order {str(order.get('order_id') or '').strip() or str(order.get('ticker') or '').strip() or 'unknown'}"
+                )
+            status = str(current_order.get("status") or "").upper()
+            if status == "FILLED":
+                orders_for_recon.append(order)
+                buy_orders_filled += 1
+        if buy_orders_submitted > 0:
+            logger.info(
+                "[POSTTRADE_RECON] buy_orders_submitted=%d buy_orders_filled=%d buy_orders_pending=%d (excluded from drift check)",
+                buy_orders_submitted,
+                buy_orders_filled,
+                buy_orders_submitted - buy_orders_filled,
+            )
+        return orders_for_recon
+    except Exception as exc:
+        logger.warning(
+            "[POSTTRADE_RECON] buy fill resolution failed; using full submitted order set: %s",
+            exc,
+        )
+        return list(submitted_orders or [])
+
+
 def _sell_phase_timeout_seconds() -> float:
     raw = _coerce_float(os.getenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS"), None)
     if raw is None:
@@ -1638,9 +1692,15 @@ def _build_capital_budget(
     cash_value = _coerce_float(broker_cash, None)
     equity_value = _coerce_float(broker_equity, None)
     buying_power_value = _coerce_float(broker_buying_power, None)
-    reserve_cash = max(
+    reserve_cash_floor = max(
         float(CAPITAL_RESERVE_MIN_CASH),
         max(0.0, float(equity_value or 0.0)) * float(CAPITAL_RESERVE_EQUITY_PCT),
+    )
+    reserve_cash_cap = max(0.0, float(equity_value or 0.0)) * 0.05
+    reserve_cash = (
+        min(reserve_cash_floor, reserve_cash_cap)
+        if reserve_cash_cap > 0.0
+        else reserve_cash_floor
     )
     expected_sell_proceeds_value = max(0.0, float(expected_sell_proceeds or 0.0))
     expected_sell_proceeds_conservative = float(
@@ -2074,9 +2134,10 @@ def _capture_alpaca_posttrade_state(
         run_date,
         alpaca_positions_snapshot,
     )
+    orders_for_recon = _resolve_filled_buy_orders(alpaca, submitted_orders)
     expected_positions = _expected_positions_after_orders(
         _holdings_to_quantity_map(holdings_prev),
-        submitted_orders,
+        orders_for_recon,
     )
     actual_positions = _positions_to_quantity_map(alpaca_positions_snapshot)
     posttrade_recon = write_post_execution_drift_report(
@@ -2252,7 +2313,7 @@ def _risk_controls_preflight(
     try:
         from core.risk_controls import RiskControls
 
-        rc = RiskControls()
+        rc = RiskControls(max_position_pct=float(cfg.max_position_pct))
 
         # ── Circuit breaker: compare current equity to historical peak ──
         peak_equity = _get_peak_equity_from_ledger(ledger_path)

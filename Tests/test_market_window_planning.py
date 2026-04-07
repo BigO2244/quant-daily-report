@@ -7,6 +7,7 @@ import pytest
 import daily_quant_report as dqr
 from paper.build_execution_email import build_execution_email_text
 import paper.paper_broker as broker
+import paper.trading_calendar as trading_calendar
 
 
 def test_paper_market_closed_generates_planning_email():
@@ -31,6 +32,23 @@ def test_paper_market_closed_generates_planning_email():
     assert "Execution Status: PLANNED — MARKET CLOSED (NEXT OPEN)" in body
     assert "Planned For: 2026-02-10 09:30 ET" in body
     assert "Planning email only — no orders were sent." in body
+
+
+def test_good_friday_is_treated_as_market_holiday():
+    now_et = dt.datetime(2026, 4, 3, 9, 35, tzinfo=ZoneInfo("America/New_York"))
+
+    status = trading_calendar.market_session_status(
+        run_date="2026-04-03",
+        now_et=now_et,
+        cutoff_time_et="15:45",
+    )
+
+    assert trading_calendar.is_trading_day("2026-04-03") is False
+    assert trading_calendar.next_trading_day("2026-04-03") == "2026-04-06"
+    assert status.is_trading_day is False
+    assert status.is_open_now is False
+    assert status.reason == "MARKET_CLOSED_DAY"
+    assert status.next_open_et.isoformat() == "2026-04-06T09:30:00-04:00"
 
 
 def test_live_market_closed_halts_and_generates_no_plan():
@@ -841,6 +859,39 @@ def test_apply_risk_guards_turnover_cap_exempts_sells_and_preserves_full_exits()
 
     assert float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0]) == 7.0
     assert float(guarded.loc[guarded["ticker"] == "MSFT", "shares"].iloc[0]) == 7.0
+
+
+def test_apply_risk_guards_turnover_cap_preserves_fractional_buys() -> None:
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=True,
+        min_trade_dollars=100.0,
+        max_turnover_pct=0.20,
+        max_position_change_pct=1.0,
+        risk_action="hard_stop",
+    )
+    trades = pd.DataFrame(
+        [
+            {"ticker": "AAPL", "side": "BUY", "shares": 3.5, "price": 400.0, "slippage_cost": 0.0, "notional": 1400.0, "reason": "rebalance"},
+            {"ticker": "MSFT", "side": "BUY", "shares": 2.0, "price": 400.0, "slippage_cost": 0.0, "notional": 800.0, "reason": "rebalance"},
+        ]
+    )
+
+    guarded, blocked, hard_stop = broker.apply_risk_guards(trades=trades, equity=10000.0, cfg=cfg)
+
+    assert hard_stop is False
+    assert blocked == []
+    assert guarded.attrs["risk_meta"]["turnover_scaled"] is True
+
+    expected_scale = 2000.0 / 2200.0
+    aapl_shares = float(guarded.loc[guarded["ticker"] == "AAPL", "shares"].iloc[0])
+    msft_shares = float(guarded.loc[guarded["ticker"] == "MSFT", "shares"].iloc[0])
+
+    assert aapl_shares == pytest.approx(3.5 * expected_scale, rel=1e-6)
+    assert msft_shares == pytest.approx(2.0 * expected_scale, rel=1e-6)
+    assert aapl_shares != pytest.approx(float(int(aapl_shares)))
 
 
 def test_run_paper_day_raises_on_signal_date_mismatch(monkeypatch):

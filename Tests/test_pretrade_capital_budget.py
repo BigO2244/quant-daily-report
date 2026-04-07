@@ -138,7 +138,7 @@ def test_reserve_policy_uses_max_of_minimum_and_equity_percent() -> None:
         requested_buy_notional=0.0,
     )
 
-    assert budget_small["reserve_cash_policy"]["reserve_cash"] == 1000.0
+    assert budget_small["reserve_cash_policy"]["reserve_cash"] == 500.0
     assert budget_large["reserve_cash_policy"]["reserve_cash"] == 2500.0
 
 

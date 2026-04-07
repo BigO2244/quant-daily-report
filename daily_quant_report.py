@@ -116,6 +116,7 @@ from core.portfolio_alloc import (  # noqa: E402
     holdings_snapshot_df,
     validate_allocation_result,
     CASH_TICKER,
+    DEFAULT_MIN_GROSS_EXPOSURE,
     DEFAULT_PORTFOLIO_BASE_EQUITY,
     WEIGHT_TOLERANCE,
 )
@@ -502,6 +503,187 @@ def _expand_sleeve_holdings_for_cap(
     if len(positions_df) > 0:
         positions_df["target_weight"] = 1.0 / len(positions_df)
     diagnostics["selected_names"] = int(len(positions_df))
+    return create_sleeve_output(
+        positions_df,
+        sleeve_output.meta.sleeve_name,
+        strength=sleeve_output.meta.strength,
+        notes=sleeve_output.meta.notes,
+    ), diagnostics
+
+
+def _resolve_live_construction_policy(model_equity: float | None) -> dict[str, float]:
+    equity = max(0.0, float(model_equity or DEFAULT_PORTFOLIO_BASE_EQUITY))
+    small_account_threshold = max(
+        DEFAULT_PORTFOLIO_BASE_EQUITY,
+        float(os.getenv("SMALL_ACCOUNT_EQUITY_THRESHOLD", "25000")),
+    )
+    small_account = equity <= small_account_threshold
+
+    default_max_position_weight = 0.10
+    if small_account:
+        try:
+            from core.growth_engine_v4 import MAX_POSITION_WEIGHT as strategy_max_position_weight
+
+            default_max_position_weight = float(strategy_max_position_weight)
+        except Exception:
+            default_max_position_weight = 0.20
+
+    max_position_weight = max(
+        WEIGHT_TOLERANCE,
+        min(1.0, _snapshot_risk_value("MAX_POSITION_PCT", default_max_position_weight)),
+    )
+    default_min_position_weight = 0.05 if small_account else 0.02
+    min_position_weight = max(
+        0.0,
+        min(
+            max_position_weight,
+            _snapshot_risk_value("MIN_POSITION_PCT", default_min_position_weight),
+        ),
+    )
+    default_min_gross_exposure = 0.95 if small_account else DEFAULT_MIN_GROSS_EXPOSURE
+    min_gross_exposure = max(
+        0.0,
+        min(1.0, _snapshot_risk_value("MIN_GROSS_EXPOSURE", default_min_gross_exposure)),
+    )
+    return {
+        "model_equity": equity,
+        "max_position_weight": float(max_position_weight),
+        "min_position_weight": float(min_position_weight),
+        "min_gross_exposure": float(min_gross_exposure),
+    }
+
+
+def _preview_sleeve_allocations(sleeve_outputs: list[SleeveOutput]) -> dict[str, float]:
+    active = []
+    for sleeve_output in sleeve_outputs:
+        positions_df = _safe_df(getattr(sleeve_output, "positions_df", pd.DataFrame()))
+        has_positions = not positions_df.empty and float(
+            positions_df.get("target_weight", pd.Series(dtype=float)).abs().sum()
+        ) > WEIGHT_TOLERANCE
+        if has_positions and float(getattr(sleeve_output.meta, "strength", 0.0)) > WEIGHT_TOLERANCE:
+            active.append(sleeve_output)
+
+    total_strength = sum(float(sleeve_output.meta.strength) for sleeve_output in active)
+    if total_strength <= WEIGHT_TOLERANCE:
+        return {sleeve_output.meta.sleeve_name: 0.0 for sleeve_output in sleeve_outputs}
+
+    active_ids = {id(sleeve_output) for sleeve_output in active}
+    return {
+        sleeve_output.meta.sleeve_name: (
+            float(sleeve_output.meta.strength) / total_strength
+            if id(sleeve_output) in active_ids
+            else 0.0
+        )
+        for sleeve_output in sleeve_outputs
+    }
+
+
+def _resize_sleeve_holdings_for_live_book(
+    sleeve_output: SleeveOutput,
+    *,
+    target_allocation: float,
+    max_position_weight: float,
+    min_position_weight: float,
+    ranked_candidates: list[str] | None = None,
+) -> tuple[SleeveOutput, dict]:
+    positions_df = _safe_df(sleeve_output.positions_df).copy()
+    target_allocation = max(0.0, float(target_allocation or 0.0))
+    max_position_weight = max(0.0, float(max_position_weight or 0.0))
+    min_position_weight = max(0.0, float(min_position_weight or 0.0))
+
+    diagnostics = {
+        "selected_names": int(len(positions_df)),
+        "min_required_names": None,
+        "max_supported_names": None,
+        "added_names": 0,
+        "trimmed_names": 0,
+        "constraint": (
+            f"max_position_weight={max_position_weight:.0%}, min_position_weight={min_position_weight:.0%}"
+            if max_position_weight > 0
+            else "none"
+        ),
+    }
+    if positions_df.empty or target_allocation <= WEIGHT_TOLERANCE or max_position_weight <= WEIGHT_TOLERANCE:
+        return sleeve_output, diagnostics
+
+    if ranked_candidates:
+        rank_lookup = {
+            str(ticker).strip().upper(): idx
+            for idx, ticker in enumerate(ranked_candidates)
+            if str(ticker).strip()
+        }
+        positions_df["_live_rank"] = positions_df.get("ticker", pd.Series(dtype=str)).astype(str).str.upper().map(
+            lambda ticker: rank_lookup.get(ticker, len(rank_lookup) + 10_000)
+        )
+        positions_df = positions_df.sort_values(["_live_rank", "ticker"], ascending=[True, True]).drop(
+            columns=["_live_rank"],
+            errors="ignore",
+        )
+    elif "rank" in positions_df.columns:
+        positions_df = positions_df.sort_values(["rank", "ticker"], ascending=[True, True])
+
+    min_required_names = max(1, int(math.ceil(target_allocation / max_position_weight)))
+    max_supported_names = None
+    if min_position_weight > WEIGHT_TOLERANCE:
+        max_supported_names = max(
+            min_required_names,
+            int(math.floor((target_allocation + WEIGHT_TOLERANCE) / min_position_weight)),
+        )
+        max_supported_names = max(1, max_supported_names)
+
+    diagnostics["min_required_names"] = int(min_required_names)
+    diagnostics["max_supported_names"] = (
+        int(max_supported_names) if max_supported_names is not None else None
+    )
+
+    original_count = int(len(positions_df))
+    if max_supported_names is not None and len(positions_df) > max_supported_names:
+        positions_df = positions_df.head(max_supported_names).copy()
+    trimmed_count = max(0, original_count - int(len(positions_df)))
+
+    additions: list[dict[str, object]] = []
+    if ranked_candidates and len(positions_df) < min_required_names:
+        existing = set(
+            positions_df.get("ticker", pd.Series(dtype=str)).astype(str).str.upper().tolist()
+        )
+        for ticker in ranked_candidates:
+            ticker_value = str(ticker).strip().upper()
+            if not ticker_value or ticker_value in existing:
+                continue
+            additions.append(
+                {
+                    "ticker": ticker_value,
+                    "target_weight": 0.0,
+                    "reason": "cap_fill",
+                    "signal_strength": 1.0,
+                }
+            )
+            existing.add(ticker_value)
+            if len(existing) >= min_required_names:
+                break
+        if additions:
+            positions_df = pd.concat([positions_df, pd.DataFrame(additions)], ignore_index=True)
+
+    if positions_df.empty:
+        return create_sleeve_output(
+            [],
+            sleeve_output.meta.sleeve_name,
+            strength=sleeve_output.meta.strength,
+            notes=sleeve_output.meta.notes,
+        ), diagnostics
+
+    if additions:
+        positions_df["target_weight"] = 1.0 / len(positions_df)
+    else:
+        weight_sum = float(positions_df.get("target_weight", pd.Series(dtype=float)).sum())
+        if weight_sum > WEIGHT_TOLERANCE:
+            positions_df["target_weight"] = positions_df["target_weight"] / weight_sum
+        else:
+            positions_df["target_weight"] = 1.0 / len(positions_df)
+
+    diagnostics["selected_names"] = int(len(positions_df))
+    diagnostics["added_names"] = int(len(additions))
+    diagnostics["trimmed_names"] = int(trimmed_count)
     return create_sleeve_output(
         positions_df,
         sleeve_output.meta.sleeve_name,
@@ -5110,7 +5292,6 @@ def main(argv: list[str] | None = None):
     trend_output = build_trend_sleeve_output(st_signals, st_equity, top_n=10, regime=_vix_regime)
     # Use the directly-built SleeveOutput from run_sleeve_value() when available;
     # fall back to the legacy extract path (always empty) otherwise.
-    from core.portfolio_alloc import create_sleeve_output as _cso
     val_output = (
         _val_output_direct
         if _val_output_direct is not None
@@ -5141,20 +5322,32 @@ def main(argv: list[str] | None = None):
         if _vix_regime is not None
         else DEFAULT_MIN_GROSS_EXPOSURE
     )
+    construction_policy = _resolve_live_construction_policy(_broker_equity_for_drift)
+    logger.info(
+        "[LIVE_CONSTRUCTION] equity=%.2f max_pos=%.0f%% min_pos=%.0f%% min_gross=%.0f%%",
+        construction_policy["model_equity"],
+        construction_policy["max_position_weight"] * 100,
+        construction_policy["min_position_weight"] * 100,
+        construction_policy["min_gross_exposure"] * 100,
+    )
 
     allocator = PortfolioAllocator(
         risk_off=risk_off,
         stash_sleeve_name="CASH",
         risk_off_stash_pct=0.0,
-        min_gross_exposure=_regime_gross_exp,
+        max_position_pct=construction_policy["max_position_weight"],
+        min_gross_exposure=(
+            _regime_gross_exp if _vix_regime is not None else construction_policy["min_gross_exposure"]
+        ),
     )
-
-    trend_output, cap_fill_diag = _expand_sleeve_holdings_for_cap(
-        trend_output,
-        max_position_weight=allocator.max_position_pct,
-        target_cash_weight=0.0,
-        ranked_candidates=_ranked_signal_tickers(st_signals),
-    )
+    cap_fill_diag = {
+        "selected_names": int(len(_safe_df(trend_output.positions_df))),
+        "min_required_names": None,
+        "max_supported_names": None,
+        "added_names": 0,
+        "trimmed_names": 0,
+        "constraint": "none",
+    }
 
     # ── Apply regime-driven sleeve strengths with drift gate ──────
     _active_sleeve_outputs = [
@@ -5176,6 +5369,28 @@ def main(argv: list[str] | None = None):
             # Drift exceeds threshold — apply regime target weight
             _so.meta.strength = _target_strength
         # else: drift below threshold — keep existing meta.strength (HOLD)
+    _preview_allocations = _preview_sleeve_allocations(_active_sleeve_outputs)
+    _resized_outputs_by_name: dict[str, SleeveOutput] = {}
+    for _so in _active_sleeve_outputs:
+        _ranked_candidates = _ranked_signal_tickers(st_signals) if _so.meta.sleeve_name == "sleeve_trend" else None
+        _resized_output, _resize_diag = _resize_sleeve_holdings_for_live_book(
+            _so,
+            target_allocation=_preview_allocations.get(_so.meta.sleeve_name, 0.0),
+            max_position_weight=construction_policy["max_position_weight"],
+            min_position_weight=construction_policy["min_position_weight"],
+            ranked_candidates=_ranked_candidates,
+        )
+        _resized_outputs_by_name[_so.meta.sleeve_name] = _resized_output
+        if _so.meta.sleeve_name == "sleeve_trend":
+            cap_fill_diag = _resize_diag
+    trend_output = _resized_outputs_by_name.get("sleeve_trend", trend_output)
+    val_output = _resized_outputs_by_name.get("sleeve_2", val_output)
+    quality_output = _resized_outputs_by_name.get("sleeve_quality", quality_output)
+    mr_output = _resized_outputs_by_name.get("sleeve_mean_reversion", mr_output)
+    _active_sleeve_outputs = [
+        so for so in [trend_output, val_output, quality_output, mr_output]
+        if so is not None
+    ]
     logger.info(
         "[REGIME_ALLOC] %s (regime: %s)",
         ", ".join(f"{k}={v:.3f}" for k, v in sorted(_regime_strengths.items())),

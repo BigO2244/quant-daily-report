@@ -1,33 +1,33 @@
 import pandas as pd
 
 import daily_quant_report as dqr
-from core.portfolio_alloc import PortfolioAllocator, create_sleeve_output
+from core.portfolio_alloc import create_sleeve_output
 
 
-def test_sleeve1_cap_fill_deploys_capital_with_10pct_limit():
+def test_small_account_live_resize_limits_sleeve_to_supported_name_band():
     base_positions = [
-        {"ticker": t, "target_weight": 0.2, "reason": "signal", "signal_strength": 1.0}
-        for t in ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
+        {"ticker": t, "target_weight": 0.10, "reason": "signal", "signal_strength": 1.0}
+        for t in ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL", "AVGO", "JPM", "XOM"]
     ]
-    sleeve = create_sleeve_output(base_positions, "sleeve_trend", strength=1.0)
+    sleeve = create_sleeve_output(base_positions, "sleeve_trend", strength=0.2368)
     ranked = [
         "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL", "AVGO", "JPM", "XOM", "UNH", "HD"
     ]
 
-    expanded, diag = dqr._expand_sleeve_holdings_for_cap(
+    resized, diag = dqr._resize_sleeve_holdings_for_live_book(
         sleeve,
-        max_position_weight=0.10,
-        target_cash_weight=0.0,
+        target_allocation=0.2368,
+        max_position_weight=0.20,
+        min_position_weight=0.05,
         ranked_candidates=ranked,
     )
 
-    allocator = PortfolioAllocator(max_position_pct=0.10)
-    result = allocator.allocate([expanded])
-    invested = float(result.combined_weights[result.combined_weights["ticker"] != "CASH"]["target_weight"].sum())
-
-    assert diag["selected_names"] >= 10
-    assert invested > 0.90
-    assert result.cash_weight < 0.10
+    assert diag["min_required_names"] == 2
+    assert diag["max_supported_names"] == 4
+    assert diag["selected_names"] == 4
+    assert diag["trimmed_names"] == 6
+    assert resized.positions_df["ticker"].tolist() == ["AAPL", "MSFT", "NVDA", "AMZN"]
+    assert float(resized.positions_df["target_weight"].sum()) == 1.0
 
 
 def test_benchmark_since_inception_stats_uses_portfolio_window_start():
