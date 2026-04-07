@@ -32,7 +32,14 @@ activate_runtime_venv() {
     local venv_dir
     venv_dir="$(resolve_runtime_venv_dir "${repo_root}")" || return 1
 
-    # shellcheck disable=SC1090
-    source "${venv_dir}/bin/activate"
+    if [[ ! -x "${venv_dir}/bin/python3" && ! -x "${venv_dir}/bin/python" ]]; then
+        echo "FATAL: runtime virtualenv missing python interpreter: ${venv_dir}" >&2
+        return 1
+    fi
+
+    export VIRTUAL_ENV="${venv_dir}"
+    export PATH="${venv_dir}/bin:${PATH}"
+    unset PYTHONHOME
+    hash -r 2>/dev/null || true
     export CAERUS_ACTIVE_VENV_DIR="${venv_dir}"
 }
