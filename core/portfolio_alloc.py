@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 DEFAULT_PORTFOLIO_BASE_EQUITY = 10_000.0
-# Active sleeves: sleeve_trend only.
-# sleeve_2 and charlie_munger are disabled pending future reimplementation.
-# To re-enable a sleeve, add it back here and wire it into daily_quant_report.py.
+# Legacy static weights used only by helper/reporting functions in this module.
+# The live production path sets sleeve strengths dynamically inside
+# daily_quant_report.py based on regime targets, sleeve activity, and broker drift.
 DEFAULT_SLEEVE_WEIGHTS = {"sleeve_trend": 1.00}
 DEFAULT_MAX_POSITION_PCT = 0.10
 DEFAULT_MAX_SLEEVE_EXPOSURE = 1.00
@@ -214,7 +214,18 @@ class PortfolioAllocator:
             return self._allocate_risk_off_stash(sleeve_outputs, previous_weights)
 
         sleeve_allocations = self._compute_sleeve_allocations(sleeve_outputs)
-        combined = self._combine_sleeve_weights(sleeve_outputs, sleeve_allocations)
+        # 2026-04-11 cash-drag fix: if a sleeve's budget exceeds the total
+        # weight it can absorb at max_position_pct (n_positions * cap), the
+        # excess would otherwise be lost to the cash bucket after
+        # _apply_position_constraints (which caps but does not renormalize).
+        # Compute a "realized" sleeve allocation that redistributes excess
+        # from capacity-constrained sleeves to sleeves that still have
+        # headroom. sleeve_allocations (the "requested" view) is kept
+        # untouched so the report still shows what each sleeve asked for.
+        realized_sleeve_allocations = self._redistribute_uncappable_sleeve_budget(
+            sleeve_outputs, sleeve_allocations
+        )
+        combined = self._combine_sleeve_weights(sleeve_outputs, realized_sleeve_allocations)
         combined = self._apply_position_constraints(combined)
 
         if previous_weights is not None and self.max_turnover is not None:
@@ -351,6 +362,101 @@ class PortfolioAllocator:
             )
             for s in sleeve_outputs
         }
+
+    def _redistribute_uncappable_sleeve_budget(
+        self,
+        sleeve_outputs: list[SleeveOutput],
+        sleeve_allocations: dict[str, float],
+    ) -> dict[str, float]:
+        """Redistribute sleeve budget that cannot be absorbed at max_position_pct.
+
+        For each sleeve, the maximum book weight it can absorb is
+        ``n_distinct_positions * max_position_pct``. If its allocation is
+        higher, the excess is moved to sleeves that still have capacity,
+        in proportion to each recipient's remaining headroom.
+
+        If no sleeve has any headroom left, the excess is kept on the
+        donor sleeve (and will surface as cash drag after position caps)
+        — but that case now appears in self._skipped_trades so the audit
+        trail is visible in the daily report.
+
+        This addresses a long-standing failure mode where the trend
+        sleeve, when it selected a small number of names (or only one),
+        would have its budget partially vaporised at the cap step, with
+        the residual routed straight to cash without ever being offered
+        to the other sleeves.
+        """
+        if self.max_position_pct <= 0 or not sleeve_allocations:
+            return dict(sleeve_allocations)
+
+        cap = float(self.max_position_pct)
+
+        # Build index of capacity per sleeve = n_positions * cap
+        capacity: dict[str, float] = {}
+        for so in sleeve_outputs:
+            name = so.meta.sleeve_name
+            df = so.positions_df
+            if df is None or df.empty or "ticker" not in df.columns:
+                capacity[name] = 0.0
+                continue
+            n = int(df["ticker"].astype(str).str.strip().nunique())
+            capacity[name] = float(n) * cap
+
+        allocations = dict(sleeve_allocations)
+
+        # First pass: identify donors (allocation > capacity) and excess
+        donors: list[tuple[str, float]] = []
+        for name, alloc in allocations.items():
+            cap_for_sleeve = capacity.get(name, 0.0)
+            if alloc > cap_for_sleeve + WEIGHT_TOLERANCE:
+                excess = alloc - cap_for_sleeve
+                donors.append((name, excess))
+                allocations[name] = cap_for_sleeve
+
+        if not donors:
+            return allocations
+
+        total_excess = sum(e for _, e in donors)
+
+        # Iteratively redistribute: recipients are sleeves where current
+        # allocation < capacity, by remaining headroom.
+        remaining = float(total_excess)
+        # loop until either all excess is placed or no capacity remains
+        for _ in range(8):
+            if remaining <= WEIGHT_TOLERANCE:
+                break
+            headrooms: dict[str, float] = {
+                name: max(0.0, capacity.get(name, 0.0) - allocations.get(name, 0.0))
+                for name in allocations
+            }
+            total_headroom = sum(headrooms.values())
+            if total_headroom <= WEIGHT_TOLERANCE:
+                break
+            take = min(remaining, total_headroom)
+            for name, hr in headrooms.items():
+                if hr <= 0.0:
+                    continue
+                allocations[name] = allocations.get(name, 0.0) + take * (hr / total_headroom)
+            remaining -= take
+
+        placed = total_excess - remaining
+        for name, excess in donors:
+            self._skipped_trades.append(
+                {
+                    "ticker": f"SLEEVE:{name}",
+                    "action": "SLEEVE_BUDGET_REDISTRIBUTED",
+                    "original_weight": sleeve_allocations.get(name, 0.0),
+                    "limited_weight": allocations.get(name, 0.0),
+                    "reason": (
+                        f"{name} could only absorb {capacity.get(name, 0.0):.1%} "
+                        f"at max_position_pct={cap:.1%}; excess={excess:.1%} "
+                        f"redistributed to other sleeves "
+                        f"(placed={placed:.1%}, residual_to_cash={remaining:.1%})"
+                    ),
+                }
+            )
+
+        return allocations
 
     def _combine_sleeve_weights(
         self,

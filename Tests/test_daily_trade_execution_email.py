@@ -220,7 +220,7 @@ def test_execution_email_ignores_latest_run_for_wrong_trade_date(tmp_path, monke
     assert resolved.resolve() == legacy_path.resolve()
 
 
-def test_execution_email_uses_stage_pointer_even_when_payload_missing(tmp_path, monkeypatch) -> None:
+def test_execution_email_uses_broker_snapshot_fallback_when_stage_payload_missing(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("EMAIL_PRETRADE", "1")
     monkeypatch.setenv("REPORT_DATE", "2026-03-30")
@@ -250,10 +250,76 @@ def test_execution_email_uses_stage_pointer_even_when_payload_missing(tmp_path, 
         },
     )
 
+    _write_json(
+        tmp_path / "outputs" / "broker_snapshot" / "broker_snapshot_2026-03-30.json",
+        {
+            "counts": {
+                "orders_report_date": 2,
+                "fills_report_date": 2,
+            },
+            "meta": {
+                "workflow_run_id": "broker-snapshot-run",
+            },
+            "orders_report_date": [
+                {
+                    "id": "alpaca-1",
+                    "symbol": "SPY",
+                    "side": "buy",
+                    "qty": "1",
+                    "filled_qty": "1",
+                    "filled_avg_price": "510.25",
+                    "status": "filled",
+                },
+                {
+                    "id": "alpaca-2",
+                    "symbol": "QQQ",
+                    "side": "sell",
+                    "qty": "2",
+                    "filled_qty": "2",
+                    "filled_avg_price": "432.10",
+                    "status": "filled",
+                },
+            ],
+            "fills_report_date": [
+                {"id": "fill-1"},
+                {"id": "fill-2"},
+            ],
+        },
+    )
+
     resolved = execution_email._resolve_payload_path("2026-03-30")
     payload = execution_email._load_payload(resolved, trade_date="2026-03-30", mode="paper")
 
     assert resolved.resolve() == (run_root / "execution_payload.json").resolve()
+    assert payload["execution_status"] == "READY"
+    assert payload["status_label"] == "BROKER_SNAPSHOT_FALLBACK"
+    assert payload["operator_execution_status"] == "executed"
+    assert payload["orders_submitted_count"] == 2
+    assert payload["orders_filled_count"] == 2
+    assert payload["run_id"] == "broker-snapshot-run"
+    assert len(payload["trades"]) == 2
+
+
+def test_execution_email_missing_payload_without_snapshot_stays_halted(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EMAIL_PRETRADE", "1")
+    monkeypatch.setenv("REPORT_DATE", "2026-03-30")
+    execution_email = _load_module_with_stubs(tmp_path)
+
+    run_root = tmp_path / "outputs" / "runs" / "run-missing-payload"
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-missing-payload",
+        trade_date="2026-03-30",
+        mode="PAPER",
+        run_root=str(run_root),
+        status="failed_pre_execution",
+        workspace_root=str(tmp_path),
+    )
+
+    resolved = execution_email._resolve_payload_path("2026-03-30")
+    payload = execution_email._load_payload(resolved, trade_date="2026-03-30", mode="paper")
+
     assert payload["execution_status"] == "HALTED"
     assert payload["halt_reason"] == "MISSING EXECUTION PAYLOAD"
 

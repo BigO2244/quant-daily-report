@@ -586,6 +586,53 @@ class AlpacaBroker:
         )
         return out
 
+    def submit_option_market_order(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        client_order_id: str,
+        tif: str = "day",
+    ) -> Dict[str, Any]:
+        logger.info(
+            "[ALPACA_SUBMIT][OPTION] submitting market order symbol=%s qty=%.6f side=%s",
+            str(symbol).upper(),
+            float(qty),
+            str(side).upper(),
+        )
+        return self.submit_market_order(
+            symbol=symbol,
+            qty=qty,
+            side=side,
+            client_order_id=client_order_id,
+            tif=tif,
+        )
+
+    def submit_option_limit_order(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        limit_price: float,
+        client_order_id: str,
+        tif: str = "day",
+    ) -> Dict[str, Any]:
+        logger.info(
+            "[ALPACA_SUBMIT][OPTION] submitting limit order symbol=%s qty=%.6f side=%s limit_price=%.6f",
+            str(symbol).upper(),
+            float(qty),
+            str(side).upper(),
+            float(limit_price),
+        )
+        return self.submit_limit_order(
+            symbol=symbol,
+            qty=qty,
+            side=side,
+            limit_price=limit_price,
+            client_order_id=client_order_id,
+            tif=tif,
+        )
+
     def list_orders(self, status: str = "open", limit: int = 100) -> List[Dict[str, Any]]:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest

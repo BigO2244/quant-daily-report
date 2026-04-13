@@ -17,6 +17,7 @@ import subprocess
 import atexit
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 import pandas as pd
 from paper.signals_io import write_signals_snapshot
@@ -81,11 +82,85 @@ from core.trading_mode import (
     legacy_shadow_mode_requested,
 )
 from paper.nav2 import update_nav
-from paper.perf_artifact_producers import (
-    rebuild_premarket_analyzer_scores,
-    update_benchmark_close_history,
-    update_vix_close_history,
-)
+try:
+    from paper.perf_artifact_producers import (
+        build_benchmark_relative_series,
+        build_concentration_history,
+        build_construction_parity_artifact,
+        build_trade_day_pnl_artifact,
+        rebuild_premarket_analyzer_scores,
+        update_benchmark_close_history,
+        update_vix_close_history,
+    )
+except ImportError as exc:  # pragma: no cover - defensive compatibility fallback
+    _perf_artifact_logger = logging.getLogger(__name__)
+    _perf_artifact_logger.warning(
+        "[PERF_PRODUCERS][WARN] falling back to compatibility shims: %s",
+        exc,
+    )
+
+    def build_benchmark_relative_series(
+        *,
+        nav_timeseries_path: Path | str = Path("outputs/perf/nav_timeseries.csv"),
+        benchmark_path: Path | str = Path("outputs/perf/benchmark_close_history.csv"),
+        output_path: Path | str = Path("outputs/perf/benchmark_relative_series.csv"),
+        rolling_windows: tuple[int, ...] = (5, 10, 20),
+    ) -> pd.DataFrame:
+        columns = [
+            "date",
+            "equity",
+            "cash",
+            "gross_exposure",
+            "net_exposure",
+            "turnover",
+            "strategy_return",
+            "spy_close",
+            "spy_return",
+            "excess_return",
+            "strategy_nav_indexed",
+            "spy_nav_indexed",
+            "strategy_return_cum",
+            "spy_return_cum",
+            "excess_return_cum",
+            "drawdown",
+        ] + [f"rolling_excess_{window}d" for window in rolling_windows]
+        out = pd.DataFrame(columns=columns)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(out_path, index=False)
+        return out
+
+    def build_concentration_history(*, output_path: Path | str = Path("outputs/perf/concentration_history.csv")) -> pd.DataFrame:
+        out = pd.DataFrame()
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(out_path, index=False)
+        return out
+
+    def build_construction_parity_artifact(*, asof_date: str | None = None) -> dict[str, object]:
+        return {"status": "fallback_compatibility_shim", "asof_date": asof_date}
+
+    def build_trade_day_pnl_artifact(
+        *,
+        trade_date: str,
+        run_root: Path,
+        broker_snapshot_path: Path,
+    ) -> dict[str, object]:
+        return {
+            "status": "fallback_compatibility_shim",
+            "trade_date": trade_date,
+            "run_root": str(run_root),
+            "broker_snapshot_path": str(broker_snapshot_path),
+        }
+
+    def rebuild_premarket_analyzer_scores() -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def update_benchmark_close_history(*, asof_date: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def update_vix_close_history(*, asof_date: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame()
 from paper.reporting_consistency import compute_exposure, determine_sleeve_state
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
@@ -104,6 +179,12 @@ from regime.regime_engine import RegimeEngine
 
 from sleeves.sleeve_trend.build_sleeve_output import build_trend_sleeve_output
 from sleeves.sleeve_trend import config as trend_cfg
+from sleeves.sleeve_defensive_etf.selection import (
+    DEFENSIVE_ETF_TICKERS,
+    SLEEVE_NAME as DEFENSIVE_SLEEVE_NAME,
+    build_defensive_etf_equity_curve,
+    build_defensive_etf_sleeve_output,
+)
 # ============================================================
 # Portfolio allocation (dynamic)
 # ============================================================
@@ -121,6 +202,10 @@ from core.portfolio_alloc import (  # noqa: E402
     WEIGHT_TOLERANCE,
 )
 from core.alpha_attribution import load_benchmark_prices  # noqa: E402
+from core.live_regime_review import build_returns_by_ticker, write_live_regime_review  # noqa: E402
+from core.options_overlay_paper import write_options_overlay_paper_review  # noqa: E402
+from core.options_execution import write_options_execution_review  # noqa: E402
+from core.options_overlay_shadow import write_options_overlay_shadow  # noqa: E402
 from engine.backtest_engine import (  # noqa: E402
     infer_latest_entries,
     attach_entry_prices,
@@ -193,6 +278,100 @@ _RUN_TERMINAL_MESSAGE: str | None = None
 # Stage flags: used to produce a precise failure classification on early exit.
 _RUN_STAGE_PAYLOAD_WRITTEN: bool = False    # True after execution_payload.json written
 _RUN_STAGE_EXECUTION_REACHED: bool = False  # True when run_paper_day() is invoked
+_SIGNAL_SNAPSHOT_CACHE: dict[str, object] | None = None
+_SIGNAL_SNAPSHOT_WRITTEN: bool = False
+
+
+def _cache_signal_snapshot_payload(
+    *,
+    run_date: str,
+    asof_date: str | None,
+    df_targets: pd.DataFrame,
+    cash_target_weight: float | None,
+    extra: dict | None,
+) -> None:
+    global _SIGNAL_SNAPSHOT_CACHE
+    global _SIGNAL_SNAPSHOT_WRITTEN
+    _SIGNAL_SNAPSHOT_CACHE = {
+        "run_date": run_date,
+        "asof_date": asof_date,
+        "df_targets": df_targets.copy() if df_targets is not None else pd.DataFrame(),
+        "cash_target_weight": cash_target_weight,
+        "extra": dict(extra or {}),
+    }
+    _SIGNAL_SNAPSHOT_WRITTEN = False
+
+
+def _flush_signal_snapshot_cache() -> str | None:
+    """Flush the cached signals snapshot to disk.
+
+    This used to swallow all exceptions and return None — the result was
+    that 20 of 21 fill dates had no signal snapshot and we could not
+    compute shadow-vs-live or alpha attribution. We now raise on every
+    failure mode except "there's nothing to flush" (empty cache).
+    """
+    global _SIGNAL_SNAPSHOT_CACHE
+    global _SIGNAL_SNAPSHOT_WRITTEN
+    if _SIGNAL_SNAPSHOT_WRITTEN:
+        return None
+    if not _SIGNAL_SNAPSHOT_CACHE:
+        logger.warning(
+            "[SIGNAL_SNAPSHOT] flush called with empty cache — no snapshot will be written"
+        )
+        return None
+
+    run_date = str(_SIGNAL_SNAPSHOT_CACHE.get("run_date") or "").strip()
+    df_targets = _SIGNAL_SNAPSHOT_CACHE.get("df_targets")
+    if not run_date:
+        raise RuntimeError(
+            "[SIGNAL_SNAPSHOT] cached payload missing run_date — refusing to write"
+        )
+    if not isinstance(df_targets, pd.DataFrame):
+        raise RuntimeError(
+            "[SIGNAL_SNAPSHOT] cached payload df_targets is not a DataFrame"
+        )
+
+    asof_date = _SIGNAL_SNAPSHOT_CACHE.get("asof_date")
+    cash_target_weight = _SIGNAL_SNAPSHOT_CACHE.get("cash_target_weight")
+    extra = _SIGNAL_SNAPSHOT_CACHE.get("extra")
+
+    if cash_target_weight is None:
+        # Derive cash weight from the breaker block in extra if possible,
+        # so we never write a cash-less snapshot from the daily pipeline.
+        if isinstance(extra, dict):
+            breaker = extra.get("breaker") if isinstance(extra.get("breaker"), dict) else None
+            if breaker and breaker.get("cash_target_weight_today") is not None:
+                cash_target_weight = float(breaker["cash_target_weight_today"])
+        if cash_target_weight is None:
+            logger.warning(
+                "[SIGNAL_SNAPSHOT] cache has no cash_target_weight; defaulting to 0.0"
+            )
+            cash_target_weight = 0.0
+
+    path = write_signals_snapshot(
+        df_targets=df_targets if not df_targets.empty else pd.DataFrame(
+            [{"ticker": "CASH", "target_weight": 1.0, "sleeve": "core"}]
+        ),
+        run_date=run_date,
+        asof_date=str(asof_date) if asof_date else None,
+        out_dir="signals",
+        cash_target_weight=float(cash_target_weight),
+        sleeve_col="sleeve",
+        extra=extra if isinstance(extra, dict) else None,
+    )
+    _SIGNAL_SNAPSHOT_WRITTEN = True
+    logger.info("[SIGNAL_SNAPSHOT] flushed cached snapshot: %s", path)
+    return path
+
+
+def _finalize_signal_snapshot_once() -> None:
+    try:
+        _flush_signal_snapshot_cache()
+    except Exception:
+        pass
+
+
+atexit.register(_finalize_signal_snapshot_once)
 
 
 def _get_git_sha() -> str | None:
@@ -2021,6 +2200,7 @@ def create_pm_first_trade_email(snapshot: dict) -> tuple[str, str]:
         "SLEEVE ALLOCATION (DYNAMIC)",
         f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",
         f"• Sleeve 2 — Valuation: {_fmt_pct(sleeve_splits.get('sleeve_2', 0.0))}",
+        f"• Defensive ETFs — Bonds: {_fmt_pct(sleeve_splits.get(DEFENSIVE_SLEEVE_NAME, 0.0))}",
         "• Charlie Munger — Long Hold",
         f"  • Allocation: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
         f"  • Status: {charlie_status}",
@@ -2046,6 +2226,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     perf = snapshot.get("performance_summary", {}) or {}
     diagnostics = snapshot.get("performance_diagnostics", {}) or {}
     alpha = snapshot.get("alpha_attribution", {}) or {}
+    ic_monitor = _load_ic_monitor_snapshot()
     cm_sig = snapshot.get("charlie_munger", {}) or {}
     cm_near_ma = (cm_sig.get("meta") or {}).get("near_ma_candidates", 0)
     cm_selected = cm_sig.get("selected", []) or []
@@ -2141,6 +2322,7 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "SLEEVE ALLOCATION (DYNAMIC)",
         f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",
         f"• Sleeve 2 — Valuation: {_fmt_pct(sleeve_splits.get('sleeve_2', 0.0))}",
+        f"• Defensive ETFs — Bonds: {_fmt_pct(sleeve_splits.get(DEFENSIVE_SLEEVE_NAME, 0.0))}",
         f"• Charlie Munger — Long Hold: {_fmt_pct(sleeve_splits.get('charlie_munger', 0.0))}",
         f"• Cash: {_fmt_pct(cash_pct)}",
         "",
@@ -2170,6 +2352,12 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "• Role: Long-duration quality accumulation hedge",
         "",
         "This sleeve acts as a stabilizer against higher-velocity trading in Sleeves 1 & 2.",
+        "",
+        "DEFENSIVE ETF SLEEVE — TREASURY / CASH PROXY",
+        f"• Status: {_sleeve_state_status(DEFENSIVE_SLEEVE_NAME)}",
+        f"• Allocation: {_fmt_pct(sleeve_splits.get(DEFENSIVE_SLEEVE_NAME, 0.0))}",
+        f"• Trades Today: {_trades_today(DEFENSIVE_SLEEVE_NAME)}",
+        "• Role: Deploy defensive capital into liquid Treasury ETFs instead of pure cash when regime risk is elevated.",
         "",
         "---",
         "",
@@ -2216,6 +2404,36 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     lines.extend(
         [
             "",
+            "SIGNAL IC MONITOR",
+        ]
+    )
+    if not ic_monitor.get("available"):
+        lines.append("• Status: unavailable — run research.ic_monitor")
+    else:
+        ic_summary = ic_monitor.get("summary") or {}
+        sleeves = ic_summary.get("sleeves") or {}
+        if not sleeves:
+            lines.append("• Status: no sleeve IC data available")
+        else:
+            lines.append(f"• Status: {str(ic_summary.get('status', 'unknown')).upper()}")
+            for sleeve_name in sorted(sleeves):
+                sleeve_payload = sleeves.get(sleeve_name) or {}
+                latest_ic = (sleeve_payload.get("latest_ic_by_horizon") or {}).get("1")
+                rolling_20 = ((sleeve_payload.get("latest_rolling_ic_by_horizon") or {}).get("1") or {}).get("20")
+                lines.append(
+                    f"• {sleeve_name}: 20d rolling IC {_fmt_number(_coerce_float_or_none(rolling_20))}, "
+                    f"latest 1d IC {_fmt_number(_coerce_float_or_none(latest_ic))}"
+                )
+        alerts = ic_summary.get("alerts") or []
+        if alerts:
+            lines.append("• Active alerts:")
+            for alert in alerts:
+                lines.append(f"  - {alert}")
+        else:
+            lines.append("• Active alerts: none")
+    lines.extend(
+        [
+            "",
             "---",
             "",
             "TRADES FOR TODAY (NEW ORDERS — EXECUTION PAYLOAD)",
@@ -2240,6 +2458,18 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     )
     lines = [line for line in lines if line is not None]
     return subject, "\n".join(lines)
+
+
+def _load_ic_monitor_snapshot() -> dict[str, Any]:
+    path = Path("outputs") / "ic_monitor" / "ic_summary.json"
+    if not path.exists():
+        return {"available": False, "path": str(path)}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("[IC_MONITOR][WARN] could not parse %s: %s", path, exc)
+        return {"available": False, "path": str(path)}
+    return {"available": True, "path": str(path), "summary": payload}
 def _normalize_weights(sleeve_allocations: dict[str, float], cash_weight: float) -> tuple[dict[str, float], float]:
     sleeves = {k: max(0.0, float(v)) for k, v in (sleeve_allocations or {}).items()}
     cash = max(0.0, float(cash_weight))
@@ -2610,17 +2840,38 @@ def run_sleeve_quality(prices: pd.DataFrame | None = None) -> "SleeveOutput":
     Requires a populated DataStore (data/fundamental/ from EDGAR XBRL ingestion).
     Returns an empty SleeveOutput if the DataStore is unavailable or signal
     build fails — never raises so the orchestrator can continue.
+
+    2026-04-11: strength is now auto-throttled by rolling IC. When the
+    60-day rolling IC of the quality sleeve turns non-positive, the
+    sleeve's base_strength is scaled down proportionally toward a floor
+    (see core/ic_throttle.py). This prevents the portfolio from paying
+    full weight while the sleeve's edge is negative (the exact failure
+    mode we saw in the backtest-vs-live reconciliation).
     """
     from core.portfolio_alloc import create_sleeve_output
     try:
         from datastore import DataStore
         from sleeves.sleeve_quality.selection import build_quality_sleeve_output
+        from core.ic_throttle import compute_sleeve_ic_throttle
 
         ds = DataStore("data/fundamental")
         _tickers = list(quant_tickers or [])
         if not _tickers:
             logger.warning("[QUALITY] No universe tickers available — skipping")
             return create_sleeve_output([], "sleeve_quality", 0.0, "No tickers")
+
+        # IC-gated auto-throttle. When the rolling IC is missing / neutral,
+        # this returns 1.0 so existing behaviour is preserved. When IC is
+        # negative, strength is scaled toward IcThrottleResult.floor.
+        throttle = compute_sleeve_ic_throttle(sleeve="sleeve_quality")
+        base_strength = float(throttle.multiplier)
+        logger.info(
+            "[QUALITY] IC throttle: multiplier=%.3f rolling_ic=%s horizon=%s reason=%s",
+            base_strength,
+            "None" if throttle.rolling_ic is None else f"{throttle.rolling_ic:.4f}",
+            throttle.horizon,
+            throttle.reason,
+        )
 
         as_of = pd.Timestamp("today").normalize()
         logger.info("[QUALITY] Building quality signals for %d tickers", len(_tickers))
@@ -2631,12 +2882,19 @@ def run_sleeve_quality(prices: pd.DataFrame | None = None) -> "SleeveOutput":
             prices=prices,
             sectors=None,
             top_n=10,
-            base_strength=1.0,
+            base_strength=base_strength,
         )
+        # Stash the throttle diagnostics so downstream reports can surface it.
+        try:
+            if result is not None and getattr(result, "meta", None) is not None:
+                setattr(result.meta, "ic_throttle", throttle.to_dict())
+        except Exception:
+            pass
         logger.info(
-            "[QUALITY] SleeveOutput: %d positions, strength=%.3f",
+            "[QUALITY] SleeveOutput: %d positions, strength=%.3f (ic_mult=%.3f)",
             len(result.positions_df) if result.positions_df is not None else 0,
             result.meta.strength if result.meta else 0.0,
+            base_strength,
         )
         return result
     except Exception as exc:
@@ -2659,9 +2917,9 @@ def run_sleeve_mean_reversion(
     prices       : Raw OHLCV universe prices from download_prices().
     regime_state : Optional dict of today's regime state (regime_result.today).
                    When breadth_state is in {deteriorating, washed_out} OR
-                   composite_regime is in {risk_off_defensive, high_volatility,
-                   breadth_washout}, the breadth gate fires and reduces the
-                   candidate count by 50%.  Pass None to disable the gate.
+                   composite_regime is in {risk_off_defensive, high_volatility},
+                   the breadth gate fires and reduces the candidate count by 50%.
+                   Pass None to disable the gate.
     """
     from core.portfolio_alloc import create_sleeve_output
     try:
@@ -2691,6 +2949,42 @@ def run_sleeve_mean_reversion(
     except Exception as exc:
         logger.warning("[MEAN_REV] Sleeve build failed (non-blocking): %s", exc)
         return create_sleeve_output([], "sleeve_mean_reversion", 0.0, f"Build error: {exc}")
+
+
+def run_sleeve_defensive_etf(
+    prices: pd.DataFrame | None = None,
+    regime_summary: dict | None = None,
+) -> tuple["SleeveOutput", pd.DataFrame]:
+    """
+    Build the defensive ETF sleeve used to absorb part of the regime cash bucket
+    in defensive states while staying on the existing ETF-capable execution path.
+    """
+    from core.portfolio_alloc import create_sleeve_output
+
+    try:
+        if prices is None or prices.empty:
+            logger.warning("[DEFENSIVE_ETF] No price data — skipping")
+            return create_sleeve_output([], DEFENSIVE_SLEEVE_NAME, 0.0, "No price data"), pd.DataFrame()
+
+        output = build_defensive_etf_sleeve_output(
+            prices=prices,
+            regime_summary=regime_summary,
+            base_strength=1.0,
+        )
+        equity_df = build_defensive_etf_equity_curve(
+            prices=prices,
+            sleeve_output=output,
+            base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
+        )
+        logger.info(
+            "[DEFENSIVE_ETF] SleeveOutput: %d positions, strength=%.3f",
+            len(output.positions_df) if output.positions_df is not None else 0,
+            output.meta.strength if output.meta else 0.0,
+        )
+        return output, equity_df
+    except Exception as exc:
+        logger.warning("[DEFENSIVE_ETF] Sleeve build failed (non-blocking): %s", exc)
+        return create_sleeve_output([], DEFENSIVE_SLEEVE_NAME, 0.0, f"Build error: {exc}"), pd.DataFrame()
 
 
 # ============================================================
@@ -2807,19 +3101,22 @@ def extract_sleeve_output(
 def _prepare_shared_regime_market_data(
     period: str = "1y",
     interval: str = "1d",
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Download the universe plus SPY/VIX once, then split it for sleeves and regime.
     This keeps the regime path read-only and avoids a second price download.
     """
     _ensure_quant_report_imports()
-    tickers = list(dict.fromkeys(list(quant_tickers or []) + ["SPY", "^VIX"]))
+    tickers = list(dict.fromkeys(list(quant_tickers or []) + ["SPY", "^VIX"] + DEFENSIVE_ETF_TICKERS))
     shared_prices = download_prices(tickers, period=period, interval=interval)
     if shared_prices.empty:
         raise ValueError("Shared market price download returned no rows")
 
     universe_prices = shared_prices[
-        ~shared_prices["ticker"].astype(str).isin(["SPY", "^VIX"])
+        ~shared_prices["ticker"].astype(str).isin(["SPY", "^VIX", *DEFENSIVE_ETF_TICKERS])
+    ].copy()
+    defensive_etf_prices = shared_prices[
+        shared_prices["ticker"].astype(str).isin(DEFENSIVE_ETF_TICKERS)
     ].copy()
     spy_prices = shared_prices[
         shared_prices["ticker"].astype(str) == "SPY"
@@ -2833,7 +3130,7 @@ def _prepare_shared_regime_market_data(
             "Shared market price set missing SPY, ^VIX, or universe rows"
         )
 
-    return universe_prices, spy_prices, vix_prices
+    return universe_prices, spy_prices, vix_prices, defensive_etf_prices
 
 
 def _build_regime_summary_payload(regime_result) -> dict:
@@ -2852,10 +3149,22 @@ def _build_regime_summary_payload(regime_result) -> dict:
     }
 
 
+LIVE_REGIME_TO_SLEEVE = {
+    "trend": "sleeve_trend",
+    "value": "sleeve_2",
+    "quality": "sleeve_quality",
+    "mean_reversion": "sleeve_mean_reversion",
+}
+
+DEFENSIVE_CASH_ROUTE_REGIMES = {"risk_off_defensive", "high_volatility"}
+DEFENSIVE_CASH_ROUTE_MACRO_STATES = {"risk_off", "stress"}
+DEFENSIVE_CASH_ROUTE_VOLATILITY_STATES = {"elevated", "crisis"}
+
+
 def _build_regime_html_block(regime_summary: dict) -> str:
     """
     Build an HTML summary block for today's macro regime.
-    Displayed above sleeve tables. Informational only — does not affect allocation.
+    Displayed above sleeve tables and aligned with the live sleeve allocator.
     Fails gracefully: returns empty string on missing/incomplete data.
     """
     if not regime_summary:
@@ -2917,7 +3226,7 @@ def _build_regime_html_block(regime_summary: dict) -> str:
     </div>
   </div>
   <p style="margin:10px 0 0 0;font-size:11px;color:#6c757d;font-style:italic">
-    Informational only &mdash; these target weights do not yet affect the live allocation.
+    These target weights feed the live allocator. Realized sleeve allocations can differ when a sleeve is inactive or broker drift stays below the rebalance threshold.
   </p>
 </div>
 """.strip()
@@ -2931,28 +3240,26 @@ def resolve_regime_strengths(
     available_sleeves: "list[str]",
 ) -> "dict[str, float]":
     """
-    Map regime weights to production sleeve names and renormalize.
+    Map regime weights to live sleeve names and renormalize.
 
     Regime columns (from RegimeAllocator):
         trend, value, quality, mean_reversion, cash
 
-    Production sleeves handled here:
+    Live sleeves handled here:
         sleeve_trend  ← trend
         sleeve_2      ← value
+        sleeve_quality ← quality
+        sleeve_mean_reversion ← mean_reversion
+        sleeve_defensive_etf ← cash (risk_off / high-volatility only)
 
     Cash weight is dropped and the remaining mapped weights are
-    renormalized so they sum to 1.0.
+    renormalized so they sum to 1.0 unless the defensive ETF sleeve is
+    active, in which case the defensive cash bucket can be routed there.
 
     Fallback: if regime_today is None, mapping is empty, or any error
     occurs, returns equal weight across available_sleeves so allocation
     remains valid.
     """
-    _REGIME_TO_SLEEVE: "dict[str, str]" = {
-        "trend":           "sleeve_trend",
-        "value":           "sleeve_2",
-        "quality":         "sleeve_quality",
-        "mean_reversion":  "sleeve_mean_reversion",
-    }
     try:
         if not regime_today:
             raise ValueError("No regime_today data")
@@ -2961,9 +3268,23 @@ def resolve_regime_strengths(
             raise ValueError("No weights in regime_today")
 
         mapped: "dict[str, float]" = {}
-        for regime_col, sleeve_name in _REGIME_TO_SLEEVE.items():
+        for regime_col, sleeve_name in LIVE_REGIME_TO_SLEEVE.items():
             if sleeve_name in available_sleeves and regime_col in weights:
                 mapped[sleeve_name] = float(weights[regime_col])
+
+        composite = str(regime_today.get("composite_regime") or "").strip().lower()
+        macro_state = str(regime_today.get("macro_state") or "").strip().lower()
+        vol_state = str(regime_today.get("volatility_state") or "").strip().lower()
+        if (
+            DEFENSIVE_SLEEVE_NAME in available_sleeves
+            and float(weights.get("cash", 0.0) or 0.0) > WEIGHT_TOLERANCE
+            and (
+                composite in DEFENSIVE_CASH_ROUTE_REGIMES
+                or macro_state in DEFENSIVE_CASH_ROUTE_MACRO_STATES
+                or vol_state in DEFENSIVE_CASH_ROUTE_VOLATILITY_STATES
+            )
+        ):
+            mapped[DEFENSIVE_SLEEVE_NAME] = float(weights.get("cash", 0.0) or 0.0)
 
         if not mapped:
             raise ValueError("No regime weights mapped to active sleeves")
@@ -3031,16 +3352,51 @@ def compute_sleeve_drift(
             )
         return {name: True for name in sleeve_names}
 
-    # Build ticker → sleeve_name lookup from sleeve_outputs
-    ticker_to_sleeve: "dict[str, str]" = {}
+    # Build ticker → {sleeve_name: share} from sleeve_outputs.
+    # When the same ticker appears in multiple sleeves, split the live broker
+    # market value across sleeves in proportion to their current target weights
+    # instead of assigning the entire holding to the last sleeve processed.
+    ticker_to_sleeve_weights: "dict[str, dict[str, float]]" = {}
     for so in (sleeve_outputs or []):
         if so is None or so.positions_df is None or so.positions_df.empty:
             continue
-        if "ticker" not in so.positions_df.columns:
+        if "ticker" not in so.positions_df.columns or "target_weight" not in so.positions_df.columns:
             continue
         sname = so.meta.sleeve_name
-        for t in so.positions_df["ticker"].astype(str).str.upper():
-            ticker_to_sleeve[t] = sname
+        df = so.positions_df.copy()
+        df["ticker"] = df["ticker"].astype(str).str.upper()
+        grouped = (
+            df.groupby("ticker", as_index=False)["target_weight"]
+            .sum()
+        )
+        sleeve_budget = max(
+            0.0,
+            float(regime_strengths.get(sname, getattr(so.meta, "strength", 0.0)) or 0.0),
+        )
+        for _, row in grouped.iterrows():
+            ticker = str(row.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            weight = abs(float(row.get("target_weight") or 0.0)) * sleeve_budget
+            ticker_to_sleeve_weights.setdefault(ticker, {})[sname] = weight
+
+    ticker_to_sleeve_shares: "dict[str, dict[str, float]]" = {}
+    for ticker, sleeve_weights in ticker_to_sleeve_weights.items():
+        positive = {
+            name: max(0.0, float(weight))
+            for name, weight in sleeve_weights.items()
+            if max(0.0, float(weight)) > WEIGHT_TOLERANCE
+        }
+        if not positive:
+            continue
+        total = sum(positive.values())
+        if total <= WEIGHT_TOLERANCE:
+            share = 1.0 / len(positive)
+            ticker_to_sleeve_shares[ticker] = {name: share for name in positive}
+        else:
+            ticker_to_sleeve_shares[ticker] = {
+                name: weight / total for name, weight in positive.items()
+            }
 
     # Accumulate current market value per sleeve from broker positions
     sleeve_mv: "dict[str, float]" = {name: 0.0 for name in sleeve_names}
@@ -3053,9 +3409,10 @@ def compute_sleeve_drift(
             mv = float(mv_raw) if mv_raw not in (None, "") else 0.0
         except (ValueError, TypeError):
             mv = 0.0
-        sname = ticker_to_sleeve.get(symbol)
-        if sname in sleeve_mv:
-            sleeve_mv[sname] += mv
+        sleeve_shares = ticker_to_sleeve_shares.get(symbol, {})
+        for sname, share in sleeve_shares.items():
+            if sname in sleeve_mv and share > WEIGHT_TOLERANCE:
+                sleeve_mv[sname] += mv * share
 
     # Compute drift and emit one log line per sleeve
     result: "dict[str, bool]" = {}
@@ -3408,6 +3765,8 @@ def build_daily_snapshot(
     st_signals: pd.DataFrame,
     s2_details: dict,
     cm_details: dict | None = None,
+    defensive_equity: pd.DataFrame | None = None,
+    defensive_output: SleeveOutput | None = None,
     vix_regime: dict | None = None,
     regime_summary: dict | None = None,
     risk_off: bool = False,
@@ -3457,23 +3816,6 @@ def build_daily_snapshot(
     weights_df = _safe_df(alloc_result.combined_weights)
     weights_df = weights_df[weights_df["ticker"] != CASH_TICKER].copy()
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
-    tickers = (
-        sorted(weights_df["ticker"].unique().tolist()) if not weights_df.empty else []
-    )
-    prices = pd.DataFrame()
-    if tickers:
-        prices = download_prices(tickers, period="6mo", interval="1d")
-        if prices.empty or prices[["open", "high", "low", "close"]].isna().all().all():
-            logger.error(
-                "Downloaded price data is empty or all-NaN; aborting snapshot generation."
-            )
-            raise RuntimeError(
-                "Downloaded price data is empty or all-NaN; aborting snapshot generation."
-            )
-    # --- Paper trading signals snapshot (daily immutable file) ---
-    # Prefer a YYYY-MM-DD string you already use in the report.
-    # If you already have something like report_date_str / asof_date_str / today_str, use that here.
-    signals_path = None
     if "sleeve" not in weights_df.columns and "sleeve_name" in weights_df.columns:
         weights_df["sleeve"] = weights_df["sleeve_name"]
     if weights_df.empty:
@@ -3499,14 +3841,49 @@ def build_daily_snapshot(
                 )
         if fallback_rows:
             weights_df = pd.DataFrame(fallback_rows)
+    signals_path = None
+    run_date_str = report_date.strftime("%Y-%m-%d")
+    cutoff_date = prev_trading_day(run_date_str)
     if weights_df.empty:
-        logger.warning(
-            "[PAPER] No target weights available; skipping signals snapshot."
+        logger.warning("[PAPER] No target weights available; writing cash-only signals snapshot.")
+        weights_df = pd.DataFrame(
+            [
+                {
+                    "ticker": CASH_TICKER,
+                    "target_weight": 1.0,
+                    "sleeve": "core",
+                    "raw_score": 0.0,
+                }
+            ]
         )
+        target_cash_weight_today = 1.0
+        breaker_block = {
+            "breaker": {
+                "mode": breaker_cfg.get("mode", "off"),
+                "source": breaker_cfg.get("source", "unknown"),
+                "reason": "no_target_weights",
+                "exposure_multiplier_today": exposure_today,
+                "exposure_label_today": exposure_label,
+                "invested_before_overlay": 0.0,
+                "invested_after_overlay": 0.0,
+                "cash_target_weight_today": 1.0,
+            },
+            "market_analyzer": market_analyzer,
+        }
+        _cache_signal_snapshot_payload(
+            run_date=run_date_str,
+            asof_date=cutoff_date,
+            df_targets=weights_df,
+            cash_target_weight=1.0,
+            extra=breaker_block,
+        )
+        signals_path = _flush_signal_snapshot_cache()
+        if signals_path is not None:
+            logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
+        signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
+        signal_store_df["ticker"] = signal_store_df["ticker"].astype(str)
+        persist_signal_snapshot(signal_store_df, report_date.strftime("%Y-%m-%d"))
     else:
-        run_date_str = report_date.strftime("%Y-%m-%d")
-        cutoff_date = prev_trading_day(run_date_str)
-
         invested_before_overlay = float(weights_df["target_weight"].sum()) if not weights_df.empty else 0.0
         weights_df_overlay = apply_portfolio_exposure_overlay(weights_df, exposure_today, cash_ticker="CASH")
         invested_after_overlay = 0.0
@@ -3539,20 +3916,36 @@ def build_daily_snapshot(
             "market_analyzer": market_analyzer,
         }
 
-        # Persist breaker-aware targets for execution/audit.
-        signals_path = write_signals_snapshot(
-            df_targets=weights_df,
+        _cache_signal_snapshot_payload(
             run_date=run_date_str,
             asof_date=cutoff_date,
-            out_dir="signals",
+            df_targets=weights_df,
             cash_target_weight=float(target_cash_weight_today),
-            sleeve_col="sleeve",  # if column exists; otherwise writer will default to "core"
             extra=breaker_block,
         )
-        logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
+        signals_path = _flush_signal_snapshot_cache()
+        if signals_path is not None:
+            logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
         signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
         signal_store_df["ticker"] = signal_store_df["ticker"].astype(str)
         persist_signal_snapshot(signal_store_df, report_date.strftime("%Y-%m-%d"))
+    tickers = (
+        sorted(
+            weights_df.loc[weights_df["ticker"].astype(str) != CASH_TICKER, "ticker"].unique().tolist()
+        )
+        if not weights_df.empty
+        else []
+    )
+    prices = pd.DataFrame()
+    if tickers:
+        prices = download_prices(tickers, period="6mo", interval="1d")
+        if prices.empty or prices[["open", "high", "low", "close"]].isna().all().all():
+            logger.error(
+                "Downloaded price data is empty or all-NaN; aborting snapshot generation."
+            )
+            raise RuntimeError(
+                "Downloaded price data is empty or all-NaN; aborting snapshot generation."
+            )
     price_map = _build_price_map(prices, report_date)
     atr_map = _build_atr_map(prices, report_date)
     entry_map = {}
@@ -3868,6 +4261,16 @@ def build_daily_snapshot(
             allocation_weight=float(display_sleeves.get("charlie_munger", 0.0)),
             weight_tolerance=WEIGHT_TOLERANCE,
         ),
+        DEFENSIVE_SLEEVE_NAME: determine_sleeve_state(
+            {
+                "equity_df": _safe_df(defensive_equity if defensive_equity is not None else pd.DataFrame()),
+                "target_weights": _safe_df(
+                    getattr(defensive_output, "positions_df", pd.DataFrame()) if defensive_output is not None else pd.DataFrame()
+                ),
+            },
+            allocation_weight=float(display_sleeves.get(DEFENSIVE_SLEEVE_NAME, 0.0)),
+            weight_tolerance=WEIGHT_TOLERANCE,
+        ),
     }
     performance_diagnostics = {
         "current_equity": portfolio_stats.get("equity"),
@@ -3908,6 +4311,7 @@ def build_daily_snapshot(
             "sleeve_trend": st_equity,
             "sleeve_2": s2_equity,
             "charlie_munger": (cm_details or {}).get("equity_df", pd.DataFrame()),
+            DEFENSIVE_SLEEVE_NAME: _safe_df(defensive_equity if defensive_equity is not None else pd.DataFrame()),
         },
         sleeve_allocations=alloc_result.sleeve_allocations,
         base_equity=DEFAULT_PORTFOLIO_BASE_EQUITY,
@@ -3955,6 +4359,7 @@ def build_html_report(
     st_trades,
     s2_equity,
     s2_trades,
+    defensive_equity: pd.DataFrame | None = None,
     alloc_result: AllocationResult = None,
     alpha_stats: dict | None = None,
     proposed_trades: list[dict] | None = None,
@@ -3982,12 +4387,14 @@ def build_html_report(
     if alloc_result is not None:
         trend_alloc = alloc_result.sleeve_allocations.get("sleeve_trend", 0.0)
         val_alloc = alloc_result.sleeve_allocations.get("sleeve_2", 0.0)
+        defensive_alloc = alloc_result.sleeve_allocations.get(DEFENSIVE_SLEEVE_NAME, 0.0)
         cash_alloc = alloc_result.cash_weight
         # Build sleeve equity map for portfolio computation
         sleeve_equity_map = {
             "sleeve_trend": st_equity,
             "sleeve_2": s2_equity,
             "charlie_munger": (cm_details or {}).get("equity_df", pd.DataFrame()),
+            DEFENSIVE_SLEEVE_NAME: _safe_df(defensive_equity if defensive_equity is not None else pd.DataFrame()),
         }
         # Compute TRUE portfolio equity (the only correct total)
         portfolio_stats = compute_portfolio_equity(
@@ -4106,6 +4513,43 @@ def build_html_report(
                     "Day Return": "—",
                 }
             )
+        if defensive_alloc > WEIGHT_TOLERANCE:
+            alloc_notional = BASE_EQUITY * defensive_alloc
+            defensive_df = _safe_df(defensive_equity if defensive_equity is not None else pd.DataFrame())
+            if not defensive_df.empty and "equity" in defensive_df.columns:
+                d_start = float(defensive_df["equity"].iloc[0])
+                d_last = float(defensive_df["equity"].iloc[-1])
+                d_prev = float(defensive_df["equity"].iloc[-2]) if len(defensive_df) > 1 else d_last
+                if d_start > 0:
+                    d_ret = (d_last / d_start) - 1.0
+                    d_day_ret = (d_last - d_prev) / d_prev if d_prev > 0 else 0.0
+                    contrib_equity = BASE_EQUITY * defensive_alloc * (1.0 + d_ret)
+                    rows.append(
+                        {
+                            "Sleeve": f"Defensive ETFs — Bonds ({defensive_alloc:.2%})",
+                            "Allocated": _fmt_money(alloc_notional),
+                            "Equity": _fmt_money(contrib_equity),
+                            "Day Return": _fmt_pct(d_day_ret),
+                        }
+                    )
+                else:
+                    rows.append(
+                        {
+                            "Sleeve": f"Defensive ETFs — Bonds ({defensive_alloc:.2%})",
+                            "Allocated": _fmt_money(alloc_notional),
+                            "Equity": "—",
+                            "Day Return": "—",
+                        }
+                    )
+            else:
+                rows.append(
+                    {
+                        "Sleeve": f"Defensive ETFs — Bonds ({defensive_alloc:.2%})",
+                        "Allocated": _fmt_money(alloc_notional),
+                        "Equity": "—",
+                        "Day Return": "—",
+                    }
+                )
         # CASH row
         if cash_alloc > WEIGHT_TOLERANCE:
             cash_notional = BASE_EQUITY * cash_alloc
@@ -5134,6 +5578,7 @@ def main(argv: list[str] | None = None):
         shared_universe_prices = pd.DataFrame()
         regime_spy_prices = pd.DataFrame()
         regime_vix_prices = pd.DataFrame()
+        defensive_etf_prices = pd.DataFrame()
         _, _ = pd.DataFrame(), pd.DataFrame()
         st_equity, st_trades, st_signals = (
             pd.DataFrame(),
@@ -5146,19 +5591,23 @@ def main(argv: list[str] | None = None):
         cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
         quality_output = None
         mr_output = None
+        defensive_output = None
+        defensive_equity = pd.DataFrame()
     else:
         shared_universe_prices = pd.DataFrame()
         regime_spy_prices = pd.DataFrame()
         regime_vix_prices = pd.DataFrame()
+        defensive_etf_prices = pd.DataFrame()
         try:
-            shared_universe_prices, regime_spy_prices, regime_vix_prices = (
+            shared_universe_prices, regime_spy_prices, regime_vix_prices, defensive_etf_prices = (
                 _prepare_shared_regime_market_data(period="2y", interval="1d")
             )
             logger.info(
-                "[REGIME] Reusing shared market data: universe_rows=%d spy_rows=%d vix_rows=%d",
+                "[REGIME] Reusing shared market data: universe_rows=%d spy_rows=%d vix_rows=%d defensive_rows=%d",
                 len(shared_universe_prices),
                 len(regime_spy_prices),
                 len(regime_vix_prices),
+                len(defensive_etf_prices),
             )
         except Exception as _shared_market_err:
             logger.warning(
@@ -5190,12 +5639,6 @@ def main(argv: list[str] | None = None):
         # ── Mean Reversion sleeve — built after regime engine so the
         # breadth gate can be wired with _regime_today (set below).
         mr_output = None  # populated after regime engine runs
-        # ── Rolling IC monitor (non-blocking) ────────────────────────
-        try:
-            from research.ic_monitor import compute_and_log_ic
-            compute_and_log_ic(report_date=today)
-        except Exception as _ic_err:
-            logger.info("[IC_MONITOR] Skipped: %s", _ic_err)
         # ── Value sleeve (non-blocking) ───────────────────────────────
         _val_output_direct = run_sleeve_value(
             prices=shared_universe_prices if not shared_universe_prices.empty else None
@@ -5205,6 +5648,8 @@ def main(argv: list[str] | None = None):
         s2_equity, s2_trades = pd.DataFrame(), pd.DataFrame()
         cm_details = {}
         cm_equity, cm_trades = pd.DataFrame(), pd.DataFrame()
+        defensive_output = None
+        defensive_equity = pd.DataFrame()
     # ── Sleeve health checks ─────────────────────────────────────
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
@@ -5217,6 +5662,8 @@ def main(argv: list[str] | None = None):
         if not s2_valid
         else ""
     )
+    defensive_valid = False
+    defensive_reason = ""
     cm_valid, cm_reason = _sleeve_is_valid(cm_equity)
     if not trend_valid:
         logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
@@ -5286,6 +5733,25 @@ def main(argv: list[str] | None = None):
             prices=shared_universe_prices if not shared_universe_prices.empty else None,
             regime_state=_regime_today,
         )
+    defensive_output, defensive_equity = run_sleeve_defensive_etf(
+        prices=defensive_etf_prices if not defensive_etf_prices.empty else None,
+        regime_summary=regime_summary,
+    )
+    defensive_valid = (
+        defensive_output is not None
+        and defensive_output.positions_df is not None
+        and not defensive_output.positions_df.empty
+    )
+    defensive_reason = (
+        defensive_output.meta.notes
+        if defensive_output is not None and defensive_output.meta is not None
+        else "inactive"
+    )
+    if (
+        not defensive_valid
+        and str(regime_summary.get("composite_regime") or "").strip().lower() in DEFENSIVE_CASH_ROUTE_REGIMES
+    ):
+        logger.warning("sleeve_defensive_etf inactive: %s -> routed to CASH", defensive_reason)
     # ─────────────────────────────────────────────────────────────
 
     # ── Extract sleeve outputs for dynamic allocation ─────────────
@@ -5351,10 +5817,14 @@ def main(argv: list[str] | None = None):
 
     # ── Apply regime-driven sleeve strengths with drift gate ──────
     _active_sleeve_outputs = [
-        so for so in [trend_output, val_output, quality_output, mr_output]
+        so for so in [trend_output, val_output, quality_output, mr_output, defensive_output]
         if so is not None
     ]
-    _active_sleeve_names = [so.meta.sleeve_name for so in _active_sleeve_outputs]
+    _active_sleeve_names = [
+        so.meta.sleeve_name
+        for so in _active_sleeve_outputs
+        if _safe_df(getattr(so, "positions_df", pd.DataFrame())).get("target_weight", pd.Series(dtype=float)).abs().sum() > WEIGHT_TOLERANCE
+    ]
     _regime_strengths = resolve_regime_strengths(_regime_today, _active_sleeve_names)
     _drift_flags = compute_sleeve_drift(
         broker_positions=_broker_positions_for_drift,
@@ -5387,8 +5857,9 @@ def main(argv: list[str] | None = None):
     val_output = _resized_outputs_by_name.get("sleeve_2", val_output)
     quality_output = _resized_outputs_by_name.get("sleeve_quality", quality_output)
     mr_output = _resized_outputs_by_name.get("sleeve_mean_reversion", mr_output)
+    defensive_output = _resized_outputs_by_name.get(DEFENSIVE_SLEEVE_NAME, defensive_output)
     _active_sleeve_outputs = [
-        so for so in [trend_output, val_output, quality_output, mr_output]
+        so for so in [trend_output, val_output, quality_output, mr_output, defensive_output]
         if so is not None
     ]
     logger.info(
@@ -5435,6 +5906,13 @@ def main(argv: list[str] | None = None):
         freed_weight += alloc_result.sleeve_allocations["charlie_munger"]
         alloc_result.sleeve_allocations["charlie_munger"] = 0.0
         patched = True
+    if (
+        not defensive_valid
+        and alloc_result.sleeve_allocations.get(DEFENSIVE_SLEEVE_NAME, 0.0) > WEIGHT_TOLERANCE
+    ):
+        freed_weight += alloc_result.sleeve_allocations[DEFENSIVE_SLEEVE_NAME]
+        alloc_result.sleeve_allocations[DEFENSIVE_SLEEVE_NAME] = 0.0
+        patched = True
     if patched:
         _old_allocs = dict(alloc_result.sleeve_allocations)
         _new_allocs, _new_cash = enforce_charlie_bounds(
@@ -5467,6 +5945,7 @@ def main(argv: list[str] | None = None):
         "sleeve_trend": st_equity,
         "sleeve_2": s2_equity,
         "charlie_munger": cm_equity,
+        DEFENSIVE_SLEEVE_NAME: defensive_equity,
     }
     portfolio_stats = compute_portfolio_equity(
         sleeve_equity_map=sleeve_equity_map,
@@ -5599,6 +6078,8 @@ def main(argv: list[str] | None = None):
             st_signals=st_signals,
             s2_details=s2_details,
             cm_details=cm_details,
+            defensive_equity=defensive_equity,
+            defensive_output=defensive_output,
             vix_regime=_vix_regime,
             regime_summary=regime_summary,
             risk_off=risk_off,
@@ -5616,6 +6097,12 @@ def main(argv: list[str] | None = None):
         **(daily_snapshot.get("inception_metrics") or {}),
         **inception_metrics,
     }
+    try:
+        from research.ic_monitor import compute_and_log_ic
+
+        compute_and_log_ic(report_date=today)
+    except Exception as _ic_err:
+        logger.warning("[IC_MONITOR] failed: %s", _ic_err)
     # --- Paper trading execution + report ---
     if _RUN_CONTEXT is not None:
         _RUN_CONTEXT.report_date = trade_date_str
@@ -6209,6 +6696,15 @@ def main(argv: list[str] | None = None):
             print(format_execution_health_banner(_op_summary))
         except Exception as _banner_exc:
             logger.warning("[EXECUTION_HEALTH][WARN] failed to render banner: %s", _banner_exc)
+        try:
+            from core.trading_day_summary import write_trading_day_summary
+            write_trading_day_summary(
+                run_root=_RUN_CONTEXT.run_root,
+                run_id=str(_RUN_CONTEXT.run_id),
+                trade_date=trade_date_str,
+            )
+        except Exception as _summary_exc:
+            logger.warning("[SUMMARY] trading_day_summary skipped after operator summary write: %s", _summary_exc)
         # Log pretrade summary
         print(
             f"[PRETRADE_SUMMARY] run_id={_RUN_CONTEXT.run_id} "
@@ -6414,6 +6910,178 @@ def main(argv: list[str] | None = None):
                 )
             except Exception as e:
                 logger.warning("[NAV][WARN] unable to hydrate snapshot nav metrics: %s", e)
+    regime_review: dict | None = None
+    try:
+        review_asof_date = str(integrity.get("asof_date") or prev_trading_day(trade_date_str))
+        review_prev_date = prev_trading_day(review_asof_date) if review_asof_date else None
+        returns_by_ticker: dict[str, float] = {}
+        target_book = _safe_df(getattr(alloc_result, "combined_weights", pd.DataFrame()))
+        if not target_book.empty and "ticker" in target_book.columns:
+            target_tickers = sorted(
+                {
+                    str(ticker).strip().upper()
+                    for ticker in target_book["ticker"].tolist()
+                    if str(ticker).strip().upper() != CASH_TICKER
+                }
+            )
+            if target_tickers and review_prev_date and review_asof_date:
+                prev_px = fetch_prev_closes_yfinance(target_tickers, asof_date=review_prev_date)
+                curr_px = fetch_prev_closes_yfinance(target_tickers, asof_date=review_asof_date)
+                returns_by_ticker = build_returns_by_ticker(prev_px, curr_px)
+        if _RUN_CONTEXT is not None:
+            regime_review = write_live_regime_review(
+                run_root=_RUN_CONTEXT.run_root,
+                output_dir=Path("outputs") / "engine_review",
+                trade_date=trade_date_str,
+                asof_date=review_asof_date,
+                regime_summary=regime_summary,
+                regime_strengths=_regime_strengths,
+                drift_flags=_drift_flags,
+                sleeve_outputs=_active_sleeve_outputs,
+                final_target_allocations=alloc_result.sleeve_allocations,
+                broker_positions=_broker_positions_for_drift,
+                broker_equity=_broker_equity_for_drift,
+                returns_by_ticker=returns_by_ticker,
+                alpha_attribution=alpha_stats,
+                signal_snapshot_path=signals_path_exec,
+                objective_contract_path=Path("config") / "engine_objectives.json",
+            )
+            daily_snapshot["live_regime_review"] = {
+                "overall_status": ((regime_review.get("promotion_gate") or {}).get("overall_status") or "").upper(),
+                "blockers": (regime_review.get("promotion_gate") or {}).get("blockers") or [],
+                "artifact_paths": regime_review.get("artifact_paths") or {},
+            }
+            write_operator_summary(
+                _RUN_CONTEXT.run_root,
+                regime_review_status=(regime_review.get("promotion_gate") or {}).get("overall_status"),
+                regime_review_blockers=(regime_review.get("promotion_gate") or {}).get("blockers"),
+            )
+    except Exception as e:
+        logger.warning("[REGIME_REVIEW][WARN] failed building live regime review: %s", e)
+    try:
+        overlay_asof_date = str(integrity.get("asof_date") or prev_trading_day(trade_date_str))
+        overlay_spy_price = None
+        if fetch_prev_closes_yfinance is not None and overlay_asof_date:
+            overlay_spy_df = fetch_prev_closes_yfinance(["SPY"], asof_date=overlay_asof_date)
+            if isinstance(overlay_spy_df, pd.DataFrame) and not overlay_spy_df.empty:
+                overlay_spy_price = _coerce_float_or_none(overlay_spy_df.iloc[0].get("prev_close"))
+        overlay_equity = _coerce_float_or_none(
+            ((paper_summary or {}).get("capital_budget") or {}).get("broker_equity_at_planning")
+        )
+        if overlay_equity is None:
+            overlay_equity = _broker_equity_for_drift
+        overlay_cash = _coerce_float_or_none(
+            ((paper_summary or {}).get("capital_budget") or {}).get("broker_cash_at_planning")
+        )
+        if overlay_cash is None:
+            overlay_cash = _coerce_float_or_none((paper_summary or {}).get("broker_cash"))
+        if overlay_cash is None:
+            overlay_cash = _coerce_float_or_none((((_pretrade_raw_snapshot or {}).get("account") or {}).get("cash")))
+        if _RUN_CONTEXT is not None:
+            options_submission_enabled = str(
+                os.getenv("ALLOW_OPTIONS_EXECUTION", os.getenv("ALLOW_OPTIONS_SUBMISSION", "0"))
+            ).strip().lower() in {"1", "true", "yes", "y", "on"}
+            options_broker = None
+            if options_submission_enabled:
+                from brokers.alpaca_broker import AlpacaBroker  # local import to keep startup light
+
+                options_broker = AlpacaBroker.from_env()
+            options_overlay_shadow = write_options_overlay_shadow(
+                run_root=_RUN_CONTEXT.run_root,
+                output_dir=Path("outputs") / "options_overlay",
+                trade_date=trade_date_str,
+                asof_date=overlay_asof_date,
+                regime_summary=regime_summary,
+                portfolio_equity=overlay_equity,
+                portfolio_cash=overlay_cash,
+                spy_price=overlay_spy_price,
+                live_regime_review=regime_review,
+                policy_path=Path("config") / "options_overlay_policy.json",
+            )
+            daily_snapshot["options_overlay_shadow"] = {
+                "status": ((options_overlay_shadow.get("trigger") or {}).get("status") or "").upper(),
+                "strategy": (options_overlay_shadow.get("recommendation") or {}).get("strategy"),
+                "feasible": bool((options_overlay_shadow.get("recommendation") or {}).get("feasible")),
+                "artifact_paths": options_overlay_shadow.get("artifact_paths") or {},
+            }
+            write_operator_summary(
+                _RUN_CONTEXT.run_root,
+                options_overlay_status=(options_overlay_shadow.get("trigger") or {}).get("status"),
+                options_overlay_strategy=(options_overlay_shadow.get("recommendation") or {}).get("strategy"),
+                options_overlay_active=(options_overlay_shadow.get("trigger") or {}).get("active"),
+                options_overlay_feasible=(options_overlay_shadow.get("recommendation") or {}).get("feasible"),
+                options_overlay_asof_date=options_overlay_shadow.get("asof_date"),
+                options_overlay_reasons=(options_overlay_shadow.get("trigger") or {}).get("reasons"),
+                options_overlay_artifact_path=((options_overlay_shadow.get("artifact_paths") or {}).get("run_json")),
+            )
+            options_overlay_paper = write_options_overlay_paper_review(
+                run_root=_RUN_CONTEXT.run_root,
+                output_dir=Path("outputs") / "options_overlay_paper",
+                trade_date=trade_date_str,
+                asof_date=overlay_asof_date,
+                regime_summary=regime_summary,
+                portfolio_equity=overlay_equity,
+                portfolio_cash=overlay_cash,
+                spy_price=overlay_spy_price,
+                live_regime_review=regime_review,
+                shadow_payload=options_overlay_shadow,
+                policy_path=Path("config") / "options_overlay_paper_policy.json",
+            )
+            daily_snapshot["options_overlay_paper_review"] = {
+                "status": str(options_overlay_paper.get("paper_review_status") or "").upper(),
+                "ready": bool(options_overlay_paper.get("paper_ready")),
+                "artifact_paths": options_overlay_paper.get("artifact_paths") or {},
+            }
+            write_operator_summary(
+                _RUN_CONTEXT.run_root,
+                options_overlay_paper_status=options_overlay_paper.get("paper_review_status"),
+                options_overlay_paper_ready=options_overlay_paper.get("paper_ready"),
+                options_overlay_paper_strategy=((options_overlay_paper.get("paper_plan") or {}).get("strategy")),
+                options_overlay_paper_artifact_path=((options_overlay_paper.get("artifact_paths") or {}).get("run_json")),
+            )
+            options_execution_review = write_options_execution_review(
+                run_root=_RUN_CONTEXT.run_root,
+                output_dir=Path("outputs") / "options_execution",
+                trade_date=trade_date_str,
+                asof_date=overlay_asof_date,
+                paper_review=options_overlay_paper,
+                allow_live_submission=options_submission_enabled,
+                broker=options_broker,
+            )
+            daily_snapshot["options_overlay_execution"] = {
+                "status": str(options_execution_review.get("execution_status") or "").upper(),
+                "ready": bool(options_execution_review.get("ready_for_submission")),
+                "artifact_paths": options_execution_review.get("artifact_paths") or {},
+            }
+            write_operator_summary(
+                _RUN_CONTEXT.run_root,
+                options_overlay_execution_status=options_execution_review.get("execution_status"),
+                options_overlay_execution_ready=options_execution_review.get("ready_for_submission"),
+                options_overlay_execution_artifact_path=((options_execution_review.get("artifact_paths") or {}).get("run_json")),
+            )
+            append_step_summary(
+                [
+                    "### Options Overlay Shadow",
+                    f"- status: `{str((options_overlay_shadow.get('trigger') or {}).get('status') or 'unknown').upper()}`",
+                    f"- strategy: `{(options_overlay_shadow.get('recommendation') or {}).get('strategy') or 'none'}`",
+                    f"- feasible: `{bool((options_overlay_shadow.get('recommendation') or {}).get('feasible'))}`",
+                    f"- artifact: `{((options_overlay_shadow.get('artifact_paths') or {}).get('run_json') or 'unavailable')}`",
+                    "",
+                    "### Options Overlay Paper Review",
+                    f"- status: `{str(options_overlay_paper.get('paper_review_status') or 'unknown').upper()}`",
+                    f"- ready: `{bool(options_overlay_paper.get('paper_ready'))}`",
+                    f"- strategy: `{(options_overlay_paper.get('paper_plan') or {}).get('strategy') or 'none'}`",
+                    f"- artifact: `{((options_overlay_paper.get('artifact_paths') or {}).get('run_json') or 'unavailable')}`",
+                    "",
+                    "### Options Overlay Execution Review",
+                    f"- status: `{str(options_execution_review.get('execution_status') or 'unknown').upper()}`",
+                    f"- ready: `{bool(options_execution_review.get('ready_for_submission'))}`",
+                    f"- strategy: `{(options_execution_review.get('live_plan') or {}).get('strategy') or 'none'}`",
+                    f"- artifact: `{((options_execution_review.get('artifact_paths') or {}).get('run_json') or 'unavailable')}`",
+                ]
+            )
+    except Exception as e:
+        logger.warning("[OPTIONS_OVERLAY][WARN] failed building shadow overlay artifact: %s", e)
     health_payload: dict
     try:
         health_payload = _build_health_payload(
@@ -6476,6 +7144,33 @@ def main(argv: list[str] | None = None):
         logger.info("[PERF_PRODUCERS] premarket_analyzer_scores rows=%d", len(analyzer_df))
     except Exception as e:
         logger.warning("[PERF_PRODUCERS][WARN] analyzer producer failed: %s", e)
+    try:
+        benchmark_relative_df = build_benchmark_relative_series()
+        logger.info("[PERF_PRODUCERS] benchmark_relative_series rows=%d", len(benchmark_relative_df))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] benchmark-relative producer failed: %s", e)
+    try:
+        concentration_history_df = build_concentration_history()
+        logger.info("[PERF_PRODUCERS] concentration_history rows=%d", len(concentration_history_df))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] concentration producer failed: %s", e)
+    try:
+        construction_parity = build_construction_parity_artifact(
+            asof_date=str(integrity.get("asof_date") or trade_date_str)
+        )
+        logger.info("[PERF_PRODUCERS] construction_parity status=%s", construction_parity.get("status"))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] construction parity producer failed: %s", e)
+    try:
+        if _RUN_CONTEXT is not None:
+            trade_pnl_payload = build_trade_day_pnl_artifact(
+                trade_date=trade_date_str,
+                run_root=_RUN_CONTEXT.run_root,
+                broker_snapshot_path=Path(f"outputs/broker_snapshot/broker_snapshot_{trade_date_str}.json"),
+            )
+            logger.info("[PERF_PRODUCERS] trade_day_pnl status=%s", trade_pnl_payload.get("status"))
+    except Exception as e:
+        logger.warning("[PERF_PRODUCERS][WARN] trade-day P&L producer failed: %s", e)
 
     # ── Execution Summary & Rolling Export (non-blocking) ─────────────
     try:
@@ -6558,6 +7253,7 @@ def main(argv: list[str] | None = None):
         st_trades=st_trades,
         s2_equity=s2_equity,
         s2_trades=s2_trades,
+        defensive_equity=defensive_equity,
         alloc_result=alloc_result,
         alpha_stats=alpha_stats,
         proposed_trades=daily_snapshot.get("proposed_trades"),

@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 
 from daily_quant_report import create_snapshot_email
@@ -53,6 +55,44 @@ def test_snapshot_email_uses_explicit_alpha_reason_when_unavailable():
 
     assert "ALPHA ATTRIBUTION VS SPY" in body
     assert "• Status: Pending — Need >=5 overlapping days; have 1 (2026-02-09 → 2026-02-09)" in body
+
+
+def test_snapshot_email_includes_ic_monitor_summary(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "outputs" / "ic_monitor").mkdir(parents=True)
+    (tmp_path / "outputs" / "ic_monitor" / "ic_summary.json").write_text(
+        json.dumps(
+            {
+                "status": "warning",
+                "alerts": ["sleeve_quality: 20d rolling IC has been <= 0 for 12 consecutive days"],
+                "sleeves": {
+                    "sleeve_quality": {
+                        "latest_ic_by_horizon": {"1": 0.158},
+                        "latest_rolling_ic_by_horizon": {"1": {"20": -0.081}},
+                    }
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    snapshot = {
+        "asof": "2026-02-11",
+        "allocations": {"cash": 0.2, "sleeves": {"sleeve_trend": 0.4, "sleeve_2": 0.3, "charlie_munger": 0.1}},
+        "performance_summary": {"wtd": 0.0, "mtd": 0.0, "total_return": 0.0},
+        "performance_diagnostics": {"current_equity": 10000, "day_return": 0.0},
+        "alpha_attribution": {"ok": False, "reason": "Need >=5 overlapping days; have 1 (2026-02-09 → 2026-02-09)"},
+        "charlie_munger": {"meta": {"near_ma_candidates": 0}, "selected": []},
+    }
+
+    _, body = create_snapshot_email(snapshot, execution_payload={"trades": []})
+
+    assert "SIGNAL IC MONITOR" in body
+    assert "• Status: WARNING" in body
+    assert "• sleeve_quality: 20d rolling IC -0.08, latest 1d IC 0.16" in body
+    assert "• Active alerts:" in body
+    assert "sleeve_quality: 20d rolling IC has been <= 0 for 12 consecutive days" in body
 
 
 def test_alpha_attribution_rows_use_date_column_when_present():

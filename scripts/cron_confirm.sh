@@ -148,7 +148,7 @@ echo "[CONFIRM] Sending trading confirmation email..." | tee -a "${LOG_FILE}"
 if [[ "${EXECUTION_POINTER_STATUS,,}" == "running" ]]; then
     CONFIRM_EXIT=1
     echo "WARN: execution still running — skipping confirmation email" | tee -a "${LOG_FILE}"
-elif [[ -n "${EXECUTION_RUN_ROOT}" ]] && [[ -f "${EXECUTION_RUN_ROOT}/execution_results.json" ]]; then
+else
     python3 -m scripts.send_trading_confirmation_email >> "${LOG_FILE}" 2>&1 || {
         echo "WARN: trading confirmation email failed (non-blocking)" | tee -a "${LOG_FILE}"
         CONFIRM_EXIT=1
@@ -162,9 +162,6 @@ ${TAIL}" >> "${LOG_FILE}" 2>&1 || {
                 echo "WARN: failure alert email send failed (non-blocking)" | tee -a "${LOG_FILE}"
             }
     }
-else
-    echo "WARN: execution_results.json not found for execution workflow pointer — skipping confirmation email" | tee -a "${LOG_FILE}"
-    CONFIRM_EXIT=1
 fi
 
 # --- Step 3: Verify execution status from execution-stage operator summary ---

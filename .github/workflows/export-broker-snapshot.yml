@@ -38,20 +38,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        shell: bash
-        run: |
-          python -m venv .venv
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
       - name: Export read-only broker snapshot
         shell: bash
         run: |
           set -euo pipefail
-          source .venv/bin/activate
           python3 scripts/export_alpaca_broker_snapshot.py --report-date "$REPORT_DATE"
+
+      - name: Rebuild dashboard from refreshed broker artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/refresh_quant_dashboard.py --repo-root . --trade-date "$REPORT_DATE" --output-dir web/dashboard --skip-live-broker
 
       - name: Upload broker snapshot artifact
         uses: actions/upload-artifact@v4
@@ -60,3 +57,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           path: outputs/broker_snapshot/broker_snapshot_${{ env.REPORT_DATE }}.json
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-${{ env.REPORT_DATE }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            web/dashboard/dashboard-data.json
+            web/dashboard/dashboard_data.json
+            web/dashboard/trading_day_summary.json

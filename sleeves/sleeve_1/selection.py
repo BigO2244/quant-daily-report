@@ -57,10 +57,10 @@ GATE_MIN_AVG_VOLUME_DAYS = 20
 GATE_MIN_AVG_VOLUME = 100_000
 
 # Composite score weights (must sum to 1.0)
-W_MOM_12_1    = 0.40   # 12-1 month momentum cross-sectional rank
+W_MOM_12_1    = 0.45   # 12-1 month momentum cross-sectional rank
 W_SECTOR_REL  = 0.25   # Sector-relative momentum rank
-W_ATR_NORM    = 0.20   # ATR-normalized momentum rank (risk-adjusted)
-W_MA_ALIGN    = 0.15   # MA alignment bonus (50d > 200d, price above both)
+W_ATR_NORM    = 0.25   # ATR-normalized momentum rank (risk-adjusted)
+W_MA_ALIGN    = 0.05   # MA alignment is a soft bonus, not a hard gate
 
 # Inverse-vol position sizing caps
 IVOL_FLOOR = 0.05   # 5% annualized vol floor
@@ -163,10 +163,6 @@ def select_and_weight(
     # ── Hard gates ──────────────────────────────────────────────────────────
     eligible = snap.dropna(subset=["mom_12_1"]).copy()
 
-    # Must be in MA uptrend (price > 50d SMA > 200d SMA)
-    if "ma_uptrend" in eligible.columns:
-        eligible = eligible[eligible["ma_uptrend"].fillna(False)]
-
     # Price gate
     if "close" in eligible.columns:
         eligible = eligible[eligible["close"] >= GATE_MIN_PRICE]
@@ -176,7 +172,7 @@ def select_and_weight(
         eligible = eligible[eligible["avg_volume_20d"].fillna(0) >= GATE_MIN_AVG_VOLUME]
 
     if eligible.empty:
-        logger.warning("[S1_SELECT] No stocks pass momentum gate filters on %s", asof_date)
+        logger.warning("[S1_SELECT] No stocks pass momentum liquidity filters on %s", asof_date)
         return pd.DataFrame()
 
     # ── Cross-sectional scoring ─────────────────────────────────────────────

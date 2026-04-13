@@ -1,0 +1,53 @@
+{
+  "benchmark": "SPY",
+  "mode": "shadow_only",
+  "north_star": "Use options as a portfolio overlay, not a primary alpha engine.",
+  "premium_budget_bps": 25.0,
+  "cash_ceiling_without_overlay": 0.18,
+  "min_contract_utilization": 0.75,
+  "activation": {
+    "protective_put": {
+      "composite_regimes": [
+        "high_volatility",
+        "breadth_washout"
+      ],
+      "volatility_states": [
+        "crisis"
+      ],
+      "breadth_states": [
+        "washed_out"
+      ],
+      "macro_states": [
+        "stress"
+      ]
+    },
+    "put_spread": {
+      "composite_regimes": [
+        "risk_off_defensive"
+      ],
+      "volatility_states": [
+        "elevated"
+      ],
+      "breadth_states": [
+        "deteriorating"
+      ],
+      "macro_states": [
+        "risk_off",
+        "stress"
+      ]
+    }
+  },
+  "strategies": {
+    "protective_put": {
+      "hedge_ratio": 1.0,
+      "target_dte": 35,
+      "long_put_moneyness": 0.98
+    },
+    "put_spread": {
+      "hedge_ratio": 0.5,
+      "target_dte": 28,
+      "long_put_moneyness": 0.98,
+      "short_put_moneyness": 0.92
+    }
+  }
+}

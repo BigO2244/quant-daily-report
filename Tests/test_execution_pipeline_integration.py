@@ -374,10 +374,16 @@ def test_confirmation_email_prefers_execution_stage_pointer_over_latest_run(
     assert "Run ID: run-confirm-good" in sent["body_text"]
 
 
-def test_confirmation_email_raises_when_execution_results_missing(tmp_path: Path, monkeypatch) -> None:
+def test_confirmation_email_falls_back_to_broker_snapshot_when_execution_results_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_missing_results")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+    monkeypatch.setenv("EMAIL_TRADING_CONFIRMATION", "1")
+    monkeypatch.delenv("EMAIL_DRY_RUN", raising=False)
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
     run_root = tmp_path / "outputs" / "runs" / "run-missing-results"
     write_trade_stage_pointer(
@@ -390,11 +396,40 @@ def test_confirmation_email_raises_when_execution_results_missing(tmp_path: Path
         workspace_root=str(tmp_path),
     )
 
-    try:
-        mod.main()
-        raise AssertionError("expected RuntimeError")
-    except RuntimeError as exc:
-        assert "Missing execution results artifact" in str(exc)
+    _write_json(
+        tmp_path / "outputs" / "broker_snapshot" / "broker_snapshot_2026-03-09.json",
+        {
+            "counts": {
+                "orders_report_date": 2,
+                "fills_report_date": 2,
+            },
+            "orders_report_date": [
+                {"id": "alpaca-1", "status": "filled"},
+                {"id": "alpaca-2", "status": "filled"},
+            ],
+            "fills_report_date": [
+                {"id": "fill-1", "symbol": "SPY", "side": "buy", "qty": "1"},
+                {"id": "fill-2", "symbol": "QQQ", "side": "buy", "qty": "1"},
+            ],
+        },
+    )
+
+    sent = {}
+
+    def _fake_send_email(*, subject, body_text, body_html=None):
+        sent["subject"] = subject
+        sent["body_text"] = body_text
+        sent["body_html"] = body_html
+
+    monkeypatch.setattr(mod, "send_email", _fake_send_email)
+
+    mod.main()
+
+    assert "Trading Confirmation 2026-03-09" in sent["subject"]
+    assert "Status: EXECUTED" in sent["body_text"]
+    assert "Submitted: 2" in sent["body_text"]
+    assert "Run ID: run-missing-results" in sent["body_text"]
+    assert "broker_snapshot_2026-03-09.json" in sent["body_text"]
 
 
 def test_confirmation_email_rejects_running_execution_pointer(tmp_path: Path, monkeypatch) -> None:
@@ -434,20 +469,51 @@ def test_confirmation_email_rejects_running_execution_pointer(tmp_path: Path, mo
         assert "still running" in str(exc)
 
 
-def test_confirmation_email_raises_on_malformed_execution_pointer(tmp_path: Path, monkeypatch) -> None:
+def test_confirmation_email_falls_back_to_broker_snapshot_on_malformed_execution_pointer(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_malformed_pointer")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-03-09")
+    monkeypatch.setenv("EMAIL_TRADING_CONFIRMATION", "1")
+    monkeypatch.delenv("EMAIL_DRY_RUN", raising=False)
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
     pointer_path = tmp_path / "outputs" / "workflow" / "2026-03-09" / "execution.json"
     pointer_path.parent.mkdir(parents=True, exist_ok=True)
     pointer_path.write_text("{ invalid json }", encoding="utf-8")
 
-    try:
-        mod.main()
-        raise AssertionError("expected RuntimeError")
-    except RuntimeError as exc:
-        assert "Malformed execution workflow pointer" in str(exc)
+    _write_json(
+        tmp_path / "outputs" / "broker_snapshot" / "broker_snapshot_2026-03-09.json",
+        {
+            "counts": {
+                "orders_report_date": 1,
+                "fills_report_date": 1,
+            },
+            "orders_report_date": [
+                {"id": "alpaca-1", "status": "filled"},
+            ],
+            "fills_report_date": [
+                {"id": "fill-1", "symbol": "SPY", "side": "buy", "qty": "1"},
+            ],
+        },
+    )
+
+    sent = {}
+
+    def _fake_send_email(*, subject, body_text, body_html=None):
+        sent["subject"] = subject
+        sent["body_text"] = body_text
+        sent["body_html"] = body_html
+
+    monkeypatch.setattr(mod, "send_email", _fake_send_email)
+
+    mod.main()
+
+    assert "Trading Confirmation 2026-03-09" in sent["subject"]
+    assert "Status: EXECUTED" in sent["body_text"]
+    assert "Submitted: 1" in sent["body_text"]
 
 
 def test_confirmation_email_trade_date_uses_current_et(tmp_path: Path, monkeypatch) -> None:

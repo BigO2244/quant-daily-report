@@ -1,0 +1,10 @@
+[Unit]
+Description=Schedule Caerus dashboard refresh
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=caerus-dashboard-refresh.service
+
+[Install]
+WantedBy=timers.target

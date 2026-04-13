@@ -8,8 +8,12 @@
 // ── Data path resolution ──────────────────────────────────────────────────────
 // Uses window.location (always correct, always available) rather than
 // document.currentScript (null inside async/deferred contexts).
-// dashboard_data.json lives beside the HTML; trading_day_summary.json is at
-// repo root /outputs/ — two directory levels up from web/dashboard/.
+// Both dashboard_data.json and trading_day_summary.json are written beside the
+// HTML so the monitor works whether the static server root is repo root or
+// web/dashboard itself.
+let refreshTimer = null;
+let bootInFlight = false;
+
 function resolveDataPaths() {
   let pageBase;
   try {
@@ -17,9 +21,21 @@ function resolveDataPaths() {
   } catch (_) {
     pageBase = window.location.href.replace(/\/[^/?#]*([?#].*)?$/, '/');
   }
+  let params;
+  try {
+    params = new URL(window.location.href).searchParams;
+  } catch (_) {
+    params = new URLSearchParams(window.location.search || '');
+  }
+  const dataParam = String(params.get('data') || 'dashboard_data.json').trim() || 'dashboard_data.json';
+  const summaryParam = String(params.get('summary') || 'trading_day_summary.json').trim() || 'trading_day_summary.json';
+  const refreshRaw = Number.parseInt(String(params.get('refresh') || '0').trim(), 10);
   return {
-    dashData: pageBase + 'dashboard_data.json',
-    summary:  new URL('../../outputs/trading_day_summary.json', pageBase).href,
+    dashData: new URL(dataParam, pageBase).href,
+    summary:  new URL(summaryParam, pageBase).href,
+    dashLabel: dataParam,
+    summaryLabel: summaryParam,
+    refreshSeconds: Number.isFinite(refreshRaw) && refreshRaw > 0 ? refreshRaw : 0,
   };
 }
 
@@ -27,7 +43,9 @@ function resolveDataPaths() {
 
 async function fetchJSON(url) {
   try {
-    const r = await fetch(url);
+    const target = new URL(url, window.location.href);
+    target.searchParams.set('_ts', String(Date.now()));
+    const r = await fetch(target.href, { cache: 'no-store' });
     if (!r.ok) return null;
     return await r.json();
   } catch {
@@ -64,11 +82,30 @@ function fmtPctRaw(v, { decimals = 2, sign = true } = {}) {
   return (n > 0 && sign ? '+' : n < 0 ? '-' : '') + s;
 }
 
+function fmtNum(v, { decimals = 2, sign = false } = {}) {
+  if (v == null || isNaN(v)) return '—';
+  const n = Number(v);
+  const s = Math.abs(n).toFixed(decimals);
+  return (n > 0 && sign ? '+' : n < 0 ? '-' : '') + s;
+}
+
+function fmtMultiple(v) {
+  if (v == null || isNaN(v)) return '—';
+  return Number(v).toFixed(2) + 'x';
+}
+
 // Returns 'pos' / 'neg' / '' — zero is always neutral (not green).
 function colorClass(v) {
   if (v == null || isNaN(v)) return '';
   const n = Number(v);
   return n > 0 ? 'pos' : n < 0 ? 'neg' : '';
+}
+
+function statusLengthClass(value) {
+  const text = String(value || '').trim();
+  if (text.length >= 20) return 'status-wrap status-very-long';
+  if (text.length >= 12) return 'status-wrap status-long';
+  return '';
 }
 
 function esc(str) {
@@ -172,6 +209,9 @@ function renderHeader(d) {
   const meta = d.run_meta || {};
   const s    = d._summary || {};
   const exec = s.execution_summary || {};
+  const portfolioAsOf = meta.portfolio_asof_date || d.governed_snapshot?.as_of || meta.report_date || '—';
+  const benchmarkAsOf = meta.benchmark_asof_date || '—';
+  const comparisonMode = meta.comparison_mode || '—';
 
   setText('meta-run-id',  meta.run_id
     ? meta.run_id.slice(0, 32) + (meta.run_id.length > 32 ? '…' : '')
@@ -199,6 +239,12 @@ function renderHeader(d) {
     } else {
       banner.classList.add('hidden');
     }
+  }
+
+  if (detail) {
+    const dateLine = `Portfolio as of ${portfolioAsOf} · Benchmark as of ${benchmarkAsOf} · Comparison ${comparisonMode}`;
+    const baseText = detail.textContent || '';
+    detail.textContent = baseText ? `${baseText} · ${dateLine}` : dateLine;
   }
 }
 
@@ -249,14 +295,26 @@ function renderKPIs(d) {
   const risk = d.risk              || {};
   const act  = d.activity          || {};
   const gov  = d.governed_snapshot || {};
+  const bk   = d.broker_snapshot   || {};
   const meta = d.run_meta          || {};
   const s    = d._summary          || {};
   const exec = s.execution_summary || {};
   const port = s.portfolio_state   || {};
+  const liveOverlay = Boolean(meta.live_broker_overlay && bk && bk.trust_level === 'authoritative');
+  const portfolioAsOf = meta.portfolio_asof_date || gov.as_of || meta.report_date || '';
+  const benchmarkAsOf = meta.benchmark_asof_date || '';
+  const comparisonMode = meta.comparison_mode || '';
 
-  // ── Portfolio Value ── governed snapshot is authoritative; kpis is fallback
-  const pv = gov.portfolio_value ?? kpi.portfolio_value;
-  setKPI('kpi-portfolio-value', fmt$(pv), 'governed NAV');
+  // ── Portfolio Value ── use live broker equity during fallback overlays
+  const pv = liveOverlay ? (bk.equity ?? bk.portfolio_value ?? gov.portfolio_value ?? kpi.portfolio_value)
+                         : (gov.portfolio_value ?? kpi.portfolio_value);
+  setKPI(
+    'kpi-portfolio-value',
+    fmt$(pv),
+    liveOverlay
+      ? (portfolioAsOf ? `live broker equity · as of ${portfolioAsOf}` : 'live broker equity')
+      : (portfolioAsOf ? `governed NAV · as of ${portfolioAsOf}` : 'governed NAV')
+  );
 
   // ── Daily P&L ── dollar amount + % return in subtitle
   const pl   = kpi.daily_pl;
@@ -287,7 +345,13 @@ function renderKPIs(d) {
     if (sub) {
       const bench = kpi.benchmark_return;
       sub.textContent = bench != null
-        ? 'SPY ' + fmtPct(bench) + ' today'
+        ? comparisonMode === 'previous_trading_day' && benchmarkAsOf
+          ? 'SPY ' + fmtPct(bench) + ' as of ' + benchmarkAsOf
+          : comparisonMode === 'same_day' && benchmarkAsOf
+          ? 'SPY ' + fmtPct(bench) + ' same day'
+          : 'SPY ' + fmtPct(bench)
+        : comparisonMode === 'portfolio_only'
+        ? 'benchmark unavailable for current date'
         : "today's excess return";
     }
   }
@@ -297,10 +361,11 @@ function renderKPIs(d) {
   if (cashEl) {
     const val = cashEl.querySelector('.kpi-value');
     const sub = cashEl.querySelector('.kpi-sub');
-    const cash = d._cash;
-    const src  = d._cashSrc;
+    const cash = liveOverlay ? bk.cash : d._cash;
+    const src  = liveOverlay ? 'broker' : d._cashSrc;
     if (val) val.textContent = src === 'ratio' ? fmtPct(cash, { sign: false }) : fmt$(cash);
-    if (sub) sub.textContent = src === 'execution' ? 'post-execution'
+    if (sub) sub.textContent = src === 'broker'    ? (portfolioAsOf ? `live broker cash · as of ${portfolioAsOf}` : 'live broker cash')
+                             : src === 'execution' ? 'post-execution'
                              : src === 'governed'  ? 'governed snapshot'
                              : src === 'ratio'     ? 'cash ratio'
                              : 'after execution';
@@ -311,7 +376,9 @@ function renderKPIs(d) {
   if (deployedEl) {
     const val = deployedEl.querySelector('.kpi-value');
     const sub = deployedEl.querySelector('.kpi-sub');
-    const gross = risk.gross_exposure;
+    const gross = liveOverlay && bk.market_value != null && bk.equity
+      ? Number(bk.market_value) / Number(bk.equity)
+      : risk.gross_exposure;
     if (val) val.textContent = gross != null ? fmtPct(gross, { sign: false }) : '—';
     if (sub) {
       const limit = risk.turnover_limit_pct;
@@ -322,7 +389,8 @@ function renderKPIs(d) {
   }
 
   // ── Positions ── portfolio_state is more accurate (reflects actual broker state)
-  const pos = port.positions_count ?? kpi.holdings;
+  const pos = liveOverlay ? (bk.positions_count ?? port.positions_count ?? kpi.holdings)
+                          : (port.positions_count ?? kpi.holdings);
   setKPI('kpi-positions', pos != null ? String(pos) : '—', 'held today');
 
   // ── Trades Executed ── accepted from execution_summary; falls back to activity
@@ -338,7 +406,7 @@ function renderKPIs(d) {
     const status = exec.status || kpi.run_status || meta.mode || '—';
     if (val) {
       val.textContent = status;
-      val.className   = 'kpi-value kpi-value--status ' + statusColor(status);
+      val.className   = 'kpi-value kpi-value--status ' + statusColor(status) + ' ' + statusLengthClass(status);
     }
     if (sub) sub.textContent = 'pipeline health';
   }
@@ -390,6 +458,168 @@ function renderPerfStats(d) {
       <span class="stat-val ${r.cls}">${r.val}</span>
     </div>`
   ).join('');
+}
+
+function renderAttribution(d) {
+  const attr = d.attribution || {};
+  const container = document.getElementById('attribution-stats');
+  if (!container) return;
+
+  setText(
+    'attribution-window',
+    attr.window_start && attr.window_end
+      ? `${attr.window_start} – ${attr.window_end} · ${attr.n_days || 0} return days`
+      : 'insufficient overlap'
+  );
+
+  if (!(attr.n_days > 0)) {
+    container.innerHTML = `<div class="empty-state">${esc(attr.reason || 'No aligned portfolio/SPY history available')}</div>`;
+    return;
+  }
+
+  const rows = [
+    { label: 'Cumulative Alpha', val: fmtPct(attr.cumulative_alpha), cls: colorClass(attr.cumulative_alpha) },
+    { label: 'Beta', val: fmtNum(attr.beta_since), cls: colorClass((attr.beta_since ?? 1) - 1) },
+    { label: 'Alpha (ann.)', val: fmtPct(attr.alpha_ann_since), cls: colorClass(attr.alpha_ann_since) },
+    { label: 'Tracking Error', val: fmtPct(attr.tracking_error_ann, { sign: false }), cls: '' },
+    { label: 'Information Ratio', val: fmtNum(attr.info_ratio), cls: colorClass(attr.info_ratio) },
+    { label: 'Correlation', val: fmtNum(attr.correlation), cls: '' },
+    { label: 'Upside Capture', val: fmtMultiple(attr.upside_capture), cls: colorClass((attr.upside_capture ?? 1) - 1) },
+    { label: 'Downside Capture', val: fmtMultiple(attr.downside_capture), cls: attr.downside_capture != null && attr.downside_capture < 1 ? 'pos' : '' },
+    { label: 'Up-Day Hit Rate', val: fmtPct(attr.up_market_hit_rate, { sign: false }), cls: colorClass((attr.up_market_hit_rate ?? 0.5) - 0.5) },
+    { label: 'Down-Day Protection', val: fmtPct(attr.down_market_hit_rate, { sign: false }), cls: colorClass((attr.down_market_hit_rate ?? 0.5) - 0.5) },
+  ];
+
+  container.innerHTML = rows.map(r =>
+    `<div class="stat-row">
+      <span class="stat-label">${esc(r.label)}</span>
+      <span class="stat-val ${r.cls}">${r.val}</span>
+    </div>`
+  ).join('');
+}
+
+function renderEdgeDiagnostics(d) {
+  const edge = d.edge_diagnostics || {};
+  const container = document.getElementById('edge-list');
+  if (!container) return;
+
+  setText(
+    'edge-source',
+    d.run_meta && d.run_meta.performance_source
+      ? `${String(d.run_meta.performance_source).replace(/_/g, ' ')} diagnostics`
+      : 'diagnostics'
+  );
+
+  const summaryRows = [
+    { label: 'Cash', val: fmtPct(edge.current_cash_ratio, { sign: false }), cls: '' },
+    { label: 'Deployed', val: fmtPct(edge.capital_deployed, { sign: false }), cls: '' },
+    { label: 'Largest Position', val: fmtPct(edge.largest_position_weight, { sign: false }), cls: '' },
+    { label: 'Top 5 Concentration', val: fmtPct(edge.top5_concentration, { sign: false }), cls: '' },
+    { label: 'Filled Turnover', val: fmtPct(edge.executed_turnover_pct, { sign: false }), cls: '' },
+  ].filter(item => item.val !== '—');
+
+  const signals = Array.isArray(edge.signals) ? edge.signals : [];
+  const summaryHtml = summaryRows.length
+    ? `<div class="edge-summary">${summaryRows.map(r => `
+        <div class="stat-row">
+          <span class="stat-label">${esc(r.label)}</span>
+          <span class="stat-val ${r.cls}">${r.val}</span>
+        </div>
+      `).join('')}</div>`
+    : '';
+
+  if (!signals.length) {
+    container.innerHTML = summaryHtml || '<div class="empty-state">No edge diagnostics available</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    ${summaryHtml}
+    <div class="edge-items">
+      ${signals.map(item => {
+        const status = (item.status || 'pass').toLowerCase();
+        return `
+          <div class="edge-item ${status}">
+            <div class="edge-head">
+              <span class="edge-label">${esc(item.label || '')}</span>
+              <span class="edge-badge ${status}">${esc(status.toUpperCase())}</span>
+            </div>
+            <div class="edge-detail">${esc(item.detail || '')}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderContributionSnapshot(d) {
+  const snap = d.contribution_snapshot || {};
+  const container = document.getElementById('contribution-panel');
+  if (!container) return;
+
+  const asof = snap.asof_date || '';
+  const sourceMode = snap.source_mode ? String(snap.source_mode).replace(/_/g, ' ') : '';
+  const age = snap.age_days != null ? ` · ${snap.age_days}d stale` : '';
+  setText('contribution-window', asof ? `${asof}${sourceMode ? ' · ' + sourceMode : ''}${age}` : 'no contribution artifact');
+
+  if (!(snap.ticker_rows > 0)) {
+    container.innerHTML = '<div class="empty-state">No contribution snapshot available</div>';
+    return;
+  }
+
+  const winners = Array.isArray(snap.top_winners) ? snap.top_winners : [];
+  const laggards = Array.isArray(snap.top_laggards) ? snap.top_laggards : [];
+  const sleeves = Array.isArray(snap.top_sleeves) ? snap.top_sleeves : [];
+
+  function contribRows(items, negative) {
+    if (!items.length) return '<div class="empty-state">No rows</div>';
+    return items.map(item => `
+      <div class="contrib-row">
+        <div>
+          <div class="contrib-name">${esc(item.ticker || item.sleeve || '')}</div>
+          <div class="contrib-meta">
+            ${item.weight_start != null ? `Wt ${fmtPct(item.weight_start, { sign: false })}` : ''}
+            ${item.return != null ? ` · Ret ${fmtPct(item.return)}` : ''}
+            ${item.sleeve_return != null ? ` · Ret ${fmtPct(item.sleeve_return)}` : ''}
+          </div>
+        </div>
+        <div class="contrib-val ${negative ? 'neg' : colorClass(item.contribution)}">${fmtPct(item.contribution)}</div>
+      </div>
+    `).join('');
+  }
+
+  container.innerHTML = `
+    <div class="contribution-summary">
+      <div class="contrib-stat">
+        <div class="contrib-stat-label">Net Contribution</div>
+        <div class="contrib-stat-value ${colorClass(snap.net_contribution)}">${fmtPct(snap.net_contribution)}</div>
+      </div>
+      <div class="contrib-stat">
+        <div class="contrib-stat-label">Positive Names</div>
+        <div class="contrib-stat-value">${esc(String(snap.positive_contributors || 0))}</div>
+      </div>
+      <div class="contrib-stat">
+        <div class="contrib-stat-label">Negative Names</div>
+        <div class="contrib-stat-value">${esc(String(snap.negative_contributors || 0))}</div>
+      </div>
+    </div>
+    <div class="contribution-grid">
+      <div class="contrib-col">
+        <div class="contrib-title">Top Winners</div>
+        ${contribRows(winners, false)}
+      </div>
+      <div class="contrib-col">
+        <div class="contrib-title">Top Laggards</div>
+        ${contribRows(laggards, true)}
+      </div>
+    </div>
+    ${sleeves.length ? `
+      <div class="contrib-col">
+        <div class="contrib-title">Sleeve Contribution</div>
+        ${contribRows(sleeves, false)}
+      </div>
+    ` : ''}
+  `;
 }
 
 // ── Canvas Charts ─────────────────────────────────────────────────────────────
@@ -544,10 +774,14 @@ function drawNavChart(d) {
   const dates = Array.from(dateSet).sort();
 
   const windowEl = document.getElementById('nav-chart-window');
+  const meta = d.run_meta || {};
   if (windowEl) {
-    windowEl.textContent = dates.length > 1
+    const windowText = dates.length > 1
       ? `${dates[0]} – ${dates[dates.length - 1]}`
       : (dates[0] || '—');
+    windowEl.textContent = meta.comparison_mode === 'previous_trading_day' && meta.benchmark_asof_date
+      ? `${windowText} · SPY as of ${meta.benchmark_asof_date}`
+      : windowText;
   }
 
   const { ctx, w, h } = setupCanvas(canvas);
@@ -771,7 +1005,8 @@ function renderBrokerStats(d) {
 
   // Broker freshness note — surfaces alignment_detail when non-trivial.
   if (df.alignment_detail) {
-    const isBad = (df.broker_vs_run_alignment || '').toLowerCase() !== 'aligned';
+    const alignState = (df.broker_vs_run_alignment || '').toLowerCase();
+    const isBad = alignState !== 'aligned' && alignState !== 'overlay';
     if (isBad) {
       html += `<div class="broker-alert broker-alert--soft">${esc(df.alignment_detail)}</div>`;
     }
@@ -803,6 +1038,7 @@ function integrityTier(status) {
   const s = String(status || '').toUpperCase();
   if (s === 'UNEXPECTED_SHORT' || s === 'MANUAL_INTERVENTION_REQUIRED') return 'fail';
   if (s === 'DRIFT_DETECTED') return 'warn';
+  if (s === 'OVERLAY_ONLY') return 'ok';
   if (s === 'OK_RECONCILED') return 'ok';
   return '';
 }
@@ -823,6 +1059,8 @@ function renderExecutionIntegrity(d) {
       ? 'Unexpected short position detected. Manual paper repair review required.'
       : reconStatus === 'DRIFT_DETECTED'
         ? 'Post-execution drift detected. Review affected symbols and repair suggestions.'
+        : reconStatus === 'OVERLAY_ONLY'
+          ? 'Live broker overlay active. No same-day governed reconciliation was run for this view.'
         : duplicateGuard !== 'CLEAR'
           ? 'Duplicate-submission protection activated for this run.'
           : 'Execution integrity checks clear.';
@@ -851,6 +1089,7 @@ function renderExecutionIntegrity(d) {
 function alignCls(s) {
   switch ((s || '').toLowerCase()) {
     case 'aligned': return 'pos';
+    case 'overlay': return 'pos';
     case 'stale':
     case 'mismatch': return 'warn';
     default: return '';
@@ -1044,72 +1283,105 @@ function showDiag(entries, bootError) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function boot() {
-  // Resolve paths first — synchronous, never throws in practice.
-  const paths = resolveDataPaths();
-
-  // Fetch both sources in parallel; null on any error or missing file.
-  let dash, summary;
+  if (bootInFlight) return;
+  bootInFlight = true;
   try {
-    [dash, summary] = await Promise.all([
-      fetchJSON(paths.dashData),
-      fetchJSON(paths.summary),
-    ]);
-  } catch (err) {
-    showDiag([], err);
-    const pill = document.getElementById('status-pill');
-    if (pill) { pill.className = 'status-pill degraded'; pill.textContent = 'ERROR'; }
-    setText('status-detail', 'Fetch failed — see diagnostics panel');
-    return;
-  }
+    // Resolve paths first — synchronous, never throws in practice.
+    const paths = resolveDataPaths();
+    const diagEntries = [
+      { ok: true, label: 'dashboard model', path: paths.dashData },
+      { ok: true, label: paths.summaryLabel, path: paths.summary },
+    ];
+    if (paths.refreshSeconds > 0) {
+      diagEntries.push({
+        ok: true,
+        label: 'auto refresh',
+        path: `enabled (${paths.refreshSeconds}s)`,
+      });
+    }
+    // Fetch both sources in parallel; null on any error or missing file.
+    let dash, summary;
+    try {
+      [dash, summary] = await Promise.all([
+        fetchJSON(paths.dashData),
+        fetchJSON(paths.summary),
+      ]);
+    } catch (err) {
+      showDiag(diagEntries, err);
+      const pill = document.getElementById('status-pill');
+      if (pill) { pill.className = 'status-pill degraded'; pill.textContent = 'ERROR'; }
+      setText('status-detail', 'Fetch failed — see diagnostics panel');
+      return;
+    }
 
-  // Always show fetch results so developer can see what loaded.
-  showDiag([
-    { ok: !!dash,    label: 'dashboard_data.json',      path: paths.dashData },
-    { ok: !!summary, label: 'trading_day_summary.json', path: paths.summary },
-  ], null);
-
-  if (!dash && !summary) {
-    const pill = document.getElementById('status-pill');
-    if (pill) { pill.className = 'status-pill degraded'; pill.textContent = 'NO DATA'; }
-    setText('status-detail', 'No data loaded — check diagnostics panel for resolved paths');
-    return;
-  }
-
-  // Render — wrapped so any unexpected exception surfaces in-page rather than
-  // leaving the dashboard silently frozen at "LOADING".
-  try {
-    const d = mergeData(dash, summary);
-
-    renderHeader(d);
-    renderKPIs(d);
-    renderPerfStats(d);
-
-    // Double rAF ensures a full layout pass completes before we read canvas
-    // parent dimensions — single rAF can fire before flex/grid layout settles.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      drawNavChart(d);
-      drawDailyChart(d);
-      drawDrawdownChart(d);
-    }));
-
-    renderExecStats(d);
-    renderOrderFlow(d);
-    renderBrokerStats(d);
-    renderExecutionIntegrity(d);
-    renderTopChanges(d);
-    renderAllocBars(d);
-    renderChecks(d);
-    renderExceptions(d);
-    renderFooter(d);
-  } catch (err) {
-    // Update diag panel with the exception; page is partially rendered.
+    // Always show fetch results so developer can see what loaded.
     showDiag([
-      { ok: !!dash,    label: 'dashboard_data.json',      path: paths.dashData },
-      { ok: !!summary, label: 'trading_day_summary.json', path: paths.summary },
-    ], err);
-    const pill = document.getElementById('status-pill');
-    if (pill) { pill.className = 'status-pill degraded'; pill.textContent = 'ERROR'; }
-    setText('status-detail', 'Render error — see diagnostics panel');
+      { ok: !!dash,    label: paths.dashLabel,            path: paths.dashData },
+      { ok: !!summary, label: paths.summaryLabel, path: paths.summary },
+      ...(paths.refreshSeconds > 0
+        ? [{ ok: true, label: 'auto refresh', path: `enabled (${paths.refreshSeconds}s)` }]
+        : []),
+    ], null);
+
+    if (!dash && !summary) {
+      const pill = document.getElementById('status-pill');
+      if (pill) { pill.className = 'status-pill degraded'; pill.textContent = 'NO DATA'; }
+      setText('status-detail', 'No data loaded — check diagnostics panel for resolved paths');
+      return;
+    }
+
+    // Render — wrapped so any unexpected exception surfaces in-page rather than
+    // leaving the dashboard silently frozen at "LOADING".
+    try {
+      const d = mergeData(dash, summary);
+
+      renderHeader(d);
+      renderKPIs(d);
+      renderPerfStats(d);
+      renderAttribution(d);
+      renderEdgeDiagnostics(d);
+      renderContributionSnapshot(d);
+
+      // Double rAF ensures a full layout pass completes before we read canvas
+      // parent dimensions — single rAF can fire before flex/grid layout settles.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        drawNavChart(d);
+        drawDailyChart(d);
+        drawDrawdownChart(d);
+      }));
+
+      renderExecStats(d);
+      renderOrderFlow(d);
+      renderBrokerStats(d);
+      renderExecutionIntegrity(d);
+      renderTopChanges(d);
+      renderAllocBars(d);
+      renderChecks(d);
+      renderExceptions(d);
+      renderFooter(d);
+    } catch (err) {
+      // Update diag panel with the exception; page is partially rendered.
+      showDiag([
+        { ok: !!dash,    label: paths.dashLabel,            path: paths.dashData },
+        { ok: !!summary, label: paths.summaryLabel, path: paths.summary },
+        ...(paths.refreshSeconds > 0
+          ? [{ ok: true, label: 'auto refresh', path: `enabled (${paths.refreshSeconds}s)` }]
+          : []),
+      ], err);
+      const pill = document.getElementById('status-pill');
+      if (pill) { pill.className = 'status-pill degraded'; pill.textContent = 'ERROR'; }
+      setText('status-detail', 'Render error — see diagnostics panel');
+    }
+  } finally {
+    bootInFlight = false;
+    if (refreshTimer) {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+    const refreshSeconds = resolveDataPaths().refreshSeconds;
+    if (refreshSeconds > 0) {
+      refreshTimer = window.setTimeout(() => { void boot(); }, refreshSeconds * 1000);
+    }
   }
 }
 

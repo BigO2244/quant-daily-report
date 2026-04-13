@@ -58,10 +58,17 @@ echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | 
 # --- Verify precompute bundle exists ---
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
 if [[ ! -f "${BUNDLE_DIR}/contract.json" ]]; then
-    echo "FATAL: precompute bundle not found at ${BUNDLE_DIR}/contract.json" | tee -a "${LOG_FILE}"
-    echo "Phase 1 (cron_precompute.sh) must complete successfully before Phase 2." | tee -a "${LOG_FILE}"
-    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1" | tee -a "${LOG_FILE}"
-    exit 1
+    echo "WARN: precompute bundle not found at ${BUNDLE_DIR}/contract.json" | tee -a "${LOG_FILE}"
+    echo "WARN: attempting self-heal by rebuilding today's precompute bundle before giving up." | tee -a "${LOG_FILE}"
+    if ! REPORT_DATE="${REPORT_DATE}" "${REPO_ROOT}/scripts/cron_precompute.sh" >> "${LOG_FILE}" 2>&1; then
+        echo "ERROR: self-heal precompute rebuild failed" | tee -a "${LOG_FILE}"
+    fi
+    if [[ ! -f "${BUNDLE_DIR}/contract.json" ]]; then
+        echo "FATAL: precompute bundle still missing at ${BUNDLE_DIR}/contract.json" | tee -a "${LOG_FILE}"
+        echo "Phase 1 (cron_precompute.sh) must complete successfully before Phase 2." | tee -a "${LOG_FILE}"
+        echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1" | tee -a "${LOG_FILE}"
+        exit 1
+    fi
 fi
 echo "OK: precompute bundle found at ${BUNDLE_DIR}" | tee -a "${LOG_FILE}"
 

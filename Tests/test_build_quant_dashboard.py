@@ -1,511 +1,880 @@
+from __future__ import annotations
+
 import json
+import subprocess
+import sys
+import tempfile
+import unittest
 from pathlib import Path
-from datetime import datetime, timezone
-
-from scripts.build_quant_dashboard import DashboardBuilder
 
 
-def _write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = REPO_ROOT / "scripts" / "research" / "build_quant_dashboard.py"
 
 
-def test_builder_marks_early_preflight_halt_without_execution_fail(tmp_path):
-    run_id = "run-abc123"
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": run_id,
-            "mode": "paper",
-        },
-    )
-    _write_json(
-        tmp_path / "outputs/paper_state/canonical_positions.json",
-        {
-            "positions": {"AAPL": 1.0},
-            "position_count": 1,
-            "reason": "bootstrap_from_broker",
-        },
-    )
-    _write_json(
-        tmp_path / f"outputs/runs/{run_id}/logs/preflight_failure.json",
-        {
-            "halt_stage": "pretrade_reconciliation",
-            "halt_reason": "pretrade_reconcile_failed:stale_state",
-            "block_reason": "stale_state",
-            "timestamp_utc": "2026-03-10T14:35:00Z",
-            "recommended_action": "Bootstrap canonical snapshot from broker and retry.",
-        },
-    )
+class BuildQuantDashboardTest(unittest.TestCase):
+    def test_build_quant_dashboard_writes_broker_authoritative_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-04-08T072000-0400_test"
+            run_root.mkdir(parents=True)
+            broker_dir = run_root / "broker"
+            broker_dir.mkdir(parents=True)
 
-    model = DashboardBuilder(repo_root=tmp_path).build()
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-123",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-04-08",
+                        "workflow_stage": "execution",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
-    run_meta = model["run_meta"]
-    assert run_meta["overall_status"] == "WARNING"
+            (run_root / "operator_summary.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-123",
+                        "trade_date": "2026-04-08",
+                        "pretrade_status": "READY",
+                        "post_execution_recon_status": "PASS",
+                        "broker_authoritative_state": True,
+                        "broker_pretrade_snapshot_ok": True,
+                        "broker_posttrade_snapshot_ok": True,
+                        "broker_preflight_cash": 1000.5,
+                        "broker_preflight_equity": 5000.0,
+                        "broker_preflight_buying_power": 7500.0,
+                        "broker_preflight_warning_flags": ["pdt_watch"],
+                        "repair_suggestions": ["none"],
+                        "affected_symbols": ["AAPL", "MSFT"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
-    exceptions = model["exceptions"]
-    preflight = next((e for e in exceptions if e.get("category") == "Preflight"), None)
-    execution = next((e for e in exceptions if e.get("category") == "Execution"), None)
-    reconciliation = next((e for e in exceptions if e.get("category") == "Reconciliation"), None)
-    assert preflight is not None
-    assert preflight["status"] == "fail"
-    assert execution is not None
-    assert execution["status"] == "warning"
-    assert "did not start" in execution["message"].lower()
-    assert reconciliation is not None
-    assert reconciliation["status"] == "warning"
+            (broker_dir / "pretrade_account_snapshot.json").write_text(
+                json.dumps({"cash": "1000.50", "equity": "5000.00", "buying_power": "7500.00"}) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "pretrade_positions.json").write_text(
+                json.dumps([{"symbol": "AAPL"}, {"symbol": "MSFT"}]) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "posttrade_account_snapshot.json").write_text(
+                json.dumps({"cash": "900.25", "equity": "5100.00"}) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "posttrade_positions.json").write_text(
+                json.dumps([{"symbol": "AAPL"}, {"symbol": "MSFT"}, {"symbol": "NVDA"}]) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "recon_posttrade.json").write_text(
+                json.dumps({"verdict": "PASS", "repair_suggestions": ["none"], "affected_symbols": ["NVDA"]}) + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard-data.json").read_text(encoding="utf-8"))
+            dashboard_js = (tmp_path / "web" / "dashboard" / "dashboard-data.js").read_text(encoding="utf-8")
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            copied_summary = json.loads((tmp_path / "web" / "dashboard" / "trading_day_summary.json").read_text(encoding="utf-8"))
+
+            self.assertTrue(payload["broker"]["authoritativeState"])
+            self.assertEqual(payload["broker"]["trustLevel"], "HIGH")
+            self.assertEqual(payload["broker"]["pretrade"]["positionsCount"], 2)
+            self.assertEqual(payload["broker"]["posttrade"]["positionsCount"], 3)
+            self.assertEqual(payload["broker"]["delta"]["positionsCount"], 1)
+            self.assertEqual(payload["broker"]["delta"]["cash"], -100.25)
+            self.assertEqual(
+                payload["broker"]["authoritativeMessage"],
+                "Today's run used broker-authoritative state.",
+            )
+            self.assertTrue(dashboard_js.startswith("window.DASHBOARD_DATA = "))
+            self.assertEqual(legacy_payload["broker_snapshot"]["equity"], 5100.0)
+            self.assertEqual(legacy_payload["kpis"]["holdings"], 3)
+            self.assertEqual(copied_summary["trade_date"], "2026-04-08")
+
+    def test_fallback_banner_uses_governed_date_when_latest_run_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-04-08T072000-0400_failed"
+            run_root.mkdir(parents=True)
+            (tmp_path / "outputs").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "perf").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker").mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-04-08",
+                        "mode": "alpaca",
+                        "status": "failed_unknown",
+                        "created_at": "2026-04-08T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "path": str(run_root),
+                        "report_date": "2026-04-08",
+                        "mode": "alpaca",
+                        "created_at": "2026-04-08T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            (tmp_path / "outputs" / "perf" / "nav_timeseries.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-04-07,10050,2050,0.796,0.796,0.004,500,0.05,0.05\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "perf" / "benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-04-07,505.0,0.001\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "captured_at": "2026-04-08T14:00:00Z",
+                        "account": {"cash": "2100", "equity": "10100", "buying_power": "20200", "last_equity": "10000"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_positions.json").write_text(
+                json.dumps({"positions_count": 4, "positions": [{"symbol": "AAPL"}]}) + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "recon_posttrade_2026-04-08.json").write_text(
+                json.dumps({"drift_status": "PASS"}) + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            self.assertEqual(legacy_payload["run_meta"]["report_date"], "2026-04-07")
+            self.assertEqual(legacy_payload["run_meta"]["run_id"], "governed-fallback-2026-04-07")
+            self.assertEqual(legacy_payload["run_meta"]["selected_governed_run"]["report_date"], "2026-04-07")
+            self.assertIn("Showing governed dashboard state from 2026-04-07.", legacy_payload["run_meta"]["status_banner"])
+            self.assertIn("newer broker snapshot is available", legacy_payload["run_meta"]["status_banner"])
+            self.assertNotIn("incomplete or failed", legacy_payload["run_meta"]["status_banner"])
+
+    def test_live_broker_overlay_prefers_same_day_broker_activity_and_ignores_stale_recon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-04-08T072000-0400_failed"
+            run_root.mkdir(parents=True)
+            (tmp_path / "outputs" / "perf").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker_snapshot").mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-04-08",
+                        "mode": "alpaca",
+                        "status": "failed_unknown",
+                        "created_at": "2026-04-08T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "path": str(run_root),
+                        "report_date": "2026-04-08",
+                        "mode": "alpaca",
+                        "created_at": "2026-04-08T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            (tmp_path / "outputs" / "perf" / "nav_timeseries.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-04-07,10050,2050,0.796,0.796,0.004,500,0.05,0.05\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "perf" / "benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-04-07,505.0,0.001\n",
+                encoding="utf-8",
+            )
+
+            (tmp_path / "outputs" / "broker" / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "captured_at": "2026-04-08T14:00:00Z",
+                        "account": {"cash": "2100", "equity": "10100", "buying_power": "20200", "last_equity": "10000"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_positions.json").write_text(
+                json.dumps({"positions_count": 4, "positions": [{"symbol": "MSFT"}, {"symbol": "NVDA"}]}) + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "intended_orders_2026-03-31.json").write_text(
+                json.dumps(
+                    {
+                        "report_date": "2026-03-31",
+                        "run_id": "stale-plan",
+                        "orders_intended": [{"ticker": "AAPL", "side": "BUY", "notional": 1000}],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "recon_posttrade_2026-03-31.json").write_text(
+                json.dumps({"trade_date": "2026-03-31", "drift_status": "DRIFT_DETECTED"}) + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker_snapshot" / "broker_snapshot_2026-04-08.json").write_text(
+                json.dumps(
+                    {
+                        "meta": {"report_date": "2026-04-08"},
+                        "orders_report_date": [
+                            {"symbol": "MSFT", "side": "buy", "status": "filled", "filled_avg_price": "300", "filled_qty": "5"},
+                            {"symbol": "NVDA", "side": "sell", "status": "filled", "filled_avg_price": "900", "filled_qty": "1"},
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            self.assertTrue(legacy_payload["run_meta"]["live_broker_overlay"])
+            self.assertIn("Live broker overlay active for 2026-04-08.", legacy_payload["run_meta"]["status_banner"])
+            self.assertEqual(legacy_payload["data_freshness"]["broker_vs_run_alignment"], "overlay")
+            self.assertEqual(legacy_payload["activity"]["activity_source"], "broker_snapshot_current")
+            self.assertEqual(legacy_payload["activity"]["orders_filled"], 2)
+            self.assertEqual(legacy_payload["activity"]["source_report_date"], "2026-04-08")
+            self.assertEqual(legacy_payload["execution_integrity"]["post_execution_recon_status"], "OVERLAY_ONLY")
+            self.assertEqual(legacy_payload["kpis"]["portfolio_value"], 10100.0)
+            self.assertEqual(legacy_payload["kpis"]["daily_pl"], 100.0)
+            self.assertAlmostEqual(legacy_payload["kpis"]["daily_return"], 0.01)
+            self.assertAlmostEqual(legacy_payload["kpis"]["benchmark_return"], 0.001)
+            self.assertAlmostEqual(legacy_payload["kpis"]["excess_return"], 0.009)
+            self.assertEqual(legacy_payload["run_meta"]["comparison_mode"], "previous_trading_day")
+            self.assertEqual(legacy_payload["run_meta"]["benchmark_asof_date"], "2026-04-07")
+            self.assertEqual(legacy_payload["top_changes"][0]["ticker"], "MSFT")
+            self.assertFalse(
+                any(item["category"] == "Reconciliation" for item in legacy_payload["exceptions"])
+            )
+
+    def test_historical_failed_run_is_downgraded_when_live_overlay_is_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-03-26T151337-0400_failed"
+            run_root.mkdir(parents=True)
+            (tmp_path / "outputs" / "perf").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker").mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "status": "failed_unknown",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "path": str(run_root),
+                        "report_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "perf" / "nav_timeseries.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-02-27,9999.55,3148.25,0.68,0.68,0.0,0,0.0,0.0\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "perf" / "benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-02-27,505.0,0.001\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "captured_at": "2026-04-08T14:00:00Z",
+                        "account": {"cash": "2100", "equity": "10100", "buying_power": "20200", "last_equity": "10000"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_positions.json").write_text(
+                json.dumps({"positions_count": 4, "positions": [{"symbol": "MSFT"}, {"symbol": "NVDA"}]}) + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            execution_exception = next(item for item in legacy_payload["exceptions"] if item["category"] == "Execution")
+            self.assertEqual("warning", execution_exception["status"])
+            self.assertIn("Historical latest attempted run status", execution_exception["message"])
+            artifact_exception = next(item for item in legacy_payload["exceptions"] if item["category"] == "Data / artifacts")
+            self.assertEqual("warning", artifact_exception["status"])
+            self.assertIn("Missing historical run artifacts", artifact_exception["message"])
+            self.assertNotIn("critical", artifact_exception["message"].lower())
+            run_check = next(item for item in legacy_payload["operating_checks"] if item["label"] == "Run completed")
+            self.assertEqual("warning", run_check["status"])
+
+    def test_plan_only_latest_run_with_missing_execution_results_still_uses_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-04-10T150856-0400_35b3591"
+            broker_dir = run_root / "broker"
+            broker_dir.mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker_snapshot").mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "2026-04-10T150856-0400_35b3591",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-04-09",
+                        "mode": "alpaca",
+                        "status": "no_action",
+                        "created_at": "2026-04-10T19:08:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "2026-04-10T150856-0400_35b3591",
+                        "path": str(run_root),
+                        "report_date": "2026-04-09",
+                        "mode": "alpaca",
+                        "created_at": "2026-04-10T19:08:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (run_root / "operator_summary.json").write_text(
+                json.dumps({"run_id": "2026-04-10T150856-0400_35b3591", "mode": "PAPER", "trade_date": "2026-04-09"}) + "\n",
+                encoding="utf-8",
+            )
+            (run_root / "execution_payload.json").write_text(
+                json.dumps({"run_id": "2026-04-10T150856-0400_35b3591", "status": "READY", "trades": []}) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "pretrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-10",
+                        "captured_at": "2026-04-10T19:08:57Z",
+                        "account": {"cash": "1471.25", "equity": "9602.73", "buying_power": "10517.98", "last_equity": "9600"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "pretrade_positions.json").write_text(
+                json.dumps({"positions_count": 16, "positions": [{"symbol": "MSFT"}, {"symbol": "NVDA"}]}) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-10",
+                        "captured_at": "2026-04-10T19:08:57Z",
+                        "account": {"cash": "1471.25", "equity": "9602.73", "buying_power": "10517.98", "last_equity": "9600"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "posttrade_positions.json").write_text(
+                json.dumps({"positions_count": 16, "positions": [{"symbol": "MSFT"}, {"symbol": "NVDA"}]}) + "\n",
+                encoding="utf-8",
+            )
+            (run_root / "reports").mkdir(parents=True, exist_ok=True)
+            (run_root / "reports" / "quant_report_2099-01-01.html").write_text("<html>ok</html>\n", encoding="utf-8")
+            (tmp_path / "outputs" / "broker_snapshot" / "broker_snapshot_2026-04-10.json").write_text(
+                json.dumps(
+                    {
+                        "meta": {"report_date": "2026-04-10"},
+                        "orders_report_date": [{"symbol": "MSFT", "side": "buy", "status": "filled", "filled_avg_price": "300", "filled_qty": "5"}],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            self.assertTrue(legacy_payload["run_meta"]["live_broker_overlay"])
+            self.assertEqual(legacy_payload["data_freshness"]["broker_vs_run_alignment"], "overlay")
+            self.assertIn("plan-only/no_action smoke run", legacy_payload["run_meta"]["status_banner"])
+            self.assertNotIn("2099-01-01", legacy_payload["run_meta"]["status_banner"])
+            artifact_exception = next(item for item in legacy_payload["exceptions"] if item["category"] == "Data / artifacts")
+            self.assertIn("Missing historical run artifacts", artifact_exception["message"])
+            self.assertIn("expected for plan-only/no_action runs", artifact_exception["message"])
+            self.assertEqual("warning", artifact_exception["status"])
+
+    def test_live_overlay_performance_series_drives_perf_summary_and_same_day_benchmark(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-03-26T151337-0400_failed"
+            run_root.mkdir(parents=True)
+            perf_dir = tmp_path / "outputs" / "perf"
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker").mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "status": "failed_unknown",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "path": str(run_root),
+                        "report_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "nav_timeseries.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-02-27,9999.55,3148.25,0.68,0.68,0.0,0,0.0,0.0\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-02-27,505.0,0.001\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "live_overlay_nav_series.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2025-12-10,0,,,,,,,\n"
+                "2026-04-07,9600,,,,,,,\n"
+                "2026-04-08,9720,1580.45,,,,,,\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "live_overlay_benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-04-07,500,\n"
+                "2026-04-08,505,0.01\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "captured_at": "2026-04-08T14:00:00Z",
+                        "account": {"cash": "1580.45", "equity": "9720", "buying_power": "19440", "last_equity": "9600"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_positions.json").write_text(
+                json.dumps({"positions_count": 16, "positions": [{"symbol": "MSFT"}, {"symbol": "NVDA"}]}) + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            self.assertEqual(legacy_payload["run_meta"]["performance_source"], "live_overlay")
+            self.assertEqual(legacy_payload["run_meta"]["portfolio_asof_date"], "2026-04-08")
+            self.assertEqual(legacy_payload["run_meta"]["benchmark_asof_date"], "2026-04-08")
+            self.assertEqual(legacy_payload["run_meta"]["comparison_mode"], "same_day")
+            self.assertAlmostEqual(legacy_payload["perf_summary"]["mtd_return"], 0.0125)
+            self.assertAlmostEqual(legacy_payload["perf_summary"]["qtd_return"], 0.0125)
+            self.assertAlmostEqual(legacy_payload["perf_summary"]["since_inception_return"], 0.0125)
+            self.assertAlmostEqual(legacy_payload["perf_summary"]["since_inception_alpha"], 0.0025)
+            self.assertAlmostEqual(legacy_payload["perf_summary"]["best_day"], 0.0125)
+            self.assertAlmostEqual(legacy_payload["perf_summary"]["worst_day"], 0.0125)
+            self.assertAlmostEqual(legacy_payload["kpis"]["benchmark_return"], 0.01)
+            self.assertAlmostEqual(legacy_payload["kpis"]["excess_return"], 0.0025)
+            self.assertEqual(legacy_payload["series"]["nav"][-1]["date"], "2026-04-08")
+
+    def test_one_row_live_overlay_series_yields_null_perf_stats_instead_of_zeroes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-03-26T151337-0400_failed"
+            run_root.mkdir(parents=True)
+            perf_dir = tmp_path / "outputs" / "perf"
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            (tmp_path / "outputs" / "broker").mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "status": "failed_unknown",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "path": str(run_root),
+                        "report_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "nav_timeseries.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-02-27,9999.55,3148.25,0.68,0.68,0.0,0,0.0,0.0\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-02-27,505.0,0.001\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "live_overlay_nav_series.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-04-08,9720,1580.45,,,,,,\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "live_overlay_benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-04-07,500,\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "captured_at": "2026-04-08T14:00:00Z",
+                        "account": {"cash": "1580.45", "equity": "9720", "buying_power": "19440", "last_equity": "9600"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "broker" / "posttrade_positions.json").write_text(
+                json.dumps({"positions_count": 16, "positions": [{"symbol": "MSFT"}]}) + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            self.assertEqual(legacy_payload["run_meta"]["performance_source"], "live_overlay")
+            self.assertIsNone(legacy_payload["perf_summary"]["mtd_return"])
+            self.assertIsNone(legacy_payload["perf_summary"]["qtd_return"])
+            self.assertIsNone(legacy_payload["perf_summary"]["since_inception_return"])
+            self.assertIsNone(legacy_payload["perf_summary"]["since_inception_alpha"])
+            self.assertIsNone(legacy_payload["perf_summary"]["current_drawdown"])
+            self.assertIsNone(legacy_payload["perf_summary"]["best_day"])
+            self.assertIsNone(legacy_payload["perf_summary"]["worst_day"])
+
+    def test_attribution_and_edge_diagnostics_are_included_in_overlay_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            run_root = tmp_path / "outputs" / "runs" / "2026-03-26T151337-0400_failed"
+            run_root.mkdir(parents=True)
+            perf_dir = tmp_path / "outputs" / "perf"
+            broker_dir = tmp_path / "outputs" / "broker"
+            broker_snapshot_dir = tmp_path / "outputs" / "broker_snapshot"
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            broker_dir.mkdir(parents=True, exist_ok=True)
+            broker_snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+            (tmp_path / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "run_root": str(run_root),
+                        "trade_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "status": "failed_unknown",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "failed-run",
+                        "path": str(run_root),
+                        "report_date": "2026-03-18",
+                        "mode": "alpaca",
+                        "created_at": "2026-03-26T13:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "nav_timeseries.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-04-07,100.0,20.0,0.8,0.8,0.0,0,0.0,0.0\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-04-07,100.0,\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "live_overlay_nav_series.csv").write_text(
+                "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
+                "2026-04-06,100.0,,,,,,,\n"
+                "2026-04-07,101.0,10.0,,,,,,\n"
+                "2026-04-08,103.02,10.3,,,,,,\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "live_overlay_benchmark_close_history.csv").write_text(
+                "date,spy_close,spy_return\n"
+                "2026-04-06,100.0,\n"
+                "2026-04-07,101.0,0.01\n"
+                "2026-04-08,102.515,0.015\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "contribution_tickers_2026-04-07.csv").write_text(
+                "ticker,weight_start,return,contribution,sleeve\n"
+                "AAA,0.20,-0.01,-0.002,core\n"
+                "BBB,0.15,0.03,0.0045,core\n"
+                "CCC,0.10,0.02,0.0020,defensive\n",
+                encoding="utf-8",
+            )
+            (perf_dir / "contribution_sleeves_2026-04-07.csv").write_text(
+                "sleeve,weight_start,sleeve_return,contribution\n"
+                "core,0.35,0.00714,0.0025\n"
+                "defensive,0.10,0.02,0.0020\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "posttrade_account_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "captured_at": "2026-04-08T14:00:00Z",
+                        "account": {"cash": "10.3", "equity": "103.02", "buying_power": "206.04", "last_equity": "101.0"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "posttrade_positions.json").write_text(
+                json.dumps(
+                    {
+                        "positions_count": 3,
+                        "positions": [
+                            {"symbol": "AAA", "market_value": "30.0"},
+                            {"symbol": "BBB", "market_value": "25.0"},
+                            {"symbol": "CCC", "market_value": "20.0"},
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (broker_snapshot_dir / "broker_snapshot_2026-04-08.json").write_text(
+                json.dumps(
+                    {
+                        "meta": {"report_date": "2026-04-08"},
+                        "positions_current": [
+                            {"symbol": "AAA", "market_value": "30.0", "unrealized_plpc": "0.01"},
+                            {"symbol": "BBB", "market_value": "25.0", "unrealized_plpc": "0.02"},
+                            {"symbol": "CCC", "market_value": "20.0", "unrealized_plpc": "-0.01"},
+                        ],
+                        "orders_report_date": [
+                            {"symbol": "AAA", "side": "buy", "status": "filled", "filled_avg_price": "10", "filled_qty": "1"},
+                            {"symbol": "BBB", "side": "sell", "status": "filled", "filled_avg_price": "20", "filled_qty": "1"},
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo-root",
+                    str(tmp_path),
+                    "--output-dir",
+                    "web/dashboard",
+                ],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
+            self.assertEqual(legacy_payload["run_meta"]["performance_source"], "live_overlay")
+            self.assertEqual(legacy_payload["attribution"]["n_days"], 2)
+            self.assertAlmostEqual(legacy_payload["attribution"]["cumulative_alpha"], 0.00505, places=6)
+            self.assertAlmostEqual(legacy_payload["attribution"]["upside_capture"], 1.2)
+            self.assertEqual(legacy_payload["contribution_snapshot"]["asof_date"], "2026-04-07")
+            self.assertEqual(legacy_payload["contribution_snapshot"]["top_winners"][0]["ticker"], "BBB")
+            self.assertAlmostEqual(legacy_payload["edge_diagnostics"]["current_cash_ratio"], 0.0999805862948942)
+            self.assertAlmostEqual(legacy_payload["edge_diagnostics"]["largest_position_weight"], 30.0 / 103.02)
+            self.assertTrue(legacy_payload["edge_diagnostics"]["signals"])
 
 
-def test_builder_infers_early_halt_when_run_folder_is_meta_only(tmp_path):
-    run_id = "run-inferred"
-    run_root = tmp_path / f"outputs/runs/{run_id}"
-    run_root.mkdir(parents=True, exist_ok=True)
-    (run_root / "meta.json").write_text("{}\n", encoding="utf-8")
-    (run_root / "manifest.json").write_text("{}\n", encoding="utf-8")
-    (run_root / "checksums.sha256").write_text("\n", encoding="utf-8")
-
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": run_id,
-            "mode": "alpaca",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-
-    run_meta = model["run_meta"]
-    assert run_meta["overall_status"] == "WARNING"
-    assert "inferred" in run_meta["status_banner"].lower()
-
-    exceptions = model["exceptions"]
-    preflight = next((e for e in exceptions if e.get("category") == "Preflight"), None)
-    execution = next((e for e in exceptions if e.get("category") == "Execution"), None)
-    reconciliation = next((e for e in exceptions if e.get("category") == "Reconciliation"), None)
-    assert preflight is not None and preflight["status"] == "warning"
-    assert execution is not None and execution["status"] == "warning"
-    assert reconciliation is not None and reconciliation["status"] == "warning"
-
-
-def test_builder_falls_back_to_legacy_canonical_snapshot_path(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-legacy",
-            "mode": "paper",
-        },
-    )
-    _write_json(
-        tmp_path / "canonical-model-snapshot/canonical_positions.json",
-        {
-            "positions": {"MSFT": 2.0},
-            "position_count": 1,
-            "reason": "legacy_snapshot",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-
-    checks = model["operating_checks"]
-    canonical_check = next((c for c in checks if c.get("label") == "Canonical positions present"), None)
-    assert canonical_check is not None
-    assert canonical_check["status"] == "pass"
-    assert canonical_check["detail"] == "canonical-model-snapshot/canonical_positions.json"
-
-
-def test_builder_prefers_broker_snapshot_artifact(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-broker-artifact",
-            "mode": "alpaca",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-    _write_json(
-        tmp_path / "outputs/broker/broker_snapshot_latest.json",
-        {
-            "portfolio_value": 101000.25,
-            "equity": 101000.25,
-            "cash": 20000.0,
-            "buying_power": 60000.0,
-            "as_of": "2026-03-10T15:55:00Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-
-    broker = model["broker_snapshot"]
-    assert broker["source"] == "artifact:outputs/broker/broker_snapshot_latest.json"
-    assert broker["portfolio_value"] == 101000.25
-    assert model["data_freshness"]["broker_vs_run_alignment"] == "aligned"
-
-
-def test_builder_derives_and_persists_broker_snapshot(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-broker-derived",
-            "mode": "alpaca",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-    _write_json(
-        tmp_path / "outputs/paper_state/canonical_positions.json",
-        {
-            "positions": {"AAPL": 2.0},
-            "position_count": 1,
-            "cash": 12000.0,
-            "equity": 98000.0,
-            "as_of": "2026-03-10T16:00:00Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-
-    broker = model["broker_snapshot"]
-    assert str(broker["source"]).startswith("derived:")
-    persisted = tmp_path / "outputs/broker/broker_snapshot_latest.json"
-    assert persisted.exists()
-
-
-def test_builder_gracefully_handles_missing_broker_snapshot(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-missing-broker",
-            "mode": "shadow",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    broker = model["broker_snapshot"]
-    assert broker["status"] == "missing"
-    assert model["data_freshness"]["broker_vs_run_alignment"] == "missing"
-
-
-def test_builder_flags_broker_run_mismatch_as_warning(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-mismatch",
-            "mode": "alpaca",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-    _write_json(
-        tmp_path / "outputs/broker/broker_snapshot_latest.json",
-        {
-            "portfolio_value": 100500.0,
-            "equity": 100500.0,
-            "cash": 15000.0,
-            "buying_power": 55000.0,
-            "as_of": "2026-03-11T09:30:00Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    assert model["data_freshness"]["broker_vs_run_alignment"] == "mismatch"
-    exceptions = model["exceptions"]
-    broker_exception = next((e for e in exceptions if e.get("category") == "Broker snapshot"), None)
-    assert broker_exception is not None
-    assert broker_exception["status"] == "warning"
-
-
-def test_builder_includes_broker_snapshot_and_freshness_fields(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-fields",
-            "mode": "paper",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    assert "governed_snapshot" in model
-    assert "broker_snapshot" in model
-    assert "data_freshness" in model
-    assert "broker_vs_run_alignment" in model["data_freshness"]
-
-
-def test_builder_broker_artifact_sets_authoritative_trust(tmp_path):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-authoritative",
-            "mode": "alpaca",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-    _write_json(
-        tmp_path / "outputs/broker/broker_snapshot_latest.json",
-        {
-            "portfolio_value": 10000.0,
-            "equity": 10000.0,
-            "cash": 2500.0,
-            "buying_power": 5000.0,
-            "as_of": "2026-03-10T15:59:00Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    broker = model["broker_snapshot"]
-    assert broker["trust_level"] == "authoritative"
-    assert broker["suspicious"] is False
-
-
-def test_builder_flags_suspicious_derived_broker_ratio(tmp_path):
-    # Governed run value near 10k.
-    perf = tmp_path / "outputs/alpha_assessment/canonical_performance.csv"
-    perf.parent.mkdir(parents=True, exist_ok=True)
-    perf.write_text(
-        "date,strategy_nav,strategy_return\n"
-        "2026-03-10,9999.55,0.0\n",
-        encoding="utf-8",
-    )
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-suspicious-derived",
-            "mode": "alpaca",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-    _write_json(
-        tmp_path / "outputs/paper_state/canonical_positions.json",
-        {
-            "positions": {"AAPL": 2.0},
-            "position_count": 1,
-            "cash": 91911.93,
-            "equity": 99853.01,
-            "timestamp_utc": "2026-03-03T16:14:07Z",
-        },
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    broker = model["broker_snapshot"]
-    freshness = model["data_freshness"]
-
-    assert broker["trust_level"] == "derived"
-    assert broker["suspicious"] is True
-    assert broker["display_equity"] is None
-    assert freshness["suspicious_broker_value"] is True
-
-    broker_exception = next((e for e in model["exceptions"] if e.get("category") == "Broker snapshot"), None)
-    assert broker_exception is not None
-    assert broker_exception["status"] == "warning"
-    assert "Suspicious" in broker_exception["message"]
-
-
-def test_builder_prefers_live_fetch_over_fallback_derivation(tmp_path, monkeypatch):
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-10",
-            "run_id": "run-live-priority",
-            "mode": "alpaca",
-            "created_at": "2026-03-10T16:00:00Z",
-        },
-    )
-
-    monkeypatch.setattr(DashboardBuilder, "_artifact_broker_snapshot", lambda self, run_id, report_date: (None, "missing"))
-    monkeypatch.setattr(
-        DashboardBuilder,
-        "_maybe_live_broker_snapshot",
-        lambda self, report_date: (
-            {
-                "portfolio_value": 10010.0,
-                "equity": 10010.0,
-                "cash": 2500.0,
-                "buying_power": 5000.0,
-                "market_value": 7510.0,
-                "as_of": datetime.now(timezone.utc).isoformat(),
-                "source": "live:alpaca_account",
-                "source_detail": "live Alpaca account fetch",
-                "trust_level": "authoritative",
-                "status": "fresh",
-                "suspicious": False,
-                "confidence_note": "",
-                "display_equity": 10010.0,
-            },
-            "live_fetch",
-        ),
-    )
-    monkeypatch.setattr(
-        DashboardBuilder,
-        "_derived_broker_snapshot",
-        lambda self, execution_payload, nav_df, canonical_positions, report_date: (
-            {
-                "portfolio_value": 50000.0,
-                "equity": 50000.0,
-                "cash": 10000.0,
-                "buying_power": None,
-                "market_value": 40000.0,
-                "as_of": "2026-03-10T10:00:00Z",
-                "source": "derived:nav_timeseries",
-                "source_detail": "derived",
-                "trust_level": "derived",
-                "status": "fresh",
-                "suspicious": False,
-                "confidence_note": "",
-                "display_equity": 50000.0,
-            },
-            "derived_nav_timeseries",
-        ),
-    )
-
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    broker = model["broker_snapshot"]
-    assert broker["source"] == "live:alpaca_account"
-    assert broker["trust_level"] == "authoritative"
-
-
-def test_run_selection_prefers_latest_successful_over_halted(tmp_path):
-    """Test that dashboard selects latest successful run over newer halted run."""
-    # Create a successful run
-    successful_run_id = "2026-03-02T101004-0500_successful"
-    _write_json(
-        tmp_path / f"outputs/runs/{successful_run_id}/meta.json",
-        {
-            "report_date": "2026-03-02",
-            "run_id": successful_run_id,
-            "mode": "paper",
-            "created_at": "2026-03-02T15:10:04Z",
-        },
-    )
-    _write_json(
-        tmp_path / f"outputs/runs/{successful_run_id}/snapshots/health_2026-03-02.json",
-        {"status": "healthy"},
-    )
-    _write_json(
-        tmp_path / f"outputs/runs/{successful_run_id}/snapshots/integrity_2026-03-02.json",
-        {"status": "pass"},
-    )
-    
-    # Create a newer halted/sparse run
-    halted_run_id = "2026-03-04T120447-0500_halted"
-    _write_json(
-        tmp_path / f"outputs/runs/{halted_run_id}/meta.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": halted_run_id,
-            "mode": "paper",
-            "created_at": "2026-03-04T17:04:47Z",
-        },
-    )
-    _write_json(tmp_path / f"outputs/runs/{halted_run_id}/manifest.json", {})
-    
-    # Latest.json points to the newer halted run
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": halted_run_id,
-            "mode": "paper",
-            "created_at": "2026-03-04T17:04:47Z",
-        },
-    )
-    
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    
-    # Should select the successful run, not the halted one
-    selected_run_meta = model["run_meta"]["selected_governed_run"]
-    assert selected_run_meta["run_id"] == successful_run_id
-    # Updated assertion for new selection logic that identifies mode
-    assert "viable" in selected_run_meta["selection_reason"].lower()
-    
-    # Latest attempted should still be recorded
-    latest_attempted_meta = model["run_meta"]["latest_attempted_run"]
-    assert latest_attempted_meta["run_id"] == halted_run_id
-
-
-def test_run_selection_metadata_included(tmp_path):
-    """Test that run selection metadata is included in output."""
-    run_id = "2026-03-04T120447-0500_test"
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": run_id,
-            "mode": "paper",
-            "created_at": "2026-03-04T17:04:47Z",
-        },
-    )
-    _write_json(
-        tmp_path / f"outputs/runs/{run_id}/meta.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": run_id,
-            "mode": "paper",
-        },
-    )
-    _write_json(tmp_path / f"outputs/runs/{run_id}/snapshots/health_2026-03-04.json", {"status": "healthy"})
-    _write_json(tmp_path / f"outputs/runs/{run_id}/snapshots/integrity_2026-03-04.json", {"status": "pass"})
-    
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    
-    assert "latest_attempted_run" in model["run_meta"]
-    assert "selected_governed_run" in model["run_meta"]
-    assert model["run_meta"]["latest_attempted_run"]["run_id"] == run_id
-    assert model["run_meta"]["selected_governed_run"]["run_id"] == run_id
-    assert "selection_reason" in model["run_meta"]["selected_governed_run"]
-
-
-def test_chart_metadata_included(tmp_path):
-    """Test that chart metadata is included in series output."""
-    run_id = "run-chart-test"
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": run_id,
-            "mode": "paper",
-        },
-    )
-    
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    
-    assert "chart_metadata" in model["series"]
-    chart_meta = model["series"]["chart_metadata"]
-    assert "nav_chart" in chart_meta
-    assert "daily_returns_chart" in chart_meta
-    assert "excess_returns_chart" in chart_meta
-    
-    # Check structure
-    assert "x_axis_label" in chart_meta["nav_chart"]
-    assert "y_axis_label" in chart_meta["nav_chart"]
-    assert chart_meta["daily_returns_chart"]["baseline"] == 0.0
-    assert chart_meta["excess_returns_chart"]["baseline"] == 0.0
-
-
-def test_activity_includes_source_context(tmp_path):
-    """Test that activity section includes source run context."""
-    run_id = "run-activity-test"
-    _write_json(
-        tmp_path / "outputs/latest.json",
-        {
-            "report_date": "2026-03-04",
-            "run_id": run_id,
-            "mode": "paper",
-        },
-    )
-    
-    model = DashboardBuilder(repo_root=tmp_path).build()
-    
-    activity = model["activity"]
-    assert "source_run_id" in activity
-    assert "source_report_date" in activity
-    assert "note" in activity
-
+if __name__ == "__main__":
+    unittest.main()

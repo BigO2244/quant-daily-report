@@ -143,14 +143,80 @@ class TestSelection:
         result = select_and_weight(empty)
         assert result.empty
 
-    def test_all_below_trend_returns_empty(self):
-        """If nothing is above 200 EMA, selection should be empty."""
+    def test_below_trend_is_no_longer_a_hard_gate(self):
         from sleeves.sleeve_trend.selection import select_and_weight
 
         signals = _make_signals()
-        signals["above_trend"] = False  # Force everything below trend
-        result = select_and_weight(signals)
-        assert result.empty, "Should select nothing when all below 200 EMA"
+        signals["above_trend"] = False
+        signals["adx"] = 30.0
+        signals["volume_sma"] = 1_000_000.0
+        signals["close"] = signals["close"].clip(lower=25.0)
+        result = select_and_weight(signals, top_n=5)
+        assert not result.empty, "Below-trend names should still be scoreable when other signals are strong"
+
+    def test_ema_alignment_is_no_longer_a_hard_gate(self):
+        from sleeves.sleeve_trend.selection import select_and_weight
+
+        signals = _make_signals()
+        signals["above_trend"] = True
+        signals["adx"] = 30.0
+        signals["volume_sma"] = 1_000_000.0
+        signals["close"] = signals["close"].clip(lower=25.0)
+        signals["ema_fast"] = signals["close"] * 0.98
+        signals["ema_slow"] = signals["close"] * 1.02
+
+        result = select_and_weight(signals, top_n=5)
+        assert not result.empty, "EMA misalignment should not zero out the trend sleeve"
+
+    def test_low_adx_is_no_longer_a_hard_gate(self):
+        from sleeves.sleeve_trend.selection import select_and_weight
+
+        signals = _make_signals()
+        signals["above_trend"] = True
+        signals["adx"] = 5.0
+        signals["volume_sma"] = 1_000_000.0
+        signals["close"] = signals["close"].clip(lower=25.0)
+
+        result = select_and_weight(signals, top_n=5)
+        assert not result.empty, "Low ADX should not zero out the trend sleeve"
+
+    def test_realized_volatility_does_not_change_score(self):
+        from sleeves.sleeve_trend.selection import _score_cross_section
+
+        frame = pd.DataFrame(
+            [
+                {
+                    "ticker": "LOWVOL",
+                    "close": 100.0,
+                    "ema_trend": 95.0,
+                    "mom_20d": 0.10,
+                    "mom_60d": 0.20,
+                    "adx": 25.0,
+                    "volume": 1_000_000.0,
+                    "volume_sma": 1_000_000.0,
+                    "ema_fast": 101.0,
+                    "ema_slow": 99.0,
+                    "realized_vol": 0.10,
+                },
+                {
+                    "ticker": "HIGHVOL",
+                    "close": 100.0,
+                    "ema_trend": 95.0,
+                    "mom_20d": 0.10,
+                    "mom_60d": 0.20,
+                    "adx": 25.0,
+                    "volume": 1_000_000.0,
+                    "volume_sma": 1_000_000.0,
+                    "ema_fast": 101.0,
+                    "ema_slow": 99.0,
+                    "realized_vol": 0.60,
+                },
+            ]
+        )
+
+        scored = _score_cross_section(frame)
+        score_map = scored.set_index("ticker")["score"].to_dict()
+        assert score_map["LOWVOL"] == score_map["HIGHVOL"], "Volatility should not affect directional score"
 
     def test_equal_weight_method(self):
         from sleeves.sleeve_trend.selection import select_and_weight

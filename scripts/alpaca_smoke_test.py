@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import ssl
@@ -13,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from brokers.alpaca_broker import AlpacaBroker
+from scripts.export_alpaca_broker_snapshot import fetch_snapshot_inputs
 
 
 def _missing_env_vars() -> list[str]:
@@ -100,9 +101,10 @@ def main() -> int:
         return 1
 
     try:
-        broker = AlpacaBroker.from_env()
-        account = broker.get_account()
-        positions = broker.get_positions()
+        account, positions, _, _, _, source_mode = fetch_snapshot_inputs(
+            report_date=_resolve_trade_date(),
+            order_limit=25,
+        )
     except Exception as exc:
         print(f"[ALPACA][SMOKE][FAIL] {exc}", file=sys.stderr)
         _print_setup_help()
@@ -112,7 +114,8 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "paper": broker.paper,
+                "source_mode": source_mode,
+                "paper": paper_raw,
                 "account": {
                     "id": account.get("id"),
                     "status": account.get("status"),
@@ -134,6 +137,15 @@ def main() -> int:
         )
     )
     return 0
+
+
+def _resolve_trade_date() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    except Exception:
+        return datetime.datetime.utcnow().date().isoformat()
 
 
 if __name__ == "__main__":

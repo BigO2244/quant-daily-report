@@ -29,6 +29,7 @@ from core.operator_summary import write_operator_summary, load_operator_summary,
 from core.quant_report import send_email
 from core.run_pointer import read_trade_stage_pointer
 from core.timing_policy import current_et
+from scripts.export_alpaca_broker_snapshot import build_snapshot_payload, fetch_snapshot_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +64,108 @@ def _resolve_execution_pointer(trade_date: str) -> dict:
     return pointer
 
 
+def _resolve_execution_pointer_optional(trade_date: str) -> dict | None:
+    try:
+        return _resolve_execution_pointer(trade_date)
+    except RuntimeError as exc:
+        if "still running" in str(exc).lower():
+            raise
+        logger.warning("[TRADING_CONFIRMATION] execution pointer unavailable for %s: %s", trade_date, exc)
+        return None
+
+
 def _load_results(trade_date: str) -> tuple[dict, Path]:
-    latest = _resolve_execution_pointer(trade_date)
-    run_root = Path(str(latest.get("run_root") or "").strip())
-    if not run_root:
-        raise RuntimeError("execution workflow pointer missing run_root")
-    results_path = run_root / "execution_results.json"
-    if not results_path.exists():
-        raise RuntimeError(f"Missing execution results artifact: {results_path}")
-    with results_path.open("r", encoding="utf-8") as f:
-        return json.load(f), results_path
+    latest = _resolve_execution_pointer_optional(trade_date)
+
+    if latest:
+        run_root = Path(str(latest.get("run_root") or "").strip())
+        if run_root:
+            results_path = run_root / "execution_results.json"
+            if results_path.exists():
+                with results_path.open("r", encoding="utf-8") as f:
+                    return json.load(f), results_path
+            logger.warning(
+                "[TRADING_CONFIRMATION] execution results missing for %s at %s; falling back to broker snapshot",
+                trade_date,
+                results_path,
+            )
+
+    return _load_broker_results_fallback(trade_date, latest or {})
+
+
+def _load_json_dict(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_results_from_broker_snapshot(trade_date: str, snapshot: dict, pointer: dict | None = None) -> dict:
+    counts = snapshot.get("counts") if isinstance(snapshot.get("counts"), dict) else {}
+    orders = snapshot.get("orders_report_date") if isinstance(snapshot.get("orders_report_date"), list) else []
+    fills = snapshot.get("fills_report_date") if isinstance(snapshot.get("fills_report_date"), list) else []
+
+    statuses = [str((order or {}).get("status") or "").strip().lower() for order in orders if isinstance(order, dict)]
+    submitted_count = int(counts.get("orders_report_date") or len(orders) or 0)
+    rejected_count = sum(status in {"rejected"} for status in statuses)
+    accepted_count = max(submitted_count - rejected_count, 0)
+
+    if submitted_count <= 0 and len(fills) <= 0:
+        raise RuntimeError(f"Broker snapshot for {trade_date} contains no report-date orders or fills")
+
+    operator_execution_status = "executed"
+    halt_reason = None
+    status = STATUS_EXECUTED
+
+    terminal_statuses = {status for status in statuses if status}
+    if terminal_statuses and terminal_statuses.issubset({"rejected", "canceled", "expired"}):
+        operator_execution_status = "halted"
+        halt_reason = "broker_snapshot_no_executed_orders"
+        status = STATUS_HALTED
+    elif any(status in {"rejected", "canceled", "expired"} for status in terminal_statuses):
+        operator_execution_status = "partial"
+        halt_reason = "broker_snapshot_partial_execution"
+
+    return {
+        "trade_date": trade_date,
+        "run_id": str((pointer or {}).get("run_id") or f"broker_snapshot:{trade_date}"),
+        "mode": str(os.getenv("TRADING_MODE") or os.getenv("MODE") or "paper").upper(),
+        "status": status,
+        "submitted_count": submitted_count,
+        "accepted_count": accepted_count,
+        "rejected_count": int(rejected_count),
+        "halt_reason": halt_reason,
+        "operator_execution_status": operator_execution_status,
+        "broker_snapshot_fallback": True,
+        "broker_fill_count": int(counts.get("fills_report_date") or len(fills) or 0),
+    }
+
+
+def _load_broker_results_fallback(trade_date: str, pointer: dict | None = None) -> tuple[dict, Path]:
+    snapshot_dir = _REPO_ROOT / "outputs" / "broker_snapshot"
+    snapshot_path = snapshot_dir / f"broker_snapshot_{trade_date}.json"
+
+    if snapshot_path.exists():
+        snapshot = _load_json_dict(snapshot_path)
+        return _build_results_from_broker_snapshot(trade_date, snapshot, pointer), snapshot_path
+
+    logger.info("[TRADING_CONFIRMATION] broker snapshot missing for %s; fetching Alpaca snapshot fallback", trade_date)
+    account, positions, orders_all, orders_closed, fills, _source_mode = fetch_snapshot_inputs(
+        report_date=trade_date,
+        order_limit=200,
+    )
+    snapshot = build_snapshot_payload(
+        report_date=trade_date,
+        workflow_run_id=str((pointer or {}).get("run_id") or ""),
+        git_sha=str((pointer or {}).get("git_sha") or ""),
+        account=account,
+        positions=positions,
+        orders_all=orders_all,
+        orders_closed=orders_closed,
+        fills=fills,
+    )
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return _build_results_from_broker_snapshot(trade_date, snapshot, pointer), snapshot_path
 
 
 def _load_performance_data(trade_date: str) -> dict | None:
@@ -278,7 +371,7 @@ def main() -> None:
     results, results_path = _load_results(trade_date)
 
     # Load run context for operator summary updates
-    latest = _resolve_execution_pointer(trade_date)
+    latest = _resolve_execution_pointer_optional(trade_date)
     run_root = Path(str(latest.get("run_root") or "").strip()) if latest else None
 
     event = EmailEvent(

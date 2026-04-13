@@ -89,11 +89,11 @@ MACRO = {
 # ---------------------------------------------------------------------------
 REGIME_WEIGHTS = {
     #                        Trend  Value  Quality  MeanRev  Cash
-    "risk_on_trending":     (45,    20,    20,      10,      5),
-    "neutral_mixed":        (30,    25,    25,      15,      5),
-    "risk_off_defensive":   (10,    30,    35,      10,      15),
-    "high_volatility":      (5,     20,    30,      5,       40),
-    "breadth_washout":      (15,    15,    20,      40,      10),
+    "risk_on_trending":     (55,    18,    15,      10,      2),
+    "neutral_mixed":        (38,    24,    20,      13,      5),
+    "risk_off_defensive":   (15,    28,    32,      10,      15),
+    "high_volatility":      (10,    20,    28,      7,       35),
+    "breadth_washout":      (20,    15,    20,      40,      5),
 }
 
 # Column order for the weight tuples above

@@ -1,0 +1,11 @@
+{
+  "benchmark": "SPY",
+  "mode": "live_execution_review",
+  "north_star": "Promote options to live only after the paper-review lane is ready and the account is explicitly enabled.",
+  "allowed_strategies": ["protective_put"],
+  "default_order_type": "market",
+  "allow_live_submission": false,
+  "max_contracts": 1,
+  "require_paper_ready": true,
+  "require_allocator_ready": true
+}

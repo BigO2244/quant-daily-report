@@ -1,446 +1,235 @@
 # AGENTS.md
 
-## Project Overview
-
-Caerus Quant is a quantitative equity trading and research platform. It
-generates daily long-only US equity selections via a regime-switching
-multi-sleeve strategy, executes paper trades through Alpaca's paper API,
-and maintains full audit trails.
-
-Constraints: - No live money - No short positions - No leverage
-
-Agents working in this repository must preserve deterministic outputs,
-protect reconciliation safety mechanisms, and avoid introducing changes
-that could silently affect execution or reporting behavior.
-
-------------------------------------------------------------------------
-
-## Project Structure & Module Organization
-
-Key components of the system:
-
--   daily_quant_report.py --- Main orchestrator for daily execution.
-
-Production trading logic: - core/ - engine/ - regime/ - sleeves/ -
-paper/ - reconciliation.py
-
-Research and forward architecture: - research/ - alpha_stack/ -
-scripts/research/
-
-AIOps infrastructure: - aiops/ - specs/ - reports/ai_runs/
-
-Testing: - Tests/ - Tests/alpha_stack/
-
-Generated runtime artifacts: - outputs/ - data/
-
-Never manually edit generated artifacts.
-
-GitHub automation: - .github/workflows/
-
-------------------------------------------------------------------------
-
-## Common Development Commands
-
-Environment setup:
-
-python3 -m venv .venv source .venv/bin/activate pip install -r
-requirements.txt
-
-------------------------------------------------------------------------
-
-Run locally (Shadow Mode --- No Broker):
-
-REPORT_DATE=\$(TZ=America/New_York date +%F) MODE=shadow
-TRADING_MODE=shadow python3 daily_quant_report.py
-
-------------------------------------------------------------------------
-
-Run locally (Alpaca Paper Mode):
-
-REPORT_DATE=\$(TZ=America/New_York date +%F) MODE=alpaca
-TRADING_MODE=alpaca ALPACA_PAPER=1 ALPACA_API_KEY_ID=...
-ALPACA_API_SECRET_KEY=...
-ALPACA_BASE_URL=https://paper-api.alpaca.markets python3
-daily_quant_report.py
-
-------------------------------------------------------------------------
-
-Run tests:
-
-pytest -q
-
-Targeted tests:
-
-pytest Tests/test_aiops_contracts.py -v pytest Tests/test_allocation.py
--v
-
-------------------------------------------------------------------------
-
-Local smoke loop:
-
-bash scripts/local_green_loop.sh
-
-------------------------------------------------------------------------
-
-AIOps execution:
-
-aiops run-all --spec specs/`<spec>`{=html}.md --mode BUILD
-
-------------------------------------------------------------------------
-
-Diagnostics / research tools:
-
-python3 scripts/alpha_report.py --apply-costs --cost-bps 25 python3
-scripts/daily_alpha_run.py python3 scripts/diag_alpaca_auth.py python3
-alpaca_smoke_test.py
-
-------------------------------------------------------------------------
-
-## Agent Working Style
-
-Agents should follow this workflow:
-
-1.  Inspect relevant files
-2.  Summarize the current implementation
-3.  Propose a concise plan
-4.  Implement minimal changes
-5.  Run the narrowest validation possible
-6.  Summarize results
-
-Prefer minimal, surgical changes over large refactors unless explicitly
-requested.
-
-Avoid broad rewrites.
-
-------------------------------------------------------------------------
-
-## Near-Term Focus (Updated 2026-03-24)
-
-For the next several trading days, agents should prioritize improving
-model measurement before adding new model complexity.
-
-Primary sequence:
-
-1.  Build the evidence layer
-    - Persist daily research artifacts for factor inputs, normalized
-      scores, regime state, sleeve selections, target weights, intended
-      orders, and realized fills.
-    - Make attribution inputs reproducible from artifacts rather than
-      from ad hoc notebook logic.
-
-2.  Upgrade attribution from metrics to decomposition
-    - Extend attribution beyond IC / Sharpe / turnover.
-    - Prioritize sleeve contribution, allocation vs. selection,
-      benchmark-relative excess return, and execution-cost drag.
-
-3.  Diagnose current signals before inventing new ones
-    - For the quality sleeve, measure factor-level IC by factor, sector,
-      and regime.
-    - Test sector-neutralization, orthogonalization, and rolling
-      reweighting before adding new data sources or ML layers.
-
-4.  Add cost realism to mean reversion
-    - Add a transaction-cost / slippage model for the
-      mean-reversion sleeve.
-    - Re-evaluate backtest quality after costs before promoting further
-      live confidence.
-
-5.  Delay "fun" complexity until the measurement loop is in place
-    - Do not prioritize new sleeves, alternative data, or ML ranking
-      until attribution and cost realism are credible.
-
-Default working plan for the next 10 trading days:
-
--   Days 1-2: define and write canonical daily research artifacts
--   Days 3-4: build attribution MVP outputs and operator-facing summaries
--   Days 5-6: run quality-sleeve factor diagnostics and rank weak
-    factors
--   Days 7-8: implement mean-reversion cost / slippage assumptions and
-    rerun research checks
--   Days 9-10: write a decision memo on what to promote, cut, or
-    redesign
-
-When choosing between infrastructure polish and modeling work, bias
-toward the items above unless production safety is at risk.
-
-------------------------------------------------------------------------
-
-## HighâRisk Areas
-
-Changes in these areas require extra caution:
-
--   reconciliation.py
--   broker / paper execution paths
--   canonical state under outputs/paper_state/
--   daily_quant_report.py orchestration
--   GitHub workflows
--   artifact schemas
--   CSV / JSON output contracts
--   email governance and reporting
-
-Before modifying these areas, explain expected impact.
-
-------------------------------------------------------------------------
-
-## Research vs Production Discipline
-
-Maintain strict separation:
-
-Production code: - core - engine - sleeves - execution pipeline
-
-Research code: - research - alpha_stack - experimental scripts
-
-Rules:
-
--   Do not wire research sleeves into production without explicit
-    promotion.
--   Do not alter production trading behavior unless requested.
--   Production engine changes should be limited to bug fixes and
-    operational hardening.
-
-------------------------------------------------------------------------
-
-## Coding Style
-
-Follow repository conventions:
-
--   Python style similar to PEP 8
--   4-space indentation
--   clear function boundaries
--   readable docstrings
-
-Naming conventions:
-
-modules: snake_case functions: snake_case variables: snake_case classes:
-PascalCase constants: UPPER_SNAKE_CASE
-
-Match surrounding style when editing existing code.
-
-------------------------------------------------------------------------
-
-## Change Hygiene
-
-When modifying code:
-
--   Preserve deterministic artifact behavior.
--   Do not rename or move operational files without documenting the
-    change.
--   If altering output schemas, document old vs new behavior.
--   Preserve public interfaces when possible.
--   Keep diffs focused.
-
-------------------------------------------------------------------------
-
-## Testing Guidelines
-
-Tests live in:
-
-Tests/
-
-Rules:
-
--   Name files test\_`<feature>`{=html}.py
--   Keep fixtures deterministic
--   Add regression coverage for changes affecting:
-    -   execution
-    -   reconciliation
-    -   reporting
-    -   workflow gating
-
-Validation expectations:
-
-1.  Run the narrowest tests first.
-2.  Run broader tests if touching orchestration or execution.
-3.  Report commands executed.
-4.  Report results.
-
-If tests cannot run, state why.
-
-------------------------------------------------------------------------
-
-## Commit & Pull Request Guidelines
-
-Commit messages should be:
-
--   short
--   imperative
--   scoped
-
-Examples:
-
-fix(execution): repair reconciliation guard feat: add execution summary
-csv docs: update alpha stack architecture cleanup: remove archived
-workflow research: add alpha factor experiment
-
-Pull Requests should include:
-
--   purpose
--   risk/impact
--   test commands executed
--   affected paths
-
-Include screenshots when UI or report artifacts change.
-
-------------------------------------------------------------------------
-
-## Security & Configuration
-
-Never commit credentials.
-
-Use:
-
--   environment variables
--   GitHub Actions secrets
-
-Validate Alpaca credentials before workflow changes:
-
-python3 alpaca_smoke_test.py
-
-For reconciliation/bootstrap procedures see:
-
-docs/OPERATIONS.md
-
-------------------------------------------------------------------------
-
-## Suggested Model Routing
-
-Agents should prefer the following models:
-
-Deep reasoning / audits  Claude Opus\
-Engineering logic  Claude Sonnet\
-Implementation  GPTâ5.3 Codex\
-Hybrid reasoning + code  GPT5.4
-
-------------------------------------------------------------------------
-
-## Expected Response Format for Large Tasks
-
-Agents should return:
-
-1.  Summary
-2.  Files changed
-3.  Validation performed
-4.  Risks or assumptions
-5.  Recommended next steps
-
-------------------------------------------------------------------------
-
-## Ops Handoff (Updated 2026-03-27)
-
-March 27, 2026 incident chain:
-
-- 7:00 AM ET precompute succeeded and wrote a bundle.
-- 9:35 AM ET execution failed first on precompute contract mode
-  validation (`PAPER` bundle vs `ALPACA` executor expectation).
-- After that validator mismatch was fixed, execution failed a second
-  time because pretrade reconciliation returned `SELF_HEAL`, refreshed
-  canonical state, and the executor halted instead of re-running
-  reconciliation once against the repaired state.
-- Manual rerun at 9:43 AM ET executed successfully after those two
-  fixes and Phase 3 confirmation was rerun successfully afterward.
-
-Operational hardening that must remain in place:
-
-- Treat precompute contract `PAPER` and `ALPACA` as equivalent for
-  execution validation unless and until the contract writer and executor
-  are fully normalized to one canonical value.
-- In the execution wrapper, if pretrade reconciliation returns
-  `SELF_HEAL`, immediately run reconciliation once more in the same run
-  and proceed when the follow-up result is `PASS` or `WARN`.
-- Cron wrappers for scheduler-host production paper flow must force:
-  `MODE=alpaca`, `TRADING_MODE=alpaca`, `ALPACA_PAPER=1`.
-  Do not rely on inherited `.env` mode flags for morning automation.
-- Same-day retry locks should continue to block duplicate executions
-  after a successful run, but known pre-execution failures must release
-  the lock so a recovery rerun is possible.
-
-First checks for the next incident review:
-
-1.  Confirm remote `~/quant-daily-report` is on a git-backed commit, not
-    only SCP overlays.
-2.  Verify `outputs/precompute/<date>/contract.json` writes
-    `"mode": "ALPACA"` under cron.
-3.  If 9:35 halts again, inspect in this order:
-    - `outputs/latest_run.json`
-    - `logs/execute_<date>.log`
-    - `outputs/broker/recon_pretrade_<date>.json`
-    - `outputs/precompute/<date>/contract.json`
-4.  If execution succeeds after a manual rerun, rerun
-    `scripts/cron_confirm.sh` immediately so operator emails and trade
-    confirmation artifacts match the real execution.
-
-Cleanup backlog after a clean March 28, 2026 cycle:
-
-- Push all scheduler fixes and repin the VM to a clean git checkout.
-- Remove environment ambiguity between `MODE`, `TRADING_MODE`, and
-  paper/live intent.
-- Add an explicit scheduler smoke command that fails if precompute and
-  executor disagree on bundle mode.
-- Add a reliability test for the exact 7:00 -> 9:35 -> 10:00 cron path,
-  not just unit tests around helper functions.
-
-------------------------------------------------------------------------
-
-## Operational Handoff (Updated 2026-03-26)
-
-The scheduler host was clean-swapped on 2026-03-26 after a partial /
-dirty deploy incident. Tomorrow's starting assumption should be:
-
--   Scheduler host path: `~/quant-daily-report`
--   Expected live git head: `f3a768b`
--   Expected remote `origin`: GitHub, not a local filesystem path
--   Expected cron source: `scripts/crontab.txt`
--   Expected canonical snapshot state: refreshed from broker after clean
-    deploy
-
-### First checks for the next session
-
-1.  Verify remote repo state before changing code
-    - `ssh brettolson@34.61.147.38`
-    - `cd ~/quant-daily-report`
-    - `git rev-parse --short HEAD`
-    - `git remote -v`
-    - `git status --short`
-    - `crontab -l`
-
-2.  Verify the 2026-03-27 precompute phase
-    - confirm the 7:00 AM ET precompute email arrived
-    - confirm `outputs/precompute/2026-03-27/` exists and bundle files are
-      complete
-    - inspect `logs/precompute_2026-03-27.log`
-
-3.  Verify the 2026-03-27 execution phase
-    - confirm the 9:35 AM ET execution submitted intended Alpaca paper
-      orders
-    - inspect `logs/execute_2026-03-27.log`
-    - inspect `outputs/latest_run.json`
-    - inspect the latest `execution_results.json`
-
-4.  Verify the 2026-03-27 confirmation phase
-    - confirm the 10:00 AM ET operator confirmation email arrived
-    - inspect `logs/confirm_2026-03-27.log`
-    - verify operator summary / confirmation artifacts were written
-
-### If tomorrow's run is clean, next cleanup priorities
-
-1.  Replace ad hoc VM deployment with a scripted clean deploy plus
-    rollback path.
-2.  Separate runtime state from code checkout
-    - `.env`
-    - `venv/`
-    - `data/`
-    - `outputs/`
-    - `logs/`
-3.  Audit ignored-but-required runtime files so git remains the real
-    source of truth.
-4.  Add a standard deploy smoke gate
-    - compile critical modules
-    - broker bootstrap
-    - plan-only precompute
-    - pretrade email dry-run
-    - confirmation email dry-run against a real execution artifact
-    - execution module import / `--help`
-5.  Review residual-position behavior for names removed from targets
-    (example: `MU`) and confirm full exits occur when intended.
-6.  Use `docs/mu_trade_trace_2026-03-26.md` as the reference memo for the
-    `MU` post-mortem and liquidation-scaling follow-up.
+This is the single agent-facing handoff for this repository. Operational,
+architecture, scheduler, and workflow guidance should live here. The older
+`CLAUDE.md` files are retired.
+
+## System Snapshot
+
+- Project: Caerus Quant / Alpha Stack quantitative trading platform
+- Scope: US long-only equities, paper trading through Alpaca, deterministic
+  run artifacts, operator-facing email/reporting
+- Production posture: paper only, no shorting, no leverage, no live trading
+- Promotion ladder: research -> backtest -> shadow -> paper -> live
+- Hard rule: do not change production trading behavior casually; bias toward
+  safety, deterministic artifacts, and explicit verification
+
+## Current Operating Environments
+
+- Local development:
+  - host: `brettolson@BDO-Macbook`
+  - use for coding, tests, diagnostics, dashboard generation, and artifact
+    review
+- Scheduler VM:
+  - host: `brettolson@34.61.147.38`
+  - path: `~/quant-daily-report`
+  - venv: `source venv/bin/activate`
+  - secrets: `~/quant-daily-report/.env`
+- GitHub Actions:
+  - historically used for scheduled paper execution, alpha reporting, and
+    nightly research digest delivery
+  - current checkout does not contain the full trading workflow files, so this
+    document distinguishes between materialized workflow files and the last
+    audited workflow inventory
+
+## Deployment And Verification Rules
+
+- Local commits do not deploy the VM.
+- Prefer local development first, then explicit deploy.
+- If files are copied to the VM, verify the remote content with `md5sum`,
+  `grep`, or a direct read. Never assume SCP succeeded.
+- Do not edit the VM directly unless the situation is an explicit hotfix.
+- For scheduler incidents, inspect these first:
+  - `outputs/latest_run.json`
+  - `logs/execute_<date>.log`
+  - `outputs/broker/recon_pretrade_<date>.json`
+  - `outputs/precompute/<date>/contract.json`
+
+## Scheduled Automation
+
+- Scheduler cron cadence on the VM:
+  - `7:00 AM ET`: `scripts/cron_precompute.sh`
+  - `9:35 AM ET`: `scripts/cron_execute.sh`
+  - `10:00 AM ET`: `scripts/cron_confirm.sh`
+- Cron wrappers for scheduler-host paper flow must force:
+  - `MODE=alpaca`
+  - `TRADING_MODE=alpaca`
+  - `ALPACA_PAPER=1`
+- Audited GitHub Actions cadence from [`repo_workflow_audit.md`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/repo_workflow_audit.md):
+  - `daily-alpaca-paper.yml`: `9:35 AM ET` weekdays
+  - `alpha_daily.yml`: `6:15 AM ET` in EST, `7:15 AM ET` in EDT
+  - `research-digest.yml`: `7:00 AM ET` weekdays
+- Materialized in this checkout:
+  - `research-digest.yml`: scheduled nightly producer for dashboard data,
+    `reports/agents/nightly_findings.json`, and `AGENTS.md` refreshes
+  - `nightly-agents-refresh.yml`: manual fallback to rebuild the
+    auto-generated sections in this file from the latest findings
+
+## Architecture Focus
+
+- Main orchestrator: [`daily_quant_report.py`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/daily_quant_report.py)
+- Broker-authoritative pre/post-trade reconciliation:
+  [`reconciliation.py`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/reconciliation.py)
+- Execution status email reconstruction:
+  [`daily_trade_execution_email.py`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/daily_trade_execution_email.py)
+- Dashboard builder:
+  [`scripts/research/build_quant_dashboard.py`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/scripts/research/build_quant_dashboard.py)
+- Static dashboard surface:
+  [`web/dashboard/index.html`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/web/dashboard/index.html)
+- Agent-doc updater:
+  [`scripts/update_agents_md.py`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/scripts/update_agents_md.py)
+
+## Broker-Authoritative Dashboard Contract
+
+Phase 5 dashboard/reporting work should surface these fields when present:
+
+- `broker_pretrade_snapshot_ok`
+- `broker_posttrade_snapshot_ok`
+- `broker_authoritative_state`
+- `broker_preflight_cash`
+- `broker_preflight_equity`
+- `broker_preflight_buying_power`
+- `post_execution_recon_status`
+- pretrade and posttrade position counts
+- pretrade and posttrade cash/equity deltas
+- broker trust level derived from the snapshot/reconciliation state
+
+Dashboard implementation notes:
+
+- Build fresh data with:
+  - `python3 scripts/research/build_quant_dashboard.py`
+- Generated files:
+  - [`web/dashboard/dashboard-data.json`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/web/dashboard/dashboard-data.json)
+  - [`web/dashboard/dashboard-data.js`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/web/dashboard/dashboard-data.js)
+- Browser entrypoint:
+  - [`web/dashboard/index.html`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/web/dashboard/index.html)
+
+## Nightly Findings Contract
+
+The nightly AGENTS refresh looks for the latest findings in this order:
+
+- `reports/agents/nightly_findings.json`
+- `reports/agents/nightly_findings.md`
+- latest file under `reports/agents/`
+- latest file under `reports/ai_runs/`
+- latest file under `reports/incidents/`
+
+Preferred JSON shape:
+
+```json
+{
+  "generated_at": "2026-04-08T11:00:00Z",
+  "headline": "Risk posture remains elevated",
+  "summary": [
+    "Breadth improved but remains below neutral threshold.",
+    "No operator action required before next scheduled run."
+  ],
+  "risks": [
+    "PDT warning still near threshold."
+  ],
+  "actions": [
+    "Review post-trade reconciliation on next execution."
+  ]
+}
+```
+
+The updater only rewrites the auto-generated sections below. Human-edited
+guidance outside those markers should remain stable.
+
+Authoritative nightly path:
+
+- `research-digest.yml` builds the dashboard payload, writes
+  `reports/agents/nightly_findings.json`, then refreshes `AGENTS.md`.
+- `nightly-agents-refresh.yml` is a manual recovery tool if the findings file
+  already exists but `AGENTS.md` needs to be regenerated.
+
+## High-Risk Areas
+
+Changes in these areas require explicit caution and validation:
+
+- reconciliation and broker state repair paths
+- paper execution and order-submission flow
+- canonical state under `outputs/paper_state/`
+- orchestration in `daily_quant_report.py`
+- workflow schedules and email routing
+- artifact schemas and JSON / CSV output contracts
+- dashboard/reporting code that operator decisions may rely on
+
+## Agent Working Rules
+
+- Inspect the current implementation before making broad changes.
+- Prefer minimal, surgical edits unless the task explicitly calls for
+  restructuring.
+- If you touch execution, reconciliation, or reporting contracts, run the
+  narrowest relevant validation first and then a broader check if warranted.
+- Report exact commands run and whether they passed.
+- Keep research work separate from production behavior unless the task is an
+  explicit promotion.
+
+## Phase Implementation Status
+
+| Phase | Description | Status | Confirmed |
+|---|---|---|---|
+| Phase 1 | Live regime-aware multi-sleeve allocator + `live_regime_review` artifacts | **Operationally confirmed** | 2026-04-09 |
+| Phase 2A | Shadow-only SPY options overlay (`options_overlay_shadow`) | **Operationally confirmed** | 2026-04-09 |
+| Phase 3A | Defensive ETF sleeve (`SGOV`, `SHY`, `IEF`, `TLT`) regime-gated | **Operationally confirmed** | 2026-04-09 |
+
+Confirmation evidence: `outputs/audits/phase_1_2_3_finalization_audit_2026-04-09.md`
+— 22/22 pytest passed; offline fixture + live-data plan-only smoke both PASS.
+
+## Immediate Open Decisions
+
+- Decide whether `quality_enhanced` becomes the intended quality sleeve spec.
+- Decide whether mean reversion should gain the missing healthy-breadth gate
+  before stronger promotion confidence.
+- Decide whether regime-aware TP/SL should be applied at the allocator/notional
+  layer before share rounding.
+- Continue building live-history evidence before trusting portfolio-level
+  attribution or alpha/IR/drawdown claims.
+
+## Ops Handoff
+
+- Scheduler host path should be `~/quant-daily-report`.
+- Expected cron source is `scripts/crontab.txt`.
+- If a `SELF_HEAL` pretrade reconciliation occurs during execution, the wrapper
+  should re-run reconciliation once against the refreshed canonical state and
+  proceed only if that follow-up verdict is `PASS` or `WARN`.
+- Same-day retry locks should block duplicate successful executions but must not
+  strand genuine recovery reruns after pre-execution failure.
+
+## Auto-Generated Nightly Findings
+
+<!-- BEGIN AUTO-GENERATED: NIGHTLY FINDINGS -->
+- Last refresh: `2026-04-08T14:14:31+00:00`
+- Source: `reports/agents/nightly_findings.json`
+- Findings generated at: `2026-04-08T14:14:28+00:00`
+- Broker-authoritative state not confirmed
+- Trade date: 2026-04-08.
+- Broker trust level: LOW.
+- Pretrade status: UNKNOWN; posttrade reconciliation: UNKNOWN.
+- Nightly digest schedule from audit: 0 12 * * 1-5, 0 11 * * 1-5 => both weekday entries target 7:00 AM ET across EST/EDT.
+- Pretrade broker snapshot was not confirmed in the latest available artifacts.
+<!-- END AUTO-GENERATED: NIGHTLY FINDINGS -->
+
+## Auto-Generated Workflow Inventory
+
+<!-- BEGIN AUTO-GENERATED: WORKFLOW INVENTORY -->
+- Materialized workflow files in this checkout:
+- `nightly-agents-refresh.yml`: Nightly Agents Refresh | triggers=workflow_dispatch | cron=none
+- `research-digest.yml`: Research Digest — Nightly | triggers=workflow_dispatch, schedule | cron=`0 11 * * 1-5`, `0 12 * * 1-5`
+- Last audited workflow inventory from `repo_workflow_audit.md`:
+- `daily-alpaca-paper.yml`: Daily Alpaca Paper Run | triggers=workflow_dispatch, schedule | schedule=35 14 * 1,2,12 1-5, 35 14 1-7 3 1-5, 35 13 8-31 3 1-5, 35 13 * 4-10 1-5, 35 13 1-7 11 1-5, 35 14 8-30 11 1-5 => intended 9:35 AM America/New_York weekdays
+- `alpha_daily.yml`: Alpha Daily Run | triggers=workflow_dispatch, schedule | schedule=15 11 * * 1-5 => 6:15 AM ET in EST, 7:15 AM ET in EDT
+- `research-digest.yml`: Research Digest — Nightly | triggers=workflow_dispatch, schedule | schedule=0 12 * * 1-5, 0 11 * * 1-5 => both weekday entries target 7:00 AM ET across EST/EDT
+- `export-broker-snapshot.yml`: Export Alpaca Broker Snapshot | triggers=workflow_dispatch | schedule=None
+- `_archived_backtest_sleeve1.yml`: Run Backtest (Sleeve 1) | triggers=workflow_dispatch | schedule=None
+- `_archived_backtest_sleeve1_robustness.yml`: Sleeve1 Robustness Backtest | triggers=workflow_dispatch | schedule=None
+- `_archived_backtest_sleeve2.yml`: Run Backtest (Sleeve 2) | triggers=workflow_dispatch | schedule=None
+<!-- END AUTO-GENERATED: WORKFLOW INVENTORY -->
+
+## Historical References
+
+- [`repo_workflow_audit.md`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/repo_workflow_audit.md)
+- [`specs/phase_5_broker_pretrade_snapshot.md`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/specs/phase_5_broker_pretrade_snapshot.md)
+- [`specs/broker_authoritative_execution_model.md`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/specs/broker_authoritative_execution_model.md)
+- [`CHANGELOG.md`](/Users/brettolson/Documents/Caerus/quant-daily-report-main/CHANGELOG.md)

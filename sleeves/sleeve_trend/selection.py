@@ -44,16 +44,16 @@ TOP_N = int(cfg.TOP_LONGS)  # default 3 from config; override here if desired
 TOP_N_MAX = 15  # upper bound for safety
 
 # Composite score weights (must sum to 1.0)
-W_TREND_STRENGTH = 0.30  # EMA alignment + distance from 200d
-W_MOMENTUM = 0.25  # 20-day and 60-day return (cross-sectional rank)
-W_ADX = 0.25  # Trend conviction (ADX level)
+W_TREND_STRENGTH = 0.35  # Distance from long-term trend
+W_MOMENTUM = 0.30  # 20-day and 60-day return (cross-sectional rank)
+W_ADX = 0.20  # Trend conviction (ADX level)
 W_VOLUME = 0.10  # Volume confirmation
-W_VOLATILITY = 0.10  # Reward lower vol (stability)
+W_EMA_ALIGNMENT = 0.05  # EMA alignment is a soft confirmation, not a hard gate
 
 # Gate thresholds — stock must pass ALL gates to be eligible
-GATE_ABOVE_200_EMA = True  # Must be above EMA(200)
-GATE_EMA_FAST_ABOVE_SLOW = True  # EMA(fast) > EMA(slow)
-GATE_ADX_MIN = 15.0  # Minimum ADX (trending, not ranging)
+GATE_ABOVE_200_EMA = False  # Distance from trend is scored; no longer a hard gate
+GATE_EMA_FAST_ABOVE_SLOW = False  # Scored softly; no longer a hard directional gate
+GATE_ADX_MIN = 0.0  # ADX is scored softly; no longer a hard directional gate
 GATE_MIN_PRICE = cfg.MIN_PRICE  # $5 min price
 GATE_MIN_AVG_VOLUME = cfg.MIN_AVG_VOLUME  # 100K shares min
 
@@ -262,14 +262,15 @@ def _score_cross_section(df: pd.DataFrame) -> pd.DataFrame:
     else:
         scored["_vol_rank"] = 50.0
 
-    # Factor 5: Lower volatility is better (stability)
-    if "realized_vol" in scored.columns:
-        # Invert: lower vol → higher rank
-        scored["_stability_rank"] = (
-            scored["realized_vol"].rank(pct=True, ascending=False) * 100
-        )
+    # Factor 5: EMA alignment is a tie-breaker, not a hard filter.
+    if {"ema_fast", "ema_slow", "close"}.issubset(scored.columns):
+        spread = (
+            (scored["ema_fast"] - scored["ema_slow"])
+            / scored["close"].clip(lower=1e-6)
+        ).clip(-0.25, 0.25)
+        scored["_ema_align_rank"] = spread.rank(pct=True) * 100
     else:
-        scored["_stability_rank"] = 50.0
+        scored["_ema_align_rank"] = 50.0
 
     # Composite
     scored["score"] = (
@@ -277,7 +278,7 @@ def _score_cross_section(df: pd.DataFrame) -> pd.DataFrame:
         + W_MOMENTUM * scored["_mom_rank"]
         + W_ADX * scored["_adx_rank"]
         + W_VOLUME * scored["_vol_rank"]
-        + W_VOLATILITY * scored["_stability_rank"]
+        + W_EMA_ALIGNMENT * scored["_ema_align_rank"]
     ).round(2)
 
     scored["rank"] = scored["score"].rank(ascending=False, method="first").astype(int)

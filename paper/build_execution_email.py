@@ -164,6 +164,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     timing_status = str(payload.get("timing_status", "")).strip().lower()
     recon_failure = bool(payload.get("recon_failure", False))
     auto_bootstrap_triggered = bool(payload.get("auto_bootstrap_triggered", False))
+    broker_snapshot_fallback = bool(payload.get("broker_snapshot_fallback", False))
 
     subject = f"TRADE EXECUTION — {trade_date} ({mode})"
     if bool(payload.get("pdt_constrained")):
@@ -267,7 +268,11 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
     if pricing_asof:
         lines.append(f"Pricing As-Of: {pricing_asof}")
 
-    if status == "PLANNED":
+    if broker_snapshot_fallback and operator_execution_status == "executed":
+        lines.append("Execution Status: EXECUTED — BROKER SNAPSHOT FALLBACK")
+        if pricing_disclaimer:
+            lines.append(str(pricing_disclaimer))
+    elif status == "PLANNED":
         if plan_only and market_status == "OPEN":
             lines.append("Execution Status: PLANNED — PLAN ONLY")
         else:
@@ -548,12 +553,20 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     status_reason = payload.get("status_reason")
     recon_failure = bool(payload.get("recon_failure", False))
     auto_bootstrap_triggered = bool(payload.get("auto_bootstrap_triggered", False))
+    operator_execution_status = str(payload.get("operator_execution_status", "")).strip().lower()
+    broker_snapshot_fallback = bool(payload.get("broker_snapshot_fallback", False))
+
+    status_display = status
+    if broker_snapshot_fallback and operator_execution_status == "executed":
+        status_display = "EXECUTED — BROKER SNAPSHOT FALLBACK"
 
     header_items = [
         f"<li><b>Mode:</b> {escape(mode)}</li>",
         f"<li><b>Trade Date:</b> {escape(trade_date)}</li>",
-        f"<li><b>Execution Status:</b> {escape(status)}</li>",
+        f"<li><b>Execution Status:</b> {escape(status_display)}</li>",
     ]
+    if operator_execution_status:
+        header_items.append(f"<li><b>Execution Outcome:</b> {escape(operator_execution_status.upper())}</li>")
     if status_label:
         header_items.append(f"<li><b>Execution Detail:</b> {escape(str(status_label))}</li>")
     if status_reason:

@@ -1,0 +1,9 @@
+{
+  "benchmark": "SPY",
+  "mode": "paper_smoke_session",
+  "open_contracts": 1,
+  "close_same_day": false,
+  "hold_between_sessions": true,
+  "default_expiry": "2026-04-17",
+  "default_strike": 680.0
+}

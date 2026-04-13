@@ -135,6 +135,10 @@ class PaperConfig:
     require_benchmark_price: bool = True
     cash_target_weight_default: float = 0.0
     sent_ledger_path: str = "outputs/orders_sent/orders_sent.csv"
+    # Rebalance deadband: skip trades where |target_weight - current_weight| is
+    # below this fraction of total equity. Suppresses churn on tiny drifts.
+    # Set to 0.0 to disable. 0.01 = "only trade names drifted >1% of equity".
+    rebalance_deadband_pct: float = 0.01
 
 
 def load_config(path: str) -> PaperConfig:
@@ -178,6 +182,9 @@ def load_config(path: str) -> PaperConfig:
         require_benchmark_price=bool(safety_cfg.get("require_benchmark_price", True)),
         cash_target_weight_default=float(
             constraints.get("cash_target_weight", constraints.get("target_cash_weight", 0.0))
+        ),
+        rebalance_deadband_pct=float(
+            constraints.get("rebalance_deadband_pct", 0.01)
         ),
     )
 
@@ -529,6 +536,10 @@ def build_rebalance_trades(
     target_investable_dollars = total_equity * (1.0 - target_cash_weight) * cash_buffer
     targets["target_dollars"] = targets["target_weight"] * total_equity * cash_buffer
 
+    # Deadband gate state (populated below; surfaced into details)
+    deadband_pct = float(getattr(cfg, "rebalance_deadband_pct", 0.0) or 0.0)
+    deadband_skipped: List[Dict[str, object]] = []
+
     trades: List[Dict[str, object]] = []
     buy_candidates: List[Dict[str, object]] = []
 
@@ -552,6 +563,31 @@ def build_rebalance_trades(
             continue
         if not cfg.allow_fractional and abs(delta) < 1.0:
             continue
+
+        # ------------------------------------------------------------ #
+        # Rebalance deadband: skip trades where the drift from current
+        # weight to target weight is below deadband_pct of total equity.
+        # This is the primary lever to suppress daily-cadence churn on
+        # slow-moving signals without losing responsiveness to real
+        # target changes. Full exits (removed_from_targets below) are
+        # NOT deadbanded — a name leaving the sleeve must be closed.
+        # ------------------------------------------------------------ #
+        if deadband_pct > 0.0 and total_equity > 0.0:
+            current_weight = (current_shares * px) / total_equity
+            target_weight_val = float(row["target_weight"])
+            drift = abs(target_weight_val - current_weight)
+            if drift < deadband_pct:
+                deadband_skipped.append(
+                    {
+                        "ticker": tkr,
+                        "current_weight": float(current_weight),
+                        "target_weight": float(target_weight_val),
+                        "drift": float(drift),
+                        "deadband_pct": float(deadband_pct),
+                        "reason": "deadband_drift_below_threshold",
+                    }
+                )
+                continue
 
         side = "BUY" if delta > 0 else "SELL"
         slipped_px, slip_cost_per_share = apply_slippage(px, side, cfg.slippage_bps)
@@ -772,6 +808,14 @@ def build_rebalance_trades(
             cash_sweep_remaining_dollars,
         )
 
+    if deadband_skipped:
+        logger.info(
+            "[DEADBAND] skipped=%d threshold=%.4f max_drift=%.4f",
+            len(deadband_skipped),
+            float(deadband_pct),
+            max((float(r["drift"]) for r in deadband_skipped), default=0.0),
+        )
+
     return pd.DataFrame(trades), {
         "target_cash_weight": float(target_cash_weight),
         "target_investable_dollars": float(target_investable_dollars),
@@ -781,6 +825,9 @@ def build_rebalance_trades(
         "cash_sweep_iterations": int(sweep_iterations),
         "cash_sweep_tickers": sorted(sweep_tickers),
         "cash_sweep_remaining_dollars": float(cash_sweep_remaining_dollars),
+        "deadband_pct": float(deadband_pct),
+        "deadband_skipped_count": int(len(deadband_skipped)),
+        "deadband_skipped": deadband_skipped,
     }
 
 
@@ -2275,6 +2322,7 @@ def _risk_controls_preflight(
     execution_trades: pd.DataFrame,
     equity: float,
     ledger_path: str,
+    cfg: object,
 ) -> Dict[str, object]:
     """
     Run portfolio risk controls before order submission.
@@ -2313,7 +2361,7 @@ def _risk_controls_preflight(
     try:
         from core.risk_controls import RiskControls
 
-        rc = RiskControls(max_position_pct=float(cfg.max_position_pct))
+        rc = RiskControls(max_position_pct=float(getattr(cfg, "max_position_pct", 0.0)))
 
         # ── Circuit breaker: compare current equity to historical peak ──
         peak_equity = _get_peak_equity_from_ledger(ledger_path)
@@ -2877,7 +2925,7 @@ def run_paper_day(
             "[PRECOMPUTE_EXECUTION] bypassing risk-controls preflight mutation for explicit precomputed trade plan"
         )
     else:
-        _rc_result = _risk_controls_preflight(execution_trades, _rc_equity, ledger_path)
+        _rc_result = _risk_controls_preflight(execution_trades, _rc_equity, ledger_path, cfg)
         if _rc_result.get("blocked"):
             blocked = True
             _cb_reason = str(_rc_result.get("block_reason") or "risk_controls_circuit_breaker")

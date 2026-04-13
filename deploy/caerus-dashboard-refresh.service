@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Caerus dashboard data from broker and artifacts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=brettolson
+Group=brettolson
+WorkingDirectory=/home/brettolson/quant-daily-report
+ExecStart=/home/brettolson/.venvs/quant-daily-report/bin/python3 scripts/refresh_quant_dashboard.py --repo-root /home/brettolson/quant-daily-report --output-dir /var/www/caerus-dashboard --env-file /home/brettolson/.caerus/alpaca.env

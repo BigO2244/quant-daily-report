@@ -3,13 +3,14 @@
   "benchmark_ticker": "SPY",
   "execution": {
     "price": "next_open",
-    "slippage_bps": 5,
+    "slippage_bps": 25,
     "sent_ledger_path": "outputs/orders_sent/orders_sent.csv"
   },
   "constraints": {
     "allow_fractional_shares": true,
     "min_trade_dollars": 100.0,
-    "cash_buffer_bps": 10.0
+    "cash_buffer_bps": 10.0,
+    "rebalance_deadband_pct": 0.01
   },
   "mode": {
     "trading_mode": "paper",

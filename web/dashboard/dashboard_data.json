@@ -1,312 +1,948 @@
 {
-  "run_meta": {
-    "report_date": "2026-02-27",
-    "run_id": "2026-02-27T134547-0500_62ce595",
-    "mode": "SHADOW",
-    "overall_status": "FAIL",
-    "benchmark": "SPY",
-    "last_updated": "2026-03-11T21:07:14Z",
-    "status_banner": "Showing most recent successful run (2026-02-27). Latest attempted run (2026-03-10T095535-0400_3edf5f4) failed before completion. Derived broker estimate is suspicious and has been de-emphasized.",
-    "latest_attempted_run": {
-      "run_id": "2026-03-10T095535-0400_3edf5f4",
-      "report_date": "2026-03-10",
-      "created_at": "2026-03-10T13:55:37.818211+00:00"
+  "activity": {
+    "activity_source": "broker_snapshot_current",
+    "buys": 8,
+    "full_exits": 4,
+    "is_simulated": false,
+    "new_positions": 8,
+    "note": "Activity source: outputs/broker_snapshot/broker_snapshot_2026-04-08.json",
+    "orders_filled": 12,
+    "orders_rejected": 0,
+    "sells": 4,
+    "source_report_date": "2026-04-08",
+    "source_run_id": "2026-03-26T151337-0400_2373f93"
+  },
+  "attribution": {
+    "alpha_ann_recent_20d": -0.21665002643516962,
+    "alpha_ann_since": -0.24291555903507098,
+    "bench_down_days": 13,
+    "bench_up_days": 12,
+    "best_relative_day": {
+      "benchmark_return": -0.017858744158138706,
+      "date": "2026-03-26",
+      "port_return": -0.0061733193614822435,
+      "spread": 0.011685424796656463
     },
-    "selected_governed_run": {
-      "run_id": "2026-02-27T134547-0500_62ce595",
-      "report_date": "2026-02-27",
-      "selection_reason": "latest_viable_shadow_simulated_run"
+    "beta_recent_20d": 0.5248347934351353,
+    "beta_since": 0.5098104844681176,
+    "correlation": 0.8081328306210676,
+    "cumulative_alpha": -0.018812624397267275,
+    "cumulative_port_return": -0.028454999999999897,
+    "cumulative_spy_return": -0.009642375602732622,
+    "down_market_hit_rate": 0.8461538461538461,
+    "downside_capture": 0.5920899635478697,
+    "info_ratio": -1.7550197966004006,
+    "n_days": 25,
+    "negative_excess_days": 11,
+    "positive_excess_days": 14,
+    "reason": null,
+    "source_name": "live_overlay",
+    "tracking_error_ann": 0.11588193743440245,
+    "up_market_hit_rate": 0.25,
+    "upside_capture": 0.3778996165879541,
+    "window_end": "2026-04-08",
+    "window_start": "2026-03-03",
+    "worst_relative_day": {
+      "benchmark_return": 0.02906792569891481,
+      "date": "2026-03-31",
+      "port_return": 0.009440108271232983,
+      "spread": -0.019627817427681826
     }
   },
-  "kpis": {
-    "portfolio_value": 9999.550018310549,
-    "daily_pl": 0.0,
-    "daily_return": 0.0,
-    "benchmark_return": -0.0075852843081221,
-    "excess_return": 0.0075852843081221,
-    "holdings": 4,
-    "turnover": 0.3148406535996432,
-    "run_status": "SIMULATED"
+  "broker_snapshot": {
+    "as_of": "2026-04-08T19:19:52.573584+00:00",
+    "buying_power": 11295.9,
+    "buying_power_note": null,
+    "cash": 1580.45,
+    "confidence_note": "",
+    "display_equity": 9715.45,
+    "equity": 9715.45,
+    "last_equity": 9597.11,
+    "market_value": 8135.0,
+    "portfolio_value": 9715.45,
+    "positions_count": 16,
+    "source": "artifact:outputs/broker/posttrade_account_snapshot.json",
+    "source_detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
+    "status": "ACTIVE",
+    "suspicious": false,
+    "trade_date": "2026-04-08",
+    "trust_level": "authoritative"
   },
+  "builder_notes": {
+    "all_warnings": [
+      "Historical latest attempted run status: failed_unknown. Live broker overlay is showing 2026-04-08.",
+      "Missing critical run artifacts: outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+    ],
+    "broker_snapshot": {
+      "freshness": "overlay",
+      "source_detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
+      "source_mode": "authoritative_artifact",
+      "source_used": "artifact:outputs/broker/posttrade_account_snapshot.json",
+      "suspicious": false,
+      "trust_level": "authoritative"
+    },
+    "build_timestamp": "2026-04-08T19:29:20+00:00",
+    "degraded_metrics": [
+      "negative_alpha"
+    ],
+    "missing_files": [
+      "outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json",
+      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json",
+      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+    ],
+    "performance": {
+      "benchmark_asof_date": "2026-04-08",
+      "benchmark_path": "outputs/perf/live_overlay_benchmark_close_history.csv",
+      "comparison_mode": "same_day",
+      "nav_path": "outputs/perf/live_overlay_nav_series.csv",
+      "portfolio_asof_date": "2026-04-08",
+      "source_name": "live_overlay"
+    },
+    "warnings": [
+      "Historical latest attempted run status: failed_unknown. Live broker overlay is showing 2026-04-08.",
+      "Missing critical run artifacts: outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+    ]
+  },
+  "contribution_snapshot": {
+    "age_days": 2,
+    "asof_date": "2026-02-25",
+    "negative_contributors": 5,
+    "net_contribution": 0.000871594270785606,
+    "paths": {
+      "sleeves": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/perf/contribution_sleeves_2026-02-25.csv",
+      "tickers": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/perf/contribution_tickers_2026-02-25.csv"
+    },
+    "positive_contributors": 5,
+    "sleeve_rows": 1,
+    "source_mode": "governed_historical",
+    "ticker_rows": 10,
+    "top_laggards": [
+      {
+        "contribution": -0.0002469846427541158,
+        "return": -0.0054870560640091215,
+        "sleeve": "core",
+        "ticker": "NEE",
+        "weight_start": 0.04501223240165989
+      },
+      {
+        "contribution": -0.0001563539945305188,
+        "return": -0.003370155250806639,
+        "sleeve": "core",
+        "ticker": "JNJ",
+        "weight_start": 0.04639370678638494
+      },
+      {
+        "contribution": -0.00015236905416042578,
+        "return": -0.0032589816328539856,
+        "sleeve": "core",
+        "ticker": "WBD",
+        "weight_start": 0.04675357867144275
+      }
+    ],
+    "top_sleeves": [
+      {
+        "contribution": 0.000871594270785606,
+        "sleeve": "core",
+        "sleeve_return": 0.002245954214946284,
+        "weight_start": 0.3880730359440795
+      }
+    ],
+    "top_winners": [
+      {
+        "contribution": 0.0004745305861150432,
+        "return": 0.012515554568145015,
+        "sleeve": "core",
+        "ticker": "ROST",
+        "weight_start": 0.03791526644155533
+      },
+      {
+        "contribution": 0.0003718802920266823,
+        "return": 0.01100849074124155,
+        "sleeve": "core",
+        "ticker": "ADI",
+        "weight_start": 0.03378122403587008
+      },
+      {
+        "contribution": 0.0003218462760787212,
+        "return": 0.004961132320955741,
+        "sleeve": "core",
+        "ticker": "SPY",
+        "weight_start": 0.06487355209600999
+      }
+    ]
+  },
+  "data_freshness": {
+    "alignment_detail": "Authoritative broker overlay active for 2026-04-08 over governed run date 2026-02-27.",
+    "broker_as_of": "2026-04-08T19:19:52.573584+00:00",
+    "broker_source_detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
+    "broker_trust_level": "authoritative",
+    "broker_vs_run_alignment": "overlay",
+    "run_last_updated": "2026-04-08T19:29:20+00:00",
+    "run_report_date": "2026-02-27",
+    "stale_threshold_hours": 36,
+    "suspicious_broker_value": false,
+    "suspicious_reason": ""
+  },
+  "edge_diagnostics": {
+    "capital_deployed": 0.8373261145906777,
+    "current_cash_ratio": 0.16267388540932226,
+    "executed_turnover_pct": 0.4232711815716204,
+    "largest_position_weight": 0.10997740711958787,
+    "positions_count": 16,
+    "recommendations": [
+      {
+        "detail": "Test lower cash floors or higher gross exposure in supportive tapes so the strategy participates when the market gaps higher.",
+        "label": "Reduce Cash Drag"
+      },
+      {
+        "detail": "Review entry filters, position sizing, and regime overlays to avoid carrying a half-beta book during market upswings.",
+        "label": "Raise Upside Capture"
+      },
+      {
+        "detail": "Compare the live book against simpler baselines such as equal-weight top-N, sector-neutral top-N, and slower rebalance variants to isolate whether the edge is in ranking, timing, or risk overlay.",
+        "label": "Re-test Stock Selection"
+      },
+      {
+        "detail": "Decide whether the engine should target benchmark-relative participation or absolute-return defensiveness, then tune exposure overlays and cash policy to match that objective.",
+        "label": "Align Beta With Intent"
+      },
+      {
+        "detail": "Test wider rebalance bands, slower refresh cadence, and trade-netting rules to see whether turnover is eroding edge faster than it improves signal responsiveness.",
+        "label": "Lower Churn"
+      }
+    ],
+    "signals": [
+      {
+        "detail": "16.3% cash leaves 83.7% deployed. That implies roughly 0.36% of benchmark participation drag over the active comparison horizon.",
+        "label": "Market Participation",
+        "status": "warning"
+      },
+      {
+        "detail": "Captured 0.38x of SPY on 12 up-market sessions.",
+        "label": "Upside Capture",
+        "status": "warning"
+      },
+      {
+        "detail": "Annualized alpha -24.29%; information ratio -1.76.",
+        "label": "Selection Quality",
+        "status": "warning"
+      },
+      {
+        "detail": "Portfolio beta is 0.51 versus SPY over the aligned window.",
+        "label": "Beta Alignment",
+        "status": "warning"
+      },
+      {
+        "detail": "Largest position 11.0%; top 5 account for 36.5% of equity.",
+        "label": "Concentration",
+        "status": "pass"
+      },
+      {
+        "detail": "Today's filled notional was about 42.3% of current equity.",
+        "label": "Rebalance Intensity",
+        "status": "warning"
+      }
+    ],
+    "top5_concentration": 0.36505462948190764,
+    "top_positions": [
+      {
+        "market_value": 1068.48,
+        "ticker": "GM",
+        "unrealized_plpc": 0.03676,
+        "weight": 0.10997740711958787
+      },
+      {
+        "market_value": 703.0,
+        "ticker": "GILD",
+        "unrealized_plpc": 0.01352,
+        "weight": 0.07235897462289445
+      },
+      {
+        "market_value": 633.25,
+        "ticker": "QCOM",
+        "unrealized_plpc": -0.01257,
+        "weight": 0.0651796880226855
+      },
+      {
+        "market_value": 626.8,
+        "ticker": "COP",
+        "unrealized_plpc": -0.01501,
+        "weight": 0.06451579700374145
+      },
+      {
+        "market_value": 515.14,
+        "ticker": "AAPL",
+        "unrealized_plpc": -0.01401,
+        "weight": 0.05302276271299836
+      }
+    ]
+  },
+  "exceptions": [
+    {
+      "category": "Execution",
+      "message": "Historical latest attempted run status: failed_unknown. Live broker overlay is showing 2026-04-08.",
+      "status": "warning"
+    },
+    {
+      "category": "Data / artifacts",
+      "message": "Missing critical run artifacts: outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json",
+      "status": "warning"
+    }
+  ],
+  "execution_integrity": {
+    "affected_symbols": [],
+    "duplicate_fill_suspicions_count": 0,
+    "duplicate_guard_status": "CLEAR",
+    "post_execution_recon_status": "OK_RECONCILED",
+    "repair_suggestions": [],
+    "visible": true
+  },
+  "governed_snapshot": {
+    "as_of": "2026-02-27",
+    "cash": 8211.255012512207,
+    "equity": 9999.550018310547,
+    "market_value": 1788.3,
+    "portfolio_value": 9999.550018310547,
+    "source": "governed:nav_timeseries",
+    "status": "fresh"
+  },
+  "kpis": {
+    "benchmark_return": 0.022071614142098683,
+    "daily_pl": 118.34,
+    "daily_return": 0.0123308,
+    "excess_return": -0.009740818725561873,
+    "holdings": 16,
+    "portfolio_value": 9715.45,
+    "run_status": "FALLBACK_VIEW",
+    "turnover": null
+  },
+  "operating_checks": [
+    {
+      "detail": "Historical latest attempted run status: failed_unknown; live broker overlay is current.",
+      "label": "Run completed",
+      "status": "warning"
+    },
+    {
+      "detail": "Accepted orders: 12.",
+      "label": "Trades executed",
+      "status": "pass"
+    },
+    {
+      "detail": "Broker positions match expected post-execution state.",
+      "label": "Reconciliation passed",
+      "status": "pass"
+    },
+    {
+      "detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
+      "label": "Broker snapshot authoritative",
+      "status": "pass"
+    },
+    {
+      "detail": "Monitor payload refreshed for static serving.",
+      "label": "Dashboard payload generated",
+      "status": "pass"
+    }
+  ],
   "perf_summary": {
-    "mtd_return": 0.0,
-    "qtd_return": 0.0,
-    "since_inception_return": 0.0,
-    "since_inception_alpha": 0.007585284308122109,
-    "current_drawdown": 0.0,
-    "best_day": 0.0,
-    "worst_day": 0.0
+    "best_day": 0.01532975391221636,
+    "current_drawdown": 0.028454999999999897,
+    "mtd_return": 0.012422573841421425,
+    "qtd_return": 0.012422573841421425,
+    "since_inception_alpha": -0.018812624397267275,
+    "since_inception_return": -0.028454999999999897,
+    "worst_day": -0.012911591379632159
+  },
+  "risk": {
+    "breaker_status": "PARTIAL",
+    "cash_position": 0.16267388540932226,
+    "drawdown": 0.028454999999999897,
+    "gross_exposure": 0.17883754794203,
+    "largest_position_weight": 0.10997740711958787,
+    "turnover_limit_pct": 0.35,
+    "turnover_pct": null
+  },
+  "run_meta": {
+    "benchmark": "SPY",
+    "benchmark_asof_date": "2026-04-08",
+    "comparison_asof_date": "2026-04-08",
+    "comparison_mode": "same_day",
+    "fallback_in_use": true,
+    "last_updated": "2026-04-08T19:29:20+00:00",
+    "latest_attempted_is_complete": false,
+    "latest_attempted_missing_artifacts": [
+      "outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json",
+      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json",
+      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+    ],
+    "latest_attempted_run": {
+      "created_at": "2026-03-26T19:18:08.173700Z",
+      "report_date": "2026-03-18",
+      "run_id": "2026-03-26T151337-0400_2373f93"
+    },
+    "latest_attempted_terminal_status": "failed_unknown",
+    "live_broker_overlay": true,
+    "mode": "ALPACA",
+    "overall_status": "WARNING",
+    "performance_source": "live_overlay",
+    "portfolio_asof_date": "2026-04-08",
+    "report_date": "2026-02-27",
+    "run_id": "governed-fallback-2026-02-27",
+    "selected_governed_run": {
+      "report_date": "2026-02-27",
+      "run_id": "governed-fallback-2026-02-27",
+      "selection_reason": "latest_successful_governed_snapshot"
+    },
+    "status_banner": "Showing governed dashboard state from 2026-02-27. Live broker overlay active for 2026-04-08. Latest attempted run 2026-03-26T151337-0400_2373f93 (2026-03-18) did not complete, but a newer broker snapshot is available. Authoritative Alpaca snapshot as of 2026-04-08 loaded."
   },
   "series": {
-    "nav": [
-      {
-        "date": "2026-02-27",
-        "value": 9999.550018310549
-      }
-    ],
     "benchmark": [
       {
-        "date": "2026-02-23",
-        "value": 682.3900146484375
+        "date": "2026-03-03",
+        "value": 680.3300170898438
       },
       {
-        "date": "2026-02-24",
-        "value": 687.3499755859375
+        "date": "2026-03-04",
+        "value": 685.1300048828125
       },
       {
-        "date": "2026-02-25",
-        "value": 693.1500244140625
+        "date": "2026-03-05",
+        "value": 681.3099975585938
       },
       {
-        "date": "2026-02-26",
-        "value": 689.2999877929688
+        "date": "2026-03-06",
+        "value": 672.3800048828125
       },
       {
-        "date": "2026-02-27",
-        "value": 685.989990234375
+        "date": "2026-03-09",
+        "value": 678.27001953125
+      },
+      {
+        "date": "2026-03-10",
+        "value": 677.1799926757812
+      },
+      {
+        "date": "2026-03-11",
+        "value": 676.3300170898438
+      },
+      {
+        "date": "2026-03-12",
+        "value": 666.0599975585938
+      },
+      {
+        "date": "2026-03-13",
+        "value": 662.2899780273438
+      },
+      {
+        "date": "2026-03-16",
+        "value": 669.030029296875
+      },
+      {
+        "date": "2026-03-17",
+        "value": 670.7899780273438
+      },
+      {
+        "date": "2026-03-18",
+        "value": 661.4299926757812
+      },
+      {
+        "date": "2026-03-19",
+        "value": 659.7999877929688
+      },
+      {
+        "date": "2026-03-20",
+        "value": 648.5700073242188
+      },
+      {
+        "date": "2026-03-23",
+        "value": 655.3800048828125
+      },
+      {
+        "date": "2026-03-24",
+        "value": 653.1799926757812
+      },
+      {
+        "date": "2026-03-25",
+        "value": 656.8200073242188
+      },
+      {
+        "date": "2026-03-26",
+        "value": 645.0900268554688
+      },
+      {
+        "date": "2026-03-27",
+        "value": 634.0900268554688
+      },
+      {
+        "date": "2026-03-30",
+        "value": 631.969970703125
+      },
+      {
+        "date": "2026-03-31",
+        "value": 650.3400268554688
+      },
+      {
+        "date": "2026-04-01",
+        "value": 655.239990234375
+      },
+      {
+        "date": "2026-04-02",
+        "value": 655.8300170898438
+      },
+      {
+        "date": "2026-04-06",
+        "value": 658.9299926757812
+      },
+      {
+        "date": "2026-04-07",
+        "value": 659.219970703125
+      },
+      {
+        "date": "2026-04-08",
+        "value": 673.77001953125
       }
     ],
+    "chart_metadata": {
+      "daily_returns_chart": {
+        "baseline": 0.0,
+        "note": "Daily return percentage",
+        "title": "Daily Returns",
+        "x_axis_label": "Date",
+        "y_axis_label": "Return (%)"
+      },
+      "excess_returns_chart": {
+        "baseline": 0.0,
+        "note": "Daily outperformance vs SPY",
+        "title": "Excess Return vs SPY",
+        "x_axis_label": "Date",
+        "y_axis_label": "Excess Return (%)"
+      },
+      "nav_chart": {
+        "note": "Indexed to 100 at inception",
+        "title": "Portfolio NAV vs Benchmark",
+        "x_axis_label": "Date",
+        "y_axis_label": "Value"
+      }
+    },
     "daily_returns": [
       {
-        "date": "2026-02-27",
+        "date": "2026-03-04",
         "value": 0.0
-      }
-    ],
-    "excess_returns": [
+      },
       {
-        "date": "2026-02-27",
-        "value": 0.0075852843081221
+        "date": "2026-03-05",
+        "value": -0.0029759999999999787
+      },
+      {
+        "date": "2026-03-06",
+        "value": -0.007886470135122003
+      },
+      {
+        "date": "2026-03-09",
+        "value": 0.0010524070399056118
+      },
+      {
+        "date": "2026-03-10",
+        "value": 0.0006776395119378886
+      },
+      {
+        "date": "2026-03-11",
+        "value": 0.0010021465919447525
+      },
+      {
+        "date": "2026-03-12",
+        "value": -0.01097628107022508
+      },
+      {
+        "date": "2026-03-13",
+        "value": -0.012911591379632159
+      },
+      {
+        "date": "2026-03-16",
+        "value": 0.01532975391221636
+      },
+      {
+        "date": "2026-03-17",
+        "value": 0.0031185253219983
+      },
+      {
+        "date": "2026-03-18",
+        "value": -0.011287507997684076
+      },
+      {
+        "date": "2026-03-19",
+        "value": -0.005206693529116846
+      },
+      {
+        "date": "2026-03-20",
+        "value": -0.012670951140911324
+      },
+      {
+        "date": "2026-03-23",
+        "value": 0.0029570136667909086
+      },
+      {
+        "date": "2026-03-24",
+        "value": 0.0063203044073478765
+      },
+      {
+        "date": "2026-03-25",
+        "value": -0.0018921485662500848
+      },
+      {
+        "date": "2026-03-26",
+        "value": -0.0061733193614822435
+      },
+      {
+        "date": "2026-03-27",
+        "value": -0.009395718372493422
+      },
+      {
+        "date": "2026-03-30",
+        "value": 0.0019498184942179364
+      },
+      {
+        "date": "2026-03-31",
+        "value": 0.009440108271232983
+      },
+      {
+        "date": "2026-04-01",
+        "value": -0.0010867438074340097
+      },
+      {
+        "date": "2026-04-02",
+        "value": 0.0014995456553816844
+      },
+      {
+        "date": "2026-04-06",
+        "value": 0.003069517815169176
+      },
+      {
+        "date": "2026-04-07",
+        "value": -0.004462595421430904
+      },
+      {
+        "date": "2026-04-08",
+        "value": 0.01233079541653681
       }
     ],
     "drawdown": [
       {
-        "date": "2026-02-27",
+        "date": "2026-03-03",
         "value": 0.0
+      },
+      {
+        "date": "2026-03-04",
+        "value": 0.0
+      },
+      {
+        "date": "2026-03-05",
+        "value": -0.0029759999999999787
+      },
+      {
+        "date": "2026-03-06",
+        "value": -0.010838999999999932
+      },
+      {
+        "date": "2026-03-09",
+        "value": -0.009797999999999973
+      },
+      {
+        "date": "2026-03-10",
+        "value": -0.009126999999999996
+      },
+      {
+        "date": "2026-03-11",
+        "value": -0.008133999999999975
+      },
+      {
+        "date": "2026-03-12",
+        "value": -0.019020999999999955
+      },
+      {
+        "date": "2026-03-13",
+        "value": -0.03168700000000013
+      },
+      {
+        "date": "2026-03-16",
+        "value": -0.016843000000000052
+      },
+      {
+        "date": "2026-03-17",
+        "value": -0.01377700000000004
+      },
+      {
+        "date": "2026-03-18",
+        "value": -0.02490900000000007
+      },
+      {
+        "date": "2026-03-19",
+        "value": -0.029986000000000068
+      },
+      {
+        "date": "2026-03-20",
+        "value": -0.04227700000000001
+      },
+      {
+        "date": "2026-03-23",
+        "value": -0.03944500000000006
+      },
+      {
+        "date": "2026-03-24",
+        "value": -0.033374000000000015
+      },
+      {
+        "date": "2026-03-25",
+        "value": -0.035203000000000095
+      },
+      {
+        "date": "2026-03-26",
+        "value": -0.04115900000000006
+      },
+      {
+        "date": "2026-03-27",
+        "value": -0.05016799999999999
+      },
+      {
+        "date": "2026-03-30",
+        "value": -0.048316000000000026
+      },
+      {
+        "date": "2026-03-31",
+        "value": -0.03933199999999992
+      },
+      {
+        "date": "2026-04-01",
+        "value": -0.04037599999999997
+      },
+      {
+        "date": "2026-04-02",
+        "value": -0.03893700000000011
+      },
+      {
+        "date": "2026-04-06",
+        "value": -0.0359870000000001
+      },
+      {
+        "date": "2026-04-07",
+        "value": -0.04028899999999991
+      },
+      {
+        "date": "2026-04-08",
+        "value": -0.028454999999999897
       }
     ],
-    "chart_metadata": {
-      "nav_chart": {
-        "title": "Portfolio NAV Indexed to 100",
-        "x_axis_label": "Date (YYYY-MM-DD)",
-        "y_axis_label": "Indexed Value",
-        "font_size": "12pt",
-        "show_grid": true,
-        "note": "Portfolio NAV (blue) vs SPY benchmark (orange), indexed to 100 at inception"
+    "excess_returns": [
+      {
+        "date": "2026-03-04",
+        "value": -0.007055381465455479
       },
-      "daily_returns_chart": {
-        "title": "Daily Strategy Returns",
-        "x_axis_label": "Date (YYYY-MM-DD)",
-        "y_axis_label": "Daily Return (%)",
-        "baseline": 0.0,
-        "baseline_visible": true,
-        "font_size": "12pt",
-        "show_grid": true,
-        "note": "Daily percentage return; positive values are gains"
+      {
+        "date": "2026-03-05",
+        "value": 0.002599594846225073
       },
-      "excess_returns_chart": {
-        "title": "Daily Excess Return vs SPY",
-        "x_axis_label": "Date (YYYY-MM-DD)",
-        "y_axis_label": "Excess Return (%)",
-        "baseline": 0.0,
-        "baseline_visible": true,
-        "font_size": "12pt",
-        "show_grid": true,
-        "note": "Daily outperformance/underperformance vs SPY"
+      {
+        "date": "2026-03-06",
+        "value": 0.005220621655371294
+      },
+      {
+        "date": "2026-03-09",
+        "value": -0.007707542104423926
+      },
+      {
+        "date": "2026-03-10",
+        "value": 0.0022847087086894646
+      },
+      {
+        "date": "2026-03-11",
+        "value": 0.002257315963648976
+      },
+      {
+        "date": "2026-03-12",
+        "value": 0.00420864237209162
+      },
+      {
+        "date": "2026-03-13",
+        "value": -0.007251411298154764
+      },
+      {
+        "date": "2026-03-16",
+        "value": 0.005152865399413065
+      },
+      {
+        "date": "2026-03-17",
+        "value": 0.00048792781007733765
+      },
+      {
+        "date": "2026-03-18",
+        "value": 0.0026661670096382872
+      },
+      {
+        "date": "2026-03-19",
+        "value": -0.002742328591236687
+      },
+      {
+        "date": "2026-03-20",
+        "value": 0.004349328756810822
+      },
+      {
+        "date": "2026-03-23",
+        "value": -0.007543005578146911
+      },
+      {
+        "date": "2026-03-24",
+        "value": 0.009677154159614343
+      },
+      {
+        "date": "2026-03-25",
+        "value": -0.007464907513636043
+      },
+      {
+        "date": "2026-03-26",
+        "value": 0.011685424796656463
+      },
+      {
+        "date": "2026-03-27",
+        "value": 0.00765616515083456
+      },
+      {
+        "date": "2026-03-30",
+        "value": 0.005293280877402551
+      },
+      {
+        "date": "2026-03-31",
+        "value": -0.019627817427681826
+      },
+      {
+        "date": "2026-04-01",
+        "value": -0.008621207590324032
+      },
+      {
+        "date": "2026-04-02",
+        "value": 0.0005990712272905263
+      },
+      {
+        "date": "2026-04-06",
+        "value": -0.0016572795334688362
+      },
+      {
+        "date": "2026-04-07",
+        "value": -0.0049026695272796905
+      },
+      {
+        "date": "2026-04-08",
+        "value": -0.009740818725561873
       }
-    }
+    ],
+    "nav": [
+      {
+        "date": "2026-03-03",
+        "value": 10000.0
+      },
+      {
+        "date": "2026-03-04",
+        "value": 10000.0
+      },
+      {
+        "date": "2026-03-05",
+        "value": 9970.24
+      },
+      {
+        "date": "2026-03-06",
+        "value": 9891.61
+      },
+      {
+        "date": "2026-03-09",
+        "value": 9902.02
+      },
+      {
+        "date": "2026-03-10",
+        "value": 9908.73
+      },
+      {
+        "date": "2026-03-11",
+        "value": 9918.66
+      },
+      {
+        "date": "2026-03-12",
+        "value": 9809.79
+      },
+      {
+        "date": "2026-03-13",
+        "value": 9683.13
+      },
+      {
+        "date": "2026-03-16",
+        "value": 9831.57
+      },
+      {
+        "date": "2026-03-17",
+        "value": 9862.23
+      },
+      {
+        "date": "2026-03-18",
+        "value": 9750.91
+      },
+      {
+        "date": "2026-03-19",
+        "value": 9700.14
+      },
+      {
+        "date": "2026-03-20",
+        "value": 9577.23
+      },
+      {
+        "date": "2026-03-23",
+        "value": 9605.55
+      },
+      {
+        "date": "2026-03-24",
+        "value": 9666.26
+      },
+      {
+        "date": "2026-03-25",
+        "value": 9647.97
+      },
+      {
+        "date": "2026-03-26",
+        "value": 9588.41
+      },
+      {
+        "date": "2026-03-27",
+        "value": 9498.32
+      },
+      {
+        "date": "2026-03-30",
+        "value": 9516.84
+      },
+      {
+        "date": "2026-03-31",
+        "value": 9606.68
+      },
+      {
+        "date": "2026-04-01",
+        "value": 9596.24
+      },
+      {
+        "date": "2026-04-02",
+        "value": 9610.63
+      },
+      {
+        "date": "2026-04-06",
+        "value": 9640.13
+      },
+      {
+        "date": "2026-04-07",
+        "value": 9597.11
+      },
+      {
+        "date": "2026-04-08",
+        "value": 9715.45
+      }
+    ]
   },
-  "risk": {
-    "drawdown": 0.0,
-    "cash_position": 0.8211624520579698,
-    "gross_exposure": 0.17883754794203,
-    "largest_position_weight": null,
-    "turnover_pct": 0.3148406535996432,
-    "turnover_limit_pct": 0.35,
-    "breaker_status": "PARTIAL"
-  },
-  "activity": {
-    "buys": 4,
-    "sells": 3,
-    "new_positions": 4,
-    "full_exits": 3,
-    "orders_filled": 7,
-    "orders_rejected": 0,
-    "source_run_id": "2026-02-27T134547-0500_62ce595",
-    "source_report_date": "2026-02-27",
-    "activity_source": "run_trades_csv",
-    "is_simulated": true,
-    "note": "Activity source: run_trades_csv from shadow simulation run 2026-02-27T134547-0500_62ce595"
-  },
-  "governed_snapshot": {
-    "portfolio_value": 9999.550018310549,
-    "equity": 9999.550018310549,
-    "cash": 8211.255012512207,
-    "market_value": 1788.2950057983417,
-    "as_of": "2026-02-27",
-    "source": "governed:canonical_performance",
-    "status": "fresh"
-  },
-  "broker_snapshot": {
-    "portfolio_value": 99853.01,
-    "cash": 91911.93,
-    "buying_power": null,
-    "buying_power_note": "Not provided by broker source",
-    "equity": 99853.01,
-    "market_value": 7941.080000000002,
-    "as_of": "2026-03-03T16:14:07Z",
-    "source": "artifact:outputs/broker/broker_snapshot_latest.json",
-    "source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
-    "trust_level": "authoritative",
-    "status": "suspicious",
-    "suspicious": true,
-    "confidence_note": "Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)",
-    "display_equity": null
-  },
-  "data_freshness": {
-    "run_report_date": "2026-02-27",
-    "run_last_updated": "2026-02-27T18:45:47Z",
-    "broker_as_of": "2026-03-03T16:14:07Z",
-    "broker_vs_run_alignment": "stale",
-    "alignment_detail": "Broker snapshot older than 36 hours.",
-    "stale_threshold_hours": 36,
-    "broker_trust_level": "authoritative",
-    "broker_source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
-    "suspicious_broker_value": true,
-    "suspicious_reason": "Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
-  },
-  "top_changes": [
-    {
-      "ticker": "MNST",
-      "action": "BUY",
-      "change_weight": 0.05162032208755242,
-      "reason": "rebalance_to_target"
-    },
-    {
-      "ticker": "MO",
-      "action": "BUY",
-      "change_weight": 0.04884469899013247,
-      "reason": "rebalance_to_target"
-    },
-    {
-      "ticker": "JNJ",
-      "action": "SELL",
-      "change_weight": -0.04878379193729283,
-      "reason": "removed_from_targets"
-    },
-    {
-      "ticker": "WBD",
-      "action": "SELL",
-      "change_weight": -0.04822404556776625,
-      "reason": "removed_from_targets"
-    },
-    {
-      "ticker": "JCI",
-      "action": "BUY",
-      "change_weight": 0.043285947422164114,
-      "reason": "rebalance_to_target"
-    }
-  ],
-  "exceptions": [
-    {
-      "category": "Reconciliation",
-      "status": "pass",
-      "message": "Reconciliation not applicable in shadow simulation mode."
-    },
-    {
-      "category": "Execution",
-      "status": "fail",
-      "message": "Execution status: SIMULATED."
-    },
-    {
-      "category": "Risk",
-      "status": "warning",
-      "message": "Breaker or regime indicates caution: PARTIAL."
-    },
-    {
-      "category": "Broker snapshot",
-      "status": "warning",
-      "message": "Suspicious derived broker estimate: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
-    },
-    {
-      "category": "Data / artifacts",
-      "status": "warning",
-      "message": "Missing optional artifacts: outputs/paper_state/canonical_positions.json, outputs/runs/2026-02-27T134547-0500_62ce595/execution_payload.json, outputs/runs/2026-02-27T134547-0500_62ce595/execution_results.json"
-    }
-  ],
-  "operating_checks": [
-    {
-      "label": "Run completed",
-      "status": "fail",
-      "detail": "Execution status: SIMULATED."
-    },
-    {
-      "label": "Trades executed",
-      "status": "pass",
-      "detail": "Orders filled: 7."
-    },
-    {
-      "label": "Reconciliation passed",
-      "status": "warning",
-      "detail": "Reconciliation artifact not found."
-    },
-    {
-      "label": "Canonical positions present",
-      "status": "pass",
-      "detail": "canonical-model-snapshot/canonical_positions.json"
-    },
-    {
-      "label": "Ledger updated",
-      "status": "pass",
-      "detail": "Ledger has at least one trade row."
-    },
-    {
-      "label": "Daily report generated",
-      "status": "pass",
-      "detail": "Run report HTML found."
-    },
-    {
-      "label": "Metric completeness",
-      "status": "pass",
-      "detail": "All executive metrics computed."
-    },
-    {
-      "label": "Broker snapshot available",
-      "status": "warning",
-      "detail": "Suspicious derived estimate. Source: artifact snapshot outputs/broker/broker_snapshot_latest.json"
-    },
-    {
-      "label": "Run vs broker alignment",
-      "status": "warning",
-      "detail": "Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
-    }
-  ],
   "sources": [
     {
       "path": "outputs/latest.json",
-      "status": "used"
-    },
-    {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/meta.json",
-      "status": "present"
-    },
-    {
-      "path": "outputs/alpha_assessment/canonical_performance.csv",
-      "status": "used"
-    },
-    {
-      "path": "outputs/perf/nav_timeseries.csv",
-      "status": "used"
-    },
-    {
-      "path": "outputs/perf/benchmark_close_history.csv",
-      "status": "used"
-    },
-    {
-      "path": "outputs/perf/vix_close_history.csv",
-      "status": "used"
-    },
-    {
-      "path": "outputs/ledger/trades.csv",
       "status": "used"
     },
     {
@@ -314,89 +950,72 @@
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-03-10T095535-0400_3edf5f4/operator_summary.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_results.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_payload.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/operator_summary.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/execution_results.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/execution_payload.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/execution_email/2026-02-27.json",
+      "path": "outputs/trading_day_summary.json",
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/snapshots/health_2026-02-27.json",
+      "path": "outputs/perf/live_overlay_nav_series.csv",
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/snapshots/integrity_2026-02-27.json",
+      "path": "outputs/perf/live_overlay_benchmark_close_history.csv",
       "status": "used"
     },
     {
-      "path": "outputs/paper_state/canonical_positions.json",
-      "status": "missing"
-    },
-    {
-      "path": "canonical-model-snapshot/canonical_positions.json",
+      "path": "outputs/broker_snapshot/broker_snapshot_2026-04-08.json",
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json",
-      "status": "missing"
-    },
-    {
-      "path": "outputs/broker/broker_snapshot_latest.json",
+      "path": "outputs/broker/recon_posttrade_2026-04-08.json",
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-02-27T134547-0500_62ce595/reports/quant_report_*.html",
+      "path": "outputs/perf/contribution_tickers_2026-02-25.csv",
       "status": "used"
+    },
+    {
+      "path": "outputs/perf/contribution_sleeves_2026-02-25.csv",
+      "status": "used"
+    },
+    {
+      "path": "outputs/broker/posttrade_account_snapshot.json",
+      "status": "used"
+    },
+    {
+      "path": "outputs/runs/2026-03-26T151337-0400_2373f93",
+      "status": "present"
     }
   ],
-  "builder_notes": {
-    "build_timestamp": "2026-03-11T21:07:14Z",
-    "missing_files": [
-      "outputs/paper_state/canonical_positions.json",
-      "outputs/runs/2026-02-27T134547-0500_62ce595/execution_payload.json",
-      "outputs/runs/2026-02-27T134547-0500_62ce595/execution_results.json",
-      "outputs/runs/2026-02-27T134547-0500_62ce595/logs/preflight_failure.json",
-      "outputs/runs/2026-02-27T134547-0500_62ce595/operator_summary.json",
-      "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_payload.json",
-      "outputs/runs/2026-03-10T095535-0400_3edf5f4/execution_results.json",
-      "outputs/runs/2026-03-10T095535-0400_3edf5f4/operator_summary.json"
-    ],
-    "warnings": [
-      "Suspicious broker snapshot: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
-    ],
-    "all_warnings": [
-      "Estimated daily P/L from latest NAV and daily return due to missing prior NAV point.",
-      "Suspicious broker snapshot: Broker equity $99,853 is 9.99x vs governed $10,000 (implausible magnitude)"
-    ],
-    "degraded_metrics": [],
-    "broker_snapshot": {
-      "source_mode": "authoritative_artifact",
-      "source_used": "artifact:outputs/broker/broker_snapshot_latest.json",
-      "freshness": "stale",
-      "trust_level": "authoritative",
-      "source_detail": "artifact snapshot outputs/broker/broker_snapshot_latest.json",
-      "suspicious": true
+  "top_changes": [
+    {
+      "action": "SELL",
+      "change_weight": 0.04986490589730789,
+      "reason": "executed_order",
+      "ticker": "ADSK"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.03831011430247698,
+      "reason": "executed_order",
+      "ticker": "BKNG"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.06034923755461662,
+      "reason": "executed_order",
+      "ticker": "NSC"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.01810312440494264,
+      "reason": "executed_order",
+      "ticker": "PANW"
+    },
+    {
+      "action": "BUY",
+      "change_weight": 0.01580575269287578,
+      "reason": "executed_order",
+      "ticker": "GM"
     }
-  }
+  ]
 }

@@ -4,15 +4,17 @@
 
 Alpha Stack is a multi-sleeve regime-switching equity platform. It generates a daily HTML report and builds a portfolio from sleeve-level signals rather than from a single monolithic strategy.
 
-The current baseline portfolio targets:
+Current live reality:
 
-- 80% Sleeve 1
-- 20% Sleeve 2
-- $10,000 baseline capital
+- `sleeve_trend`, `sleeve_2` (value), `sleeve_quality`, and `sleeve_mean_reversion` feed the live allocator
+- `sleeve_1` still runs as a research lane and its output is not yet part of the live book
+- live sleeve budgets are conditioned on the regime layer, then filtered by sleeve activity and broker-drift thresholds
+- the live posture is now explicitly aggressive: cash is kept near zero in risk-on, and only true defensive regimes may route cash to the Treasury sleeve
+- legacy static weights in `core/portfolio_alloc.py` are not the live source of truth
 
-## Sleeve 1: Trend / Momentum
+## Sleeve 1: Research Momentum Ranker
 
-Status: partially implemented.
+Status: implemented as research, not currently live.
 
 Current facts:
 
@@ -28,7 +30,7 @@ Design intent:
 
 ## Sleeve 2: Value
 
-Status: fully implemented.
+Status: implemented and part of the live allocator.
 
 Current behavior:
 
@@ -42,33 +44,44 @@ Important caveat:
 - This implementation is not point-in-time correct for historical backtests
 - Backtest results should not be trusted for promotion decisions until fundamental timing is fixed
 
-## Planned Sleeves
+## Additional Live Sleeves
 
 | Sleeve | Status | Notes |
 |---|---|---|
-| Sleeve 3: Quality | Planned | Signals not yet defined |
-| Sleeve 4: Mean Reversion | Planned | Signals not yet defined |
+| Sleeve 3: Quality | Live | Included in regime-aware allocation |
+| Sleeve 4: Mean Reversion | Live | Included in regime-aware allocation and breadth-gated |
 
 ## Regime Layer Intent
 
-The regime layer is designed as a four-dimension classifier:
+The regime layer is a four-dimension classifier:
 
 - trend
 - volatility
 - breadth
 - macro
 
-The intended future implementation is a state machine with explicit thresholds and hysteresis. That state-machine behavior is not yet fully implemented.
+It is implemented in `regime/` with explicit thresholds and EWM smoothing. Phase 1 (live regime-aware allocator) is operationally confirmed as of 2026-04-09. The main remaining gap is promotion-grade attribution and richer operator diagnostics, not basic regime classification.
+
+### Promotion Gate
+
+`core/live_regime_review.py` writes a `promotion_gate` block to each run's `live_regime_review.json`. The gate evaluates blocking conditions before a regime change is eligible for operator promotion to a higher trust level. Key checks:
+
+- regime stability (hysteresis window cleared)
+- sleeve drift within threshold (≥3% min before rebalance triggers)
+- no active execution blockers in `operator_summary.json`
+
+`regime_review_status` and `regime_review_blockers` are surfaced in `operator_summary.json` for each run. A clear `promotion_gate` does not auto-promote — it signals operator review is warranted.
 
 ## Portfolio Construction
 
-Current allocation baseline is configured in `core/portfolio_alloc.py`.
+Live allocation is orchestrated in `daily_quant_report.py` by:
 
-Near-term design goals:
+- building sleeve outputs
+- computing regime-conditioned target sleeve weights
+- applying a broker-drift threshold before rebalancing
+- passing active sleeve strengths into `PortfolioAllocator`
 
-- static sleeve weights first
-- regime-aware overrides second
-- risk controls and attribution after the initial allocator contract is stable
+`core/portfolio_alloc.py` still provides the combining and constraint engine, but its static helper defaults are legacy-only.
 
 ## Promotion Ladder
 
@@ -81,18 +94,19 @@ The legacy model remains frozen until Alpha Stack is validated.
 ## Known Issues
 
 1. Sleeve 2 backtests contain look-ahead bias due to snapshot P/E inputs.
-2. Sleeve 2 backtests do not yet produce a full daily equity curve.
-3. Sleeve 1 factor pipeline functions are still stubs.
-4. No transaction cost model is included in backtests.
-5. No benchmark comparison is surfaced in the daily report.
+2. The research `alpha_stack` allocator is richer than the live path, so production and research are not yet fully aligned.
+3. Sleeve 1 remains research-only despite being part of the long-term sleeve roadmap.
+4. No transaction cost model is included in most sleeve-level backtests.
+5. Sleeve-level attribution and overlap diagnostics remain weaker than required for promotion-grade regime evaluation.
 
 ## Planned Sequence
 
-1. Add point-in-time correct fundamentals and FRED macro inputs.
-2. Build the regime state machine.
-3. Extend Sleeve 1.
-4. Refactor Sleeve 2 to PIT-safe multi-metric value.
-5. Add attribution.
-6. Add allocator v1 regime overrides.
-7. Implement Sleeve 3.
-8. Implement Sleeve 4.
+1. ~~Harden the existing live regime-aware allocator with tests and operator diagnostics.~~ — **Done (Phase 1, confirmed 2026-04-09).**
+2. Extend Sleeve 1 into a promotable live candidate or formally replace it.
+3. Refactor Sleeve 2 to PIT-safe multi-metric value.
+4. Add promotion-grade attribution and overlap diagnostics.
+5. ~~Introduce options overlays after the equity allocator is stable, starting with a shadow-only SPY hedge overlay lane.~~ — **Done (Phase 2A shadow-only, confirmed 2026-04-09). No live execution path exists.**
+5b. Phase 2B — paper/promotion review for options overlays is now in progress; it produces paper-ready review artifacts only and still does not submit orders.
+5c. Phase 2C — live options execution lane is now scaffolded as a gated, disabled-by-default path for protective SPY puts only; daily runs submit only when `ALLOW_OPTIONS_EXECUTION=1` or `ALLOW_OPTIONS_SUBMISSION=1` is explicitly set.
+6. ~~Add bond / defensive ETF sleeves, starting with a live-capable defensive Treasury ETF sleeve that can absorb defensive regime cash.~~ — **Done (Phase 3A, confirmed 2026-04-09).**
+7. Bias the live allocator toward participation first: lower cash, tighter defensive routing, and stronger trend weighting in bullish regimes.

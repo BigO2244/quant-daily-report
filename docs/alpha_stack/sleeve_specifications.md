@@ -4,10 +4,11 @@
 
 | Sleeve | Role | Status | Current Notes |
 |---|---|---|---|
-| Sleeve 1 | Trend / Momentum | Partial | Shared factor pipeline stubs remain in `core/quant_report.py`. |
-| Sleeve 2 | Value | Implemented | Uses snapshot yfinance P/E against industry-relative ranking and hold-day rules. |
-| Sleeve 3 | Quality | Planned | Signals not yet defined. |
-| Sleeve 4 | Mean Reversion | Planned | Signals not yet defined. |
+| Sleeve 1 | Trend / Momentum | Research only | Shared factor pipeline stubs remain in `core/quant_report.py`; output discarded in live path. |
+| Sleeve 2 | Value | Live | Uses snapshot yfinance P/E against industry-relative ranking and hold-day rules. |
+| Sleeve 3 | Quality | Live | Included in regime-aware allocation. |
+| Sleeve 4 | Mean Reversion | Live | Included in regime-aware allocation; breadth-gated. |
+| Defensive ETF Sleeve | Bonds / capital preservation | Live-capable (Phase 3A confirmed) | Uses `SGOV`, `SHY`, `IEF`, `TLT`; regime-gated to `risk_off_defensive`, `high_volatility`, `breadth_washout`; freed weight routes to cash only when invalid. |
 
 ## Sleeve 1
 
@@ -39,17 +40,25 @@ Critical caveat:
 
 ## Sleeve 3
 
-Planned only:
-
-- quality sleeve
-- signals not yet defined
+Live — quality sleeve. Included in the regime-aware multi-sleeve allocator.
 
 ## Sleeve 4
 
-Planned only:
+Live — mean reversion sleeve. Included in the regime-aware multi-sleeve allocator; breadth-gated.
 
-- mean reversion sleeve
-- signals not yet defined
+## Defensive ETF Sleeve
+
+Current implementation:
+
+- live-capable sleeve using liquid Treasury ETFs
+- ETF set: `SGOV`, `SHY`, `IEF`, `TLT`
+- activates in defensive regimes instead of staying entirely in cash
+- uses regime state plus simple recent-return / realized-vol diagnostics to tilt duration exposure
+
+Current caveat:
+
+- this is an initial deterministic defensive sleeve, not a fully researched duration-rotation model
+- it is meant to reduce dead cash in risk-off states while preserving auditability
 
 ## Common Promotion Ladder
 

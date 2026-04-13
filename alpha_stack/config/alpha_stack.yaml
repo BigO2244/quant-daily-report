@@ -21,7 +21,7 @@ feature_flags:
   ENABLE_ALPHA_STACK: false           # Master switch — must be true for any AS component to run
   ENABLE_ALPHA_STACK_SHADOW: false    # Enable shadow mode (parallel paper NAV tracking)
   ENABLE_MEAN_REVERSION: false        # MR sleeve — off until validated in shadow
-  ENABLE_OPTIONS_OVERLAY: false       # Future options overlays — not implemented in v1
+  ENABLE_OPTIONS_OVERLAY: false       # Phase 2A shadow artifacts exist; no options execution path yet
   ENABLE_VALUE_SLEEVE: false          # Value sleeve — off until PIT fundamentals are wired
   ENABLE_QUALITY_SLEEVE: false        # Quality sleeve — off until PIT fundamentals are wired
 
@@ -294,10 +294,14 @@ allocator:
 # RESEARCH / BACKTEST
 # ===========================================================================
 research:
-  # Cost model (applied in all backtest outputs)
+  # Cost model (applied in all backtest outputs).
+  # NOTE: slippage_bps is ONE-WAY and applied to absolute turnover notional at
+  # each rebalance (see engine/backtest_engine.py run_backtest docstring).
+  # This matches the paper broker live cost assumption of 25bps one-way,
+  # calibrated 2026-04-11 to align backtest & live expected drag.
   cost_model:
-    slippage_bps: 25                # 25bps round-trip slippage
-    commission_bps: 1               # ~1bps commission at scale
+    slippage_bps: 25                # 25 bps one-way slippage (matches live broker)
+    commission_bps: 1               # ~1 bps commission at scale (applied as extra one-way cost)
     apply_to_turnover: true
 
   # Rolling attribution windows

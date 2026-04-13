@@ -1,7 +1,13 @@
 import json
+import tempfile
+import unittest
+from pathlib import Path
 
 from scripts.export_alpaca_broker_snapshot import (
     build_snapshot_payload,
+    load_env_file,
+    write_posttrade_recon_from_snapshot,
+    write_supporting_broker_artifacts,
     write_snapshot_json,
 )
 
@@ -89,3 +95,75 @@ def test_write_snapshot_json_uses_deterministic_filename(tmp_path):
     out_path = write_snapshot_json(payload, tmp_path, "2026-03-10")
     assert out_path == tmp_path / "broker_snapshot_2026-03-10.json"
     assert out_path.exists()
+
+
+class ExportAlpacaBrokerSnapshotCompatTest(unittest.TestCase):
+    def test_load_env_file_accepts_export_syntax(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / "alpaca.env"
+            env_path.write_text(
+                "export ALPACA_API_KEY_ID='key123'\nALPACA_API_SECRET_KEY=\"secret456\"\n",
+                encoding="utf-8",
+            )
+            load_env_file(env_path)
+            self.assertEqual("key123", __import__("os").environ.get("ALPACA_API_KEY_ID"))
+            self.assertEqual("secret456", __import__("os").environ.get("ALPACA_API_SECRET_KEY"))
+
+    def test_write_supporting_broker_artifacts_populates_monitor_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            payload = build_snapshot_payload(
+                report_date="2026-04-08",
+                workflow_run_id="run-1",
+                git_sha="deadbeef",
+                account={"cash": "1500.5", "equity": "9700.0", "buying_power": "11000.0", "last_equity": "9600.0"},
+                positions=[{"symbol": "AAPL", "qty": "2", "market_value": "400.0"}],
+                orders_all=[],
+                orders_closed=[],
+                fills=[],
+            )
+            paths = write_supporting_broker_artifacts(repo_root=repo_root, payload=payload, source_mode="alpaca_rest_api")
+            account_snapshot = json.loads(paths["posttrade_account_snapshot"].read_text(encoding="utf-8"))
+            positions_snapshot = json.loads(paths["posttrade_positions"].read_text(encoding="utf-8"))
+            latest_snapshot = json.loads(paths["broker_snapshot_latest"].read_text(encoding="utf-8"))
+
+            self.assertEqual("2026-04-08", account_snapshot["trade_date"])
+            self.assertEqual("9700.0", account_snapshot["equity"])
+            self.assertEqual(1, positions_snapshot["positions_count"])
+            self.assertEqual("authoritative", latest_snapshot["trust_level"])
+            self.assertEqual("alpaca_rest_api", latest_snapshot["source"])
+
+    def test_write_posttrade_recon_from_snapshot_uses_same_day_latest_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            run_root = repo_root / "outputs" / "runs" / "2026-04-08T093500-0400_live"
+            broker_dir = run_root / "broker"
+            broker_dir.mkdir(parents=True, exist_ok=True)
+            (repo_root / "outputs").mkdir(parents=True, exist_ok=True)
+            (repo_root / "outputs" / "latest_run.json").write_text(
+                json.dumps(
+                    {
+                        "trade_date": "2026-04-08",
+                        "run_root": str(run_root),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "pretrade_positions.json").write_text(
+                json.dumps({"positions": [{"symbol": "AAPL", "qty": "2", "side": "long"}]}) + "\n",
+                encoding="utf-8",
+            )
+            payload = build_snapshot_payload(
+                report_date="2026-04-08",
+                workflow_run_id="run-1",
+                git_sha="deadbeef",
+                account={"cash": "1500.5", "equity": "9700.0"},
+                positions=[{"symbol": "AAPL", "qty": "3", "side": "long", "market_value": "600.0"}],
+                orders_all=[],
+                orders_closed=[],
+                fills=[{"symbol": "AAPL", "side": "buy", "qty": "1", "price": "200.0"}],
+            )
+            recon = write_posttrade_recon_from_snapshot(repo_root=repo_root, payload=payload, report_date="2026-04-08")
+            self.assertIsNotNone(recon)
+            self.assertEqual("OK_RECONCILED", recon["drift_status"])

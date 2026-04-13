@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from core.options_overlay_paper import (
+    build_options_overlay_paper_review,
+    write_options_overlay_paper_review,
+)
+
+
+class OptionsOverlayPaperTests(unittest.TestCase):
+    def test_risk_on_stays_inactive(self) -> None:
+        payload = build_options_overlay_paper_review(
+            trade_date="2026-04-10",
+            asof_date="2026-04-09",
+            regime_summary={
+                "composite_regime": "risk_on_trending",
+                "trend_state": "strong_up",
+                "volatility_state": "normal",
+                "breadth_state": "healthy",
+                "macro_state": "risk_on",
+            },
+            portfolio_equity=100000.0,
+            portfolio_cash=5000.0,
+            spy_price=680.0,
+            live_regime_review={"promotion_gate": {"overall_status": "ready"}},
+        )
+
+        self.assertEqual(payload["paper_review_status"], "INACTIVE")
+        self.assertFalse(payload["paper_ready"])
+
+    def test_shadow_ready_becomes_paper_ready(self) -> None:
+        payload = build_options_overlay_paper_review(
+            trade_date="2026-04-10",
+            asof_date="2026-04-09",
+            regime_summary={
+                "composite_regime": "risk_off_defensive",
+                "trend_state": "weak_down",
+                "volatility_state": "elevated",
+                "breadth_state": "deteriorating",
+                "macro_state": "risk_off",
+            },
+            portfolio_equity=200000.0,
+            portfolio_cash=5000.0,
+            spy_price=680.0,
+            live_regime_review={"promotion_gate": {"overall_status": "ready"}},
+        )
+
+        self.assertEqual(payload["shadow"]["trigger"]["status"], "READY_SHADOW_RECOMMENDATION")
+        self.assertEqual(payload["paper_review_status"], "READY_FOR_PAPER_REVIEW")
+        self.assertTrue(payload["paper_ready"])
+        self.assertEqual(payload["paper_plan"]["strategy"], "put_spread")
+        self.assertEqual(payload["paper_plan"]["contracts_recommended"], 1)
+        self.assertEqual(payload["paper_plan"]["roll_before_dte"], 14)
+
+    def test_small_account_stays_watch_only(self) -> None:
+        payload = build_options_overlay_paper_review(
+            trade_date="2026-04-10",
+            asof_date="2026-04-09",
+            regime_summary={
+                "composite_regime": "high_volatility",
+                "trend_state": "strong_down",
+                "volatility_state": "crisis",
+                "breadth_state": "washed_out",
+                "macro_state": "stress",
+            },
+            portfolio_equity=10000.0,
+            portfolio_cash=1000.0,
+            spy_price=680.0,
+            live_regime_review={"promotion_gate": {"overall_status": "ready"}},
+        )
+
+        self.assertEqual(payload["paper_review_status"], "WATCH_ONLY_CONTRACT_TOO_LARGE")
+        self.assertFalse(payload["paper_ready"])
+
+    def test_writer_persists_json_and_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            payload = write_options_overlay_paper_review(
+                run_root=tmp_path / "outputs" / "runs" / "run-1",
+                output_dir=tmp_path / "outputs" / "options_overlay_paper",
+                trade_date="2026-04-10",
+                asof_date="2026-04-09",
+                regime_summary={
+                    "composite_regime": "risk_off_defensive",
+                    "trend_state": "weak_down",
+                    "volatility_state": "elevated",
+                    "breadth_state": "deteriorating",
+                    "macro_state": "risk_off",
+                },
+                portfolio_equity=200000.0,
+                portfolio_cash=5000.0,
+                spy_price=680.0,
+                live_regime_review={"promotion_gate": {"overall_status": "ready"}},
+            )
+
+            artifact_paths = payload["artifact_paths"]
+            self.assertTrue(Path(artifact_paths["run_json"]).exists())
+            self.assertTrue(Path(artifact_paths["dated_json"]).exists())
+            self.assertTrue(Path(artifact_paths["dated_markdown"]).exists())
+            self.assertTrue(Path(artifact_paths["latest_json"]).exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

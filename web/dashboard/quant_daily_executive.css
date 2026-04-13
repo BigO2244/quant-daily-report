@@ -185,6 +185,9 @@ body { font-family: var(--font-sans); color: var(--c-text); min-height: 100vh; }
   letter-spacing: -0.02em;
 }
 .kpi-value--status { font-size: 1.1rem; }
+.kpi-value.status-wrap { white-space: normal; line-height: 1.2; word-break: break-word; }
+.kpi-value.status-long { font-size: 0.95rem; }
+.kpi-value.status-very-long { font-size: 0.82rem; }
 .kpi-sub { font-size: 0.7rem; color: var(--c-text-dim); }
 
 /* ── Performance row ─────────────────────────────────────────── */
@@ -201,6 +204,13 @@ body { font-family: var(--font-sans); color: var(--c-text); min-height: 100vh; }
   gap: var(--gap);
 }
 @media (max-width: 700px) { .chart-pair-row { grid-template-columns: 1fr; } }
+
+.edge-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.1fr;
+  gap: var(--gap);
+}
+@media (max-width: 1100px) { .edge-row { grid-template-columns: 1fr; } }
 
 .chart-card canvas { width: 100%; display: block; }
 
@@ -397,6 +407,109 @@ body { font-family: var(--font-sans); color: var(--c-text); min-height: 100vh; }
 }
 .integrity-tag.warn { border-color: var(--c-yellow); color: var(--c-yellow); }
 .integrity-tag.fail { border-color: var(--c-red); color: var(--c-red); }
+
+/* ── Edge diagnostics ───────────────────────────────────────── */
+.edge-list, .contribution-panel { display: flex; flex-direction: column; gap: 10px; }
+.edge-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+@media (max-width: 700px) { .edge-summary { grid-template-columns: 1fr; } }
+.edge-summary .stat-row { padding: 5px 0; }
+.edge-items { display: flex; flex-direction: column; gap: 8px; }
+.edge-item {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  padding: 10px 12px;
+}
+.edge-item.pass { border-color: var(--c-green); }
+.edge-item.warning { border-color: var(--c-yellow); }
+.edge-item.fail { border-color: var(--c-red); }
+.edge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.edge-label {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+}
+.edge-badge {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.edge-badge.pass { color: var(--c-green); }
+.edge-badge.warning { color: var(--c-yellow); }
+.edge-badge.fail { color: var(--c-red); }
+.edge-detail { font-size: 0.8rem; line-height: 1.45; color: var(--c-text); }
+
+.contribution-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+@media (max-width: 700px) { .contribution-summary { grid-template-columns: 1fr; } }
+.contrib-stat {
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  padding: 10px 12px;
+}
+.contrib-stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--c-text-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.contrib-stat-value {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.contribution-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 700px) { .contribution-grid { grid-template-columns: 1fr; } }
+.contrib-col {
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  padding: 10px 12px;
+}
+.contrib-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--c-text-2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.contrib-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-border-soft);
+  font-size: 0.8rem;
+}
+.contrib-row:last-child { border-bottom: none; }
+.contrib-name { font-family: var(--font-mono); color: var(--c-text); }
+.contrib-val { font-family: var(--font-mono); }
+.contrib-meta { color: var(--c-text-dim); font-size: 0.76rem; line-height: 1.45; }
 
 /* ── Footer ──────────────────────────────────────────────────── */
 .dash-footer {

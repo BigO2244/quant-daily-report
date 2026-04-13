@@ -1,1142 +1,1569 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import datetime as dt
 import json
-import os
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import math
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 
-from core.trading_mode import normalize_trading_mode
-
-
-@dataclass
-class SourceRecord:
-    path: str
-    status: str
+STALE_THRESHOLD_HOURS = 36
 
 
-def _canonical_mode_label(value: object, default: str = "paper") -> str:
-    return str(normalize_trading_mode(value, default=default) or default).upper()
+def _read_json(path: Path) -> dict[str, Any] | list[Any] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace("$", "").replace(",", "")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    number = _float_or_none(value)
+    if number is None:
+        return None
+    return int(number)
+
+
+def _resolve_metric(snapshot: dict[str, Any] | list[Any] | None, *keys: str) -> float | None:
+    if not isinstance(snapshot, dict):
+        return None
+    base = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else snapshot
+    for key in keys:
+        if key in base:
+            value = _float_or_none(base.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _resolve_positions_count(snapshot: dict[str, Any] | list[Any] | None) -> int | None:
+    if snapshot is None:
+        return None
+    if isinstance(snapshot, list):
+        return len(snapshot)
+    positions_count = _int_or_none(snapshot.get("positions_count"))
+    if positions_count is not None:
+        return positions_count
+    positions = snapshot.get("positions")
+    if isinstance(positions, list):
+        return len(positions)
+    normalized = snapshot.get("normalized_positions")
+    if isinstance(normalized, dict):
+        return len(normalized)
+    return None
+
+
+def _parse_date(value: Any) -> dt.date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _parse_datetime(value: Any) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _status_is_complete(value: Any) -> bool:
+    status = str(value or "").strip().lower()
+    return status in {"success", "ok", "pass", "no_action", "executed", "idempotent_replay"}
+
+
+def _status_is_failure(value: Any) -> bool:
+    status = str(value or "").strip().lower()
+    if not status:
+        return False
+    return "fail" in status or status in {"error", "halted", "degraded"}
+
+
+def _relative_str(repo_root: Path, path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        return str(path.resolve().relative_to(repo_root.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _iso_date_prefix(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:10]
+
+
+def _same_trade_date(value: Any, trade_date: str | None) -> bool:
+    if not trade_date:
+        return False
+    return _iso_date_prefix(value) == str(trade_date)
+
+
+def _path_trade_date(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    for token in reversed(path.stem.split("_")):
+        if _parse_date(token) is not None:
+            return token
+    return None
+
+
+def _latest_row_on_or_before(
+    rows: list[dict[str, Any]],
+    target_date: str | None,
+    value_key: str,
+) -> dict[str, Any] | None:
+    if not target_date:
+        return None
+    latest: dict[str, Any] | None = None
+    for row in rows:
+        row_date = str(row.get("date") or "").strip()
+        if not row_date or row_date > target_date:
+            continue
+        if row.get(value_key) is None:
+            continue
+        latest = row
+    return latest
+
+
+def _mean(values: list[float]) -> float | None:
+    numeric = [float(value) for value in values if value is not None]
+    if not numeric:
+        return None
+    return sum(numeric) / float(len(numeric))
+
+
+def _sample_stddev(values: list[float]) -> float | None:
+    numeric = [float(value) for value in values if value is not None]
+    if len(numeric) < 2:
+        return None
+    mean_value = _mean(numeric)
+    if mean_value is None:
+        return None
+    variance = sum((value - mean_value) ** 2 for value in numeric) / float(len(numeric) - 1)
+    return math.sqrt(variance)
+
+
+def _regress_alpha_beta(port_returns: list[float], bench_returns: list[float]) -> tuple[float | None, float | None]:
+    if len(port_returns) != len(bench_returns) or len(port_returns) < 2:
+        return None, None
+    mean_port = _mean(port_returns)
+    mean_bench = _mean(bench_returns)
+    if mean_port is None or mean_bench is None:
+        return None, None
+    variance_bench = sum((value - mean_bench) ** 2 for value in bench_returns) / float(len(bench_returns) - 1)
+    if variance_bench <= 0:
+        return None, None
+    covariance = sum(
+        (bench - mean_bench) * (port - mean_port)
+        for port, bench in zip(port_returns, bench_returns)
+    ) / float(len(port_returns) - 1)
+    beta = covariance / variance_bench
+    alpha_daily = mean_port - beta * mean_bench
+    return beta, alpha_daily * 252.0
+
+
+def _correlation(port_returns: list[float], bench_returns: list[float]) -> float | None:
+    if len(port_returns) != len(bench_returns) or len(port_returns) < 2:
+        return None
+    port_std = _sample_stddev(port_returns)
+    bench_std = _sample_stddev(bench_returns)
+    if port_std in (None, 0) or bench_std in (None, 0):
+        return None
+    mean_port = _mean(port_returns)
+    mean_bench = _mean(bench_returns)
+    if mean_port is None or mean_bench is None:
+        return None
+    covariance = sum(
+        (bench - mean_bench) * (port - mean_port)
+        for port, bench in zip(port_returns, bench_returns)
+    ) / float(len(port_returns) - 1)
+    return covariance / (port_std * bench_std)
+
+
+def _capture_ratio(port_returns: list[float], bench_returns: list[float], *, positive: bool) -> float | None:
+    selected = [
+        (port, bench)
+        for port, bench in zip(port_returns, bench_returns)
+        if (bench > 0 if positive else bench < 0)
+    ]
+    if not selected:
+        return None
+    mean_port = _mean([port for port, _ in selected])
+    mean_bench = _mean([bench for _, bench in selected])
+    if mean_port is None or mean_bench in (None, 0):
+        return None
+    return mean_port / mean_bench
+
+
+def _hit_rate(port_returns: list[float], bench_returns: list[float], *, positive: bool) -> float | None:
+    selected = [
+        (port, bench)
+        for port, bench in zip(port_returns, bench_returns)
+        if (bench > 0 if positive else bench < 0)
+    ]
+    if not selected:
+        return None
+    hits = sum(1 for port, bench in selected if port > bench)
+    return hits / float(len(selected))
+
+
+def _find_latest_dated_file(root: Path, pattern: str, max_date: str | None = None) -> Path | None:
+    matches: list[tuple[str, Path]] = []
+    for path in root.glob(pattern):
+        trade_date = _path_trade_date(path)
+        if trade_date is None:
+            continue
+        if max_date and trade_date > max_date:
+            continue
+        matches.append((trade_date, path))
+    if not matches:
+        return None
+    return max(matches, key=lambda item: item[0])[1]
+
+
+def _build_attribution_summary(performance: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "source_name": performance.get("source_name"),
+        "window_start": None,
+        "window_end": None,
+        "n_days": 0,
+        "cumulative_port_return": None,
+        "cumulative_spy_return": None,
+        "cumulative_alpha": None,
+        "beta_since": None,
+        "alpha_ann_since": None,
+        "beta_recent_20d": None,
+        "alpha_ann_recent_20d": None,
+        "tracking_error_ann": None,
+        "info_ratio": None,
+        "correlation": None,
+        "upside_capture": None,
+        "downside_capture": None,
+        "up_market_hit_rate": None,
+        "down_market_hit_rate": None,
+        "positive_excess_days": 0,
+        "negative_excess_days": 0,
+        "bench_up_days": 0,
+        "bench_down_days": 0,
+        "best_relative_day": None,
+        "worst_relative_day": None,
+        "reason": None,
+    }
+
+    nav_map = {
+        str(row.get("date") or "").strip(): row.get("equity")
+        for row in performance.get("nav_rows", [])
+        if str(row.get("date") or "").strip() and row.get("equity") not in (None, 0)
+    }
+    benchmark_map = {
+        str(row.get("date") or "").strip(): row.get("spy_close")
+        for row in performance.get("benchmark_rows", [])
+        if str(row.get("date") or "").strip() and row.get("spy_close") not in (None, 0)
+    }
+    common_dates = sorted(set(nav_map) & set(benchmark_map))
+    if len(common_dates) < 2:
+        out["reason"] = "insufficient_overlap"
+        return out
+
+    port_returns: list[float] = []
+    bench_returns: list[float] = []
+    dated_spreads: list[dict[str, Any]] = []
+    for prev_date, curr_date in zip(common_dates[:-1], common_dates[1:]):
+        prev_port = nav_map.get(prev_date)
+        curr_port = nav_map.get(curr_date)
+        prev_bench = benchmark_map.get(prev_date)
+        curr_bench = benchmark_map.get(curr_date)
+        if prev_port in (None, 0) or curr_port is None or prev_bench in (None, 0) or curr_bench is None:
+            continue
+        port_ret = (float(curr_port) / float(prev_port)) - 1.0
+        bench_ret = (float(curr_bench) / float(prev_bench)) - 1.0
+        spread = port_ret - bench_ret
+        port_returns.append(port_ret)
+        bench_returns.append(bench_ret)
+        dated_spreads.append(
+            {
+                "date": curr_date,
+                "port_return": port_ret,
+                "benchmark_return": bench_ret,
+                "spread": spread,
+            }
+        )
+
+    if len(port_returns) < 2:
+        out["reason"] = "insufficient_aligned_returns"
+        return out
+
+    out["window_start"] = common_dates[0]
+    out["window_end"] = common_dates[-1]
+    out["n_days"] = len(port_returns)
+    out["cumulative_port_return"] = (float(nav_map[common_dates[-1]]) / float(nav_map[common_dates[0]])) - 1.0
+    out["cumulative_spy_return"] = (float(benchmark_map[common_dates[-1]]) / float(benchmark_map[common_dates[0]])) - 1.0
+    out["cumulative_alpha"] = out["cumulative_port_return"] - out["cumulative_spy_return"]
+
+    beta_since, alpha_ann_since = _regress_alpha_beta(port_returns, bench_returns)
+    out["beta_since"] = beta_since
+    out["alpha_ann_since"] = alpha_ann_since
+
+    recent_window = 20
+    if len(port_returns) >= recent_window:
+        beta_recent, alpha_recent = _regress_alpha_beta(port_returns[-recent_window:], bench_returns[-recent_window:])
+        out["beta_recent_20d"] = beta_recent
+        out["alpha_ann_recent_20d"] = alpha_recent
+
+    excess_returns = [port - bench for port, bench in zip(port_returns, bench_returns)]
+    excess_std = _sample_stddev(excess_returns)
+    excess_mean = _mean(excess_returns)
+    if excess_std not in (None, 0):
+        out["tracking_error_ann"] = excess_std * math.sqrt(252.0)
+        out["info_ratio"] = (
+            (excess_mean / excess_std) * math.sqrt(252.0)
+            if excess_mean is not None
+            else None
+        )
+    out["correlation"] = _correlation(port_returns, bench_returns)
+    out["upside_capture"] = _capture_ratio(port_returns, bench_returns, positive=True)
+    out["downside_capture"] = _capture_ratio(port_returns, bench_returns, positive=False)
+    out["up_market_hit_rate"] = _hit_rate(port_returns, bench_returns, positive=True)
+    out["down_market_hit_rate"] = _hit_rate(port_returns, bench_returns, positive=False)
+    out["positive_excess_days"] = sum(1 for spread in excess_returns if spread > 0)
+    out["negative_excess_days"] = sum(1 for spread in excess_returns if spread < 0)
+    out["bench_up_days"] = sum(1 for bench in bench_returns if bench > 0)
+    out["bench_down_days"] = sum(1 for bench in bench_returns if bench < 0)
+    if dated_spreads:
+        out["best_relative_day"] = max(dated_spreads, key=lambda item: item["spread"])
+        out["worst_relative_day"] = min(dated_spreads, key=lambda item: item["spread"])
+    return out
+
+
+def _load_contribution_snapshot(repo_root: Path, max_date: str | None) -> dict[str, Any]:
+    out = {
+        "asof_date": None,
+        "source_mode": None,
+        "age_days": None,
+        "ticker_rows": 0,
+        "sleeve_rows": 0,
+        "net_contribution": None,
+        "positive_contributors": 0,
+        "negative_contributors": 0,
+        "top_winners": [],
+        "top_laggards": [],
+        "top_sleeves": [],
+        "paths": {"tickers": "", "sleeves": ""},
+    }
+    perf_dir = repo_root / "outputs" / "perf"
+    tickers_path = _find_latest_dated_file(perf_dir, "contribution_tickers_*.csv", max_date=max_date)
+    if tickers_path is None:
+        return out
+
+    asof_date = _path_trade_date(tickers_path)
+    sleeves_path = (
+        perf_dir / f"contribution_sleeves_{asof_date}.csv"
+        if asof_date and (perf_dir / f"contribution_sleeves_{asof_date}.csv").exists()
+        else _find_latest_dated_file(perf_dir, "contribution_sleeves_*.csv", max_date=asof_date)
+    )
+
+    ticker_rows: list[dict[str, Any]] = []
+    with tickers_path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            ticker = str(row.get("ticker") or "").strip().upper()
+            contribution = _float_or_none(row.get("contribution"))
+            if not ticker or contribution is None:
+                continue
+            ticker_rows.append(
+                {
+                    "ticker": ticker,
+                    "weight_start": _float_or_none(row.get("weight_start")),
+                    "return": _float_or_none(row.get("return")),
+                    "contribution": contribution,
+                    "sleeve": str(row.get("sleeve") or "core").strip() or "core",
+                }
+            )
+
+    sleeve_rows: list[dict[str, Any]] = []
+    if sleeves_path is not None:
+        with sleeves_path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                contribution = _float_or_none(row.get("contribution"))
+                if contribution is None:
+                    continue
+                sleeve_rows.append(
+                    {
+                        "sleeve": str(row.get("sleeve") or "core").strip() or "core",
+                        "weight_start": _float_or_none(row.get("weight_start")),
+                        "sleeve_return": _float_or_none(row.get("sleeve_return")),
+                        "contribution": contribution,
+                    }
+                )
+
+    out["asof_date"] = asof_date
+    out["source_mode"] = "governed_historical" if asof_date and max_date and asof_date < max_date else "current"
+    out["paths"] = {
+        "tickers": str(tickers_path),
+        "sleeves": str(sleeves_path) if sleeves_path is not None else "",
+    }
+    out["ticker_rows"] = len(ticker_rows)
+    out["sleeve_rows"] = len(sleeve_rows)
+    out["net_contribution"] = sum(row["contribution"] for row in ticker_rows) if ticker_rows else None
+    out["positive_contributors"] = sum(1 for row in ticker_rows if row["contribution"] > 0)
+    out["negative_contributors"] = sum(1 for row in ticker_rows if row["contribution"] < 0)
+    out["top_winners"] = sorted(ticker_rows, key=lambda row: row["contribution"], reverse=True)[:3]
+    out["top_laggards"] = sorted(ticker_rows, key=lambda row: row["contribution"])[:3]
+    out["top_sleeves"] = sorted(sleeve_rows, key=lambda row: abs(row["contribution"]), reverse=True)[:3]
+
+    if asof_date and max_date and _parse_date(asof_date) and _parse_date(max_date):
+        out["age_days"] = (_parse_date(max_date) - _parse_date(asof_date)).days
+    return out
+
+
+def _build_position_diagnostics(
+    *,
+    broker_snapshot: dict[str, Any],
+    broker_day_snapshot: dict[str, Any] | None,
+    orders_today: list[dict[str, Any]],
+) -> dict[str, Any]:
+    equity = _float_or_none(broker_snapshot.get("equity"))
+    cash = _float_or_none(broker_snapshot.get("cash"))
+    positions = (
+        broker_day_snapshot.get("positions_current")
+        if isinstance(broker_day_snapshot, dict) and isinstance(broker_day_snapshot.get("positions_current"), list)
+        else []
+    )
+    weights: list[dict[str, Any]] = []
+    if equity not in (None, 0):
+        for item in positions:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or "").strip().upper()
+            market_value = _float_or_none(item.get("market_value"))
+            if not symbol or market_value is None:
+                continue
+            weights.append(
+                {
+                    "ticker": symbol,
+                    "weight": abs(market_value) / float(equity),
+                    "market_value": market_value,
+                    "unrealized_plpc": _float_or_none(item.get("unrealized_plpc")),
+                }
+            )
+    weights.sort(key=lambda row: row["weight"], reverse=True)
+
+    traded_notional = 0.0
+    for order in orders_today:
+        notional = _float_or_none(order.get("notional"))
+        if notional is None:
+            filled_price = _float_or_none(order.get("filled_avg_price")) or _float_or_none(order.get("limit_price")) or _float_or_none(order.get("price"))
+            qty = _float_or_none(order.get("filled_qty")) or _float_or_none(order.get("qty"))
+            if filled_price is not None and qty is not None:
+                notional = filled_price * qty
+        if notional is not None:
+            traded_notional += abs(notional)
+
+    current_cash_ratio = (
+        (float(cash) / float(equity))
+        if cash is not None and equity not in (None, 0)
+        else None
+    )
+    return {
+        "current_cash_ratio": current_cash_ratio,
+        "capital_deployed": (1.0 - current_cash_ratio) if current_cash_ratio is not None else None,
+        "largest_position_weight": weights[0]["weight"] if weights else None,
+        "top5_concentration": sum(item["weight"] for item in weights[:5]) if weights else None,
+        "positions_count": len(weights),
+        "executed_turnover_pct": (traded_notional / float(equity)) if traded_notional and equity not in (None, 0) else None,
+        "top_positions": weights[:5],
+    }
+
+
+def _build_edge_diagnostics(
+    *,
+    attribution: dict[str, Any],
+    position_diag: dict[str, Any],
+    current_benchmark_return: float | None = None,
+) -> dict[str, Any]:
+    diagnostics = {
+        **position_diag,
+        "signals": [],
+        "recommendations": [],
+    }
+    signals: list[dict[str, Any]] = []
+    recommendations: list[dict[str, Any]] = []
+
+    current_cash_ratio = position_diag.get("current_cash_ratio")
+    cumulative_spy = attribution.get("cumulative_spy_return")
+    benchmark_reference = (
+        current_benchmark_return
+        if current_benchmark_return not in (None, 0)
+        else cumulative_spy
+    )
+    if current_cash_ratio is not None:
+        drag_estimate = (
+            current_cash_ratio * benchmark_reference
+            if benchmark_reference not in (None, 0)
+            else None
+        )
+        signals.append(
+            {
+                "label": "Market Participation",
+                "status": "warning" if current_cash_ratio >= 0.12 and (benchmark_reference or 0) > 0 else "pass",
+                "detail": (
+                    f"{current_cash_ratio:.1%} cash leaves {1.0 - current_cash_ratio:.1%} deployed."
+                    + (
+                        f" That implies roughly {drag_estimate:.2%} of benchmark participation drag over the active comparison horizon."
+                        if drag_estimate is not None and drag_estimate > 0
+                        else ""
+                    )
+                ),
+            }
+        )
+        if current_cash_ratio >= 0.12 and (benchmark_reference or 0) > 0:
+            recommendations.append(
+                {
+                    "label": "Reduce Cash Drag",
+                    "detail": "Test lower cash floors or higher gross exposure in supportive tapes so the strategy participates when the market gaps higher.",
+                }
+            )
+
+    upside_capture = attribution.get("upside_capture")
+    bench_up_days = int(attribution.get("bench_up_days") or 0)
+    if upside_capture is not None and bench_up_days >= 3:
+        signals.append(
+            {
+                "label": "Upside Capture",
+                "status": "warning" if upside_capture < 0.8 else "pass",
+                "detail": f"Captured {upside_capture:.2f}x of SPY on {bench_up_days} up-market sessions.",
+            }
+        )
+        if upside_capture < 0.8:
+            recommendations.append(
+                {
+                    "label": "Raise Upside Capture",
+                    "detail": "Review entry filters, position sizing, and regime overlays to avoid carrying a half-beta book during market upswings.",
+                }
+            )
+
+    alpha_ann = attribution.get("alpha_ann_since")
+    info_ratio = attribution.get("info_ratio")
+    if alpha_ann is not None or info_ratio is not None:
+        status = "pass"
+        if (alpha_ann or 0) < 0 or (info_ratio or 0) < 0:
+            status = "warning"
+        signals.append(
+            {
+                "label": "Selection Quality",
+                "status": status,
+                "detail": (
+                    f"Annualized alpha {alpha_ann:.2%}" if alpha_ann is not None else "Annualized alpha unavailable"
+                )
+                + (
+                    f"; information ratio {info_ratio:.2f}."
+                    if info_ratio is not None
+                    else "."
+                ),
+            }
+        )
+        if (alpha_ann or 0) < 0 or (info_ratio or 0) < 0:
+            recommendations.append(
+                {
+                    "label": "Re-test Stock Selection",
+                    "detail": "Compare the live book against simpler baselines such as equal-weight top-N, sector-neutral top-N, and slower rebalance variants to isolate whether the edge is in ranking, timing, or risk overlay.",
+                }
+            )
+
+    beta_since = attribution.get("beta_since")
+    cumulative_alpha = attribution.get("cumulative_alpha")
+    if beta_since is not None:
+        beta_status = "pass"
+        if (
+            ((cumulative_spy is not None and cumulative_spy > 0) or (upside_capture is not None and upside_capture < 0.8))
+            and beta_since < 0.75
+        ):
+            beta_status = "warning"
+        elif cumulative_alpha is not None and cumulative_alpha < 0 and beta_since > 1.25:
+            beta_status = "warning"
+        signals.append(
+            {
+                "label": "Beta Alignment",
+                "status": beta_status,
+                "detail": f"Portfolio beta is {beta_since:.2f} versus SPY over the aligned window.",
+            }
+        )
+        if beta_status == "warning":
+            recommendations.append(
+                {
+                    "label": "Align Beta With Intent",
+                    "detail": "Decide whether the engine should target benchmark-relative participation or absolute-return defensiveness, then tune exposure overlays and cash policy to match that objective.",
+                }
+            )
+
+    largest_position = position_diag.get("largest_position_weight")
+    top5_concentration = position_diag.get("top5_concentration")
+    if largest_position is not None or top5_concentration is not None:
+        concentration_status = "pass"
+        if (largest_position or 0) > 0.12 or (top5_concentration or 0) > 0.45:
+            concentration_status = "warning"
+        signals.append(
+            {
+                "label": "Concentration",
+                "status": concentration_status,
+                "detail": (
+                    f"Largest position {(largest_position or 0):.1%}; top 5 account for {(top5_concentration or 0):.1%} of equity."
+                ),
+            }
+        )
+        if concentration_status == "warning":
+            recommendations.append(
+                {
+                    "label": "Check Concentration Risk",
+                    "detail": "Run scenario tests with tighter single-name or top-5 caps to determine whether a small set of positions is dominating outcome variance.",
+                }
+            )
+
+    executed_turnover = position_diag.get("executed_turnover_pct")
+    if executed_turnover is not None:
+        signals.append(
+            {
+                "label": "Rebalance Intensity",
+                "status": "warning" if executed_turnover > 0.15 and (cumulative_alpha or 0) < 0 else "pass",
+                "detail": f"Today's filled notional was about {executed_turnover:.1%} of current equity.",
+            }
+        )
+        if executed_turnover > 0.15 and (cumulative_alpha or 0) < 0:
+            recommendations.append(
+                {
+                    "label": "Lower Churn",
+                    "detail": "Test wider rebalance bands, slower refresh cadence, and trade-netting rules to see whether turnover is eroding edge faster than it improves signal responsiveness.",
+                }
+            )
+
+    diagnostics["signals"] = signals
+    diagnostics["recommendations"] = recommendations
+    return diagnostics
+
+
+def _load_latest_pointer(repo_root: Path) -> dict[str, Any]:
+    for path in (repo_root / "outputs/latest_run.json", repo_root / "outputs/latest.json"):
+        payload = _read_json(path)
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _resolve_run_root(repo_root: Path, explicit_run_root: str | None) -> Path | None:
+    if explicit_run_root:
+        path = Path(explicit_run_root)
+        return path if path.is_absolute() else repo_root / path
+    latest = _load_latest_pointer(repo_root)
+    run_root = latest.get("run_root") or latest.get("path")
+    if run_root:
+        path = Path(str(run_root))
+        return path if path.is_absolute() else repo_root / path
+    runs_dir = repo_root / "outputs/runs"
+    if not runs_dir.exists():
+        return None
+    run_roots = [path for path in runs_dir.iterdir() if path.is_dir()]
+    if not run_roots:
+        return None
+    return max(run_roots, key=lambda path: path.stat().st_mtime)
+
+
+def _latest_glob(root: Path, pattern: str) -> Path | None:
+    matches = [path for path in root.glob(pattern) if path.is_file()]
+    if not matches:
+        return None
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def _find_artifact(repo_root: Path, run_root: Path | None, trade_date: str | None, names: list[str]) -> Path | None:
+    search_roots: list[Path] = []
+    if run_root is not None:
+        search_roots.extend([run_root, run_root / "broker"])
+    search_roots.append(repo_root / "outputs/broker")
+    search_roots.append(repo_root / "outputs")
+
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for name in names:
+            direct = root / name
+            if direct.exists():
+                return direct
+            if trade_date:
+                dated = _latest_glob(root, f"*{trade_date}*{name}")
+                if dated is not None:
+                    return dated
+    return None
+
+
+def _load_operator_summary(repo_root: Path, run_root: Path | None) -> dict[str, Any]:
+    candidates = []
+    if run_root is not None:
+        candidates.append(run_root / "operator_summary.json")
+    candidates.append(repo_root / "outputs/latest_operator_summary.json")
+    for path in candidates:
+        payload = _read_json(path)
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _load_trading_day_summary(repo_root: Path, run_root: Path | None) -> dict[str, Any]:
+    candidates = []
+    if run_root is not None:
+        candidates.append(run_root / "trading_day_summary.json")
+    candidates.append(repo_root / "outputs/latest_trading_day_summary.json")
+    candidates.append(repo_root / "outputs/trading_day_summary.json")
+    for path in candidates:
+        payload = _read_json(path)
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _derive_trade_date(
+    repo_root: Path,
+    run_root: Path | None,
+    operator_summary: dict[str, Any],
+    trading_day_summary: dict[str, Any],
+    explicit: str | None,
+) -> str:
+    if explicit:
+        return explicit
+    latest = _load_latest_pointer(repo_root)
+    meta = _read_json(run_root / "meta.json") if run_root is not None else None
+    for candidate in (
+        operator_summary.get("trade_date"),
+        latest.get("trade_date"),
+        latest.get("report_date"),
+        meta.get("report_date") if isinstance(meta, dict) else None,
+        trading_day_summary.get("trade_date"),
+    ):
+        if candidate:
+            return str(candidate)
+    return dt.date.today().isoformat()
+
+
+def _derive_trust_level(
+    operator_summary: dict[str, Any],
+    pretrade_ok: bool,
+    posttrade_ok: bool,
+    recon_status: str | None,
+) -> str:
+    status = str(recon_status or "").strip().upper()
+    authoritative = bool(operator_summary.get("broker_authoritative_state"))
+    if authoritative and pretrade_ok and posttrade_ok and status in {"", "PASS", "WARN", "SELF_HEAL", "OK"}:
+        return "HIGH"
+    if authoritative or pretrade_ok or posttrade_ok:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _series_point(date_text: str, value: float | None) -> dict[str, Any]:
+    return {"date": date_text, "value": value}
+
+
+def build_dashboard_payload(repo_root: Path, *, run_root_arg: str | None = None, trade_date_arg: str | None = None) -> dict[str, Any]:
+    run_root = _resolve_run_root(repo_root, run_root_arg)
+    operator_summary = _load_operator_summary(repo_root, run_root)
+    trading_day_summary = _load_trading_day_summary(repo_root, run_root)
+    trade_date = _derive_trade_date(repo_root, run_root, operator_summary, trading_day_summary, trade_date_arg)
+    latest = _load_latest_pointer(repo_root)
+
+    pretrade_account_path = _find_artifact(
+        repo_root,
+        run_root,
+        trade_date,
+        ["pretrade_account_snapshot.json", f"pretrade_account_snapshot_{trade_date}.json"],
+    )
+    pretrade_positions_path = _find_artifact(
+        repo_root,
+        run_root,
+        trade_date,
+        ["pretrade_positions_snapshot.json", "pretrade_positions.json", f"pretrade_positions_{trade_date}.json"],
+    )
+    posttrade_account_path = _find_artifact(
+        repo_root,
+        run_root,
+        trade_date,
+        [
+            "posttrade_account_snapshot.json",
+            "postsell_account_snapshot.json",
+            f"posttrade_account_snapshot_{trade_date}.json",
+        ],
+    )
+    posttrade_positions_path = _find_artifact(
+        repo_root,
+        run_root,
+        trade_date,
+        ["posttrade_positions_snapshot.json", "posttrade_positions.json", f"posttrade_positions_{trade_date}.json"],
+    )
+    recon_posttrade_path = _find_artifact(
+        repo_root,
+        run_root,
+        trade_date,
+        ["recon_posttrade.json", f"recon_posttrade_{trade_date}.json"],
+    )
+    recon_pretrade_path = _find_artifact(
+        repo_root,
+        run_root,
+        trade_date,
+        ["recon_pretrade.json", f"recon_pretrade_{trade_date}.json"],
+    )
+
+    pretrade_account = _read_json(pretrade_account_path) if pretrade_account_path else None
+    pretrade_positions = _read_json(pretrade_positions_path) if pretrade_positions_path else None
+    posttrade_account = _read_json(posttrade_account_path) if posttrade_account_path else None
+    posttrade_positions = _read_json(posttrade_positions_path) if posttrade_positions_path else None
+    recon_posttrade = _read_json(recon_posttrade_path) if recon_posttrade_path else None
+    recon_pretrade = _read_json(recon_pretrade_path) if recon_pretrade_path else None
+
+    pretrade_ok = bool(
+        operator_summary.get("broker_pretrade_snapshot_ok")
+        or pretrade_account is not None
+        or pretrade_positions is not None
+    )
+    posttrade_ok = bool(
+        operator_summary.get("broker_posttrade_snapshot_ok")
+        or posttrade_account is not None
+        or posttrade_positions is not None
+    )
+
+    pretrade_cash = _resolve_metric(pretrade_account, "cash")
+    pretrade_equity = _resolve_metric(pretrade_account, "equity", "portfolio_value")
+    pretrade_buying_power = _resolve_metric(pretrade_account, "buying_power", "daytrading_buying_power")
+    posttrade_cash = _resolve_metric(posttrade_account, "cash")
+    posttrade_equity = _resolve_metric(posttrade_account, "equity", "portfolio_value")
+
+    recon_status = (
+        operator_summary.get("post_execution_recon_status")
+        or (recon_posttrade.get("verdict") if isinstance(recon_posttrade, dict) else None)
+        or (recon_posttrade.get("drift_status") if isinstance(recon_posttrade, dict) else None)
+    )
+
+    trust_level = _derive_trust_level(operator_summary, pretrade_ok, posttrade_ok, recon_status)
+    authoritative = bool(operator_summary.get("broker_authoritative_state"))
+
+    pretrade_positions_count = _resolve_positions_count(pretrade_positions)
+    posttrade_positions_count = _resolve_positions_count(posttrade_positions)
+
+    payload = {
+        "generatedAt": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "tradeDate": trade_date,
+        "runId": str(operator_summary.get("run_id") or latest.get("run_id") or ""),
+        "runRoot": str(run_root) if run_root is not None else "",
+        "broker": {
+            "authoritativeState": authoritative,
+            "authoritativeMessage": (
+                "Today's run used broker-authoritative state."
+                if authoritative
+                else "Broker-authoritative post-trade state was not confirmed."
+            ),
+            "trustLevel": trust_level,
+            "pretrade": {
+                "snapshotOk": pretrade_ok,
+                "status": operator_summary.get("pretrade_status") or "UNKNOWN",
+                "positionsCount": (
+                    pretrade_positions_count
+                    if pretrade_positions_count is not None
+                    else trading_day_summary.get("pretrade_positions_count")
+                ),
+                "cash": (
+                    pretrade_cash
+                    if pretrade_cash is not None
+                    else _float_or_none(trading_day_summary.get("pretrade_cash"))
+                    if trading_day_summary.get("pretrade_cash") is not None
+                    else _float_or_none(operator_summary.get("broker_preflight_cash"))
+                ),
+                "equity": (
+                    pretrade_equity
+                    if pretrade_equity is not None
+                    else _float_or_none(trading_day_summary.get("pretrade_equity"))
+                    if trading_day_summary.get("pretrade_equity") is not None
+                    else _float_or_none(operator_summary.get("broker_preflight_equity"))
+                ),
+                "buyingPower": (
+                    pretrade_buying_power
+                    if pretrade_buying_power is not None
+                    else _float_or_none(trading_day_summary.get("pretrade_buying_power"))
+                    if trading_day_summary.get("pretrade_buying_power") is not None
+                    else _float_or_none(operator_summary.get("broker_preflight_buying_power"))
+                ),
+                "restrictionFlags": operator_summary.get("broker_preflight_restriction_flags") or [],
+                "warningFlags": operator_summary.get("broker_preflight_warning_flags") or [],
+            },
+            "posttrade": {
+                "snapshotOk": posttrade_ok,
+                "reconStatus": recon_status or "UNKNOWN",
+                "positionsCount": (
+                    posttrade_positions_count
+                    if posttrade_positions_count is not None
+                    else trading_day_summary.get("posttrade_positions_count")
+                ),
+                "cash": (
+                    posttrade_cash
+                    if posttrade_cash is not None
+                    else _float_or_none(trading_day_summary.get("posttrade_cash"))
+                ),
+                "equity": (
+                    posttrade_equity
+                    if posttrade_equity is not None
+                    else _float_or_none(trading_day_summary.get("posttrade_equity"))
+                ),
+                "repairSuggestions": operator_summary.get("repair_suggestions") or (
+                    recon_posttrade.get("repair_suggestions") if isinstance(recon_posttrade, dict) else []
+                ) or [],
+                "affectedSymbols": operator_summary.get("affected_symbols") or (
+                    recon_posttrade.get("affected_symbols") if isinstance(recon_posttrade, dict) else []
+                ) or [],
+            },
+            "delta": {
+                "positionsCount": (
+                    posttrade_positions_count - pretrade_positions_count
+                    if posttrade_positions_count is not None and pretrade_positions_count is not None
+                    else trading_day_summary.get("positions_count_delta")
+                    if trading_day_summary.get("positions_count_delta") is not None
+                    else (
+                        trading_day_summary.get("posttrade_positions_count") - trading_day_summary.get("pretrade_positions_count")
+                        if trading_day_summary.get("posttrade_positions_count") is not None
+                        and trading_day_summary.get("pretrade_positions_count") is not None
+                        else None
+                    )
+                ),
+                "cash": (
+                    round(posttrade_cash - pretrade_cash, 2)
+                    if pretrade_cash is not None and posttrade_cash is not None
+                    else _float_or_none(trading_day_summary.get("cash_delta"))
+                ),
+                "equity": (
+                    round(posttrade_equity - pretrade_equity, 2)
+                    if pretrade_equity is not None and posttrade_equity is not None
+                    else _float_or_none(trading_day_summary.get("equity_delta"))
+                ),
+            },
+            "paths": {
+                "pretradeAccount": str(pretrade_account_path) if pretrade_account_path else "",
+                "pretradePositions": str(pretrade_positions_path) if pretrade_positions_path else "",
+                "posttradeAccount": str(posttrade_account_path) if posttrade_account_path else "",
+                "posttradePositions": str(posttrade_positions_path) if posttrade_positions_path else "",
+                "reconPretrade": str(recon_pretrade_path) if recon_pretrade_path else "",
+                "reconPosttrade": str(recon_posttrade_path) if recon_posttrade_path else "",
+                "tradingDaySummary": (
+                    str(run_root / "trading_day_summary.json")
+                    if run_root is not None and (run_root / "trading_day_summary.json").exists()
+                    else str(repo_root / "outputs/trading_day_summary.json")
+                ),
+            },
+            "pretradeReconDecision": (
+                recon_pretrade.get("reconciliation_decision") if isinstance(recon_pretrade, dict) else None
+            ),
+        },
+    }
+    return payload
 
 
 class DashboardBuilder:
-    def __init__(self, repo_root: Path) -> None:
-        self.repo_root = repo_root
-        self.missing_files: list[str] = []
-        self.warnings: list[str] = []
-        self.sources: list[SourceRecord] = []
-        self.degraded_metrics: list[str] = []
-        self.broker_source_mode: str = "missing"
-        self.broker_source_used: str = "none"
-        self.freshness_classification: str = "missing"
-
-    def _abs(self, rel: str) -> Path:
-        return self.repo_root / rel
-
-    def _record_source(self, rel_path: str, exists: bool, used: bool = False) -> Path:
-        path = self._abs(rel_path)
-        if exists:
-            self.sources.append(SourceRecord(rel_path, "used" if used else "present"))
-        else:
-            self.sources.append(SourceRecord(rel_path, "missing"))
-            self.missing_files.append(rel_path)
-        return path
-
-    def _read_json(self, rel_path: str, required: bool = False, used: bool = True) -> dict[str, Any] | list[Any] | None:
-        path = self._abs(rel_path)
-        exists = path.exists()
-        self._record_source(rel_path, exists=exists, used=used and exists)
-        if not exists:
-            if required:
-                self.warnings.append(f"Missing required JSON artifact: {rel_path}")
-            return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            self.warnings.append(f"Failed to parse JSON {rel_path}: {exc}")
-            return None
-
-    def _read_csv(self, rel_path: str, required: bool = False, used: bool = True) -> pd.DataFrame | None:
-        path = self._abs(rel_path)
-        exists = path.exists()
-        self._record_source(rel_path, exists=exists, used=used and exists)
-        if not exists:
-            if required:
-                self.warnings.append(f"Missing required CSV artifact: {rel_path}")
-            return None
-        try:
-            return pd.read_csv(path)
-        except Exception as exc:
-            self.warnings.append(f"Failed to parse CSV {rel_path}: {exc}")
-            return None
-
-    def _read_json_if_exists(self, rel_path: str, *, used: bool = True) -> dict[str, Any] | list[Any] | None:
-        path = self._abs(rel_path)
-        if not path.exists():
-            return None
-        self._record_source(rel_path, exists=True, used=used)
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            self.warnings.append(f"Failed to parse JSON {rel_path}: {exc}")
-            return None
-
-    @staticmethod
-    def _parse_iso_timestamp(raw: Any) -> datetime | None:
-        text = str(raw or "").strip()
-        if not text:
-            return None
-        normalized = text.replace("Z", "+00:00")
-        try:
-            dt = datetime.fromisoformat(normalized)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            return None
-
-    @staticmethod
-    def _as_iso_z(raw: datetime | str | None) -> str | None:
-        if raw is None:
-            return None
-        if isinstance(raw, str):
-            parsed = DashboardBuilder._parse_iso_timestamp(raw)
-            if parsed is None:
-                return str(raw)
-            return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        return raw.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-    @staticmethod
-    def _is_truthy(value: Any, default: bool = False) -> bool:
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
-
-    def _normalize_broker_snapshot(
+    def __init__(
         self,
         *,
-        payload: dict[str, Any],
-        source: str,
-        as_of_hint: str | None = None,
-        trust_level: str = "derived",
-        source_detail: str | None = None,
-    ) -> dict[str, Any] | None:
-        account = payload.get("account") if isinstance(payload.get("account"), dict) else payload
-        if not isinstance(account, dict):
-            return None
+        repo_root: Path | str,
+        run_root_arg: str | None = None,
+        trade_date_arg: str | None = None,
+    ) -> None:
+        self.repo_root = Path(repo_root).resolve()
+        self.run_root_arg = run_root_arg
+        self.trade_date_arg = trade_date_arg
+        self._now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
 
-        portfolio_value = self._coerce_num(account.get("portfolio_value") or account.get("equity"))
-        equity = self._coerce_num(account.get("equity") or account.get("portfolio_value"))
-        cash = self._coerce_num(account.get("cash"))
-        buying_power = self._coerce_num(account.get("buying_power"))
-        
-        # Track whether buying_power was not provided vs unavailable
-        buying_power_note = None
-        if buying_power is None and "buying_power" in account:
-            buying_power_note = "Not provided by broker source"
-        elif buying_power is None:
-            buying_power_note = "Field not present in broker payload"
-        market_value = self._coerce_num(account.get("market_value"))
-        if market_value is None and equity is not None and cash is not None:
-            market_value = float(equity - cash)
-
-        if all(v is None for v in [portfolio_value, equity, cash, buying_power, market_value]):
-            return None
-
-        as_of = (
-            str(payload.get("as_of") or "").strip()
-            or str(payload.get("timestamp_utc") or "").strip()
-            or str(payload.get("timestamp") or "").strip()
-            or as_of_hint
-            or self._safe_iso_now()
+    def _context(self) -> dict[str, Any]:
+        run_root = _resolve_run_root(self.repo_root, self.run_root_arg)
+        latest_run = _read_json(self.repo_root / "outputs/latest_run.json")
+        latest_meta = _read_json(self.repo_root / "outputs/latest.json")
+        latest = latest_run if isinstance(latest_run, dict) else {}
+        if isinstance(latest_meta, dict):
+            merged = dict(latest_meta)
+            merged.update(latest)
+            latest = merged
+        operator_summary = _load_operator_summary(self.repo_root, run_root)
+        trading_day_summary = _load_trading_day_summary(self.repo_root, run_root)
+        trade_date = _derive_trade_date(
+            self.repo_root,
+            run_root,
+            operator_summary,
+            trading_day_summary,
+            self.trade_date_arg,
         )
-
         return {
-            "portfolio_value": portfolio_value,
+            "run_root": run_root,
+            "latest": latest,
+            "operator_summary": operator_summary,
+            "trading_day_summary": trading_day_summary,
+            "trade_date": trade_date,
+        }
+
+    def _normalize_broker_snapshot(self, path: Path, payload: dict[str, Any], trust_level: str, mode: str) -> tuple[dict[str, Any], str]:
+        account = payload.get("account") if isinstance(payload.get("account"), dict) else payload
+        cash = _float_or_none(account.get("cash"))
+        equity = _float_or_none(account.get("equity") or account.get("portfolio_value"))
+        last_equity = _float_or_none(account.get("last_equity"))
+        buying_power = _float_or_none(account.get("buying_power") or account.get("daytrading_buying_power"))
+        market_value = _float_or_none(payload.get("market_value"))
+        if market_value is None and cash is not None and equity is not None:
+            market_value = round(equity - cash, 2)
+
+        positions_count = None
+        if "posttrade" in path.name or "postsell" in path.name:
+            positions_path = path.with_name("posttrade_positions.json")
+            positions_count = _resolve_positions_count(_read_json(positions_path))
+        elif "pretrade" in path.name:
+            positions_path = path.with_name("pretrade_positions.json")
+            positions_count = _resolve_positions_count(_read_json(positions_path))
+        else:
+            positions_count = _int_or_none(payload.get("positions_count"))
+
+        snapshot = {
+            "portfolio_value": equity,
             "cash": cash,
             "buying_power": buying_power,
-            "buying_power_note": buying_power_note,
+            "buying_power_note": None if buying_power is not None else "Not provided by broker source",
             "equity": equity,
+            "last_equity": last_equity,
             "market_value": market_value,
-            "as_of": self._as_iso_z(as_of),
-            "source": source,
-            "source_detail": source_detail or source,
+            "positions_count": positions_count,
+            "trade_date": payload.get("trade_date"),
+            "as_of": payload.get("captured_at") or payload.get("persisted_at") or payload.get("as_of"),
+            "source": f"artifact:{_relative_str(self.repo_root, path)}",
+            "source_detail": f"artifact snapshot {_relative_str(self.repo_root, path)}",
             "trust_level": trust_level,
-            "status": "fresh",
+            "status": payload.get("status") or "fresh",
             "suspicious": False,
             "confidence_note": "",
+            "display_equity": equity,
         }
+        return snapshot, mode
 
-    def _persist_broker_snapshot(self, snapshot: dict[str, Any], *, reason: str) -> None:
-        out_path = self._abs("outputs/broker/broker_snapshot_latest.json")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            **snapshot,
-            "persisted_at": self._safe_iso_now(),
-            "persist_reason": reason,
-        }
-        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        self.sources.append(SourceRecord("outputs/broker/broker_snapshot_latest.json", "used"))
-
-    def _extract_snapshot_from_recon(self, payload: dict[str, Any], *, source_path: str) -> dict[str, Any] | None:
-        broker_payload = payload.get("broker_snapshot")
-        if not isinstance(broker_payload, dict):
-            return None
-        as_of_hint = str(payload.get("timestamp_utc") or "").strip() or None
-        return self._normalize_broker_snapshot(
-            payload=broker_payload,
-            source=f"artifact:{source_path}",
-            as_of_hint=as_of_hint,
-            trust_level="reconciled",
-            source_detail=f"reconciliation artifact {source_path}",
-        )
-
-    def _find_latest_recon_file(self, pattern: str) -> tuple[str | None, dict[str, Any] | None]:
-        broker_dir = self._abs("outputs/broker")
-        if not broker_dir.exists():
-            return None, None
-        files = sorted(broker_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-        for path in files:
-            rel = str(path.relative_to(self.repo_root))
-            payload = self._read_json_if_exists(rel, used=True)
-            if isinstance(payload, dict):
-                return rel, payload
-        return None, None
-
-    def _load_trading_day_summary(self, run_id: str | None) -> dict[str, Any] | None:
-        candidate_paths: list[str] = []
+    def _artifact_broker_snapshot(self, run_id: str | None = None, report_date: str | None = None) -> tuple[dict[str, Any] | None, str]:
+        candidates: list[tuple[Path, str, str]] = []
         if run_id:
-            candidate_paths.append(f"outputs/runs/{run_id}/trading_day_summary.json")
-        candidate_paths.append("outputs/trading_day_summary.json")
-
-        for rel in candidate_paths:
-            payload = self._read_json(rel, required=False, used=True)
-            if isinstance(payload, dict):
-                return payload
-        return None
-
-    @staticmethod
-    def _build_execution_integrity(summary_obj: dict[str, Any] | None) -> dict[str, Any]:
-        broker_context = (summary_obj or {}).get("broker_context") if isinstance(summary_obj, dict) else {}
-        if not isinstance(broker_context, dict):
-            broker_context = {}
-        affected_symbols = [str(sym).strip().upper() for sym in list(broker_context.get("affected_symbols") or []) if str(sym).strip()]
-        repair_suggestions = [str(item).strip() for item in list(broker_context.get("repair_suggestions") or []) if str(item).strip()]
-        duplicate_guard_status = str(broker_context.get("duplicate_guard_status") or "").strip() or None
-        recon_status = str(broker_context.get("post_execution_recon_status") or "").strip() or None
-        duplicate_fill_suspicions_count = int(broker_context.get("duplicate_fill_suspicions_count") or 0)
-        return {
-            "duplicate_guard_status": duplicate_guard_status,
-            "post_execution_recon_status": recon_status,
-            "affected_symbols": affected_symbols,
-            "repair_suggestions": repair_suggestions,
-            "duplicate_fill_suspicions_count": duplicate_fill_suspicions_count,
-            "visible": bool(
-                duplicate_guard_status
-                or recon_status
-                or affected_symbols
-                or repair_suggestions
-                or duplicate_fill_suspicions_count
-            ),
-        }
-
-    def _artifact_broker_snapshot(self, run_id: str | None, report_date: str | None) -> tuple[dict[str, Any] | None, str]:
-        candidate_paths: list[str] = [
-            "outputs/broker/broker_snapshot_latest.json",
-        ]
-        if run_id:
-            candidate_paths.extend(
+            run_root = self.repo_root / "outputs" / "runs" / run_id / "broker"
+            candidates.extend(
                 [
-                    f"outputs/runs/{run_id}/broker/posttrade_account_snapshot.json",
-                    f"outputs/runs/{run_id}/broker/pretrade_account_snapshot.json",
-                    f"outputs/runs/{run_id}/broker/broker_snapshot_latest.json",
-                    f"outputs/runs/{run_id}/broker/broker_snapshot.json",
+                    (run_root / "posttrade_account_snapshot.json", "authoritative", "authoritative_artifact"),
+                    (run_root / "postsell_account_snapshot.json", "authoritative", "authoritative_artifact"),
+                    (run_root / "pretrade_account_snapshot.json", "authoritative", "pretrade_artifact"),
                 ]
             )
+        candidates.extend(
+            [
+                (self.repo_root / "outputs" / "broker" / "posttrade_account_snapshot.json", "authoritative", "authoritative_artifact"),
+                (self.repo_root / "outputs" / "broker" / "postsell_account_snapshot.json", "authoritative", "authoritative_artifact"),
+                (self.repo_root / "outputs" / "broker" / "pretrade_account_snapshot.json", "authoritative", "pretrade_artifact"),
+                (self.repo_root / "outputs" / "broker" / "broker_snapshot_latest.json", "derived", "artifact_snapshot"),
+            ]
+        )
 
-        for rel in candidate_paths:
-            payload = self._read_json_if_exists(rel, used=True)
-            if isinstance(payload, dict):
-                normalized = self._normalize_broker_snapshot(
-                    payload=payload,
-                    source=f"artifact:{rel}",
-                    trust_level="authoritative",
-                    source_detail=f"artifact snapshot {rel}",
-                )
-                if normalized:
-                    return normalized, "authoritative_artifact"
-
-        if report_date:
-            for rel in [
-                f"outputs/broker/recon_posttrade_{report_date}.json",
-                f"outputs/broker/recon_pretrade_{report_date}.json",
-            ]:
-                payload = self._read_json_if_exists(rel, used=True)
-                if isinstance(payload, dict):
-                    normalized = self._extract_snapshot_from_recon(payload, source_path=rel)
-                    if normalized:
-                        return normalized, "reconciled_artifact"
-
-        for pattern in ["recon_posttrade_*.json", "recon_pretrade_*.json"]:
-            rel, payload = self._find_latest_recon_file(pattern)
-            if rel and isinstance(payload, dict):
-                normalized = self._extract_snapshot_from_recon(payload, source_path=rel)
-                if normalized:
-                    return normalized, "reconciled_artifact"
-
+        for path, trust_level, mode in candidates:
+            payload = _read_json(path)
+            if not isinstance(payload, dict):
+                continue
+            if path.name == "broker_snapshot_latest.json":
+                inferred_trust = str(payload.get("trust_level") or "").strip().lower()
+                if not inferred_trust:
+                    source = str(payload.get("source") or "").lower()
+                    inferred_trust = "authoritative" if "alpaca" in source else "derived"
+                snapshot, resolved_mode = self._normalize_broker_snapshot(path, payload, inferred_trust, mode)
+                return snapshot, resolved_mode
+            snapshot, resolved_mode = self._normalize_broker_snapshot(path, payload, trust_level, mode)
+            return snapshot, resolved_mode
         return None, "missing"
 
-    def _derived_broker_snapshot(
+    def _load_performance_dataset(
         self,
         *,
-        execution_payload: dict[str, Any],
-        nav_df: pd.DataFrame | None,
-        canonical_positions: dict[str, Any],
-        report_date: str | None,
-    ) -> tuple[dict[str, Any] | None, str]:
-        if isinstance(execution_payload, dict) and execution_payload:
-            normalized = self._normalize_broker_snapshot(
-                payload=execution_payload,
-                source="derived:execution_payload",
-                as_of_hint=report_date,
-                trust_level="derived",
-                source_detail="derived from execution payload",
-            )
-            if normalized:
-                return normalized, "derived_execution_payload"
+        nav_path: Path,
+        benchmark_path: Path,
+        source_name: str,
+    ) -> dict[str, Any]:
+        nav_rows_raw = _read_csv_rows(nav_path)
+        benchmark_rows_raw = _read_csv_rows(benchmark_path)
 
-        if nav_df is not None and not nav_df.empty and "equity" in nav_df.columns:
-            latest_row = nav_df.dropna(subset=["equity"]).tail(1)
-            if not latest_row.empty:
-                row = latest_row.iloc[0]
-                payload = {
-                    "equity": row.get("equity"),
-                    "portfolio_value": row.get("equity"),
-                    "cash": row.get("cash") if "cash" in latest_row.columns else None,
-                    "as_of": row.get("date") if "date" in latest_row.columns else report_date,
+        nav_rows: list[dict[str, Any]] = []
+        for row in nav_rows_raw:
+            date_text = str(row.get("date") or "").strip()
+            if not date_text:
+                continue
+            nav_rows.append(
+                {
+                    "date": date_text,
+                    "equity": _float_or_none(row.get("equity") or row.get("portfolio_value")),
+                    "cash": _float_or_none(row.get("cash")),
+                    "gross_exposure": _float_or_none(row.get("gross_exposure")),
+                    "return_1d": _float_or_none(row.get("return_1d")),
+                    "turnover_pct": _float_or_none(row.get("turnover_pct") or row.get("turnover")),
                 }
-                normalized = self._normalize_broker_snapshot(
-                    payload=payload,
-                    source="derived:nav_timeseries",
-                    as_of_hint=report_date,
-                    trust_level="derived",
-                    source_detail="derived from governed nav_timeseries",
+            )
+        nav_rows.sort(key=lambda row: row["date"])
+        first_positive_index = next(
+            (
+                index
+                for index, row in enumerate(nav_rows)
+                if row.get("equity") is not None and float(row["equity"]) > 0.0
+            ),
+            None,
+        )
+        if first_positive_index not in (None, 0):
+            nav_rows = nav_rows[first_positive_index:]
+
+        benchmark_rows: list[dict[str, Any]] = []
+        for row in benchmark_rows_raw:
+            date_text = str(row.get("date") or "").strip()
+            if not date_text:
+                continue
+            benchmark_rows.append(
+                {
+                    "date": date_text,
+                    "spy_close": _float_or_none(row.get("spy_close")),
+                    "spy_return": _float_or_none(row.get("spy_return")),
+                }
+            )
+        benchmark_rows.sort(key=lambda row: row["date"])
+
+        daily_returns = []
+        for index, row in enumerate(nav_rows):
+            value = row.get("return_1d")
+            if value is None and index > 0:
+                prev_equity = nav_rows[index - 1].get("equity")
+                equity = row.get("equity")
+                if prev_equity not in (None, 0) and equity is not None:
+                    value = (equity / prev_equity) - 1.0
+            if value is not None:
+                daily_returns.append(_series_point(row["date"], value))
+
+        nav_series = [
+            _series_point(row["date"], row["equity"])
+            for row in nav_rows
+            if row.get("equity") is not None
+        ]
+        benchmark_series = [
+            _series_point(row["date"], row["spy_close"])
+            for row in benchmark_rows
+            if row.get("spy_close") is not None
+        ]
+        excess_returns = []
+        benchmark_idx = 0
+        latest_benchmark_return = None
+        for point in daily_returns:
+            while benchmark_idx < len(benchmark_rows) and benchmark_rows[benchmark_idx]["date"] <= point["date"]:
+                if benchmark_rows[benchmark_idx].get("spy_return") is not None:
+                    latest_benchmark_return = benchmark_rows[benchmark_idx]["spy_return"]
+                benchmark_idx += 1
+            excess_returns.append(
+                _series_point(
+                    point["date"],
+                    point["value"] - latest_benchmark_return
+                    if latest_benchmark_return is not None
+                    else None,
                 )
-                if normalized:
-                    return normalized, "derived_nav_timeseries"
-
-        if isinstance(canonical_positions, dict) and canonical_positions:
-            normalized = self._normalize_broker_snapshot(
-                payload=canonical_positions,
-                source="derived:canonical_positions",
-                as_of_hint=report_date,
-                trust_level="derived",
-                source_detail="derived from canonical positions snapshot",
             )
-            if normalized:
-                return normalized, "derived_canonical_positions"
 
-        return None, "missing"
+        drawdown = []
+        peak = None
+        for row in nav_rows:
+            equity = row.get("equity")
+            if equity is None:
+                continue
+            peak = equity if peak is None else max(peak, equity)
+            drawdown_value = 0.0 if peak in (None, 0) else min(0.0, (equity / peak) - 1.0)
+            drawdown.append(_series_point(row["date"], drawdown_value))
 
-    def _maybe_live_broker_snapshot(self, report_date: str | None) -> tuple[dict[str, Any] | None, str]:
-        if not self._is_truthy(os.getenv("DASHBOARD_FETCH_BROKER_SNAPSHOT"), default=False):
-            return None, "disabled"
-        key_id = str(os.getenv("ALPACA_API_KEY_ID") or os.getenv("ALPACA_KEY_ID") or "").strip()
-        secret = str(os.getenv("ALPACA_API_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY") or "").strip()
-        if not key_id or not secret:
-            self.warnings.append("Live broker fetch requested but Alpaca credentials are not set.")
-            return None, "missing_credentials"
-        try:
-            from brokers.alpaca_broker import AlpacaBroker
+        return {
+            "source_name": source_name,
+            "nav_path": nav_path,
+            "benchmark_path": benchmark_path,
+            "nav_rows": nav_rows,
+            "benchmark_rows": benchmark_rows,
+            "series": {
+                "nav": nav_series,
+                "benchmark": benchmark_series,
+                "daily_returns": daily_returns,
+                "excess_returns": excess_returns,
+                "drawdown": drawdown,
+                "chart_metadata": {
+                    "nav_chart": {
+                        "title": "Portfolio NAV vs Benchmark",
+                        "x_axis_label": "Date",
+                        "y_axis_label": "Value",
+                        "note": "Indexed to 100 at inception",
+                    },
+                    "daily_returns_chart": {
+                        "title": "Daily Returns",
+                        "x_axis_label": "Date",
+                        "y_axis_label": "Return (%)",
+                        "baseline": 0.0,
+                        "note": "Daily return percentage",
+                    },
+                    "excess_returns_chart": {
+                        "title": "Excess Return vs SPY",
+                        "x_axis_label": "Date",
+                        "y_axis_label": "Excess Return (%)",
+                        "baseline": 0.0,
+                        "note": "Daily outperformance vs SPY",
+                    },
+                },
+            },
+        }
 
-            broker = AlpacaBroker.from_env()
-            account = broker.get_account() or {}
-            snapshot = self._normalize_broker_snapshot(
-                payload=account,
-                source="live:alpaca_account",
-                as_of_hint=self._safe_iso_now(),
-                trust_level="authoritative",
-                source_detail="live Alpaca account fetch",
-            )
-            if snapshot:
-                return snapshot, "live_fetch"
-        except Exception as exc:
-            self.warnings.append(f"Live broker fetch failed: {exc}")
-            return None, "live_fetch_failed"
-        return None, "live_fetch_failed"
+    def _build_perf_summary(self, performance: dict[str, Any]) -> dict[str, Any]:
+        nav_rows = performance["nav_rows"]
+        benchmark_rows = performance["benchmark_rows"]
+        daily_returns = [point["value"] for point in performance["series"]["daily_returns"] if point.get("value") is not None]
+        drawdown_series = performance["series"]["drawdown"]
 
-    def _classify_freshness(
-        self,
-        *,
-        report_date: str | None,
-        run_last_updated: str | None,
-        broker_as_of: str | None,
-    ) -> tuple[dict[str, Any], str]:
-        run_dt = self._parse_iso_timestamp(run_last_updated)
-        broker_dt = self._parse_iso_timestamp(broker_as_of)
-        run_date_obj = None
-        if report_date:
-            try:
-                run_date_obj = datetime.fromisoformat(str(report_date)).date()
-            except Exception:
-                run_date_obj = None
+        if not nav_rows:
+            return {
+                "mtd_return": None,
+                "qtd_return": None,
+                "since_inception_return": None,
+                "since_inception_alpha": None,
+                "current_drawdown": None,
+                "best_day": None,
+                "worst_day": None,
+            }
+
+        latest = nav_rows[-1]
+        latest_date = _parse_date(latest["date"])
+        month_rows = [row for row in nav_rows if latest_date and _parse_date(row["date"]) and _parse_date(row["date"]).month == latest_date.month and _parse_date(row["date"]).year == latest_date.year]
+        quarter_rows = [
+            row
+            for row in nav_rows
+            if latest_date
+            and _parse_date(row["date"])
+            and _parse_date(row["date"]).year == latest_date.year
+            and ((_parse_date(row["date"]).month - 1) // 3) == ((latest_date.month - 1) // 3)
+        ]
+
+        def _period_return(rows: list[dict[str, Any]]) -> float | None:
+            if len(rows) < 2:
+                return None
+            first = rows[0].get("equity")
+            last = rows[-1].get("equity")
+            if first in (None, 0) or last is None:
+                return None
+            return (last / first) - 1.0
+
+        nav_start_date = str(nav_rows[0].get("date") or "").strip()
+        nav_end_date = str(nav_rows[-1].get("date") or "").strip()
+        aligned_benchmark_rows = [
+            {"equity": row.get("spy_close")}
+            for row in benchmark_rows
+            if nav_start_date <= str(row.get("date") or "").strip() <= nav_end_date
+            and row.get("spy_close") is not None
+        ]
+        bench_first = aligned_benchmark_rows[0].get("equity") if aligned_benchmark_rows else None
+        bench_last = aligned_benchmark_rows[-1].get("equity") if aligned_benchmark_rows else None
+        benchmark_return = (
+            ((bench_last / bench_first) - 1.0)
+            if len(aligned_benchmark_rows) >= 2 and bench_first not in (None, 0) and bench_last is not None
+            else None
+        )
+        drawdown_value = drawdown_series[-1]["value"] if len(drawdown_series) >= 2 else None
+
+        return {
+            "mtd_return": _period_return(month_rows),
+            "qtd_return": _period_return(quarter_rows),
+            "since_inception_return": _period_return(nav_rows),
+            "since_inception_alpha": (
+                _period_return(nav_rows) - benchmark_return
+                if _period_return(nav_rows) is not None and benchmark_return is not None
+                else None
+            ),
+            "current_drawdown": abs(drawdown_value) if drawdown_value is not None else None,
+            "best_day": max(daily_returns) if daily_returns else None,
+            "worst_day": min(daily_returns) if daily_returns else None,
+        }
+
+    def _load_intended_orders(self, report_date: str) -> tuple[dict[str, Any] | None, Path | None]:
+        broker_dir = self.repo_root / "outputs" / "broker"
+        direct = broker_dir / f"intended_orders_{report_date}.json"
+        if direct.exists():
+            payload = _read_json(direct)
+            return (payload if isinstance(payload, dict) else None), direct
+        latest = _latest_glob(broker_dir, "intended_orders_*.json")
+        payload = _read_json(latest) if latest else None
+        return (payload if isinstance(payload, dict) else None), latest
+
+    def _load_orders_csv(self, report_date: str) -> tuple[list[dict[str, Any]], Path | None]:
+        broker_dir = self.repo_root / "outputs" / "broker"
+        direct = broker_dir / f"orders_{report_date}.csv"
+        if direct.exists():
+            return _read_csv_rows(direct), direct
+        latest = _latest_glob(broker_dir, "orders_*.csv")
+        return (_read_csv_rows(latest), latest) if latest else ([], None)
+
+    def _load_recon_posttrade(self, report_date: str) -> tuple[dict[str, Any] | None, Path | None]:
+        broker_dir = self.repo_root / "outputs" / "broker"
+        direct = broker_dir / f"recon_posttrade_{report_date}.json"
+        if direct.exists():
+            payload = _read_json(direct)
+            return (payload if isinstance(payload, dict) else None), direct
+        latest = _latest_glob(broker_dir, "recon_posttrade*.json")
+        payload = _read_json(latest) if latest else None
+        return (payload if isinstance(payload, dict) else None), latest
+
+    def _load_broker_day_snapshot(self, trade_date: str | None) -> tuple[dict[str, Any] | None, Path | None]:
+        snapshot_dir = self.repo_root / "outputs" / "broker_snapshot"
+        if trade_date:
+            direct = snapshot_dir / f"broker_snapshot_{trade_date}.json"
+            if direct.exists():
+                payload = _read_json(direct)
+                return (payload if isinstance(payload, dict) else None), direct
+        latest = _latest_glob(snapshot_dir, "broker_snapshot_*.json")
+        payload = _read_json(latest) if latest else None
+        return (payload if isinstance(payload, dict) else None), latest
+
+    def _build_data_freshness(self, report_date: str, broker_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+        broker_as_of = broker_snapshot.get("as_of") if broker_snapshot else None
+        broker_trade_date = broker_snapshot.get("trade_date") if broker_snapshot else None
+        report_day = _parse_date(report_date)
+        broker_day = _parse_date(broker_trade_date) or _parse_date(broker_as_of)
+        broker_ts = _parse_datetime(broker_as_of)
 
         alignment = "missing"
         detail = "Broker snapshot unavailable."
-        stale_threshold_hours = 36
-
-        if broker_dt is None:
-            alignment = "missing"
-            detail = "Broker snapshot timestamp unavailable."
-        else:
-            age_hours = (datetime.now(timezone.utc) - broker_dt.astimezone(timezone.utc)).total_seconds() / 3600.0
-            if age_hours > stale_threshold_hours:
+        if broker_snapshot:
+            if report_day is not None and broker_day is not None and report_day == broker_day:
+                alignment = "aligned"
+                detail = "Broker snapshot aligned with dashboard run date."
+            elif broker_ts is not None and (self._now - broker_ts) > dt.timedelta(hours=STALE_THRESHOLD_HOURS):
                 alignment = "stale"
-                detail = f"Broker snapshot older than {stale_threshold_hours} hours."
-            elif run_date_obj is None:
-                alignment = "mismatch"
-                detail = "Run report date unavailable; alignment cannot be confirmed."
+                detail = f"Broker snapshot older than {STALE_THRESHOLD_HOURS} hours."
             else:
-                broker_date = broker_dt.date()
-                if broker_date == run_date_obj:
-                    alignment = "aligned"
-                    detail = "Broker snapshot date aligns with run report date."
-                else:
-                    alignment = "mismatch"
-                    if broker_date > run_date_obj:
-                        detail = "Broker snapshot is newer than governed run date."
-                    else:
-                        detail = "Governed run date is newer than broker snapshot."
+                alignment = "mismatch"
+                detail = "Broker snapshot date does not match the selected dashboard run date."
 
-        freshness = {
+        return {
             "run_report_date": report_date,
-            "run_last_updated": self._as_iso_z(run_last_updated),
-            "broker_as_of": self._as_iso_z(broker_as_of),
+            "run_last_updated": self._now.isoformat(),
+            "broker_as_of": broker_as_of,
             "broker_vs_run_alignment": alignment,
             "alignment_detail": detail,
-            "stale_threshold_hours": stale_threshold_hours,
+            "stale_threshold_hours": STALE_THRESHOLD_HOURS,
+            "broker_trust_level": broker_snapshot.get("trust_level") if broker_snapshot else "missing",
+            "broker_source_detail": broker_snapshot.get("source_detail") if broker_snapshot else "",
+            "suspicious_broker_value": bool(broker_snapshot.get("suspicious")) if broker_snapshot else False,
+            "suspicious_reason": broker_snapshot.get("confidence_note") if broker_snapshot else "",
         }
-        return freshness, alignment
 
-    def _apply_broker_sanity_guardrails(
+    def _build_summary_export(
         self,
         *,
+        report_date: str,
+        run_id: str,
+        trading_day_summary: dict[str, Any],
+        summary_matches_report: bool,
+        broker_surface: dict[str, Any],
+        benchmark_payload: dict[str, Any],
         broker_snapshot: dict[str, Any],
-        governed_snapshot: dict[str, Any],
-        data_freshness: dict[str, Any],
-    ) -> tuple[dict[str, Any], bool]:
-        trust = str(broker_snapshot.get("trust_level") or "missing")
-        broker_value = self._coerce_num(
-            broker_snapshot.get("equity")
-            if broker_snapshot.get("equity") is not None
-            else broker_snapshot.get("portfolio_value")
-        )
-        governed_value = self._coerce_num(governed_snapshot.get("portfolio_value"))
-
-        suspicious = False
-        suspicious_reasons: list[str] = []
-
-        # Stricter plausibility checks for derived/stale snapshots
-        if broker_value is not None and governed_value and governed_value > 0:
-            ratio = broker_value / governed_value
-            # Flag as suspicious if off by >2x or <0.5x (stricter for derived)
-            if trust == "derived" and (ratio > 2.0 or ratio < 0.5):
-                suspicious = True
-                suspicious_reasons.append(
-                    f"Derived broker equity ${broker_value:,.0f} is {ratio:.2f}x vs governed ${governed_value:,.0f}"
-                )
-            # Flag as very suspicious if off by >5x or <0.2x (even for authoritative)
-            elif (ratio > 5.0 or ratio < 0.2):
-                suspicious = True
-                suspicious_reasons.append(
-                    f"Broker equity ${broker_value:,.0f} is {ratio:.2f}x vs governed ${governed_value:,.0f} (implausible magnitude)"
-                )
-
-        if suspicious:
-            broker_snapshot["status"] = "suspicious"
-            broker_snapshot["suspicious"] = True
-            broker_snapshot["confidence_note"] = "; ".join(suspicious_reasons)
-            broker_snapshot["display_equity"] = None
-            data_freshness["suspicious_broker_value"] = True
-            data_freshness["suspicious_reason"] = broker_snapshot["confidence_note"]
-            self.warnings.append(f"Suspicious broker snapshot: {broker_snapshot['confidence_note']}")
+        live_broker_overlay: bool,
+        recon_status: str,
+    ) -> dict[str, Any]:
+        if trading_day_summary and summary_matches_report:
+            summary = json.loads(json.dumps(trading_day_summary))
         else:
-            broker_snapshot.setdefault("suspicious", False)
-            broker_snapshot.setdefault("confidence_note", "")
-            broker_snapshot["display_equity"] = broker_value
-            data_freshness.setdefault("suspicious_broker_value", False)
-
-        return broker_snapshot, suspicious
-
-    def _find_latest_execution_payload(self, report_date: str | None, run_id: str | None = None) -> tuple[str | None, dict[str, Any] | None]:
-        # Canonical-first resolution order:
-        # 1) outputs/latest_run.json -> run_root
-        # 2) run_root/operator_summary.json
-        # 3) run_root/execution_results.json
-        # 4) run_root/execution_payload.json
-        # 5) legacy outputs/execution_email/<date>.json fallback
-        run_root_candidates: list[Path] = []
-        latest_run = self._read_json("outputs/latest_run.json", required=False, used=True)
-        if isinstance(latest_run, dict):
-            run_root_raw = str(latest_run.get("run_root") or "").strip()
-            if run_root_raw:
-                run_root_path = Path(run_root_raw)
-                if not run_root_path.is_absolute():
-                    run_root_path = self.repo_root / run_root_path
-                run_root_candidates.append(run_root_path)
-        if run_id:
-            run_root_candidates.append(self._abs(f"outputs/runs/{run_id}"))
-
-        for run_root_path in run_root_candidates:
-            if not run_root_path.exists() or not run_root_path.is_dir():
-                continue
-            try:
-                run_root_rel = str(run_root_path.relative_to(self.repo_root))
-            except Exception:
-                run_root_rel = run_root_path.as_posix()
-
-            op_rel = f"{run_root_rel}/operator_summary.json"
-            rs_rel = f"{run_root_rel}/execution_results.json"
-            ep_rel = f"{run_root_rel}/execution_payload.json"
-
-            operator_summary = self._read_json(op_rel, required=False, used=True)
-            execution_results = self._read_json(rs_rel, required=False, used=True)
-            execution_payload = self._read_json(ep_rel, required=False, used=True)
-
-            merged: dict[str, Any] = {}
-            source = None
-
-            if isinstance(operator_summary, dict):
-                source = op_rel
-                merged.update(operator_summary)
-                pretrade_status = str(operator_summary.get("pretrade_status") or "").upper()
-                if pretrade_status:
-                    merged["execution_status"] = pretrade_status
-                if operator_summary.get("pretrade_halt_reason") and not merged.get("halt_reason"):
-                    merged["halt_reason"] = operator_summary.get("pretrade_halt_reason")
-
-            if isinstance(execution_results, dict):
-                source = source or rs_rel
-                merged.update(execution_results)
-                status = str(execution_results.get("status") or "").upper()
-                if status:
-                    merged["execution_status"] = status
-
-            if isinstance(execution_payload, dict):
-                source = source or ep_rel
-                for key, value in execution_payload.items():
-                    merged.setdefault(key, value)
-                payload_status = str(execution_payload.get("status") or execution_payload.get("execution_status") or "").upper()
-                if payload_status and not merged.get("execution_status"):
-                    merged["execution_status"] = payload_status
-
-            if merged:
-                return source, merged
-
-        # Legacy fallback for backward compatibility when canonical artifacts are absent.
-        exec_dir = self._abs("outputs/execution_email")
-        if not exec_dir.exists():
-            self._record_source("outputs/execution_email", exists=False)
-            self.warnings.append("Execution payload directory not found.")
-            return None, None
-
-        if report_date:
-            candidate = f"outputs/execution_email/{report_date}.json"
-            payload = self._read_json(candidate, required=False, used=True)
-            if isinstance(payload, dict):
-                return candidate, payload
-
-        files = sorted(exec_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for file in files:
-            name = file.name
-            if ".empty." in name:
-                continue
-            rel = str(file.relative_to(self.repo_root))
-            payload = self._read_json(rel, required=False, used=True)
-            if isinstance(payload, dict):
-                return rel, payload
-
-        self.warnings.append("No usable execution payload JSON found.")
-        return None, None
-
-    def _find_latest_health_integrity(self, run_id: str | None, report_date: str | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None, str | None]:
-        if not run_id or not report_date:
-            return None, None, None, None
-
-        run_root = self._abs(f"outputs/runs/{run_id}/snapshots")
-        health_rel = f"outputs/runs/{run_id}/snapshots/health_{report_date}.json"
-        integrity_rel = f"outputs/runs/{run_id}/snapshots/integrity_{report_date}.json"
-
-        health = self._read_json(health_rel, required=False, used=True)
-        integrity = self._read_json(integrity_rel, required=False, used=True)
-
-        if isinstance(health, dict) or isinstance(integrity, dict):
-            return (
-                health if isinstance(health, dict) else None,
-                integrity if isinstance(integrity, dict) else None,
-                health_rel if isinstance(health, dict) else None,
-                integrity_rel if isinstance(integrity, dict) else None,
-            )
-
-        if not run_root.exists():
-            self.warnings.append(f"Run snapshot folder missing for run_id={run_id}")
-            return None, None, None, None
-
-        health_files = sorted(run_root.glob("health_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        integrity_files = sorted(run_root.glob("integrity_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-
-        health_obj = None
-        integrity_obj = None
-        health_used = None
-        integrity_used = None
-
-        if health_files:
-            rel = str(health_files[0].relative_to(self.repo_root))
-            parsed = self._read_json(rel, required=False, used=True)
-            if isinstance(parsed, dict):
-                health_obj = parsed
-                health_used = rel
-
-        if integrity_files:
-            rel = str(integrity_files[0].relative_to(self.repo_root))
-            parsed = self._read_json(rel, required=False, used=True)
-            if isinstance(parsed, dict):
-                integrity_obj = parsed
-                integrity_used = rel
-
-        return health_obj, integrity_obj, health_used, integrity_used
-
-    def _read_first_existing_json(self, rel_paths: list[str], *, required: bool = False) -> tuple[str | None, dict[str, Any] | None]:
-        for rel in rel_paths:
-            parsed = self._read_json(rel, required=False, used=True)
-            if isinstance(parsed, dict):
-                return rel, parsed
-        if required and rel_paths:
-            self.warnings.append(f"Missing required JSON artifact: {rel_paths[0]}")
-        return None, None
-
-    def _find_preflight_failure(self, run_id: str | None) -> tuple[dict[str, Any] | None, str | None]:
-        if not run_id:
-            return None, None
-        rel = f"outputs/runs/{run_id}/logs/preflight_failure.json"
-        payload = self._read_json(rel, required=False, used=True)
-        if isinstance(payload, dict):
-            return payload, rel
-        return None, None
-
-    def _infer_early_halt_without_artifacts(self, run_id: str | None) -> tuple[bool, str | None]:
-        if not run_id:
-            return False, None
-        run_root = self._abs(f"outputs/runs/{run_id}")
-        if not run_root.exists() or not run_root.is_dir():
-            return False, None
-        artifact_files: list[str] = []
-        for file_path in sorted(p for p in run_root.rglob("*") if p.is_file()):
-            rel = file_path.relative_to(run_root).as_posix()
-            if rel in {"meta.json", "manifest.json", "checksums.sha256"}:
-                continue
-            artifact_files.append(rel)
-        if artifact_files:
-            return False, None
-        return True, "Run folder has no stage artifacts beyond meta/manifest/checksums."
-
-    @staticmethod
-    def _coerce_num(v: Any) -> float | None:
-        try:
-            if v is None or (isinstance(v, str) and not v.strip()):
-                return None
-            n = float(v)
-            return n if pd.notna(n) else None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _safe_iso_now() -> str:
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-    @staticmethod
-    def _to_series(df: pd.DataFrame | None, date_col: str, value_col: str) -> list[dict[str, Any]]:
-        if df is None or date_col not in df.columns or value_col not in df.columns:
-            return []
-        out: list[dict[str, Any]] = []
-        for _, row in df.iterrows():
-            date = str(row.get(date_col, "")).strip()
-            value = DashboardBuilder._coerce_num(row.get(value_col))
-            if date and value is not None:
-                out.append({"date": date, "value": value})
-        return out
-
-    @staticmethod
-    def _calc_drawdown(nav_series: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not nav_series:
-            return []
-        peak = None
-        out: list[dict[str, Any]] = []
-        for p in nav_series:
-            value = p.get("value")
-            if value is None:
-                continue
-            if peak is None or value > peak:
-                peak = value
-            dd = 0.0 if not peak else (value / peak) - 1.0
-            out.append({"date": p.get("date"), "value": dd})
-        return out
-
-    @staticmethod
-    def _cumulative_return(returns: pd.Series) -> float | None:
-        if returns.empty:
-            return None
-        returns = returns.dropna()
-        if returns.empty:
-            return None
-        prod_val = DashboardBuilder._coerce_num((1.0 + returns).prod())
-        if prod_val is None:
-            return None
-        return float(prod_val - 1.0)
-
-    @staticmethod
-    def _returns_from_series(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if len(points) < 2:
-            return []
-        out: list[dict[str, Any]] = []
-        prev = None
-        for p in points:
-            value = DashboardBuilder._coerce_num(p.get("value"))
-            date = str(p.get("date") or "").strip()
-            if value is None or not date:
-                continue
-            if prev is not None and prev != 0:
-                out.append({"date": date, "value": (value / prev) - 1.0})
-            prev = value
-        return out
-
-    def _mark_degraded(self, metric_name: str, reason: str) -> None:
-        self.degraded_metrics.append(f"{metric_name}: {reason}")
-
-    def _filter_executive_warnings(self) -> list[str]:
-        """Filter warnings to only executive-level concerns.
-        
-        Suppresses low-level artifact/parsing warnings and focuses on:
-        - Preflight/execution failures
-        - Suspicious broker values
-        - Missing critical position/ledger artifacts
-        """
-        executive_warnings = []
-        for w in self.warnings:
-            # Include critical warnings
-            if any(keyword in w.lower() for keyword in [
-                "preflight", "suspicious", "broker snapshot",
-                "canonical positions", "ledger"
-            ]):
-                executive_warnings.append(w)
-            # Suppress low-level artifact warnings
-            elif any(keyword in w.lower() for keyword in [
-                "failed to parse", "derived strategy daily returns",
-                "estimated daily p/l", "payload directory not found",
-                "no usable execution payload"
-            ]):
-                continue
-            # Include other warnings selectively
-            elif "missing required" in w.lower():
-                # Only if it's about core artifacts
-                if any(core in w.lower() for core in ["canonical_performance", "nav_timeseries", "latest.json"]):
-                    executive_warnings.append(w)
-        return executive_warnings
-
-    def _discover_runs(self) -> list[dict[str, Any]]:
-        """Discover all runs in outputs/runs/ and classify them by completeness.
-        
-        Classification includes:
-        - is_complete: Has health/integrity or quant_report
-        - is_failed: Has preflight_failure or is sparse and incomplete
-        - is_sparse: Only has meta.json/manifest
-        - has_real_activity: Has trades/execution records
-        - mode: canonical paper/live with legacy aliases normalized
-        - is_viable_executive: Meets criteria for executive dashboard display
-        """
-        runs_root = self._abs("outputs/runs")
-        if not runs_root.exists() or not runs_root.is_dir():
-            return []
-        
-        discovered_runs: list[dict[str, Any]] = []
-        for run_dir in sorted(runs_root.iterdir(), reverse=True):
-            if not run_dir.is_dir() or run_dir.name.startswith("."):
-                continue
-            
-            run_id = run_dir.name
-            meta_path = run_dir / "meta.json"
-            meta_obj = {}
-            if meta_path.exists():
-                try:
-                    meta_obj = json.loads(meta_path.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
-            
-            # Validate report_date - skip test/placeholder runs
-            report_date = meta_obj.get("report_date")
-            if report_date and report_date in {"2000-01-01", "1970-01-01"}:
-                # Skip obvious test/placeholder dates
-                continue
-            if report_date:
-                try:
-                    # Validate date format and range
-                    from datetime import datetime
-                    parsed_date = datetime.strptime(report_date, "%Y-%m-%d")
-                    if parsed_date.year < 2020 or parsed_date.year > 2030:
-                        # Skip dates outside reasonable production range
-                        continue
-                except (ValueError, TypeError):
-                    # Skip runs with malformed dates
-                    continue
-            
-            # Check for completion indicators
-            has_health = (run_dir / "snapshots" / f"health_{meta_obj.get('report_date', '')}.json").exists() if meta_obj.get('report_date') else False
-            has_integrity = (run_dir / "snapshots" / f"integrity_{meta_obj.get('report_date', '')}.json").exists() if meta_obj.get('report_date') else False
-            has_quant_report = any((run_dir / "reports").glob("quant_report_*.html")) if (run_dir / "reports").exists() else False
-            has_preflight_failure = (run_dir / "logs" / "preflight_failure.json").exists()
-            
-            # Check for real activity artifacts
-            has_trades = (run_dir / "ledger" / "trades.csv").exists()
-            has_execution_email = any((run_dir / "snapshots").glob("execution_email_*.json")) if (run_dir / "snapshots").exists() else False
-            
-            # Sparse check
-            artifact_count = 0
-            for file_path in run_dir.rglob("*"):
-                if file_path.is_file():
-                    rel = file_path.relative_to(run_dir).as_posix()
-                    if rel not in {"meta.json", "manifest.json", "checksums.sha256"}:
-                        artifact_count += 1
-            
-            is_sparse = artifact_count == 0
-            is_complete = (has_health and has_integrity) or has_quant_report
-            is_failed = has_preflight_failure or (is_sparse and not is_complete)
-            has_real_activity = has_trades or has_execution_email
-            
-            # For executive display, requires:
-            # 1. Complete run (health/integrity or report) - proves actual execution
-            # 2. Not failed/halted
-            # 3. Not sparse/meta-only (meta-only runs never executed)
-            # Activity evidence is preferred but not strictly required if otherwise complete
-            is_viable_executive = (
-                is_complete and 
-                not is_failed and 
-                not is_sparse
-            )
-            
-            discovered_runs.append({
+            broker = broker_surface.get("broker", {})
+            summary = {
+                "generated_at": self._now.isoformat(),
                 "run_id": run_id,
-                "report_date": meta_obj.get("report_date"),
-                "created_at": meta_obj.get("created_at"),
-                "mode": normalize_trading_mode(meta_obj.get("mode"), default="paper"),
-                "raw_mode": str(meta_obj.get("mode") or "").strip().lower() or "paper",
-                "is_complete": is_complete,
-                "is_failed": is_failed,
-                "is_sparse": is_sparse,
-                "has_real_activity": has_real_activity,
-                "has_preflight_failure": has_preflight_failure,
-                "artifact_count": artifact_count,
-                "is_viable_executive": is_viable_executive,
-            })
-        
-        return discovered_runs
+                "trade_date": report_date,
+                "execution_summary": {
+                    "orders_submitted": None,
+                    "orders_accepted": None,
+                    "orders_rejected": None,
+                    "duplicate_orders": 0,
+                    "buy_orders": None,
+                    "sell_orders": None,
+                    "executed": False,
+                    "partial_execution": False,
+                    "status": "UNKNOWN",
+                },
+                "portfolio_state": {
+                    "cash_after": broker.get("posttrade", {}).get("cash"),
+                    "positions_count": broker.get("posttrade", {}).get("positionsCount"),
+                    "portfolio_market_value": None,
+                },
+                "broker_context": {
+                    "broker_authoritative_state": bool(
+                        broker.get("authoritativeState")
+                        or live_broker_overlay
+                        or broker_snapshot.get("trust_level") == "authoritative"
+                    ),
+                    "post_execution_recon_status": recon_status,
+                    "duplicate_guard_status": "CLEAR",
+                    "affected_symbols": broker.get("posttrade", {}).get("affectedSymbols") or [],
+                    "repair_suggestions": broker.get("posttrade", {}).get("repairSuggestions") or [],
+                    "duplicate_fill_suspicions_count": 0,
+                    "pretrade_positions_count": broker.get("pretrade", {}).get("positionsCount"),
+                    "pretrade_cash": broker.get("pretrade", {}).get("cash"),
+                    "pretrade_equity": broker.get("pretrade", {}).get("equity"),
+                    "pretrade_buying_power": broker.get("pretrade", {}).get("buyingPower"),
+                    "posttrade_positions_count": broker.get("posttrade", {}).get("positionsCount"),
+                    "posttrade_cash": broker_snapshot.get("cash") if live_broker_overlay else broker.get("posttrade", {}).get("cash"),
+                    "posttrade_equity": broker_snapshot.get("equity") if live_broker_overlay else broker.get("posttrade", {}).get("equity"),
+                },
+            }
 
-    def _select_executive_run(self, latest_attempted_run_id: str | None) -> tuple[str | None, str]:
-        """Select the best run for executive metrics display.
-        
-        Strict selection criteria:
-        1. Must be complete and not failed
-        2. Must have real activity evidence (trades, execution records)
-        3. Must not be sparse/meta-only
-        4. Prefer live over paper
-        5. Prefer latest viable run matching above criteria
-        
-        Returns tuple of (selected_run_id, selection_reason).
-        """
-        discovered = self._discover_runs()
-        if not discovered:
-            return latest_attempted_run_id, "no_runs_discovered"
-        
-        # Find viable executive runs (complete, not sparse, has activity)
-        viable_runs = [r for r in discovered if r["is_viable_executive"] and not r["is_failed"]]
-        
-        if viable_runs:
-            # Among viable runs, prefer by canonical mode: live > paper.
-            live_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "live"]
-            paper_runs = [r for r in viable_runs if str(r.get("mode") or "").lower() == "paper"]
-            
-            # Use highest-priority available mode
-            if live_runs:
-                selected = live_runs[0]
-                return selected["run_id"], "latest_viable_live_run"
-            if paper_runs:
-                selected = paper_runs[0]
-                return selected["run_id"], "latest_viable_paper_run"
-        
-        # Fallback: No viable executive runs found. Use latest attempted if available.
-        if latest_attempted_run_id:
-            # Even though not ideal, provide context that this is a fallback
-            return latest_attempted_run_id, "latest_attempted_fallback_no_viable_executive_run"
-        
-        # Last resort: Most recent discovered run
-        if discovered:
-            return discovered[0]["run_id"], "most_recent_run_fallback_no_viable"
-        
-        return None, "no_runs_discovered"
-
+        summary["dashboard"] = {
+            "generated": True,
+            "path": "web/dashboard/dashboard_data.json",
+        }
+        summary["benchmark"] = benchmark_payload
+        if live_broker_overlay:
+            execution_summary = summary.get("execution_summary")
+            if not isinstance(execution_summary, dict):
+                execution_summary = {}
+            execution_summary["orders_submitted"] = None
+            execution_summary["orders_accepted"] = None
+            execution_summary["orders_rejected"] = None
+            execution_summary["buy_orders"] = None
+            execution_summary["sell_orders"] = None
+            execution_summary["executed"] = False
+            execution_summary["partial_execution"] = False
+            execution_summary["status"] = "OVERLAY_ONLY"
+            summary["execution_summary"] = execution_summary
+            broker_context = summary.get("broker_context")
+            if not isinstance(broker_context, dict):
+                broker_context = {}
+            broker_context["broker_authoritative_state"] = True
+            broker_context["post_execution_recon_status"] = recon_status
+            broker_context["posttrade_cash"] = broker_snapshot.get("cash")
+            broker_context["posttrade_equity"] = broker_snapshot.get("equity")
+            broker_context["posttrade_positions_count"] = broker_snapshot.get("positions_count")
+            summary["broker_context"] = broker_context
+            portfolio_state = summary.get("portfolio_state")
+            if not isinstance(portfolio_state, dict):
+                portfolio_state = {}
+            portfolio_state["cash_after"] = broker_snapshot.get("cash")
+            portfolio_state["positions_count"] = broker_snapshot.get("positions_count")
+            summary["portfolio_state"] = portfolio_state
+        return summary
 
     def build(self) -> dict[str, Any]:
-        latest = self._read_json("outputs/latest.json", required=False, used=True)
-        latest_obj = latest if isinstance(latest, dict) else {}
+        context = self._context()
+        run_root = context["run_root"]
+        latest = context["latest"]
+        operator_summary = context["operator_summary"]
+        trading_day_summary = context["trading_day_summary"]
+        report_date = context["trade_date"]
 
-        # Latest attempted run from outputs/latest.json
-        latest_attempted_run_id = str(latest_obj.get("run_id") or "").strip() or None
-        latest_attempted_report_date = str(latest_obj.get("report_date") or "").strip() or None
-        latest_attempted_mode = _canonical_mode_label(latest_obj.get("mode") or "paper")
-        latest_attempted_raw_mode = str(latest_obj.get("mode") or "").strip().lower() or "paper"
-        latest_attempted_created_at = str(
-            latest_obj.get("created_at")
-            or latest_obj.get("last_updated")
-            or latest_obj.get("updated_at")
+        broker_surface = build_dashboard_payload(
+            self.repo_root,
+            run_root_arg=str(run_root) if run_root is not None else self.run_root_arg,
+            trade_date_arg=report_date,
+        )
+        governed_performance = self._load_performance_dataset(
+            nav_path=self.repo_root / "outputs" / "perf" / "nav_timeseries.csv",
+            benchmark_path=self.repo_root / "outputs" / "perf" / "benchmark_close_history.csv",
+            source_name="governed",
+        )
+        overlay_nav_path = self.repo_root / "outputs" / "perf" / "live_overlay_nav_series.csv"
+        overlay_benchmark_path = self.repo_root / "outputs" / "perf" / "live_overlay_benchmark_close_history.csv"
+        overlay_performance = self._load_performance_dataset(
+            nav_path=overlay_nav_path,
+            benchmark_path=overlay_benchmark_path if overlay_benchmark_path.exists() else governed_performance["benchmark_path"],
+            source_name="live_overlay",
+        )
+
+        governed_latest_nav = governed_performance["nav_rows"][-1] if governed_performance["nav_rows"] else {}
+        selected_governed_report_date = str(governed_latest_nav.get("date") or report_date)
+        summary_matches_selected_governed = (
+            str(trading_day_summary.get("trade_date") or "").strip() == selected_governed_report_date
+        )
+        run_id = str(
+            operator_summary.get("run_id")
+            or (trading_day_summary.get("run_id") if summary_matches_selected_governed else None)
+            or latest.get("run_id")
             or ""
-        ).strip() or None
-
-        # Discover and select executive run
-        selected_run_id, selection_reason = self._select_executive_run(latest_attempted_run_id)
-        discovered_runs = self._discover_runs()
-
-        # ── Latest-attempted run observability ───────────────────────────────
-        # Read latest_run.json for authoritative terminal_status (written by
-        # _finalize_run_context_once, which now uses _RUN_TERMINAL_STATUS).
-        latest_run_ptr = self._read_json("outputs/latest_run.json", required=False, used=True)
-        latest_run_ptr_obj = latest_run_ptr if isinstance(latest_run_ptr, dict) else {}
-        latest_attempted_terminal_status: str | None = str(
-            latest_run_ptr_obj.get("status") or ""
-        ).strip() or None
-
-        # Classify whether the latest attempted run is considered complete.
-        latest_attempted_is_complete: bool = latest_attempted_terminal_status in {
-            "success", "no_action"
-        }
-
-        # List authoritative per-run artifacts that are missing from the latest attempted run.
-        latest_attempted_missing_artifacts: list[str] = []
-        if latest_attempted_run_id:
-            _lat_root = self._abs(f"outputs/runs/{latest_attempted_run_id}")
-            for _artifact_name in (
-                "operator_summary.json",
-                "execution_payload.json",
-                "execution_results.json",
-            ):
-                if not (_lat_root / _artifact_name).exists():
-                    latest_attempted_missing_artifacts.append(_artifact_name)
-
-        # Identify the most recent genuinely complete run for fallback display.
-        latest_successful_run_id: str | None = None
-        latest_successful_trade_date: str | None = None
-        for _r in discovered_runs:
-            if _r.get("is_complete") and not _r.get("is_failed") and not _r.get("is_sparse"):
-                latest_successful_run_id = _r["run_id"]
-                latest_successful_trade_date = _r.get("report_date")
-                break
-
-        fallback_in_use: bool = (
-            selected_run_id != latest_attempted_run_id
-            and latest_attempted_run_id is not None
         )
-        fallback_reason: str | None = selection_reason if fallback_in_use else None
+        artifact_lookup_id = run_root.name if isinstance(run_root, Path) else run_id or None
+        broker_snapshot, broker_mode = self._artifact_broker_snapshot(run_id=artifact_lookup_id, report_date=report_date)
+        benchmark_summary = trading_day_summary.get("benchmark") if isinstance(trading_day_summary.get("benchmark"), dict) else {}
 
-        # Use selected run for executive metrics
-        report_date = latest_attempted_report_date if selected_run_id == latest_attempted_run_id else None
-        run_id = selected_run_id
-        mode = latest_attempted_mode
-        raw_mode = latest_attempted_raw_mode
-        run_last_updated = latest_attempted_created_at if selected_run_id == latest_attempted_run_id else None
-
-        # If selected run differs from latest attempted, read its metadata
-        if selected_run_id and selected_run_id != latest_attempted_run_id:
-            selected_meta = self._read_json(f"outputs/runs/{selected_run_id}/meta.json", required=False, used=False)
-            if isinstance(selected_meta,dict):
-                report_date = str(selected_meta.get("report_date") or "").strip() or None
-                mode = _canonical_mode_label(selected_meta.get("mode") or "paper")
-                raw_mode = str(selected_meta.get("mode") or "").strip().lower() or "paper"
-                run_last_updated = str(
-                    selected_meta.get("created_at")
-                    or selected_meta.get("last_updated")
-                    or selected_meta.get("updated_at")
-                    or ""
-                ).strip() or None
-
-        canonical_df = self._read_csv("outputs/alpha_assessment/canonical_performance.csv", required=False, used=True)
-        nav_df = self._read_csv("outputs/perf/nav_timeseries.csv", required=False, used=True)
-        benchmark_df = self._read_csv("outputs/perf/benchmark_close_history.csv", required=False, used=True)
-        vix_df = self._read_csv("outputs/perf/vix_close_history.csv", required=False, used=True)
-        trades_df = self._read_csv("outputs/ledger/trades.csv", required=False, used=True)
-
-        _, execution_payload = self._find_latest_execution_payload(report_date, run_id=run_id)
-        exec_payload_obj: dict[str, Any] = execution_payload if isinstance(execution_payload, dict) else {}
-        health_obj, integrity_obj, _, _ = self._find_latest_health_integrity(run_id, report_date)
-        trading_day_summary_obj = self._load_trading_day_summary(run_id)
-        execution_integrity = self._build_execution_integrity(trading_day_summary_obj)
-
-        canonical_positions_path, positions_obj = self._read_first_existing_json(
-            [
-                "outputs/paper_state/canonical_positions.json",
-                "canonical-model-snapshot/canonical_positions.json",
-            ],
-            required=False,
+        governed_portfolio_value = governed_latest_nav.get("equity")
+        if governed_portfolio_value is None and summary_matches_selected_governed:
+            governed_portfolio_value = _float_or_none(benchmark_summary.get("portfolio_value"))
+        if governed_portfolio_value is None:
+            governed_portfolio_value = (
+                broker_surface.get("broker", {}).get("posttrade", {}).get("equity")
+                or broker_surface.get("broker", {}).get("pretrade", {}).get("equity")
+            )
+        governed_cash = (
+            governed_latest_nav.get("cash")
+            if governed_latest_nav.get("cash") is not None
+            else _float_or_none(trading_day_summary.get("portfolio_state", {}).get("cash_after"))
+            if summary_matches_selected_governed and isinstance(trading_day_summary.get("portfolio_state"), dict)
+            else None
         )
-        if canonical_positions_path is None:
-            canonical_positions_path = "outputs/paper_state/canonical_positions.json"
-        if positions_obj is None:
-            positions_obj = {}
+        if governed_cash is None and broker_snapshot is not None:
+            governed_cash = broker_snapshot.get("cash")
 
-        preflight_failure_obj, _preflight_failure_path = self._find_preflight_failure(run_id)
-        preflight_halted = isinstance(preflight_failure_obj, dict)
-        inferred_early_halt, inferred_note = self._infer_early_halt_without_artifacts(run_id)
-
-        # Normalize canonical numeric columns if present.
-        if canonical_df is not None and not canonical_df.empty:
-            for col in [
-                "strategy_nav",
-                "strategy_return",
-                "spy_close",
-                "spy_return",
-                "excess_return",
-                "vix_close",
-                "cash_weight",
-                "gross_exposure",
-                "turnover",
-                "holdings_count",
-            ]:
-                if col in canonical_df.columns:
-                    canonical_df[col] = pd.to_numeric(canonical_df[col], errors="coerce")
-            if "date" in canonical_df.columns:
-                canonical_df["date"] = pd.to_datetime(canonical_df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-        if nav_df is not None and not nav_df.empty:
-            for col in ["equity", "cash", "gross_exposure", "net_exposure", "return_1d", "turnover"]:
-                if col in nav_df.columns:
-                    nav_df[col] = pd.to_numeric(nav_df[col], errors="coerce")
-            if "date" in nav_df.columns:
-                nav_df["date"] = pd.to_datetime(nav_df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-        if benchmark_df is not None and not benchmark_df.empty:
-            for col in ["spy_close", "spy_return"]:
-                if col in benchmark_df.columns:
-                    benchmark_df[col] = pd.to_numeric(benchmark_df[col], errors="coerce")
-            if "date" in benchmark_df.columns:
-                benchmark_df["date"] = pd.to_datetime(benchmark_df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-        if vix_df is not None and not vix_df.empty and "vix_close" in vix_df.columns:
-            vix_df["vix_close"] = pd.to_numeric(vix_df["vix_close"], errors="coerce")
-            if "date" in vix_df.columns:
-                vix_df["date"] = pd.to_datetime(vix_df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-        nav_series = []
-        benchmark_series = []
-        daily_returns_series = []
-        excess_returns_series = []
-
-        if canonical_df is not None and not canonical_df.empty:
-            nav_series = self._to_series(canonical_df, "date", "strategy_nav")
-            benchmark_series = self._to_series(canonical_df, "date", "spy_close")
-            daily_returns_series = self._to_series(canonical_df, "date", "strategy_return")
-            excess_returns_series = self._to_series(canonical_df, "date", "excess_return")
-
-        if not nav_series and nav_df is not None and not nav_df.empty:
-            nav_series = self._to_series(nav_df, "date", "equity")
-
-        if not benchmark_series and benchmark_df is not None and not benchmark_df.empty:
-            benchmark_series = self._to_series(benchmark_df, "date", "spy_close")
-
-        if not daily_returns_series and nav_df is not None and not nav_df.empty and "return_1d" in nav_df.columns:
-            daily_returns_series = self._to_series(nav_df, "date", "return_1d")
-
-        drawdown_series = self._calc_drawdown(nav_series)
-
-        if not daily_returns_series:
-            daily_returns_series = self._returns_from_series(nav_series)
-            if daily_returns_series:
-                self.warnings.append("Derived strategy daily returns from NAV series due to missing canonical strategy_return values.")
-
-        benchmark_returns_series = self._to_series(canonical_df, "date", "spy_return") if canonical_df is not None else []
-        if not benchmark_returns_series and benchmark_df is not None and not benchmark_df.empty:
-            benchmark_returns_series = self._to_series(benchmark_df, "date", "spy_return")
-        if not benchmark_returns_series:
-            benchmark_returns_series = self._returns_from_series(benchmark_series)
-
-        # Latest row extraction for KPI-level metrics.
-        latest_nav = nav_series[-1]["value"] if nav_series else None
-        prev_nav = nav_series[-2]["value"] if len(nav_series) > 1 else None
-        daily_pl = (latest_nav - prev_nav) if (latest_nav is not None and prev_nav is not None) else None
-
-        latest_daily_return = daily_returns_series[-1]["value"] if daily_returns_series else None
-        if latest_daily_return is None and nav_series and len(nav_series) >= 2:
-            base = nav_series[-2]["value"]
-            if base:
-                latest_daily_return = (nav_series[-1]["value"] / base) - 1.0
-
-        if daily_pl is None and latest_nav is not None and latest_daily_return is not None and (1.0 + latest_daily_return) != 0:
-            prev_est = latest_nav / (1.0 + latest_daily_return)
-            daily_pl = latest_nav - prev_est
-            self.warnings.append("Estimated daily P/L from latest NAV and daily return due to missing prior NAV point.")
+        governed_market_value = None
+        if governed_latest_nav.get("gross_exposure") is not None and governed_portfolio_value is not None:
+            governed_market_value = round(governed_portfolio_value * governed_latest_nav["gross_exposure"], 2)
+        elif governed_portfolio_value is not None and governed_cash is not None:
+            governed_market_value = round(governed_portfolio_value - governed_cash, 2)
 
         governed_snapshot = {
-            "portfolio_value": latest_nav,
-            "equity": latest_nav,
-            "cash": None,
-            "market_value": None,
-            "as_of": nav_series[-1]["date"] if nav_series else report_date,
-            "source": "governed:canonical_performance" if canonical_df is not None and not canonical_df.empty else "governed:nav_timeseries",
-            "status": "fresh" if latest_nav is not None else "missing",
+            "portfolio_value": governed_portfolio_value,
+            "equity": governed_portfolio_value,
+            "cash": governed_cash,
+            "market_value": governed_market_value,
+            "as_of": governed_latest_nav.get("date") or report_date,
+            "source": "governed:nav_timeseries" if governed_performance["nav_rows"] else "governed:benchmark_summary",
+            "status": "fresh" if governed_portfolio_value is not None else "missing",
         }
-
-        if nav_df is not None and not nav_df.empty:
-            nav_tail = nav_df.tail(1)
-            if not nav_tail.empty:
-                nav_row = nav_tail.iloc[0]
-                governed_snapshot["cash"] = self._coerce_num(nav_row.get("cash"))
-                if governed_snapshot.get("as_of") is None and "date" in nav_tail.columns:
-                    governed_snapshot["as_of"] = str(nav_row.get("date") or "").strip() or report_date
-
-        if governed_snapshot["equity"] is not None and governed_snapshot["cash"] is not None:
-            governed_snapshot["market_value"] = float(governed_snapshot["equity"] - governed_snapshot["cash"])
-
-        broker_snapshot, broker_mode = self._artifact_broker_snapshot(run_id=run_id, report_date=report_date)
-        if broker_snapshot is None:
-            broker_snapshot, broker_mode = self._maybe_live_broker_snapshot(report_date=report_date)
-            if broker_snapshot is not None:
-                try:
-                    self._persist_broker_snapshot(broker_snapshot, reason="self_heal_live_fetch")
-                except Exception as exc:
-                    self.warnings.append(f"Failed to persist live broker snapshot artifact: {exc}")
-        if broker_snapshot is None:
-            broker_snapshot, broker_mode = self._derived_broker_snapshot(
-                execution_payload=exec_payload_obj,
-                nav_df=nav_df,
-                canonical_positions=positions_obj,
-                report_date=report_date,
-            )
-            if broker_snapshot is not None:
-                try:
-                    self._persist_broker_snapshot(broker_snapshot, reason=f"self_heal_{broker_mode}")
-                except Exception as exc:
-                    self.warnings.append(f"Failed to persist derived broker snapshot artifact: {exc}")
 
         if broker_snapshot is None:
             broker_snapshot = {
                 "portfolio_value": None,
                 "cash": None,
                 "buying_power": None,
+                "buying_power_note": "Broker snapshot unavailable",
                 "equity": None,
                 "market_value": None,
+                "positions_count": None,
+                "trade_date": report_date,
                 "as_of": None,
-                "source": "missing",
-                "source_detail": "broker snapshot unavailable",
+                "source": "",
+                "source_detail": "",
                 "trust_level": "missing",
                 "status": "missing",
                 "suspicious": False,
@@ -1144,778 +1571,848 @@ class DashboardBuilder:
                 "display_equity": None,
             }
 
-        data_freshness, alignment = self._classify_freshness(
-            report_date=report_date,
-            run_last_updated=run_last_updated,
-            broker_as_of=broker_snapshot.get("as_of"),
-        )
-        data_freshness["broker_trust_level"] = broker_snapshot.get("trust_level", "missing")
-        data_freshness["broker_source_detail"] = broker_snapshot.get("source_detail", broker_snapshot.get("source", "missing"))
-        if alignment == "missing":
-            broker_snapshot["status"] = "missing"
-        elif alignment == "stale":
-            broker_snapshot["status"] = "stale"
-        else:
-            broker_snapshot["status"] = "fresh"
+        if broker_snapshot.get("equity") is not None and governed_snapshot.get("portfolio_value") not in (None, 0):
+            governed_value = float(governed_snapshot["portfolio_value"])
+            broker_value = float(broker_snapshot["equity"])
+            ratio = max(broker_value / governed_value, governed_value / broker_value) if broker_value else None
+            suspicious = bool(ratio and ratio >= 5.0 and abs(broker_value - governed_value) >= 1000.0)
+            if suspicious:
+                broker_snapshot["suspicious"] = True
+                broker_snapshot["confidence_note"] = (
+                    f"Broker equity ${broker_value:,.0f} is {ratio:.2f}x vs governed ${governed_value:,.0f} (implausible magnitude)"
+                )
+                broker_snapshot["display_equity"] = None
 
-        broker_snapshot, suspicious_broker_value = self._apply_broker_sanity_guardrails(
+        latest_run_root = Path(str(latest.get("run_root") or latest.get("path") or "")).expanduser() if latest.get("run_root") or latest.get("path") else None
+        if latest_run_root is not None and not latest_run_root.is_absolute():
+            latest_run_root = self.repo_root / latest_run_root
+        expected_latest = []
+        if latest_run_root is not None:
+            expected_latest = [
+                latest_run_root / "operator_summary.json",
+                latest_run_root / "execution_results.json",
+                latest_run_root / "execution_payload.json",
+            ]
+        latest_missing = [_relative_str(self.repo_root, path) for path in expected_latest if not path.exists()]
+        latest_has_execution_results = bool(
+            latest_run_root is not None and (latest_run_root / "execution_results.json").exists()
+        )
+        latest_status = str(latest.get("status") or "").strip().lower()
+        planning_statuses = {"no_action", "plan_only", "overlay_only"}
+        latest_complete = bool(
+            (
+                _status_is_complete(latest.get("status"))
+                or (latest_run_root is not None and _latest_glob(latest_run_root / "reports", "quant_report_*.html"))
+            )
+            and not (latest_status in planning_statuses and not latest_has_execution_results)
+            or (
+                latest_has_execution_results
+                and latest_run_root is not None
+                and (latest_run_root / "operator_summary.json").exists()
+            )
+        )
+        fallback_in_use = not latest_complete
+        broker_trade_date = _iso_date_prefix(broker_snapshot.get("trade_date") or broker_snapshot.get("as_of"))
+        live_broker_overlay = bool(
+            fallback_in_use
+            and broker_snapshot.get("trust_level") == "authoritative"
+            and broker_trade_date
+            and broker_trade_date > selected_governed_report_date
+        )
+        selected_trade_date_for_daily = broker_trade_date if live_broker_overlay and broker_trade_date else selected_governed_report_date
+        intended_orders, intended_path = self._load_intended_orders(selected_trade_date_for_daily)
+        if intended_orders is not None and not _same_trade_date(intended_orders.get("report_date"), selected_trade_date_for_daily):
+            intended_orders, intended_path = None, None
+        orders_rows, orders_path = self._load_orders_csv(selected_trade_date_for_daily)
+        if orders_path is not None and not _same_trade_date(_path_trade_date(orders_path), selected_trade_date_for_daily):
+            orders_rows, orders_path = [], None
+        recon_posttrade, recon_path = self._load_recon_posttrade(selected_trade_date_for_daily)
+        if recon_posttrade is not None and not _same_trade_date(recon_posttrade.get("trade_date"), selected_trade_date_for_daily):
+            recon_posttrade, recon_path = None, None
+        broker_day_snapshot, broker_day_snapshot_path = self._load_broker_day_snapshot(selected_trade_date_for_daily)
+        if broker_day_snapshot is not None:
+            snapshot_trade_date = (
+                broker_day_snapshot.get("meta", {}).get("report_date")
+                if isinstance(broker_day_snapshot.get("meta"), dict)
+                else None
+            )
+            if not _same_trade_date(snapshot_trade_date, selected_trade_date_for_daily):
+                broker_day_snapshot, broker_day_snapshot_path = None, None
+
+        data_freshness = self._build_data_freshness(selected_governed_report_date, broker_snapshot)
+        if live_broker_overlay and broker_trade_date:
+            data_freshness["broker_vs_run_alignment"] = "overlay"
+            data_freshness["alignment_detail"] = (
+                f"Authoritative broker overlay active for {broker_trade_date} over governed run date {selected_governed_report_date}."
+            )
+
+        performance = (
+            overlay_performance
+            if live_broker_overlay and overlay_performance["nav_rows"]
+            else governed_performance
+        )
+        perf_summary = self._build_perf_summary(performance)
+        latest_nav = performance["nav_rows"][-1] if performance["nav_rows"] else {}
+
+        exec_summary = (
+            trading_day_summary.get("execution_summary")
+            if summary_matches_selected_governed and isinstance(trading_day_summary.get("execution_summary"), dict)
+            else {}
+        )
+        effective_exec_summary = {} if live_broker_overlay else exec_summary
+        broker_day_return = (
+            ((float(broker_snapshot.get("equity")) / float(broker_snapshot.get("last_equity"))) - 1.0)
+            if live_broker_overlay
+            and broker_snapshot.get("equity") not in (None, 0)
+            and broker_snapshot.get("last_equity") not in (None, 0)
+            else None
+        )
+        portfolio_asof_date = (
+            broker_trade_date
+            if live_broker_overlay and broker_trade_date
+            else str(latest_nav.get("date") or selected_governed_report_date)
+        )
+        portfolio_return_fraction = (
+            broker_day_return
+            if broker_day_return is not None
+            else latest_nav.get("return_1d")
+        )
+        benchmark_compare_row = _latest_row_on_or_before(
+            performance["benchmark_rows"],
+            portfolio_asof_date,
+            "spy_close",
+        )
+        benchmark_asof_date = (
+            str(benchmark_compare_row.get("date") or "").strip()
+            if isinstance(benchmark_compare_row, dict)
+            else ""
+        )
+        comparison_mode = (
+            "same_day"
+            if portfolio_asof_date and benchmark_asof_date and portfolio_asof_date == benchmark_asof_date
+            else "previous_trading_day"
+            if portfolio_asof_date and benchmark_asof_date and benchmark_asof_date < portfolio_asof_date
+            else "portfolio_only"
+            if portfolio_asof_date
+            else "unavailable"
+        )
+        benchmark_payload = {
+            "portfolio_value": (
+                broker_snapshot.get("equity")
+                if live_broker_overlay and broker_snapshot.get("equity") is not None
+                else _float_or_none(benchmark_summary.get("portfolio_value"))
+                if summary_matches_selected_governed and benchmark_summary.get("portfolio_value") is not None
+                else governed_portfolio_value
+            ),
+            "spy_value": (
+                _float_or_none(benchmark_summary.get("spy_value"))
+                if summary_matches_selected_governed and benchmark_summary.get("spy_value") is not None and comparison_mode == "same_day"
+                else (benchmark_compare_row.get("spy_close") if isinstance(benchmark_compare_row, dict) else None)
+            ),
+            "portfolio_return_pct": (
+                round(broker_day_return * 100.0, 6)
+                if broker_day_return is not None
+                else _float_or_none(benchmark_summary.get("portfolio_return_pct"))
+                if summary_matches_selected_governed and benchmark_summary.get("portfolio_return_pct") is not None and not live_broker_overlay
+                else (portfolio_return_fraction * 100 if portfolio_return_fraction is not None else None)
+            ),
+            "spy_return_pct": (
+                _float_or_none(benchmark_summary.get("spy_return_pct"))
+                if summary_matches_selected_governed and benchmark_summary.get("spy_return_pct") is not None and comparison_mode == "same_day"
+                else (
+                    benchmark_compare_row.get("spy_return") * 100
+                    if isinstance(benchmark_compare_row, dict) and benchmark_compare_row.get("spy_return") is not None
+                    else None
+                )
+            ),
+            "performance_vs_spy_pct": (
+                _float_or_none(benchmark_summary.get("performance_vs_spy_pct"))
+                if summary_matches_selected_governed and benchmark_summary.get("performance_vs_spy_pct") is not None and comparison_mode == "same_day"
+                else (
+                    (portfolio_return_fraction - benchmark_compare_row.get("spy_return")) * 100
+                    if portfolio_return_fraction is not None
+                    and isinstance(benchmark_compare_row, dict)
+                    and benchmark_compare_row.get("spy_return") is not None
+                    else None
+                )
+            ),
+            "portfolio_asof_date": portfolio_asof_date,
+            "benchmark_asof_date": benchmark_asof_date or None,
+            "comparison_asof_date": benchmark_asof_date or portfolio_asof_date,
+            "comparison_mode": comparison_mode,
+        }
+        attribution = _build_attribution_summary(performance)
+        contribution_snapshot = _load_contribution_snapshot(self.repo_root, selected_governed_report_date)
+
+        broker_orders_today = (
+            broker_day_snapshot.get("orders_report_date")
+            if isinstance(broker_day_snapshot, dict) and isinstance(broker_day_snapshot.get("orders_report_date"), list)
+            else []
+        )
+        position_diag = _build_position_diagnostics(
             broker_snapshot=broker_snapshot,
-            governed_snapshot=governed_snapshot,
-            data_freshness=data_freshness,
+            broker_day_snapshot=broker_day_snapshot,
+            orders_today=broker_orders_today,
         )
+        edge_diagnostics = _build_edge_diagnostics(
+            attribution=attribution,
+            position_diag=position_diag,
+            current_benchmark_return=(
+                benchmark_payload.get("spy_return_pct") / 100.0
+                if benchmark_payload.get("spy_return_pct") is not None
+                else None
+            ),
+        )
+        order_rows_for_activity = broker_orders_today if broker_orders_today else orders_rows
+        buys_from_orders = sum(1 for row in order_rows_for_activity if str(row.get("side") or "").upper() == "BUY")
+        sells_from_orders = sum(1 for row in order_rows_for_activity if str(row.get("side") or "").upper() == "SELL")
+        accepted_from_orders = sum(
+            1
+            for row in order_rows_for_activity
+            if str(row.get("status") or "").lower() in {"accepted", "filled", "partially_filled", "done_for_day"}
+        ) or (len(order_rows_for_activity) if order_rows_for_activity else 0)
+        rejected_from_orders = sum(1 for row in order_rows_for_activity if str(row.get("status") or "").lower() == "rejected")
 
-        self.broker_source_mode = broker_mode
-        self.broker_source_used = str(broker_snapshot.get("source") or "missing")
-        self.freshness_classification = alignment
-
-        benchmark_return = None
-        if benchmark_returns_series:
-            benchmark_return = benchmark_returns_series[-1]["value"]
-
-        if canonical_df is not None and "excess_return" in canonical_df.columns and not canonical_df["excess_return"].dropna().empty:
-            excess_return = float(canonical_df["excess_return"].dropna().iloc[-1])
-        elif latest_daily_return is not None and benchmark_return is not None:
-            excess_return = float(latest_daily_return - benchmark_return)
-        else:
-            excess_return = None
-
-        holdings = None
-        if canonical_df is not None and "holdings_count" in canonical_df.columns and not canonical_df["holdings_count"].dropna().empty:
-            holdings = int(float(canonical_df["holdings_count"].dropna().iloc[-1]))
-        elif isinstance(positions_obj.get("position_count"), (int, float)):
-            position_count = positions_obj.get("position_count")
-            if position_count is not None:
-                holdings = int(position_count)
-
-        turnover = None
-        if canonical_df is not None and "turnover" in canonical_df.columns and not canonical_df["turnover"].dropna().empty:
-            turnover = float(canonical_df["turnover"].dropna().iloc[-1])
-        elif nav_df is not None and "turnover" in nav_df.columns and not nav_df["turnover"].dropna().empty:
-            turnover = float(nav_df["turnover"].dropna().iloc[-1])
-
-        execution_status = "UNKNOWN"
-        if exec_payload_obj:
-            execution_status = str(
-                exec_payload_obj.get("status")
-                or exec_payload_obj.get("execution_status")
-                or exec_payload_obj.get("status_label")
-                or "UNKNOWN"
-            ).upper()
-        elif isinstance(health_obj, dict):
-            execution_status = str(health_obj.get("status") or "UNKNOWN").upper()
-        if preflight_halted and execution_status in {"UNKNOWN", "", "N/A"}:
-            execution_status = "HALTED_PREFLIGHT"
-        if inferred_early_halt and execution_status in {"UNKNOWN", "", "N/A", "HALTED"}:
-            execution_status = "HALTED_INFERRED_PREFLIGHT"
-        
-        # Legacy shadow aliases map into canonical paper mode, but should still
-        # be reported honestly as paper simulation rather than broker execution.
-        run_mode_lower = normalize_trading_mode(raw_mode, default="paper")
-        legacy_shadow_alias = str(raw_mode or "").strip().lower() == "shadow"
-        if legacy_shadow_alias:
-            # Check if run has actual activity (trades recorded)
-            has_run_activity = False
-            if run_id:
-                try:
-                    trades_path = self._abs(f"outputs/runs/{run_id}/ledger/trades.csv")
-                    if trades_path.exists():
-                        trades_df = pd.read_csv(trades_path)
-                        has_run_activity = len(trades_df) > 0
-                except Exception:
-                    pass
-            
-            # Adjust status based on activity and original status
-            if execution_status in {"PASS", "COMPLETED", "SUCCESS", "READY"}:
-                execution_status = "SIMULATED"
-            elif execution_status == "PLANNED" and has_run_activity:
-                # Has activity despite PLANNED status - report as executed shadow sim
-                execution_status = "SIMULATED"
-            elif execution_status == "PLANNED" and not has_run_activity:
-                execution_status = "PAPER_PLANNED"
-
-        # Performance summary metrics.
-        mtd = qtd = si = si_alpha = best_day = worst_day = None
-        current_drawdown = drawdown_series[-1]["value"] if drawdown_series else None
-
-        if current_drawdown is None:
-            self._mark_degraded("current_drawdown", "insufficient NAV history")
-
-        if canonical_df is not None and not canonical_df.empty and "date" in canonical_df.columns:
-            work = canonical_df.copy()
-            work["date_dt"] = pd.to_datetime(work["date"], errors="coerce")
-            work = work.dropna(subset=["date_dt"]).sort_values("date_dt")
-
-            if "strategy_return" in work.columns:
-                sr = pd.to_numeric(work["strategy_return"], errors="coerce")
-                if not sr.dropna().empty:
-                    last_dt = work["date_dt"].max()
-                    month_mask = (work["date_dt"].dt.year == last_dt.year) & (work["date_dt"].dt.month == last_dt.month)
-                    quarter = ((last_dt.month - 1) // 3) + 1
-                    q_mask = (work["date_dt"].dt.year == last_dt.year) & ((((work["date_dt"].dt.month - 1) // 3) + 1) == quarter)
-
-                    mtd = self._cumulative_return(sr[month_mask])
-                    qtd = self._cumulative_return(sr[q_mask])
-                    si = self._cumulative_return(sr)
-                    best_day = float(sr.dropna().max()) if not sr.dropna().empty else None
-                    worst_day = float(sr.dropna().min()) if not sr.dropna().empty else None
-
-            if "spy_return" in work.columns and "strategy_return" in work.columns:
-                sr = pd.to_numeric(work["strategy_return"], errors="coerce")
-                br = pd.to_numeric(work["spy_return"], errors="coerce")
-                aligned = pd.DataFrame({"sr": sr, "br": br}).dropna()
-                if not aligned.empty:
-                    strat_prod = self._coerce_num((1.0 + aligned["sr"]).prod())
-                    bench_prod = self._coerce_num((1.0 + aligned["br"]).prod())
-                    if strat_prod is not None and bench_prod is not None:
-                        si_alpha = float((strat_prod - 1.0) - (bench_prod - 1.0))
-
-        # Fallback for return metrics when canonical strategy_return is sparse.
-        if si is None and daily_returns_series:
-            daily_ser = pd.Series([x["value"] for x in daily_returns_series], dtype=float)
-            si = self._cumulative_return(daily_ser)
-            if si is not None:
-                self.warnings.append("Derived since-inception return from fallback daily return series.")
-
-        if mtd is None and daily_returns_series:
-            dr_df = pd.DataFrame(daily_returns_series)
-            dr_df["date_dt"] = pd.to_datetime(dr_df["date"], errors="coerce")
-            dr_df = dr_df.dropna(subset=["date_dt"]).sort_values("date_dt")
-            if not dr_df.empty:
-                last_dt = dr_df["date_dt"].iloc[-1]
-                mask = (dr_df["date_dt"].dt.year == last_dt.year) & (dr_df["date_dt"].dt.month == last_dt.month)
-                mtd = self._cumulative_return(pd.Series(dr_df.loc[mask, "value"], dtype=float))
-
-        if si_alpha is None and daily_returns_series and benchmark_returns_series:
-            dr = pd.DataFrame(daily_returns_series).rename(columns={"value": "sr"})
-            br = pd.DataFrame(benchmark_returns_series).rename(columns={"value": "br"})
-            merged = dr.merge(br, on="date", how="inner")
-            if not merged.empty:
-                strat_prod = self._coerce_num((1.0 + pd.Series(merged["sr"], dtype=float)).prod())
-                bench_prod = self._coerce_num((1.0 + pd.Series(merged["br"], dtype=float)).prod())
-                if strat_prod is not None and bench_prod is not None:
-                    si_alpha = float((strat_prod - 1.0) - (bench_prod - 1.0))
-
-        if daily_pl is None:
-            self._mark_degraded("daily_pl", "missing prior NAV and no return-based estimate")
-        if mtd is None:
-            self._mark_degraded("mtd_return", "insufficient in-month return history")
-        if si is None:
-            self._mark_degraded("since_inception_return", "insufficient return history")
-        if excess_return is None:
-            self._mark_degraded("excess_return", "missing strategy or benchmark daily return")
-
-        # Risk section.
-        latest_cash_weight = None
-        latest_gross = None
-        latest_largest = None
-        latest_vix_regime = None
-
-        if canonical_df is not None and not canonical_df.empty:
-            if "cash_weight" in canonical_df.columns and not canonical_df["cash_weight"].dropna().empty:
-                latest_cash_weight = float(canonical_df["cash_weight"].dropna().iloc[-1])
-            if "gross_exposure" in canonical_df.columns and not canonical_df["gross_exposure"].dropna().empty:
-                latest_gross = float(canonical_df["gross_exposure"].dropna().iloc[-1])
-            if "vix_regime" in canonical_df.columns and not canonical_df["vix_regime"].dropna().empty:
-                latest_vix_regime = str(canonical_df["vix_regime"].dropna().iloc[-1])
-
-        if latest_cash_weight is None and nav_df is not None and not nav_df.empty and "cash" in nav_df.columns and "equity" in nav_df.columns:
-            nav_last = nav_df.dropna(subset=["cash", "equity"]).copy()
-            if not nav_last.empty:
-                cash_val = float(nav_last.iloc[-1]["cash"])
-                equity_val = float(nav_last.iloc[-1]["equity"])
-                if equity_val != 0:
-                    latest_cash_weight = cash_val / equity_val
-
-        if latest_gross is None and nav_df is not None and not nav_df.empty and "gross_exposure" in nav_df.columns and not nav_df["gross_exposure"].dropna().empty:
-            latest_gross = float(nav_df["gross_exposure"].dropna().iloc[-1])
-
-        if exec_payload_obj:
-            risk_summary = exec_payload_obj.get("risk_summary")
-            if isinstance(risk_summary, dict):
-                max_weight_txt = str(risk_summary.get("Max position weight (%)") or "").replace("%", "").strip()
-                latest_largest = self._coerce_num(max_weight_txt)
-                if latest_largest is not None:
-                    latest_largest = latest_largest / 100.0
-
-        if latest_largest is None and isinstance(positions_obj.get("positions"), dict) and latest_nav:
-            # Approximation only if position quantities exist without mark prices.
-            latest_largest = None
-
-        turnover_limit_pct = 0.35
-
-        breaker_status = None
-        if exec_payload_obj:
-            breaker = exec_payload_obj.get("breaker")
-            if isinstance(breaker, dict):
-                breaker_status = str(breaker.get("mode") or "").upper() or None
-            if breaker_status is None:
-                ao = exec_payload_obj.get("active_overlay")
-                if ao is not None:
-                    breaker_status = str(ao).upper()
-        if breaker_status is None and latest_vix_regime:
-            breaker_status = latest_vix_regime.upper()
-
-        # Activity section.
-        buys = sells = new_positions = full_exits = orders_filled = orders_rejected = 0
+        orders_intended = intended_orders.get("orders_intended") if isinstance(intended_orders, dict) else []
         top_changes: list[dict[str, Any]] = []
-        activity_source = "unknown"
-
-        trades_list: list[dict[str, Any]] = []
-        if isinstance(exec_payload_obj.get("trades"), list):
-            trades_list = [t for t in exec_payload_obj["trades"] if isinstance(t, dict)]
-            activity_source = "execution_payload"
-
-        # Fallback: Try to read trades from selected run's ledger if execution payload is missing
-        if not trades_list and run_id:
-            try:
-                trades_path = self._abs(f"outputs/runs/{run_id}/ledger/trades.csv")
-                if trades_path.exists():
-                    run_trades_df = pd.read_csv(trades_path)
-                    if not run_trades_df.empty:
-                        for _, row in run_trades_df.iterrows():
-                            trade_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                            trades_list.append(trade_dict)
-                        activity_source = "run_trades_csv"
-            except Exception:
-                pass
-
-        if trades_list:
-            for t in trades_list:
-                side = str(t.get("side") or "").upper()
-                reason = str(t.get("reason") or "").lower()
-                if side == "BUY":
-                    buys += 1
-                elif side == "SELL":
-                    sells += 1
-                if side == "BUY" and "removed" not in reason:
-                    new_positions += 1
-                if side == "SELL" and "removed" in reason:
-                    full_exits += 1
-
-            equity_ref = self._coerce_num(exec_payload_obj.get("equity")) or latest_nav
-            for t in sorted(trades_list, key=lambda x: abs(self._coerce_num(x.get("notional")) or 0.0), reverse=True)[:5]:
-                notional = self._coerce_num(t.get("notional"))
-                side = str(t.get("side") or "").upper()
-                if notional is not None and equity_ref:
-                    signed = (notional / equity_ref) * (1 if side == "BUY" else -1)
-                else:
-                    signed = None
+        if live_broker_overlay and broker_orders_today:
+            for order in broker_orders_today[:5]:
+                filled_price = (
+                    _float_or_none(order.get("filled_avg_price"))
+                    or _float_or_none(order.get("limit_price"))
+                    or _float_or_none(order.get("price"))
+                )
+                qty = _float_or_none(order.get("filled_qty")) or _float_or_none(order.get("qty"))
+                notional = _float_or_none(order.get("notional"))
+                if notional is None and filled_price is not None and qty is not None:
+                    notional = filled_price * qty
+                change_weight = (
+                    (notional / broker_snapshot.get("equity"))
+                    if notional is not None and broker_snapshot.get("equity") not in (None, 0)
+                    else None
+                )
                 top_changes.append(
                     {
-                        "ticker": t.get("ticker"),
-                        "action": side or "N/A",
-                        "change_weight": signed,
-                        "reason": t.get("reason") or "Not provided",
+                        "ticker": order.get("symbol"),
+                        "action": str(order.get("side") or "").upper() or "HOLD",
+                        "change_weight": change_weight,
+                        "reason": "executed_order",
+                    }
+                )
+        elif isinstance(orders_intended, list):
+            for order in orders_intended[:5]:
+                notional = _float_or_none(order.get("notional"))
+                change_weight = (
+                    (notional / governed_portfolio_value)
+                    if notional is not None and governed_portfolio_value not in (None, 0)
+                    else None
+                )
+                top_changes.append(
+                    {
+                        "ticker": order.get("ticker"),
+                        "action": str(order.get("side") or "").upper() or "HOLD",
+                        "change_weight": change_weight,
+                        "reason": str(order.get("reason") or "planned_rebalance").strip().replace(" ", "_").lower(),
+                    }
+                )
+        elif broker_orders_today:
+            for order in broker_orders_today[:5]:
+                filled_price = (
+                    _float_or_none(order.get("filled_avg_price"))
+                    or _float_or_none(order.get("limit_price"))
+                    or _float_or_none(order.get("price"))
+                )
+                qty = _float_or_none(order.get("filled_qty")) or _float_or_none(order.get("qty"))
+                notional = _float_or_none(order.get("notional"))
+                if notional is None and filled_price is not None and qty is not None:
+                    notional = filled_price * qty
+                change_weight = (
+                    (notional / broker_snapshot.get("equity"))
+                    if notional is not None and broker_snapshot.get("equity") not in (None, 0)
+                    else None
+                )
+                top_changes.append(
+                    {
+                        "ticker": order.get("symbol"),
+                        "action": str(order.get("side") or "").upper() or "HOLD",
+                        "change_weight": change_weight,
+                        "reason": "executed_order",
                     }
                 )
 
-        if isinstance(health_obj, dict):
-            orders_filled = int(self._coerce_num(health_obj.get("executed_trade_count")) or buys + sells)
-            planned = int(self._coerce_num(health_obj.get("planned_trade_count")) or orders_filled)
-            orders_rejected = max(planned - orders_filled, 0)
-        else:
-            orders_filled = buys + sells
-            orders_rejected = 0
+        broker_context = (
+            trading_day_summary.get("broker_context")
+            if summary_matches_selected_governed and isinstance(trading_day_summary.get("broker_context"), dict)
+            else {}
+        )
+        effective_broker_context = {} if live_broker_overlay else broker_context
+        overlay_only_recon = bool(
+            live_broker_overlay
+            and not (
+                isinstance(recon_posttrade, dict)
+                or str(effective_broker_context.get("post_execution_recon_status") or "").strip()
+            )
+        )
+        duplicate_guard_status = effective_broker_context.get("duplicate_guard_status") or "CLEAR"
+        recon_status = (
+            effective_broker_context.get("post_execution_recon_status")
+            or (
+                recon_posttrade.get("drift_status") or recon_posttrade.get("verdict")
+                if isinstance(recon_posttrade, dict)
+                else None
+            )
+            or ("OVERLAY_ONLY" if overlay_only_recon else None)
+            or (broker_surface.get("broker", {}).get("posttrade", {}).get("reconStatus") if not live_broker_overlay else None)
+            or "UNKNOWN"
+        )
+        affected_symbols = (
+            effective_broker_context.get("affected_symbols")
+            or (
+                recon_posttrade.get("affected_symbols")
+                if isinstance(recon_posttrade, dict)
+                else None
+            )
+            or []
+        )
+        repair_suggestions = (
+            effective_broker_context.get("repair_suggestions")
+            or (
+                recon_posttrade.get("repair_suggestions")
+                if isinstance(recon_posttrade, dict)
+                else None
+            )
+            or []
+        )
+        duplicate_fill_suspicions_count = (
+            effective_broker_context.get("duplicate_fill_suspicions_count")
+            or (
+                recon_posttrade.get("duplicate_fill_suspicions_count")
+                if isinstance(recon_posttrade, dict)
+                else None
+            )
+            or 0
+        )
 
-        # Exceptions and operating checks.
-        recon_ok = None
-        if exec_payload_obj and exec_payload_obj.get("recon_failure") is not None:
-            recon_ok = not bool(exec_payload_obj.get("recon_failure"))
-        elif isinstance(health_obj, dict) and health_obj.get("recon_delta") is not None:
-            delta = abs(self._coerce_num(health_obj.get("recon_delta")) or 0.0)
-            tol = abs(self._coerce_num(health_obj.get("recon_equity_tolerance")) or 0.0)
-            recon_ok = delta <= tol if tol > 0 else delta == 0.0
-        if preflight_halted and recon_ok is None:
-            recon_ok = None
-        if inferred_early_halt and recon_ok is None:
-            recon_ok = None
-
-        run_success = execution_status in {
-            "PASS",
-            "READY",
-            "SUCCESS",
-            "COMPLETED",
-            "EXECUTED",
-            "NO_ACTION",
-            "SKIPPED_DUPLICATE",
+        execution_integrity = {
+            "duplicate_guard_status": duplicate_guard_status,
+            "post_execution_recon_status": recon_status,
+            "affected_symbols": affected_symbols,
+            "repair_suggestions": repair_suggestions,
+            "duplicate_fill_suspicions_count": duplicate_fill_suspicions_count,
+            "visible": True,
         }
-        if preflight_halted:
-            run_success = False
-        if inferred_early_halt:
-            run_success = False
-        if execution_status in {"HALTED", "HALTED_PREFLIGHT", "HALTED_INFERRED_PREFLIGHT", "FAIL", "FAILED", "ERROR", "RECON_FAIL_AUTO_BOOTSTRAP"}:
-            run_success = False
 
-        required_artifacts = [
-            "outputs/latest.json",
-            "outputs/alpha_assessment/canonical_performance.csv",
-            "outputs/perf/nav_timeseries.csv",
-            "outputs/ledger/trades.csv",
-        ]
-        missing_required = [p for p in required_artifacts if not (self.repo_root / p).exists()]
+        activity = {
+            "buys": (
+                effective_exec_summary.get("buy_orders")
+                if effective_exec_summary.get("buy_orders") is not None
+                else buys_from_orders
+            ),
+            "sells": (
+                effective_exec_summary.get("sell_orders")
+                if effective_exec_summary.get("sell_orders") is not None
+                else sells_from_orders
+            ),
+            "new_positions": (
+                effective_exec_summary.get("buy_orders")
+                if effective_exec_summary.get("buy_orders") is not None
+                else buys_from_orders
+            ),
+            "full_exits": (
+                effective_exec_summary.get("sell_orders")
+                if effective_exec_summary.get("sell_orders") is not None
+                else sells_from_orders
+            ),
+            "orders_filled": (
+                effective_exec_summary.get("orders_accepted")
+                if effective_exec_summary.get("orders_accepted") is not None
+                else accepted_from_orders
+            ),
+            "orders_rejected": (
+                effective_exec_summary.get("orders_rejected")
+                if effective_exec_summary.get("orders_rejected") is not None
+                else rejected_from_orders
+            ),
+            "source_run_id": intended_orders.get("run_id") if isinstance(intended_orders, dict) else run_id,
+            "source_report_date": (
+                broker_day_snapshot.get("meta", {}).get("report_date")
+                if isinstance(broker_day_snapshot, dict) and isinstance(broker_day_snapshot.get("meta"), dict)
+                else intended_orders.get("report_date")
+                if isinstance(intended_orders, dict)
+                else selected_trade_date_for_daily
+            ),
+            "activity_source": (
+                "broker_snapshot_current"
+                if broker_day_snapshot
+                else "intended_orders"
+                if intended_orders
+                else "orders_csv"
+                if orders_rows
+                else "trading_day_summary"
+            ),
+            "is_simulated": str(latest.get("mode") or "").lower() in {"paper", "shadow", "simulated"},
+            "note": (
+                f"Activity source: {_relative_str(self.repo_root, broker_day_snapshot_path)}"
+                if broker_day_snapshot_path is not None
+                else f"Activity source: {_relative_str(self.repo_root, intended_path)}"
+                if intended_path is not None
+                else f"Activity source: {_relative_str(self.repo_root, orders_path)}"
+                if orders_path is not None
+                else "Activity source: trading_day_summary"
+            ),
+        }
 
-        exceptions: list[dict[str, str]] = []
-        if preflight_halted:
-            halt_stage = str(preflight_failure_obj.get("halt_stage") or "preflight")
-            halt_reason = str(preflight_failure_obj.get("halt_reason") or "preflight gate failed")
-            exceptions.append(
-                {
-                    "category": "Preflight",
-                    "status": "fail",
-                    "message": f"Run halted at {halt_stage}: {halt_reason}.",
-                }
-            )
-        elif inferred_early_halt:
-            exceptions.append(
-                {
-                    "category": "Preflight",
-                    "status": "warning",
-                    "message": "Run likely halted before stage artifacts were generated (inferred).",
-                }
-            )
+        risk_cash_ratio = (
+            governed_cash / governed_portfolio_value
+            if governed_cash is not None and governed_portfolio_value not in (None, 0)
+            else None
+        )
+        gross_exposure = latest_nav.get("gross_exposure")
+        if gross_exposure is None and risk_cash_ratio is not None:
+            gross_exposure = max(0.0, 1.0 - risk_cash_ratio)
 
-        if recon_ok is True:
-            exceptions.append({"category": "Reconciliation", "status": "pass", "message": "No issues detected."})
-        elif preflight_halted:
-            exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation gate blocked execution before run stages."})
-        elif recon_ok is False:
-            msg = "Model/broker reconciliation failed."
-            if inferred_early_halt:
-                msg = "Reconciliation likely blocked run before stage artifacts were generated (inferred)."
-                exceptions.append({"category": "Reconciliation", "status": "warning", "message": msg})
+        risk = {
+            "drawdown": perf_summary.get("current_drawdown"),
+            "cash_position": (
+                position_diag.get("current_cash_ratio")
+                if live_broker_overlay and position_diag.get("current_cash_ratio") is not None
+                else risk_cash_ratio
+            ),
+            "gross_exposure": gross_exposure,
+            "largest_position_weight": position_diag.get("largest_position_weight"),
+            "turnover_pct": latest_nav.get("turnover_pct"),
+            "turnover_limit_pct": 0.35,
+            "breaker_status": (
+                operator_summary.get("breaker_status")
+                or effective_broker_context.get("broker_pdt_risk_status")
+            ) or ("PARTIAL" if _status_is_failure(effective_exec_summary.get("status") or latest.get("status")) else "OFF"),
+        }
+
+        daily_pl = None
+        if broker_day_return is not None and broker_snapshot.get("equity") is not None and broker_snapshot.get("last_equity") is not None:
+            daily_pl = round(float(broker_snapshot["equity"]) - float(broker_snapshot["last_equity"]), 2)
+        elif governed_portfolio_value is not None and benchmark_payload.get("portfolio_return_pct") is not None:
+            daily_pl = round(governed_portfolio_value * (benchmark_payload["portfolio_return_pct"] / 100.0), 2)
+
+        display_run_id = (
+            run_id
+            if not fallback_in_use or operator_summary.get("run_id") or summary_matches_selected_governed
+            else f"governed-fallback-{selected_governed_report_date}"
+        )
+        overall_status = (
+            "WARNING"
+            if fallback_in_use and governed_portfolio_value is not None
+            else "PASS"
+            if effective_exec_summary.get("status") in {"EXECUTED", "IDEMPOTENT_REPLAY", "PASS", "OK"}
+            else "FAIL"
+            if _status_is_failure(latest.get("status")) or _status_is_failure(effective_exec_summary.get("status"))
+            else str(effective_exec_summary.get("status") or latest.get("status") or "UNKNOWN").upper()
+        )
+
+        status_banner_parts = []
+        latest_attempted_report_date = str(latest.get("trade_date") or latest.get("report_date") or "").strip()
+        latest_created_at = _parse_datetime(latest.get("created_at"))
+        broker_as_of = _parse_datetime(broker_snapshot.get("as_of")) if broker_snapshot else None
+        broker_overlay_label_date = (
+            broker_trade_date
+            if broker_trade_date and broker_trade_date != "2099-01-01"
+            else _iso_date_prefix(broker_snapshot.get("as_of")) or portfolio_asof_date
+        )
+        latest_attempted_report_date_display = (
+            latest_attempted_report_date
+            if latest_attempted_report_date and latest_attempted_report_date != "2099-01-01"
+            else ""
+        )
+        historical_latest_attempt_issue = bool(
+            live_broker_overlay
+            and broker_trade_date
+            and latest_attempted_report_date
+            and latest_attempted_report_date < broker_trade_date
+        )
+        if fallback_in_use:
+            status_banner_parts.append(f"Showing governed dashboard state from {selected_governed_report_date}.")
+            if live_broker_overlay and broker_overlay_label_date:
+                status_banner_parts.append(f"Live broker overlay active for {broker_overlay_label_date}.")
+            if latest.get("run_id"):
+                latest_attempted_label = f"Latest attempted run {latest.get('run_id')}"
+                if latest_status in planning_statuses:
+                    latest_attempted_label += " was a plan-only/no_action smoke run and did not complete."
+                else:
+                    if latest_attempted_report_date_display:
+                        latest_attempted_label += f" ({latest_attempted_report_date_display})"
+                    if broker_as_of is not None and latest_created_at is not None and broker_as_of > latest_created_at:
+                        latest_attempted_label += " did not complete, but a newer broker snapshot is available."
+                    else:
+                        latest_attempted_label += " did not complete."
+                status_banner_parts.append(latest_attempted_label)
+        if broker_snapshot.get("trust_level") == "authoritative":
+            broker_as_of_label = _iso_date_prefix(broker_snapshot.get("as_of"))
+            if broker_as_of_label:
+                status_banner_parts.append(f"Authoritative Alpaca snapshot as of {broker_as_of_label} loaded.")
             else:
-                exceptions.append({"category": "Reconciliation", "status": "fail", "message": msg})
-        elif inferred_early_halt:
-            exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status inferred from sparse run artifacts."})
-        elif legacy_shadow_alias:
-            exceptions.append({"category": "Reconciliation", "status": "pass", "message": "Reconciliation not applicable in paper simulation mode."})
-        else:
-            exceptions.append({"category": "Reconciliation", "status": "warning", "message": "Reconciliation status unavailable."})
+                status_banner_parts.append("Authoritative Alpaca snapshot loaded.")
+        elif broker_snapshot.get("trust_level") == "derived":
+            status_banner_parts.append("Broker values are derived rather than directly confirmed.")
+        if comparison_mode == "previous_trading_day" and benchmark_asof_date:
+            status_banner_parts.append(f"SPY comparison uses {benchmark_asof_date} close.")
+        elif comparison_mode == "portfolio_only":
+            status_banner_parts.append("SPY comparison unavailable for the current portfolio date.")
+        if recon_status and recon_status not in {"UNKNOWN", "PASS", "OK", "OK_RECONCILED"}:
+            status_banner_parts.append(f"Post-trade reconciliation status: {recon_status}.")
+        if not status_banner_parts:
+            status_banner_parts.append("Dashboard loaded from latest available artifacts.")
+        status_banner = " ".join(status_banner_parts)
 
-        if preflight_halted:
-            halt_stage = str(preflight_failure_obj.get("halt_stage") or "preflight")
+        latest_attempted_run = {
+            "run_id": latest.get("run_id"),
+            "report_date": latest.get("trade_date") or latest.get("report_date"),
+            "created_at": latest.get("created_at"),
+        }
+        selected_governed_run = {
+            "run_id": display_run_id,
+            "report_date": selected_governed_report_date,
+            "selection_reason": "latest_attempted_is_complete" if latest_complete else "latest_successful_governed_snapshot",
+        }
+
+        run_meta = {
+            "report_date": selected_governed_report_date,
+            "run_id": display_run_id,
+            "mode": str(operator_summary.get("mode") or latest.get("mode") or "alpaca").upper(),
+            "overall_status": overall_status,
+            "benchmark": "SPY",
+            "last_updated": self._now.isoformat(),
+            "status_banner": status_banner,
+            "latest_attempted_run": latest_attempted_run,
+            "selected_governed_run": selected_governed_run,
+            "fallback_in_use": fallback_in_use,
+            "live_broker_overlay": live_broker_overlay,
+            "performance_source": performance.get("source_name"),
+            "portfolio_asof_date": portfolio_asof_date or None,
+            "benchmark_asof_date": benchmark_asof_date or None,
+            "comparison_asof_date": benchmark_payload.get("comparison_asof_date"),
+            "comparison_mode": comparison_mode,
+            "latest_attempted_is_complete": latest_complete,
+            "latest_attempted_terminal_status": latest.get("status"),
+            "latest_attempted_missing_artifacts": latest_missing,
+        }
+
+        kpis = {
+            "portfolio_value": broker_snapshot.get("equity") if live_broker_overlay and broker_snapshot.get("equity") is not None else governed_portfolio_value,
+            "daily_pl": daily_pl,
+            "daily_return": (
+                benchmark_payload["portfolio_return_pct"] / 100.0
+                if benchmark_payload.get("portfolio_return_pct") is not None
+                else None
+            ),
+            "benchmark_return": (
+                benchmark_payload["spy_return_pct"] / 100.0
+                if benchmark_payload.get("spy_return_pct") is not None
+                else None
+            ),
+            "excess_return": (
+                benchmark_payload["performance_vs_spy_pct"] / 100.0
+                if benchmark_payload.get("performance_vs_spy_pct") is not None
+                else None
+            ),
+            "holdings": (
+                broker_snapshot.get("positions_count")
+                if broker_snapshot.get("positions_count") is not None
+                else broker_surface.get("broker", {}).get("posttrade", {}).get("positionsCount")
+            ),
+            "turnover": latest_nav.get("turnover_pct"),
+            "run_status": (
+                "FALLBACK_VIEW"
+                if fallback_in_use and governed_portfolio_value is not None
+                else effective_exec_summary.get("status") or latest.get("status") or "UNKNOWN"
+            ),
+        }
+
+        exceptions = []
+        if _status_is_failure(latest.get("status")) or _status_is_failure(effective_exec_summary.get("status")):
             exceptions.append(
                 {
                     "category": "Execution",
-                    "status": "warning",
-                    "message": f"Execution did not start due to preflight halt at {halt_stage}.",
+                    "status": "warning" if historical_latest_attempt_issue else "fail",
+                    "message": (
+                        f"Latest attempted run status: {latest.get('status') or effective_exec_summary.get('status') or 'UNKNOWN'}."
+                        if not historical_latest_attempt_issue
+                        else (
+                            f"Historical latest attempted run status: {latest.get('status') or effective_exec_summary.get('status') or 'UNKNOWN'}."
+                            f" Live broker overlay is showing {broker_trade_date}."
+                        )
+                    ),
                 }
             )
-        elif inferred_early_halt:
+        if recon_status not in {"PASS", "OK", "OK_RECONCILED", "UNKNOWN", "OVERLAY_ONLY"}:
             exceptions.append(
                 {
-                    "category": "Execution",
-                    "status": "warning",
-                    "message": "Execution likely did not start; halted before stage artifacts were generated (inferred).",
+                    "category": "Reconciliation",
+                    "status": "warning" if "DRIFT" in recon_status or recon_status == "WARN" else "fail",
+                    "message": (
+                        recon_posttrade.get("operator_message")
+                        if isinstance(recon_posttrade, dict) and recon_posttrade.get("operator_message")
+                        else f"Post-trade reconciliation status: {recon_status}."
+                    ),
                 }
             )
-        elif run_success:
-            if legacy_shadow_alias:
-                msg = f"Paper simulation status: {execution_status}. (This is simulated activity, not broker execution.)"
-            else:
-                msg = f"Execution status: {execution_status}."
-            exceptions.append({"category": "Execution", "status": "pass", "message": msg})
-        else:
-            exceptions.append({"category": "Execution", "status": "fail", "message": f"Execution status: {execution_status}."})
-
-        risk_status = "pass"
-        risk_message = "No risk exceptions detected."
-        if breaker_status in {"LOCK", "HALTED"}:
-            risk_status = "fail"
-            risk_message = f"Breaker status is {breaker_status}."
-        elif breaker_status in {"PARTIAL", "ELEVATED", "HIGH", "CRISIS"}:
-            risk_status = "warning"
-            risk_message = f"Breaker or regime indicates caution: {breaker_status}."
-        exceptions.append({"category": "Risk", "status": risk_status, "message": risk_message})
-
-        broker_alignment_msg = str(data_freshness.get("alignment_detail") or "Broker alignment not available.")
-        broker_trust = str(broker_snapshot.get("trust_level") or "missing")
-        if suspicious_broker_value:
-            broker_alignment_msg = str(data_freshness.get("suspicious_reason") or broker_alignment_msg)
-            exceptions.append({
-                "category": "Broker snapshot",
-                "status": "warning",
-                "message": f"Suspicious derived broker estimate: {broker_alignment_msg}",
-            })
-        elif broker_trust == "derived":
-            exceptions.append({
-                "category": "Broker snapshot",
-                "status": "warning",
-                "message": f"Derived broker estimate in use. {broker_alignment_msg}",
-            })
-        elif alignment == "aligned":
-            exceptions.append({"category": "Broker snapshot", "status": "pass", "message": broker_alignment_msg})
-        elif alignment in {"mismatch", "stale"}:
-            exceptions.append({"category": "Broker snapshot", "status": "warning", "message": broker_alignment_msg})
-        else:
-            exceptions.append({"category": "Broker snapshot", "status": "warning", "message": "Broker snapshot unavailable; dashboard is showing governed run values."})
-
-        missing_optional = sorted(set(self.missing_files) - set(missing_required))
-
-        if missing_required:
+        if data_freshness["broker_vs_run_alignment"] not in {"aligned", "overlay"}:
+            exceptions.append(
+                {
+                    "category": "Broker snapshot",
+                    "status": "warning",
+                    "message": data_freshness["alignment_detail"],
+                }
+            )
+        if broker_snapshot.get("suspicious"):
+            exceptions.append(
+                {
+                    "category": "Broker snapshot",
+                    "status": "warning",
+                    "message": broker_snapshot.get("confidence_note"),
+                }
+            )
+        if latest_missing:
+            missing_prefix = (
+                "Missing historical run artifacts (expected for plan-only/no_action runs): "
+                if live_broker_overlay or not _status_is_failure(latest.get("status"))
+                else "Missing critical run artifacts: "
+            )
             exceptions.append(
                 {
                     "category": "Data / artifacts",
                     "status": "warning",
-                    "message": f"Missing critical artifacts: {', '.join(missing_required)}",
+                    "message": missing_prefix + ", ".join(latest_missing),
                 }
             )
-        elif missing_optional:
+        if live_broker_overlay and not overlay_performance["nav_rows"]:
             exceptions.append(
                 {
-                    "category": "Data / artifacts",
+                    "category": "Performance history",
                     "status": "warning",
-                    "message": f"Missing optional artifacts: {', '.join(missing_optional[:3])}",
+                    "message": "Live overlay performance history is unavailable; governed NAV history is still in use.",
                 }
             )
-        elif self.degraded_metrics:
+        if comparison_mode == "portfolio_only":
             exceptions.append(
                 {
-                    "category": "Data / artifacts",
+                    "category": "Benchmark",
                     "status": "warning",
-                    "message": f"Metrics degraded: {'; '.join(self.degraded_metrics[:3])}",
+                    "message": "SPY comparison is unavailable for the current portfolio date range.",
                 }
             )
-        else:
-            exceptions.append({"category": "Data / artifacts", "status": "pass", "message": "All critical artifacts present."})
-
-        report_generated = False
-        if run_id:
-            report_dir = self._abs(f"outputs/runs/{run_id}/reports")
-            if report_dir.exists() and any(report_dir.glob("quant_report_*.html")):
-                report_generated = True
-                self.sources.append(SourceRecord(f"outputs/runs/{run_id}/reports/quant_report_*.html", "used"))
-            else:
-                self.sources.append(SourceRecord(f"outputs/runs/{run_id}/reports/quant_report_*.html", "missing"))
-
-        canonical_positions_exists = (self.repo_root / canonical_positions_path).exists()
 
         operating_checks = [
             {
                 "label": "Run completed",
-                "status": "pass" if run_success else ("warning" if (preflight_halted or inferred_early_halt) else "fail"),
+                "status": (
+                    "pass"
+                    if latest_complete
+                    else "warning"
+                    if historical_latest_attempt_issue or _status_is_failure(latest.get("status"))
+                    else "warning"
+                ),
                 "detail": (
-                    f"Execution status: {execution_status}."
-                    if not (preflight_halted or inferred_early_halt)
-                    else "Run halted before execution stages completed."
+                    "Latest attempted run has the expected completion artifacts."
+                    if latest_complete
+                    else (
+                        f"Historical latest attempted run status: {latest.get('status') or 'UNKNOWN'}; live broker overlay is current."
+                        if historical_latest_attempt_issue
+                        else f"Latest attempted run status: {latest.get('status') or 'UNKNOWN'}."
+                    )
                 ),
             },
             {
                 "label": "Trades executed",
-                "status": "pass" if orders_filled > 0 else "warning",
-                "detail": f"Orders filled: {orders_filled}.",
+                "status": "pass" if (activity.get("orders_filled") or 0) > 0 else "warning",
+                "detail": f"Accepted orders: {activity.get('orders_filled') or 0}.",
             },
             {
                 "label": "Reconciliation passed",
-                "status": (
-                    "pass"
-                    if recon_ok is True
-                    else ("warning" if (preflight_halted or inferred_early_halt) else ("fail" if recon_ok is False else "warning"))
-                ),
+                "status": "pass" if recon_status in {"PASS", "OK", "OK_RECONCILED"} else "skip" if recon_status == "OVERLAY_ONLY" else "warning",
                 "detail": (
-                    "Preflight reconciliation gate failed."
-                    if preflight_halted
-                    else (
-                        "Reconciliation status inferred; halted before stage artifacts were generated."
-                        if inferred_early_halt
-                        else ("Reconciliation check available." if recon_ok is not None else "Reconciliation artifact not found.")
-                    )
+                    "Live broker overlay active; same-day governed reconciliation was not run."
+                    if recon_status == "OVERLAY_ONLY"
+                    else recon_posttrade.get("operator_message")
+                    if isinstance(recon_posttrade, dict) and recon_posttrade.get("operator_message")
+                    else f"Reconciliation status: {recon_status}."
                 ),
             },
             {
-                "label": "Canonical positions present",
-                "status": "pass" if canonical_positions_exists else "fail",
-                "detail": canonical_positions_path if canonical_positions_exists else "Canonical snapshot missing.",
+                "label": "Broker snapshot authoritative",
+                "status": "pass" if broker_snapshot.get("trust_level") == "authoritative" else "warning",
+                "detail": broker_snapshot.get("source_detail") or "Broker snapshot unavailable.",
             },
             {
-                "label": "Ledger updated",
-                "status": "pass" if trades_df is not None and not trades_df.empty else "warning",
-                "detail": "Ledger has at least one trade row." if trades_df is not None and not trades_df.empty else "No trade rows found in ledger.",
-            },
-            {
-                "label": "Daily report generated",
-                "status": "pass" if report_generated else "warning",
-                "detail": "Run report HTML found." if report_generated else "Run report HTML not found in latest run archive.",
-            },
-            {
-                "label": "Metric completeness",
-                "status": "pass" if not self.degraded_metrics else "warning",
-                "detail": "All executive metrics computed." if not self.degraded_metrics else "; ".join(self.degraded_metrics[:3]),
-            },
-            {
-                "label": "Broker snapshot available",
-                "status": (
-                    "warning"
-                    if (suspicious_broker_value or broker_trust == "derived")
-                    else ("pass" if broker_snapshot.get("status") == "fresh" else ("warning" if broker_snapshot.get("status") == "stale" else "fail"))
-                ),
-                "detail": (
-                    f"Suspicious derived estimate. Source: {broker_snapshot.get('source_detail') or broker_snapshot.get('source') or 'missing'}"
-                    if suspicious_broker_value
-                    else (
-                        f"Derived estimate. Source: {broker_snapshot.get('source_detail') or broker_snapshot.get('source') or 'missing'}"
-                        if broker_trust == "derived"
-                        else f"Source: {broker_snapshot.get('source_detail') or broker_snapshot.get('source') or 'missing'}; as_of={broker_snapshot.get('as_of') or 'n/a'}"
-                    )
-                ),
-            },
-            {
-                "label": "Run vs broker alignment",
-                "status": "pass" if alignment == "aligned" else "warning",
-                "detail": broker_alignment_msg,
+                "label": "Dashboard payload generated",
+                "status": "pass",
+                "detail": "Monitor payload refreshed for static serving.",
             },
         ]
 
-        status_banner = "Run status unavailable."
-        
-        # Executive-friendly banner based on run selection context
-        if selected_run_id != latest_attempted_run_id and latest_attempted_run_id:
-            # Latest attempted run failed/halted, but successful run available
-            if report_date and run_success:
-                status_banner = (
-                    f"Latest run ({latest_attempted_run_id}) halted. "
-                    f"Executive metrics from most recent successful run ({report_date}). "
-                    f"{('Metrics current as of selected run.' if not suspicious_broker_value else 'Broker estimate is suspicious.')}"
-                )
-            elif report_date:
-                status_banner = f"Showing most recent successful run ({report_date}). Latest attempted run ({latest_attempted_run_id}) failed before completion."
-        elif report_date and run_success:
-            trades_txt = f"{orders_filled} trades executed" if orders_filled > 0 else "no trades executed"
-            excess_txt = "benchmark comparison unavailable"
-            if excess_return is not None:
-                excess_bps = round(excess_return * 10000)
-                excess_txt = f"portfolio {'outperformed' if excess_bps >= 0 else 'underperformed'} benchmark by {abs(excess_bps)} bps"
-            status_banner = (
-                f"Run completed successfully on {report_date}. "
-                f"{trades_txt.capitalize()}. {excess_txt.capitalize()}. "
-                f"{('No material exceptions.' if len([e for e in exceptions if e['status'] == 'fail']) == 0 else 'Exceptions require review.')}"
+        sources = []
+        for path in [
+            self.repo_root / "outputs" / "latest.json",
+            self.repo_root / "outputs" / "latest_run.json",
+            self.repo_root / "outputs" / "trading_day_summary.json",
+            performance["nav_path"],
+            performance["benchmark_path"],
+            broker_day_snapshot_path,
+            intended_path,
+            orders_path,
+            recon_path,
+            Path(contribution_snapshot["paths"]["tickers"]) if contribution_snapshot["paths"].get("tickers") else None,
+            Path(contribution_snapshot["paths"]["sleeves"]) if contribution_snapshot["paths"].get("sleeves") else None,
+        ]:
+            if path is None:
+                continue
+            sources.append(
+                {
+                    "path": _relative_str(self.repo_root, path),
+                    "status": "used" if path.exists() else "missing",
+                }
             )
-        elif report_date:
-            status_banner = f"Run reported {execution_status} on {report_date}. Review exceptions and operating checks."
-        if preflight_halted and report_date:
-            halt_stage = str(preflight_failure_obj.get("halt_stage") or "preflight")
-            status_banner = (
-                f"Run halted during {halt_stage} on {report_date}. "
-                "Execution did not start; review preflight failure details."
-            )
-        elif inferred_early_halt and report_date:
-            status_banner = (
-                f"Run likely halted before stage artifacts were generated on {report_date}. "
-                "This classification is inferred from sparse run artifacts."
+        if broker_snapshot.get("source"):
+            broker_source = str(broker_snapshot["source"]).replace("artifact:", "")
+            sources.append({"path": broker_source, "status": "used"})
+        if run_root is not None:
+            sources.append(
+                {
+                    "path": _relative_str(self.repo_root, run_root),
+                    "status": "present" if run_root.exists() else "missing",
+                }
             )
 
-        if suspicious_broker_value:
-            status_banner = f"{status_banner} Derived broker estimate is suspicious and has been de-emphasized."
-        elif broker_trust == "derived":
-            status_banner = f"{status_banner} Broker view is a derived estimate (not authoritative)."
-        elif alignment == "mismatch":
-            status_banner = f"{status_banner} Broker snapshot and governed run date are out of sync."
-        elif alignment == "stale":
-            status_banner = f"{status_banner} Broker snapshot is stale."
-        elif alignment == "missing":
-            status_banner = f"{status_banner} Broker snapshot unavailable; governed run snapshot shown."
+        warnings = [item["message"] for item in exceptions if item["status"] != "pass"]
+        builder_notes = {
+            "build_timestamp": self._now.isoformat(),
+            "missing_files": latest_missing,
+            "warnings": warnings[:4],
+            "all_warnings": warnings,
+            "degraded_metrics": (
+                ["benchmark_comparison_unavailable"]
+                if comparison_mode == "portfolio_only"
+                else []
+            ) + (
+                ["live_overlay_history_missing"]
+                if live_broker_overlay and not overlay_performance["nav_rows"]
+                else []
+            ) + (
+                ["negative_alpha"]
+                if attribution.get("cumulative_alpha") is not None and attribution.get("cumulative_alpha") < 0
+                else []
+            ),
+            "performance": {
+                "source_name": performance.get("source_name"),
+                "nav_path": _relative_str(self.repo_root, performance.get("nav_path")),
+                "benchmark_path": _relative_str(self.repo_root, performance.get("benchmark_path")),
+                "portfolio_asof_date": portfolio_asof_date,
+                "benchmark_asof_date": benchmark_asof_date or None,
+                "comparison_mode": comparison_mode,
+            },
+            "broker_snapshot": {
+                "source_mode": broker_mode,
+                "source_used": broker_snapshot.get("source"),
+                "freshness": data_freshness.get("broker_vs_run_alignment"),
+                "trust_level": broker_snapshot.get("trust_level"),
+                "source_detail": broker_snapshot.get("source_detail"),
+                "suspicious": broker_snapshot.get("suspicious"),
+            },
+        }
 
-        if inferred_note:
-            self.warnings.append(inferred_note)
-
-        # Filter to executive-level warnings only
-        executive_warnings = self._filter_executive_warnings()
-
-        overall_status = "PASS" if run_success else ("WARNING" if (preflight_halted or inferred_early_halt or execution_status == "UNKNOWN") else "FAIL")
-
-        model = {
-            "run_meta": {
-                "report_date": report_date or "Not generated",
-                "run_id": run_id or "Not generated",
-                "mode": mode,
-                "overall_status": overall_status,
-                "benchmark": "SPY",
-                "last_updated": self._safe_iso_now(),
-                "status_banner": status_banner,
-"latest_attempted_run": {
-                    "run_id": latest_attempted_run_id,
-                    "report_date": latest_attempted_report_date,
-                    "created_at": latest_attempted_created_at,
-                },
-                "selected_governed_run": {
-                    "run_id": selected_run_id,
-                    "report_date": report_date,
-                    "selection_reason": selection_reason,
-                },
-                # Run-observability fields — distinguish incomplete/failed runs from
-                # intentional no-action days and stale fallback dashboard states.
-                "latest_attempted_terminal_status": latest_attempted_terminal_status,
-                "latest_attempted_is_complete": latest_attempted_is_complete,
-                "latest_attempted_missing_artifacts": latest_attempted_missing_artifacts,
-                "latest_successful_run_id": latest_successful_run_id,
-                "latest_successful_trade_date": latest_successful_trade_date,
-                "fallback_in_use": fallback_in_use,
-                "fallback_reason": fallback_reason,
-            },
-            "kpis": {
-                "portfolio_value": latest_nav,
-                "daily_pl": daily_pl,
-                "daily_return": latest_daily_return,
-                "benchmark_return": benchmark_return,
-                "excess_return": excess_return,
-                "holdings": holdings,
-                "turnover": turnover,
-                "run_status": execution_status,
-            },
-            "perf_summary": {
-                "mtd_return": mtd,
-                "qtd_return": qtd,
-                "since_inception_return": si,
-                "since_inception_alpha": si_alpha,
-                "current_drawdown": current_drawdown,
-                "best_day": best_day,
-                "worst_day": worst_day,
-            },
-            "series": {
-                "nav": nav_series,
-                "benchmark": benchmark_series,
-                "daily_returns": daily_returns_series,
-                "excess_returns": excess_returns_series,
-                "drawdown": drawdown_series,
-                "chart_metadata": {
-                    "nav_chart": {
-                        "title": "Portfolio NAV Indexed to 100",
-                        "x_axis_label": "Date (YYYY-MM-DD)",
-                        "y_axis_label": "Indexed Value",
-                        "font_size": "12pt",
-                        "show_grid": True,
-                        "note": "Portfolio NAV (blue) vs SPY benchmark (orange), indexed to 100 at inception" if nav_series else "NAV data unavailable",
-                    },
-                    "daily_returns_chart": {
-                        "title": "Daily Strategy Returns",
-                        "x_axis_label": "Date (YYYY-MM-DD)",
-                        "y_axis_label": "Daily Return (%)",
-                        "baseline": 0.0,
-                        "baseline_visible": True,
-                        "font_size": "12pt",
-                        "show_grid": True,
-                        "note": "Daily percentage return; positive values are gains" if daily_returns_series else "Daily returns unavailable",
-                    },
-                    "excess_returns_chart": {
-                        "title": "Daily Excess Return vs SPY",
-                        "x_axis_label": "Date (YYYY-MM-DD)",
-                        "y_axis_label": "Excess Return (%)",
-                        "baseline": 0.0,
-                        "baseline_visible": True,
-                        "font_size": "12pt",
-                        "show_grid": True,
-                        "note": "Daily outperformance/underperformance vs SPY" if excess_returns_series else "Excess returns unavailable",
-                    },
-                },
-            },
-            "risk": {
-                "drawdown": current_drawdown,
-                "cash_position": latest_cash_weight,
-                "gross_exposure": latest_gross,
-                "largest_position_weight": latest_largest,
-                "turnover_pct": turnover,
-                "turnover_limit_pct": turnover_limit_pct,
-                "breaker_status": breaker_status or "UNKNOWN",
-            },
-            "activity": {
-                "buys": buys,
-                "sells": sells,
-                "new_positions": new_positions,
-                "full_exits": full_exits,
-                "orders_filled": orders_filled,
-                "orders_rejected": orders_rejected,
-                "source_run_id": selected_run_id,
-                "source_report_date": report_date,
-                "activity_source": activity_source,
-                "is_simulated": legacy_shadow_alias,
-                "note": f"Activity source: {activity_source} from {'paper simulation' if legacy_shadow_alias else 'execution'} run {selected_run_id or 'unavailable'}",
-            },
+        return {
+            "run_meta": run_meta,
+            "kpis": kpis,
+            "perf_summary": perf_summary,
+            "series": performance["series"],
+            "risk": risk,
+            "activity": activity,
             "governed_snapshot": governed_snapshot,
             "broker_snapshot": broker_snapshot,
-            "execution_integrity": execution_integrity,
             "data_freshness": data_freshness,
             "top_changes": top_changes,
             "exceptions": exceptions,
             "operating_checks": operating_checks,
-            "sources": [s.__dict__ for s in self.sources],
-            "builder_notes": {
-                "build_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "missing_files": sorted(set(self.missing_files)),
-                "warnings": executive_warnings,
-                "all_warnings": self.warnings,
-                "degraded_metrics": self.degraded_metrics,
-                "broker_snapshot": {
-                    "source_mode": self.broker_source_mode,
-                    "source_used": self.broker_source_used,
-                    "freshness": self.freshness_classification,
-                    "trust_level": broker_snapshot.get("trust_level", "missing"),
-                    "source_detail": broker_snapshot.get("source_detail", "missing"),
-                    "suspicious": bool(broker_snapshot.get("suspicious")),
-                    "broker_authoritative_state": bool(broker_snapshot.get("trust_level") == "authoritative"),
-                },
-            },
+            "sources": sources,
+            "builder_notes": builder_notes,
+            "execution_integrity": execution_integrity,
+            "attribution": attribution,
+            "edge_diagnostics": edge_diagnostics,
+            "contribution_snapshot": contribution_snapshot,
+            "_summary_export": self._build_summary_export(
+                report_date=selected_governed_report_date,
+                run_id=display_run_id,
+                trading_day_summary=trading_day_summary,
+                summary_matches_report=summary_matches_selected_governed,
+                broker_surface=broker_surface,
+                benchmark_payload=benchmark_payload,
+                broker_snapshot=broker_snapshot,
+                live_broker_overlay=live_broker_overlay,
+                recon_status=recon_status,
+            ),
         }
-        return model
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build Quant Daily Executive Dashboard data JSON from repo artifacts.")
-    parser.add_argument("--repo-root", default=".", help="Repository root path")
-    parser.add_argument(
-        "--output",
-        default="web/dashboard/dashboard_data.json",
-        help="Dashboard JSON output path (relative to repo root unless absolute)",
-    )
-    return parser.parse_args()
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build dashboard payloads for the Caerus monitor and broker views.")
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--run-root", default=None)
+    parser.add_argument("--trade-date", default=None)
+    parser.add_argument("--output-dir", default="web/dashboard")
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
-    repo_root = Path(args.repo_root).resolve()
-    output_path = Path(args.output)
-    if not output_path.is_absolute():
-        output_path = repo_root / output_path
+def write_dashboard_payload(
+    repo_root: Path,
+    payload: dict[str, Any],
+    output_dir: Path,
+    *,
+    legacy_payload: dict[str, Any] | None = None,
+    summary_payload: dict[str, Any] | None = None,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "dashboard-data.json"
+    js_path = output_dir / "dashboard-data.js"
+    json_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    js_text = "window.DASHBOARD_DATA = " + json.dumps(payload, indent=2, sort_keys=True) + ";\n"
+    json_path.write_text(json_text, encoding="utf-8")
+    js_path.write_text(js_text, encoding="utf-8")
 
-    builder = DashboardBuilder(repo_root=repo_root)
-    model = builder.build()
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(model, indent=2), encoding="utf-8")
-
-    print(f"[DASHBOARD] wrote {output_path}")
-    notes = model.get("builder_notes", {})
-    missing = notes.get("missing_files", [])
-    warnings = notes.get("warnings", [])
-    degraded = notes.get("degraded_metrics", [])
-    broker_diag = notes.get("broker_snapshot", {}) if isinstance(notes, dict) else {}
-    sources = model.get("sources", [])
-    used_count = len([s for s in sources if s.get("status") == "used"])
-    missing_count = len([s for s in sources if s.get("status") == "missing"])
-
-    print(f"[DASHBOARD] sources_used={used_count} sources_missing={missing_count}")
-    print(f"[DASHBOARD] degraded_metrics={len(degraded)} warnings={len(warnings)}")
-    print(
-        "[DASHBOARD] broker_source_mode={mode} broker_source_used={used} freshness={fresh} trust={trust} suspicious={susp}".format(
-            mode=broker_diag.get("source_mode", "missing"),
-            used=broker_diag.get("source_used", "missing"),
-            fresh=broker_diag.get("freshness", "missing"),
-            trust=broker_diag.get("trust_level", "missing"),
-            susp=broker_diag.get("suspicious", False),
+    if legacy_payload is not None:
+        clean_legacy = {key: value for key, value in legacy_payload.items() if not str(key).startswith("_")}
+        (output_dir / "dashboard_data.json").write_text(
+            json.dumps(clean_legacy, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
+
+    if summary_payload is not None:
+        (output_dir / "trading_day_summary.json").write_text(
+            json.dumps(summary_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    repo_root = Path(args.repo_root).resolve()
+    broker_payload = build_dashboard_payload(repo_root, run_root_arg=args.run_root, trade_date_arg=args.trade_date)
+
+    builder = DashboardBuilder(
+        repo_root=repo_root,
+        run_root_arg=args.run_root,
+        trade_date_arg=args.trade_date,
     )
-    for msg in warnings:
-        print(f"[DASHBOARD][WARN] {msg}")
-    for metric_msg in degraded:
-        print(f"[DASHBOARD][DEGRADED] {metric_msg}")
-    if missing:
-        print("[DASHBOARD][MISSING] " + ", ".join(missing))
+    legacy_payload = builder.build()
+    summary_payload = legacy_payload.pop("_summary_export", None)
 
-    print()
-    print("[DASHBOARD] ── Local development workflow ──────────────────────────────")
-    print("[DASHBOARD]   1. serve:  python -m http.server 8765  (from repo root)")
-    print("[DASHBOARD]   2. open:   http://localhost:8765/web/dashboard/quant_daily_executive.html")
-    print("[DASHBOARD] ─────────────────────────────────────────────────────────────")
-
+    output_dir = repo_root / args.output_dir
+    write_dashboard_payload(
+        repo_root,
+        broker_payload,
+        output_dir,
+        legacy_payload=legacy_payload,
+        summary_payload=summary_payload if isinstance(summary_payload, dict) else None,
+    )
+    print(str(output_dir / "dashboard_data.json"))
     return 0
 
 

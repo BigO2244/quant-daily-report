@@ -1,0 +1,11 @@
+{
+  "benchmark": "SPY",
+  "north_star": "Significantly outperform SPY with 20%+ annualized returns and strong risk-adjusted performance.",
+  "annualized_return_target": 0.2,
+  "annualized_excess_return_target": 0.05,
+  "sharpe_target": 1.0,
+  "max_drawdown_floor": -0.1,
+  "beta_floor": 0.9,
+  "upside_capture_floor": 0.9,
+  "cash_ceiling": 0.05
+}

@@ -123,7 +123,7 @@ Run from repo root (`/Users/brettolson/Documents/Caerus/quant-daily-report-main`
 
 ```bash
 cd /Users/brettolson/Documents/Caerus/quant-daily-report-main
-python3 scripts/build_quant_dashboard.py
+python3 scripts/research/build_quant_dashboard.py
 ```
 
 Default output path:
@@ -133,7 +133,7 @@ Default output path:
 Optional output path:
 
 ```bash
-python3 scripts/build_quant_dashboard.py --output web/dashboard/dashboard_data.json
+python3 scripts/research/build_quant_dashboard.py --output web/dashboard/dashboard_data.json
 ```
 
 `web/dashboard/dashboard_data.json` is generated at build time and is not committed by default.
@@ -152,6 +152,12 @@ Optional live fetch is disabled by default and only runs when:
 
 - `DASHBOARD_FETCH_BROKER_SNAPSHOT=1`
 - Alpaca credentials are present in environment.
+
+You can also force a live broker fetch without setting the env toggle:
+
+```bash
+python3 scripts/research/build_quant_dashboard.py --fetch-live-broker
+```
 
 When a broker snapshot is derived or fetched live, the builder persists a normalized artifact at:
 
@@ -175,7 +181,7 @@ If the browser blocks local `fetch` for `file://` URLs, the page automatically f
 1. Build dashboard JSON:
 
 ```bash
-python3 scripts/build_quant_dashboard.py
+python3 scripts/research/build_quant_dashboard.py
 ```
 
 2. Start a local static server from repo root:
@@ -188,12 +194,14 @@ python3 -m http.server 8765
 3. Open with query parameter (uses generated real JSON at `web/dashboard/dashboard_data.json`):
 
 - `http://localhost:8765/web/dashboard/quant_daily_executive.html?data=dashboard_data.json`
+- `http://localhost:8765/web/dashboard/quant_daily_executive.html?data=dashboard_data.json&refresh=60`
 
 How `?data=` is resolved:
 
 - `?data=dashboard_data.json` loads `web/dashboard/dashboard_data.json` relative to the dashboard HTML path.
 - This is the canonical and most reliable query-string form for local serve mode.
 - `?data=sample_dashboard_data.json` forces sample JSON mode while still using the local server.
+- `?refresh=60` reloads the static JSON every 60 seconds using `cache: no-store`, which is the simplest way to get near-live updates when the VM rebuilds `dashboard_data.json` on a schedule.
 
 ## Source Artifacts Used
 

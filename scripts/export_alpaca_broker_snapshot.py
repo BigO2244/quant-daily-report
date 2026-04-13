@@ -6,7 +6,11 @@ import datetime as dt
 import json
 import logging
 import os
+import ssl
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from brokers.alpaca_broker import AlpacaBroker
+from brokers.alpaca_broker import AlpacaBroker, load_alpaca_env
+from reconciliation import write_post_execution_drift_report
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,21 @@ def parse_args() -> argparse.Namespace:
         default=200,
         help="Max number of recent orders to request per query.",
     )
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="Optional shell env file with Alpaca credentials (supports `export KEY=value`).",
+    )
+    parser.add_argument(
+        "--repo-root",
+        default=str(REPO_ROOT),
+        help="Repository root for compatibility artifact writes.",
+    )
+    parser.add_argument(
+        "--no-supporting-artifacts",
+        action="store_true",
+        help="Only write outputs/broker_snapshot/broker_snapshot_<date>.json.",
+    )
     return parser.parse_args()
 
 
@@ -54,6 +74,30 @@ def _resolve_report_date(value: str | None) -> str:
         return dt.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     except Exception:
         return dt.datetime.utcnow().date().isoformat()
+
+
+def load_env_file(path: str | Path | None) -> None:
+    if path is None:
+        return
+    env_path = Path(path).expanduser()
+    if not env_path.exists():
+        raise FileNotFoundError(f"env file not found: {env_path}")
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
+            value = value[1:-1]
+        os.environ[key] = value
 
 
 def _field(obj: dict[str, Any], *keys: str) -> Any:
@@ -77,6 +121,138 @@ def _date_prefix(value: Any) -> str:
     if not text:
         return ""
     return text[:10]
+
+
+def _to_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _signed_qty(side: Any, qty: Any) -> float:
+    numeric = _to_float(qty) or 0.0
+    side_text = str(side or "").strip().lower()
+    if side_text in {"sell", "short"}:
+        return -abs(numeric)
+    return abs(numeric)
+
+
+def _extract_position_map(items: list[dict[str, Any]] | dict[str, Any] | None) -> dict[str, float]:
+    if isinstance(items, dict):
+        raw_items = items.get("positions")
+        if not isinstance(raw_items, list):
+            raw_items = []
+    elif isinstance(items, list):
+        raw_items = items
+    else:
+        raw_items = []
+    out: dict[str, float] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        qty = _to_float(item.get("qty"))
+        side = item.get("side")
+        if qty is None and isinstance(item.get("raw"), dict):
+            qty = _to_float(item["raw"].get("qty"))
+            side = side or item["raw"].get("side")
+        if qty is None:
+            continue
+        out[symbol] = _signed_qty(side, qty)
+    return out
+
+
+def _apply_fills_to_positions(expected: dict[str, float], fills: list[dict[str, Any]]) -> dict[str, float]:
+    next_positions = dict(expected)
+    for fill in fills:
+        symbol = str(fill.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        delta = _signed_qty(fill.get("side"), fill.get("qty"))
+        next_positions[symbol] = round(float(next_positions.get(symbol, 0.0)) + float(delta), 10)
+        if abs(next_positions[symbol]) <= 1e-9:
+            next_positions.pop(symbol, None)
+    return next_positions
+
+
+def _market_value_total(positions: list[dict[str, Any]]) -> float | None:
+    values = [_to_float(item.get("market_value")) for item in positions]
+    numeric = [value for value in values if value is not None]
+    if not numeric:
+        return None
+    return round(sum(numeric), 2)
+
+
+def _rest_json(
+    *,
+    url: str,
+    headers: dict[str, str],
+    timeout: int = 20,
+) -> dict[str, Any] | list[Any]:
+    request = urllib.request.Request(url, headers=headers)
+    context = ssl.create_default_context()
+    with urllib.request.urlopen(request, context=context, timeout=timeout) as response:
+        body = response.read().decode("utf-8", errors="replace")
+    payload = json.loads(body)
+    if isinstance(payload, (dict, list)):
+        return payload
+    raise RuntimeError(f"Unexpected Alpaca response type for {url}: {type(payload).__name__}")
+
+
+def _rest_get(
+    *,
+    base_url: str,
+    path: str,
+    headers: dict[str, str],
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any] | list[Any]:
+    query = urllib.parse.urlencode(
+        {key: value for key, value in (params or {}).items() if value not in (None, "")},
+        doseq=True,
+    )
+    url = f"{base_url.rstrip('/')}{path}"
+    if query:
+        url = f"{url}?{query}"
+    return _rest_json(url=url, headers=headers)
+
+
+def _rest_list_fills(
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    report_date: str,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
+    fills: list[dict[str, Any]] = []
+    page_token: str | None = None
+    while True:
+        payload = _rest_get(
+            base_url=base_url,
+            path="/v2/account/activities/FILL",
+            headers=headers,
+            params={
+                "date": report_date,
+                "direction": "desc",
+                "page_size": page_size,
+                "page_token": page_token,
+            },
+        )
+        batch = payload if isinstance(payload, list) else []
+        if not batch:
+            break
+        fills.extend(dict(item) for item in batch if isinstance(item, dict))
+        if len(batch) < page_size:
+            break
+        next_token = str(batch[-1].get("id") or "").strip()
+        if not next_token or next_token == page_token:
+            break
+        page_token = next_token
+    return fills
 
 
 def _order_on_report_date(order: dict[str, Any], report_date: str) -> bool:
@@ -126,6 +302,7 @@ def _sanitize_order(order: dict[str, Any]) -> dict[str, Any]:
         "status": _field(order, "status"),
         "qty": _field(order, "qty"),
         "filled_qty": _field(order, "filled_qty"),
+        "filled_avg_price": _field(order, "filled_avg_price"),
         "notional": _field(order, "notional"),
         "limit_price": _field(order, "limit_price"),
         "stop_price": _field(order, "stop_price"),
@@ -227,18 +404,159 @@ def write_snapshot_json(payload: dict[str, Any], output_dir: str | Path, report_
     return out_path
 
 
+def fetch_snapshot_inputs(*, report_date: str, order_limit: int) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], str]:
+    try:
+        broker = AlpacaBroker.from_env()
+        account = broker.get_account()
+        positions = broker.get_positions()
+        orders_all = broker.list_orders(status="all", limit=order_limit)
+        orders_closed = broker.list_orders(status="closed", limit=order_limit)
+        fills = broker.list_fills_since(report_date)
+        return account, positions, orders_all, orders_closed, fills, "alpaca_py"
+    except Exception as exc:
+        if "alpaca-py is required" not in str(exc):
+            raise
+
+    cfg = load_alpaca_env()
+    headers = {
+        "APCA-API-KEY-ID": cfg.key_id,
+        "APCA-API-SECRET-KEY": cfg.secret_key,
+    }
+    account = _rest_get(base_url=cfg.base_url, path="/v2/account", headers=headers)
+    positions = _rest_get(base_url=cfg.base_url, path="/v2/positions", headers=headers)
+    orders_all = _rest_get(
+        base_url=cfg.base_url,
+        path="/v2/orders",
+        headers=headers,
+        params={"status": "all", "limit": order_limit, "direction": "desc", "nested": "false"},
+    )
+    orders_closed = _rest_get(
+        base_url=cfg.base_url,
+        path="/v2/orders",
+        headers=headers,
+        params={"status": "closed", "limit": order_limit, "direction": "desc", "nested": "false"},
+    )
+    fills = _rest_list_fills(base_url=cfg.base_url, headers=headers, report_date=report_date)
+    return (
+        dict(account) if isinstance(account, dict) else {},
+        [dict(item) for item in positions] if isinstance(positions, list) else [],
+        [dict(item) for item in orders_all] if isinstance(orders_all, list) else [],
+        [dict(item) for item in orders_closed] if isinstance(orders_closed, list) else [],
+        fills,
+        "alpaca_rest_api",
+    )
+
+
+def write_supporting_broker_artifacts(
+    *,
+    repo_root: Path,
+    payload: dict[str, Any],
+    source_mode: str,
+) -> dict[str, Path]:
+    broker_dir = repo_root / "outputs" / "broker"
+    broker_dir.mkdir(parents=True, exist_ok=True)
+    report_date = str(payload.get("meta", {}).get("report_date") or "")
+    captured_at = str(payload.get("meta", {}).get("generated_at") or dt.datetime.now(dt.timezone.utc).isoformat())
+    account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
+    positions = payload.get("positions_current") if isinstance(payload.get("positions_current"), list) else []
+    market_value = _market_value_total(positions)
+
+    posttrade_account = {
+        "trade_date": report_date,
+        "captured_at": captured_at,
+        "source": source_mode,
+        "status": account.get("status"),
+        "cash": account.get("cash"),
+        "equity": account.get("equity") or account.get("portfolio_value"),
+        "buying_power": account.get("buying_power"),
+        "portfolio_value": account.get("portfolio_value") or account.get("equity"),
+        "last_equity": account.get("last_equity"),
+        "account": account,
+    }
+    posttrade_positions = {
+        "trade_date": report_date,
+        "captured_at": captured_at,
+        "source": source_mode,
+        "positions_count": len(positions),
+        "positions": positions,
+    }
+    broker_snapshot_latest = {
+        "trade_date": report_date,
+        "as_of": captured_at,
+        "captured_at": captured_at,
+        "source": source_mode,
+        "trust_level": "authoritative",
+        "status": account.get("status") or "ACTIVE",
+        "cash": account.get("cash"),
+        "equity": account.get("equity") or account.get("portfolio_value"),
+        "portfolio_value": account.get("portfolio_value") or account.get("equity"),
+        "buying_power": account.get("buying_power"),
+        "last_equity": account.get("last_equity"),
+        "market_value": market_value,
+        "positions_count": len(positions),
+        "account": account,
+    }
+
+    posttrade_account_path = broker_dir / "posttrade_account_snapshot.json"
+    posttrade_positions_path = broker_dir / "posttrade_positions.json"
+    latest_path = broker_dir / "broker_snapshot_latest.json"
+    posttrade_account_path.write_text(json.dumps(posttrade_account, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    posttrade_positions_path.write_text(json.dumps(posttrade_positions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    latest_path.write_text(json.dumps(broker_snapshot_latest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "posttrade_account_snapshot": posttrade_account_path,
+        "posttrade_positions": posttrade_positions_path,
+        "broker_snapshot_latest": latest_path,
+    }
+
+
+def write_posttrade_recon_from_snapshot(
+    *,
+    repo_root: Path,
+    payload: dict[str, Any],
+    report_date: str,
+) -> dict[str, Any] | None:
+    latest_run_path = repo_root / "outputs" / "latest_run.json"
+    if not latest_run_path.exists():
+        return None
+    latest = json.loads(latest_run_path.read_text(encoding="utf-8"))
+    if str(latest.get("trade_date") or "").strip() != report_date:
+        return None
+    run_root = Path(str(latest.get("run_root") or "")).expanduser()
+    if not run_root.is_absolute():
+        run_root = repo_root / run_root
+    pretrade_positions_path = run_root / "broker" / "pretrade_positions.json"
+    if not pretrade_positions_path.exists():
+        return None
+    pretrade_positions = json.loads(pretrade_positions_path.read_text(encoding="utf-8"))
+    expected_positions = _apply_fills_to_positions(
+        _extract_position_map(pretrade_positions),
+        payload.get("fills_report_date") if isinstance(payload.get("fills_report_date"), list) else [],
+    )
+    actual_positions = _extract_position_map(
+        payload.get("positions_current") if isinstance(payload.get("positions_current"), list) else [],
+    )
+    account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
+    return write_post_execution_drift_report(
+        run_date=report_date,
+        expected_positions=expected_positions,
+        actual_positions=actual_positions,
+        actual_cash=_to_float(account.get("cash")),
+        actual_equity=_to_float(account.get("equity") or account.get("portfolio_value")),
+    )
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
+    load_env_file(args.env_file)
+    repo_root = Path(args.repo_root).resolve()
     report_date = _resolve_report_date(args.report_date)
     order_limit = max(1, int(args.order_limit))
-
-    broker = AlpacaBroker.from_env()
-    account = broker.get_account()
-    positions = broker.get_positions()
-    orders_all = broker.list_orders(status="all", limit=order_limit)
-    orders_closed = broker.list_orders(status="closed", limit=order_limit)
-    fills = broker.list_fills_since(report_date)
+    account, positions, orders_all, orders_closed, fills, source_mode = fetch_snapshot_inputs(
+        report_date=report_date,
+        order_limit=order_limit,
+    )
 
     payload = build_snapshot_payload(
         report_date=report_date,
@@ -252,14 +570,39 @@ def main() -> int:
     )
 
     out_path = write_snapshot_json(payload, args.output_dir, report_date)
+    supporting_paths: dict[str, Path] = {}
+    recon_payload: dict[str, Any] | None = None
+    if not args.no_supporting_artifacts:
+        supporting_paths = write_supporting_broker_artifacts(
+            repo_root=repo_root,
+            payload=payload,
+            source_mode=source_mode,
+        )
+        recon_payload = write_posttrade_recon_from_snapshot(
+            repo_root=repo_root,
+            payload=payload,
+            report_date=report_date,
+        )
     logger.info(
-        "[BROKER_SNAPSHOT] wrote %s (positions=%d orders_today=%d orders_closed_recent=%d fills_today=%d)",
+        "[BROKER_SNAPSHOT] wrote %s (source=%s positions=%d orders_today=%d orders_closed_recent=%d fills_today=%d)",
         out_path,
+        source_mode,
         payload["counts"]["positions_current"],
         payload["counts"]["orders_report_date"],
         payload["counts"]["orders_closed_recent"],
         payload["counts"]["fills_report_date"],
     )
+    if supporting_paths:
+        logger.info(
+            "[BROKER_SNAPSHOT] supporting artifacts: %s",
+            ", ".join(str(path) for path in supporting_paths.values()),
+        )
+    if recon_payload:
+        logger.info(
+            "[BROKER_SNAPSHOT] posttrade recon: %s status=%s",
+            recon_payload.get("report_path"),
+            recon_payload.get("drift_status"),
+        )
     return 0
 
 

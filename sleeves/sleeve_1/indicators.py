@@ -128,6 +128,8 @@ def uptrend_ratio(df: pd.DataFrame, asof_date=None) -> float:
     Fraction of the universe in an uptrend (above 200d MA) on asof_date.
     Used for the breadth risk filter.
     """
+    if df is None or df.empty or "date" not in df.columns:
+        return 1.0
     if asof_date is None:
         asof_date = df["date"].max()
     snap = df[df["date"] == pd.to_datetime(asof_date)]

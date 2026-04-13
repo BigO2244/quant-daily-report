@@ -13,7 +13,10 @@ from core.quant_report import download_prices
 OUTPUT_DIR = Path("outputs/backtests/sleeve1_robustness")
 DEFAULT_START = "2005-01-01"
 DEFAULT_TOP_N = 10
-DEFAULT_SLIPPAGE_BPS = 10
+# 2026-04-11: aligned from 10 → 25 bps one-way to match live paper broker
+# cost assumption (paper/config_paper.json::execution.slippage_bps) and the
+# alpha_stack research cost_model. Keeps backtest vs live comparisons honest.
+DEFAULT_SLIPPAGE_BPS = 25
 
 
 def _month_end_rule() -> str:

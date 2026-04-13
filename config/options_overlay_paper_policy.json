@@ -1,0 +1,8 @@
+{
+  "benchmark": "SPY",
+  "mode": "paper_review",
+  "north_star": "Promote options from shadow to paper only after the overlay is feasible and the review gate is clear.",
+  "roll_before_dte": 14,
+  "max_holding_dte": 45,
+  "min_contract_utilization": 0.75
+}
