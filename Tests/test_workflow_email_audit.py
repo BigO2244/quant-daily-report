@@ -13,6 +13,7 @@ def test_workflow_inventory_matches_repo_files() -> None:
         "daily-alpaca-paper.yml",
         "daily-alpaca-precompute.yml",
         "export-broker-snapshot.yml",
+        "nightly-agents-refresh.yml",
         "research-digest.yml",
     }
 

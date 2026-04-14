@@ -994,8 +994,8 @@ def build_dashboard_payload(repo_root: Path, *, run_root_arg: str | None = None,
 class DashboardBuilder:
     def __init__(
         self,
-        *,
         repo_root: Path | str,
+        *,
         run_root_arg: str | None = None,
         trade_date_arg: str | None = None,
     ) -> None:
@@ -1003,6 +1003,44 @@ class DashboardBuilder:
         self.run_root_arg = run_root_arg
         self.trade_date_arg = trade_date_arg
         self._now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+
+    def _find_latest_execution_payload(
+        self,
+        trade_date: str | None,
+        *,
+        run_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
+        candidates: list[Path] = []
+        if run_id:
+            run_root = self.repo_root / "outputs" / "runs" / str(run_id)
+            candidates.extend(
+                [
+                    run_root / "operator_summary.json",
+                    run_root / "execution_results.json",
+                    run_root / "execution_payload.json",
+                ]
+            )
+
+        if trade_date:
+            candidates.append(self.repo_root / "outputs" / "execution_email" / f"{trade_date}.json")
+
+        for path in candidates:
+            payload = _read_json(path)
+            if not isinstance(payload, dict):
+                continue
+            out = dict(payload)
+            if path.name == "operator_summary.json":
+                run_root = path.parent
+                execution_results = _read_json(run_root / "execution_results.json")
+                if isinstance(execution_results, dict):
+                    out.update({key: value for key, value in execution_results.items() if value is not None})
+            if out.get("execution_status") is None:
+                out["execution_status"] = out.get("status") or out.get("pretrade_status")
+            if out.get("status") is None and out.get("execution_status") is not None:
+                out["status"] = out.get("execution_status")
+            return _relative_str(self.repo_root, path), out
+
+        return None, {}
 
     def _context(self) -> dict[str, Any]:
         run_root = _resolve_run_root(self.repo_root, self.run_root_arg)
@@ -1504,8 +1542,10 @@ class DashboardBuilder:
 
         governed_latest_nav = governed_performance["nav_rows"][-1] if governed_performance["nav_rows"] else {}
         selected_governed_report_date = str(governed_latest_nav.get("date") or report_date)
+        summary_trade_date = str(trading_day_summary.get("trade_date") or "").strip()
         summary_matches_selected_governed = (
-            str(trading_day_summary.get("trade_date") or "").strip() == selected_governed_report_date
+            bool(trading_day_summary)
+            and (not summary_trade_date or summary_trade_date == selected_governed_report_date)
         )
         run_id = str(
             operator_summary.get("run_id")
@@ -1593,7 +1633,9 @@ class DashboardBuilder:
                 latest_run_root / "execution_results.json",
                 latest_run_root / "execution_payload.json",
             ]
-        latest_missing = [_relative_str(self.repo_root, path) for path in expected_latest if not path.exists()]
+        latest_missing_paths = [path for path in expected_latest if not path.exists()]
+        latest_missing = [_relative_str(self.repo_root, path) for path in latest_missing_paths]
+        latest_missing_artifacts = [path.name for path in latest_missing_paths]
         latest_has_execution_results = bool(
             latest_run_root is not None and (latest_run_root / "execution_results.json").exists()
         )
@@ -2093,7 +2135,7 @@ class DashboardBuilder:
             "comparison_mode": comparison_mode,
             "latest_attempted_is_complete": latest_complete,
             "latest_attempted_terminal_status": latest.get("status"),
-            "latest_attempted_missing_artifacts": latest_missing,
+            "latest_attempted_missing_artifacts": latest_missing_artifacts,
         }
 
         kpis = {

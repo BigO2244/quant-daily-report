@@ -92,7 +92,7 @@ def build_options_smoke_session(
     option_positions = _option_positions(list(positions or []))
     open_symbols = [str(pos.get("symbol") or "") for pos in option_positions]
     open_qty = sum(_position_qty(pos) for pos in option_positions)
-    today = _trade_date_today()
+    today = str(trade_date or asof_date or _trade_date_today())
     last_action_date = str(session_state.get("last_action_date") or "")
     last_open_date = str(session_state.get("last_open_date") or "")
     last_close_date = str(session_state.get("last_close_date") or "")

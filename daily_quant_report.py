@@ -426,14 +426,20 @@ def _canonical_artifact_path(category: str, filename: str) -> Path:
     return base / filename
 
 
-def _capture_pretrade_broker_snapshot(*, trade_date: str, paper_requested: bool) -> dict | None:
+def _capture_pretrade_broker_snapshot(
+    *,
+    trade_date: str,
+    paper_requested: bool | None = None,
+    alpaca_requested: bool | None = None,
+) -> dict | None:
     """
     Capture authoritative broker state before any execution-path mutation.
 
     Phase 1 observability only: failures are recorded to artifacts/logs but do not
     change execution control flow.
     """
-    if not paper_requested or _RUN_CONTEXT is None or _RUN_CONTEXT.run_root is None:
+    requested = bool(paper_requested if paper_requested is not None else alpaca_requested)
+    if not requested or _RUN_CONTEXT is None or _RUN_CONTEXT.run_root is None:
         return None
 
     try:
@@ -1681,9 +1687,11 @@ def build_execution_email_payload(
     daily_snapshot: dict,
     paper_summary: dict | None,
 ) -> dict:
-    mode = canonical_trading_mode_label(
-        (paper_summary or {}).get("trading_mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)
+    raw_summary_mode = (paper_summary or {}).get("trading_mode") or os.getenv(
+        "TRADING_MODE",
+        DEFAULT_TRADING_MODE,
     )
+    mode = "SHADOW" if legacy_shadow_mode_requested(raw_summary_mode) else canonical_trading_mode_label(raw_summary_mode)
     if mode == "LIVE":
         return {
             "trade_date": trade_date,
@@ -3434,6 +3442,26 @@ def compute_sleeve_drift(
     return result
 
 
+def apply_regime_strengths_to_sleeves(
+    sleeve_outputs: "list[SleeveOutput]",
+    regime_strengths: "dict[str, float]",
+    drift_flags: "dict[str, bool] | None" = None,
+) -> None:
+    """Apply regime target strengths without letting HOLD sleeves use stale bases.
+
+    ``drift_flags`` remains part of the diagnostics path, but a below-threshold
+    sleeve must still be anchored to the regime target. Otherwise base strengths
+    such as 1.0/1.0 get renormalized into unintended 50/50 allocations.
+    """
+    _ = drift_flags
+    for sleeve_output in sleeve_outputs:
+        sname = sleeve_output.meta.sleeve_name
+        target_strength = regime_strengths.get(sname)
+        if target_strength is None:
+            continue
+        sleeve_output.meta.strength = float(target_strength)
+
+
 # ============================================================
 # Portfolio equity computation (FIXED)
 # ============================================================
@@ -5044,6 +5072,10 @@ def _is_truthy(value: str | int | bool | None, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _explicit_trading_mode_requested() -> bool:
+    return bool(str(os.getenv("MODE") or "").strip() or str(os.getenv("TRADING_MODE") or "").strip())
+
+
 def _email_strict_enabled() -> bool:
     return _is_truthy(os.getenv("EMAIL_STRICT"), default=False)
 
@@ -5485,6 +5517,7 @@ def main(argv: list[str] | None = None):
     global _RUN_TERMINAL_STATUS, _RUN_TERMINAL_SUBSTATUS, _RUN_TERMINAL_MESSAGE
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
+    explicit_trading_mode_requested = _explicit_trading_mode_requested()
     mode_norm, trading_mode_norm, paper_requested, legacy_shadow_requested = _resolve_exec_modes()
     boot_now_utc = dt.datetime.now(dt.timezone.utc)
     boot_now_et = boot_now_utc.astimezone(ZoneInfo("America/New_York"))
@@ -5832,13 +5865,11 @@ def main(argv: list[str] | None = None):
         sleeve_outputs=_active_sleeve_outputs,
         regime_strengths=_regime_strengths,
     )
-    for _so in _active_sleeve_outputs:
-        _sname = _so.meta.sleeve_name
-        _target_strength = _regime_strengths.get(_sname)
-        if _target_strength is not None and _drift_flags.get(_sname, True):
-            # Drift exceeds threshold — apply regime target weight
-            _so.meta.strength = _target_strength
-        # else: drift below threshold — keep existing meta.strength (HOLD)
+    apply_regime_strengths_to_sleeves(
+        _active_sleeve_outputs,
+        _regime_strengths,
+        _drift_flags,
+    )
     _preview_allocations = _preview_sleeve_allocations(_active_sleeve_outputs)
     _resized_outputs_by_name: dict[str, SleeveOutput] = {}
     for _so in _active_sleeve_outputs:
@@ -6198,7 +6229,20 @@ def main(argv: list[str] | None = None):
                         "[ORDER] --reset-ledger-date ignored without force execution override"
                     )
             effective_plan_only = bool(args.plan_only or legacy_shadow_requested)
-            if paper_requested and not effective_plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+            recon_enabled = bool(
+                paper_requested
+                and not effective_plan_only
+                and _is_truthy(os.getenv("RECON_ENABLE"), default=True)
+            )
+            if (
+                recon_enabled
+                and not explicit_trading_mode_requested
+            ):
+                recon_enabled = False
+                logger.warning(
+                    "[RECON] Skipping broker reconciliation for implicit local paper mode"
+                )
+            if recon_enabled:
                 if _is_truthy(os.getenv("RECON_V2"), default=False):
                     recon_result = pre_trade_reconcile_and_classify(
                         run_date=trade_date_str,
@@ -6228,7 +6272,11 @@ def main(argv: list[str] | None = None):
             )
             if paper_requested:
                 summary_mode = str((paper_summary or {}).get("trading_mode", "")).strip().lower()
-                if summary_mode != "paper":
+                summary_mode_norm = canonical_trading_mode(
+                    summary_mode or "paper",
+                    field_name="paper_summary.trading_mode",
+                )
+                if summary_mode_norm != "paper":
                     raise RuntimeError(
                         f"[INVARIANT] Paper mode requested but paper broker resolved trading_mode={summary_mode or 'unknown'}"
                     )
@@ -6244,7 +6292,7 @@ def main(argv: list[str] | None = None):
                     (paper_summary or {}).get("posttrade_recon_path"),
                     ",".join(list((paper_summary or {}).get("posttrade_repair_suggestions") or [])) or "none",
                 )
-            if paper_requested and not effective_plan_only and _is_truthy(os.getenv("RECON_ENABLE"), default=True):
+            if recon_enabled:
                 # Refresh canonical snapshot from broker to ensure model matches reality after execution
                 posttrade_positions_path = (paper_summary or {}).get("posttrade_positions_snapshot_path")
                 posttrade_account_path = (paper_summary or {}).get("posttrade_account_snapshot_path")

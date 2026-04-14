@@ -17,6 +17,36 @@ def _module(name: str, **attrs) -> ModuleType:
 
 
 def _load_module(tmp_path: Path):
+    stub_module_names = (
+        "pandas",
+        "brokers",
+        "brokers.alpaca_broker",
+        "brokers.alpaca_snapshot",
+        "core",
+        "core.execution_audit",
+        "core.execution_payload",
+        "core.execution_summary",
+        "core.live_retry_policy",
+        "core.operator_summary",
+        "core.precompute_contract",
+        "core.run_pointer",
+        "core.timing_policy",
+        "core.trading_mode",
+        "core.trading_day_summary",
+        "paper",
+        "paper.build_execution_email",
+        "paper.paper_broker",
+        "paper.run_manager",
+        "paper.state_paths",
+        "reconciliation",
+        "daily_quant_report",
+    )
+    missing = object()
+    original_modules = {
+        name: sys.modules.get(name, missing)
+        for name in stub_module_names
+    }
+
     def _safe_write_text(path, text, allow_overwrite=True):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +190,11 @@ def _load_module(tmp_path: Path):
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    for name, original in original_modules.items():
+        if original is missing:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
     return module
 
 

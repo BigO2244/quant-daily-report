@@ -108,7 +108,7 @@ jobs:
           fi
           "${args[@]}"
 
-      - name: Evaluate stale guard with bundle awareness
+      - name: Fail when precompute stale guard blocks execution
         if: steps.guard.outputs.allow_run != 'true'
         shell: bash
         run: |

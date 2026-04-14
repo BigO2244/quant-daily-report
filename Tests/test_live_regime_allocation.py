@@ -9,6 +9,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import daily_quant_report as dqr  # noqa: E402
 from core.portfolio_alloc import create_sleeve_output  # noqa: E402
+from core.portfolio_alloc import PortfolioAllocator  # noqa: E402
 
 
 class ResolveRegimeStrengthsTests(unittest.TestCase):
@@ -258,6 +259,46 @@ class ComputeSleeveDriftTests(unittest.TestCase):
         )
 
         self.assertEqual(result, {"sleeve_trend": True, "sleeve_quality": True})
+
+    def test_hold_flags_do_not_leave_stale_strengths_in_allocator(self) -> None:
+        outputs = [
+            create_sleeve_output(
+                [{"ticker": "AAPL", "target_weight": 1.0}],
+                "sleeve_trend",
+                strength=1.0,
+            ),
+            create_sleeve_output(
+                [{"ticker": "IBM", "target_weight": 1.0}],
+                "sleeve_2",
+                strength=1.0,
+            ),
+        ]
+        regime_strengths = {"sleeve_trend": 0.60, "sleeve_2": 0.40}
+        drift_flags = dqr.compute_sleeve_drift(
+            broker_positions=[
+                {"symbol": "AAPL", "market_value": "5900"},
+                {"symbol": "IBM", "market_value": "4100"},
+            ],
+            broker_equity=10_000.0,
+            sleeve_outputs=outputs,
+            regime_strengths=regime_strengths,
+        )
+
+        self.assertEqual(drift_flags, {"sleeve_trend": False, "sleeve_2": False})
+        dqr.apply_regime_strengths_to_sleeves(outputs, regime_strengths, drift_flags)
+
+        result = PortfolioAllocator(max_position_pct=1.0, min_gross_exposure=1.0).allocate(outputs)
+
+        self.assertAlmostEqual(
+            result.sleeve_allocations.get("sleeve_trend", 0.0),
+            0.60,
+            places=9,
+        )
+        self.assertAlmostEqual(
+            result.sleeve_allocations.get("sleeve_2", 0.0),
+            0.40,
+            places=9,
+        )
 
 
 if __name__ == "__main__":

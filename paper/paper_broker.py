@@ -51,6 +51,7 @@ SENT_LEDGER_COLUMNS = [
 ]
 
 CAPITAL_RESERVE_MIN_CASH = 500.0
+CAPITAL_POSTSELL_RESERVE_MIN_CASH = 1000.0
 CAPITAL_RESERVE_EQUITY_PCT = 0.01
 CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
 ALPACA_SELL_PHASE_TIMEOUT_SECONDS = 90.0
@@ -1749,6 +1750,8 @@ def _build_capital_budget(
         if reserve_cash_cap > 0.0
         else reserve_cash_floor
     )
+    if cash_value is not None and float(cash_value) < 0.0:
+        reserve_cash += abs(float(cash_value))
     expected_sell_proceeds_value = max(0.0, float(expected_sell_proceeds or 0.0))
     expected_sell_proceeds_conservative = float(
         expected_sell_proceeds_value * float(CAPITAL_SELL_PROCEEDS_HAIRCUT)
@@ -1872,14 +1875,17 @@ def _apply_capital_budget_to_trades(
 
 def _compute_buy_budget(account: Dict[str, object], cfg: PaperConfig) -> float:
     del cfg
-    capital_budget = _build_capital_budget(
-        broker_cash=account.get("cash"),
-        broker_equity=account.get("equity") or account.get("portfolio_value"),
-        broker_buying_power=account.get("buying_power"),
-        expected_sell_proceeds=0.0,
-        requested_buy_notional=float("inf"),
+    cash_value = _coerce_float(account.get("cash"), 0.0) or 0.0
+    equity_value = _coerce_float(account.get("equity") or account.get("portfolio_value"), None)
+    buying_power_value = _coerce_float(account.get("buying_power"), cash_value)
+    reserve_cash = max(
+        float(CAPITAL_POSTSELL_RESERVE_MIN_CASH),
+        max(0.0, float(equity_value or 0.0)) * float(CAPITAL_RESERVE_EQUITY_PCT),
     )
-    return float(((capital_budget.get("reserve_cash_policy") or {}).get("available_for_buys")) or 0.0)
+    available_cash = max(0.0, float(cash_value) - float(reserve_cash))
+    if buying_power_value is not None:
+        available_cash = min(available_cash, max(0.0, float(buying_power_value)))
+    return float(available_cash)
 
 
 def _apply_buy_budget(
@@ -2455,8 +2461,9 @@ def run_paper_day(
         )
     if mode == "live":
         raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
-    legacy_shadow_requested = legacy_shadow_mode_requested(cfg.trading_mode, env_mode, env_trading_mode)
-    paper_execution_requested = mode == "paper"
+    cfg_legacy_shadow_requested = legacy_shadow_mode_requested(cfg.trading_mode)
+    legacy_shadow_requested = legacy_shadow_mode_requested(env_mode, env_trading_mode)
+    paper_execution_requested = mode == "paper" and not cfg_legacy_shadow_requested
     planning_account_snapshot: Dict[str, object] | None = None
 
     holdings_prev, cash_prev, equity_prev, last_date = read_latest_holdings_from_ledger(ledger_path)
