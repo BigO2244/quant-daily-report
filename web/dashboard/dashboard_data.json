@@ -1,16 +1,16 @@
 {
   "activity": {
     "activity_source": "broker_snapshot_current",
-    "buys": 8,
-    "full_exits": 4,
-    "is_simulated": false,
-    "new_positions": 8,
-    "note": "Activity source: outputs/broker_snapshot/broker_snapshot_2026-04-08.json",
+    "buys": 5,
+    "full_exits": 7,
+    "is_simulated": true,
+    "new_positions": 5,
+    "note": "Activity source: outputs/broker_snapshot/broker_snapshot_2026-04-09.json",
     "orders_filled": 12,
     "orders_rejected": 0,
-    "sells": 4,
-    "source_report_date": "2026-04-08",
-    "source_run_id": "2026-03-26T151337-0400_2373f93"
+    "sells": 7,
+    "source_report_date": "2026-04-09",
+    "source_run_id": "2026-04-13T110024-0400_67948e0"
   },
   "attribution": {
     "alpha_ann_recent_20d": -0.21665002643516962,
@@ -25,7 +25,7 @@
     },
     "beta_recent_20d": 0.5248347934351353,
     "beta_since": 0.5098104844681176,
-    "correlation": 0.8081328306210676,
+    "correlation": 0.8081328306210674,
     "cumulative_alpha": -0.018812624397267275,
     "cumulative_port_return": -0.028454999999999897,
     "cumulative_spy_return": -0.009642375602732622,
@@ -50,28 +50,28 @@
     }
   },
   "broker_snapshot": {
-    "as_of": "2026-04-08T19:19:52.573584+00:00",
-    "buying_power": 11295.9,
+    "as_of": "2026-04-09T13:50:35.044822+00:00",
+    "buying_power": 12101.58,
     "buying_power_note": null,
-    "cash": 1580.45,
+    "cash": 2388.18,
     "confidence_note": "",
-    "display_equity": 9715.45,
-    "equity": 9715.45,
-    "last_equity": 9597.11,
-    "market_value": 8135.0,
-    "portfolio_value": 9715.45,
+    "display_equity": 9713.4,
+    "equity": 9713.4,
+    "last_equity": 9751.97,
+    "market_value": 7325.22,
+    "portfolio_value": 9713.4,
     "positions_count": 16,
     "source": "artifact:outputs/broker/posttrade_account_snapshot.json",
     "source_detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
     "status": "ACTIVE",
     "suspicious": false,
-    "trade_date": "2026-04-08",
+    "trade_date": "2026-04-09",
     "trust_level": "authoritative"
   },
   "builder_notes": {
     "all_warnings": [
-      "Historical latest attempted run status: failed_unknown. Live broker overlay is showing 2026-04-08.",
-      "Missing critical run artifacts: outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+      "Latest attempted run status: failed_unknown.",
+      "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json, outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json"
     ],
     "broker_snapshot": {
       "freshness": "overlay",
@@ -81,26 +81,25 @@
       "suspicious": false,
       "trust_level": "authoritative"
     },
-    "build_timestamp": "2026-04-08T19:29:20+00:00",
+    "build_timestamp": "2026-04-15T16:59:07+00:00",
     "degraded_metrics": [
       "negative_alpha"
     ],
     "missing_files": [
-      "outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json",
-      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json",
-      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+      "outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json",
+      "outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json"
     ],
     "performance": {
       "benchmark_asof_date": "2026-04-08",
       "benchmark_path": "outputs/perf/live_overlay_benchmark_close_history.csv",
-      "comparison_mode": "same_day",
+      "comparison_mode": "previous_trading_day",
       "nav_path": "outputs/perf/live_overlay_nav_series.csv",
-      "portfolio_asof_date": "2026-04-08",
+      "portfolio_asof_date": "2026-04-09",
       "source_name": "live_overlay"
     },
     "warnings": [
-      "Historical latest attempted run status: failed_unknown. Live broker overlay is showing 2026-04-08.",
-      "Missing critical run artifacts: outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+      "Latest attempted run status: failed_unknown.",
+      "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json, outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json"
     ]
   },
   "contribution_snapshot": {
@@ -172,22 +171,22 @@
     ]
   },
   "data_freshness": {
-    "alignment_detail": "Authoritative broker overlay active for 2026-04-08 over governed run date 2026-02-27.",
-    "broker_as_of": "2026-04-08T19:19:52.573584+00:00",
+    "alignment_detail": "Authoritative broker overlay active for 2026-04-09 over governed run date 2026-02-27.",
+    "broker_as_of": "2026-04-09T13:50:35.044822+00:00",
     "broker_source_detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
     "broker_trust_level": "authoritative",
     "broker_vs_run_alignment": "overlay",
-    "run_last_updated": "2026-04-08T19:29:20+00:00",
+    "run_last_updated": "2026-04-15T16:59:07+00:00",
     "run_report_date": "2026-02-27",
     "stale_threshold_hours": 36,
     "suspicious_broker_value": false,
     "suspicious_reason": ""
   },
   "edge_diagnostics": {
-    "capital_deployed": 0.8373261145906777,
-    "current_cash_ratio": 0.16267388540932226,
-    "executed_turnover_pct": 0.4232711815716204,
-    "largest_position_weight": 0.10997740711958787,
+    "capital_deployed": 0.754135524121317,
+    "current_cash_ratio": 0.24586447587868304,
+    "executed_turnover_pct": 0.4888504539090329,
+    "largest_position_weight": 0.09360677002903206,
     "positions_count": 16,
     "recommendations": [
       {
@@ -213,7 +212,7 @@
     ],
     "signals": [
       {
-        "detail": "16.3% cash leaves 83.7% deployed. That implies roughly 0.36% of benchmark participation drag over the active comparison horizon.",
+        "detail": "24.6% cash leaves 75.4% deployed. That implies roughly 0.54% of benchmark participation drag over the active comparison horizon.",
         "label": "Market Participation",
         "status": "warning"
       },
@@ -233,59 +232,59 @@
         "status": "warning"
       },
       {
-        "detail": "Largest position 11.0%; top 5 account for 36.5% of equity.",
+        "detail": "Largest position 9.4%; top 5 account for 32.9% of equity.",
         "label": "Concentration",
         "status": "pass"
       },
       {
-        "detail": "Today's filled notional was about 42.3% of current equity.",
+        "detail": "Today's filled notional was about 48.9% of current equity.",
         "label": "Rebalance Intensity",
         "status": "warning"
       }
     ],
-    "top5_concentration": 0.36505462948190764,
+    "top5_concentration": 0.32862025655280336,
     "top_positions": [
       {
-        "market_value": 1068.48,
+        "market_value": 909.24,
         "ticker": "GM",
-        "unrealized_plpc": 0.03676,
-        "weight": 0.10997740711958787
+        "unrealized_plpc": 0.02928,
+        "weight": 0.09360677002903206
       },
       {
-        "market_value": 703.0,
-        "ticker": "GILD",
-        "unrealized_plpc": 0.01352,
-        "weight": 0.07235897462289445
-      },
-      {
-        "market_value": 633.25,
+        "market_value": 637.8,
         "ticker": "QCOM",
-        "unrealized_plpc": -0.01257,
-        "weight": 0.0651796880226855
+        "unrealized_plpc": -0.00547,
+        "weight": 0.06566186917042437
       },
       {
-        "market_value": 626.8,
-        "ticker": "COP",
-        "unrealized_plpc": -0.01501,
-        "weight": 0.06451579700374145
+        "market_value": 621.74,
+        "ticker": "BDX",
+        "unrealized_plpc": -0.00889,
+        "weight": 0.0640084831264027
       },
       {
-        "market_value": 515.14,
+        "market_value": 515.24,
         "ticker": "AAPL",
-        "unrealized_plpc": -0.01401,
-        "weight": 0.05302276271299836
+        "unrealized_plpc": -0.01382,
+        "weight": 0.05304424815203739
+      },
+      {
+        "market_value": 508.0,
+        "ticker": "COP",
+        "unrealized_plpc": -0.00212,
+        "weight": 0.052298886074906833
       }
     ]
   },
   "exceptions": [
     {
       "category": "Execution",
-      "message": "Historical latest attempted run status: failed_unknown. Live broker overlay is showing 2026-04-08.",
-      "status": "warning"
+      "message": "Latest attempted run status: failed_unknown.",
+      "status": "fail"
     },
     {
       "category": "Data / artifacts",
-      "message": "Missing critical run artifacts: outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json, outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json",
+      "message": "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json, outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json",
       "status": "warning"
     }
   ],
@@ -293,7 +292,7 @@
     "affected_symbols": [],
     "duplicate_fill_suspicions_count": 0,
     "duplicate_guard_status": "CLEAR",
-    "post_execution_recon_status": "OK_RECONCILED",
+    "post_execution_recon_status": "OVERLAY_ONLY",
     "repair_suggestions": [],
     "visible": true
   },
@@ -308,17 +307,17 @@
   },
   "kpis": {
     "benchmark_return": 0.022071614142098683,
-    "daily_pl": 118.34,
-    "daily_return": 0.0123308,
-    "excess_return": -0.009740818725561873,
+    "daily_pl": -38.57,
+    "daily_return": -0.0039551,
+    "excess_return": -0.026026712445313294,
     "holdings": 16,
-    "portfolio_value": 9715.45,
+    "portfolio_value": 9713.4,
     "run_status": "FALLBACK_VIEW",
     "turnover": null
   },
   "operating_checks": [
     {
-      "detail": "Historical latest attempted run status: failed_unknown; live broker overlay is current.",
+      "detail": "Latest attempted run status: failed_unknown.",
       "label": "Run completed",
       "status": "warning"
     },
@@ -328,9 +327,9 @@
       "status": "pass"
     },
     {
-      "detail": "Broker positions match expected post-execution state.",
+      "detail": "Live broker overlay active; same-day governed reconciliation was not run.",
       "label": "Reconciliation passed",
-      "status": "pass"
+      "status": "skip"
     },
     {
       "detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
@@ -354,10 +353,10 @@
   },
   "risk": {
     "breaker_status": "PARTIAL",
-    "cash_position": 0.16267388540932226,
+    "cash_position": 0.24586447587868304,
     "drawdown": 0.028454999999999897,
     "gross_exposure": 0.17883754794203,
-    "largest_position_weight": 0.10997740711958787,
+    "largest_position_weight": 0.09360677002903206,
     "turnover_limit_pct": 0.35,
     "turnover_pct": null
   },
@@ -365,34 +364,33 @@
     "benchmark": "SPY",
     "benchmark_asof_date": "2026-04-08",
     "comparison_asof_date": "2026-04-08",
-    "comparison_mode": "same_day",
+    "comparison_mode": "previous_trading_day",
     "fallback_in_use": true,
-    "last_updated": "2026-04-08T19:29:20+00:00",
+    "last_updated": "2026-04-15T16:59:07+00:00",
     "latest_attempted_is_complete": false,
     "latest_attempted_missing_artifacts": [
-      "outputs/runs/2026-03-26T151337-0400_2373f93/operator_summary.json",
-      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_results.json",
-      "outputs/runs/2026-03-26T151337-0400_2373f93/execution_payload.json"
+      "execution_results.json",
+      "execution_payload.json"
     ],
     "latest_attempted_run": {
-      "created_at": "2026-03-26T19:18:08.173700Z",
-      "report_date": "2026-03-18",
-      "run_id": "2026-03-26T151337-0400_2373f93"
+      "created_at": "2026-04-13T15:02:28.061914Z",
+      "report_date": "2026-04-13",
+      "run_id": "2026-04-13T110024-0400_67948e0"
     },
     "latest_attempted_terminal_status": "failed_unknown",
     "live_broker_overlay": true,
-    "mode": "ALPACA",
+    "mode": "PAPER",
     "overall_status": "WARNING",
     "performance_source": "live_overlay",
-    "portfolio_asof_date": "2026-04-08",
+    "portfolio_asof_date": "2026-04-09",
     "report_date": "2026-02-27",
-    "run_id": "governed-fallback-2026-02-27",
+    "run_id": "2026-04-13T110024-0400_67948e0",
     "selected_governed_run": {
       "report_date": "2026-02-27",
-      "run_id": "governed-fallback-2026-02-27",
+      "run_id": "2026-04-13T110024-0400_67948e0",
       "selection_reason": "latest_successful_governed_snapshot"
     },
-    "status_banner": "Showing governed dashboard state from 2026-02-27. Live broker overlay active for 2026-04-08. Latest attempted run 2026-03-26T151337-0400_2373f93 (2026-03-18) did not complete, but a newer broker snapshot is available. Authoritative Alpaca snapshot as of 2026-04-08 loaded."
+    "status_banner": "Showing governed dashboard state from 2026-02-27. Live broker overlay active for 2026-04-09. Latest attempted run 2026-04-13T110024-0400_67948e0 (2026-04-13) did not complete. Authoritative Alpaca snapshot as of 2026-04-09 loaded. SPY comparison uses 2026-04-08 close. Post-trade reconciliation status: OVERLAY_ONLY."
   },
   "series": {
     "benchmark": [
@@ -962,11 +960,7 @@
       "status": "used"
     },
     {
-      "path": "outputs/broker_snapshot/broker_snapshot_2026-04-08.json",
-      "status": "used"
-    },
-    {
-      "path": "outputs/broker/recon_posttrade_2026-04-08.json",
+      "path": "outputs/broker_snapshot/broker_snapshot_2026-04-09.json",
       "status": "used"
     },
     {
@@ -982,40 +976,40 @@
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-03-26T151337-0400_2373f93",
+      "path": "outputs/runs/2026-04-13T110024-0400_67948e0",
       "status": "present"
     }
   ],
   "top_changes": [
     {
       "action": "SELL",
-      "change_weight": 0.04986490589730789,
-      "reason": "executed_order",
-      "ticker": "ADSK"
-    },
-    {
-      "action": "SELL",
-      "change_weight": 0.03831011430247698,
-      "reason": "executed_order",
-      "ticker": "BKNG"
-    },
-    {
-      "action": "SELL",
-      "change_weight": 0.06034923755461662,
-      "reason": "executed_order",
-      "ticker": "NSC"
-    },
-    {
-      "action": "SELL",
-      "change_weight": 0.01810312440494264,
-      "reason": "executed_order",
-      "ticker": "PANW"
-    },
-    {
-      "action": "BUY",
-      "change_weight": 0.01580575269287578,
+      "change_weight": 0.015580538225544095,
       "reason": "executed_order",
       "ticker": "GM"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.013115901743982541,
+      "reason": "executed_order",
+      "ticker": "COP"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.050421067803240883,
+      "reason": "executed_order",
+      "ticker": "C"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.07252352420367739,
+      "reason": "executed_order",
+      "ticker": "GILD"
+    },
+    {
+      "action": "SELL",
+      "change_weight": 0.03823995706961517,
+      "reason": "executed_order",
+      "ticker": "MRK"
     }
   ]
 }

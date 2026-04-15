@@ -8,35 +8,34 @@
     "cash_delta": null,
     "equity_delta": null,
     "paths": {
-      "posttradeAccount": "",
-      "posttradePositions": "",
+      "posttradeAccount": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/broker/posttrade_account_snapshot.json",
+      "posttradePositions": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/broker/posttrade_positions.json",
       "pretradeAccount": "",
       "pretradePositions": "",
       "reconPosttrade": "",
       "reconPretrade": "",
-      "tradingDaySummary": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/runs/2026-03-26T151337-0400_2373f93/trading_day_summary.json"
+      "tradingDaySummary": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/trading_day_summary.json"
     },
     "positions_delta": null,
-    "posttrade_positions_count": null,
-    "posttrade_snapshot_ok": false,
+    "posttrade_positions_count": 16,
+    "posttrade_snapshot_ok": true,
     "pretrade_positions_count": null,
     "pretrade_snapshot_ok": false,
-    "run_id": "",
-    "run_root": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/runs/2026-03-26T151337-0400_2373f93",
-    "trade_date": "2026-04-08",
-    "trust_level": "LOW"
+    "run_id": "2026-04-13T110024-0400_67948e0",
+    "run_root": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/runs/2026-04-13T110024-0400_67948e0",
+    "trade_date": "2026-04-13",
+    "trust_level": "MEDIUM"
   },
-  "generated_at": "2026-04-08T14:14:28+00:00",
-  "headline": "Broker-authoritative state not confirmed",
+  "generated_at": "2026-04-15T16:59:11+00:00",
+  "headline": "Broker state partially confirmed",
   "risks": [
     "Pretrade broker snapshot was not confirmed in the latest available artifacts.",
-    "Posttrade broker snapshot was not confirmed in the latest available artifacts.",
     "The latest run did not confirm broker-authoritative post-trade state.",
     "Posttrade reconciliation status is UNKNOWN."
   ],
   "summary": [
-    "Trade date: 2026-04-08.",
-    "Broker trust level: LOW.",
+    "Trade date: 2026-04-13.",
+    "Broker trust level: MEDIUM.",
     "Pretrade status: UNKNOWN; posttrade reconciliation: UNKNOWN.",
     "Nightly digest schedule from audit: 0 12 * * 1-5, 0 11 * * 1-5 => both weekday entries target 7:00 AM ET across EST/EDT."
   ]

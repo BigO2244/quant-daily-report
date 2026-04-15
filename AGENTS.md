@@ -200,12 +200,12 @@ Confirmation evidence: `outputs/audits/phase_1_2_3_finalization_audit_2026-04-09
 ## Auto-Generated Nightly Findings
 
 <!-- BEGIN AUTO-GENERATED: NIGHTLY FINDINGS -->
-- Last refresh: `2026-04-08T14:14:31+00:00`
+- Last refresh: `2026-04-15T16:59:14+00:00`
 - Source: `reports/agents/nightly_findings.json`
-- Findings generated at: `2026-04-08T14:14:28+00:00`
-- Broker-authoritative state not confirmed
-- Trade date: 2026-04-08.
-- Broker trust level: LOW.
+- Findings generated at: `2026-04-15T16:59:11+00:00`
+- Broker state partially confirmed
+- Trade date: 2026-04-13.
+- Broker trust level: MEDIUM.
 - Pretrade status: UNKNOWN; posttrade reconciliation: UNKNOWN.
 - Nightly digest schedule from audit: 0 12 * * 1-5, 0 11 * * 1-5 => both weekday entries target 7:00 AM ET across EST/EDT.
 - Pretrade broker snapshot was not confirmed in the latest available artifacts.
@@ -215,6 +215,14 @@ Confirmation evidence: `outputs/audits/phase_1_2_3_finalization_audit_2026-04-09
 
 <!-- BEGIN AUTO-GENERATED: WORKFLOW INVENTORY -->
 - Materialized workflow files in this checkout:
+- `_archived_backtest_sleeve1.yml`: Run Backtest (Sleeve 1) | triggers=workflow_dispatch | cron=none
+- `_archived_backtest_sleeve1_robustness.yml`: Sleeve1 Robustness Backtest | triggers=unknown | cron=none
+- `_archived_backtest_sleeve2.yml`: Run Backtest (Sleeve 2) | triggers=workflow_dispatch | cron=none
+- `alpha_daily.yml`: Alpha Daily Run | triggers=schedule | cron=`15 11 * * 1-5`
+- `daily-alpaca-live.yml`: Daily Alpaca Live | triggers=workflow_dispatch, schedule | cron=`35 14 * 1,2,12 1-5`, `35 14 1-7 3 1-5`, `35 13 8-31 3 1-5`, `35 13 * 4-10 1-5`, `35 13 1-7 11 1-5`, `35 14 8-30 11 1-5`
+- `daily-alpaca-paper.yml`: Daily Alpaca Paper Run (Deprecated Wrapper) | triggers=workflow_dispatch | cron=none
+- `daily-alpaca-precompute.yml`: Daily Alpaca Precompute | triggers=workflow_dispatch, schedule | cron=`30 12 * 1,2,12 1-5`, `30 12 1-7 3 1-5`, `30 11 8-31 3 1-5`, `30 11 * 4-10 1-5`, `30 11 1-7 11 1-5`, `30 12 8-30 11 1-5`
+- `export-broker-snapshot.yml`: Export Alpaca Broker Snapshot | triggers=workflow_dispatch | cron=none
 - `nightly-agents-refresh.yml`: Nightly Agents Refresh | triggers=workflow_dispatch | cron=none
 - `research-digest.yml`: Research Digest — Nightly | triggers=workflow_dispatch, schedule | cron=`0 11 * * 1-5`, `0 12 * * 1-5`
 - Last audited workflow inventory from `repo_workflow_audit.md`:
