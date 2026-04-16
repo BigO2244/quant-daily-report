@@ -50,12 +50,28 @@ SENT_LEDGER_COLUMNS = [
     "status",
 ]
 
-CAPITAL_RESERVE_MIN_CASH = 500.0
-CAPITAL_POSTSELL_RESERVE_MIN_CASH = 1000.0
-CAPITAL_RESERVE_EQUITY_PCT = 0.01
+CAPITAL_RESERVE_MIN_CASH = float(os.getenv("CAPITAL_RESERVE_MIN_CASH", "100.0"))
+CAPITAL_POSTSELL_RESERVE_MIN_CASH = float(os.getenv("CAPITAL_POSTSELL_RESERVE_MIN_CASH", "100.0"))
+CAPITAL_RESERVE_EQUITY_PCT = float(os.getenv("CAPITAL_RESERVE_EQUITY_PCT", "0.005"))
 CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
 ALPACA_SELL_PHASE_TIMEOUT_SECONDS = 90.0
 ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS = 3.0
+
+
+def _reserve_cash_for_equity(
+    equity_value: float | None,
+    *,
+    min_cash: float = CAPITAL_RESERVE_MIN_CASH,
+    reserve_pct: float = CAPITAL_RESERVE_EQUITY_PCT,
+    max_cash_pct: float = 0.05,
+) -> float:
+    """Keep operational cash below the model objective ceiling when possible."""
+    equity = max(0.0, float(equity_value or 0.0))
+    reserve_floor = max(float(min_cash), equity * float(reserve_pct))
+    reserve_cap = equity * float(max_cash_pct)
+    if reserve_cap > 0.0:
+        return float(min(reserve_floor, reserve_cap))
+    return float(reserve_floor)
 
 
 def _load_yfinance():
@@ -1740,16 +1756,7 @@ def _build_capital_budget(
     cash_value = _coerce_float(broker_cash, None)
     equity_value = _coerce_float(broker_equity, None)
     buying_power_value = _coerce_float(broker_buying_power, None)
-    reserve_cash_floor = max(
-        float(CAPITAL_RESERVE_MIN_CASH),
-        max(0.0, float(equity_value or 0.0)) * float(CAPITAL_RESERVE_EQUITY_PCT),
-    )
-    reserve_cash_cap = max(0.0, float(equity_value or 0.0)) * 0.05
-    reserve_cash = (
-        min(reserve_cash_floor, reserve_cash_cap)
-        if reserve_cash_cap > 0.0
-        else reserve_cash_floor
-    )
+    reserve_cash = _reserve_cash_for_equity(equity_value)
     if cash_value is not None and float(cash_value) < 0.0:
         reserve_cash += abs(float(cash_value))
     expected_sell_proceeds_value = max(0.0, float(expected_sell_proceeds or 0.0))
@@ -1878,9 +1885,9 @@ def _compute_buy_budget(account: Dict[str, object], cfg: PaperConfig) -> float:
     cash_value = _coerce_float(account.get("cash"), 0.0) or 0.0
     equity_value = _coerce_float(account.get("equity") or account.get("portfolio_value"), None)
     buying_power_value = _coerce_float(account.get("buying_power"), cash_value)
-    reserve_cash = max(
-        float(CAPITAL_POSTSELL_RESERVE_MIN_CASH),
-        max(0.0, float(equity_value or 0.0)) * float(CAPITAL_RESERVE_EQUITY_PCT),
+    reserve_cash = _reserve_cash_for_equity(
+        equity_value,
+        min_cash=CAPITAL_POSTSELL_RESERVE_MIN_CASH,
     )
     available_cash = max(0.0, float(cash_value) - float(reserve_cash))
     if buying_power_value is not None:

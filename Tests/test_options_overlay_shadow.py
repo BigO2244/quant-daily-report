@@ -11,7 +11,7 @@ from core.options_overlay_shadow import (
 
 
 class OptionsOverlayShadowTests(unittest.TestCase):
-    def test_risk_on_regime_stays_inactive(self) -> None:
+    def test_risk_on_regime_surfaces_income_and_leap_candidates(self) -> None:
         payload = build_options_overlay_shadow(
             trade_date="2026-04-09",
             asof_date="2026-04-08",
@@ -27,9 +27,52 @@ class OptionsOverlayShadowTests(unittest.TestCase):
             spy_price=676.01,
         )
 
-        self.assertEqual(payload["trigger"]["status"], "INACTIVE")
-        self.assertFalse(payload["trigger"]["active"])
-        self.assertIsNone(payload["recommendation"]["strategy"])
+        self.assertIn(payload["trigger"]["status"], {"WATCH_ONLY_REVIEW_CANDIDATE", "READY_SHADOW_RECOMMENDATION"})
+        self.assertTrue(payload["trigger"]["active"])
+        strategies = {item["strategy"] for item in payload["candidate_strategies"]}
+        self.assertIn("covered_call", strategies)
+        self.assertIn("leap_call", strategies)
+        self.assertIn(payload["recommendation"]["strategy"], strategies)
+
+    def test_neutral_elevated_vol_regime_surfaces_butterfly_candidate(self) -> None:
+        payload = build_options_overlay_shadow(
+            trade_date="2026-04-09",
+            asof_date="2026-04-08",
+            regime_summary={
+                "composite_regime": "neutral_mixed",
+                "trend_state": "neutral",
+                "volatility_state": "elevated",
+                "breadth_state": "mixed",
+                "macro_state": "neutral",
+            },
+            portfolio_equity=100000.0,
+            portfolio_cash=5000.0,
+            spy_price=676.01,
+        )
+
+        strategies = {item["strategy"] for item in payload["candidate_strategies"]}
+        self.assertIn("call_butterfly", strategies)
+        self.assertIn("covered_call", strategies)
+        self.assertIn("leap_call", strategies)
+
+    def test_high_vol_regime_surfaces_straddle_candidate(self) -> None:
+        payload = build_options_overlay_shadow(
+            trade_date="2026-04-09",
+            asof_date="2026-04-08",
+            regime_summary={
+                "composite_regime": "high_volatility",
+                "trend_state": "strong_down",
+                "volatility_state": "elevated",
+                "breadth_state": "washed_out",
+                "macro_state": "stress",
+            },
+            portfolio_equity=100000.0,
+            portfolio_cash=5000.0,
+            spy_price=676.01,
+        )
+
+        strategies = {item["strategy"] for item in payload["candidate_strategies"]}
+        self.assertIn("long_straddle", strategies)
 
     def test_risk_off_regime_recommends_put_spread_when_account_can_support_it(self) -> None:
         payload = build_options_overlay_shadow(

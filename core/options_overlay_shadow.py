@@ -9,8 +9,8 @@ from typing import Any
 DEFAULT_POLICY: dict[str, Any] = {
     "benchmark": "SPY",
     "mode": "shadow_only",
-    "north_star": "Use options as a portfolio overlay, not a primary alpha engine.",
-    "premium_budget_bps": 25.0,
+    "north_star": "Use options as a capital-efficient overlay sleeve: harvest premium, define risk, and add convex exposure without bypassing promotion gates.",
+    "premium_budget_bps": 75.0,
     "cash_ceiling_without_overlay": 0.18,
     "min_contract_utilization": 0.75,
     "activation": {
@@ -26,6 +26,30 @@ DEFAULT_POLICY: dict[str, Any] = {
             "breadth_states": ["deteriorating"],
             "macro_states": ["risk_off", "stress"],
         },
+        "covered_call": {
+            "composite_regimes": ["risk_on_trending", "neutral_mixed"],
+            "volatility_states": ["elevated", "normal"],
+            "breadth_states": ["mixed", "healthy"],
+            "macro_states": ["neutral", "risk_on"],
+        },
+        "long_straddle": {
+            "composite_regimes": ["high_volatility", "breadth_washout"],
+            "volatility_states": ["crisis", "elevated"],
+            "breadth_states": ["washed_out"],
+            "macro_states": ["stress"],
+        },
+        "call_butterfly": {
+            "composite_regimes": ["neutral_mixed"],
+            "volatility_states": ["elevated"],
+            "breadth_states": ["mixed", "deteriorating"],
+            "macro_states": ["neutral"],
+        },
+        "leap_call": {
+            "composite_regimes": ["risk_on_trending", "neutral_mixed"],
+            "volatility_states": ["normal", "elevated"],
+            "breadth_states": ["healthy", "mixed"],
+            "macro_states": ["risk_on", "neutral"],
+        },
     },
     "strategies": {
         "protective_put": {
@@ -38,6 +62,31 @@ DEFAULT_POLICY: dict[str, Any] = {
             "target_dte": 28,
             "long_put_moneyness": 0.98,
             "short_put_moneyness": 0.92,
+        },
+        "covered_call": {
+            "target_dte": 35,
+            "short_call_moneyness": 1.05,
+            "premium_budget_bps": 0.0,
+            "requires_covered_inventory": True,
+        },
+        "long_straddle": {
+            "target_dte": 35,
+            "long_call_moneyness": 1.0,
+            "long_put_moneyness": 1.0,
+            "premium_budget_bps": 50.0,
+        },
+        "call_butterfly": {
+            "target_dte": 28,
+            "lower_call_moneyness": 0.98,
+            "center_call_moneyness": 1.0,
+            "upper_call_moneyness": 1.02,
+            "premium_budget_bps": 35.0,
+        },
+        "leap_call": {
+            "target_dte": 390,
+            "long_call_moneyness": 0.85,
+            "premium_budget_bps": 125.0,
+            "role": "cash_replacement_convexity",
         },
     },
 }
@@ -172,6 +221,137 @@ def _floor_strike(spot: float, moneyness: float) -> int:
     return max(1, int(math.floor(float(spot) * float(moneyness))))
 
 
+def _ceil_strike(spot: float, moneyness: float) -> int:
+    return max(1, int(math.ceil(float(spot) * float(moneyness))))
+
+
+def _candidate_match_reasons(
+    strategy: str,
+    regime_summary: dict[str, Any] | None,
+    policy: dict[str, Any],
+) -> list[str]:
+    regime_summary = dict(regime_summary or {})
+    activation = dict(policy.get("activation") or {}).get(strategy) or {}
+    checks = [
+        ("composite_regime", "composite_regimes"),
+        ("volatility_state", "volatility_states"),
+        ("breadth_state", "breadth_states"),
+        ("macro_state", "macro_states"),
+    ]
+    reasons: list[str] = []
+    for regime_key, activation_key in checks:
+        current = _norm_text(regime_summary.get(regime_key))
+        if _matches_any(current, activation.get(activation_key)):
+            reasons.append(f"{regime_key}={current}")
+    return reasons
+
+
+def _strategy_legs(strategy: str, spot: float, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    if strategy == "protective_put":
+        return [
+            {
+                "side": "BUY",
+                "kind": "PUT",
+                "strike": _floor_strike(spot, float(_to_float(cfg.get("long_put_moneyness")) or 1.0)),
+            }
+        ]
+    if strategy == "put_spread":
+        long_strike = _floor_strike(spot, float(_to_float(cfg.get("long_put_moneyness")) or 1.0))
+        short_strike = _floor_strike(spot, float(_to_float(cfg.get("short_put_moneyness")) or 0.92))
+        if short_strike >= long_strike:
+            short_strike = max(1, long_strike - 1)
+        return [
+            {"side": "BUY", "kind": "PUT", "strike": long_strike},
+            {"side": "SELL", "kind": "PUT", "strike": short_strike},
+        ]
+    if strategy == "covered_call":
+        return [
+            {
+                "side": "SELL",
+                "kind": "CALL",
+                "strike": _ceil_strike(spot, float(_to_float(cfg.get("short_call_moneyness")) or 1.05)),
+            }
+        ]
+    if strategy == "long_straddle":
+        strike = max(1, int(round(spot)))
+        return [
+            {"side": "BUY", "kind": "CALL", "strike": strike},
+            {"side": "BUY", "kind": "PUT", "strike": strike},
+        ]
+    if strategy == "call_butterfly":
+        lower = _floor_strike(spot, float(_to_float(cfg.get("lower_call_moneyness")) or 0.98))
+        center = max(lower + 1, int(round(spot * float(_to_float(cfg.get("center_call_moneyness")) or 1.0))))
+        upper = max(center + 1, _ceil_strike(spot, float(_to_float(cfg.get("upper_call_moneyness")) or 1.02)))
+        return [
+            {"side": "BUY", "kind": "CALL", "strike": lower, "ratio": 1},
+            {"side": "SELL", "kind": "CALL", "strike": center, "ratio": 2},
+            {"side": "BUY", "kind": "CALL", "strike": upper, "ratio": 1},
+        ]
+    if strategy == "leap_call":
+        return [
+            {
+                "side": "BUY",
+                "kind": "CALL",
+                "strike": _floor_strike(spot, float(_to_float(cfg.get("long_call_moneyness")) or 0.85)),
+            }
+        ]
+    return []
+
+
+def _build_strategy_candidate(
+    *,
+    strategy: str,
+    reasons: list[str],
+    policy: dict[str, Any],
+    equity: float | None,
+    cash: float | None,
+    invested_ratio: float | None,
+    spot: float | None,
+    asof_date: str | None,
+) -> dict[str, Any]:
+    cfg = dict((policy.get("strategies") or {}).get(strategy) or {})
+    target_dte = int(_to_float(cfg.get("target_dte")) or 0)
+    expiry = _pick_expiry(asof_date, target_dte)
+    premium_bps = _to_float(cfg.get("premium_budget_bps"))
+    if premium_bps is None:
+        premium_bps = _to_float(policy.get("premium_budget_bps")) or 0.0
+    premium_budget = (float(equity) * float(premium_bps) / 10000.0) if equity is not None else None
+    contract_notional = (float(spot) * 100.0) if spot is not None and spot > 0 else None
+    notional_basis = float(equity or 0.0) * float(invested_ratio if invested_ratio is not None else 1.0)
+    if strategy == "covered_call":
+        notional_basis = max(0.0, notional_basis)
+    elif strategy == "leap_call":
+        notional_basis = max(0.0, float(cash or 0.0) + (float(equity or 0.0) * 0.05))
+
+    contracts_float = (
+        notional_basis / contract_notional
+        if contract_notional and contract_notional > 0 and notional_basis > 0
+        else 0.0
+    )
+    min_contract_utilization = float(_to_float(policy.get("min_contract_utilization")) or 0.0)
+    feasible = bool(equity and equity > 0 and spot and spot > 0 and contracts_float >= min_contract_utilization)
+    if strategy == "covered_call" and bool(cfg.get("requires_covered_inventory")):
+        # We do not yet pass per-underlying inventory into this overlay; keep it
+        # as a paper-review candidate until covered-lot validation is wired.
+        feasible = False
+        reasons = [*reasons, "covered inventory validation not wired"]
+    contracts_recommended = max(1, int(math.floor(contracts_float + 1e-9))) if feasible else 0
+    return {
+        "strategy": strategy,
+        "status": "CANDIDATE" if reasons else "NO_REGIME_MATCH",
+        "reasons": reasons,
+        "feasible": feasible,
+        "target_dte": target_dte,
+        "expiry": expiry,
+        "premium_budget_dollars": premium_budget,
+        "contract_notional": contract_notional,
+        "contracts_float": contracts_float,
+        "contracts_recommended": contracts_recommended,
+        "role": cfg.get("role") or ("income_overlay" if strategy == "covered_call" else "volatility_overlay"),
+        "legs": _strategy_legs(strategy, float(spot), cfg) if spot is not None and spot > 0 else [],
+    }
+
+
 def build_options_overlay_shadow(
     *,
     trade_date: str,
@@ -196,6 +376,33 @@ def build_options_overlay_shadow(
         invested_ratio = 1.0
 
     strategy, reasons, base_status = _select_strategy(regime_summary, cash_ratio, policy)
+    candidate_strategies: list[dict[str, Any]] = []
+    for candidate_name in [
+        "protective_put",
+        "put_spread",
+        "covered_call",
+        "long_straddle",
+        "call_butterfly",
+        "leap_call",
+    ]:
+        candidate_reasons = _candidate_match_reasons(candidate_name, regime_summary, policy)
+        if candidate_reasons:
+            candidate_strategies.append(
+                _build_strategy_candidate(
+                    strategy=candidate_name,
+                    reasons=candidate_reasons,
+                    policy=policy,
+                    equity=equity,
+                    cash=cash,
+                    invested_ratio=invested_ratio,
+                    spot=spot,
+                    asof_date=asof_date,
+                )
+            )
+    if strategy is None and base_status == "INACTIVE" and candidate_strategies:
+        strategy = str(candidate_strategies[0].get("strategy") or "")
+        reasons = list(candidate_strategies[0].get("reasons") or reasons)
+        base_status = "ACTIVE"
     recommendation: dict[str, Any] = {
         "strategy": strategy,
         "feasible": False,
@@ -216,7 +423,7 @@ def build_options_overlay_shadow(
     if equity is None or equity <= 0 or spot is None or spot <= 0:
         status = "DATA_UNAVAILABLE"
         reasons = ["portfolio equity or SPY price unavailable"]
-    elif strategy:
+    elif strategy in {"protective_put", "put_spread"}:
         strategy_cfg = dict((policy.get("strategies") or {}).get(strategy) or {})
         hedge_ratio = max(0.0, min(1.0, float(_to_float(strategy_cfg.get("hedge_ratio")) or 0.0)))
         target_dte = int(_to_float(strategy_cfg.get("target_dte")) or 0)
@@ -271,6 +478,38 @@ def build_options_overlay_shadow(
             "long_put": long_put,
             "short_put": short_put,
         }
+    elif strategy:
+        selected_candidate = next(
+            (dict(item) for item in candidate_strategies if item.get("strategy") == strategy),
+            {},
+        )
+        if selected_candidate:
+            feasible = bool(selected_candidate.get("feasible"))
+            contracts_recommended = int(selected_candidate.get("contracts_recommended") or 0)
+            status = "READY_SHADOW_RECOMMENDATION" if feasible else "WATCH_ONLY_REVIEW_CANDIDATE"
+            if not feasible:
+                reasons = list(selected_candidate.get("reasons") or reasons)
+            recommendation = {
+                "strategy": strategy,
+                "feasible": feasible,
+                "target_hedge_ratio": None,
+                "target_protected_notional": None,
+                "contract_notional": selected_candidate.get("contract_notional"),
+                "contracts_float": selected_candidate.get("contracts_float"),
+                "contracts_recommended": contracts_recommended,
+                "target_dte": selected_candidate.get("target_dte"),
+                "expiry": selected_candidate.get("expiry"),
+                "premium_budget_dollars": selected_candidate.get("premium_budget_dollars"),
+                "max_premium_per_contract": (
+                    float(selected_candidate.get("premium_budget_dollars") or 0.0) / float(contracts_recommended)
+                    if contracts_recommended > 0
+                    else None
+                ),
+                "long_put": None,
+                "short_put": None,
+                "legs": selected_candidate.get("legs") or [],
+                "role": selected_candidate.get("role"),
+            }
 
     return {
         "generated_at": _now_utc(),
@@ -304,6 +543,7 @@ def build_options_overlay_shadow(
             "reasons": reasons,
         },
         "recommendation": recommendation,
+        "candidate_strategies": candidate_strategies,
     }
 
 
@@ -361,9 +601,24 @@ def build_options_overlay_shadow_markdown(payload: dict[str, Any]) -> str:
         f"- Expiry: {recommendation.get('expiry') or 'N/A'}",
         f"- Premium budget: {_format_money(recommendation.get('premium_budget_dollars'))}",
         "",
-        "## Trigger Reasons",
+        "## Strategy Candidates",
         "",
     ]
+    candidates = list(payload.get("candidate_strategies") or [])
+    if candidates:
+        for candidate in candidates:
+            lines.append(
+                f"- {candidate.get('strategy')}: feasible={'YES' if candidate.get('feasible') else 'NO'}, "
+                f"contracts={candidate.get('contracts_recommended') or 0}, "
+                f"expiry={candidate.get('expiry') or 'N/A'}, role={candidate.get('role') or 'N/A'}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend([
+        "",
+        "## Trigger Reasons",
+        "",
+    ])
     for reason in trigger.get("reasons") or ["none"]:
         lines.append(f"- {reason}")
     return "\n".join(lines) + "\n"

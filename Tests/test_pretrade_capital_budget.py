@@ -17,6 +17,7 @@ from paper.paper_broker import (
     _apply_capital_budget_to_trades,
     _build_capital_budget,
     _build_shadow_orders,
+    _compute_buy_budget,
     _split_orders_for_execution,
     _write_intended_orders_artifact,
 )
@@ -91,13 +92,13 @@ def test_negative_cash_with_sell_proceeds_only_allows_conservative_amount() -> N
     clipped, meta = _apply_capital_budget_to_trades(trades, _cfg(), capital_budget)
 
     assert meta["expected_sell_proceeds_conservative"] == 2850.0
-    assert meta["allowed_buy_notional"] == 1350.0
-    assert meta["capital_constraint_triggered"] is True
-    assert meta["clipped_or_deferred_buys_count"] == 1
+    assert meta["allowed_buy_notional"] == 1700.0
+    assert meta["capital_constraint_triggered"] is False
+    assert meta["clipped_or_deferred_buys_count"] == 0
     buy_notional = float(
         clipped.loc[clipped["side"].astype(str).str.upper() == "BUY", "notional"].sum()
     )
-    assert buy_notional == 1350.0
+    assert buy_notional == 1700.0
 
 
 def test_positive_cash_with_reserve_allows_normal_buy_plan() -> None:
@@ -122,6 +123,17 @@ def test_positive_cash_with_reserve_allows_normal_buy_plan() -> None:
     assert meta["capital_constraint_triggered"] is False
 
 
+def test_postsell_buy_budget_targets_less_than_five_percent_cash() -> None:
+    budget = _compute_buy_budget(
+        {"cash": "2388.18", "equity": "9713.40", "buying_power": "2388.18"},
+        _cfg(),
+    )
+
+    remaining_cash = 2388.18 - budget
+    assert remaining_cash == 100.0
+    assert remaining_cash / 9713.40 < 0.05
+
+
 def test_reserve_policy_uses_max_of_minimum_and_equity_percent() -> None:
     budget_small = _build_capital_budget(
         broker_cash=5000.0,
@@ -138,8 +150,8 @@ def test_reserve_policy_uses_max_of_minimum_and_equity_percent() -> None:
         requested_buy_notional=0.0,
     )
 
-    assert budget_small["reserve_cash_policy"]["reserve_cash"] == 500.0
-    assert budget_large["reserve_cash_policy"]["reserve_cash"] == 2500.0
+    assert budget_small["reserve_cash_policy"]["reserve_cash"] == 250.0
+    assert budget_large["reserve_cash_policy"]["reserve_cash"] == 1250.0
 
 
 def test_conservative_sell_haircut_is_applied() -> None:

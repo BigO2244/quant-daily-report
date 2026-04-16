@@ -101,6 +101,8 @@ def _paper_plan_from_shadow(
         "max_premium_per_contract": recommendation.get("max_premium_per_contract"),
         "long_put": recommendation.get("long_put"),
         "short_put": recommendation.get("short_put"),
+        "legs": recommendation.get("legs") or [],
+        "role": recommendation.get("role"),
         "paper_trade_type": "review_only",
     }
 
@@ -153,6 +155,7 @@ def build_options_overlay_paper_review(
         },
         "shadow": shadow_payload,
         "paper_plan": _paper_plan_from_shadow(shadow_payload=shadow_payload, policy=policy),
+        "candidate_strategies": shadow_payload.get("candidate_strategies") or [],
     }
     return review
 
@@ -178,6 +181,7 @@ def build_options_overlay_paper_markdown(payload: dict[str, Any]) -> str:
         f"- Target DTE: {paper_plan.get('target_dte') or 'N/A'}",
         f"- Roll before DTE: {paper_plan.get('roll_before_dte') or 'N/A'}",
         f"- Premium budget: {paper_plan.get('premium_budget_dollars') or 'N/A'}",
+        f"- Role: {paper_plan.get('role') or 'N/A'}",
         "",
         "## Shadow Source",
         "",

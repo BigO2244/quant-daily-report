@@ -164,7 +164,7 @@ def test_phase3_sell_first_postsell_snapshot_and_buy_budget(tmp_path, monkeypatc
     assert [side for side, _, _, _ in fake.submitted] == ["SELL", "BUY"]
     assert result["sell_phase_status"] == "COMPLETED"
     assert float(result["postsell_cash_confirmed"]) == pytest.approx(2200.0)
-    assert float(result["buy_budget_computed"]) == pytest.approx(1200.0)
+    assert float(result["buy_budget_computed"]) == pytest.approx(2100.0)
     postsell_path = Path(result["postsell_account_snapshot_path"])
     assert postsell_path.exists()
     payload = json.loads(postsell_path.read_text(encoding="utf-8"))
@@ -192,7 +192,7 @@ def test_phase3_buy_budget_reduces_buys_when_confirmed_cash_is_lower(tmp_path, m
     fake = _SequencedAlpaca(
         account_sequence=[
             {"cash": "2500.0", "equity": "10000.0", "buying_power": "2500.0", "status": "ACTIVE"},
-            {"cash": "1900.0", "equity": "10100.0", "buying_power": "1900.0", "status": "ACTIVE"},
+            {"cash": "1000.0", "equity": "10100.0", "buying_power": "1000.0", "status": "ACTIVE"},
             {"cash": "1000.0", "equity": "10100.0", "buying_power": "1000.0", "status": "ACTIVE"},
         ],
         positions_sequence=[
@@ -419,8 +419,8 @@ def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypat
     fake = _SequencedAlpaca(
         account_sequence=[
             {"cash": "1200.0", "equity": "10000.0", "buying_power": "1200.0", "status": "ACTIVE"},
-            {"cash": "950.0", "equity": "10000.0", "buying_power": "950.0", "status": "ACTIVE"},
-            {"cash": "950.0", "equity": "10000.0", "buying_power": "950.0", "status": "ACTIVE"},
+            {"cash": "50.0", "equity": "10000.0", "buying_power": "50.0", "status": "ACTIVE"},
+            {"cash": "50.0", "equity": "10000.0", "buying_power": "50.0", "status": "ACTIVE"},
         ],
         positions_sequence=[
             [],

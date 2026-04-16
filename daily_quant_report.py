@@ -7050,6 +7050,11 @@ def main(argv: list[str] | None = None):
                 "status": ((options_overlay_shadow.get("trigger") or {}).get("status") or "").upper(),
                 "strategy": (options_overlay_shadow.get("recommendation") or {}).get("strategy"),
                 "feasible": bool((options_overlay_shadow.get("recommendation") or {}).get("feasible")),
+                "candidate_strategies": [
+                    item.get("strategy")
+                    for item in list(options_overlay_shadow.get("candidate_strategies") or [])
+                    if item.get("strategy")
+                ],
                 "artifact_paths": options_overlay_shadow.get("artifact_paths") or {},
             }
             write_operator_summary(

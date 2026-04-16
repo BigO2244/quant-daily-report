@@ -1,8 +1,8 @@
 {
   "benchmark": "SPY",
   "mode": "shadow_only",
-  "north_star": "Use options as a portfolio overlay, not a primary alpha engine.",
-  "premium_budget_bps": 25.0,
+  "north_star": "Use options as a capital-efficient overlay sleeve: harvest premium, define risk, and add convex exposure without bypassing promotion gates.",
+  "premium_budget_bps": 75.0,
   "cash_ceiling_without_overlay": 0.18,
   "min_contract_utilization": 0.75,
   "activation": {
@@ -35,6 +35,73 @@
         "risk_off",
         "stress"
       ]
+    },
+    "covered_call": {
+      "composite_regimes": [
+        "risk_on_trending",
+        "neutral_mixed"
+      ],
+      "volatility_states": [
+        "elevated",
+        "normal"
+      ],
+      "breadth_states": [
+        "mixed",
+        "healthy"
+      ],
+      "macro_states": [
+        "neutral",
+        "risk_on"
+      ]
+    },
+    "long_straddle": {
+      "composite_regimes": [
+        "high_volatility",
+        "breadth_washout"
+      ],
+      "volatility_states": [
+        "crisis",
+        "elevated"
+      ],
+      "breadth_states": [
+        "washed_out"
+      ],
+      "macro_states": [
+        "stress"
+      ]
+    },
+    "call_butterfly": {
+      "composite_regimes": [
+        "neutral_mixed"
+      ],
+      "volatility_states": [
+        "elevated"
+      ],
+      "breadth_states": [
+        "mixed",
+        "deteriorating"
+      ],
+      "macro_states": [
+        "neutral"
+      ]
+    },
+    "leap_call": {
+      "composite_regimes": [
+        "risk_on_trending",
+        "neutral_mixed"
+      ],
+      "volatility_states": [
+        "normal",
+        "elevated"
+      ],
+      "breadth_states": [
+        "healthy",
+        "mixed"
+      ],
+      "macro_states": [
+        "risk_on",
+        "neutral"
+      ]
     }
   },
   "strategies": {
@@ -48,6 +115,31 @@
       "target_dte": 28,
       "long_put_moneyness": 0.98,
       "short_put_moneyness": 0.92
+    },
+    "covered_call": {
+      "target_dte": 35,
+      "short_call_moneyness": 1.05,
+      "premium_budget_bps": 0.0,
+      "requires_covered_inventory": true
+    },
+    "long_straddle": {
+      "target_dte": 35,
+      "long_call_moneyness": 1.0,
+      "long_put_moneyness": 1.0,
+      "premium_budget_bps": 50.0
+    },
+    "call_butterfly": {
+      "target_dte": 28,
+      "lower_call_moneyness": 0.98,
+      "center_call_moneyness": 1.0,
+      "upper_call_moneyness": 1.02,
+      "premium_budget_bps": 35.0
+    },
+    "leap_call": {
+      "target_dte": 390,
+      "long_call_moneyness": 0.85,
+      "premium_budget_bps": 125.0,
+      "role": "cash_replacement_convexity"
     }
   }
 }

@@ -161,6 +161,7 @@ If yfinance is unavailable (network issue, market closure), the regime module fa
 | Tier 2 | Secondary data provider (backup for Yahoo Finance) | Backlog |
 | Tier 3 | SPY puts overlay for explicit drawdown hedge | **Phase 2A shadow-only confirmed 2026-04-09**; no live execution path |
 | Tier 3 | Options paper/promotion review lane | **Phase 2B in progress**; paper-ready review artifacts, no execution |
+| Tier 3 | Options strategy overlay | **Phase 2C expanded**; shadow/paper-review candidates now include protective puts, put spreads, covered calls, long straddles, call butterflies, and LEAP calls |
 | Tier 3 | Options execution lane | **Phase 2C scaffolded**; gated, disabled-by-default submit path for protective SPY puts (`ALLOW_OPTIONS_EXECUTION=1`) |
 | Tier 3 | Defensive Treasury ETF sleeve | **Phase 3A confirmed 2026-04-09**; live-capable, regime-gated |
 | Architectural | Decide fate of Sleeve 1: integrate into live allocator or formally archive | Open |
@@ -171,7 +172,7 @@ If yfinance is unavailable (network issue, market closure), the regime module fa
 ## Key Architectural Facts (for reference)
 
 - **Live sleeve set:** `sleeve_trend`, `sleeve_2` (value), `sleeve_quality`, `sleeve_mean_reversion`, `sleeve_defensive_etf`. Sleeve 1 output is discarded (`_, _ = run_sleeve_1()`).
-- **No live options execution path by default.** Phase 2A writes shadow SPY hedge recommendations only (`mode=shadow_only`); Phase 2B adds paper-review artifacts only; Phase 2C scaffolds a gated, opt-in protective-put submit path but keeps live order routing disabled until explicitly enabled via `ALLOW_OPTIONS_EXECUTION=1` / `ALLOW_OPTIONS_SUBMISSION=1`.
+- **No live options execution path by default.** Phase 2A writes shadow SPY hedge recommendations only (`mode=shadow_only`); Phase 2B adds paper-review artifacts only; Phase 2C scaffolds a gated, opt-in protective-put submit path but keeps live order routing disabled until explicitly enabled via `ALLOW_OPTIONS_EXECUTION=1` / `ALLOW_OPTIONS_SUBMISSION=1`. The overlay model now evaluates richer review-only structures — covered calls, long straddles, call butterflies, and LEAP calls — but those structures remain paper-review artifacts until execution, covered-inventory validation, and options risk limits are explicitly promoted.
 - **Defensive ETF sleeve** activates only in `risk_off_defensive`, `high_volatility`, or `breadth_washout` regimes; freed weight falls to cash on invalid output.
 - **Drawdown circuit breakers** exist at 10% (soft — reduce size) and 15% (hard — stop new entries) in `engine/breaker.py`.
 - **The venv Python binary is macOS-only** and cannot run in the Linux sandbox. Use `source .venv/bin/activate` from your Mac terminal for all WFO and live runs.

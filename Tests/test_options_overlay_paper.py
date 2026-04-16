@@ -11,7 +11,7 @@ from core.options_overlay_paper import (
 
 
 class OptionsOverlayPaperTests(unittest.TestCase):
-    def test_risk_on_stays_inactive(self) -> None:
+    def test_risk_on_surfaces_review_candidates_but_not_paper_ready_without_covered_inventory(self) -> None:
         payload = build_options_overlay_paper_review(
             trade_date="2026-04-10",
             asof_date="2026-04-09",
@@ -28,8 +28,11 @@ class OptionsOverlayPaperTests(unittest.TestCase):
             live_regime_review={"promotion_gate": {"overall_status": "ready"}},
         )
 
-        self.assertEqual(payload["paper_review_status"], "INACTIVE")
+        self.assertEqual(payload["paper_review_status"], "WATCH_ONLY_CONTRACT_TOO_LARGE")
         self.assertFalse(payload["paper_ready"])
+        strategies = {item["strategy"] for item in payload["candidate_strategies"]}
+        self.assertIn("covered_call", strategies)
+        self.assertIn("leap_call", strategies)
 
     def test_shadow_ready_becomes_paper_ready(self) -> None:
         payload = build_options_overlay_paper_review(
