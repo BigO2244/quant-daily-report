@@ -30,15 +30,22 @@ def test_daily_alpaca_email_steps_and_debug_defaults_are_pinned() -> None:
     assert "outputs/execution_email/${{ env.REPORT_DATE }}.json" in workflow
 
 
-def test_daily_alpaca_workflow_has_only_schedule_and_dispatch_triggers() -> None:
+def test_daily_alpaca_workflow_is_dispatch_only_to_avoid_vm_cron_duplicates() -> None:
     workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
-    assert "schedule:" in workflow
+    assert "schedule:" not in workflow
     assert "workflow_call:" not in workflow
     assert "repository_dispatch:" not in workflow
     assert "pull_request:" not in workflow
     assert "push:" not in workflow
+
+
+def test_github_workflows_have_no_schedule_triggers() -> None:
+    for path in Path(".github/workflows").glob("*.yml"):
+        workflow = path.read_text(encoding="utf-8")
+        assert "schedule:" not in workflow, f"{path} must remain dispatch-only"
+        assert "cron:" not in workflow, f"{path} must remain dispatch-only"
 
 
 def test_daily_alpaca_live_retry_chain_uses_always_for_failed_primary_handoff() -> None:

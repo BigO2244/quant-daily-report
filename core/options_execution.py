@@ -91,14 +91,29 @@ def _allocator_ready(review: dict[str, Any] | None) -> bool:
     return str(review.get("allocator_review_status") or "").strip().lower() == "ready"
 
 
+def _allowed_strategies(policy: dict[str, Any]) -> set[str]:
+    return {
+        str(strategy).strip().lower()
+        for strategy in list(policy.get("allowed_strategies") or [])
+        if str(strategy).strip()
+    }
+
+
 def _live_plan_from_paper_review(review: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     paper_plan = dict(review.get("paper_plan") or {})
     underlying = str(policy.get("benchmark") or review.get("benchmark") or "SPY").upper()
     strategy = str(paper_plan.get("strategy") or "").strip().lower()
+    allowed = _allowed_strategies(policy)
+    if not allowed:
+        raise PermissionError("no options strategies are allowed for live submission")
+    if strategy not in allowed:
+        raise PermissionError(f"strategy {strategy or 'unknown'} is not allowed for live submission")
     expiry = str(paper_plan.get("expiry") or "").strip()
     target_dte = int(_to_float(paper_plan.get("target_dte")) or 0)
     contracts = max(0, int(_to_float(paper_plan.get("contracts_recommended")) or 0))
     contracts = min(contracts, int(_to_float(policy.get("max_contracts")) or 1))
+    if contracts <= 0:
+        raise ValueError("non-positive contract count in paper plan")
     if strategy == "protective_put":
         option_type = "PUT"
         strike = _to_float((paper_plan.get("long_put") or {}).get("strike"))
@@ -168,6 +183,10 @@ def build_options_execution_review(
             reasons.append(str(exc))
             execution_status = "WATCH_SPREAD_LIVE_NOT_READY"
             live_plan = {}
+        except PermissionError as exc:
+            reasons.append(str(exc))
+            execution_status = "WATCH_STRATEGY_NOT_ALLOWED"
+            live_plan = {}
         except Exception as exc:
             reasons.append(str(exc))
             execution_status = "WATCH_PLAN_UNAVAILABLE"
@@ -187,7 +206,9 @@ def build_options_execution_review(
     }
     if ready_for_submission and live_submission_allowed and broker is not None:
         live_plan = _live_plan_from_paper_review(paper_review, policy)
-        qty = max(1, int(_to_float(live_plan.get("contracts")) or 0))
+        qty = int(_to_float(live_plan.get("contracts")) or 0)
+        if qty <= 0:
+            raise ValueError("refusing to submit non-positive option contract quantity")
         client_order_id = f"opt:{trade_date}:{live_plan['strategy']}:{live_plan['option_symbol']}"
         submission["attempted"] = True
         if live_plan["order_type"] == "limit":

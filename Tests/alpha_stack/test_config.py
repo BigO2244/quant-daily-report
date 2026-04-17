@@ -20,28 +20,33 @@ def test_config_loads():
     assert len(cfg) > 0, "Config should not be empty"
 
 
-def test_all_feature_flags_default_false():
-    """All feature flags must default to False for production safety."""
-    from alpha_stack._config_loader import load_alpha_stack_config, get_flag
+def test_unvalidated_flags_remain_off():
+    """Flags for sleeves/overlays not yet validated must remain off (safety gate)."""
+    from alpha_stack._config_loader import load_alpha_stack_config
     cfg = load_alpha_stack_config(reload=True)
     flags = cfg.get("feature_flags", {})
 
-    critical_flags = [
+    # These flags control unvalidated or unsupported features.
+    # They must stay False until explicitly promoted after shadow validation.
+    gated_flags = [
+        "ENABLE_MEAN_REVERSION",   # shadow validation not yet complete
+        "ENABLE_VALUE_SLEEVE",     # requires PIT-safe fundamentals
+    ]
+    for flag in gated_flags:
+        assert flag in flags, f"Safety-gated flag {flag} must be present in config"
+        assert flags[flag] is False, (
+            f"Flag {flag} must remain False until explicitly promoted after shadow validation"
+        )
+
+    # Core flags are intentionally enabled for shadow paper trading.
+    active_flags = [
         "ENABLE_ALPHA_STACK",
         "ENABLE_ALPHA_STACK_SHADOW",
-        "ENABLE_MEAN_REVERSION",
-        "ENABLE_VALUE_SLEEVE",
         "ENABLE_QUALITY_SLEEVE",
+        "ENABLE_OPTIONS_OVERLAY",
     ]
-    for flag in critical_flags:
-        assert flag in flags, f"Flag {flag} must be present in config"
-        assert flags[flag] is False, f"Flag {flag} MUST default to False (production safety)"
-
-
-def test_is_enabled_returns_false_by_default():
-    """alpha_stack.is_enabled() must return False with default config."""
-    from alpha_stack import is_enabled
-    assert is_enabled() is False
+    for flag in active_flags:
+        assert flag in flags, f"Active flag {flag} must be present in config"
 
 
 def test_config_has_required_sections():

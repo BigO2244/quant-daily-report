@@ -87,6 +87,27 @@ python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0 >> "${LOG_
 
 if [[ ${EXIT_CODE} -eq 0 ]]; then
     echo "OK: execution completed successfully" | tee -a "${LOG_FILE}"
+    OPTIONS_SUBMISSION_ENABLED="$(printf '%s' "${ALLOW_OPTIONS_EXECUTION:-${ALLOW_OPTIONS_SUBMISSION:-0}}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${OPTIONS_SUBMISSION_ENABLED}" == "1" || "${OPTIONS_SUBMISSION_ENABLED}" == "true" || "${OPTIONS_SUBMISSION_ENABLED}" == "yes" || "${OPTIONS_SUBMISSION_ENABLED}" == "y" || "${OPTIONS_SUBMISSION_ENABLED}" == "on" ]]; then
+        PAPER_REVIEW_PATH="${REPO_ROOT}/outputs/options_overlay_paper/options_overlay_paper_review_${REPORT_DATE}.json"
+        if [[ ! -f "${PAPER_REVIEW_PATH}" ]]; then
+            echo "ERROR: options submission requested but paper review is missing at ${PAPER_REVIEW_PATH}" | tee -a "${LOG_FILE}"
+            EXIT_CODE=1
+        else
+            echo "=== PHASE 2: OPTIONS OVERLAY EXECUTION ===" | tee -a "${LOG_FILE}"
+            python3 scripts/execute_options_overlay.py \
+                --run-root "${REPO_ROOT}/outputs/options_execution/${REPORT_DATE}" \
+                --output-dir "${REPO_ROOT}/outputs/options_execution" \
+                --paper-review "${PAPER_REVIEW_PATH}" \
+                --trade-date "${REPORT_DATE}" \
+                --submit >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
+            if [[ ${EXIT_CODE} -eq 0 ]]; then
+                echo "OK: options overlay execution review completed" | tee -a "${LOG_FILE}"
+            else
+                echo "ERROR: options overlay execution failed with exit code ${EXIT_CODE}" | tee -a "${LOG_FILE}"
+            fi
+        fi
+    fi
 else
     echo "ERROR: execution failed with exit code ${EXIT_CODE}" | tee -a "${LOG_FILE}"
 fi

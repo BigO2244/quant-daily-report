@@ -15,15 +15,6 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-    # Precompute target: 7:30 AM America/New_York.
-    # EST weekdays use 12:30 UTC, EDT weekdays use 11:30 UTC.
-    - cron: "30 12 * 1,2,12 1-5"
-    - cron: "30 12 1-7 3 1-5"
-    - cron: "30 11 8-31 3 1-5"
-    - cron: "30 11 * 4-10 1-5"
-    - cron: "30 11 1-7 11 1-5"
-    - cron: "30 12 8-30 11 1-5"
 
 jobs:
   precompute:

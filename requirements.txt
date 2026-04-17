@@ -5,3 +5,4 @@ matplotlib
 alpaca-py
 requests
 pyarrow
+PyYAML

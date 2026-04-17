@@ -15,7 +15,7 @@ def inverse_vol_weights(
     vols: pd.Series,
     vol_floor: float = 0.10,
     vol_cap: float = 0.60,
-    position_cap: float = 0.10,
+    position_cap: float = 0.20,
     position_floor: float = 0.02,
 ) -> pd.Series:
     """
@@ -52,7 +52,7 @@ def equal_weights(
 
 def score_proportional_weights(
     scores: pd.Series,
-    position_cap: float = 0.10,
+    position_cap: float = 0.20,
     position_floor: float = 0.02,
 ) -> pd.Series:
     """Weight proportional to score."""

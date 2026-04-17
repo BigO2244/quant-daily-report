@@ -18,12 +18,12 @@
 # FEATURE FLAGS
 # ===========================================================================
 feature_flags:
-  ENABLE_ALPHA_STACK: false           # Master switch — must be true for any AS component to run
-  ENABLE_ALPHA_STACK_SHADOW: false    # Enable shadow mode (parallel paper NAV tracking)
+  ENABLE_ALPHA_STACK: true            # Master switch
+  ENABLE_ALPHA_STACK_SHADOW: true     # Shadow mode (parallel paper NAV tracking)
   ENABLE_MEAN_REVERSION: false        # MR sleeve — off until validated in shadow
-  ENABLE_OPTIONS_OVERLAY: false       # Phase 2A shadow artifacts exist; no options execution path yet
+  ENABLE_OPTIONS_OVERLAY: true        # Options overlay enabled; execution wired via brokers/alpaca_broker.py
   ENABLE_VALUE_SLEEVE: false          # Value sleeve — off until PIT fundamentals are wired
-  ENABLE_QUALITY_SLEEVE: false        # Quality sleeve — off until PIT fundamentals are wired
+  ENABLE_QUALITY_SLEEVE: true         # Enabled (yfinance fundamentals; not PIT-safe, accepted for paper)
 
 # ===========================================================================
 # UNIVERSE
@@ -146,7 +146,7 @@ sleeves:
   common:
     min_price: 5.0
     min_adv_shares: 100000
-    position_cap: 0.10              # Per-name cap at sleeve level
+    position_cap: 0.20              # Per-name cap at sleeve level — raised for concentration
 
   trend:
     enabled: true                   # Active when ENABLE_ALPHA_STACK is true
@@ -160,17 +160,20 @@ sleeves:
     w_r6_1: 0.30
     w_r3_1: 0.15
     w_trend_flag: 0.10
+    # Thematic overlay — score boost from research agent digest
+    thematic_boost_weight: 0.15     # Additive weight on [0,1] thematic score before ranking
     # Volatility-adjusted scoring
     atr_lookback: 20
     # Entry/exit thresholds
-    enter_score: 70
-    hold_score: 55
-    exit_score: 45
-    # Sizing
+    enter_score: 65                 # Lowered: faster entry on high-conviction names
+    hold_score: 50
+    exit_score: 40
+    # Sizing — concentrated: fewer, bigger bets
     vol_floor: 0.10                 # 10% annualized vol floor for inv-vol weights
     vol_cap: 0.60                   # 60% annualized vol cap
-    top_n: 15
-    max_positions: 20
+    position_cap: 0.20              # 20% per-name sleeve cap
+    top_n: 10
+    max_positions: 12
 
   value:
     enabled: false                  # Off until PIT fundamentals are wired
@@ -186,7 +189,7 @@ sleeves:
     top_n: 15
 
   quality:
-    enabled: false                  # Off until PIT fundamentals are wired
+    enabled: true                   # Enabled for paper (yfinance; not PIT-safe, accepted)
     # Factor weights
     w_roe: 0.30
     w_roic: 0.25
@@ -197,7 +200,8 @@ sleeves:
     enter_score: 70
     hold_score: 55
     exit_score: 45
-    top_n: 15
+    top_n: 10
+    position_cap: 0.20
 
   mean_reversion:
     enabled: false                  # Controlled by ENABLE_MEAN_REVERSION flag
@@ -224,32 +228,33 @@ sleeves:
 # ===========================================================================
 allocator:
   # Base sleeve budget by trend state (before modifiers)
+  # Value sleeve disabled — budgets redistributed to trend and quality
   base_weights:
     strong_up:
-      trend: 0.55
-      value: 0.20
-      quality: 0.15
-      mean_reversion: 0.10
+      trend: 0.70
+      value: 0.00
+      quality: 0.25
+      mean_reversion: 0.05
     weak_up:
-      trend: 0.45
-      value: 0.25
-      quality: 0.20
-      mean_reversion: 0.10
+      trend: 0.60
+      value: 0.00
+      quality: 0.35
+      mean_reversion: 0.05
     neutral:
-      trend: 0.35
-      value: 0.25
-      quality: 0.30
-      mean_reversion: 0.10
+      trend: 0.45
+      value: 0.00
+      quality: 0.50
+      mean_reversion: 0.05
     weak_down:
       trend: 0.20
-      value: 0.20
-      quality: 0.50
-      mean_reversion: 0.10
+      value: 0.00
+      quality: 0.75
+      mean_reversion: 0.05
     strong_down:
-      trend: 0.10
-      value: 0.15
-      quality: 0.65
-      mean_reversion: 0.10
+      trend: 0.05
+      value: 0.00
+      quality: 0.90
+      mean_reversion: 0.05
 
   # Volatility modifiers (applied after trend base)
   vol_modifiers:
@@ -282,13 +287,13 @@ allocator:
   constraints:
     max_gross_exposure: 0.95        # 95% max long; 5% min cash
     min_cash: 0.05
-    max_position_pct: 0.10          # 10% per-name hard cap
-    max_sector_pct: 0.30            # 30% per-sector cap (placeholder if sector data available)
-    # Turnover smoothing
-    max_daily_sleeve_change: 0.05   # 5% max sleeve budget shift per day
-    # Drawdown circuit breaker (placeholder — wire to live NAV before paper mode)
-    drawdown_soft: 0.10             # 10% DD → reduce all sleeves by 50%
-    drawdown_hard: 0.15             # 15% DD → cash-only hold mode
+    max_position_pct: 0.20          # 20% per-name hard cap — concentrated book
+    max_sector_pct: 0.40            # 40% per-sector cap (AI/tech concentration acceptable)
+    # Turnover smoothing — loosened to allow faster entry on high-conviction signals
+    max_daily_sleeve_change: 0.15   # 15% max sleeve budget shift per day (was 5%)
+    # Drawdown circuit breaker
+    drawdown_soft: 0.12             # 12% DD → reduce all sleeves by 50%
+    drawdown_hard: 0.20             # 20% DD → cash-only hold mode
 
 # ===========================================================================
 # RESEARCH / BACKTEST

@@ -2,9 +2,6 @@ name: Research Digest — Nightly
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 11 * * 1-5"
-    - cron: "0 12 * * 1-5"
 
 permissions:
   contents: write

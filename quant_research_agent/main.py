@@ -82,8 +82,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--output-dir",
         metavar="PATH",
-        default=None,
-        help="If set, save digest HTML and JSON summary to this directory.",
+        default=str(Path(__file__).parent / "outputs"),
+        help="Directory to save digest HTML and JSON (default: quant_research_agent/outputs/).",
     )
     return p.parse_args()
 
@@ -218,8 +218,7 @@ def main() -> int:
     logger.info("Digest built: %d items, subject: %s", len(digest.items), digest.subject)
 
     # --- Persist outputs (always, before send, so artifacts exist even if email fails) ---
-    if args.output_dir:
-        _persist_outputs(digest, Path(args.output_dir))
+    _persist_outputs(digest, Path(args.output_dir))
 
     # --- Deliver ---
     if args.dry_run:

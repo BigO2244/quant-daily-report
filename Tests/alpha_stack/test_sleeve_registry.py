@@ -46,17 +46,16 @@ class TestSleeveRegistry:
         assert "quality" in names
         assert "mean_reversion" in names
 
-    def test_active_sleeves_with_flags_off(self):
-        """With all flags off, only trend sleeve should be active."""
+    def test_active_sleeves_current_config(self):
+        """Current config: trend and quality active; value and mean_reversion gated off."""
         from alpha_stack.sleeves.registry import SleeveRegistry
-        # All flags are false by default in config
         registry = SleeveRegistry()
         active_names = registry.active_sleeve_names()
-        # trend has no blocking flag (only master ENABLE_ALPHA_STACK)
+        # Intentionally enabled for paper shadow trading
         assert "trend" in active_names
-        # value, quality, mean_reversion should be excluded
+        assert "quality" in active_names
+        # Gated off — require validation before promotion
         assert "value" not in active_names
-        assert "quality" not in active_names
         assert "mean_reversion" not in active_names
 
     def test_trend_sleeve_name(self):
@@ -75,14 +74,14 @@ class TestSleeveRegistry:
         assert out.active is False
         assert "ENABLE_VALUE_SLEEVE" in out.reason
 
-    def test_quality_sleeve_run_returns_disabled(self):
-        """QualitySleeve.run() returns active=False when flag is off."""
+    def test_quality_sleeve_run_returns_active(self):
+        """QualitySleeve.run() returns active=True when ENABLE_QUALITY_SLEEVE=true."""
         import pandas as pd
         from alpha_stack.sleeves.quality import QualitySleeve
         sleeve = QualitySleeve()
         ctx = _make_ctx()
         out = sleeve.run(pd.DataFrame(), ctx, as_of_date="2024-01-15")
-        assert out.active is False
+        assert out.active is True
 
     def test_mean_reversion_run_returns_disabled(self):
         """MeanReversionSleeve.run() returns active=False when flag is off."""

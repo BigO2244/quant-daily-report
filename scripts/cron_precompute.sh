@@ -46,6 +46,8 @@ export EMAIL_PRETRADE=0
 export EMAIL_TRADING_CONFIRMATION=0
 export EMAIL_INTERNAL_DEBUG=0
 export PLAN_ONLY=1
+export ALLOW_OPTIONS_EXECUTION=0
+export ALLOW_OPTIONS_SUBMISSION=0
 
 echo "=== PHASE 1: PRECOMPUTE ===" | tee -a "${LOG_FILE}"
 echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "${LOG_FILE}"

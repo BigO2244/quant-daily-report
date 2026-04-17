@@ -3,67 +3,94 @@
 # investment themes, and what you want the agent to flag.
 
 portfolio:
-  style: "quantitative long/short equity"
-  horizon: "3-10 day holding period"
+  style: "concentrated momentum equity — alpha quant, high conviction"
+  horizon: "5-21 day holding period"
   universe: "US large-cap and mid-cap equities"
 
-  # Tickers you are currently holding or watching closely.
+  # Tickers currently winning / high-conviction watchlist.
   # The agent will flag any research item that mentions these.
   watchlist:
-    - NVDA
-    - MSFT
-    - AAPL
-    - AMZN
-    - META
-    - GOOGL
-    - JPM
-    - GS
-    - SPY
-    - QQQ
+    - AVGO       # AI networking supercycle — multi-gigawatt data center contracts
+    - NVDA       # GPU dominance, Blackwell ramp
+    - MSFT       # Azure AI, Anthropic/OpenAI partner ecosystem
+    - VST        # Power/nuclear — AI energy nexus
+    - TLN        # Nuclear energy — power contracts for AI data centers
+    - MU         # HBM memory supercycle, AI training demand
+    - META       # AI capex beneficiary, Llama moat
+    - GOOGL      # Gemini inference, TPU ramp
+    - AMZN       # AWS AI infrastructure
+    - LMT        # Defense supercycle — geopolitical risk premium
+    - NOC        # Defense — same thesis as LMT
+    - GD         # Defense — same thesis
+    - SPY        # Market regime
+    - QQQ        # Tech breadth proxy
 
 themes:
-  # Each theme is scored separately. Add/remove freely.
+  - name: ai_energy_nexus
+    description: "Power demand from AI data centers — nuclear, natural gas, grid infrastructure"
+    keywords:
+      - nuclear power
+      - data center power
+      - AI electricity demand
+      - power purchase agreement
+      - grid capacity
+      - Constellation Energy
+      - Vistra
+      - Talen Energy
+      - SMR
+      - small modular reactor
+      - gigawatt
+
   - name: ai_infrastructure
-    description: "AI compute, GPU supply chain, inference, data centers"
+    description: "AI compute, GPU supply chain, custom silicon, HBM memory, inference"
     keywords:
       - AI infrastructure
       - GPU
       - inference compute
       - data center
-      - CUDA
-      - H100
       - Blackwell
+      - H100
+      - HBM
+      - custom silicon
+      - ASIC
+      - multi-gigawatt
+      - hyperscaler capex
+      - AI capex
 
-  - name: macro_rates
-    description: "Fed policy, interest rates, yield curve, credit spreads"
+  - name: defense_supercycle
+    description: "Global defense spending ramp — NATO commitments, Ukraine, Indo-Pacific"
     keywords:
-      - Federal Reserve
-      - interest rate
-      - yield curve
-      - CPI
-      - inflation
-      - FOMC
-      - credit spread
+      - defense budget
+      - NATO spending
+      - Ukraine war
+      - defense contract
+      - F-35
+      - hypersonic
+      - missile defense
+      - military spending
+      - defense authorization
 
-  - name: earnings_revisions
-    description: "Earnings beats/misses, guidance changes, analyst revisions"
+  - name: earnings_catalyst
+    description: "Imminent earnings beats, guidance raises, analyst upgrades"
     keywords:
       - earnings surprise
       - EPS beat
       - guidance raised
-      - guidance lowered
       - analyst upgrade
-      - analyst downgrade
+      - revenue beat
+      - margin expansion
+      - backlog growth
 
-  - name: geopolitical_risk
-    description: "Supply chain, trade policy, sanctions, energy geopolitics"
+  - name: macro_regime
+    description: "Fed policy, tariff impacts, yield curve — regime-shifting macro signals only"
     keywords:
+      - Federal Reserve
+      - interest rate cut
       - tariff
       - trade war
-      - sanctions
-      - supply chain
-      - OPEC
-      - energy security
+      - credit spread
+      - recession risk
+      - FOMC
 
 scoring:
   # Relative weights Claude uses when ranking items.

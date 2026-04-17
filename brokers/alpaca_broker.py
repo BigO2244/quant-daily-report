@@ -594,6 +594,11 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
+        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
+        if not bool(self.paper) or "paper-api.alpaca.markets" not in base_url_norm:
+            raise RuntimeError(
+                "Refusing option market order outside Alpaca paper environment"
+            )
         logger.info(
             "[ALPACA_SUBMIT][OPTION] submitting market order symbol=%s qty=%.6f side=%s",
             str(symbol).upper(),
@@ -617,6 +622,11 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
+        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
+        if not bool(self.paper) or "paper-api.alpaca.markets" not in base_url_norm:
+            raise RuntimeError(
+                "Refusing option limit order outside Alpaca paper environment"
+            )
         logger.info(
             "[ALPACA_SUBMIT][OPTION] submitting limit order symbol=%s qty=%.6f side=%s limit_price=%.6f",
             str(symbol).upper(),

@@ -164,7 +164,18 @@ except ImportError as exc:  # pragma: no cover - defensive compatibility fallbac
 from paper.reporting_consistency import compute_exposure, determine_sleeve_state
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
-from research.signal_store import persist_signal_snapshot
+def persist_signal_snapshot(df, date_str: str) -> None:
+    """Write signal snapshot to outputs/signal_store/ (replaces deleted research.signal_store)."""
+    import json as _json
+    _out = Path("outputs") / "signal_store"
+    _out.mkdir(parents=True, exist_ok=True)
+    _out_path = _out / f"signals_{date_str}.json"
+    try:
+        _out_path.write_text(
+            _json.dumps(df.to_dict(orient="records"), default=str), encoding="utf-8"
+        )
+    except Exception as _e:
+        logger.warning("[SIGNAL_STORE] Failed to persist snapshot: %s", _e)
 from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
 from reconciliation import (
     bootstrap_model_ledger_from_broker,
@@ -206,6 +217,7 @@ from core.live_regime_review import build_returns_by_ticker, write_live_regime_r
 from core.options_overlay_paper import write_options_overlay_paper_review  # noqa: E402
 from core.options_execution import write_options_execution_review  # noqa: E402
 from core.options_overlay_shadow import write_options_overlay_shadow  # noqa: E402
+from alpha_stack._config_loader import get_flag as get_alpha_stack_flag  # noqa: E402
 from engine.backtest_engine import (  # noqa: E402
     infer_latest_entries,
     attach_entry_prices,
@@ -7025,10 +7037,26 @@ def main(argv: list[str] | None = None):
             overlay_cash = _coerce_float_or_none((paper_summary or {}).get("broker_cash"))
         if overlay_cash is None:
             overlay_cash = _coerce_float_or_none((((_pretrade_raw_snapshot or {}).get("account") or {}).get("cash")))
-        if _RUN_CONTEXT is not None:
-            options_submission_enabled = str(
+        if _RUN_CONTEXT is not None and get_alpha_stack_flag("ENABLE_OPTIONS_OVERLAY", default=False):
+            options_submission_requested = str(
                 os.getenv("ALLOW_OPTIONS_EXECUTION", os.getenv("ALLOW_OPTIONS_SUBMISSION", "0"))
             ).strip().lower() in {"1", "true", "yes", "y", "on"}
+            options_plan_only = bool(
+                getattr(args, "plan_only", False)
+                or legacy_shadow_requested
+                or _is_truthy(os.getenv("PLAN_ONLY"), default=False)
+            )
+            options_live_context = str(os.getenv("WORKFLOW_KIND") or "").strip().lower() == "live"
+            options_submission_enabled = bool(
+                options_submission_requested and options_live_context and not options_plan_only
+            )
+            if options_submission_requested and not options_submission_enabled:
+                logger.warning(
+                    "[OPTIONS_OVERLAY] live submission requested but blocked "
+                    "(plan_only=%s workflow_kind=%s)",
+                    options_plan_only,
+                    str(os.getenv("WORKFLOW_KIND") or "unset"),
+                )
             options_broker = None
             if options_submission_enabled:
                 from brokers.alpaca_broker import AlpacaBroker  # local import to keep startup light

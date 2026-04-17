@@ -2,9 +2,6 @@ name: Alpha Daily Run
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # 6:15am ET ≈ 11:15 UTC (adjust for DST if you want)
-    - cron: "15 11 * * 1-5"
 
 jobs:
   alpha:
