@@ -55,11 +55,20 @@ class BaseAgent(ABC):
                         self.name, result.get("regime", "?"), result.get("score", 0.0))
             return result
         except Exception as exc:
-            logger.warning("[%s] run failed: %s — returning neutral stub", self.name, exc)
+            logger.exception("[%s] run failed — returning neutral stub", self.name)
             return self._neutral_stub(str(exc))
 
     def _neutral_stub(self, reason: str = "") -> Dict[str, Any]:
-        return {"status": "error", "regime": "unknown", "score": 0.0, "error": reason}
+        return {
+            "agent": self.name,
+            "signal": None,
+            "confidence": None,
+            "as_of": None,
+            "status": "error",
+            "regime": "unknown",
+            "score": 0.0,
+            "error": reason,
+        }
 
     @staticmethod
     def _clamp(value: float, lo: float = -1.0, hi: float = 1.0) -> float:

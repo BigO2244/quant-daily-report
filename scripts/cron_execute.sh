@@ -32,7 +32,7 @@ export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
 export MODE="paper"
 export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
-export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
+export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 
 # --- Log setup ---
 LOG_DIR="${REPO_ROOT}/logs"

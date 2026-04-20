@@ -67,6 +67,21 @@ class TestVolatilityClassifier:
         from alpha_stack.regime.state_machine import classify_volatility, VolatilityState
         assert classify_volatility(None) == VolatilityState.NORMAL
 
+    def test_boundary_calm_normal_at_16(self):
+        from alpha_stack.regime.state_machine import classify_volatility, VolatilityState
+        assert classify_volatility(15.99) == VolatilityState.CALM
+        assert classify_volatility(16.0) == VolatilityState.NORMAL
+
+    def test_boundary_normal_elevated_at_22(self):
+        from alpha_stack.regime.state_machine import classify_volatility, VolatilityState
+        assert classify_volatility(21.99) == VolatilityState.NORMAL
+        assert classify_volatility(22.0) == VolatilityState.ELEVATED
+
+    def test_boundary_elevated_crisis_at_30(self):
+        from alpha_stack.regime.state_machine import classify_volatility, VolatilityState
+        assert classify_volatility(29.99) == VolatilityState.ELEVATED
+        assert classify_volatility(30.0) == VolatilityState.CRISIS
+
 
 class TestBreadthClassifier:
     """classify_breadth() produces correct states."""
@@ -90,6 +105,22 @@ class TestBreadthClassifier:
     def test_none_defaults_to_mixed(self):
         from alpha_stack.regime.state_machine import classify_breadth, BreadthState
         assert classify_breadth(None) == BreadthState.MIXED
+
+    def test_boundary_deteriorating_washed_out_at_30(self):
+        from alpha_stack.regime.state_machine import classify_breadth, BreadthState
+        assert classify_breadth(30.1) == BreadthState.DETERIORATING
+        assert classify_breadth(30.0) == BreadthState.DETERIORATING  # inclusive: >= 30 → DETERIORATING
+        assert classify_breadth(29.99) == BreadthState.WASHED_OUT
+
+    def test_boundary_mixed_deteriorating_at_45(self):
+        from alpha_stack.regime.state_machine import classify_breadth, BreadthState
+        assert classify_breadth(44.99) == BreadthState.DETERIORATING
+        assert classify_breadth(45.0) == BreadthState.MIXED
+
+    def test_boundary_healthy_mixed_at_65(self):
+        from alpha_stack.regime.state_machine import classify_breadth, BreadthState
+        assert classify_breadth(64.99) == BreadthState.MIXED
+        assert classify_breadth(65.0) == BreadthState.HEALTHY
 
 
 # ------------------------------------------------------------------ #

@@ -29,7 +29,7 @@ class DummyBroker:
 
 class OptionsExecutionTests(unittest.TestCase):
     def test_build_option_symbol_occ_format(self) -> None:
-        self.assertEqual(build_option_symbol(underlying="SPY", expiry="2026-04-17", option_type="put", strike=480.0), "SPY   260417P00480000")
+        self.assertEqual(build_option_symbol(underlying="SPY", expiry="2026-04-17", option_type="put", strike=480.0), "SPY260417P00480000")
 
     def _ready_paper_review(self, strategy: str = "protective_put", contracts: int = 1) -> dict[str, object]:
         return {
@@ -181,7 +181,7 @@ class OptionsExecutionTests(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError):
             broker.submit_option_market_order(
-                symbol="SPY   260417P00480000",
+                symbol="SPY260417P00480000",
                 qty=1,
                 side="BUY",
                 client_order_id="test",

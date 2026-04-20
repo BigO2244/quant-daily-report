@@ -85,22 +85,40 @@ def run_all(
         agents = [a for a in agents if a.name in agent_filter]
         logger.info("Running subset: %s", [a.name for a in agents])
 
-    signals: Dict[str, dict] = {}
+    signals: List[dict] = []
     for agent in agents:
         logger.info("→ Running %s agent...", agent.name)
-        result = agent.run(target)
-        signals[agent.name] = result
+        try:
+            result = agent.run(target)
+        except Exception:
+            logger.exception("[ORCHESTRATOR] agent %s raised unexpectedly — using neutral stub", agent.name)
+            result = {
+                "agent": agent.name,
+                "signal": None,
+                "confidence": None,
+                "as_of": None,
+                "status": "error",
+                "regime": "unknown",
+                "score": 0.0,
+                "error": "unhandled exception in orchestrator",
+            }
+        result.setdefault("agent", agent.name)
+        result.setdefault("signal", None)
+        result.setdefault("confidence", None)
+        result.setdefault("as_of", target.isoformat())
+        signals.append(result)
         status = result.get("status", "?")
         regime = result.get("regime", "?")
         score = result.get("score", 0.0)
         logger.info("  %s: status=%s regime=%s score=%.3f", agent.name, status, regime, score)
 
+    signals_by_name: Dict[str, dict] = {r.get("agent", ""): r for r in signals}
     payload = {
         "as_of_date": target.isoformat(),
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
         "agent_count": len(signals),
         "signals": signals,
-        "summary": _build_summary(signals),
+        "summary": _build_summary(signals_by_name),
     }
 
     if not dry_run:

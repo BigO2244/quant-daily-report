@@ -50,6 +50,11 @@ def _canonical_alpaca_base(base_url: Optional[str], paper: bool) -> str:
     base = str(base_url or default_base).strip().rstrip("/")
     if base.endswith("/v2"):
         base = base[:-3]
+    if paper and "paper-api.alpaca.markets" not in base.lower():
+        raise RuntimeError(
+            f"ALPACA_PAPER=1 but ALPACA_BASE_URL resolves to non-paper host: {base!r}. "
+            "Set ALPACA_BASE_URL=https://paper-api.alpaca.markets or unset it."
+        )
     return base
 
 
@@ -486,6 +491,12 @@ class AlpacaBroker:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
+        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
+        if bool(self.paper) and "paper-api.alpaca.markets" not in base_url_norm:
+            raise RuntimeError(
+                "Refusing equity market order outside Alpaca paper environment. "
+                f"base_url={self.base_url!r}"
+            )
         side_norm = str(side).upper()
         qty_float = float(qty)
         client_id = str(client_order_id)
@@ -539,6 +550,12 @@ class AlpacaBroker:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
 
+        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
+        if bool(self.paper) and "paper-api.alpaca.markets" not in base_url_norm:
+            raise RuntimeError(
+                "Refusing equity limit order outside Alpaca paper environment. "
+                f"base_url={self.base_url!r}"
+            )
         side_norm = str(side).upper()
         qty_float = float(qty)
         symbol_norm = str(symbol).upper()

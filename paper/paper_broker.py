@@ -2049,6 +2049,19 @@ def _submit_alpaca_orders(
     submit_success = 0
     submit_failed = 0
 
+    # Build open-order index keyed by (symbol, side) to catch same-symbol duplicates
+    # that may have a different client_order_id (e.g. a re-run on the same day).
+    open_orders_by_symbol_side: Dict[str, Dict[str, object]] = {}
+    try:
+        open_orders = alpaca.list_orders(status="open", limit=500)
+        for o in open_orders:
+            sym = str(o.get("symbol") or "").upper()
+            sd = str(o.get("side") or "").upper()
+            if sym and sd:
+                open_orders_by_symbol_side[(sym, sd)] = o
+    except Exception:
+        logger.warning("[ALPACA][DUPLICATE_GUARD] failed to fetch open orders — skipping symbol-side duplicate check")
+
     for order in orders:
         internal_order_id = str(order.get("order_id", ""))
         ticker = str(order.get("ticker", "")).upper()
@@ -2091,6 +2104,44 @@ def _submit_alpaca_orders(
                 "[ALPACA][IDEMPOTENT] skipped remote-existing order_id=%s client_order_id=%s",
                 internal_order_id,
                 client_order_id,
+            )
+            continue
+
+        # Block same-symbol/same-side duplicates that slipped past the client_order_id check
+        # (e.g. a re-run with a fresh order_id for the same ticker today).
+        if (ticker, side) in open_orders_by_symbol_side:
+            open_dup = open_orders_by_symbol_side[(ticker, side)]
+            idempotent_skips.append(internal_order_id)
+            idempotent_drop_reasons["open_symbol_side_duplicate"] += 1
+            remote_existing_orders.append(order)
+            alpaca_submission_summary["remote_existing_orders"] = int(
+                alpaca_submission_summary.get("remote_existing_orders", 0)
+            ) + 1
+            submission_metadata[internal_order_id] = {
+                "client_order_id": client_order_id,
+                "alpaca_order_id": str(open_dup.get("id") or ""),
+                "status": "OPEN_DUPLICATE_BLOCKED",
+            }
+            alpaca_submissions.append(
+                {
+                    "trade_date": run_date,
+                    "order_id": internal_order_id,
+                    "client_order_id": client_order_id,
+                    "alpaca_order_id": str(open_dup.get("id") or ""),
+                    "ticker": ticker,
+                    "side": side,
+                    "quantity": float(quantity),
+                    "status": "OPEN_DUPLICATE_BLOCKED",
+                    "submitted_at": str(open_dup.get("submitted_at") or ""),
+                    "mode": "alpaca",
+                }
+            )
+            logger.warning(
+                "[ALPACA][DUPLICATE_GUARD] blocked duplicate order ticker=%s side=%s order_id=%s existing_alpaca_id=%s",
+                ticker,
+                side,
+                internal_order_id,
+                open_dup.get("id"),
             )
             continue
 

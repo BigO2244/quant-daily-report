@@ -96,18 +96,34 @@ def _load_digest_scores(
         logger.warning("[THEMATIC] Failed to read digest %s: %s", digest_path, exc)
         return pd.Series(dtype=float)
 
-    ticker_scores: Dict[str, float] = {}
+    # Accumulate bullish and bearish scores separately so that net-bearish
+    # tickers receive no positive boost (a bearish-only ticker must not rank
+    # higher than a neutral ticker).
+    bullish_scores: Dict[str, float] = {}
+    bearish_scores: Dict[str, float] = {}
     for item in data.get("items", []):
         item_score = float(item.get("score", 0.0))
         tickers = item.get("tickers_mentioned", [])
         if not tickers or item_score <= 0:
             continue
-        if item.get("sentiment", "neutral") == "bearish":
-            item_score *= 0.50
-        for ticker in tickers:
-            t = ticker.strip().upper()
-            if t:
-                ticker_scores[t] = max(ticker_scores.get(t, 0.0), item_score)
+        sentiment = item.get("sentiment", "neutral")
+        if sentiment == "bearish":
+            for ticker in tickers:
+                t = ticker.strip().upper()
+                if t:
+                    bearish_scores[t] = max(bearish_scores.get(t, 0.0), item_score * 0.50)
+        else:
+            for ticker in tickers:
+                t = ticker.strip().upper()
+                if t:
+                    bullish_scores[t] = max(bullish_scores.get(t, 0.0), item_score)
+
+    # Net score: only positive net values contribute a boost.
+    ticker_scores: Dict[str, float] = {}
+    for t in set(bullish_scores) | set(bearish_scores):
+        net = bullish_scores.get(t, 0.0) - bearish_scores.get(t, 0.0)
+        if net > 0:
+            ticker_scores[t] = net
 
     if not ticker_scores:
         return pd.Series(dtype=float)
@@ -133,7 +149,12 @@ def _load_overnight_scores(as_of: date, max_age_days: int) -> pd.Series:
         return pd.Series(dtype=float)
 
     ticker_scores: Dict[str, float] = {}
-    signals = payload.get("signals", {})
+    signals_raw = payload.get("signals", {})
+    # Normalize list-format output (new orchestrator) to dict keyed by agent name.
+    if isinstance(signals_raw, list):
+        signals = {item.get("agent", ""): item for item in signals_raw if isinstance(item, dict)}
+    else:
+        signals = signals_raw if isinstance(signals_raw, dict) else {}
 
     # Earnings revision: direct per-ticker scores
     earnings = signals.get("earnings_revision", {})
@@ -182,7 +203,9 @@ def _find_latest_file(
     as_of: date,
     max_age_days: int,
 ) -> Optional[Path]:
-    cutoff = as_of - timedelta(days=max_age_days)
+    # Add 2 calendar-day buffer to cover weekends: a 3-trading-day window spans
+    # up to 5 calendar days when the boundary falls across a weekend.
+    cutoff = as_of - timedelta(days=max_age_days + 2)
     candidates: list[tuple[date, Path]] = []
 
     for d in search_dirs:
@@ -200,6 +223,8 @@ def _find_latest_file(
                     continue
             if file_date >= cutoff:
                 candidates.append((file_date, f))
+            else:
+                logger.debug("[THEMATIC] Rejecting stale file %s (date=%s < cutoff=%s)", f.name, file_date, cutoff)
 
     if not candidates:
         return None

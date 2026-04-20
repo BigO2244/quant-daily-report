@@ -45,15 +45,39 @@ def test_load_alpaca_env_uses_legacy_names(monkeypatch):
     assert cfg.base_url == "https://api.alpaca.markets"
 
 
-def test_load_alpaca_env_respects_base_url_override(monkeypatch):
+def test_load_alpaca_env_respects_base_url_override_live_mode(monkeypatch):
     _clear_alpaca_env(monkeypatch)
     monkeypatch.setenv("ALPACA_API_KEY_ID", "k")
     monkeypatch.setenv("ALPACA_API_SECRET_KEY", "s")
+    monkeypatch.setenv("ALPACA_PAPER", "0")
     monkeypatch.setenv("ALPACA_BASE_URL", "https://example.test/v2")
 
     cfg = load_alpaca_env()
 
     assert cfg.base_url == "https://example.test"
+
+
+def test_load_alpaca_env_rejects_non_paper_url_in_paper_mode(monkeypatch):
+    _clear_alpaca_env(monkeypatch)
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "s")
+    monkeypatch.setenv("ALPACA_PAPER", "1")
+    monkeypatch.setenv("ALPACA_BASE_URL", "https://api.alpaca.markets")
+
+    with pytest.raises(RuntimeError, match="non-paper host"):
+        load_alpaca_env()
+
+
+def test_load_alpaca_env_accepts_paper_url_in_paper_mode(monkeypatch):
+    _clear_alpaca_env(monkeypatch)
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "s")
+    monkeypatch.setenv("ALPACA_PAPER", "1")
+    monkeypatch.setenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+
+    cfg = load_alpaca_env()
+
+    assert cfg.base_url == "https://paper-api.alpaca.markets"
 
 
 def test_load_alpaca_env_missing_credentials(monkeypatch):

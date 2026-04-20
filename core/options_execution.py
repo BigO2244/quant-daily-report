@@ -64,7 +64,7 @@ def build_option_symbol(
     option_type: str,
     strike: float,
 ) -> str:
-    root = str(underlying or "").strip().upper()[:6].ljust(6)
+    root = str(underlying or "").strip().upper()[:6]
     expiry_text = str(expiry or "").strip()
     expiry_norm = expiry_text.replace("-", "")
     if len(expiry_norm) == 8:
