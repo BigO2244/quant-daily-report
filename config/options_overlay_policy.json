@@ -1,10 +1,11 @@
 {
   "benchmark": "SPY",
-  "mode": "shadow_only",
+  "mode": "paper",
   "north_star": "Use options as a capital-efficient overlay sleeve: harvest premium, define risk, and add convex exposure without bypassing promotion gates.",
   "premium_budget_bps": 75.0,
   "cash_ceiling_without_overlay": 0.18,
   "min_contract_utilization": 0.75,
+  "min_contract_premium": 50.0,
   "activation": {
     "protective_put": {
       "composite_regimes": [
@@ -108,13 +109,15 @@
     "protective_put": {
       "hedge_ratio": 1.0,
       "target_dte": 35,
-      "long_put_moneyness": 0.98
+      "long_put_moneyness": 0.98,
+      "premium_budget_bps": 500.0
     },
     "put_spread": {
       "hedge_ratio": 0.5,
       "target_dte": 28,
       "long_put_moneyness": 0.98,
-      "short_put_moneyness": 0.92
+      "short_put_moneyness": 0.92,
+      "premium_budget_bps": 200.0
     },
     "covered_call": {
       "target_dte": 35,

@@ -119,7 +119,8 @@ class OptionsOverlayShadowTests(unittest.TestCase):
         self.assertFalse(payload["trigger"]["active"])
         self.assertIsNone(payload["recommendation"]["strategy"])
 
-    def test_small_account_becomes_watch_only_for_spy_contract(self) -> None:
+    def test_small_account_crisis_regime_recommends_one_protective_put(self) -> None:
+        # Budget-based feasibility: 500bps on $10K = $500 >= min_contract_premium $50 → feasible.
         payload = build_options_overlay_shadow(
             trade_date="2026-04-09",
             asof_date="2026-04-08",
@@ -135,12 +136,35 @@ class OptionsOverlayShadowTests(unittest.TestCase):
             spy_price=676.01,
         )
 
+        self.assertEqual(payload["trigger"]["status"], "READY_SHADOW_RECOMMENDATION")
+        self.assertTrue(payload["trigger"]["active"])
+        self.assertEqual(payload["recommendation"]["strategy"], "protective_put")
+        self.assertTrue(payload["recommendation"]["feasible"])
+        self.assertEqual(payload["recommendation"]["contracts_recommended"], 1)
+        self.assertEqual(payload["recommendation"]["expiry"], "2026-05-15")
+
+    def test_tiny_account_below_premium_floor_stays_watch_only(self) -> None:
+        # $800 equity × 500bps = $40 < min_contract_premium $50 → not feasible.
+        payload = build_options_overlay_shadow(
+            trade_date="2026-04-09",
+            asof_date="2026-04-08",
+            regime_summary={
+                "composite_regime": "high_volatility",
+                "trend_state": "strong_down",
+                "volatility_state": "crisis",
+                "breadth_state": "washed_out",
+                "macro_state": "stress",
+            },
+            portfolio_equity=800.0,
+            portfolio_cash=100.0,
+            spy_price=676.01,
+        )
+
         self.assertEqual(payload["trigger"]["status"], "WATCH_ONLY_CONTRACT_TOO_LARGE")
         self.assertTrue(payload["trigger"]["active"])
         self.assertEqual(payload["recommendation"]["strategy"], "protective_put")
         self.assertFalse(payload["recommendation"]["feasible"])
         self.assertEqual(payload["recommendation"]["contracts_recommended"], 0)
-        self.assertEqual(payload["recommendation"]["expiry"], "2026-05-15")
 
     def test_writer_persists_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

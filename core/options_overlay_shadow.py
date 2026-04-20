@@ -328,8 +328,13 @@ def _build_strategy_candidate(
         if contract_notional and contract_notional > 0 and notional_basis > 0
         else 0.0
     )
-    min_contract_utilization = float(_to_float(policy.get("min_contract_utilization")) or 0.0)
-    feasible = bool(equity and equity > 0 and spot and spot > 0 and contracts_float >= min_contract_utilization)
+    min_contract_premium = float(_to_float(policy.get("min_contract_premium")) or 50.0)
+    feasible = bool(
+        equity and equity > 0
+        and spot and spot > 0
+        and premium_budget is not None
+        and premium_budget >= min_contract_premium
+    )
     if strategy == "covered_call" and bool(cfg.get("requires_covered_inventory")):
         # We do not yet pass per-underlying inventory into this overlay; keep it
         # as a paper-review candidate until covered-lot validation is wired.
@@ -427,7 +432,10 @@ def build_options_overlay_shadow(
         strategy_cfg = dict((policy.get("strategies") or {}).get(strategy) or {})
         hedge_ratio = max(0.0, min(1.0, float(_to_float(strategy_cfg.get("hedge_ratio")) or 0.0)))
         target_dte = int(_to_float(strategy_cfg.get("target_dte")) or 0)
-        premium_budget_dollars = float(equity) * float(_to_float(policy.get("premium_budget_bps")) or 0.0) / 10000.0
+        strategy_premium_bps = _to_float(strategy_cfg.get("premium_budget_bps"))
+        if strategy_premium_bps is None:
+            strategy_premium_bps = _to_float(policy.get("premium_budget_bps")) or 0.0
+        premium_budget_dollars = float(equity) * float(strategy_premium_bps) / 10000.0
         target_protected_notional = float(equity) * float(invested_ratio if invested_ratio is not None else 1.0) * hedge_ratio
         contract_notional = float(spot) * 100.0
         contracts_float = (
@@ -435,17 +443,17 @@ def build_options_overlay_shadow(
             if contract_notional > 0
             else 0.0
         )
-        min_contract_utilization = float(_to_float(policy.get("min_contract_utilization")) or 0.0)
+        min_contract_premium = float(_to_float(policy.get("min_contract_premium")) or 50.0)
         contracts_recommended = 0
         feasible = False
-        if contracts_float >= min_contract_utilization:
+        if premium_budget_dollars >= min_contract_premium:
             contracts_recommended = max(1, int(math.floor(contracts_float + 1e-9)))
-            feasible = contracts_recommended > 0
-            status = "READY_SHADOW_RECOMMENDATION" if feasible else "WATCH_ONLY_CONTRACT_TOO_LARGE"
+            feasible = True
+            status = "READY_SHADOW_RECOMMENDATION"
         else:
             status = "WATCH_ONLY_CONTRACT_TOO_LARGE"
             reasons.append(
-                f"target hedge covers only {contracts_float:.2f} SPY contracts at current portfolio size"
+                f"premium budget ${premium_budget_dollars:.2f} below minimum ${min_contract_premium:.2f} per contract"
             )
 
         long_put = {
