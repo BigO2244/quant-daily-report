@@ -55,11 +55,12 @@ class OptionsOverlayPaperTests(unittest.TestCase):
         self.assertEqual(payload["paper_review_status"], "READY_FOR_PAPER_REVIEW")
         self.assertTrue(payload["paper_ready"])
         self.assertEqual(payload["paper_plan"]["strategy"], "put_spread")
-        self.assertEqual(payload["paper_plan"]["contracts_recommended"], 1)
+        # 200bps on $200K = $400 budget; floor($400/$75)=5, capped at max_contracts=3 → 3
+        self.assertEqual(payload["paper_plan"]["contracts_recommended"], 3)
         self.assertEqual(payload["paper_plan"]["roll_before_dte"], 14)
 
-    def test_small_account_crisis_regime_promotes_to_paper_ready(self) -> None:
-        # Budget-based feasibility: 500bps on $10K = $500 >= $50 floor → paper-ready.
+    def test_small_account_crisis_regime_promotes_to_paper_ready_with_directional_sizing(self) -> None:
+        # 500bps on $10K = $500; floor(500/150)=3 contracts, capped at max_contracts=5 → 3.
         payload = build_options_overlay_paper_review(
             trade_date="2026-04-10",
             asof_date="2026-04-09",
@@ -79,7 +80,7 @@ class OptionsOverlayPaperTests(unittest.TestCase):
         self.assertEqual(payload["paper_review_status"], "READY_FOR_PAPER_REVIEW")
         self.assertTrue(payload["paper_ready"])
         self.assertEqual(payload["paper_plan"]["strategy"], "protective_put")
-        self.assertEqual(payload["paper_plan"]["contracts_recommended"], 1)
+        self.assertEqual(payload["paper_plan"]["contracts_recommended"], 3)
 
     def test_writer_persists_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

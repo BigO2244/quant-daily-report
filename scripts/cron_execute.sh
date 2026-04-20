@@ -39,6 +39,10 @@ LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/execute_${REPORT_DATE}.log"
 
+# --- Options overlay execution (default enabled for paper trading) ---
+export ALLOW_OPTIONS_EXECUTION="${ALLOW_OPTIONS_EXECUTION:-1}"
+export ALLOW_OPTIONS_SUBMISSION="${ALLOW_OPTIONS_SUBMISSION:-1}"
+
 # --- Suppress emails during execution (Phase 3 handles email) ---
 export EMAIL_INLINE_REPORTS=0
 export EMAIL_MARKET_CONDITIONS=0

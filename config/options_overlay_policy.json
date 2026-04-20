@@ -110,14 +110,18 @@
       "hedge_ratio": 1.0,
       "target_dte": 35,
       "long_put_moneyness": 0.98,
-      "premium_budget_bps": 500.0
+      "premium_budget_bps": 500.0,
+      "max_contracts": 5,
+      "per_contract_cost_estimate_dollars": 150.0
     },
     "put_spread": {
       "hedge_ratio": 0.5,
       "target_dte": 28,
       "long_put_moneyness": 0.98,
       "short_put_moneyness": 0.92,
-      "premium_budget_bps": 200.0
+      "premium_budget_bps": 200.0,
+      "max_contracts": 3,
+      "per_contract_cost_estimate_dollars": 75.0
     },
     "covered_call": {
       "target_dte": 35,

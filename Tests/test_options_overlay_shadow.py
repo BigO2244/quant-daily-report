@@ -94,7 +94,8 @@ class OptionsOverlayShadowTests(unittest.TestCase):
         self.assertTrue(payload["trigger"]["active"])
         self.assertEqual(payload["recommendation"]["strategy"], "put_spread")
         self.assertTrue(payload["recommendation"]["feasible"])
-        self.assertEqual(payload["recommendation"]["contracts_recommended"], 1)
+        # 200bps on $200K = $400 budget; floor($400/$75)=5, capped at max_contracts=3 → 3
+        self.assertEqual(payload["recommendation"]["contracts_recommended"], 3)
         self.assertEqual(payload["recommendation"]["expiry"], "2026-05-08")
         self.assertEqual(payload["recommendation"]["long_put"]["kind"], "PUT")
         self.assertEqual(payload["recommendation"]["short_put"]["kind"], "PUT")
@@ -119,8 +120,8 @@ class OptionsOverlayShadowTests(unittest.TestCase):
         self.assertFalse(payload["trigger"]["active"])
         self.assertIsNone(payload["recommendation"]["strategy"])
 
-    def test_small_account_crisis_regime_recommends_one_protective_put(self) -> None:
-        # Budget-based feasibility: 500bps on $10K = $500 >= min_contract_premium $50 → feasible.
+    def test_small_account_crisis_regime_recommends_directional_put_contracts(self) -> None:
+        # 500bps on $10K = $500 budget; per_contract_estimate=$150 → floor(500/150)=3, capped at max_contracts=5 → 3.
         payload = build_options_overlay_shadow(
             trade_date="2026-04-09",
             asof_date="2026-04-08",
@@ -140,7 +141,7 @@ class OptionsOverlayShadowTests(unittest.TestCase):
         self.assertTrue(payload["trigger"]["active"])
         self.assertEqual(payload["recommendation"]["strategy"], "protective_put")
         self.assertTrue(payload["recommendation"]["feasible"])
-        self.assertEqual(payload["recommendation"]["contracts_recommended"], 1)
+        self.assertEqual(payload["recommendation"]["contracts_recommended"], 3)
         self.assertEqual(payload["recommendation"]["expiry"], "2026-05-15")
 
     def test_tiny_account_below_premium_floor_stays_watch_only(self) -> None:

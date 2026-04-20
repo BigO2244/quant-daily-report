@@ -444,10 +444,17 @@ def build_options_overlay_shadow(
             else 0.0
         )
         min_contract_premium = float(_to_float(policy.get("min_contract_premium")) or 50.0)
+        per_contract_estimate = _to_float(strategy_cfg.get("per_contract_cost_estimate_dollars"))
+        max_contracts_cfg = int(_to_float(strategy_cfg.get("max_contracts")) or 1)
         contracts_recommended = 0
         feasible = False
         if premium_budget_dollars >= min_contract_premium:
-            contracts_recommended = max(1, int(math.floor(contracts_float + 1e-9)))
+            if per_contract_estimate and per_contract_estimate > 0:
+                # Directional sizing: scale by how many contracts the budget covers
+                contracts_by_budget = int(math.floor(premium_budget_dollars / per_contract_estimate))
+                contracts_recommended = max(1, min(max_contracts_cfg, contracts_by_budget))
+            else:
+                contracts_recommended = max(1, int(math.floor(contracts_float + 1e-9)))
             feasible = True
             status = "READY_SHADOW_RECOMMENDATION"
         else:

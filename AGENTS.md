@@ -3,8 +3,9 @@
 Single agent-facing handoff for this repository. Operational, architecture,
 scheduler, and workflow guidance lives here.
 
-Last updated: 2026-04-17 — major Alpha Stack build-out, overnight research
-agents, options enabled, test suite clean.
+Last updated: 2026-04-20 — options promoted to paper execution, directional
+contract sizing, ALLOW_OPTIONS_EXECUTION default enabled, overnight agents
+moved to 1 AM ET, test suite clean at 955.
 
 ---
 
@@ -14,7 +15,7 @@ agents, options enabled, test suite clean.
 - **Scope**: US long-only equities + options overlay, paper trading through Alpaca
 - **Production posture**: paper only, no shorting, no leverage
 - **Promotion ladder**: research → backtest → shadow → paper → live
-- **Test suite**: 951 passing, 0 failing (as of 2026-04-17)
+- **Test suite**: 955 passing, 0 failing (as of 2026-04-20)
 - **Hard rule**: do not change production trading behavior casually; bias toward
   safety, deterministic artifacts, and explicit verification
 
@@ -41,7 +42,7 @@ Five phases run on the VM weekdays. Install with `crontab scripts/crontab.txt`.
 
 | Time (ET) | Phase | Script | Output |
 |---|---|---|---|
-| 8:00 PM | 0a — Overnight agents | `scripts/cron_overnight.sh` | `outputs/overnight_signals/YYYY-MM-DD.json` |
+| 1:00 AM | 0a — Overnight agents | `scripts/cron_overnight.sh` | `outputs/overnight_signals/YYYY-MM-DD.json` |
 | 6:30 AM | 0b — Claude research digest | `scripts/cron_research.sh` | `quant_research_agent/outputs/digest_YYYY-MM-DD.json` |
 | 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | `outputs/precompute/YYYY-MM-DD/` bundle |
 | 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Alpaca paper equity orders + gated protective-put options |
@@ -160,7 +161,7 @@ Config: `quant_research_agent/config/strategy_context.yaml`
 
 ### Options Overlay (`core/options_overlay_shadow.py`, `core/options_execution.py`)
 
-**Status: Enabled as of 2026-04-17.**
+**Status: Paper execution active as of 2026-04-20. Mode: `paper` (was `shadow_only`).**
 
 Six strategy types, each regime-gated:
 
@@ -168,18 +169,28 @@ Six strategy types, each regime-gated:
 |---|---|---|
 | Covered call | Risk-on trending, normal/elevated VIX | Harvest premium on held positions |
 | LEAP call | Risk-on or neutral, healthy/mixed breadth | Capital-efficient long exposure |
-| Protective put | Crisis VIX, breadth washed out | Hedge the book |
-| Put spread | Risk-off, deteriorating breadth | Defined-risk hedge |
+| Protective put | Crisis VIX, breadth washed out | Directional downside bet |
+| Put spread | Risk-off, deteriorating breadth | Defined-risk directional bet |
 | Call butterfly | Neutral, elevated VIX | Low-cost directional bet |
 | Long straddle | Crisis/elevated VIX, washed out | Volatility play |
 
+**Contract Sizing** (`config/options_overlay_policy.json`):
+- Feasibility gate: `premium_budget_dollars >= min_contract_premium` ($50 floor).
+  Replaces the old portfolio-coverage check that required $38K+ to pass.
+- Directional sizing (protective_put + put_spread): `contracts = min(max_contracts, floor(budget / per_contract_cost_estimate))`.
+  Scales with conviction rather than treating puts purely as a hedge.
+- Current policy for protective_put: 500bps budget (~$486 on $9.7K), $150/contract estimate, max 5 → **3 contracts** in crisis.
+- Current policy for put_spread: 200bps budget, $75/contract estimate, max 3 → up to 3 contracts.
+- Accounts below $1K (budget < $50 floor) remain `WATCH_ONLY_CONTRACT_TOO_LARGE`.
+
 Execution config: `config/options_execution_policy.json`
 - `allow_live_submission: true` — policy permits submission only after runtime gates pass
-- Runtime gates: `ALLOW_OPTIONS_EXECUTION=1`, `WORKFLOW_KIND=live`, not plan-only,
-  `ENABLE_OPTIONS_OVERLAY=true`, and Alpaca paper endpoint validation
+- Runtime gates: `ALLOW_OPTIONS_EXECUTION=1` (default enabled in `cron_execute.sh`),
+  `WORKFLOW_KIND=live`, not plan-only, `ENABLE_OPTIONS_OVERLAY=true`, Alpaca paper endpoint
 - `allowed_strategies: ["protective_put"]` — enforced allowlist; only protective
   puts execute live, others generate shadow/review artifacts only
 - `require_paper_ready: true` and `require_allocator_ready: true` remain as gates
+- Override to disable: set `ALLOW_OPTIONS_EXECUTION=0` in `.env`
 
 Execution path: `scripts/execute_options_overlay.py` →
 `core/options_execution.py` → `brokers/alpaca_broker.py:submit_option_market_order()`
