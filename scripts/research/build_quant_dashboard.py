@@ -5,8 +5,15 @@ import csv
 import datetime as dt
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
+
+REPO_CODE_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_CODE_ROOT))
+
+from scripts.build_portfolio_history import build_portfolio_history
 
 
 STALE_THRESHOLD_HOURS = 36
@@ -451,14 +458,19 @@ def _build_position_diagnostics(
     broker_snapshot: dict[str, Any],
     broker_day_snapshot: dict[str, Any] | None,
     orders_today: list[dict[str, Any]],
+    positions_fallback: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     equity = _float_or_none(broker_snapshot.get("equity"))
     cash = _float_or_none(broker_snapshot.get("cash"))
     positions = (
         broker_day_snapshot.get("positions_current")
         if isinstance(broker_day_snapshot, dict) and isinstance(broker_day_snapshot.get("positions_current"), list)
-        else []
+        else positions_fallback or []
     )
+    if equity in (None, 0) and positions:
+        total_mv = sum(_float_or_none(p.get("market_value")) or 0.0 for p in positions if isinstance(p, dict))
+        if total_mv > 0:
+            equity = total_mv + (cash or 0.0)
     weights: list[dict[str, Any]] = []
     if equity not in (None, 0):
         for item in positions:
@@ -1133,6 +1145,8 @@ class DashboardBuilder:
             payload = _read_json(path)
             if not isinstance(payload, dict):
                 continue
+            if payload.get("ok") is False or payload.get("error"):
+                continue
             if path.name == "broker_snapshot_latest.json":
                 inferred_trust = str(payload.get("trust_level") or "").strip().lower()
                 if not inferred_trust:
@@ -1714,6 +1728,7 @@ class DashboardBuilder:
             if live_broker_overlay and broker_trade_date
             else str(latest_nav.get("date") or selected_governed_report_date)
         )
+        portfolio_history = build_portfolio_history(self.repo_root, report_date=portfolio_asof_date)
         portfolio_return_fraction = (
             broker_day_return
             if broker_day_return is not None
@@ -1791,10 +1806,18 @@ class DashboardBuilder:
             if isinstance(broker_day_snapshot, dict) and isinstance(broker_day_snapshot.get("orders_report_date"), list)
             else []
         )
+        _pt_pos_path = self.repo_root / "outputs" / "broker" / "posttrade_positions.json"
+        _pt_pos_raw = _read_json(_pt_pos_path) if _pt_pos_path.exists() else None
+        posttrade_positions_list = (
+            _pt_pos_raw.get("positions")
+            if isinstance(_pt_pos_raw, dict) and isinstance(_pt_pos_raw.get("positions"), list)
+            else None
+        )
         position_diag = _build_position_diagnostics(
             broker_snapshot=broker_snapshot,
             broker_day_snapshot=broker_day_snapshot,
             orders_today=broker_orders_today,
+            positions_fallback=posttrade_positions_list,
         )
         edge_diagnostics = _build_edge_diagnostics(
             attribution=attribution,
@@ -2298,6 +2321,11 @@ class DashboardBuilder:
             self.repo_root / "outputs" / "trading_day_summary.json",
             performance["nav_path"],
             performance["benchmark_path"],
+            self.repo_root / "outputs" / "portfolio_history" / "summary.json",
+            self.repo_root / "outputs" / "portfolio_history" / "transactions.csv",
+            self.repo_root / "outputs" / "portfolio_history" / "positions.csv",
+            self.repo_root / "outputs" / "portfolio_history" / "nav.csv",
+            self.repo_root / "outputs" / "portfolio_history" / "attribution.csv",
             broker_day_snapshot_path,
             intended_path,
             orders_path,
@@ -2351,6 +2379,14 @@ class DashboardBuilder:
                 "benchmark_asof_date": benchmark_asof_date or None,
                 "comparison_mode": comparison_mode,
             },
+            "portfolio_history": {
+                "summary_path": "outputs/portfolio_history/summary.json",
+                "transactions_path": "outputs/portfolio_history/transactions.csv",
+                "positions_path": "outputs/portfolio_history/positions.csv",
+                "nav_path": "outputs/portfolio_history/nav.csv",
+                "attribution_path": "outputs/portfolio_history/attribution.csv",
+                "warnings": (portfolio_history.get("summary") or {}).get("warnings", []),
+            },
             "broker_snapshot": {
                 "source_mode": broker_mode,
                 "source_used": broker_snapshot.get("source"),
@@ -2380,6 +2416,7 @@ class DashboardBuilder:
             "attribution": attribution,
             "edge_diagnostics": edge_diagnostics,
             "contribution_snapshot": contribution_snapshot,
+            "portfolio_history": portfolio_history,
             "_summary_export": self._build_summary_export(
                 report_date=selected_governed_report_date,
                 run_id=display_run_id,

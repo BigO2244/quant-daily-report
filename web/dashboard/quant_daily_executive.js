@@ -1175,6 +1175,124 @@ function renderAllocBars(d) {
   }).join('');
 }
 
+// ── Current positions ─────────────────────────────────────────────────────────
+
+function renderTopPositions(d) {
+  const positions = (d.edge_diagnostics || {}).top_positions || [];
+  const tbody = document.getElementById('positions-body');
+  if (!tbody) return;
+  if (!positions.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No position data</td></tr>';
+    return;
+  }
+  tbody.innerHTML = positions.map(p => {
+    const plpc = p.unrealized_plpc != null ? Number(p.unrealized_plpc) : null;
+    const plCls = plpc == null ? '' : plpc > 0 ? 'pos' : plpc < 0 ? 'neg' : '';
+    return `<tr>
+      <td style="font-family:var(--font-mono);font-weight:600">${esc(p.ticker || '')}</td>
+      <td style="font-family:var(--font-mono)">${fmtPct(p.weight, { sign: false })}</td>
+      <td style="font-family:var(--font-mono)">${fmt$(p.market_value, { decimals: 0 })}</td>
+      <td class="${plCls}" style="font-family:var(--font-mono)">${fmtPct(plpc)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Portfolio history ────────────────────────────────────────────────────────
+
+function shortSourcePath(value) {
+  return String(value || '')
+    .replace('outputs/portfolio_history/', '')
+    .replace('outputs/broker_snapshot/', 'broker_snapshot/')
+    .replace('outputs/perf/', 'perf/')
+    .replace('outputs/ledger/', 'ledger/');
+}
+
+function renderPortfolioHistory(d) {
+  const history = d.portfolio_history || {};
+  const summary = history.summary || {};
+  const counts = summary.counts || {};
+  const latest = summary.latest || {};
+  const transactions = Array.isArray(history.transactions) ? history.transactions : [];
+  const positions = Array.isArray(history.positions) ? history.positions : [];
+
+  setText(
+    'history-transactions-meta',
+    counts.transactions != null
+      ? `${counts.transactions} rows · ${shortSourcePath(((summary.paths || {}).transaction_sources || [])[0] || '')}`
+      : 'no rows'
+  );
+  setText(
+    'history-positions-meta',
+    summary.as_of_date
+      ? `as of ${summary.as_of_date}`
+      : 'no broker snapshot'
+  );
+
+  const txBody = document.getElementById('history-transactions-body');
+  if (txBody) {
+    const recent = [...transactions]
+      .sort((a, b) => String(b.timestamp || b.date || '').localeCompare(String(a.timestamp || a.date || '')))
+      .slice(0, 12);
+    if (!recent.length) {
+      txBody.innerHTML = '<tr><td colspan="7" class="empty-state">No transaction history available</td></tr>';
+    } else {
+      txBody.innerHTML = recent.map(tx => {
+        const side = String(tx.side || '').toUpperCase();
+        const cls = side === 'BUY' ? 'pos' : side === 'SELL' ? 'neg' : '';
+        return `<tr>
+          <td style="font-family:var(--font-mono)">${esc(tx.date || '')}</td>
+          <td style="font-family:var(--font-mono);font-weight:600">${esc(tx.ticker || '')}</td>
+          <td class="${cls}" style="font-family:var(--font-mono);font-weight:600">${esc(side)}</td>
+          <td style="font-family:var(--font-mono)">${fmtNum(tx.quantity, { decimals: 2, sign: false })}</td>
+          <td style="font-family:var(--font-mono)">${fmt$(tx.fill_price, { decimals: 2 })}</td>
+          <td style="font-family:var(--font-mono)">${fmt$(tx.notional, { decimals: 0 })}</td>
+          <td class="muted">${esc(shortSourcePath(tx.source || ''))}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  const posBody = document.getElementById('history-positions-body');
+  if (posBody) {
+    const topPositions = positions.slice(0, 12);
+    if (!topPositions.length) {
+      posBody.innerHTML = '<tr><td colspan="5" class="empty-state">No broker position history available</td></tr>';
+    } else {
+      posBody.innerHTML = topPositions.map(pos => {
+        const pl = pos.unrealized_pl != null ? Number(pos.unrealized_pl) : null;
+        const cls = pl == null ? '' : pl > 0 ? 'pos' : pl < 0 ? 'neg' : '';
+        return `<tr>
+          <td style="font-family:var(--font-mono);font-weight:600">${esc(pos.ticker || '')}</td>
+          <td style="font-family:var(--font-mono)">${fmtNum(pos.quantity, { decimals: 2, sign: false })}</td>
+          <td style="font-family:var(--font-mono)">${fmt$(pos.market_value, { decimals: 0 })}</td>
+          <td style="font-family:var(--font-mono)">${fmtPct(pos.weight, { sign: false })}</td>
+          <td class="${cls}" style="font-family:var(--font-mono)">${fmt$(pl, { decimals: 0, sign: true })}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  const summaryEl = document.getElementById('history-summary');
+  if (!summaryEl) return;
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
+  const rows = [
+    { label: 'History as of', val: summary.as_of_date || summary.report_date || '—', cls: '' },
+    { label: 'Transactions', val: counts.transactions != null ? String(counts.transactions) : '—', cls: '' },
+    { label: 'Positions', val: counts.positions != null ? String(counts.positions) : '—', cls: '' },
+    { label: 'NAV Rows', val: counts.nav_rows != null ? String(counts.nav_rows) : '—', cls: '' },
+    { label: 'Equity', val: fmt$(latest.equity, { decimals: 0 }), cls: '' },
+    { label: '1D Return', val: fmtPct(latest.return_1d), cls: colorClass(latest.return_1d) },
+    { label: 'Total Traded', val: fmt$(latest.total_traded_notional, { decimals: 0 }), cls: '' },
+    { label: 'Warnings', val: warnings.length ? String(warnings.length) : '0', cls: warnings.length ? 'warn' : 'pos' },
+  ];
+  summaryEl.innerHTML = rows.map(r =>
+    `<div class="stat-row">
+      <span class="stat-label">${esc(r.label)}</span>
+      <span class="stat-val ${r.cls}">${r.val}</span>
+    </div>`
+  ).join('');
+}
+
 // ── Health row ────────────────────────────────────────────────────────────────
 
 function renderChecks(d) {
@@ -1355,7 +1473,9 @@ async function boot() {
       renderBrokerStats(d);
       renderExecutionIntegrity(d);
       renderTopChanges(d);
+      renderTopPositions(d);
       renderAllocBars(d);
+      renderPortfolioHistory(d);
       renderChecks(d);
       renderExceptions(d);
       renderFooter(d);

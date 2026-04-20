@@ -1,1 +1,0 @@
-"""Overlay engine research package."""

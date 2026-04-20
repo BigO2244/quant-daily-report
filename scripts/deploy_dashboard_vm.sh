@@ -21,6 +21,7 @@ scp \
 echo "[deploy] syncing dashboard refresh scripts"
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_REPO}/scripts/research'"
 scp "${repo_root}/scripts/refresh_quant_dashboard.py" "${REMOTE_HOST}:${REMOTE_REPO}/scripts/refresh_quant_dashboard.py"
+scp "${repo_root}/scripts/build_portfolio_history.py" "${REMOTE_HOST}:${REMOTE_REPO}/scripts/build_portfolio_history.py"
 scp "${repo_root}/scripts/export_alpaca_broker_snapshot.py" "${REMOTE_HOST}:${REMOTE_REPO}/scripts/export_alpaca_broker_snapshot.py"
 scp "${repo_root}/scripts/research/build_quant_dashboard.py" "${REMOTE_HOST}:${REMOTE_REPO}/scripts/research/build_quant_dashboard.py"
 

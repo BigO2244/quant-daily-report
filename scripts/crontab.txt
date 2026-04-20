@@ -4,7 +4,7 @@
 # All times are America/New_York (handles EST/EDT automatically).
 # Runs weekdays only (Mon-Fri = 1-5).
 #
-# Phase 0a: Overnight Agents (market close research) — 8:00 PM ET
+# Phase 0a: Overnight Agents (early morning research) — 1:00 AM ET
 # Phase 0b: Claude Research Agent (morning digest) — 6:30 AM ET
 # Phase 1:  Precompute (signals, recon, position check) — 7:00 AM ET
 # Phase 2:  Order Execution (Alpaca paper API + gated options overlay) — 9:35 AM ET
@@ -14,8 +14,8 @@ CRON_TZ=America/New_York
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# Phase 0a: Overnight Agents (after market close — 8 PM ET)
-0 20 * * 1-5 $HOME/quant-daily-report/scripts/cron_overnight.sh >> $HOME/quant-daily-report/logs/cron_overnight.log 2>&1
+# Phase 0a: Overnight Agents (early morning — 1 AM ET, same trading day)
+0 1 * * 1-5 $HOME/quant-daily-report/scripts/cron_overnight.sh >> $HOME/quant-daily-report/logs/cron_overnight.log 2>&1
 
 # Phase 0b: Claude Research Agent (before precompute — 6:30 AM ET)
 30 6 * * 1-5 $HOME/quant-daily-report/scripts/cron_research.sh >> $HOME/quant-daily-report/logs/cron_research.log 2>&1

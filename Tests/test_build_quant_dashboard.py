@@ -874,6 +874,17 @@ class BuildQuantDashboardTest(unittest.TestCase):
             self.assertAlmostEqual(legacy_payload["edge_diagnostics"]["current_cash_ratio"], 0.0999805862948942)
             self.assertAlmostEqual(legacy_payload["edge_diagnostics"]["largest_position_weight"], 30.0 / 103.02)
             self.assertTrue(legacy_payload["edge_diagnostics"]["signals"])
+            self.assertEqual(legacy_payload["portfolio_history"]["summary"]["counts"]["transactions"], 2)
+            self.assertEqual(legacy_payload["portfolio_history"]["summary"]["counts"]["positions"], 3)
+            self.assertEqual(legacy_payload["portfolio_history"]["transactions"][0]["ticker"], "AAA")
+            self.assertEqual(legacy_payload["portfolio_history"]["positions"][0]["ticker"], "AAA")
+            self.assertTrue((tmp_path / "outputs" / "portfolio_history" / "transactions.csv").exists())
+            self.assertTrue(
+                any(
+                    item["path"] == "outputs/portfolio_history/transactions.csv" and item["status"] == "used"
+                    for item in legacy_payload["sources"]
+                )
+            )
 
 
 if __name__ == "__main__":

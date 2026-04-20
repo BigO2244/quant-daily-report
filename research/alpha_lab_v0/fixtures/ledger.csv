@@ -1,4 +1,0 @@
-timestamp_et,run_id,source,trade_date,asof_date,order_id,ticker,sleeve,side,quantity,fill_price,notional,fees,reason,signal_hash,status
-2026-01-05T09:35:00,test-001,paper,2026-01-05,2026-01-05,ord-001,AAPL,sleeve1,BUY,100,180.50,18050.00,1.00,open_position,abc123,filled
-2026-01-05T09:35:01,test-001,paper,2026-01-05,2026-01-05,ord-002,MSFT,sleeve1,BUY,80,420.00,33600.00,1.00,open_position,abc123,filled
-2026-01-06T09:35:00,test-002,paper,2026-01-06,2026-01-06,ord-003,AAPL,sleeve1,SELL,30,182.00,5460.00,1.00,rebalance,def456,filled

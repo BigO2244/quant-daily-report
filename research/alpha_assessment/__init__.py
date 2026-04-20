@@ -1,1 +1,0 @@
-"""Alpha assessment research package."""

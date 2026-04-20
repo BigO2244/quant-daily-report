@@ -10,7 +10,7 @@
     "orders_rejected": 0,
     "sells": 7,
     "source_report_date": "2026-04-09",
-    "source_run_id": "2026-04-13T110024-0400_67948e0"
+    "source_run_id": "2026-04-16T131433-0400_15ae127"
   },
   "attribution": {
     "alpha_ann_recent_20d": -0.21665002643516962,
@@ -71,7 +71,7 @@
   "builder_notes": {
     "all_warnings": [
       "Latest attempted run status: failed_unknown.",
-      "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json, outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json"
+      "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-16T131433-0400_15ae127/execution_results.json, outputs/runs/2026-04-16T131433-0400_15ae127/execution_payload.json"
     ],
     "broker_snapshot": {
       "freshness": "overlay",
@@ -81,13 +81,13 @@
       "suspicious": false,
       "trust_level": "authoritative"
     },
-    "build_timestamp": "2026-04-15T16:59:07+00:00",
+    "build_timestamp": "2026-04-17T21:22:00+00:00",
     "degraded_metrics": [
       "negative_alpha"
     ],
     "missing_files": [
-      "outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json",
-      "outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json"
+      "outputs/runs/2026-04-16T131433-0400_15ae127/execution_results.json",
+      "outputs/runs/2026-04-16T131433-0400_15ae127/execution_payload.json"
     ],
     "performance": {
       "benchmark_asof_date": "2026-04-08",
@@ -99,7 +99,7 @@
     },
     "warnings": [
       "Latest attempted run status: failed_unknown.",
-      "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json, outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json"
+      "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-16T131433-0400_15ae127/execution_results.json, outputs/runs/2026-04-16T131433-0400_15ae127/execution_payload.json"
     ]
   },
   "contribution_snapshot": {
@@ -176,7 +176,7 @@
     "broker_source_detail": "artifact snapshot outputs/broker/posttrade_account_snapshot.json",
     "broker_trust_level": "authoritative",
     "broker_vs_run_alignment": "overlay",
-    "run_last_updated": "2026-04-15T16:59:07+00:00",
+    "run_last_updated": "2026-04-17T21:22:00+00:00",
     "run_report_date": "2026-02-27",
     "stale_threshold_hours": 36,
     "suspicious_broker_value": false,
@@ -284,7 +284,7 @@
     },
     {
       "category": "Data / artifacts",
-      "message": "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-13T110024-0400_67948e0/execution_results.json, outputs/runs/2026-04-13T110024-0400_67948e0/execution_payload.json",
+      "message": "Missing historical run artifacts (expected for plan-only/no_action runs): outputs/runs/2026-04-16T131433-0400_15ae127/execution_results.json, outputs/runs/2026-04-16T131433-0400_15ae127/execution_payload.json",
       "status": "warning"
     }
   ],
@@ -366,16 +366,16 @@
     "comparison_asof_date": "2026-04-08",
     "comparison_mode": "previous_trading_day",
     "fallback_in_use": true,
-    "last_updated": "2026-04-15T16:59:07+00:00",
+    "last_updated": "2026-04-17T21:22:00+00:00",
     "latest_attempted_is_complete": false,
     "latest_attempted_missing_artifacts": [
       "execution_results.json",
       "execution_payload.json"
     ],
     "latest_attempted_run": {
-      "created_at": "2026-04-13T15:02:28.061914Z",
-      "report_date": "2026-04-13",
-      "run_id": "2026-04-13T110024-0400_67948e0"
+      "created_at": "2026-04-16T17:15:47.385092Z",
+      "report_date": "2026-04-16",
+      "run_id": "2026-04-16T131433-0400_15ae127"
     },
     "latest_attempted_terminal_status": "failed_unknown",
     "live_broker_overlay": true,
@@ -384,13 +384,13 @@
     "performance_source": "live_overlay",
     "portfolio_asof_date": "2026-04-09",
     "report_date": "2026-02-27",
-    "run_id": "2026-04-13T110024-0400_67948e0",
+    "run_id": "2026-04-16T131433-0400_15ae127",
     "selected_governed_run": {
       "report_date": "2026-02-27",
-      "run_id": "2026-04-13T110024-0400_67948e0",
+      "run_id": "2026-04-16T131433-0400_15ae127",
       "selection_reason": "latest_successful_governed_snapshot"
     },
-    "status_banner": "Showing governed dashboard state from 2026-02-27. Live broker overlay active for 2026-04-09. Latest attempted run 2026-04-13T110024-0400_67948e0 (2026-04-13) did not complete. Authoritative Alpaca snapshot as of 2026-04-09 loaded. SPY comparison uses 2026-04-08 close. Post-trade reconciliation status: OVERLAY_ONLY."
+    "status_banner": "Showing governed dashboard state from 2026-02-27. Live broker overlay active for 2026-04-09. Latest attempted run 2026-04-16T131433-0400_15ae127 (2026-04-16) did not complete. Authoritative Alpaca snapshot as of 2026-04-09 loaded. SPY comparison uses 2026-04-08 close. Post-trade reconciliation status: OVERLAY_ONLY."
   },
   "series": {
     "benchmark": [
@@ -976,7 +976,7 @@
       "status": "used"
     },
     {
-      "path": "outputs/runs/2026-04-13T110024-0400_67948e0",
+      "path": "outputs/runs/2026-04-16T131433-0400_15ae127",
       "status": "present"
     }
   ],

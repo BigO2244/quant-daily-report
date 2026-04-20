@@ -34,6 +34,7 @@ def test_dashboard_js_supports_query_data_and_refresh():
     assert "function renderAttribution" in js
     assert "function renderEdgeDiagnostics" in js
     assert "function renderContributionSnapshot" in js
+    assert "function renderPortfolioHistory" in js
 
 
 def test_dashboard_index_redirects_to_monitor():
@@ -49,10 +50,17 @@ def test_dashboard_html_has_edge_diagnostic_sections():
     main_html = (repo_root / "web/dashboard/quant_daily_executive.html").read_text(encoding="utf-8")
     review_html = (repo_root / "web/dashboard/engine_review.html").read_text(encoding="utf-8")
 
-    assert 'id="attribution-stats"' not in main_html
-    assert 'id="edge-list"' not in main_html
-    assert 'id="contribution-panel"' not in main_html
-    assert 'id="attribution-stats"' not in review_html
+    # These analytics sections are now rendered in the main dashboard.
+    assert 'id="attribution-stats"' in main_html
+    assert 'id="edge-list"' in main_html
+    assert 'id="contribution-panel"' in main_html
+    # Current positions table added to portfolio row.
+    assert 'id="positions-body"' in main_html
+    # Broker-authoritative history is rendered separately from dashboard summary cards.
+    assert 'id="history-transactions-body"' in main_html
+    assert 'id="history-positions-body"' in main_html
+    assert 'id="history-summary"' in main_html
+    # Engine review page retains its own diagnostics sections.
     assert 'id="signals-list"' in review_html
     assert 'id="recommendations-list"' in review_html
     assert 'id="contribution-panel"' in review_html
