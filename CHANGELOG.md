@@ -8,6 +8,18 @@ This log covers material architectural and process changes. Routine bug fixes an
 ---
 
 ## Recent Major Changes (Early 2026)
+### Named Strategy Framework and Daily Shadow Lane — April 2026
+
+- Introduced named strategy framework for operator-facing materials:
+  - `Caerus Polaris` = current paper baseline / operational control
+  - `Caerus Orion` = primary shadow candidate
+  - `Caerus Lyra` = secondary shadow challenger
+  - `SPY` remains the benchmark
+- Added DEV-only shadow lane under `research/shadow_tracking`
+- Added automatic post-precompute shadow hook via `scripts/run_shadow_candidates_daily.sh`
+- Shadow artifacts now land under `outputs/shadow_candidates/YYYY-MM-DD/` and `outputs/shadow_candidates/performance/`
+- Polaris remains the active production paper control; Orion and Lyra are shadow only
+
 ### VIX Producer Integration — March 6, 2026
 
 - Added `update_vix_close_history()` producer in `paper/perf_artifact_producers.py`

@@ -1,18 +1,37 @@
 # Alpha Stack
 
-Alpha Stack is a regime-switching quantitative trading platform for US equities. It produces a daily HTML email report and manages a multi-sleeve portfolio construction process with a current baseline allocation of 80% Sleeve 1 and 20% Sleeve 2 on a $10,000 notional book.
-
-The project is still in staged promotion. The legacy model remains frozen for production safety while Alpha Stack is validated through research, backtest, shadow, paper, and live-readiness gates.
+Alpha Stack is the Caerus quantitative trading platform for US long-only equities plus a gated options overlay. The current operating reality is:
+- paper execution remains active and unchanged
+- new strategy variants are validated through research and shadow lanes first
+- promotion stays explicit: `research -> backtest -> shadow -> paper -> live`
 
 ## Current State
 
-- Sleeve 1 (Trend/Momentum): partially implemented
-- Sleeve 2 (Value: P/E vs. industry): fully implemented
-- Sleeve 3 (Quality): planned, not implemented
-- Sleeve 4 (Mean Reversion): planned, not implemented
 - Daily orchestrator: `daily_quant_report.py`
-- Portfolio allocator baseline: `core/portfolio_alloc.py`
-- Universe file: `data/universe.csv`
+- Paper execution posture: Alpaca paper only
+- Current paper execution control: **Caerus Polaris**
+- Primary shadow candidate: **Caerus Orion**
+- Secondary shadow challenger: **Caerus Lyra**
+- Benchmark: **SPY**
+
+## Named Strategies
+
+- `Caerus Polaris` / `caerus_polaris`
+  - current paper baseline / operational control
+- `Caerus Orion` / `caerus_orion`
+  - primary shadow candidate
+  - Alpha Lab v2 lead candidate: H2 rank-decay exit + H6 top-5 concentration
+- `Caerus Lyra` / `caerus_lyra`
+  - secondary shadow challenger
+  - Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
+- `SPY` / `spy_benchmark`
+  - benchmark only
+
+Current promotion state:
+- Polaris remains the active paper model
+- Orion is shadow only
+- Lyra is shadow only
+- Shadow is artifact-only and non-blocking
 
 ## Seven-Layer Architecture
 
@@ -81,13 +100,16 @@ REPORT_DATE=$(TZ=America/New_York date +%F) MODE=alpaca TRADING_MODE=alpaca ALPA
 - `EMAIL_APP_PASSWORD`
 - `EMAIL_RECIPIENT`
 
-## Promotion Ladder
+## Daily Workflow Note
 
-All new strategies and features follow this path:
+After successful precompute, the system now runs a best-effort shadow generation step:
+- wrapper: `scripts/run_shadow_candidates_daily.sh`
+- called from: `scripts/cron_precompute.sh`
+- outputs:
+  - `outputs/shadow_candidates/YYYY-MM-DD/`
+  - `outputs/shadow_candidates/performance/`
 
-`research -> backtest -> shadow -> paper -> live`
-
-The legacy model remains frozen while Alpha Stack runs alongside it until the promotion gates are met.
+This shadow lane writes target books and comparison artifacts for Polaris, Orion, and Lyra. It does not send orders and cannot block production execution.
 
 ## Known Issues / Technical Debt
 
@@ -116,6 +138,7 @@ The legacy model remains frozen while Alpha Stack runs alongside it until the pr
 ## Documentation Map
 
 - [Architecture Reference](docs/Alpha_Stack_Architecture_Reference.md)
+- [Shadow Testing: Polaris / Orion / Lyra](docs/shadow_testing_caerus_orion_lyra.md)
 - [Alpha Stack Docs Index](docs/alpha_stack/README.md)
 - [Architecture Overview](docs/alpha_stack/architecture_overview.md)
 - [Sleeve Specifications](docs/alpha_stack/sleeve_specifications.md)

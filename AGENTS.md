@@ -1,11 +1,34 @@
 # AGENTS.md
 
+CURRENT STRATEGY STATE
+
+Paper (Active):
+- Caerus Polaris
+
+Shadow (Daily, Non-Blocking):
+- Caerus Orion (Primary Candidate)
+- Caerus Lyra (Challenger)
+
+Benchmark:
+- SPY
+
+Execution:
+- Only Polaris sends orders
+- Orion and Lyra generate artifacts only
+
+Automation:
+- Shadow runs automatically after precompute via:
+  scripts/run_shadow_candidates_daily.sh
+
+
+## System Overview
 Single agent-facing handoff for this repository. Operational, architecture,
 scheduler, and workflow guidance lives here.
 
-Last updated: 2026-04-20 — options promoted to paper execution, directional
-contract sizing, ALLOW_OPTIONS_EXECUTION default enabled, overnight agents
-moved to 1 AM ET, test suite clean at 955.
+Last updated: 2026-04-22 — named strategy framework documented, Orion/Lyra
+shadow lane added post-precompute as a non-blocking artifact-only step,
+dashboard remains broker-authoritative V2 prototype, options still
+paper-executed, last known full test suite clean at 955 on 2026-04-20.
 
 ---
 
@@ -18,6 +41,23 @@ moved to 1 AM ET, test suite clean at 955.
 - **Test suite**: 955 passing, 0 failing (as of 2026-04-20)
 - **Hard rule**: do not change production trading behavior casually; bias toward
   safety, deterministic artifacts, and explicit verification
+
+## Named Strategy Framework
+
+- **Caerus Polaris** (`caerus_polaris`)
+  - current paper baseline / operational control
+  - current paper execution remains wired to this baseline behavior
+- **Caerus Orion** (`caerus_orion`)
+  - primary shadow candidate
+  - derived from Alpha Lab v2 winner: H2 rank-decay exit + H6 top-5 concentration
+  - not promoted to paper
+- **Caerus Lyra** (`caerus_lyra`)
+  - secondary shadow challenger
+  - derived from Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
+  - not promoted to paper
+- **SPY** (`spy_benchmark`)
+  - benchmark symbol and comparison anchor
+  - remains `SPY` in code and artifacts
 
 ---
 
@@ -32,6 +72,11 @@ moved to 1 AM ET, test suite clean at 955.
   - path: `~/quant-daily-report`
   - venv: `source venv/bin/activate`
   - secrets: `~/quant-daily-report/.env`
+  - web routes:
+    - `/` → landing page with links to dashboard and golf bot
+    - `/dashboard/` → primary protected dashboard
+    - `/dashboardDEV/` → protected dev/prototype dashboard
+    - `/golf/` → golf bot (must remain isolated; do not break or overwrite)
 - **Cron install**: `crontab scripts/crontab.txt`
 
 ---
@@ -44,17 +89,25 @@ Five phases run on the VM weekdays. Install with `crontab scripts/crontab.txt`.
 |---|---|---|---|
 | 1:00 AM | 0a — Overnight agents | `scripts/cron_overnight.sh` | `outputs/overnight_signals/YYYY-MM-DD.json` |
 | 6:30 AM | 0b — Claude research digest | `scripts/cron_research.sh` | `quant_research_agent/outputs/digest_YYYY-MM-DD.json` |
-| 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | `outputs/precompute/YYYY-MM-DD/` bundle |
+| 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | `outputs/precompute/YYYY-MM-DD/` bundle + best-effort shadow artifacts |
 | 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Alpaca paper equity orders + gated protective-put options |
 | 10:00 AM | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
 | Monday 8 AM | Weekly model review | `scripts/cron_weekly_review.sh` | Review artifacts |
 
 **Data flow**: Phase 0a runs overnight agents → Phase 0b runs Claude to score
 news/arxiv/earnings → Phase 1 precompute consumes both (via thematic overlay) →
-Phase 2 executes the precomputed plan → Phase 3 confirms and emails.
+successful precompute triggers the non-blocking shadow lane for Polaris / Orion /
+Lyra → Phase 2 executes the precomputed plan → Phase 3 confirms and emails.
 
 Overnight signals are accepted up to 3 days old; research digest up to 3 days
 old. Non-fatal failures in 0a/0b do not block Phase 1.
+
+Shadow generation is best-effort only:
+- wrapper: `scripts/run_shadow_candidates_daily.sh`
+- invoked from: `scripts/cron_precompute.sh`
+- outputs: `outputs/shadow_candidates/YYYY-MM-DD/` and `outputs/shadow_candidates/performance/`
+- failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed
+- shadow cannot block production execution
 
 ---
 
@@ -64,6 +117,16 @@ old. Non-fatal failures in 0a/0b do not block Phase 1.
 
 `daily_quant_report.py` — Phase 1 entry point. Runs regime classification,
 sleeve scoring, allocation, reconciliation, and writes the precompute bundle.
+
+### Current Strategy State
+
+- **Paper execution model**: Caerus Polaris
+- **Shadow-only daily models**: Caerus Orion, Caerus Lyra
+- **Benchmark**: SPY
+- **Promotion state**:
+  - Polaris: paper
+  - Orion: shadow only
+  - Lyra: shadow only
 
 ### Alpha Stack (alpha_stack/)
 
@@ -214,6 +277,71 @@ Benchmark: SPY. Cash proxy: SGOV.
 
 All cron scripts force `ALPACA_PAPER=1` and `ALPACA_BASE_URL=paper-api.alpaca.markets`.
 
+### Dashboard Stack (`web/dashboard/`, `scripts/refresh_quant_dashboard.py`)
+
+**Status: V2 prototype live as of 2026-04-21.**
+
+The dashboard was reset from an executive-summary style page into a
+broker-authoritative terminal-style surface. Current production intent:
+
+- primary route: `/dashboard/`
+- development mirror: `/dashboardDEV/`
+- both protected by the existing `Caerus` basic auth
+- root host `/` is now a landing page and should not auto-redirect to golf
+
+**Current dashboard source-of-truth hierarchy**
+
+- Positions: Alpaca-backed broker snapshot artifacts
+- NAV / cash / buying power: Alpaca-backed broker account snapshot artifacts
+- Trades today: Alpaca fills for the report date
+- Historical performance: Alpaca portfolio history overlay + SPY benchmark history
+
+**Hard dashboard rule**
+
+Do not reintroduce blended or heuristic headline metrics. If a dashboard panel
+cannot be built from a canonical persisted source, degrade visibly or fail.
+
+**Current builder**
+
+- `scripts/research/build_dashboard_v1.py`
+  - despite the filename, this now emits `schema_version: dashboard-v2-prototype`
+  - contains the strict validation checks and the terminal data model
+- `scripts/refresh_quant_dashboard.py`
+  - refreshes Alpaca-backed broker snapshot + fills + portfolio history
+  - writes the primary static site to `/var/www/caerus-dashboard`
+  - writes the dev mirror to `/var/www/caerus-dashboard-dev`
+
+**Current frontend**
+
+- `web/dashboard/index.html`
+- `web/dashboard/quant_daily_executive.css`
+- `web/dashboard/quant_daily_executive.js`
+
+The UI now defaults dark and terminal-like. The three main chart panels expose:
+
+- Relative Performance — indexed NAV vs SPY
+- Excess Curve — cumulative relative edge vs SPY
+- Drawdown — portfolio loss from prior peak
+
+Axis/unit notes are intentionally explicit; do not remove them unless replaced
+with clearer axis labels and scale markers.
+
+**Dashboard deployment**
+
+- Nginx config: `deploy/caerus-dashboard.nginx`
+- Landing page: `deploy/root_landing.html`
+- Refresh service: `deploy/caerus-dashboard-refresh.service`
+- Refresh timer: `deploy/caerus-dashboard-refresh.timer`
+- Deploy script: `scripts/deploy_dashboard_vm.sh`
+
+**Dashboard operational notes**
+
+- `/dashboard/` is the stable user-facing route
+- `/dashboardDEV/` is the safe place for iterative UI changes and V3 work
+- `/golf/` must remain isolated; dashboard deploys must not overwrite golf bot config
+- the dashboard may still surface `DRIFT_DETECTED` from posttrade reconciliation;
+  do not hide reconciliation issues just to keep the UI green
+
 ### Anti-Churn Mechanisms
 
 Four independent layers prevent position and regime whipsaw:
@@ -257,6 +385,14 @@ Four independent layers prevent position and regime whipsaw:
 | `scripts/cron_precompute.sh` | Phase 1 — 7:00 AM ET precompute |
 | `scripts/cron_execute.sh` | Phase 2 — 9:35 AM ET order execution |
 | `scripts/cron_confirm.sh` | Phase 3 — 10:00 AM ET confirmation + email |
+| `scripts/research/build_dashboard_v1.py` | Current strict dashboard builder — emits the broker-authoritative V2 prototype payload |
+| `scripts/refresh_quant_dashboard.py` | Refreshes Alpaca broker/fill/history artifacts and publishes both dashboard surfaces |
+| `scripts/deploy_dashboard_vm.sh` | Deploys dashboard assets, landing page, refresh service, and nginx config to the VM |
+| `deploy/caerus-dashboard.nginx` | VM nginx config for `/`, `/dashboard/`, `/dashboardDEV/`, and preserved `/golf/` |
+| `deploy/root_landing.html` | Root landing page linking dashboard, dashboardDEV, and golf bot |
+| `web/dashboard/index.html` | Terminal-style dashboard shell |
+| `web/dashboard/quant_daily_executive.css` | Dark terminal dashboard styling |
+| `web/dashboard/quant_daily_executive.js` | Frontend rendering for metrics, charts, tape, and validation |
 | `trading_audit.py` | Holding period, slippage, turnover utilities |
 | `reconciliation.py` | Broker-authoritative pre/post-trade reconciliation |
 | `data/universe.csv` | 201-ticker trading universe |
@@ -274,11 +410,24 @@ Four independent layers prevent position and regime whipsaw:
 For scheduler incidents, inspect:
 - `outputs/latest_run.json`
 - `logs/execute_<date>.log`
+- `logs/shadow_<date>.log`
 - `logs/overnight_<date>.log`
 - `logs/research_<date>.log`
 - `outputs/broker/recon_pretrade_<date>.json`
 - `outputs/precompute/<date>/contract.json`
 - `outputs/overnight_signals/<date>.json`
+- `outputs/shadow_candidates/<date>/comparison.md`
+- `outputs/shadow_candidates/performance/shadow_summary.json`
+
+For dashboard incidents, inspect:
+- `/var/www/caerus-dashboard/dashboard_data.json`
+- `/var/www/caerus-dashboard-dev/dashboard_data.json`
+- `outputs/broker/broker_snapshot_latest.json`
+- `outputs/broker/posttrade_positions.json`
+- `outputs/broker_snapshot/broker_snapshot_<date>.json`
+- `outputs/perf/live_overlay_nav_series.csv`
+- `outputs/perf/live_overlay_benchmark_close_history.csv`
+- `outputs/broker/recon_posttrade_<date>.json`
 
 ---
 
@@ -294,6 +443,7 @@ Changes in these areas require explicit caution and validation:
 - Overnight agent orchestrator (`overnight_agents/orchestrator.py`)
 - Artifact schemas and JSON/CSV output contracts
 - Cron schedules (`scripts/crontab.txt`)
+- Dashboard publishing and nginx routing (`scripts/refresh_quant_dashboard.py`, `deploy/caerus-dashboard.nginx`)
 
 ---
 
@@ -346,6 +496,11 @@ Changes in these areas require explicit caution and validation:
   Replicate this in any new script.
 - The overnight agents accept a `--dry-run` flag for local testing without
   writing output files. Always dry-run first when modifying agent logic.
+- If you touch the dashboard, preserve the broker-authoritative data path first
+  and the visual layer second. Never silently swap in planned trades, accepted
+  orders, or stale run artifacts for positions/NAV/fills just to keep the page populated.
+- Prefer promoting risky dashboard/UI experiments to `/dashboardDEV/` first,
+  then push to `/dashboard/` only after data and route verification pass.
 
 ---
 
@@ -356,6 +511,8 @@ Changes in these areas require explicit caution and validation:
 - After SCP: run `python -m pytest Tests/ -q --tb=no` on the VM to confirm clean suite
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
+- Successful precompute now also triggers `scripts/run_shadow_candidates_daily.sh`
+  as a non-blocking reporting step for Polaris / Orion / Lyra shadow artifacts
 - If a `SELF_HEAL` pretrade reconciliation occurs, the wrapper re-runs reconciliation
   once against the refreshed canonical state before proceeding
 - Same-day retry locks block duplicate successful executions but must not strand

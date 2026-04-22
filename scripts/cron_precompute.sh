@@ -85,6 +85,7 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
     python3 -m scripts.send_precompute_email >> "${LOG_FILE}" 2>&1 || {
         echo "WARN: precompute email send failed (non-blocking)" | tee -a "${LOG_FILE}"
     }
+    bash "${REPO_ROOT}/scripts/run_shadow_candidates_daily.sh" --trade-date "${REPORT_DATE}" >> "${LOG_FILE}" 2>&1 || true
 fi
 
 exit ${EXIT_CODE}

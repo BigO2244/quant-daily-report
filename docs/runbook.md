@@ -27,6 +27,13 @@ This runbook covers day-to-day operation of the Caerus trading system. It assume
 
 Review this before 9:35 AM ET each trading day.
 
+### Strategy Naming
+
+- `Caerus Polaris` = current paper baseline / operational control
+- `Caerus Orion` = primary shadow candidate
+- `Caerus Lyra` = secondary shadow challenger
+- `SPY` = benchmark
+
 ### 1. Confirm Alpha Daily completed (~6:15 AM ET)
 
 - Go to **Actions → Alpha Daily Run** and confirm the most recent scheduled run completed with a green checkmark.
@@ -68,6 +75,7 @@ Or trigger the workflow and watch the "Alpaca smoke test" and "Diag Alpaca auth"
 |---|---|---|---|
 | ~6:15 AM | `alpha_daily` | `alpha` | alpha_report.py → daily_alpha_run.py → commit live_nav.csv → email alpha report |
 | ~7:00 AM | `research-digest` | `digest` | quant_research_agent/main.py → email digest |
+| ~7:00 AM after precompute | local VM cron | shadow lane | `scripts/cron_precompute.sh` → `scripts/run_shadow_candidates_daily.sh` → write `outputs/shadow_candidates/YYYY-MM-DD/` |
 | 9:35 AM | `daily-alpaca-paper` | `engine_run` | restore cache → smoke test → env check → daily_quant_report.py → auto-bootstrap if recon fails → upload artifacts |
 | After engine_run | `daily-alpaca-paper` | `email` | download artifacts → send execution email → send snapshot email |
 
@@ -76,6 +84,22 @@ Both cron entries for each workflow handle DST shifts (EST vs EDT). Both entries
 ---
 
 ## Expected Outputs from a Healthy Run
+
+### After precompute shadow generation
+
+- `outputs/shadow_candidates/<DATE>/caerus_polaris.json`
+- `outputs/shadow_candidates/<DATE>/caerus_orion.json`
+- `outputs/shadow_candidates/<DATE>/caerus_lyra.json`
+- `outputs/shadow_candidates/<DATE>/comparison.json`
+- `outputs/shadow_candidates/<DATE>/comparison.md`
+- `outputs/shadow_candidates/performance/shadow_nav_series.csv`
+- `outputs/shadow_candidates/performance/shadow_summary.json`
+- `logs/shadow_<DATE>.log`
+
+Operator note:
+- `comparison.md` is the fastest daily shadow artifact to review
+- broker context appendix, if present, is informational only
+- shadow remains model-portfolio based and does not reflect broker-authoritative holdings
 
 ### After `alpha_daily`
 

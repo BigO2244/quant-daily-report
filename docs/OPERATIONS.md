@@ -1,5 +1,22 @@
 # Operations Guide
 
+## Current Strategy State
+
+- `Caerus Polaris` / `caerus_polaris` is the current paper execution control.
+- `Caerus Orion` / `caerus_orion` is the primary shadow candidate only.
+- `Caerus Lyra` / `caerus_lyra` is the secondary shadow challenger only.
+- `SPY` remains the benchmark.
+- Shadow is model-portfolio based and artifact-only; it is not broker-authoritative execution state.
+
+## Daily Shadow Automation
+
+- After successful precompute, `scripts/cron_precompute.sh` calls `scripts/run_shadow_candidates_daily.sh`.
+- The shadow wrapper writes to:
+  - `outputs/shadow_candidates/YYYY-MM-DD/`
+  - `outputs/shadow_candidates/performance/`
+- Failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed.
+- Shadow generation must never block production paper execution.
+
 ## Table of Contents
 - [Reconciliation Failure Recovery](#reconciliation-failure-recovery)
   - [Overview](#overview)

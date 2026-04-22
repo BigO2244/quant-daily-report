@@ -2,6 +2,25 @@
 
 This document is the current architecture reference for Alpha Stack. It reflects the present implementation state, the active design intent, and the staged promotion path for future work.
 
+## Current Named Strategy State
+
+- `Caerus Polaris` / `caerus_polaris`
+  - current paper baseline / operational control
+- `Caerus Orion` / `caerus_orion`
+  - primary shadow candidate
+  - derived from the Alpha Lab v2 lead combination: H2 rank-decay exit + H6 top-5 concentration
+- `Caerus Lyra` / `caerus_lyra`
+  - secondary shadow challenger
+  - derived from the Alpha Lab v2 challenger combination: H1 weekly rebalance + H6 top-5 concentration
+- `SPY` / `spy_benchmark`
+  - benchmark
+
+Current promotion state:
+- Polaris = paper
+- Orion = shadow only
+- Lyra = shadow only
+- promotion ladder remains `research -> backtest -> shadow -> paper -> live`
+
 ## Purpose and Governance
 
 Alpha Stack is a regime-switching quantitative trading platform built as a multi-sleeve system. It is intended to replace the idea of a single strategy script with a layered platform that can explain decisions at the sleeve, regime, portfolio, execution, and attribution levels.
@@ -65,6 +84,15 @@ All new strategies and features follow:
 `research -> backtest -> shadow -> paper -> live`
 
 The legacy model remains frozen while Alpha Stack is validated in parallel.
+
+## Shadow Automation
+
+- Successful precompute now triggers a best-effort shadow run through `scripts/run_shadow_candidates_daily.sh`.
+- The wrapper is called from `scripts/cron_precompute.sh`.
+- Outputs land under:
+  - `outputs/shadow_candidates/YYYY-MM-DD/`
+  - `outputs/shadow_candidates/performance/`
+- Shadow failures are logged and swallowed; production execution does not depend on shadow success.
 
 ## Known Issues / Technical Debt
 

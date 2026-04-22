@@ -1,5 +1,13 @@
 # Alpha Stack Run Commands
 
+## Current Strategy State
+
+- `Caerus Polaris` / `caerus_polaris` is the current paper execution control.
+- `Caerus Orion` / `caerus_orion` is the primary shadow candidate only.
+- `Caerus Lyra` / `caerus_lyra` is the secondary shadow challenger only.
+- `SPY` remains the benchmark.
+- Orion and Lyra are not promoted to paper.
+
 ## Environment Setup
 
 ```bash
@@ -23,6 +31,6 @@ REPORT_DATE=$(TZ=America/New_York date +%F) MODE=alpaca TRADING_MODE=alpaca ALPA
 ## Current Platform Notes
 
 - Alpha Stack is a multi-sleeve platform, not a single-strategy script.
-- Sleeve 1 is partially implemented.
-- Sleeve 2 is fully implemented but its backtests still have look-ahead bias because P/E is fetched from yfinance snapshot data.
-- Current allocator baseline is 80% Sleeve 1 and 20% Sleeve 2 on a $10,000 notional baseline.
+- Successful precompute now triggers `scripts/run_shadow_candidates_daily.sh` as a non-blocking artifact-only step.
+- Shadow artifacts are written to `outputs/shadow_candidates/YYYY-MM-DD/` and `outputs/shadow_candidates/performance/`.
+- Shadow failures are logged and swallowed; they do not block production execution.

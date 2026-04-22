@@ -29,11 +29,7 @@ from scripts.export_alpaca_broker_snapshot import (
     write_snapshot_json,
     write_supporting_broker_artifacts,
 )
-from scripts.research.build_quant_dashboard import (
-    DashboardBuilder,
-    build_dashboard_payload,
-    write_dashboard_payload,
-)
+from scripts.research.build_dashboard_v1 import DashboardV1Builder, write_dashboard_v1_payload
 
 logger = logging.getLogger(__name__)
 EASTERN_TZ = ZoneInfo("America/New_York")
@@ -341,6 +337,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-root", default=None)
     parser.add_argument("--trade-date", default=None)
     parser.add_argument("--output-dir", default="web/dashboard")
+    parser.add_argument("--mirror-output-dir", default=None)
     parser.add_argument("--env-file", default=None, help="Optional env file with Alpaca credentials.")
     parser.add_argument("--order-limit", type=int, default=200)
     parser.add_argument("--history-days", type=int, default=DEFAULT_HISTORY_DAYS)
@@ -397,23 +394,17 @@ def refresh_live_broker_artifacts(
     }
 
 
-def rebuild_dashboard(*, repo_root: Path, run_root: str | None, trade_date: str | None, output_dir: str) -> dict[str, str]:
-    broker_payload = build_dashboard_payload(repo_root, run_root_arg=run_root, trade_date_arg=trade_date)
-    builder = DashboardBuilder(repo_root=repo_root, run_root_arg=run_root, trade_date_arg=trade_date)
-    legacy_payload = builder.build()
-    summary_payload = legacy_payload.pop("_summary_export", None)
+def rebuild_dashboard(*, repo_root: Path, run_root: str | None, trade_date: str | None, output_dir: str, mirror_output_dir: str | None = None) -> dict[str, str]:
     resolved_output_dir = repo_root / output_dir
-    write_dashboard_payload(
-        repo_root,
-        broker_payload,
-        resolved_output_dir,
-        legacy_payload=legacy_payload,
-        summary_payload=summary_payload if isinstance(summary_payload, dict) else None,
-    )
+    payload = DashboardV1Builder(repo_root=repo_root, report_date=trade_date).build()
+    write_dashboard_v1_payload(payload, resolved_output_dir)
+    if mirror_output_dir:
+        write_dashboard_v1_payload(payload, repo_root / mirror_output_dir)
     return {
         "dashboard_json": str(resolved_output_dir / "dashboard-data.json"),
         "monitor_json": str(resolved_output_dir / "dashboard_data.json"),
         "summary_json": str(resolved_output_dir / "trading_day_summary.json"),
+        "mirror_monitor_json": str((repo_root / mirror_output_dir / "dashboard_data.json")) if mirror_output_dir else "",
     }
 
 
@@ -445,6 +436,7 @@ def main() -> int:
         run_root=args.run_root,
         trade_date=args.trade_date,
         output_dir=args.output_dir,
+        mirror_output_dir=args.mirror_output_dir,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

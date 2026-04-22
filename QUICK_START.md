@@ -2,13 +2,16 @@
 
 This repository hosts Alpha Stack, a regime-switching multi-sleeve equity platform with a daily HTML report and staged promotion controls.
 
-## Current Baseline
+## Current Strategy State
 
-- Sleeve 1: Trend/Momentum, partially implemented
-- Sleeve 2: Value, fully implemented
-- Baseline portfolio mix: 80% Sleeve 1 / 20% Sleeve 2
-- Capital baseline: $10,000
-- Cash proxy for Sleeve 2: `SGOV`
+- `Caerus Polaris` / `caerus_polaris`: current paper baseline / operational control
+- `Caerus Orion` / `caerus_orion`: primary shadow candidate
+- `Caerus Lyra` / `caerus_lyra`: secondary shadow challenger
+- `SPY` / `spy_benchmark`: benchmark
+- Current promotion state:
+  - Polaris = paper
+  - Orion = shadow only
+  - Lyra = shadow only
 
 ## Run Locally
 
@@ -30,6 +33,16 @@ Alpaca paper mode:
 
 ```bash
 REPORT_DATE=$(TZ=America/New_York date +%F) MODE=alpaca TRADING_MODE=alpaca ALPACA_PAPER=1 ALPACA_API_KEY_ID=... ALPACA_API_SECRET_KEY=... ALPACA_BASE_URL=https://paper-api.alpaca.markets python3 daily_quant_report.py
+```
+
+Daily shadow generation only:
+
+```bash
+python3 -m research.shadow_tracking.run \
+  --trade-date YYYY-MM-DD \
+  --start-date 2014-01-01 \
+  --end-date YYYY-MM-DD \
+  --output-dir outputs/shadow_candidates
 ```
 
 ## Files to Know
@@ -55,4 +68,4 @@ REPORT_DATE=$(TZ=America/New_York date +%F) MODE=alpaca TRADING_MODE=alpaca ALPA
 
 `research -> backtest -> shadow -> paper -> live`
 
-Alpha Stack should continue alongside the frozen legacy model until validation gates are satisfied.
+Daily automation now runs shadow generation after successful precompute via `scripts/run_shadow_candidates_daily.sh`. That shadow step is artifact-only, non-blocking, and does not affect paper execution.

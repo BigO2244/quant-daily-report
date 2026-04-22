@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caerus Entry</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf7;
+      --line: #d7ccb8;
+      --text: #1d2430;
+      --muted: #6a7280;
+      --accent: #0f5c4d;
+      --accent2: #7d4f12;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Palatino Linotype", serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, #efe5d0 0, transparent 34%),
+        linear-gradient(180deg, #faf7f0 0%, var(--bg) 100%);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(900px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 36px;
+      box-shadow: 0 24px 56px rgba(31, 36, 48, 0.08);
+    }
+    p.eyebrow {
+      margin: 0 0 8px;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 52px;
+      line-height: 1;
+    }
+    .lede {
+      margin: 0 0 28px;
+      color: var(--muted);
+      font-size: 18px;
+      max-width: 680px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    a.card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 22px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: white;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+    }
+    a.card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 18px 32px rgba(31, 36, 48, 0.08);
+      border-color: var(--accent);
+    }
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .tag {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: #eef6f3;
+      color: var(--accent);
+    }
+    .tag.alt {
+      background: #f9efe2;
+      color: var(--accent2);
+    }
+    @media (max-width: 700px) {
+      h1 { font-size: 38px; }
+      .cards { grid-template-columns: 1fr; }
+      main { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">CAERUS HOST</p>
+    <h1>Select a destination</h1>
+    <p class="lede">This host serves the Caerus trading dashboard and the golf bot separately. Use the direct destination below instead of relying on the root URL to redirect.</p>
+    <div class="cards">
+      <a class="card" href="/dashboard/">
+        <h2>Dashboard</h2>
+        <p>Protected operator dashboard for positions, NAV, fills, and historical performance.</p>
+        <span class="tag">Protected</span>
+      </a>
+      <a class="card" href="/dashboardDEV/">
+        <h2>Dashboard DEV</h2>
+        <p>Protected development surface for terminal UI and future iterations.</p>
+        <span class="tag">Protected</span>
+      </a>
+      <a class="card" href="/golf/">
+        <h2>Golf Bot</h2>
+        <p>Golf application served independently from the dashboard.</p>
+        <span class="tag alt">Separate App</span>
+      </a>
+    </div>
+  </main>
+</body>
+</html>

@@ -13,6 +13,8 @@ The attached reference image is directionally useful for layout density, but the
 
 Implementation-grade contract, source mapping, and VM hosting details live in [dashboard_v2_spec.md](/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/dashboard_v2_spec.md).
 
+For the restart, the minimum truthful foundation now lives in [dashboard_v1_spec.md](/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/dashboard_v1_spec.md). V1 intentionally narrows scope to positions, NAV, today's trades, and historical performance plus automated validation gates.
+
 ## Current Artifact Reality
 
 The repo already has a usable measurement base:
