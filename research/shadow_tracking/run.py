@@ -34,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output_root = Path(args.output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
+    trade_date = str(pd.Timestamp(args.trade_date or args.end_date).strftime("%Y-%m-%d"))
+    dated_dir = output_root / trade_date
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[SHADOW] created folder for trade_date={trade_date}")
 
     universe = load_universe("data/universe.csv")
     panel, panel_meta = ensure_price_panel(
@@ -44,9 +48,43 @@ def main(argv: list[str] | None = None) -> int:
         allow_download=bool(args.allow_download),
     )
     signals = build_alpha_lab_signal_frame(panel)
-    trade_date = resolve_trade_date(signals, requested_trade_date=args.trade_date, end_date=args.end_date)
-    dated_dir = output_root / trade_date
-    dated_dir.mkdir(parents=True, exist_ok=True)
+    print(resolve_trade_date(signals, requested_trade_date=args.trade_date, end_date=args.end_date))
+    previous_trade_date = find_previous_trading_date(signals, trade_date=trade_date)
+
+    if not trade_date_has_data(signals, trade_date=trade_date):
+        print(f"[SHADOW] no data for trade_date={trade_date}")
+        delta_payload = {
+            "trade_date": trade_date,
+            "previous_date": previous_trade_date,
+            "status": "NO_DATA",
+            "strategies": {},
+        }
+        comparison_payload = build_no_data_comparison_payload(
+            trade_date=trade_date,
+            delta_payload=delta_payload,
+            panel_meta=panel_meta,
+        )
+        (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2))
+        (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2))
+        (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload))
+        (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2))
+        shadow_performance = build_shadow_performance_payload(
+            panel=panel,
+            output_root=output_root,
+            trade_date=trade_date,
+            previous_trade_date=previous_trade_date,
+            strategy_payloads={},
+            data_status="NO_DATA",
+        )
+        (dated_dir / "shadow_performance.json").write_text(json.dumps(shadow_performance, indent=2))
+        print(f"[SHADOW] performance computed for trade_date={trade_date}")
+        print("[SHADOW] NAV updated")
+        shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
+        (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
+        print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
+        print("[SHADOW] delta status: NO_PRIOR")
+        print(f"[SHADOW] wrote {dated_dir}/...")
+        return 0
 
     definitions = build_shadow_definitions()
     strategy_payloads = {}
@@ -64,9 +102,38 @@ def main(argv: list[str] | None = None) -> int:
         strategy_payloads[definition.strategy_slug] = payload
         (dated_dir / f"{definition.strategy_slug}.json").write_text(json.dumps(payload, indent=2))
 
-    comparison_payload = build_comparison_payload(strategy_payloads, trade_date=trade_date)
+    delta_payload = build_delta_payload(
+        output_root=output_root,
+        trade_date=trade_date,
+        previous_trade_date=previous_trade_date,
+        strategy_payloads=strategy_payloads,
+    )
+    if delta_payload.get("status") == "OK":
+        print(f"[SHADOW] delta comparison vs {delta_payload.get('previous_date')}")
+        print("[SHADOW] delta status: OK")
+    else:
+        print("[SHADOW] delta status: NO_PRIOR")
+    (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2))
+
+    comparison_payload = build_comparison_payload(strategy_payloads, trade_date=trade_date, delta_payload=delta_payload)
+    (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2))
     (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2))
     (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload))
+    shadow_performance = build_shadow_performance_payload(
+        panel=panel,
+        output_root=output_root,
+        trade_date=trade_date,
+        previous_trade_date=previous_trade_date,
+        strategy_payloads=strategy_payloads,
+        data_status="OK",
+    )
+    (dated_dir / "shadow_performance.json").write_text(json.dumps(shadow_performance, indent=2))
+    print(f"[SHADOW] performance computed for trade_date={trade_date}")
+    print("[SHADOW] NAV updated")
+    shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
+    (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
+    print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
+    print(f"[SHADOW] wrote {dated_dir}/...")
 
     nav_series, summary = build_performance_artifacts(
         panel=panel,
@@ -84,12 +151,40 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def resolve_trade_date(signals: pd.DataFrame, *, requested_trade_date: str | None, end_date: str) -> str:
+    requested = str(pd.Timestamp(requested_trade_date or end_date).strftime("%Y-%m-%d"))
+    if trade_date_has_data(signals, trade_date=requested):
+        return f"[SHADOW] using requested trade_date={requested}"
+    nearest = find_latest_available_trade_date(signals, trade_date=requested)
+    if nearest:
+        return f"[SHADOW] requested trade_date unavailable in data; nearest available date is {nearest}"
+    return f"[SHADOW] requested trade_date unavailable in data; no earlier market date exists in panel"
+
+
+def trade_date_has_data(signals: pd.DataFrame, *, trade_date: str) -> bool:
+    if signals.empty or "date" not in signals.columns:
+        return False
+    dates = pd.DatetimeIndex(pd.to_datetime(signals["date"])).strftime("%Y-%m-%d")
+    return trade_date in set(dates)
+
+
+def find_latest_available_trade_date(signals: pd.DataFrame, *, trade_date: str) -> str | None:
+    if signals.empty or "date" not in signals.columns:
+        return None
     dates = pd.DatetimeIndex(pd.to_datetime(signals["date"])).sort_values().unique()
-    upper = pd.Timestamp(requested_trade_date or end_date)
-    eligible = dates[dates <= upper]
+    eligible = dates[dates <= pd.Timestamp(trade_date)]
     if len(eligible) == 0:
-        raise ValueError("No eligible trade date available in signal frame")
+        return None
     return str(eligible[-1].date())
+
+
+def find_previous_trading_date(signals: pd.DataFrame, *, trade_date: str) -> str | None:
+    if signals.empty or "date" not in signals.columns:
+        return None
+    dates = pd.DatetimeIndex(pd.to_datetime(signals["date"])).sort_values().unique()
+    earlier = dates[dates < pd.Timestamp(trade_date)]
+    if len(earlier) == 0:
+        return None
+    return str(earlier[-1].date())
 
 
 def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_date: str) -> dict:
@@ -133,7 +228,23 @@ def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_
     }
 
 
-def build_comparison_payload(strategy_payloads: dict[str, dict], *, trade_date: str) -> dict:
+def build_no_data_comparison_payload(*, trade_date: str, delta_payload: dict, panel_meta: dict) -> dict:
+    return {
+        "trade_date": trade_date,
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "shadow_methodology": "model_portfolio",
+        "status": "NO_DATA",
+        "message": "No shadow portfolio generated because the requested trade date is unavailable in the data panel.",
+        "delta": delta_payload,
+        "strategies": {},
+        "pairwise_overlap": [],
+        "differences_vs_polaris": {},
+        "broker_context": {},
+        "data": panel_meta,
+    }
+
+
+def build_comparison_payload(strategy_payloads: dict[str, dict], *, trade_date: str, delta_payload: dict | None = None) -> dict:
     pairwise = []
     for left_slug, right_slug in combinations(strategy_payloads.keys(), 2):
         left = strategy_payloads[left_slug]
@@ -147,6 +258,7 @@ def build_comparison_payload(strategy_payloads: dict[str, dict], *, trade_date: 
         "trade_date": trade_date,
         "benchmark_symbol": BENCHMARK_SYMBOL,
         "shadow_methodology": "model_portfolio",
+        "delta": delta_payload,
         "strategies": {
             slug: {
                 "strategy_name": payload["strategy_name"],
@@ -187,14 +299,37 @@ def compare_two_strategies(left: dict, right: dict) -> dict:
 
 def build_comparison_markdown(comparison: dict) -> str:
     strategies = comparison["strategies"]
+    delta = comparison.get("delta") or {}
+    delta_status = delta.get("status") or "NO_PRIOR"
     lines = [
         "# Shadow Candidates Comparison",
         "",
         f"## Trade Date",
         f"- {comparison['trade_date']}",
         "",
-        "## Polaris vs Orion",
+        "## Delta Artifact",
+        "- File: delta.json",
+        f"- Status: {delta_status}",
+        "",
+        "## Day-over-Day Changes",
     ]
+    lines.extend(_delta_markdown_lines(delta))
+    if comparison.get("status") == "NO_DATA":
+        lines.extend(
+            [
+                "",
+                "## Status",
+                f"- {comparison.get('message')}",
+                "",
+                "## Benchmark Note",
+                f"- Benchmark symbol: {comparison['benchmark_symbol']}",
+            ]
+        )
+        return "\n".join(lines) + "\n"
+    lines.extend([
+        "",
+        "## Polaris vs Orion",
+    ])
     lines.extend(_pairwise_lines(comparison, "caerus_polaris", "caerus_orion"))
     lines.extend(["", "## Polaris vs Lyra"])
     lines.extend(_pairwise_lines(comparison, "caerus_polaris", "caerus_lyra"))
@@ -291,6 +426,450 @@ def build_performance_artifacts(
             "summary": summarise_performance(nav, returns=returns, benchmark_returns=None, label="SPY"),
         }
     return nav_frame, summary
+
+
+def build_shadow_performance_payload(
+    *,
+    panel: pd.DataFrame,
+    output_root: Path,
+    trade_date: str,
+    previous_trade_date: str | None,
+    strategy_payloads: dict[str, dict],
+    data_status: str,
+) -> dict:
+    prior_chain_state, prior_payload = load_prior_shadow_performance(
+        output_root=output_root,
+        previous_trade_date=previous_trade_date,
+    )
+    prior_navs = (prior_payload or {}).get("strategies") or {}
+    returns_by_ticker = compute_returns_for_trade_date(panel=panel, trade_date=trade_date)
+    chain_state = prior_chain_state
+    if chain_state == "BROKEN_CHAIN":
+        print(f"[SHADOW] broken performance chain at prior date={previous_trade_date}")
+
+    strategies = {}
+    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra"):
+        prev_nav_raw = (prior_navs.get(slug) or {}).get("nav", 1.0 if chain_state == "NO_PRIOR" else None)
+        prev_nav = float(prev_nav_raw) if prev_nav_raw is not None else None
+        if chain_state == "BROKEN_CHAIN":
+            daily_return = 0.0 if data_status == "NO_DATA" else round(
+                float(pd.Series((strategy_payloads.get(slug) or {}).get("target_weights") or {}, dtype=float).mul(pd.Series(returns_by_ticker), fill_value=0.0).sum()),
+                10,
+            )
+            nav = None
+            weight_count = int(len((strategy_payloads.get(slug) or {}).get("target_weights") or {})) if data_status != "NO_DATA" else 0
+        elif data_status == "NO_DATA":
+            daily_return = 0.0
+            nav = prev_nav
+            weight_count = 0
+        else:
+            weights = pd.Series((strategy_payloads.get(slug) or {}).get("target_weights") or {}, dtype=float)
+            daily_return = round(float(weights.mul(pd.Series(returns_by_ticker), fill_value=0.0).sum()), 10)
+            nav = round(float(prev_nav * (1.0 + daily_return)), 10)
+            weight_count = int(len(weights))
+        strategies[slug] = {
+            "strategy_name": (strategy_payloads.get(slug) or {}).get(
+                "strategy_name",
+                {
+                    "caerus_polaris": "Caerus Polaris",
+                    "caerus_orion": "Caerus Orion",
+                    "caerus_lyra": "Caerus Lyra",
+                }[slug],
+            ),
+            "daily_return": daily_return,
+            "nav": nav,
+            "previous_nav": prev_nav,
+            "weights_count": weight_count,
+        }
+
+    spy_prev_nav = float((prior_navs.get(BENCHMARK_SLUG) or {}).get("nav", 1.0))
+    if chain_state == "BROKEN_CHAIN":
+        spy_prev_nav = None
+        spy_return = round(float(returns_by_ticker.get(BENCHMARK_SYMBOL, 0.0)), 10) if data_status != "NO_DATA" else 0.0
+        spy_nav = None
+    else:
+        spy_prev_nav = float((prior_navs.get(BENCHMARK_SLUG) or {}).get("nav", 1.0))
+        spy_return = round(float(returns_by_ticker.get(BENCHMARK_SYMBOL, 0.0)), 10) if data_status != "NO_DATA" else 0.0
+        spy_nav = round(float(spy_prev_nav * (1.0 + spy_return)), 10) if data_status != "NO_DATA" else spy_prev_nav
+    strategies[BENCHMARK_SLUG] = {
+        "strategy_name": "SPY",
+        "daily_return": spy_return,
+        "nav": spy_nav,
+        "previous_nav": spy_prev_nav,
+        "weights_count": 1,
+    }
+
+    return {
+        "trade_date": trade_date,
+        "previous_trade_date": previous_trade_date,
+        "status": chain_state,
+        "data_status": data_status,
+        "return_convention": "weights_as_of_t",
+        "strategies": strategies,
+    }
+
+
+def load_prior_shadow_performance(*, output_root: Path, previous_trade_date: str | None) -> tuple[str, dict | None]:
+    if not previous_trade_date:
+        return "NO_PRIOR", None
+    previous_dir = output_root / previous_trade_date
+    if not previous_dir.exists():
+        return "NO_PRIOR", None
+    path = previous_dir / "shadow_performance.json"
+    if not path.exists():
+        return "BROKEN_CHAIN", None
+    try:
+        return "OK", json.loads(path.read_text())
+    except Exception:
+        return "BROKEN_CHAIN", None
+
+
+def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> dict:
+    dated_dir = output_root / trade_date
+    current_performance = safe_read_json(dated_dir / "shadow_performance.json") or {}
+    history_dates = list_shadow_date_dirs(output_root=output_root, trade_date=trade_date)
+    performance_history = [
+        (date, safe_read_json(output_root / date / "shadow_performance.json"))
+        for date in history_dates
+    ]
+
+    evaluation = {
+        "trade_date": trade_date,
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "strategies": {},
+    }
+    strategy_names = {
+        "caerus_polaris": "Caerus Polaris",
+        "caerus_orion": "Caerus Orion",
+        "caerus_lyra": "Caerus Lyra",
+        BENCHMARK_SLUG: "SPY",
+    }
+    spy_current = ((current_performance.get("strategies") or {}).get(BENCHMARK_SLUG) or {})
+    spy_cumulative_return = (
+        round(float(spy_current["nav"]) - 1.0, 10)
+        if spy_current.get("nav") is not None
+        else None
+    )
+    for slug, strategy_name in strategy_names.items():
+        current = ((current_performance.get("strategies") or {}).get(slug) or {})
+        chain_state = current_performance.get("status")
+        data_status = current_performance.get("data_status")
+        return_convention = current_performance.get("return_convention")
+        nav = current.get("nav")
+        cumulative_return = round(float(nav) - 1.0, 10) if nav is not None else None
+        excess_return_vs_spy = (
+            round(cumulative_return - spy_cumulative_return, 10)
+            if slug != BENCHMARK_SLUG and cumulative_return is not None and spy_cumulative_return is not None
+            else 0.0
+            if slug == BENCHMARK_SLUG and spy_cumulative_return is not None
+            else None
+        )
+        valid_daily_returns = extract_valid_daily_returns(performance_history=performance_history, strategy_slug=slug)
+        nav_history = extract_chain_nav_history(performance_history=performance_history, strategy_slug=slug)
+        turnover_history = extract_strategy_metric_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="expected_turnover")
+        concentration_history = extract_strategy_top3_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        constituent_change_count = extract_constituent_change_count(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        evaluation["strategies"][slug] = {
+            "strategy_name": strategy_name,
+            "status": chain_state,
+            "data_status": data_status,
+            "return_convention": return_convention,
+            "daily_return": current.get("daily_return"),
+            "nav": nav,
+            "cumulative_return": cumulative_return,
+            "excess_return_vs_spy": excess_return_vs_spy,
+            "rolling_count_of_valid_days": len(valid_daily_returns),
+            "realized_volatility_ann": compute_realized_volatility_ann(valid_daily_returns),
+            "max_drawdown": compute_max_drawdown(nav_history),
+            "avg_turnover": round(sum(turnover_history) / len(turnover_history), 10) if turnover_history else None,
+            "avg_top_3_concentration": round(sum(concentration_history) / len(concentration_history), 10) if concentration_history else None,
+            "constituent_change_count": constituent_change_count,
+        }
+    return evaluation
+
+
+def list_shadow_date_dirs(*, output_root: Path, trade_date: str) -> list[str]:
+    candidates = []
+    for child in output_root.iterdir() if output_root.exists() else []:
+        if not child.is_dir():
+            continue
+        try:
+            normalized = pd.Timestamp(child.name).strftime("%Y-%m-%d")
+        except Exception:
+            continue
+        if normalized == child.name and child.name <= trade_date:
+            candidates.append(child.name)
+    return sorted(candidates)
+
+
+def safe_read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def extract_valid_daily_returns(*, performance_history: list[tuple[str, dict | None]], strategy_slug: str) -> list[float]:
+    returns: list[float] = []
+    for _, payload in performance_history:
+        if not payload:
+            break
+        if payload.get("status") == "BROKEN_CHAIN":
+            return []
+        if payload.get("data_status") != "OK":
+            continue
+        strategy = ((payload.get("strategies") or {}).get(strategy_slug) or {})
+        if strategy.get("nav") is None:
+            return []
+        returns.append(float(strategy.get("daily_return") or 0.0))
+    return returns
+
+
+def extract_chain_nav_history(*, performance_history: list[tuple[str, dict | None]], strategy_slug: str) -> list[float] | None:
+    navs: list[float] = []
+    for _, payload in performance_history:
+        if not payload:
+            return None
+        if payload.get("status") == "BROKEN_CHAIN":
+            return None
+        strategy = ((payload.get("strategies") or {}).get(strategy_slug) or {})
+        nav = strategy.get("nav")
+        if nav is None:
+            return None
+        navs.append(float(nav))
+    return navs
+
+
+def extract_strategy_metric_history(*, output_root: Path, history_dates: list[str], strategy_slug: str, field: str) -> list[float]:
+    values = []
+    for date in history_dates:
+        payload = safe_read_json(output_root / date / f"{strategy_slug}.json")
+        if not payload:
+            continue
+        value = payload.get(field)
+        if value is not None:
+            values.append(float(value))
+    return values
+
+
+def extract_strategy_top3_concentration_history(*, output_root: Path, history_dates: list[str], strategy_slug: str) -> list[float]:
+    values = []
+    for date in history_dates:
+        payload = safe_read_json(output_root / date / f"{strategy_slug}.json")
+        if not payload:
+            continue
+        value = ((payload.get("weight_concentration") or {}).get("top3_concentration"))
+        if value is not None:
+            values.append(float(value))
+    return values
+
+
+def extract_constituent_change_count(*, output_root: Path, history_dates: list[str], strategy_slug: str) -> int | None:
+    total = 0
+    found = False
+    for date in history_dates:
+        delta_payload = safe_read_json(output_root / date / "delta.json")
+        if not delta_payload or delta_payload.get("status") != "OK":
+            continue
+        strategy = ((delta_payload.get("strategies") or {}).get(strategy_slug) or {})
+        if not strategy:
+            continue
+        total += len(strategy.get("adds") or []) + len(strategy.get("removes") or [])
+        found = True
+    return total if found else None
+
+
+def compute_realized_volatility_ann(daily_returns: list[float]) -> float | None:
+    if len(daily_returns) < 2:
+        return None
+    return round(float(pd.Series(daily_returns, dtype=float).std(ddof=1) * (252.0 ** 0.5)), 10)
+
+
+def compute_max_drawdown(nav_history: list[float] | None) -> float | None:
+    if not nav_history:
+        return None
+    nav = pd.Series(nav_history, dtype=float)
+    drawdown = nav / nav.cummax() - 1.0
+    return round(float(drawdown.min()), 10)
+
+
+def compute_returns_for_trade_date(*, panel: pd.DataFrame, trade_date: str) -> dict[str, float]:
+    frame = panel.copy()
+    if frame.empty or "date" not in frame.columns or "ticker" not in frame.columns or "close" not in frame.columns:
+        return {}
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame = frame.sort_values(["ticker", "date"])
+    frame["daily_return"] = frame.groupby("ticker")["close"].pct_change()
+    current = frame[frame["date"] == pd.Timestamp(trade_date)].copy()
+    current["ticker"] = current["ticker"].astype(str)
+    return {
+        str(ticker): round(float(daily_return), 10)
+        for ticker, daily_return in zip(current["ticker"], current["daily_return"].fillna(0.0))
+    }
+
+
+def build_delta_payload(
+    *,
+    output_root: Path,
+    trade_date: str,
+    previous_trade_date: str | None,
+    strategy_payloads: dict[str, dict],
+) -> dict:
+    if previous_trade_date is None:
+        return {
+            "trade_date": trade_date,
+            "previous_date": None,
+            "status": "NO_PRIOR",
+            "strategies": {},
+        }
+
+    previous_dir = output_root / previous_trade_date
+    strategies = {}
+    for slug in ("caerus_orion", "caerus_polaris", "caerus_lyra"):
+        previous_path = previous_dir / f"{slug}.json"
+        if not previous_path.exists():
+            print(f"[SHADOW] warning: prior snapshot missing for {slug} on {previous_trade_date}")
+            return {
+                "trade_date": trade_date,
+                "previous_date": previous_trade_date,
+                "status": "NO_PRIOR",
+                "strategies": {},
+            }
+        try:
+            previous_payload = json.loads(previous_path.read_text())
+        except Exception as exc:
+            print(f"[SHADOW] warning: prior snapshot unreadable for {slug} on {previous_trade_date}: {exc}")
+            return {
+                "trade_date": trade_date,
+                "previous_date": previous_trade_date,
+                "status": "NO_PRIOR",
+                "strategies": {},
+            }
+        strategies[slug] = compute_strategy_delta(previous_payload, strategy_payloads[slug])
+
+    return {
+        "trade_date": trade_date,
+        "previous_date": previous_trade_date,
+        "status": "OK",
+        "strategies": strategies,
+    }
+
+
+def find_previous_shadow_date(output_root: Path, *, trade_date: str) -> str | None:
+    candidates = []
+    for child in output_root.iterdir() if output_root.exists() else []:
+        if not child.is_dir():
+            continue
+        try:
+            normalized = pd.Timestamp(child.name).strftime("%Y-%m-%d")
+        except Exception:
+            continue
+        if normalized == child.name and child.name < trade_date:
+            candidates.append(child.name)
+    return max(candidates) if candidates else None
+
+
+def compute_strategy_delta(previous_payload: dict, current_payload: dict) -> dict:
+    prev_weights = pd.Series(previous_payload.get("target_weights") or {}, dtype=float)
+    curr_weights = pd.Series(current_payload.get("target_weights") or {}, dtype=float)
+    prev_set = set(prev_weights.index)
+    curr_set = set(curr_weights.index)
+    added = sorted(curr_set - prev_set)
+    removed = sorted(prev_set - curr_set)
+    unchanged = sorted(prev_set & curr_set)
+
+    weight_changes = {}
+    increases = []
+    decreases = []
+    for ticker in unchanged:
+        delta = round(float(curr_weights[ticker] - prev_weights[ticker]), 6)
+        weight_changes[str(ticker)] = delta
+        if delta > 0:
+            increases.append({"ticker": str(ticker), "delta_weight": delta})
+        elif delta < 0:
+            decreases.append({"ticker": str(ticker), "delta_weight": delta})
+
+    increases.sort(key=lambda item: item["delta_weight"], reverse=True)
+    decreases.sort(key=lambda item: item["delta_weight"])
+    all_names = prev_weights.index.union(curr_weights.index)
+    turnover_proxy = round(
+        float(
+            (
+                curr_weights.reindex(all_names, fill_value=0.0)
+                - prev_weights.reindex(all_names, fill_value=0.0)
+            ).abs().sum()
+        ),
+        6,
+    )
+    rotated_names = len(added) + len(removed)
+    summary = (
+        "Orion stable"
+        if current_payload.get("strategy_slug") == "caerus_orion" and rotated_names == 0 and not increases and not decreases
+        else f"Orion rotated {rotated_names} names"
+        if current_payload.get("strategy_slug") == "caerus_orion"
+        else f"{current_payload.get('strategy_name')} stable"
+        if rotated_names == 0 and not increases and not decreases
+        else f"{current_payload.get('strategy_name')} rotated {rotated_names} names"
+    )
+    return {
+        "strategy_name": current_payload.get("strategy_name"),
+        "strategy_slug": current_payload.get("strategy_slug"),
+        "adds": added,
+        "removes": removed,
+        "unchanged": unchanged,
+        "weight_changes": weight_changes,
+        "increases": increases,
+        "decreases": decreases,
+        "summary_metrics": {
+            "num_adds": len(added),
+            "num_removals": len(removed),
+            "num_unchanged": len(unchanged),
+            "turnover_proxy": turnover_proxy,
+        },
+        "summary": summary,
+    }
+
+
+def _delta_markdown_lines(delta_payload: dict | None) -> list[str]:
+    if not delta_payload:
+        return ["No prior day available for comparison."]
+    if delta_payload.get("status") == "NO_DATA":
+        previous = delta_payload.get("previous_date")
+        return [
+            f"- Previous trading day: {previous}" if previous else "- Previous trading day: None",
+            "- No market data available for this trade date.",
+            "- Current trade date has no market data, so no holdings delta was computed.",
+        ]
+    if delta_payload.get("status") == "NO_PRIOR":
+        previous = delta_payload.get("previous_date")
+        return [
+            f"- Previous trading day: {previous}" if previous else "- Previous trading day: None",
+            "- No prior day available for comparison.",
+        ]
+    lines = [f"- Previous available day: {delta_payload.get('previous_date')}"]
+    for slug in ("caerus_orion", "caerus_polaris", "caerus_lyra"):
+        item = (delta_payload.get("strategies") or {}).get(slug) or {}
+        lines.extend(
+            [
+                "",
+                f"### {item.get('strategy_name') or slug}",
+                f"- Adds: {', '.join(item.get('adds') or []) or 'None'}",
+                f"- Removes: {', '.join(item.get('removes') or []) or 'None'}",
+                f"- Increases: {_format_weight_moves(item.get('increases') or [], top_n=3)}",
+                f"- Decreases: {_format_weight_moves(item.get('decreases') or [], top_n=3)}",
+                f"- Summary: {item.get('summary') or 'No change summary available'}",
+            ]
+        )
+    return lines
+
+
+def _format_weight_moves(items: list[dict], *, top_n: int) -> str:
+    if not items:
+        return "None"
+    sliced = items[:top_n]
+    return ", ".join(f"{item['ticker']} ({item['delta_weight']:+.2%})" for item in sliced)
 
 
 def _load_broker_context(strategy_payloads: dict[str, dict]) -> dict:

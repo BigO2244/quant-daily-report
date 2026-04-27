@@ -9,28 +9,56 @@ import os
 import sys
 from pathlib import Path
 
+
+def _load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {}
+
+
+def _number_or_zero(value: object) -> float:
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def main() -> None:
     trade_date = os.environ.get("REPORT_DATE") or __import__("datetime").date.today().isoformat()
     payload_path = Path(f"outputs/precompute/{trade_date}/planned_execution_payload.json")
+    daily_snapshot_path = Path(f"outputs/precompute/{trade_date}/daily_snapshot.json")
 
     if not payload_path.exists():
         print(f"[ERROR] Precompute payload not found: {payload_path}")
         sys.exit(1)
 
-    p = json.loads(payload_path.read_text())
+    p = _load_json(payload_path)
+    daily_snapshot = _load_json(daily_snapshot_path)
+    market_analyzer = p.get("market_analyzer") or {}
+    regime_summary = daily_snapshot.get("regime_summary") or {}
 
     sells = [t for t in p.get("trades", []) if t["side"] == "SELL"]
     buys  = [t for t in p.get("trades", []) if t["side"] == "BUY"]
 
-    regime     = (p.get("market_analyzer") or {}).get("regime", "UNKNOWN")
-    vix        = (p.get("market_analyzer") or {}).get("vix", "?")
-    signal     = (p.get("market_analyzer") or {}).get("signal_bucket", "?")
-    equity     = p.get("equity", 0)
-    cash_pct   = p.get("achieved_cash_weight", 0) * 100
+    regime = (
+        regime_summary.get("composite_regime")
+        or market_analyzer.get("regime")
+        or "UNKNOWN"
+    )
+    signal = market_analyzer.get("signal_bucket", "?")
+    vix_value = market_analyzer.get("vix")
+    vix = f"{float(vix_value):.2f}" if isinstance(vix_value, (int, float)) else "UNAVAILABLE (degraded: VIX regime skipped)"
+    equity     = _number_or_zero(p.get("equity"))
+    cash_pct   = _number_or_zero(p.get("achieved_cash_weight")) * 100
     gross_exp  = float((p.get("risk_summary") or {}).get("Gross exposure (%)", "0%").strip("%"))
     positions  = (p.get("risk_summary") or {}).get("# positions", "?")
-    t_cap      = (p.get("risk_meta") or {}).get("turnover_cap", 0)
-    t_req      = (p.get("risk_meta") or {}).get("turnover_requested", 0)
+    t_cap      = _number_or_zero((p.get("risk_meta") or {}).get("turnover_cap"))
+    t_req      = _number_or_zero((p.get("risk_meta") or {}).get("turnover_requested"))
     t_scaled   = (p.get("risk_meta") or {}).get("turnover_scaled", False)
     t_scope    = str((p.get("risk_meta") or {}).get("turnover_cap_scope") or "").strip().lower()
     turnover_label = "Buy turnover" if t_scope == "buys_only" else "Turnover"
