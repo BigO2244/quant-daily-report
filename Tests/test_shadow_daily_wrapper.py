@@ -1,14 +1,58 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
+
+
+def _make_fake_venv(tmp_path: Path) -> Path:
+    venv = tmp_path / "fake_venv"
+    bin_dir = venv / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "activate").write_text("export PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n")
+    python = bin_dir / "python3"
+    python.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+trade_date=""
+output_dir=""
+for ((i=1; i <= $#; i++)); do
+    arg="${!i}"
+    next_index=$((i + 1))
+    next_value="${!next_index-}"
+    case "${arg}" in
+        --definitely-invalid-arg)
+            exit 2
+            ;;
+        --trade-date)
+            trade_date="${next_value}"
+            ;;
+        --output-dir)
+            output_dir="${next_value}"
+            ;;
+    esac
+done
+if [[ -z "${trade_date}" || -z "${output_dir}" ]]; then
+    exit 2
+fi
+dated_dir="${output_dir}/${trade_date}"
+mkdir -p "${dated_dir}"
+printf '# Shadow Comparison\\n\\n- Trade date: %s\\n' "${trade_date}" > "${dated_dir}/comparison.md"
+printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/comparison.json"
+printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/delta.json"
+printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/shadow_evaluation.json"
+exit 0
+"""
+    )
+    python.chmod(0o755)
+    return venv
 
 
 def test_wrapper_returns_success_even_when_shadow_runner_fails(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
+    fake_venv = _make_fake_venv(tmp_path)
     log_dir = repo_root / "logs"
     trade_date = "2023-04-03"
+    (log_dir / f"shadow_{trade_date}.log").unlink(missing_ok=True)
     result = subprocess.run(
         [
             "bash",
@@ -18,6 +62,10 @@ def test_wrapper_returns_success_even_when_shadow_runner_fails(tmp_path: Path) -
             "--definitely-invalid-arg",
         ],
         cwd=repo_root,
+        env={
+            "CAERUS_VENV_DIR": str(fake_venv),
+            "HOME": str(tmp_path),
+        },
         capture_output=True,
         text=True,
         check=True,
@@ -30,8 +78,9 @@ def test_wrapper_returns_success_even_when_shadow_runner_fails(tmp_path: Path) -
 
 def test_wrapper_smoke_writes_expected_log_lines(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    panel_src = repo_root / "outputs/research/flow_detection_v1/price_panel.parquet"
+    fake_venv = _make_fake_venv(tmp_path)
     trade_date = "2026-04-21"
+    (repo_root / "logs" / f"shadow_{trade_date}.log").unlink(missing_ok=True)
     out_dir = tmp_path / "shadow_out"
     result = subprocess.run(
         [
@@ -39,19 +88,30 @@ def test_wrapper_smoke_writes_expected_log_lines(tmp_path: Path) -> None:
             "scripts/run_shadow_candidates_daily.sh",
             "--trade-date",
             trade_date,
-            "--price-cache-path",
-            str(panel_src),
             "--output-dir",
             str(out_dir),
         ],
         cwd=repo_root,
+        env={
+            "CAERUS_VENV_DIR": str(fake_venv),
+            "HOME": str(tmp_path),
+        },
         capture_output=True,
         text=True,
         check=True,
     )
     assert result.returncode == 0
     assert (out_dir / trade_date / "comparison.json").exists()
+    latest_dir = out_dir / "latest"
+    assert (latest_dir / "comparison.md").exists()
+    assert (latest_dir / "comparison.json").exists()
+    assert (latest_dir / "delta.json").exists()
+    assert (latest_dir / "shadow_evaluation.json").exists()
+    assert trade_date in (latest_dir / "comparison.md").read_text()
     log_path = repo_root / "logs" / f"shadow_{trade_date}.log"
     text = log_path.read_text()
     assert f"[SHADOW] start trade_date={trade_date}" in text
     assert f"[SHADOW] wrote {out_dir}/{trade_date}/..." in text
+    assert f"[SHADOW] latest artifacts published to {latest_dir}/" in text
+    assert "[SHADOW] desktop path unavailable; latest artifacts published to" in text
+    assert "[SHADOW] updated Desktop Orion.md" not in text
