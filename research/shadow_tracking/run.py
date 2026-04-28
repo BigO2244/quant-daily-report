@@ -64,10 +64,9 @@ def main(argv: list[str] | None = None) -> int:
             delta_payload=delta_payload,
             panel_meta=panel_meta,
         )
+        (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2))
         (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2))
         (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2))
-        (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload))
-        (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2))
         shadow_performance = build_shadow_performance_payload(
             panel=panel,
             output_root=output_root,
@@ -81,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[SHADOW] NAV updated")
         shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
         (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
+        (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload, dated_dir=dated_dir))
         print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
         print("[SHADOW] delta status: NO_PRIOR")
         print(f"[SHADOW] wrote {dated_dir}/...")
@@ -118,7 +118,6 @@ def main(argv: list[str] | None = None) -> int:
     comparison_payload = build_comparison_payload(strategy_payloads, trade_date=trade_date, delta_payload=delta_payload)
     (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2))
     (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2))
-    (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload))
     shadow_performance = build_shadow_performance_payload(
         panel=panel,
         output_root=output_root,
@@ -132,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     print("[SHADOW] NAV updated")
     shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
     (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
+    (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload, dated_dir=dated_dir))
     print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
     print(f"[SHADOW] wrote {dated_dir}/...")
 
@@ -297,9 +297,10 @@ def compare_two_strategies(left: dict, right: dict) -> dict:
     }
 
 
-def build_comparison_markdown(comparison: dict) -> str:
+def build_comparison_markdown(comparison: dict, *, dated_dir: Path | None = None) -> str:
     strategies = comparison["strategies"]
-    delta = comparison.get("delta") or {}
+    delta = _load_markdown_sidecar(dated_dir, "delta.json") or comparison.get("delta") or {}
+    evaluation = _load_markdown_sidecar(dated_dir, "shadow_evaluation.json")
     delta_status = delta.get("status") or "NO_PRIOR"
     lines = [
         "# Shadow Candidates Comparison",
@@ -307,12 +308,22 @@ def build_comparison_markdown(comparison: dict) -> str:
         f"## Trade Date",
         f"- {comparison['trade_date']}",
         "",
+    ]
+    lines.extend(_executive_summary_lines(evaluation=evaluation, delta=delta))
+    lines.extend(["", "## Performance Scoreboard"])
+    lines.extend(_performance_scoreboard_lines(evaluation))
+    lines.extend(["", "## Relative Performance"])
+    lines.extend(_relative_performance_lines(evaluation))
+    lines.extend(["", "## Chain Health"])
+    lines.extend(_chain_health_lines(evaluation=evaluation, delta=delta))
+    lines.extend([
+        "",
         "## Delta Artifact",
         "- File: delta.json",
         f"- Status: {delta_status}",
         "",
         "## Day-over-Day Changes",
-    ]
+    ])
     lines.extend(_delta_markdown_lines(delta))
     if comparison.get("status") == "NO_DATA":
         lines.extend(
@@ -361,6 +372,268 @@ def build_comparison_markdown(comparison: dict) -> str:
             )
     lines.extend(["", "## Benchmark Note", f"- Benchmark symbol: {comparison['benchmark_symbol']}"])
     return "\n".join(lines) + "\n"
+
+
+def _load_markdown_sidecar(dated_dir: Path | None, filename: str) -> dict | None:
+    if dated_dir is None:
+        return None
+    return safe_read_json(dated_dir / filename)
+
+
+def _model_strategy_slugs() -> tuple[str, ...]:
+    return ("caerus_polaris", "caerus_orion", "caerus_lyra")
+
+
+def _scoreboard_slugs(evaluation: dict | None) -> list[str]:
+    strategies = (evaluation or {}).get("strategies") or {}
+    slugs = [slug for slug in _model_strategy_slugs() if slug in strategies]
+    if BENCHMARK_SLUG in strategies:
+        slugs.append(BENCHMARK_SLUG)
+    return slugs
+
+
+def _strategy_label(slug: str, payload: dict | None = None) -> str:
+    if payload and payload.get("strategy_name"):
+        return str(payload["strategy_name"])
+    return {
+        "caerus_polaris": "Caerus Polaris",
+        "caerus_orion": "Caerus Orion",
+        "caerus_lyra": "Caerus Lyra",
+        BENCHMARK_SLUG: "SPY",
+    }.get(slug, slug)
+
+
+def _as_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_pct(value: object) -> str:
+    number = _as_float(value)
+    return "N/A" if number is None else f"{number:.2%}"
+
+
+def _fmt_signed_pct(value: object) -> str:
+    number = _as_float(value)
+    return "N/A" if number is None else f"{number:+.2%}"
+
+
+def _fmt_decimal(value: object) -> str:
+    number = _as_float(value)
+    return "N/A" if number is None else f"{number:.2f}"
+
+
+def _fmt_int(value: object) -> str:
+    if value is None:
+        return "N/A"
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _evaluation_strategies(evaluation: dict | None) -> dict:
+    return (evaluation or {}).get("strategies") or {}
+
+
+def _model_metrics(evaluation: dict | None) -> dict[str, dict]:
+    strategies = _evaluation_strategies(evaluation)
+    return {slug: strategies.get(slug) or {} for slug in _model_strategy_slugs()}
+
+
+def _min_valid_days(evaluation: dict | None) -> int | None:
+    metrics = _model_metrics(evaluation)
+    counts = [
+        int(payload.get("rolling_count_of_valid_days") or 0)
+        for payload in metrics.values()
+        if payload
+    ]
+    return min(counts) if counts else None
+
+
+def _best_strategy(evaluation: dict | None, field: str) -> tuple[str, dict] | None:
+    candidates = []
+    for slug, payload in _model_metrics(evaluation).items():
+        value = _as_float(payload.get(field))
+        if value is not None:
+            candidates.append((value, slug, payload))
+    if not candidates:
+        return None
+    _, slug, payload = max(candidates, key=lambda item: item[0])
+    return slug, payload
+
+
+def _cum_diff(evaluation: dict | None, slug: str, baseline_slug: str = "caerus_polaris") -> float | None:
+    strategies = _evaluation_strategies(evaluation)
+    left = _as_float((strategies.get(slug) or {}).get("cumulative_return"))
+    baseline = _as_float((strategies.get(baseline_slug) or {}).get("cumulative_return"))
+    if left is None or baseline is None:
+        return None
+    return left - baseline
+
+
+def _excess_vs_spy(evaluation: dict | None, slug: str) -> float | None:
+    return _as_float((_evaluation_strategies(evaluation).get(slug) or {}).get("excess_return_vs_spy"))
+
+
+def _executive_summary_lines(*, evaluation: dict | None, delta: dict) -> list[str]:
+    lines = ["## Executive Summary"]
+    if evaluation is None:
+        return lines + [
+            "- Best performer today: N/A - performance scoreboard unavailable: shadow_evaluation.json missing",
+            "- Best cumulative performer: N/A - performance scoreboard unavailable: shadow_evaluation.json missing",
+            "- Polaris vs SPY: N/A - shadow_evaluation.json missing",
+            "- Orion vs Polaris: N/A - shadow_evaluation.json missing",
+            "- Lyra vs Polaris: N/A - shadow_evaluation.json missing",
+            f"- Chain health: UNKNOWN; delta status is {delta.get('status') or 'NO_PRIOR'}",
+            "- Operator conclusion: Do not use shadow performance for decisions until shadow_evaluation.json is generated.",
+        ]
+
+    if BENCHMARK_SLUG not in _evaluation_strategies(evaluation):
+        lines.append("- Warning: SPY benchmark unavailable in evaluation artifact")
+
+    min_valid = _min_valid_days(evaluation)
+    best_today = _best_strategy(evaluation, "daily_return")
+    best_cumulative = _best_strategy(evaluation, "cumulative_return")
+    initializing = min_valid is None or min_valid < 2
+    if best_today:
+        _, payload = best_today
+        lines.append(f"- Best performer today: {_strategy_label('', payload)} ({_fmt_pct(payload.get('daily_return'))})")
+    else:
+        lines.append("- Best performer today: N/A")
+    if best_cumulative:
+        _, payload = best_cumulative
+        suffix = " - INITIALIZING; performance comparison is not yet meaningful" if initializing else ""
+        lines.append(f"- Best cumulative performer: {_strategy_label('', payload)} ({_fmt_pct(payload.get('cumulative_return'))}){suffix}")
+    else:
+        lines.append("- Best cumulative performer: N/A")
+    lines.append(f"- Polaris vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_polaris'))} excess return")
+    lines.append(f"- Orion vs Polaris: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_orion'))} cumulative return difference")
+    lines.append(f"- Lyra vs Polaris: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_lyra'))} cumulative return difference")
+    lines.append(f"- Chain health: {_chain_health_summary(evaluation=evaluation, delta=delta)}")
+    if initializing:
+        lines.append(
+            f"- Operator conclusion: INITIALIZING; minimum valid days is {_fmt_int(min_valid)}. One valid day cannot establish a performance trend."
+        )
+    else:
+        leader = _strategy_label("", best_cumulative[1]) if best_cumulative else "N/A"
+        lines.append(f"- Operator conclusion: Decision-useful chain; {leader} leads by cumulative return.")
+    return lines
+
+
+def _performance_scoreboard_lines(evaluation: dict | None) -> list[str]:
+    if evaluation is None:
+        return ["Performance scoreboard unavailable: shadow_evaluation.json missing"]
+    strategies = _evaluation_strategies(evaluation)
+    lines = [
+        "| Strategy | Data Status | Chain Status | Valid Days | Daily Return | Cumulative Return | Excess vs SPY | Vol Ann | Max Drawdown | Avg Turnover | Top-3 Conc. | Constituent Changes |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for slug in _scoreboard_slugs(evaluation):
+        payload = strategies.get(slug) or {}
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _strategy_label(slug, payload),
+                    str(payload.get("data_status") or "N/A"),
+                    str(payload.get("status") or "N/A"),
+                    _fmt_int(payload.get("rolling_count_of_valid_days")),
+                    _fmt_pct(payload.get("daily_return")),
+                    _fmt_pct(payload.get("cumulative_return")),
+                    _fmt_pct(payload.get("excess_return_vs_spy")),
+                    _fmt_pct(payload.get("realized_volatility_ann")),
+                    _fmt_pct(payload.get("max_drawdown")),
+                    _fmt_decimal(payload.get("avg_turnover")),
+                    _fmt_pct(payload.get("avg_top_3_concentration")),
+                    _fmt_int(payload.get("constituent_change_count")),
+                ]
+            )
+            + " |"
+        )
+    if BENCHMARK_SLUG not in strategies:
+        lines.append("| SPY | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |")
+        lines.append("")
+        lines.append("SPY benchmark unavailable in evaluation artifact")
+    return lines
+
+
+def _relative_performance_lines(evaluation: dict | None) -> list[str]:
+    if evaluation is None:
+        return ["- Status: UNKNOWN - shadow_evaluation.json missing"]
+    min_valid = _min_valid_days(evaluation)
+    status = "INITIALIZING" if min_valid is None or min_valid < 2 else "DECISION_USEFUL"
+    lines = [
+        f"- Status: {status}",
+        f"- Orion minus Polaris cumulative return: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_orion'))}",
+        f"- Lyra minus Polaris cumulative return: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_lyra'))}",
+        f"- Polaris excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_polaris'))}",
+        f"- Orion excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_orion'))}",
+        f"- Lyra excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_lyra'))}",
+    ]
+    if status == "INITIALIZING":
+        lines.append("- Diagnosis: INITIALIZING; one valid day cannot establish performance trend.")
+    return lines
+
+
+def _chain_health_lines(*, evaluation: dict | None, delta: dict) -> list[str]:
+    if evaluation is None:
+        return [
+            "- Minimum valid days: N/A",
+            "- Any NO_DATA: UNKNOWN",
+            "- Any BROKEN_CHAIN: UNKNOWN",
+            f"- Delta status: {delta.get('status') or 'NO_PRIOR'}",
+            "- Diagnosis: shadow_evaluation.json is missing; chain health cannot be trusted.",
+        ]
+    strategies = _model_metrics(evaluation)
+    min_valid = _min_valid_days(evaluation)
+    any_no_data = any(payload.get("data_status") == "NO_DATA" for payload in strategies.values())
+    any_broken = any(payload.get("status") == "BROKEN_CHAIN" for payload in strategies.values())
+    delta_status = delta.get("status") or "NO_PRIOR"
+    return [
+        f"- Minimum valid days: {_fmt_int(min_valid)}",
+        f"- Any NO_DATA: {'YES' if any_no_data else 'NO'}",
+        f"- Any BROKEN_CHAIN: {'YES' if any_broken else 'NO'}",
+        f"- Delta status: {delta_status}",
+        f"- Diagnosis: {_chain_health_diagnosis(evaluation=evaluation, delta=delta)}",
+    ]
+
+
+def _chain_health_summary(*, evaluation: dict | None, delta: dict) -> str:
+    if evaluation is None:
+        return f"UNKNOWN; delta status is {delta.get('status') or 'NO_PRIOR'}"
+    min_valid = _min_valid_days(evaluation)
+    strategies = _model_metrics(evaluation)
+    any_no_data = any(payload.get("data_status") == "NO_DATA" for payload in strategies.values())
+    any_broken = any(payload.get("status") == "BROKEN_CHAIN" for payload in strategies.values())
+    delta_status = delta.get("status") or "NO_PRIOR"
+    state = "BROKEN" if any_broken else "NO_DATA" if any_no_data else "OK"
+    return f"{state}; minimum valid days={_fmt_int(min_valid)}; delta status={delta_status}"
+
+
+def _chain_health_diagnosis(*, evaluation: dict, delta: dict) -> str:
+    strategies = _model_metrics(evaluation)
+    min_valid = _min_valid_days(evaluation)
+    any_no_data = any(payload.get("data_status") == "NO_DATA" for payload in strategies.values())
+    any_broken = any(payload.get("status") == "BROKEN_CHAIN" for payload in strategies.values())
+    delta_status = delta.get("status") or "NO_PRIOR"
+    if any_broken:
+        return "BROKEN_CHAIN detected; do not trust cumulative shadow performance until prior artifacts are repaired."
+    if any_no_data:
+        return "NO_DATA detected; the price/signal panel did not support at least one model strategy for this date."
+    if min_valid is None or min_valid < 2:
+        if delta_status == "NO_PRIOR":
+            return "INITIALIZING; current artifacts are valid, but prior-day snapshots are missing so trend and delta comparisons are not decision-useful yet."
+        return "INITIALIZING; current artifacts are valid, but fewer than two valid days are available."
+    if delta_status == "NO_PRIOR":
+        return "Performance chain has multiple valid days, but day-over-day holdings delta lacks prior snapshots."
+    if delta_status == "NO_DATA":
+        return "Performance chain has data, but delta artifact reports NO_DATA for holdings comparison."
+    return "Healthy; cumulative performance and day-over-day delta are available."
 
 
 def _pairwise_lines(comparison: dict, left_slug: str, right_slug: str) -> list[str]:

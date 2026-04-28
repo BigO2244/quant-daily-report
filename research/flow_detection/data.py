@@ -55,6 +55,15 @@ def standardize_panel(df: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+def filter_panel_window(df: pd.DataFrame, *, start_date: str, end_date: str) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df[
+        (df["date"] >= pd.Timestamp(start_date))
+        & (df["date"] <= pd.Timestamp(end_date))
+    ].copy().reset_index(drop=True)
+
+
 def load_local_price_panel(
     *,
     symbols: Sequence[str] | None = None,
@@ -177,11 +186,14 @@ def ensure_price_panel(
     chunk_size: int = 25,
 ) -> tuple[pd.DataFrame, dict]:
     symbol_set = {str(sym).upper() for sym in symbols}
+    raw_cache_panel = pd.DataFrame()
     cache_panel = pd.DataFrame()
     cache_source = None
     cache_path_obj = Path(cache_path) if cache_path else None
     if cache_path_obj and cache_path_obj.exists():
-        cache_panel = standardize_panel(pd.read_parquet(cache_path_obj))
+        raw_cache_panel = standardize_panel(pd.read_parquet(cache_path_obj))
+        cache_panel = filter_panel_window(raw_cache_panel, start_date=start_date, end_date=end_date)
+        cache_panel = cache_panel[cache_panel["ticker"].isin(symbol_set)].copy()
         cache_source = str(cache_path_obj)
 
     local_panel = pd.DataFrame()
@@ -191,6 +203,7 @@ def ensure_price_panel(
     panel = pd.concat([cache_panel, local_panel], ignore_index=True) if not cache_panel.empty or not local_panel.empty else pd.DataFrame()
     if not panel.empty:
         panel = panel.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
+        panel = filter_panel_window(panel, start_date=start_date, end_date=end_date)
         panel = panel.reset_index(drop=True)
 
     coverage = _coverage_by_symbol(panel)
@@ -214,7 +227,10 @@ def ensure_price_panel(
         panel = panel.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last").reset_index(drop=True)
         if cache_path_obj is not None:
             cache_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            panel.to_parquet(cache_path_obj, index=False)
+            cache_write = pd.concat([raw_cache_panel, fetched], ignore_index=True) if not raw_cache_panel.empty else fetched
+            cache_write = cache_write.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last").reset_index(drop=True)
+            cache_write.to_parquet(cache_path_obj, index=False)
+        panel = filter_panel_window(panel, start_date=start_date, end_date=end_date)
 
     meta = {
         "requested_start_date": start_date,

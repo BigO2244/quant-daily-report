@@ -9,6 +9,7 @@ import pandas as pd
 
 from research.flow_detection.analysis import attach_forward_returns
 from research.flow_detection.backtest import FlowBacktestConfig, run_strategy_backtest
+from research.flow_detection.data import ensure_price_panel
 from research.flow_detection.random_windows import sample_randomized_windows
 from research.flow_detection.run import _write_artifacts, build_summary
 from research.flow_detection.signals import build_flow_signals
@@ -123,6 +124,28 @@ def test_backtest_summary_includes_benchmark_comparison() -> None:
     baseline = run_strategy_backtest(signals, strategy="baseline", config=config)
     assert "benchmark_cumulative_return" in baseline["summary"]
     assert "excess_return_vs_spy" in baseline["summary"]
+
+
+def test_ensure_price_panel_filters_cache_to_requested_window(tmp_path: Path) -> None:
+    panel = _make_panel()
+    cache_path = tmp_path / "price_panel.parquet"
+    panel.to_parquet(cache_path, index=False)
+
+    filtered, meta = ensure_price_panel(
+        symbols=["AAA", "SPY"],
+        start_date="2024-06-03",
+        end_date="2024-06-10",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=False,
+    )
+
+    assert not filtered.empty
+    assert set(filtered["ticker"].unique()) == {"AAA", "SPY"}
+    assert filtered["date"].min() >= pd.Timestamp("2024-06-03")
+    assert filtered["date"].max() <= pd.Timestamp("2024-06-10")
+    assert meta["coverage"]["start_date"] == "2024-06-03"
+    assert meta["coverage"]["end_date"] == "2024-06-10"
 
 
 def test_cli_smoke(tmp_path: Path, monkeypatch) -> None:

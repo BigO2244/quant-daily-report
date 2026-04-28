@@ -11,6 +11,7 @@ import pandas as pd
 
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.shadow_tracking.run import (
+    build_comparison_markdown,
     compute_returns_for_trade_date,
     compute_strategy_delta,
     find_previous_shadow_date,
@@ -149,6 +150,140 @@ def test_trade_date_helpers_are_explicit() -> None:
     assert trade_date_has_data(signals, trade_date="2023-03-31") is True
     assert trade_date_has_data(signals, trade_date="2023-04-02") is False
     assert find_previous_trading_date(signals, trade_date="2023-03-31") == "2023-03-30"
+
+
+def test_comparison_markdown_renders_decision_grade_summary(tmp_path: Path) -> None:
+    dated_dir = tmp_path / "2026-04-24"
+    dated_dir.mkdir()
+    comparison = {
+        "trade_date": "2026-04-24",
+        "benchmark_symbol": "SPY",
+        "delta": {"trade_date": "2026-04-24", "previous_date": "2026-04-23", "status": "OK", "strategies": {}},
+        "strategies": {
+            "caerus_polaris": {
+                "strategy_name": "Caerus Polaris",
+                "expected_turnover": 0.10,
+                "estimated_holding_period_days": 20.0,
+                "weight_concentration": {"max_weight": 0.10, "top3_concentration": 0.30},
+                "holdings": [{"ticker": "AAA", "target_weight": 0.10}],
+            },
+            "caerus_orion": {
+                "strategy_name": "Caerus Orion",
+                "expected_turnover": 0.20,
+                "estimated_holding_period_days": 30.0,
+                "weight_concentration": {"max_weight": 0.20, "top3_concentration": 0.60},
+                "holdings": [{"ticker": "BBB", "target_weight": 0.20}],
+            },
+            "caerus_lyra": {
+                "strategy_name": "Caerus Lyra",
+                "expected_turnover": 0.30,
+                "estimated_holding_period_days": 40.0,
+                "weight_concentration": {"max_weight": 0.20, "top3_concentration": 0.60},
+                "holdings": [{"ticker": "CCC", "target_weight": 0.20}],
+            },
+        },
+        "pairwise_overlap": [
+            {
+                "left_slug": "caerus_polaris",
+                "right_slug": "caerus_orion",
+                "overlap_weight_pct": 0.5,
+                "left_unique_names": ["AAA"],
+                "right_unique_names": ["BBB"],
+            },
+            {
+                "left_slug": "caerus_polaris",
+                "right_slug": "caerus_lyra",
+                "overlap_weight_pct": 0.4,
+                "left_unique_names": ["AAA"],
+                "right_unique_names": ["CCC"],
+            },
+            {
+                "left_slug": "caerus_orion",
+                "right_slug": "caerus_lyra",
+                "overlap_weight_pct": 0.8,
+                "left_unique_names": ["BBB"],
+                "right_unique_names": ["CCC"],
+            },
+        ],
+        "broker_context": {},
+    }
+    evaluation = {
+        "trade_date": "2026-04-24",
+        "benchmark_symbol": "SPY",
+        "strategies": {
+            "caerus_polaris": {
+                "strategy_name": "Caerus Polaris",
+                "status": "OK",
+                "data_status": "OK",
+                "return_convention": "weights_as_of_t",
+                "daily_return": 0.01,
+                "cumulative_return": 0.03,
+                "excess_return_vs_spy": 0.01,
+                "rolling_count_of_valid_days": 3,
+                "realized_volatility_ann": 0.15,
+                "max_drawdown": -0.02,
+                "avg_turnover": 0.10,
+                "avg_top_3_concentration": 0.30,
+                "constituent_change_count": 2,
+            },
+            "caerus_orion": {
+                "strategy_name": "Caerus Orion",
+                "status": "OK",
+                "data_status": "OK",
+                "return_convention": "weights_as_of_t",
+                "daily_return": 0.02,
+                "cumulative_return": 0.05,
+                "excess_return_vs_spy": 0.03,
+                "rolling_count_of_valid_days": 3,
+                "realized_volatility_ann": 0.18,
+                "max_drawdown": -0.01,
+                "avg_turnover": 0.20,
+                "avg_top_3_concentration": 0.60,
+                "constituent_change_count": 4,
+            },
+            "caerus_lyra": {
+                "strategy_name": "Caerus Lyra",
+                "status": "OK",
+                "data_status": "OK",
+                "return_convention": "weights_as_of_t",
+                "daily_return": -0.01,
+                "cumulative_return": 0.01,
+                "excess_return_vs_spy": -0.01,
+                "rolling_count_of_valid_days": 3,
+                "realized_volatility_ann": 0.20,
+                "max_drawdown": -0.04,
+                "avg_turnover": 0.30,
+                "avg_top_3_concentration": 0.60,
+                "constituent_change_count": 6,
+            },
+            "spy_benchmark": {
+                "strategy_name": "SPY",
+                "status": "OK",
+                "data_status": "OK",
+                "return_convention": "weights_as_of_t",
+                "daily_return": 0.005,
+                "cumulative_return": 0.02,
+                "excess_return_vs_spy": 0.0,
+                "rolling_count_of_valid_days": 3,
+                "realized_volatility_ann": 0.12,
+                "max_drawdown": -0.01,
+            },
+        },
+    }
+    (dated_dir / "delta.json").write_text(json.dumps(comparison["delta"]))
+    (dated_dir / "shadow_evaluation.json").write_text(json.dumps(evaluation))
+
+    markdown = build_comparison_markdown(comparison, dated_dir=dated_dir)
+
+    assert markdown.index("## Executive Summary") < markdown.index("## Delta Artifact")
+    assert "- Best performer today: Caerus Orion (2.00%)" in markdown
+    assert "- Best cumulative performer: Caerus Orion (5.00%)" in markdown
+    assert "- Orion vs Polaris: +2.00% cumulative return difference" in markdown
+    assert "| Caerus Orion | OK | OK | 3 | 2.00% | 5.00% | 3.00% | 18.00% | -1.00% | 0.20 | 60.00% | 4 |" in markdown
+    assert "- Status: DECISION_USEFUL" in markdown
+    assert "- Delta status: OK" in markdown
+    assert "- Diagnosis: Healthy; cumulative performance and day-over-day delta are available." in markdown
+    assert "## Polaris vs Orion" in markdown
 
 
 def test_trade_date_helpers_handle_empty_signals_frame() -> None:
