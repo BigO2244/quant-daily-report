@@ -148,6 +148,115 @@ def test_ensure_price_panel_filters_cache_to_requested_window(tmp_path: Path) ->
     assert meta["coverage"]["end_date"] == "2024-06-10"
 
 
+def test_ensure_price_panel_downloads_only_missing_tail_for_stale_cache(tmp_path: Path, monkeypatch) -> None:
+    panel = _make_panel()
+    stale = panel[panel["date"] <= pd.Timestamp("2024-06-28")].copy()
+    cache_path = tmp_path / "price_panel.parquet"
+    stale.to_parquet(cache_path, index=False)
+    calls = []
+
+    def fake_download_price_panel(*, symbols, start_date, end_date, chunk_size=25, pause_seconds=0.0):
+        calls.append({"symbols": list(symbols), "start_date": start_date, "end_date": end_date})
+        return panel[
+            (panel["ticker"].isin(symbols))
+            & (panel["date"] >= pd.Timestamp(start_date))
+            & (panel["date"] <= pd.Timestamp(end_date))
+        ].copy()
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", fake_download_price_panel)
+
+    filtered, meta = ensure_price_panel(
+        symbols=["AAA", "BBB", "SPY"],
+        start_date="2024-01-01",
+        end_date="2024-07-05",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+    )
+
+    assert calls == [
+        {
+            "symbols": ["AAA", "BBB", "SPY"],
+            "start_date": "2024-06-29",
+            "end_date": "2024-07-05",
+        }
+    ]
+    assert meta["download_start_date"] == "2024-06-29"
+    assert filtered["date"].max() == pd.Timestamp("2024-07-05")
+
+
+def test_ensure_price_panel_splits_missing_and_stale_download_windows(tmp_path: Path, monkeypatch) -> None:
+    panel = _make_panel()
+    stale = panel[
+        (panel["ticker"].isin(["AAA", "SPY"]))
+        & (panel["date"] <= pd.Timestamp("2024-06-28"))
+    ].copy()
+    cache_path = tmp_path / "price_panel.parquet"
+    stale.to_parquet(cache_path, index=False)
+    calls = []
+
+    def fake_download_price_panel(*, symbols, start_date, end_date, chunk_size=25, pause_seconds=0.0):
+        calls.append({"symbols": list(symbols), "start_date": start_date, "end_date": end_date})
+        return panel[
+            (panel["ticker"].isin(symbols))
+            & (panel["date"] >= pd.Timestamp(start_date))
+            & (panel["date"] <= pd.Timestamp(end_date))
+        ].copy()
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", fake_download_price_panel)
+
+    filtered, meta = ensure_price_panel(
+        symbols=["AAA", "BBB", "SPY"],
+        start_date="2024-01-01",
+        end_date="2024-07-05",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+    )
+
+    assert calls == [
+        {"symbols": ["BBB"], "start_date": "2024-01-01", "end_date": "2024-07-05"},
+        {"symbols": ["AAA", "SPY"], "start_date": "2024-06-29", "end_date": "2024-07-05"},
+    ]
+    assert meta["download_start_by_symbol"]["BBB"] == "2024-01-01"
+    assert meta["download_start_by_symbol"]["AAA"] == "2024-06-29"
+    assert set(filtered["ticker"].unique()) == {"AAA", "BBB", "SPY"}
+
+
+def test_ensure_price_panel_records_failed_symbol_without_crashing(tmp_path: Path, monkeypatch) -> None:
+    panel = _make_panel()
+    calls = []
+
+    def fake_download_price_panel(*, symbols, start_date, end_date, chunk_size=25, pause_seconds=0.0):
+        symbols = list(symbols)
+        calls.append({"symbols": symbols, "start_date": start_date, "end_date": end_date})
+        if "MMC" in symbols:
+            raise RuntimeError("MMC failed download")
+        return panel[
+            (panel["ticker"].isin(symbols))
+            & (panel["date"] >= pd.Timestamp(start_date))
+            & (panel["date"] <= pd.Timestamp(end_date))
+        ].copy()
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", fake_download_price_panel)
+
+    filtered, meta = ensure_price_panel(
+        symbols=["AAA", "MMC", "SPY"],
+        start_date="2024-01-01",
+        end_date="2024-07-05",
+        cache_path=tmp_path / "price_panel.parquet",
+        prefer_local=False,
+        allow_download=True,
+    )
+
+    assert {"AAA", "SPY"} <= set(filtered["ticker"].unique())
+    assert "MMC" in meta["download_failed_symbols"]
+    assert "MMC failed download" in meta["download_errors"]["MMC"]
+    assert meta["download_start_date"] == "2024-01-01"
+    assert calls[0]["symbols"] == ["AAA", "MMC", "SPY"]
+    assert ["MMC"] in [call["symbols"] for call in calls]
+
+
 def test_cli_smoke(tmp_path: Path, monkeypatch) -> None:
     panel = _make_panel()
     panel_path = tmp_path / "price_panel.parquet"

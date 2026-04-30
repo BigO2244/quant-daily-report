@@ -214,14 +214,85 @@ def ensure_price_panel(
     )
     needs_download = allow_download and (missing_symbols or incomplete_symbols)
 
+    fetched_frames: list[pd.DataFrame] = []
     fetched = pd.DataFrame()
+    download_start_by_symbol: dict[str, str] = {}
+    download_start_date: str | None = None
+    download_failed_symbols: list[str] = []
+    download_errors: dict[str, str] = {}
     if needs_download:
         download_symbols = sorted(set(missing_symbols + incomplete_symbols))
-        fetched = download_price_panel(
-            symbols=download_symbols,
-            start_date=start_date,
-            end_date=end_date,
-            chunk_size=chunk_size,
+        # Build per-symbol start dates: missing symbols need full history;
+        # incomplete symbols can tail from their own max_date + 1 day.
+        download_start_by_symbol = {
+            sym: str(pd.Timestamp(start_date).date()) if sym in missing_symbols
+            else str(max(pd.Timestamp(start_date), coverage[sym]["max_date"] + pd.Timedelta(days=1)).date())
+            for sym in download_symbols
+        }
+        download_start_date = min(download_start_by_symbol.values()) if download_start_by_symbol else None
+
+        def fetch_group(group_symbols: Sequence[str], group_start_date: str) -> pd.DataFrame:
+            try:
+                frame = download_price_panel(
+                    symbols=group_symbols,
+                    start_date=group_start_date,
+                    end_date=end_date,
+                    chunk_size=chunk_size,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[FLOW] Download group failed; retrying symbols individually: symbols=%s error=%s",
+                    ",".join(group_symbols),
+                    exc,
+                )
+                frames: list[pd.DataFrame] = []
+                for sym in group_symbols:
+                    try:
+                        single = download_price_panel(
+                            symbols=[sym],
+                            start_date=group_start_date,
+                            end_date=end_date,
+                            chunk_size=1,
+                        )
+                    except Exception as single_exc:
+                        download_failed_symbols.append(str(sym).upper())
+                        download_errors[str(sym).upper()] = str(single_exc)
+                        logger.warning("[FLOW] Download failed for symbol=%s: %s", sym, single_exc)
+                        continue
+                    if single.empty:
+                        download_failed_symbols.append(str(sym).upper())
+                        download_errors[str(sym).upper()] = "empty_download"
+                    else:
+                        frames.append(single)
+                return (
+                    pd.concat(frames, ignore_index=True)
+                    if frames
+                    else pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
+                )
+            present = {str(sym).upper() for sym in frame["ticker"].unique()} if not frame.empty and "ticker" in frame.columns else set()
+            for sym in group_symbols:
+                sym_upper = str(sym).upper()
+                if sym_upper not in present:
+                    download_failed_symbols.append(sym_upper)
+                    download_errors[sym_upper] = "empty_download"
+            return frame
+
+        if missing_symbols:
+            fetched_frames.append(fetch_group(missing_symbols, start_date))
+        # Group incomplete symbols by their individual tail-start date to avoid
+        # leaving gaps when stale symbols have differing max_dates.
+        if incomplete_symbols:
+            groups: dict[str, list[str]] = {}
+            for sym in incomplete_symbols:
+                tail_start = download_start_by_symbol[sym]
+                groups.setdefault(tail_start, []).append(sym)
+            for tail_start, group_syms in groups.items():
+                fetched_frames.append(fetch_group(group_syms, tail_start))
+        download_failed_symbols = sorted(set(download_failed_symbols))
+        fetched = (
+            pd.concat([frame for frame in fetched_frames if not frame.empty], ignore_index=True)
+            if any(not frame.empty for frame in fetched_frames)
+            else pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
         )
         panel = pd.concat([panel, fetched], ignore_index=True) if not panel.empty else fetched
         panel = panel.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last").reset_index(drop=True)
@@ -238,6 +309,10 @@ def ensure_price_panel(
         "symbols_requested": len(symbol_set),
         "coverage": panel_coverage(panel).__dict__,
         "download_performed": bool(needs_download),
+        "download_start_date": str(download_start_date) if needs_download else None,
+        "download_start_by_symbol": download_start_by_symbol if needs_download else {},
+        "download_failed_symbols": download_failed_symbols,
+        "download_errors": download_errors,
         "cache_path": str(cache_path_obj) if cache_path_obj else None,
         "local_sources": [str(path) for path in DEFAULT_LOCAL_PANEL_PATHS if path.exists()],
         "cache_source": cache_source,
