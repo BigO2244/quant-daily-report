@@ -1,0 +1,451 @@
+from __future__ import annotations
+
+import argparse
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+STATUS_ORDER = {"GREEN": 0, "YELLOW": 1, "RED": 2}
+RECOMMENDED_ACTIONS = {
+    "GREEN": "HOLD_NO_ACTION",
+    "YELLOW": "HOLD_MONITOR",
+    "RED": "INVESTIGATE_BEFORE_TRADING_CHANGES",
+}
+SHADOW_STRATEGIES = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    name: str
+    status: str
+    reason_codes: list[str]
+    summary: str
+    evidence_paths: list[str]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "reason_codes": self.reason_codes,
+            "summary": self.summary,
+            "evidence_paths": self.evidence_paths,
+        }
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    if not path.exists():
+        return None, "MISSING_FILE"
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        return None, f"UNREADABLE_JSON:{type(exc).__name__}"
+    if not isinstance(payload, dict):
+        return None, "JSON_NOT_OBJECT"
+    return payload, None
+
+
+def _status_max(checks: list[CheckResult]) -> str:
+    return max((check.status for check in checks), key=lambda status: STATUS_ORDER.get(status, 2))
+
+
+def _is_number(value: Any) -> bool:
+    if isinstance(value, bool) or value is None:
+        return False
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _artifact_date(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("trade_date", "date", "as_of", "asof", "snapshot_date"):
+        value = payload.get(key)
+        if value:
+            try:
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+            except Exception:
+                text = str(value).strip()
+                return text[:10] if len(text) >= 10 else text
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        return _artifact_date(meta)
+    return None
+
+
+def _latest_precompute_date(root: Path) -> str | None:
+    precompute_dir = root / "outputs" / "precompute"
+    if not precompute_dir.exists():
+        return None
+    dates: list[str] = []
+    for child in precompute_dir.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            normalized = datetime.fromisoformat(child.name).date().isoformat()
+        except Exception:
+            continue
+        if normalized == child.name:
+            dates.append(child.name)
+    return sorted(dates)[-1] if dates else None
+
+
+def resolve_trade_date(root: Path, explicit_trade_date: str | None) -> str:
+    if explicit_trade_date:
+        return datetime.fromisoformat(explicit_trade_date).date().isoformat()
+
+    candidates: list[str] = []
+    for path in (
+        root / "outputs" / "shadow_candidates" / "latest" / "shadow_evaluation.json",
+        root / "outputs" / "reconciliation" / "live_vs_shadow" / "latest" / "live_vs_shadow_reconciliation.json",
+        root / "outputs" / "shadow_candidates" / "latest" / "comparison.json",
+    ):
+        payload, _ = _read_json(path)
+        date_value = _artifact_date(payload)
+        if date_value:
+            candidates.append(date_value)
+
+    precompute_date = _latest_precompute_date(root)
+    if precompute_date:
+        candidates.append(precompute_date)
+
+    latest_run, _ = _read_json(root / "outputs" / "latest_run.json")
+    latest_run_date = _artifact_date(latest_run)
+    if latest_run_date:
+        candidates.append(latest_run_date)
+
+    if not candidates:
+        return datetime.now().date().isoformat()
+    return sorted(candidates)[-1]
+
+
+def _check_vix_regime(root: Path, trade_date: str) -> CheckResult:
+    path = root / "outputs" / "vix_regime" / "regime_current.json"
+    payload, error = _read_json(path)
+    if error:
+        return CheckResult("VIX/regime", "RED", [error], "VIX/regime artifact is missing or unreadable.", [str(path)])
+
+    assert payload is not None
+    vix = payload.get("vix")
+    regime = _norm_text(payload.get("regime")).upper()
+    degraded_reason = payload.get("degraded_reason") or payload.get("reason") or payload.get("fallback_reason")
+    fallback_used = bool(payload.get("fallback_used")) or _norm_text(payload.get("source")).lower() == "fallback"
+    reason_codes: list[str] = []
+
+    if not _is_number(vix):
+        reason_codes.append("VIX_MISSING_OR_NON_NUMERIC")
+    if regime in {"", "?", "UNKNOWN", "N/A", "NONE"}:
+        reason_codes.append("REGIME_UNKNOWN")
+
+    if "VIX_MISSING_OR_NON_NUMERIC" in reason_codes:
+        status = "YELLOW" if fallback_used or degraded_reason else "RED"
+        summary = "VIX is unavailable but degradation is explicit." if status == "YELLOW" else "VIX is unavailable without explicit fallback."
+    elif "REGIME_UNKNOWN" in reason_codes:
+        status = "YELLOW" if fallback_used or degraded_reason else "RED"
+        summary = "Regime is unknown with explicit degraded reason." if status == "YELLOW" else "Regime is UNKNOWN without explicit degraded reason."
+    else:
+        status = "GREEN"
+        if fallback_used:
+            reason_codes.append("VIX_FALLBACK_USED")
+        summary = f"VIX={float(vix):.2f}, regime={regime}."
+
+    date_value = _artifact_date(payload)
+    if date_value and date_value != trade_date:
+        reason_codes.append("VIX_DATE_DIFFERS_FROM_HEALTH_DATE")
+    return CheckResult("VIX/regime", status, reason_codes, summary, [str(path)])
+
+
+def _check_shadow_artifacts(root: Path) -> CheckResult:
+    path = root / "outputs" / "shadow_candidates" / "latest" / "comparison.md"
+    if not path.exists():
+        return CheckResult("Shadow artifacts", "RED", ["MISSING_SHADOW_COMPARISON_MD"], "Missing latest shadow comparison markdown.", [str(path)])
+    try:
+        text = path.read_text()
+    except Exception as exc:
+        return CheckResult("Shadow artifacts", "RED", [f"UNREADABLE_SHADOW_COMPARISON:{type(exc).__name__}"], "Shadow comparison markdown is unreadable.", [str(path)])
+
+    reason_codes: list[str] = []
+    if "## Executive Summary" not in text:
+        reason_codes.append("MISSING_EXECUTIVE_SUMMARY")
+    if "## Performance Scoreboard" not in text:
+        reason_codes.append("MISSING_PERFORMANCE_SCOREBOARD")
+    if "SPY" not in text:
+        reason_codes.append("MISSING_SPY_COMPARISON")
+    no_data_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if "NO_DATA" in line and not line.strip().upper().endswith(": NO")
+    ]
+    if no_data_lines and "PRICE_CACHE_STALE" not in text and "reason" not in text.lower():
+        reason_codes.append("SILENT_NO_DATA")
+    if "PRICE_CACHE_STALE" in text:
+        reason_codes.append("PRICE_CACHE_STALE")
+
+    if "SILENT_NO_DATA" in reason_codes:
+        status = "RED"
+        summary = "Shadow comparison contains NO_DATA without an explicit reason."
+    elif "PRICE_CACHE_STALE" in reason_codes:
+        status = "YELLOW"
+        summary = "Shadow comparison reports PRICE_CACHE_STALE explicitly."
+    elif reason_codes:
+        status = "RED"
+        summary = "Shadow comparison is missing required sections."
+    else:
+        status = "GREEN"
+        summary = "Latest comparison includes Executive Summary, Performance Scoreboard, and SPY context."
+    return CheckResult("Shadow artifacts", status, reason_codes, summary, [str(path)])
+
+
+def _check_shadow_performance(root: Path) -> CheckResult:
+    path = root / "outputs" / "shadow_candidates" / "latest" / "shadow_evaluation.json"
+    payload, error = _read_json(path)
+    if error:
+        return CheckResult("Shadow performance report", "RED", [error], "Missing or unreadable shadow_evaluation.json.", [str(path)])
+
+    assert payload is not None
+    strategies = payload.get("strategies")
+    if not isinstance(strategies, dict):
+        return CheckResult("Shadow performance report", "RED", ["MISSING_STRATEGIES"], "shadow_evaluation.json has no strategies object.", [str(path)])
+
+    reason_codes: list[str] = []
+    summaries: list[str] = []
+    for slug in SHADOW_STRATEGIES:
+        row = strategies.get(slug)
+        if not isinstance(row, dict):
+            reason_codes.append(f"MISSING_{slug.upper()}")
+            continue
+        data_status = _norm_text(row.get("data_status")).upper()
+        status = _norm_text(row.get("status")).upper()
+        valid_days = row.get("rolling_count_of_valid_days")
+        reason = row.get("reason_code") or row.get("data_reason") or row.get("reason")
+        summaries.append(f"{slug}={data_status or status or 'UNKNOWN'}")
+        if data_status == "OK":
+            continue
+        if data_status == "NO_DATA" and not reason:
+            reason_codes.append(f"{slug.upper()}_NO_DATA_WITHOUT_REASON")
+        elif data_status == "NO_DATA":
+            reason_codes.append(str(reason))
+        elif data_status:
+            reason_codes.append(f"{slug.upper()}_{data_status}")
+        else:
+            reason_codes.append(f"{slug.upper()}_DATA_STATUS_MISSING")
+        if _is_number(valid_days) and float(valid_days) < 2:
+            reason_codes.append("INSUFFICIENT_HISTORY")
+
+    if any(code.endswith("NO_DATA_WITHOUT_REASON") for code in reason_codes):
+        status = "RED"
+        summary = "At least one shadow strategy has NO_DATA without a reason code."
+    elif any(code.startswith("MISSING_") or code.endswith("DATA_STATUS_MISSING") for code in reason_codes):
+        status = "RED"
+        summary = "Shadow evaluation is missing required strategy status."
+    elif reason_codes:
+        status = "YELLOW"
+        summary = "Shadow evaluation has explicit degraded status: " + ", ".join(sorted(set(reason_codes)))
+    else:
+        status = "GREEN"
+        summary = "Shadow evaluation data_status=OK for Polaris, Orion, and Lyra."
+    return CheckResult("Shadow performance report", status, sorted(set(reason_codes)), summary, [str(path)])
+
+
+def _check_reconciliation(root: Path) -> CheckResult:
+    path = root / "outputs" / "reconciliation" / "live_vs_shadow" / "latest" / "live_vs_shadow_reconciliation.json"
+    payload, error = _read_json(path)
+    if error:
+        return CheckResult("Live vs shadow reconciliation", "RED", [error], "Missing or unreadable latest reconciliation artifact.", [str(path)])
+
+    assert payload is not None
+    classification = _norm_text(payload.get("classification") or payload.get("status")).upper()
+    reason_codes = [str(item) for item in payload.get("reason_codes") or []]
+    if classification in {"", "?", "UNKNOWN"}:
+        return CheckResult("Live vs shadow reconciliation", "RED", ["CLASSIFICATION_MISSING"], "Reconciliation classification is missing or ambiguous.", [str(path)])
+    if classification == "NOT_ALIGNED" and "DIFFERENT_STRATEGY_PATH" in reason_codes:
+        return CheckResult("Live vs shadow reconciliation", "YELLOW", reason_codes, "NOT_ALIGNED is explicit due to DIFFERENT_STRATEGY_PATH.", [str(path)])
+    if classification == "NOT_COMPARABLE":
+        if reason_codes:
+            return CheckResult("Live vs shadow reconciliation", "YELLOW", reason_codes, "NOT_COMPARABLE with explicit reason codes.", [str(path)])
+        return CheckResult("Live vs shadow reconciliation", "RED", ["NOT_COMPARABLE_WITHOUT_REASON"], "NOT_COMPARABLE is missing reason codes.", [str(path)])
+    if classification in {"RECONCILED", "GREEN"}:
+        return CheckResult("Live vs shadow reconciliation", "GREEN", reason_codes, f"Classification is explicit: {classification}.", [str(path)])
+    return CheckResult("Live vs shadow reconciliation", "YELLOW", reason_codes, f"Classification is explicit: {classification}.", [str(path)])
+
+
+def _check_strategy_identity(root: Path, trade_date: str) -> CheckResult:
+    recon_path = root / "outputs" / "reconciliation" / "live_vs_shadow" / "latest" / "live_vs_shadow_reconciliation.json"
+    signals_path = root / "outputs" / "precompute" / trade_date / "signals.json"
+    recon, recon_error = _read_json(recon_path)
+    signals, _ = _read_json(signals_path)
+
+    live_strategy = None
+    shadow_baseline = None
+    reason_codes: list[str] = []
+    if recon:
+        live_strategy = recon.get("live_strategy_id") or ((recon.get("strategy_alignment") or {}).get("live_strategy_id"))
+        shadow_baseline = recon.get("shadow_baseline_strategy") or ((recon.get("strategy_alignment") or {}).get("shadow_baseline_strategy"))
+    if (not live_strategy or not shadow_baseline) and isinstance(signals, dict):
+        identity = signals.get("strategy_identity") if isinstance(signals.get("strategy_identity"), dict) else {}
+        live_strategy = live_strategy or identity.get("live_strategy_id")
+        shadow_baseline = shadow_baseline or identity.get("shadow_baseline_strategy")
+    if recon_error:
+        reason_codes.append(recon_error)
+    if not live_strategy:
+        reason_codes.append("LIVE_STRATEGY_ID_MISSING")
+    if not shadow_baseline:
+        reason_codes.append("SHADOW_BASELINE_STRATEGY_MISSING")
+
+    evidence = [str(recon_path), str(signals_path)]
+    if reason_codes:
+        return CheckResult("Strategy identity", "RED", reason_codes, "Strategy identity is missing live or shadow identifiers.", evidence)
+    summary = f"Live strategy={live_strategy}; shadow baseline={shadow_baseline}."
+    return CheckResult("Strategy identity", "GREEN", [], summary, evidence)
+
+
+def _check_data_freshness(root: Path, trade_date: str) -> CheckResult:
+    evidence_paths = [
+        str(root / "outputs" / "shadow_candidates" / "latest" / "shadow_evaluation.json"),
+        str(root / "outputs" / "reconciliation" / "live_vs_shadow" / "latest" / "live_vs_shadow_reconciliation.json"),
+        str(root / "outputs" / "precompute" / trade_date / "daily_snapshot.json"),
+        str(root / "outputs" / "precompute" / trade_date / "signals.json"),
+        str(root / "outputs" / "latest_run.json"),
+    ]
+    reason_codes: list[str] = []
+    shadow, shadow_error = _read_json(Path(evidence_paths[0]))
+    recon, recon_error = _read_json(Path(evidence_paths[1]))
+    daily_snapshot_path = Path(evidence_paths[2])
+    signals_path = Path(evidence_paths[3])
+    latest_run, _ = _read_json(Path(evidence_paths[4]))
+
+    shadow_date = _artifact_date(shadow)
+    recon_date = _artifact_date(recon)
+    latest_run_date = _artifact_date(latest_run)
+
+    if shadow_error:
+        reason_codes.append("SHADOW_LATEST_MISSING")
+    elif shadow_date != trade_date:
+        reason_codes.append("SHADOW_DATE_MISMATCH")
+    if recon_error:
+        reason_codes.append("RECONCILIATION_LATEST_MISSING")
+    elif recon_date != trade_date:
+        reason_codes.append("RECONCILIATION_DATE_MISMATCH")
+    if not daily_snapshot_path.exists():
+        reason_codes.append("PRECOMPUTE_DAILY_SNAPSHOT_MISSING")
+    if not signals_path.exists():
+        reason_codes.append("PRECOMPUTE_SIGNALS_MISSING")
+    if latest_run_date and latest_run_date != trade_date:
+        reason_codes.append("LATEST_RUN_SECONDARY_CONTEXT_STALE")
+
+    if "RECONCILIATION_LATEST_MISSING" in reason_codes or "SHADOW_LATEST_MISSING" in reason_codes:
+        status = "RED"
+        summary = "Required latest pointer is missing."
+    elif "RECONCILIATION_DATE_MISMATCH" in reason_codes or "SHADOW_DATE_MISMATCH" in reason_codes:
+        status = "RED"
+        summary = "Latest shadow or reconciliation artifact is stale versus selected trade date."
+    elif reason_codes:
+        status = "YELLOW"
+        summary = "Freshness has explicit gaps: " + ", ".join(reason_codes)
+    else:
+        status = "GREEN"
+        summary = "Latest shadow and reconciliation artifacts match the selected trade date."
+    return CheckResult("Data freshness", status, reason_codes, summary, evidence_paths)
+
+
+def build_health_check(root: Path = Path("."), trade_date: str | None = None) -> dict[str, Any]:
+    root = root.resolve()
+    resolved_trade_date = resolve_trade_date(root, trade_date)
+    checks = [
+        _check_vix_regime(root, resolved_trade_date),
+        _check_shadow_artifacts(root),
+        _check_shadow_performance(root),
+        _check_reconciliation(root),
+        _check_strategy_identity(root, resolved_trade_date),
+        _check_data_freshness(root, resolved_trade_date),
+    ]
+    overall_status = _status_max(checks)
+    return {
+        "trade_date": resolved_trade_date,
+        "generated_at": _utc_now_iso(),
+        "overall_status": overall_status,
+        "checks": [check.to_json() for check in checks],
+        "recommended_action": RECOMMENDED_ACTIONS[overall_status],
+    }
+
+
+def render_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Caerus Daily Health Check",
+        "",
+        f"- Trade Date: {payload.get('trade_date')}",
+        f"- Generated At: {payload.get('generated_at')}",
+        f"- Overall Status: {payload.get('overall_status')}",
+        f"- Recommended Action: {payload.get('recommended_action')}",
+        "",
+        "## Checks",
+    ]
+    for check in payload.get("checks") or []:
+        reasons = ", ".join(check.get("reason_codes") or []) or "none"
+        lines.append(f"- {check.get('name')}: {check.get('status')} - {check.get('summary')} Reason codes: {reasons}.")
+    return "\n".join(lines) + "\n"
+
+
+def render_console(payload: dict[str, Any]) -> str:
+    lines = [
+        "Caerus Daily Health Check",
+        f"Trade Date: {payload.get('trade_date')}",
+        f"Overall Status: {payload.get('overall_status')}",
+        "",
+        "Checks:",
+    ]
+    for check in payload.get("checks") or []:
+        lines.append(f"- {check.get('name')}: {check.get('status')} - {check.get('summary')}")
+    lines.append("")
+    lines.append(f"Recommended Action: {payload.get('recommended_action')}")
+    return "\n".join(lines)
+
+
+def write_artifacts(payload: dict[str, Any], root: Path = Path(".")) -> tuple[Path, Path, Path, Path]:
+    output_root = root / "outputs" / "health" / "caerus_daily_health_check"
+    trade_date = str(payload["trade_date"])
+    dated_dir = output_root / trade_date
+    latest_dir = output_root / "latest"
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    latest_dir.mkdir(parents=True, exist_ok=True)
+
+    dated_json = dated_dir / "health_check.json"
+    dated_md = dated_dir / "health_check.md"
+    latest_json = latest_dir / "health_check.json"
+    latest_md = latest_dir / "health_check.md"
+    json_text = json.dumps(payload, indent=2, sort_keys=True)
+    md_text = render_markdown(payload)
+    dated_json.write_text(json_text)
+    dated_md.write_text(md_text)
+    latest_json.write_text(json_text)
+    latest_md.write_text(md_text)
+    return dated_json, dated_md, latest_json, latest_md
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Artifact-only Caerus daily health check.")
+    parser.add_argument("--trade-date", default=None, help="Trade date to inspect. Defaults to latest available artifacts.")
+    parser.add_argument("--root", default=".", help="Repository root. Defaults to current directory.")
+    args = parser.parse_args(argv)
+
+    payload = build_health_check(root=Path(args.root), trade_date=args.trade_date)
+    write_artifacts(payload, root=Path(args.root))
+    print(render_console(payload))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
