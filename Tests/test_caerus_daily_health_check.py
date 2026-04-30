@@ -148,6 +148,44 @@ def test_yellow_not_comparable_explicit_reasons(tmp_path: Path) -> None:
     assert _status(payload, "Live vs shadow reconciliation") == "YELLOW"
 
 
+def test_yellow_price_cache_stale_from_shadow_sidecars(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    shadow_latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
+    (shadow_latest / "comparison.md").write_text(
+        "\n".join(
+            [
+                "# Shadow Candidates Comparison",
+                "## Executive Summary",
+                "- Chain health: NO_DATA",
+                "## Performance Scoreboard",
+                "| Strategy | Data Status |",
+                "|---|---|",
+                "| Caerus Polaris | NO_DATA |",
+                "| Caerus Orion | NO_DATA |",
+                "| Caerus Lyra | NO_DATA |",
+                "| SPY | NO_DATA |",
+                "## Chain Health",
+                "- Any NO_DATA: YES",
+            ]
+        )
+    )
+    _write_json(shadow_latest / "comparison.json", {"trade_date": TRADE_DATE, "status": "NO_DATA", "reason_code": "PRICE_CACHE_STALE"})
+    _write_json(
+        tmp_path / "outputs" / "shadow_candidates" / TRADE_DATE / "shadow_performance.json",
+        {"trade_date": TRADE_DATE, "data_status": "NO_DATA", "data_reason": "PRICE_CACHE_STALE", "strategies": {}},
+    )
+    evaluation = json.loads((shadow_latest / "shadow_evaluation.json").read_text())
+    for row in evaluation["strategies"].values():
+        row["data_status"] = "NO_DATA"
+        row.pop("data_reason", None)
+    _write_json(shadow_latest / "shadow_evaluation.json", evaluation)
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+    assert payload["overall_status"] == "YELLOW"
+    assert _status(payload, "Shadow artifacts") == "YELLOW"
+    assert _status(payload, "Shadow performance report") == "YELLOW"
+
+
 def test_red_missing_shadow_latest(tmp_path: Path) -> None:
     _write_base_artifacts(tmp_path)
     (tmp_path / "outputs" / "shadow_candidates" / "latest" / "comparison.md").unlink()

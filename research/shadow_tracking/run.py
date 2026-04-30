@@ -52,17 +52,21 @@ def main(argv: list[str] | None = None) -> int:
     previous_trade_date = find_previous_trading_date(signals, trade_date=trade_date)
 
     if not trade_date_has_data(signals, trade_date=trade_date):
+        no_data_reason = classify_no_data_reason(signals, trade_date=trade_date, allow_download=bool(args.allow_download))
         print(f"[SHADOW] no data for trade_date={trade_date}")
+        print(f"[SHADOW] no data reason: {no_data_reason}")
         delta_payload = {
             "trade_date": trade_date,
             "previous_date": previous_trade_date,
             "status": "NO_DATA",
+            "reason_code": no_data_reason,
             "strategies": {},
         }
         comparison_payload = build_no_data_comparison_payload(
             trade_date=trade_date,
             delta_payload=delta_payload,
             panel_meta=panel_meta,
+            reason_code=no_data_reason,
         )
         (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2))
         (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2))
@@ -74,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             previous_trade_date=previous_trade_date,
             strategy_payloads={},
             data_status="NO_DATA",
+            data_reason=no_data_reason,
         )
         (dated_dir / "shadow_performance.json").write_text(json.dumps(shadow_performance, indent=2))
         print(f"[SHADOW] performance computed for trade_date={trade_date}")
@@ -228,12 +233,22 @@ def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_
     }
 
 
-def build_no_data_comparison_payload(*, trade_date: str, delta_payload: dict, panel_meta: dict) -> dict:
+def classify_no_data_reason(signals: pd.DataFrame, *, trade_date: str, allow_download: bool = False) -> str:
+    if signals.empty or "date" not in signals.columns:
+        return "NO_SIGNAL_DATA"
+    max_date = pd.to_datetime(signals["date"], errors="coerce").max()
+    if pd.notna(max_date) and max_date.normalize() < pd.Timestamp(trade_date).normalize():
+        return "PRICE_CACHE_STALE" if not allow_download else "PRICE_DATA_UNAVAILABLE_AFTER_HYDRATION"
+    return "NO_DATA_FOR_TRADE_DATE"
+
+
+def build_no_data_comparison_payload(*, trade_date: str, delta_payload: dict, panel_meta: dict, reason_code: str = "NO_DATA_FOR_TRADE_DATE") -> dict:
     return {
         "trade_date": trade_date,
         "benchmark_symbol": BENCHMARK_SYMBOL,
         "shadow_methodology": "model_portfolio",
         "status": "NO_DATA",
+        "reason_code": reason_code,
         "message": "No shadow portfolio generated because the requested trade date is unavailable in the data panel.",
         "delta": delta_payload,
         "strategies": {},
@@ -709,6 +724,7 @@ def build_shadow_performance_payload(
     previous_trade_date: str | None,
     strategy_payloads: dict[str, dict],
     data_status: str,
+    data_reason: str | None = None,
 ) -> dict:
     prior_chain_state, prior_payload = load_prior_shadow_performance(
         output_root=output_root,
@@ -755,7 +771,6 @@ def build_shadow_performance_payload(
             "weights_count": weight_count,
         }
 
-    spy_prev_nav = float((prior_navs.get(BENCHMARK_SLUG) or {}).get("nav", 1.0))
     if chain_state == "BROKEN_CHAIN":
         spy_prev_nav = None
         spy_return = round(float(returns_by_ticker.get(BENCHMARK_SYMBOL, 0.0)), 10) if data_status != "NO_DATA" else 0.0
@@ -777,6 +792,7 @@ def build_shadow_performance_payload(
         "previous_trade_date": previous_trade_date,
         "status": chain_state,
         "data_status": data_status,
+        "data_reason": data_reason,
         "return_convention": "weights_as_of_t",
         "strategies": strategies,
     }
@@ -792,9 +808,15 @@ def load_prior_shadow_performance(*, output_root: Path, previous_trade_date: str
     if not path.exists():
         return "BROKEN_CHAIN", None
     try:
-        return "OK", json.loads(path.read_text())
+        payload = json.loads(path.read_text())
     except Exception:
         return "BROKEN_CHAIN", None
+    if payload.get("status") == "BROKEN_CHAIN":
+        return "BROKEN_CHAIN", None
+    strategies = (payload.get("strategies") or {})
+    if any(v.get("nav") is None for v in strategies.values() if isinstance(v, dict)):
+        return "BROKEN_CHAIN", None
+    return "OK", payload
 
 
 def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> dict:
@@ -827,6 +849,7 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
         current = ((current_performance.get("strategies") or {}).get(slug) or {})
         chain_state = current_performance.get("status")
         data_status = current_performance.get("data_status")
+        data_reason = current_performance.get("data_reason")
         return_convention = current_performance.get("return_convention")
         nav = current.get("nav")
         cumulative_return = round(float(nav) - 1.0, 10) if nav is not None else None
@@ -846,6 +869,7 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
             "strategy_name": strategy_name,
             "status": chain_state,
             "data_status": data_status,
+            "data_reason": data_reason,
             "return_convention": return_convention,
             "daily_return": current.get("daily_return"),
             "nav": nav,

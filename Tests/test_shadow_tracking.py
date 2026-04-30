@@ -12,6 +12,7 @@ import pandas as pd
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.shadow_tracking.run import (
     build_comparison_markdown,
+    classify_no_data_reason,
     compute_returns_for_trade_date,
     compute_strategy_delta,
     find_previous_shadow_date,
@@ -150,6 +151,36 @@ def test_trade_date_helpers_are_explicit() -> None:
     assert trade_date_has_data(signals, trade_date="2023-03-31") is True
     assert trade_date_has_data(signals, trade_date="2023-04-02") is False
     assert find_previous_trading_date(signals, trade_date="2023-03-31") == "2023-03-30"
+
+
+def test_shadow_no_data_marks_stale_price_cache(tmp_path: Path) -> None:
+    panel = _make_panel()
+    panel_path = tmp_path / "price_panel.parquet"
+    panel.to_parquet(panel_path, index=False)
+    out_dir = tmp_path / "shadow"
+    assert main(
+        [
+            "--trade-date",
+            "2030-06-01",
+            "--start-date",
+            "2022-01-03",
+            "--end-date",
+            "2030-06-01",
+            "--output-dir",
+            str(out_dir),
+            "--price-cache-path",
+            str(panel_path),
+        ]
+    ) == 0
+    comparison = json.loads((out_dir / "2030-06-01" / "comparison.json").read_text())
+    performance = json.loads((out_dir / "2030-06-01" / "shadow_performance.json").read_text())
+    evaluation = json.loads((out_dir / "2030-06-01" / "shadow_evaluation.json").read_text())
+    assert comparison["status"] == "NO_DATA"
+    assert comparison["reason_code"] == "PRICE_CACHE_STALE"
+    assert performance["data_reason"] == "PRICE_CACHE_STALE"
+    assert evaluation["strategies"]["caerus_polaris"]["data_reason"] == "PRICE_CACHE_STALE"
+    signals = build_alpha_lab_signal_frame(panel)
+    assert classify_no_data_reason(signals, trade_date="2030-06-01") == "PRICE_CACHE_STALE"
 
 
 def test_comparison_markdown_renders_decision_grade_summary(tmp_path: Path) -> None:
@@ -374,6 +405,7 @@ def test_runner_writes_no_data_folder_for_unavailable_date(tmp_path: Path) -> No
     evaluation = json.loads((dated_dir / "shadow_evaluation.json").read_text())
     assert evaluation["strategies"]["caerus_orion"]["status"] == "NO_PRIOR"
     assert evaluation["strategies"]["caerus_orion"]["data_status"] == "NO_DATA"
+    assert evaluation["strategies"]["caerus_orion"]["data_reason"] == "PRICE_CACHE_STALE"
     assert evaluation["strategies"]["caerus_orion"]["return_convention"] == "weights_as_of_t"
 
 

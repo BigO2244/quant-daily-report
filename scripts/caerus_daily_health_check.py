@@ -170,6 +170,7 @@ def _check_vix_regime(root: Path, trade_date: str) -> CheckResult:
 
 def _check_shadow_artifacts(root: Path) -> CheckResult:
     path = root / "outputs" / "shadow_candidates" / "latest" / "comparison.md"
+    json_path = root / "outputs" / "shadow_candidates" / "latest" / "comparison.json"
     if not path.exists():
         return CheckResult("Shadow artifacts", "RED", ["MISSING_SHADOW_COMPARISON_MD"], "Missing latest shadow comparison markdown.", [str(path)])
     try:
@@ -189,7 +190,11 @@ def _check_shadow_artifacts(root: Path) -> CheckResult:
         for line in text.splitlines()
         if "NO_DATA" in line and not line.strip().upper().endswith(": NO")
     ]
-    if no_data_lines and "PRICE_CACHE_STALE" not in text and "reason" not in text.lower():
+    comparison_payload, _ = _read_json(json_path)
+    comparison_reason = _norm_text((comparison_payload or {}).get("reason_code") or (comparison_payload or {}).get("data_reason")).upper()
+    if no_data_lines and comparison_reason:
+        reason_codes.append(comparison_reason)
+    elif no_data_lines and "PRICE_CACHE_STALE" not in text and "reason" not in text.lower():
         reason_codes.append("SILENT_NO_DATA")
     if "PRICE_CACHE_STALE" in text:
         reason_codes.append("PRICE_CACHE_STALE")
@@ -206,7 +211,7 @@ def _check_shadow_artifacts(root: Path) -> CheckResult:
     else:
         status = "GREEN"
         summary = "Latest comparison includes Executive Summary, Performance Scoreboard, and SPY context."
-    return CheckResult("Shadow artifacts", status, reason_codes, summary, [str(path)])
+    return CheckResult("Shadow artifacts", status, sorted(set(reason_codes)), summary, [str(path), str(json_path)])
 
 
 def _check_shadow_performance(root: Path) -> CheckResult:
@@ -216,6 +221,10 @@ def _check_shadow_performance(root: Path) -> CheckResult:
         return CheckResult("Shadow performance report", "RED", [error], "Missing or unreadable shadow_evaluation.json.", [str(path)])
 
     assert payload is not None
+    trade_date = str(payload.get("trade_date") or "")
+    performance_path = root / "outputs" / "shadow_candidates" / trade_date / "shadow_performance.json" if trade_date else None
+    performance_payload, _ = _read_json(performance_path) if performance_path else (None, None)
+    fallback_reason = _norm_text((performance_payload or {}).get("data_reason") or (performance_payload or {}).get("reason_code"))
     strategies = payload.get("strategies")
     if not isinstance(strategies, dict):
         return CheckResult("Shadow performance report", "RED", ["MISSING_STRATEGIES"], "shadow_evaluation.json has no strategies object.", [str(path)])
@@ -230,7 +239,7 @@ def _check_shadow_performance(root: Path) -> CheckResult:
         data_status = _norm_text(row.get("data_status")).upper()
         status = _norm_text(row.get("status")).upper()
         valid_days = row.get("rolling_count_of_valid_days")
-        reason = row.get("reason_code") or row.get("data_reason") or row.get("reason")
+        reason = row.get("reason_code") or row.get("data_reason") or row.get("reason") or fallback_reason
         summaries.append(f"{slug}={data_status or status or 'UNKNOWN'}")
         if data_status == "OK":
             continue
@@ -257,7 +266,10 @@ def _check_shadow_performance(root: Path) -> CheckResult:
     else:
         status = "GREEN"
         summary = "Shadow evaluation data_status=OK for Polaris, Orion, and Lyra."
-    return CheckResult("Shadow performance report", status, sorted(set(reason_codes)), summary, [str(path)])
+    evidence = [str(path)]
+    if performance_path:
+        evidence.append(str(performance_path))
+    return CheckResult("Shadow performance report", status, sorted(set(reason_codes)), summary, evidence)
 
 
 def _check_reconciliation(root: Path) -> CheckResult:
