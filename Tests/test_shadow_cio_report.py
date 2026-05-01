@@ -14,7 +14,7 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2))
 
 
-def _evaluation(*, no_data: bool = False) -> dict:
+def _evaluation(*, no_data: bool = False, valid_days: int = 9) -> dict:
     status = "NO_DATA" if no_data else "OK"
     reason = "PRICE_CACHE_STALE" if no_data else None
     daily_returns = {
@@ -34,7 +34,7 @@ def _evaluation(*, no_data: bool = False) -> dict:
                 "daily_return": daily_returns[slug] if not no_data else None,
                 "cumulative_return": cumulative_return,
                 "excess_return_vs_spy": 0.0 if slug == "spy_benchmark" else cumulative_return - 0.03,
-                "rolling_count_of_valid_days": 9 if not no_data else 0,
+                "rolling_count_of_valid_days": valid_days if not no_data else 0,
             }
             for slug, name, cumulative_return in [
                 ("caerus_polaris", "Caerus Polaris", 0.10),
@@ -46,9 +46,9 @@ def _evaluation(*, no_data: bool = False) -> dict:
     }
 
 
-def _write_shadow_artifacts(tmp_path: Path, *, no_data: bool = False) -> None:
+def _write_shadow_artifacts(tmp_path: Path, *, no_data: bool = False, valid_days: int = 9) -> None:
     latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
-    _write_json(latest / "shadow_evaluation.json", _evaluation(no_data=no_data))
+    _write_json(latest / "shadow_evaluation.json", _evaluation(no_data=no_data, valid_days=valid_days))
     comparison = {"trade_date": TRADE_DATE, "status": "NO_DATA", "reason_code": "PRICE_CACHE_STALE"} if no_data else {"trade_date": TRADE_DATE, "status": "OK"}
     _write_json(latest / "comparison.json", comparison)
     performance = tmp_path / "outputs" / "shadow_candidates" / "performance"
@@ -118,6 +118,46 @@ def test_shadow_cio_report_handles_no_data_price_cache_stale(tmp_path: Path) -> 
     assert "=== DATA HEALTH ===" in report.body
     assert "- Stale" in report.body
     assert "raw" not in report.body.lower()
+
+
+def test_shadow_cio_report_blocks_promotion_when_valid_days_under_ten_and_stale(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path, valid_days=7)
+    comparison_path = tmp_path / "outputs" / "shadow_candidates" / "latest" / "comparison.json"
+    _write_json(comparison_path, {"trade_date": TRADE_DATE, "status": "OK", "reason_code": "PRICE_CACHE_STALE"})
+    performance_path = tmp_path / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv"
+    performance_path.write_text(
+        "\n".join(
+            [
+                "date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark",
+                "2026-01-02,1.00,1.00,1.00,1.00",
+                "2026-01-05,1.01,1.02,1.02,1.00",
+                "2026-01-06,1.02,1.04,1.04,1.01",
+                "2026-01-07,1.03,1.06,1.06,1.01",
+                "2026-01-08,1.04,1.08,1.08,1.02",
+                "2026-01-09,1.06,1.10,1.10,1.02",
+                "2026-01-12,1.08,1.12,1.11,1.025",
+                "2026-01-13,1.10,1.14,1.12,1.03",
+            ]
+        )
+        + "\n"
+    )
+
+    body = build_report(tmp_path).body
+
+    assert "- Lyra: NOT_READY - Strong YTD, but only 7 valid days and current data is stale." in body
+    assert "- Orion: NOT_READY - Strong YTD, but only 7 valid days and current data is stale." in body
+    assert "PROMOTE_CANDIDATE" not in body
+
+
+def test_shadow_cio_report_caps_stale_strong_candidate_at_watch(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path, valid_days=10)
+    comparison_path = tmp_path / "outputs" / "shadow_candidates" / "latest" / "comparison.json"
+    _write_json(comparison_path, {"trade_date": TRADE_DATE, "status": "OK", "reason_code": "PRICE_CACHE_STALE"})
+
+    body = build_report(tmp_path).body
+
+    assert "- Lyra: WATCH - Strong YTD, but current data is stale." in body
+    assert "PROMOTE_CANDIDATE" not in body
 
 
 def test_shadow_cio_report_handles_missing_artifacts_without_crashing(tmp_path: Path) -> None:

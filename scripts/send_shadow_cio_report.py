@@ -276,7 +276,14 @@ def _model_by_slug(models: list[ModelSnapshot], slug: str) -> ModelSnapshot | No
     return next((model for model in models if model.slug == slug), None)
 
 
-def _promotion_signal(model: ModelSnapshot, polaris: ModelSnapshot | None, spy: ModelSnapshot | None) -> tuple[str, str]:
+def _promotion_signal(
+    model: ModelSnapshot,
+    polaris: ModelSnapshot | None,
+    spy: ModelSnapshot | None,
+    *,
+    data_health: str,
+    data_health_reason: str,
+) -> tuple[str, str]:
     if model.slug == BASELINE_SLUG:
         return "BASELINE", "Paper baseline for comparison."
 
@@ -291,12 +298,27 @@ def _promotion_signal(model: ModelSnapshot, polaris: ModelSnapshot | None, spy: 
         if spy and model.period_return is not None and spy.period_return is not None
         else model.excess_vs_spy_period
     )
-    if valid_days < 7 or model.period_return is None:
+    is_stale = data_health == "Stale" or "PRICE_CACHE_STALE" in data_health_reason
+    is_strong = gap is not None and gap > 0 and excess is not None and excess > 0
+    if valid_days < 10:
         signal = "NOT_READY"
-    elif gap is not None and gap > 0 and excess is not None and excess > 0:
+        if is_strong and is_stale:
+            reason = f"Strong {model.period_label}, but only {valid_days} valid days and current data is stale."
+        elif is_strong:
+            reason = f"Strong {model.period_label}, but only {valid_days} valid days."
+        elif is_stale:
+            reason = f"Only {valid_days} valid days and current data is stale."
+        else:
+            reason = f"Only {valid_days} valid days."
+        return signal, reason
+    if model.period_return is None:
+        signal = "NOT_READY"
+    elif is_strong and not is_stale:
         signal = "PROMOTE_CANDIDATE"
     else:
         signal = "WATCH"
+    if is_strong and is_stale:
+        return signal, f"Strong {model.period_label}, but current data is stale."
     reason = (
         f"Gap vs Polaris: {_fmt_pct(gap)}; "
         f"valid days: {valid_days}; "
@@ -404,13 +426,13 @@ def render_email_body(report_date: str, models: list[ModelSnapshot], data_health
 
     lines.extend(["", "=== PROMOTION SIGNAL ===", ""])
     if polaris:
-        signal, reason = _promotion_signal(polaris, polaris, spy)
+        signal, reason = _promotion_signal(polaris, polaris, spy, data_health=data_health, data_health_reason=data_health_reason)
         lines.append(f"- Polaris: {signal} - {reason}")
     for slug in PROMOTION_SLUGS:
         model = _model_by_slug(models, slug)
         if not model:
             continue
-        signal, reason = _promotion_signal(model, polaris, spy)
+        signal, reason = _promotion_signal(model, polaris, spy, data_health=data_health, data_health_reason=data_health_reason)
         lines.append(f"- {model.name}: {signal} - {reason}")
 
     lines.extend(
