@@ -75,6 +75,7 @@ from core.operator_summary import (
     load_operator_summary,
 )
 from core.step_summary import append_step_summary
+from core.strategy_identity import strategy_identity_metadata
 from core.trade_count_contract import compute_trade_count_contract
 from core.trading_mode import (
     canonical_trading_mode,
@@ -2070,9 +2071,12 @@ def build_execution_email_payload(
     )
     sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
     total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
+    identity = strategy_identity_metadata(trade_date)
 
     payload = {
         "trade_date": trade_date,
+        "strategy_identity": identity,
+        **identity,
         "mode": mode,
         "execution_status": status,
         "halt_reason": halted_reason,
@@ -2259,6 +2263,10 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         return "NONE" if count == 0 else str(count)
     raw_mode = str((execution_payload or {}).get("mode") or os.getenv("TRADING_MODE", DEFAULT_TRADING_MODE)).upper()
     env_mode = "LIVE" if raw_mode == "LIVE" else "SHADOW"
+    strategy_identity = (execution_payload or {}).get("strategy_identity") or strategy_identity_metadata(asof_str)
+    live_strategy_id = str(strategy_identity.get("live_strategy_id") or "unknown")
+    shadow_baseline = str(strategy_identity.get("shadow_baseline_strategy") or "unknown")
+    tracks_shadow = bool(strategy_identity.get("live_tracks_shadow_baseline"))
     exec_trades = (execution_payload or {}).get("trades", []) or []
     intent_from_payload = (execution_payload or {}).get("proposed_trades_intent_count") if execution_payload else None
     if intent_from_payload is None:
@@ -2338,6 +2346,9 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "",
         "RUN CONTEXT",
         f"• Inception: {_fmt_date(inception_metrics.get('inception_date'))}",
+        f"• Live strategy: {live_strategy_id}",
+        f"• Shadow baseline: {shadow_baseline}",
+        f"• Live tracks shadow baseline: {'YES' if tracks_shadow else 'NO'}",
         "",
         "SLEEVE ALLOCATION (DYNAMIC)",
         f"• Sleeve 1 — Momentum: {_fmt_pct(sleeve_splits.get('sleeve_trend', 0.0))}",

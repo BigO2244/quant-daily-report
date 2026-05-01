@@ -39,6 +39,10 @@ def main() -> None:
 
     p = _load_json(payload_path)
     daily_snapshot = _load_json(daily_snapshot_path)
+    strategy_identity = p.get("strategy_identity") or daily_snapshot.get("strategy_identity") or {}
+    live_strategy_id = strategy_identity.get("live_strategy_id") or p.get("live_strategy_id") or "growth_engine_v4"
+    shadow_baseline = strategy_identity.get("shadow_baseline_strategy") or p.get("shadow_baseline_strategy") or "caerus_polaris"
+    tracks_shadow = bool(strategy_identity.get("live_tracks_shadow_baseline", p.get("live_tracks_shadow_baseline", False)))
     market_analyzer = p.get("market_analyzer") or {}
     regime_summary = daily_snapshot.get("regime_summary") or {}
 
@@ -68,6 +72,8 @@ def main() -> None:
     lines.append(f"Alpha Stack — Trade Plan for {trade_date}")
     lines.append(f"Prices from prior close ({pricing_dt}). No orders sent yet.")
     lines.append("Live prices at execution may change share counts or substitute tickers.")
+    lines.append(f"Live strategy: {live_strategy_id}")
+    lines.append(f"Shadow baseline: {shadow_baseline} (live tracks baseline: {'YES' if tracks_shadow else 'NO'})")
     lines.append("")
 
     lines.append("PORTFOLIO STATE")

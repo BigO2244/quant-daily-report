@@ -1,0 +1,2 @@
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+/bin/bash: /Users/brettolson/Documents/Caerus/quant-daily-report-main/scripts/auto_shadow_health_recovery.sh: Operation not permitted

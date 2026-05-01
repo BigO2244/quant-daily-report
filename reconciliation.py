@@ -863,7 +863,7 @@ def write_post_execution_drift_report(
         input_issues.append("actual_positions_unavailable")
 
     if input_issues:
-        drift_status = "MANUAL_INTERVENTION_REQUIRED"
+        drift_status = "NOT_COMPARABLE"
     elif unexpected_short_positions:
         drift_status = "UNEXPECTED_SHORT"
     elif missing_in_actual or missing_in_expected or qty_mismatches:
@@ -885,6 +885,10 @@ def write_post_execution_drift_report(
         operator_message = (
             "Post-execution broker drift detected; expected and actual positions differ."
         )
+    elif drift_status == "NOT_COMPARABLE":
+        operator_message = (
+            "Post-execution drift check could not be completed from local artifacts; manual review required."
+        )
     else:
         operator_message = (
             "Post-execution drift check could not be completed from local artifacts; manual review required."
@@ -896,7 +900,9 @@ def write_post_execution_drift_report(
         "verdict": "PASS" if drift_status == "OK_RECONCILED" else "WARN",
         "drift_status": drift_status,
         "operator_message": operator_message,
-        "manual_intervention_required": drift_status in {"UNEXPECTED_SHORT", "MANUAL_INTERVENTION_REQUIRED"},
+        "manual_intervention_required": drift_status in {"UNEXPECTED_SHORT", "NOT_COMPARABLE"},
+        "comparison_status": drift_status,
+        "not_comparable_reasons": list(input_issues),
         "expected_positions": expected,
         "actual_positions": actual,
         "matching_positions": matching_positions,

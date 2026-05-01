@@ -48,6 +48,12 @@ def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
     assert payload is not None
     assert snapshot["signals_snapshot_path"].endswith("outputs/precompute/2026-03-17/signals.json")
     assert payload["trades"][0]["ticker"] == "AAPL"
+    assert payload["live_strategy_id"] == "growth_engine_v4"
+    assert payload["execution_target_source"] == "outputs/precompute/2026-03-17/signals.json"
+    assert payload["execution_target_type"] == "precompute_signals"
+    assert payload["shadow_baseline_strategy"] == "caerus_polaris"
+    assert payload["shadow_baseline_source"] == "outputs/shadow_candidates/2026-03-17/caerus_polaris.json"
+    assert payload["live_tracks_shadow_baseline"] is False
 
 
 def test_validate_precompute_contract_missing() -> None:

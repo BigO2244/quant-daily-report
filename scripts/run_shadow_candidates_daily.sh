@@ -24,6 +24,8 @@ activate_runtime_venv "${REPO_ROOT}" || {
 TRADE_DATE="${REPORT_DATE:-$(date +%F)}"
 SHADOW_START_DATE="${SHADOW_START_DATE:-2014-01-01}"
 SHADOW_OUTPUT_DIR="${SHADOW_OUTPUT_DIR:-outputs/shadow_candidates}"
+SHADOW_ALLOW_DOWNLOAD="${SHADOW_ALLOW_DOWNLOAD:-0}"
+ALLOW_DOWNLOAD_ENABLED=0
 PASSTHROUGH_ARGS=()
 for ((i=1; i <= $#; i++)); do
     arg="${!i}"
@@ -70,6 +72,10 @@ RUN_CMD=(
 if [[ ${#PASSTHROUGH_ARGS[@]} -gt 0 ]]; then
     RUN_CMD+=("${PASSTHROUGH_ARGS[@]}")
 fi
+if [[ "${SHADOW_ALLOW_DOWNLOAD}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
+    ALLOW_DOWNLOAD_ENABLED=1
+    RUN_CMD+=(--allow-download)
+fi
 "${RUN_CMD[@]}" >> "${LOG_FILE}" 2>&1 || RC=$?
 
 if [[ ${RC} -eq 0 ]]; then
@@ -87,6 +93,17 @@ LATEST_FILES=(
     "shadow_evaluation.json"
 )
 
+NO_DATA_REASON=""
+if [[ -f "${DATED_DIR}/comparison.json" ]]; then
+    NO_DATA_REASON="$(sed -n 's/.*"reason_code"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${DATED_DIR}/comparison.json" | head -n 1)"
+    if [[ -z "${NO_DATA_REASON}" ]]; then
+        NO_DATA_REASON="$(sed -n 's/.*"data_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${DATED_DIR}/comparison.json" | head -n 1)"
+    fi
+fi
+if [[ "${ALLOW_DOWNLOAD_ENABLED}" -ne 1 && "${NO_DATA_REASON}" == "PRICE_CACHE_STALE" ]]; then
+    log "[SHADOW] price cache stale; run local hydration workflow to refresh."
+fi
+
 if [[ ${RC} -eq 0 && -f "${DATED_DIR}/comparison.md" ]]; then
     mkdir -p "${LATEST_DIR}"
     for artifact in "${LATEST_FILES[@]}"; do
@@ -99,11 +116,18 @@ if [[ ${RC} -eq 0 && -f "${DATED_DIR}/comparison.md" ]]; then
     log "[SHADOW] latest artifacts published to ${LATEST_DIR}/"
 
     if [[ -d "${HOME}/Desktop" ]]; then
-        ln -sf "${REPO_ROOT}/${LATEST_DIR}/comparison.md" "${HOME}/Desktop/Orion.md"
+        ln -sf "$(realpath "${LATEST_DIR}/comparison.md")" "${HOME}/Desktop/Orion.md"
         log "[SHADOW] updated Desktop Orion.md"
     else
         log "[SHADOW] desktop path unavailable; latest artifacts published to ${LATEST_DIR}/"
     fi
+
+    python3 -m scripts.live_vs_shadow_reconciliation \
+        --trade-date "${TRADE_DATE}" \
+        --shadow-dir "${SHADOW_OUTPUT_DIR}" \
+        --output-dir outputs/reconciliation/live_vs_shadow >> "${LOG_FILE}" 2>&1 || {
+        log "[SHADOW] live-vs-shadow reconciliation failed but non-blocking"
+    }
 else
     log "[SHADOW] no valid comparison.md found for latest publish"
 fi

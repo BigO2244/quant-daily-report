@@ -35,6 +35,7 @@ from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
 from paper.reporting_consistency import compute_exposure
 from core.trading_mode import canonical_trading_mode, legacy_shadow_mode_requested
+from core.strategy_identity import strategy_identity_metadata
 from core.universe_v4 import is_allowed_etf_symbol
 
 logger = logging.getLogger(__name__)
@@ -1330,9 +1331,12 @@ def _write_intended_orders_artifact(
                 "notional": float(row["notional"]) if row.get("notional") is not None else None,
                 "reason": str(row["reason"]) if row.get("reason") is not None else None,
             })
+    identity = strategy_identity_metadata(run_date)
     payload = {
         "report_date": run_date,
         "run_id": run_id,
+        "strategy_identity": identity,
+        **identity,
         "orders_intended_count": len(orders_list),
         "orders_intended": orders_list,
         "execution_blocked": not execution_enabled,

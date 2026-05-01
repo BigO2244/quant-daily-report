@@ -154,6 +154,7 @@ def test_phase4_run_paper_day_writes_posttrade_artifacts(tmp_path, monkeypatch):
     recon_payload = json.loads(recon_path.read_text(encoding="utf-8"))
     assert float(account_payload["cash"]) == pytest.approx(820.0)
     assert positions_payload["normalized_positions"] == {"BBB": 2.0}
+    assert recon_payload["expected_positions"] == {"BBB": 2.0}
     assert recon_payload["actual_positions"] == {"BBB": 2.0}
 
 

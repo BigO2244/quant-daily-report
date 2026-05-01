@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.strategy_identity import strategy_identity_metadata
 from core.trading_mode import canonical_trading_mode_label
 from paper.run_manager import safe_write_text
 
@@ -104,6 +105,15 @@ def write_precompute_bundle(
 ) -> Path:
     bundle_dir = precompute_bundle_dir(trade_date)
     bundle_dir.mkdir(parents=True, exist_ok=True)
+    identity = strategy_identity_metadata(trade_date)
+    daily_snapshot = dict(daily_snapshot or {})
+    signals_payload = dict(signals_payload or {})
+    execution_payload = dict(execution_payload or {})
+    daily_snapshot.setdefault("strategy_identity", identity)
+    signals_payload.setdefault("strategy_identity", identity)
+    execution_payload.setdefault("strategy_identity", identity)
+    for key, value in identity.items():
+        execution_payload.setdefault(key, value)
 
     snapshot_path = bundle_dir / "daily_snapshot.json"
     signals_path = bundle_dir / "signals.json"

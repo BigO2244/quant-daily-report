@@ -37,7 +37,11 @@ fi
 dated_dir="${output_dir}/${trade_date}"
 mkdir -p "${dated_dir}"
 printf '# Shadow Comparison\\n\\n- Trade date: %s\\n' "${trade_date}" > "${dated_dir}/comparison.md"
-printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/comparison.json"
+if [[ -n "${FAKE_SHADOW_REASON:-}" ]]; then
+    printf '{"trade_date":"%s","reason_code":"%s"}\\n' "${trade_date}" "${FAKE_SHADOW_REASON}" > "${dated_dir}/comparison.json"
+else
+    printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/comparison.json"
+fi
 printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/delta.json"
 printf '{"trade_date":"%s"}\\n' "${trade_date}" > "${dated_dir}/shadow_evaluation.json"
 exit 0
@@ -115,3 +119,62 @@ def test_wrapper_smoke_writes_expected_log_lines(tmp_path: Path) -> None:
     assert f"[SHADOW] latest artifacts published to {latest_dir}/" in text
     assert "[SHADOW] desktop path unavailable; latest artifacts published to" in text
     assert "[SHADOW] updated Desktop Orion.md" not in text
+
+
+def test_wrapper_logs_local_hydration_guidance_for_stale_cache(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    fake_venv = _make_fake_venv(tmp_path)
+    trade_date = "2026-04-30"
+    (repo_root / "logs" / f"shadow_{trade_date}.log").unlink(missing_ok=True)
+    out_dir = tmp_path / "shadow_out"
+    result = subprocess.run(
+        [
+            "bash",
+            "scripts/run_shadow_candidates_daily.sh",
+            "--trade-date",
+            trade_date,
+            "--output-dir",
+            str(out_dir),
+        ],
+        cwd=repo_root,
+        env={
+            "CAERUS_VENV_DIR": str(fake_venv),
+            "FAKE_SHADOW_REASON": "PRICE_CACHE_STALE",
+            "HOME": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.returncode == 0
+    text = (repo_root / "logs" / f"shadow_{trade_date}.log").read_text()
+    assert "[SHADOW] price cache stale; run local hydration workflow to refresh." in text
+
+
+def test_local_hydration_workflow_dry_run_prints_expected_commands(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            "bash",
+            "scripts/hydrate_shadow_locally_and_sync.sh",
+            "--trade-date",
+            "2026-04-30",
+            "--remote-host",
+            "vm.example",
+            "--remote-repo",
+            "/srv/quant",
+            "--dry-run",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = result.stdout
+    assert "python3 -m research.shadow_tracking.run" in output
+    assert "--allow-download" in output
+    assert "rsync -av outputs/research/flow_detection_v1/price_panel.parquet" in output
+    assert "outputs/shadow_candidates/2026-04-30/" in output
+    assert "outputs/shadow_candidates/latest/" in output
+    assert "python3 -m scripts.live_vs_shadow_reconciliation --trade-date 2026-04-30" in output
+    assert "python3 -m scripts.caerus_daily_health_check --trade-date 2026-04-30" in output
