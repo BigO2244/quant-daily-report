@@ -29,5 +29,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Phase 3: Confirmation + Email
 0 10 * * 1-5 $HOME/quant-daily-report/scripts/cron_confirm.sh >> $HOME/quant-daily-report/logs/cron_confirm.log 2>&1
 
+# Shadow CIO model scorecard email
+0 21 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.send_shadow_cio_report >> logs/shadow_cio_report.log 2>&1
+
 # Weekly Model Review (Monday 8:00 AM ET)
 0 8 * * 1 $HOME/quant-daily-report/scripts/cron_weekly_review.sh >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1
