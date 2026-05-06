@@ -83,6 +83,7 @@ def _mock_open_market(monkeypatch, trading_mode: str = "paper"):
 
     class _StubAlpaca:
         paper = True
+        submitted = False
 
         @classmethod
         def from_env(cls):
@@ -90,10 +91,19 @@ def _mock_open_market(monkeypatch, trading_mode: str = "paper"):
 
         def find_order_by_client_id(self, client_id):
             _ = client_id
+            if self.submitted:
+                return {"id": "stub-AAPL-BUY", "status": "filled", "filled_qty": "10"}
+            return None
+
+        def get_order(self, order_id):
+            _ = order_id
+            if self.submitted:
+                return {"id": "stub-AAPL-BUY", "status": "filled", "filled_qty": "10"}
             return None
 
         def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
             _ = (symbol, qty, side, client_order_id, tif)
+            self.submitted = True
             return {
                 "id": f"stub-{symbol}-{side}",
                 "status": "accepted",
@@ -102,6 +112,7 @@ def _mock_open_market(monkeypatch, trading_mode: str = "paper"):
 
         def submit_limit_order(self, symbol, qty, side, limit_price, client_order_id, tif="day"):
             _ = (symbol, qty, side, limit_price, client_order_id, tif)
+            self.submitted = True
             return {
                 "id": f"stub-limit-{symbol}-{side}",
                 "status": "accepted",
@@ -215,6 +226,36 @@ def test_paper_market_open_not_halted(monkeypatch, tmp_path):
     assert result["exit_only"] is False
     assert len(result["execution_trades"]) == 1
     assert str(result["execution_trades"][0]["side"]).upper() == "BUY"
+
+
+def test_fetch_open_prices_uses_intraday_fallback_when_daily_bar_is_stale(monkeypatch):
+    class _FakeYFinance:
+        def set_tz_cache_location(self, _path):
+            pass
+
+        def download(self, *, tickers, interval, **_kwargs):
+            columns = pd.MultiIndex.from_product([["Open"], tickers])
+            if interval == "1d":
+                return pd.DataFrame(
+                    [[99.0 for _ in tickers]],
+                    index=[pd.Timestamp("2026-05-05")],
+                    columns=columns,
+                )
+            if interval == "1m":
+                return pd.DataFrame(
+                    [[101.0 for _ in tickers]],
+                    index=[pd.Timestamp("2026-05-06 13:30:00+00:00")],
+                    columns=columns,
+                )
+            raise AssertionError(f"unexpected interval {interval}")
+
+    monkeypatch.setattr(broker, "_load_yfinance", lambda: _FakeYFinance())
+
+    result = broker.fetch_open_prices_yfinance(["AAPL", "SPY"], run_date="2026-05-06")
+
+    assert set(result["ticker"]) == {"AAPL", "SPY"}
+    assert set(result["price_date"]) == {"2026-05-06"}
+    assert set(result["open"]) == {101.0}
 
 
 def test_paper_idempotent_skip_prevents_same_day_reexecution(monkeypatch, tmp_path):
@@ -331,6 +372,7 @@ def test_paper_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
 
     class _StubAlpaca:
         paper = True
+        submitted = False
 
         @classmethod
         def from_env(cls):
@@ -338,10 +380,19 @@ def test_paper_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
 
         def find_order_by_client_id(self, client_id):
             _ = client_id
+            if self.submitted:
+                return {"id": "alpaca-oid-1", "status": "filled", "filled_qty": "10"}
+            return None
+
+        def get_order(self, order_id):
+            _ = order_id
+            if self.submitted:
+                return {"id": "alpaca-oid-1", "status": "filled", "filled_qty": "10"}
             return None
 
         def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
             _ = (symbol, qty, side, client_order_id, tif)
+            self.submitted = True
             return {
                 "id": "alpaca-oid-1",
                 "status": "accepted",
@@ -352,6 +403,7 @@ def test_paper_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
             self, symbol, qty, side, limit_price, client_order_id, tif="day"
         ):
             _ = (symbol, qty, side, limit_price, client_order_id, tif)
+            self.submitted = True
             return {
                 "id": "alpaca-oid-limit-1",
                 "status": "accepted",
