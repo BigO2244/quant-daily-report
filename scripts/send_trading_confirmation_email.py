@@ -28,8 +28,8 @@ from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED, STATUS_SKIPPE
 from core.operator_summary import write_operator_summary, load_operator_summary, format_operator_summary_log
 from core.quant_report import send_email
 from core.run_pointer import read_trade_stage_pointer
+from core.shadow_scoreboard import build_shadow_scoreboard
 from core.timing_policy import current_et
-from scripts.export_alpaca_broker_snapshot import build_snapshot_payload, fetch_snapshot_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +85,29 @@ def _load_results(trade_date: str) -> tuple[dict, Path]:
                 with results_path.open("r", encoding="utf-8") as f:
                     return json.load(f), results_path
             logger.warning(
-                "[TRADING_CONFIRMATION] execution results missing for %s at %s; falling back to broker snapshot",
+                "[TRADING_CONFIRMATION] execution results missing for %s at %s; trying execution payload fallback",
                 trade_date,
                 results_path,
             )
+            payload_path = run_root / "execution_payload.json"
+            if payload_path.exists():
+                payload = _load_json_dict(payload_path)
+                if _should_use_execution_payload_fallback(payload):
+                    return _build_results_from_execution_payload(trade_date, payload, latest), payload_path
+                logger.warning(
+                    "[TRADING_CONFIRMATION] execution payload for %s is not terminal; trying broker snapshot fallback",
+                    trade_date,
+                )
+
+    legacy_payload_path = _REPO_ROOT / "outputs" / "execution_email" / f"{trade_date}.json"
+    if legacy_payload_path.exists():
+        payload = _load_json_dict(legacy_payload_path)
+        if _should_use_execution_payload_fallback(payload):
+            return _build_results_from_execution_payload(trade_date, payload, latest or {}), legacy_payload_path
+        logger.warning(
+            "[TRADING_CONFIRMATION] legacy execution payload for %s is not terminal; trying broker snapshot fallback",
+            trade_date,
+        )
 
     return _load_broker_results_fallback(trade_date, latest or {})
 
@@ -97,6 +116,61 @@ def _load_json_dict(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         payload = json.load(f)
     return payload if isinstance(payload, dict) else {}
+
+
+def _to_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _should_use_execution_payload_fallback(payload: dict) -> bool:
+    raw_status = str(payload.get("status") or payload.get("execution_status") or "").strip().upper()
+    halt_reason = str(payload.get("halt_reason") or "").strip()
+    submitted_count = _to_int(payload.get("submitted_count") or payload.get("orders_submitted_count"))
+    return bool(halt_reason or submitted_count > 0 or raw_status in {STATUS_HALTED, STATUS_SKIPPED_DUPLICATE, "NO_ACTION"})
+
+
+def _build_results_from_execution_payload(trade_date: str, payload: dict, pointer: dict | None = None) -> dict:
+    payload_trade_date = str(payload.get("trade_date") or trade_date)
+    if payload_trade_date != trade_date:
+        raise RuntimeError(
+            f"Execution payload trade_date mismatch for {trade_date}: {payload_trade_date}"
+        )
+
+    raw_status = str(payload.get("status") or payload.get("execution_status") or "").strip().upper()
+    halt_reason = payload.get("halt_reason")
+    submitted_count = _to_int(payload.get("submitted_count") or payload.get("orders_submitted_count"))
+    accepted_count = _to_int(payload.get("accepted_count"))
+    rejected_count = _to_int(payload.get("rejected_count"))
+
+    if raw_status == STATUS_EXECUTED or submitted_count > 0:
+        status = STATUS_EXECUTED
+        operator_execution_status = str(payload.get("operator_execution_status") or "executed").strip().lower()
+    elif raw_status == STATUS_SKIPPED_DUPLICATE:
+        status = STATUS_SKIPPED_DUPLICATE
+        operator_execution_status = "skipped_duplicate"
+    else:
+        status = STATUS_HALTED
+        operator_execution_status = str(payload.get("operator_execution_status") or "halted").strip().lower()
+
+    if submitted_count > 0 and accepted_count == 0 and rejected_count == 0:
+        accepted_count = submitted_count
+
+    return {
+        "trade_date": trade_date,
+        "run_id": str(payload.get("run_id") or (pointer or {}).get("run_id") or f"execution_payload:{trade_date}"),
+        "mode": str(payload.get("mode") or os.getenv("TRADING_MODE") or os.getenv("MODE") or "paper").upper(),
+        "status": status,
+        "submitted_count": submitted_count,
+        "accepted_count": accepted_count,
+        "rejected_count": rejected_count,
+        "halt_reason": halt_reason,
+        "operator_execution_status": operator_execution_status,
+        "execution_payload_fallback": True,
+        "broker_fill_count": _to_int(payload.get("orders_filled_count") or payload.get("filled_count")),
+    }
 
 
 def _build_results_from_broker_snapshot(trade_date: str, snapshot: dict, pointer: dict | None = None) -> dict:
@@ -140,6 +214,22 @@ def _build_results_from_broker_snapshot(trade_date: str, snapshot: dict, pointer
     }
 
 
+def _allow_confirmation_broker_fetch() -> bool:
+    return str(os.getenv("ALLOW_CONFIRMATION_BROKER_FETCH", "")).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _fetch_live_broker_snapshot_inputs(*, report_date: str, order_limit: int):
+    from scripts.export_alpaca_broker_snapshot import fetch_snapshot_inputs
+
+    return fetch_snapshot_inputs(report_date=report_date, order_limit=order_limit)
+
+
+def _build_live_broker_snapshot_payload(**kwargs) -> dict:
+    from scripts.export_alpaca_broker_snapshot import build_snapshot_payload
+
+    return build_snapshot_payload(**kwargs)
+
+
 def _load_broker_results_fallback(trade_date: str, pointer: dict | None = None) -> tuple[dict, Path]:
     snapshot_dir = _REPO_ROOT / "outputs" / "broker_snapshot"
     snapshot_path = snapshot_dir / f"broker_snapshot_{trade_date}.json"
@@ -148,12 +238,32 @@ def _load_broker_results_fallback(trade_date: str, pointer: dict | None = None) 
         snapshot = _load_json_dict(snapshot_path)
         return _build_results_from_broker_snapshot(trade_date, snapshot, pointer), snapshot_path
 
+    if not _allow_confirmation_broker_fetch():
+        logger.warning(
+            "[TRADING_CONFIRMATION] broker snapshot missing for %s and live broker fetch is disabled",
+            trade_date,
+        )
+        return {
+            "trade_date": trade_date,
+            "run_id": str((pointer or {}).get("run_id") or f"missing_artifacts:{trade_date}"),
+            "mode": str(os.getenv("TRADING_MODE") or os.getenv("MODE") or "paper").upper(),
+            "status": STATUS_HALTED,
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "halt_reason": "broker_snapshot_unavailable_local_artifact_missing",
+            "operator_execution_status": "unavailable",
+            "broker_snapshot_fallback": False,
+            "broker_snapshot_unavailable": True,
+            "broker_snapshot_path": str(snapshot_path),
+        }, snapshot_path
+
     logger.info("[TRADING_CONFIRMATION] broker snapshot missing for %s; fetching Alpaca snapshot fallback", trade_date)
-    account, positions, orders_all, orders_closed, fills, _source_mode = fetch_snapshot_inputs(
+    account, positions, orders_all, orders_closed, fills, _source_mode = _fetch_live_broker_snapshot_inputs(
         report_date=trade_date,
         order_limit=200,
     )
-    snapshot = build_snapshot_payload(
+    snapshot = _build_live_broker_snapshot_payload(
         report_date=trade_date,
         workflow_run_id=str((pointer or {}).get("run_id") or ""),
         git_sha=str((pointer or {}).get("git_sha") or ""),
@@ -221,6 +331,101 @@ def _load_performance_data(trade_date: str) -> dict | None:
         return None
 
 
+def _load_reconciliation_data(trade_date: str, results_path: Path) -> dict:
+    candidates: list[Path] = []
+    run_root = results_path.parent if results_path.name in {"execution_results.json", "execution_payload.json"} else None
+    if run_root is not None:
+        operator_summary = _load_json_dict(run_root / "operator_summary.json") if (run_root / "operator_summary.json").exists() else {}
+        summary_path = str(operator_summary.get("post_execution_recon_path") or "").strip()
+        if summary_path:
+            path = Path(summary_path)
+            candidates.append(path if path.is_absolute() else _REPO_ROOT / path)
+        candidates.append(run_root / "broker" / f"recon_posttrade_{trade_date}.json")
+
+    candidates.append(_REPO_ROOT / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        payload = _load_json_dict(path)
+        status = str(
+            payload.get("drift_status")
+            or payload.get("reconciliation_status")
+            or payload.get("status")
+            or "UNKNOWN"
+        ).strip().upper()
+        return {
+            "status": status or "UNKNOWN",
+            "path": path,
+            "payload": payload,
+        }
+
+    return {
+        "status": "INDETERMINATE",
+        "path": candidates[0] if candidates else None,
+        "payload": {},
+        "reason": "posttrade reconciliation artifact missing",
+    }
+
+
+def _format_reconciliation_section(recon: dict) -> tuple[str, str, bool]:
+    status = str(recon.get("status") or "INDETERMINATE").upper()
+    payload = recon.get("payload") if isinstance(recon.get("payload"), dict) else {}
+    path = recon.get("path")
+    path_text = str(path) if path else "unavailable"
+    healthy = status in {"OK", "PASS", "OK_RECONCILED"}
+    if healthy:
+        explanation = "Broker positions match expected post-execution state."
+    elif status == "DRIFT_DETECTED":
+        explanation = "Expected and broker positions differ."
+    elif status == "UNEXPECTED_SHORT":
+        explanation = "Unexpected short position detected."
+    elif status == "INDETERMINATE":
+        explanation = str(recon.get("reason") or "Reconciliation could not be completed from artifacts.")
+    else:
+        explanation = str(payload.get("operator_message") or "Reconciliation requires review.")
+
+    drift_lines: list[str] = []
+    for item in payload.get("share_deltas") or []:
+        if not isinstance(item, dict):
+            continue
+        classification = str(item.get("classification") or "")
+        if classification == "MATCH":
+            continue
+        symbol = str(item.get("symbol") or "").strip()
+        expected = item.get("expected_qty")
+        broker_qty = item.get("broker_qty")
+        drift_lines.append(f"- {symbol}: expected {expected}, broker {broker_qty} ({classification})")
+    for item in payload.get("qty_mismatches") or []:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").strip()
+        line = f"- {symbol}: expected {item.get('expected_qty')}, broker {item.get('actual_qty')} (QTY_MISMATCH)"
+        if line not in drift_lines:
+            drift_lines.append(line)
+
+    text_lines = [
+        "--- Reconciliation Status ---",
+        f"Status: {status}",
+        f"Explanation: {explanation}",
+        f"Artifact: {path_text}",
+    ]
+    if drift_lines:
+        text_lines.append("Drift details:")
+        text_lines.extend(drift_lines)
+    text = "\n".join(text_lines) + "\n"
+
+    html_lines = [html_escape(line) for line in text_lines]
+    html = "<h3>Reconciliation Status</h3><p style='font-family:monospace;'>" + "<br>".join(html_lines) + "</p>"
+    return text, html, healthy
+
+
+def html_escape(value: object) -> str:
+    import html
+
+    return html.escape(str(value))
+
+
 def _fmt_pct(val: float) -> str:
     sign = "+" if val >= 0 else ""
     return f"{sign}{val * 100:.2f}%"
@@ -244,6 +449,12 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     submitted = int(results.get("submitted_count") or 0)
     accepted = int(results.get("accepted_count") or 0)
     rejected = int(results.get("rejected_count") or 0)
+    filled = int(
+        results.get("filled_count")
+        or results.get("orders_filled_count")
+        or results.get("broker_fill_count")
+        or 0
+    )
     halt_reason = results.get("halt_reason")
     operator_execution_status = str(results.get("operator_execution_status") or "").strip().lower()
 
@@ -275,6 +486,34 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         reason_line = "Halt reason: none"
 
     artifact_ref = f"Results artifact: {results_path}"
+    execution_text = (
+        "--- Execution Status ---\n"
+        f"Run ID: {run_id}\n"
+        f"Trade date: {trade_date}\n"
+        f"Mode: {mode}\n"
+        f"Status: {status_display}\n"
+        f"Submitted: {submitted}\n"
+        f"Accepted: {accepted}\n"
+        f"Rejected: {rejected}\n"
+        f"Filled: {filled}\n"
+        f"{reason_line}\n"
+        f"{artifact_ref}\n"
+    )
+    execution_html = (
+        f"<h3>{status_emoji} Execution Status</h3>"
+        f"<p><b>Run ID:</b> {html_escape(run_id)}</p>"
+        f"<p><b>Trade Date:</b> {html_escape(trade_date)}</p>"
+        f"<p><b>Mode:</b> {html_escape(mode)}</p>"
+        f"<p><b>Status:</b> {html_escape(status_display)}</p>"
+        f"<p><b>Submitted:</b> {submitted} | <b>Accepted:</b> {accepted} | "
+        f"<b>Rejected:</b> {rejected} | <b>Filled:</b> {filled}</p>"
+        f"<p><b>Halt/skip reason:</b> {html_escape(halt_reason or 'none')}</p>"
+        f"<p style='font-size: 0.9em; color: #666;'>{html_escape(artifact_ref)}</p>"
+    )
+
+    recon_text, recon_html, recon_healthy = _format_reconciliation_section(
+        _load_reconciliation_data(trade_date, results_path)
+    )
 
     # ------------------------------------------------------------------ #
     # Performance vs SPY section
@@ -328,38 +567,49 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
             "<h3>Performance vs SPY</h3>"
             "<p style='color:#888;'>Performance data not yet available.</p>"
         )
+    shadow_scoreboard = build_shadow_scoreboard(_REPO_ROOT, trade_date)
+    shadow_text = shadow_scoreboard["text"]
+    shadow_html = shadow_scoreboard["html"]
+    shadow_healthy = str(shadow_scoreboard.get("status") or "").upper() == "OK" and "Artifact status: DEGRADED" not in shadow_text
 
     # ------------------------------------------------------------------ #
     # Assemble body
     # ------------------------------------------------------------------ #
+    action_items: list[str] = []
+    if status_display in {"HALTED", "PARTIAL"}:
+        action_items.append("Review execution halt before next run.")
+    if not recon_healthy:
+        action_items.append("Review reconciliation drift before next run.")
+    if not shadow_healthy:
+        action_items.append("Review shadow artifact generation or data coverage.")
+    if not action_items:
+        action_items.append("None")
+    operator_text = "--- Operator Action Required ---\n" + "\n".join(f"- {item}" for item in action_items) + "\n"
+    operator_html = (
+        "<h3>Operator Action Required</h3><ul>"
+        + "".join(f"<li>{html_escape(item)}</li>" for item in action_items)
+        + "</ul>"
+    )
+
     body_text = (
-        f"Run ID: {run_id}\n"
-        f"Trade date: {trade_date}\n"
-        f"Mode: {mode}\n"
-        f"Status: {status_display}\n"
-        f"\n"
-        f"Submitted: {submitted}\n"
-        f"Accepted: {accepted}\n"
-        f"Rejected: {rejected}\n"
-        f"\n"
-        f"{reason_line}\n"
-        f"{artifact_ref}\n"
+        f"{execution_text}\n"
+        f"{recon_text}\n"
         f"{perf_text}"
+        f"{shadow_text}"
+        f"\n{operator_text}"
     )
     body_html = (
         "<html><body>"
-        f"<h3>{status_emoji} Trading Confirmation {trade_date}</h3>"
-        f"<p><b>Run ID:</b> {run_id}</p>"
-        f"<p><b>Trade Date:</b> {trade_date}</p>"
-        f"<p><b>Mode:</b> {mode}</p>"
-        f"<p><b>Status:</b> {status_display}</p>"
+        f"<h2>Trading Confirmation {html_escape(trade_date)} [{html_escape(status_display)}]</h2>"
+        f"{execution_html}"
         f"<hr>"
-        f"<p><b>Submitted:</b> {submitted} | <b>Accepted:</b> {accepted} | <b>Rejected:</b> {rejected}</p>"
-        f"<p><b>Halt/skip reason:</b> {halt_reason or 'none'}</p>"
+        f"{recon_html}"
         f"<hr>"
         f"{perf_html}"
         f"<hr>"
-        f"<p style='font-size: 0.9em; color: #666;'>{artifact_ref}</p>"
+        f"{shadow_html}"
+        f"<hr>"
+        f"{operator_html}"
         "</body></html>"
     )
     return subject, body_text, body_html

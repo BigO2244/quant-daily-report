@@ -379,9 +379,108 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.DataFram
         if retries:
             df = pd.concat([df, pd.DataFrame(retries)], ignore_index=True)
 
+    stale_or_missing = set(missing_pre)
+    if not df.empty and "price_date" in df.columns:
+        stale_or_missing.update(
+            str(row["ticker"])
+            for _, row in df.iterrows()
+            if str(row.get("price_date") or "") < run_date
+        )
+    if stale_or_missing:
+        intraday_df = _fetch_intraday_open_prices_yfinance(
+            yf=yf,
+            tickers=sorted(stale_or_missing),
+            run_date=run_date,
+        )
+        if not intraday_df.empty:
+            if df.empty:
+                df = intraday_df
+            else:
+                df = pd.concat(
+                    [
+                        df[~df["ticker"].astype(str).isin(set(intraday_df["ticker"].astype(str)))],
+                        intraday_df,
+                    ],
+                    ignore_index=True,
+                )
+
     if df.empty:
         raise RuntimeError(f"No usable open prices for run_date={run_date}")
     return df.drop_duplicates(subset=["ticker"], keep="last")
+
+
+def _fetch_intraday_open_prices_yfinance(*, yf, tickers: List[str], run_date: str) -> pd.DataFrame:
+    if not tickers:
+        return pd.DataFrame(columns=["ticker", "open", "price_date"])
+
+    start = pd.Timestamp(run_date)
+    end = start + pd.Timedelta(days=1)
+    rows: List[Dict[str, object]] = []
+
+    for interval in ("1m", "5m"):
+        try:
+            yf.set_tz_cache_location(tempfile.mkdtemp(prefix="yf_tz_cache_"))
+            px = yf.download(
+                tickers=tickers,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                interval=interval,
+                group_by="column",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+        except Exception:
+            continue
+
+        if px is None or len(px) == 0:
+            continue
+
+        interval_rows: List[Dict[str, object]] = []
+        if isinstance(px.columns, pd.MultiIndex):
+            if "Open" not in px.columns.get_level_values(0):
+                continue
+            opens = px["Open"]
+            for ticker in tickers:
+                if ticker not in opens.columns:
+                    continue
+                series = opens[ticker].dropna()
+                if series.empty:
+                    continue
+                same_day = series[series.index.map(lambda idx: str(pd.Timestamp(idx).date()) == run_date)]
+                if same_day.empty:
+                    continue
+                interval_rows.append(
+                    {
+                        "ticker": ticker,
+                        "open": float(same_day.iloc[0]),
+                        "price_date": str(pd.Timestamp(same_day.index[0]).date()),
+                    }
+                )
+        else:
+            if len(tickers) != 1 or "Open" not in px.columns:
+                continue
+            series = px["Open"].dropna()
+            same_day = series[series.index.map(lambda idx: str(pd.Timestamp(idx).date()) == run_date)]
+            if not same_day.empty:
+                interval_rows.append(
+                    {
+                        "ticker": tickers[0],
+                        "open": float(same_day.iloc[0]),
+                        "price_date": str(pd.Timestamp(same_day.index[0]).date()),
+                    }
+                )
+
+        if interval_rows:
+            rows.extend(interval_rows)
+            found = {str(row["ticker"]) for row in rows}
+            tickers = [ticker for ticker in tickers if ticker not in found]
+            if not tickers:
+                break
+
+    if not rows:
+        return pd.DataFrame(columns=["ticker", "open", "price_date"])
+    return pd.DataFrame(rows).drop_duplicates(subset=["ticker"], keep="last")
 
 
 def fetch_prev_closes_yfinance(tickers: List[str], asof_date: str) -> pd.DataFrame:
@@ -1511,53 +1610,96 @@ def _expected_positions_after_orders(
     return expected
 
 
-def _resolve_filled_buy_orders(
+def _order_status_value(order: Dict[str, object] | None) -> str:
+    if not order:
+        return ""
+    return str(order.get("status") or "").upper().replace("ORDERSTATUS.", "")
+
+
+def _order_filled_quantity(order: Dict[str, object] | None, fallback_quantity: object = None) -> float | None:
+    if not order:
+        return None
+    for key in ("filled_qty", "filled_quantity", "filled_shares"):
+        if key in order:
+            return abs(_coerce_float(order.get(key), 0.0) or 0.0)
+    status = _order_status_value(order)
+    if status == "FILLED":
+        return abs(_coerce_float(order.get("quantity") or order.get("qty") or fallback_quantity, 0.0) or 0.0)
+    if status in {"CANCELED", "CANCELLED", "EXPIRED", "REJECTED", "PENDING_NEW", "ACCEPTED", "NEW", "HELD"}:
+        return 0.0
+    return None
+
+
+def _resolve_filled_orders_for_recon(
     alpaca: AlpacaBroker,
     submitted_orders: List[Dict[str, object]],
 ) -> List[Dict[str, object]]:
-    buy_orders_submitted = 0
-    buy_orders_filled = 0
     orders_for_recon: List[Dict[str, object]] = []
-    try:
-        for order in submitted_orders or []:
-            side = str(order.get("side") or "").upper()
-            if side in {"SELL", "CLOSE", "REDUCE"}:
-                orders_for_recon.append(order)
-                continue
-            buy_orders_submitted += 1
-            alpaca_order_id = str(order.get("alpaca_order_id") or "").strip()
-            current_order: Dict[str, object] | None = None
-            if alpaca_order_id:
-                current_order = alpaca.get_order(alpaca_order_id)
-            else:
-                internal_order_id = str(order.get("order_id") or "").strip()
-                if not internal_order_id:
-                    raise RuntimeError("missing internal order_id for submitted buy order")
-                current_order = alpaca.find_order_by_client_id(
-                    alpaca_client_order_id(internal_order_id)
-                )
-            if not current_order:
-                raise RuntimeError(
-                    f"missing current Alpaca status for buy order {str(order.get('order_id') or '').strip() or str(order.get('ticker') or '').strip() or 'unknown'}"
-                )
-            status = str(current_order.get("status") or "").upper()
-            if status == "FILLED":
-                orders_for_recon.append(order)
-                buy_orders_filled += 1
-        if buy_orders_submitted > 0:
-            logger.info(
-                "[POSTTRADE_RECON] buy_orders_submitted=%d buy_orders_filled=%d buy_orders_pending=%d (excluded from drift check)",
-                buy_orders_submitted,
-                buy_orders_filled,
-                buy_orders_submitted - buy_orders_filled,
+    submitted_count = 0
+    filled_count = 0
+    partial_count = 0
+    pending_count = 0
+    rejected_count = 0
+
+    for order in submitted_orders or []:
+        symbol = str(order.get("ticker") or "").upper().strip()
+        side = str(order.get("side") or "").upper()
+        submitted_qty = abs(_coerce_float(order.get("quantity"), 0.0) or 0.0)
+        if not symbol or not side or submitted_qty <= 1e-12:
+            continue
+
+        submitted_count += 1
+        alpaca_order_id = str(order.get("alpaca_order_id") or "").strip()
+        current_order: Dict[str, object] | None = None
+        if alpaca_order_id:
+            current_order = alpaca.get_order(alpaca_order_id)
+        else:
+            internal_order_id = str(order.get("order_id") or "").strip()
+            if not internal_order_id:
+                raise RuntimeError(f"missing internal order_id for submitted order {symbol} {side}")
+            current_order = alpaca.find_order_by_client_id(
+                alpaca_client_order_id(internal_order_id)
             )
-        return orders_for_recon
-    except Exception as exc:
-        logger.warning(
-            "[POSTTRADE_RECON] buy fill resolution failed; using full submitted order set: %s",
-            exc,
+
+        if not current_order:
+            raise RuntimeError(
+                f"missing current Alpaca status for submitted order {str(order.get('order_id') or '').strip() or symbol}"
+            )
+
+        status = _order_status_value(current_order)
+        filled_qty = _order_filled_quantity(current_order, fallback_quantity=submitted_qty)
+        if filled_qty is None:
+            raise RuntimeError(
+                f"unable to resolve filled quantity for submitted order {str(order.get('order_id') or '').strip() or symbol}: status={status or 'UNKNOWN'}"
+            )
+        if filled_qty <= 1e-12:
+            if status in {"REJECTED", "CANCELED", "CANCELLED", "EXPIRED"}:
+                rejected_count += 1
+            else:
+                pending_count += 1
+            continue
+
+        resolved = dict(order)
+        resolved["quantity"] = float(filled_qty)
+        resolved["filled_quantity"] = float(filled_qty)
+        resolved["resolved_order_status"] = status
+        orders_for_recon.append(resolved)
+        if filled_qty + 1e-12 < submitted_qty:
+            partial_count += 1
+        else:
+            filled_count += 1
+
+    if submitted_count > 0:
+        logger.info(
+            "[POSTTRADE_RECON] submitted=%d filled=%d partial=%d pending=%d rejected=%d resolved_orders=%d",
+            submitted_count,
+            filled_count,
+            partial_count,
+            pending_count,
+            rejected_count,
+            len(orders_for_recon),
         )
-        return list(submitted_orders or [])
+    return orders_for_recon
 
 
 def _sell_phase_timeout_seconds() -> float:
@@ -2249,7 +2391,7 @@ def _capture_alpaca_posttrade_state(
         run_date,
         alpaca_positions_snapshot,
     )
-    orders_for_recon = _resolve_filled_buy_orders(alpaca, submitted_orders)
+    orders_for_recon = _resolve_filled_orders_for_recon(alpaca, submitted_orders)
     expected_positions = _expected_positions_after_orders(
         _holdings_to_quantity_map(holdings_prev),
         orders_for_recon,

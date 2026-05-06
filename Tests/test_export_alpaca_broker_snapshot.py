@@ -167,3 +167,59 @@ class ExportAlpacaBrokerSnapshotCompatTest(unittest.TestCase):
             recon = write_posttrade_recon_from_snapshot(repo_root=repo_root, payload=payload, report_date="2026-04-08")
             self.assertIsNotNone(recon)
             self.assertEqual("OK_RECONCILED", recon["drift_status"])
+
+    def test_write_posttrade_recon_uses_filled_orders_when_fill_activities_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            run_root = repo_root / "outputs" / "runs" / "2026-05-06T101413-0400_259de85"
+            broker_dir = run_root / "broker"
+            broker_dir.mkdir(parents=True, exist_ok=True)
+            (repo_root / "outputs").mkdir(parents=True, exist_ok=True)
+            (repo_root / "outputs" / "latest_run.json").write_text(
+                json.dumps({"trade_date": "2026-05-06", "run_root": str(run_root)}) + "\n",
+                encoding="utf-8",
+            )
+            (broker_dir / "pretrade_positions.json").write_text(
+                json.dumps(
+                    {
+                        "positions": [
+                            {"symbol": "GILD", "qty": "4", "side": "long"},
+                            {"symbol": "GM", "qty": "15", "side": "long"},
+                            {"symbol": "QCOM", "qty": "3", "side": "long"},
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            payload = build_snapshot_payload(
+                report_date="2026-05-06",
+                workflow_run_id="run-1",
+                git_sha="deadbeef",
+                account={"cash": "2087.83", "equity": "10132.03"},
+                positions=[
+                    {"symbol": "GM", "qty": "11", "side": "long"},
+                    {"symbol": "QCOM", "qty": "2", "side": "long"},
+                    {"symbol": "HLT", "qty": "1", "side": "long"},
+                    {"symbol": "INTC", "qty": "2", "side": "long"},
+                    {"symbol": "UNH", "qty": "1", "side": "long"},
+                    {"symbol": "WM", "qty": "2", "side": "long"},
+                ],
+                orders_all=[
+                    {"symbol": "GILD", "side": "sell", "qty": "4", "filled_qty": "4", "status": "filled", "filled_at": "2026-05-06T14:14:23Z"},
+                    {"symbol": "GM", "side": "sell", "qty": "4", "filled_qty": "4", "status": "filled", "filled_at": "2026-05-06T14:14:23Z"},
+                    {"symbol": "QCOM", "side": "sell", "qty": "1", "filled_qty": "1", "status": "filled", "filled_at": "2026-05-06T14:14:23Z"},
+                    {"symbol": "HLT", "side": "buy", "qty": "1", "filled_qty": "1", "status": "filled", "filled_at": "2026-05-06T14:14:26Z"},
+                    {"symbol": "INTC", "side": "buy", "qty": "2", "filled_qty": "2", "status": "filled", "filled_at": "2026-05-06T14:14:27Z"},
+                    {"symbol": "UNH", "side": "buy", "qty": "1", "filled_qty": "1", "status": "filled", "filled_at": "2026-05-06T14:14:27Z"},
+                    {"symbol": "WM", "side": "buy", "qty": "2", "filled_qty": "2", "status": "filled", "filled_at": "2026-05-06T14:14:26Z"},
+                ],
+                orders_closed=[],
+                fills=[],
+            )
+
+            recon = write_posttrade_recon_from_snapshot(repo_root=repo_root, payload=payload, report_date="2026-05-06")
+
+            self.assertIsNotNone(recon)
+            self.assertEqual("OK_RECONCILED", recon["drift_status"])
+            self.assertEqual([], recon["qty_mismatches"])

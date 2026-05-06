@@ -784,23 +784,31 @@ def main(argv: list[str] | None = None) -> int:
             ledger_path=paper_ledger_path,
         )
 
-        paper_summary = run_paper_day(
-            run_date=trade_date,
-            signals_path=adjusted_signals_path,
-            ledger_path=paper_ledger_path,
-            trades_path=paper_trades_path,
-            config_path="paper/config_paper.json",
-            force=False,
-            plan_only=False,
-            constraints={
-                "cash_target_weight": adjusted_cash_target_weight,
-            },
-            precomputed_trade_plan=(
-                list((planned_payload or {}).get("trades") or [])
-                if exact_precomputed_execution
-                else None
-            ),
-        )
+        prior_run_output_root = os.environ.get("RUN_OUTPUT_ROOT")
+        os.environ["RUN_OUTPUT_ROOT"] = str(run_root)
+        try:
+            paper_summary = run_paper_day(
+                run_date=trade_date,
+                signals_path=adjusted_signals_path,
+                ledger_path=paper_ledger_path,
+                trades_path=paper_trades_path,
+                config_path="paper/config_paper.json",
+                force=False,
+                plan_only=False,
+                constraints={
+                    "cash_target_weight": adjusted_cash_target_weight,
+                },
+                precomputed_trade_plan=(
+                    list((planned_payload or {}).get("trades") or [])
+                    if exact_precomputed_execution
+                    else None
+                ),
+            )
+        finally:
+            if prior_run_output_root is None:
+                os.environ.pop("RUN_OUTPUT_ROOT", None)
+            else:
+                os.environ["RUN_OUTPUT_ROOT"] = prior_run_output_root
         paper_summary["run_id"] = run_id
         paper_summary["precomputed_execution_mode"] = (
             "exact_payload" if exact_precomputed_execution else "rebuilt_from_signals"

@@ -180,6 +180,26 @@ def _apply_fills_to_positions(expected: dict[str, float], fills: list[dict[str, 
     return next_positions
 
 
+def _filled_orders_as_fills(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    fills: list[dict[str, Any]] = []
+    for order in orders or []:
+        if not isinstance(order, dict):
+            continue
+        status = str(order.get("status") or "").strip().lower().replace("orderstatus.", "")
+        if status not in {"filled", "partially_filled"}:
+            continue
+        symbol = str(order.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        qty = _to_float(order.get("filled_qty"))
+        if qty is None:
+            qty = _to_float(order.get("qty"))
+        if qty is None or abs(qty) <= 1e-12:
+            continue
+        fills.append({"symbol": symbol, "side": order.get("side"), "qty": abs(qty)})
+    return fills
+
+
 def _market_value_total(positions: list[dict[str, Any]]) -> float | None:
     values = [_to_float(item.get("market_value")) for item in positions]
     numeric = [value for value in values if value is not None]
@@ -529,10 +549,12 @@ def write_posttrade_recon_from_snapshot(
     if not pretrade_positions_path.exists():
         return None
     pretrade_positions = json.loads(pretrade_positions_path.read_text(encoding="utf-8"))
-    expected_positions = _apply_fills_to_positions(
-        _extract_position_map(pretrade_positions),
-        payload.get("fills_report_date") if isinstance(payload.get("fills_report_date"), list) else [],
-    )
+    fills = payload.get("fills_report_date") if isinstance(payload.get("fills_report_date"), list) else []
+    if not fills:
+        fills = _filled_orders_as_fills(
+            payload.get("orders_report_date") if isinstance(payload.get("orders_report_date"), list) else []
+        )
+    expected_positions = _apply_fills_to_positions(_extract_position_map(pretrade_positions), fills)
     actual_positions = _extract_position_map(
         payload.get("positions_current") if isinstance(payload.get("positions_current"), list) else [],
     )

@@ -78,6 +78,7 @@ class _Phase4Alpaca:
     paper = True
 
     def __init__(self):
+        self.submitted = False
         self.account_calls = [
             {"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0", "status": "ACTIVE"},
             {"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0", "status": "ACTIVE"},
@@ -93,9 +94,17 @@ class _Phase4Alpaca:
         return cls()
 
     def find_order_by_client_id(self, client_id):
+        if self.submitted:
+            return {"id": "alpaca-1", "status": "filled", "filled_qty": "2"}
+        return None
+
+    def get_order(self, order_id):
+        if order_id == "alpaca-1":
+            return {"id": order_id, "status": "filled", "filled_qty": "2"}
         return None
 
     def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
+        self.submitted = True
         return {
             "id": "alpaca-1",
             "status": "accepted",
@@ -184,3 +193,85 @@ def test_phase4_refresh_from_posttrade_snapshot_matches_canonical(tmp_path, monk
     assert canonical["cash"] == pytest.approx(2500.0)
     assert canonical["equity"] == pytest.approx(4650.0)
     assert canonical["reason"] == "posttrade_refresh_from_snapshot"
+
+
+class _ReconFillAlpaca:
+    def __init__(self, statuses):
+        self.statuses = statuses
+
+    def get_order(self, order_id):
+        return self.statuses.get(order_id)
+
+    def find_order_by_client_id(self, client_id):
+        return self.statuses.get(client_id)
+
+
+def test_posttrade_expected_positions_apply_actual_filled_orders():
+    submitted = [
+        {"alpaca_order_id": "sell-gild", "ticker": "GILD", "side": "SELL", "quantity": 4},
+        {"alpaca_order_id": "sell-gm", "ticker": "GM", "side": "SELL", "quantity": 4},
+        {"alpaca_order_id": "sell-qcom", "ticker": "QCOM", "side": "SELL", "quantity": 1},
+        {"alpaca_order_id": "buy-hlt", "ticker": "HLT", "side": "BUY", "quantity": 1},
+        {"alpaca_order_id": "buy-intc", "ticker": "INTC", "side": "BUY", "quantity": 2},
+        {"alpaca_order_id": "buy-unh", "ticker": "UNH", "side": "BUY", "quantity": 1},
+        {"alpaca_order_id": "buy-wm", "ticker": "WM", "side": "BUY", "quantity": 2},
+    ]
+    alpaca = _ReconFillAlpaca(
+        {
+            "sell-gild": {"status": "filled", "filled_qty": "4"},
+            "sell-gm": {"status": "filled", "filled_qty": "4"},
+            "sell-qcom": {"status": "filled", "filled_qty": "1"},
+            "buy-hlt": {"status": "filled", "filled_qty": "1"},
+            "buy-intc": {"status": "filled", "filled_qty": "2"},
+            "buy-unh": {"status": "filled", "filled_qty": "1"},
+            "buy-wm": {"status": "filled", "filled_qty": "2"},
+        }
+    )
+
+    resolved = broker._resolve_filled_orders_for_recon(alpaca, submitted)
+    expected = broker._expected_positions_after_orders(
+        {"GILD": 4, "GM": 15, "QCOM": 3},
+        resolved,
+    )
+
+    assert expected == {
+        "GM": 11.0,
+        "QCOM": 2.0,
+        "HLT": 1.0,
+        "INTC": 2.0,
+        "UNH": 1.0,
+        "WM": 2.0,
+    }
+
+
+def test_posttrade_expected_positions_ignore_rejected_orders():
+    submitted = [{"alpaca_order_id": "buy-hlt", "ticker": "HLT", "side": "BUY", "quantity": 1}]
+    alpaca = _ReconFillAlpaca({"buy-hlt": {"status": "rejected", "filled_qty": "0"}})
+
+    resolved = broker._resolve_filled_orders_for_recon(alpaca, submitted)
+    expected = broker._expected_positions_after_orders({}, resolved)
+
+    assert resolved == []
+    assert expected == {}
+
+
+def test_posttrade_expected_positions_apply_partial_fill_quantity_only():
+    submitted = [{"alpaca_order_id": "sell-gm", "ticker": "GM", "side": "SELL", "quantity": 4}]
+    alpaca = _ReconFillAlpaca({"sell-gm": {"status": "partially_filled", "filled_qty": "1.5"}})
+
+    resolved = broker._resolve_filled_orders_for_recon(alpaca, submitted)
+    expected = broker._expected_positions_after_orders({"GM": 15}, resolved)
+
+    assert resolved[0]["quantity"] == pytest.approx(1.5)
+    assert expected == {"GM": 13.5}
+
+
+def test_posttrade_expected_positions_ignore_zero_share_orders():
+    submitted = [{"alpaca_order_id": "buy-hlt", "ticker": "HLT", "side": "BUY", "quantity": 0}]
+    alpaca = _ReconFillAlpaca({"buy-hlt": {"status": "filled", "filled_qty": "0"}})
+
+    resolved = broker._resolve_filled_orders_for_recon(alpaca, submitted)
+    expected = broker._expected_positions_after_orders({}, resolved)
+
+    assert resolved == []
+    assert expected == {}
