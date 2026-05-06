@@ -196,7 +196,8 @@ def _filled_orders_as_fills(orders: list[dict[str, Any]]) -> list[dict[str, Any]
             qty = _to_float(order.get("qty"))
         if qty is None or abs(qty) <= 1e-12:
             continue
-        fills.append({"symbol": symbol, "side": order.get("side"), "qty": abs(qty)})
+        side = str(order.get("side") or "").strip().lower().replace("orderside.", "")
+        fills.append({"symbol": symbol, "side": side, "qty": abs(qty)})
     return fills
 
 
