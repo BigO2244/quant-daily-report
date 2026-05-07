@@ -2,33 +2,36 @@
 """
 Operational Stability Window Evaluation
 =======================================
-Standalone analysis that compares Polaris, Orion, Lyra, and SPY across:
-  1. An "Official Since-Inception" window (default start: 2026-03-23)
-  2. An "Operational Stability" window (default start: 2026-04-24)
+Dual-mode daily analytics utility. Automatically computes STRICT and LOOSE
+evaluations for Polaris, Orion, Lyra, and SPY across four windows:
 
-A day is considered fully operationally valid when ALL of the following hold:
-  - shadow_evaluation.json present and data_status == "OK" for all strategies
-  - Production execution run exists with operator_execution_status == "executed"
-  - Reconciliation status == OK_RECONCILED (read from actual recon file, not
-    stale operator_summary field)
-  - No halt or skip reason
-  - No duplicate replay anomaly
+  1. Since Inception     (default: 2026-03-23)
+  2. Stability Window    (default: 2026-04-24)
+  3. Rolling 14D
+  4. Rolling 30D         (only reported when >= 5 records exist in window)
 
-Returns come from shadow_evaluation.json daily_return fields.  This is the
-model-portfolio return, NOT realized execution return.
+Validity modes (both always computed):
+  STRICT  — execution_status == EXECUTED  AND  reconciliation == OK_RECONCILED
+  LOOSE   — execution_status == EXECUTED  (recon not required)
 
-This script is READ-ONLY.  It does not modify any production artifact.
+A day additionally requires:
+  - shadow_evaluation.json present with data_status OK for all strategies
+  - No halt or skip reason; no duplicate replay flag
+
+Returns from shadow_evaluation.json daily_return field (model-portfolio
+returns, NOT realized execution returns).
+
+READ-ONLY: does not modify any production artifact.
 
 Usage:
     python3 -m research.analysis.stable_window_evaluation [options]
 
-    --repo-root PATH        Path to repo root (default: auto-detected)
-    --since-start DATE      Since-inception start date, YYYY-MM-DD (default: 2026-03-23)
-    --stable-start DATE     Stability window start date, YYYY-MM-DD (default: 2026-04-24)
+    --repo-root PATH        Repo root path (default: auto-detected)
+    --since-start DATE      Since-inception start (default: 2026-03-23)
+    --stable-start DATE     Stability window start (default: 2026-04-24)
     --end-date DATE         End date YYYY-MM-DD (default: today)
     --output-dir PATH       Override output directory
-    --loose-recon           Include executed days even when recon not confirmed
-    --csv                   Also export daily returns as CSV
+    --csv                   Export daily returns CSV (shadow-OK days)
 """
 from __future__ import annotations
 
@@ -36,43 +39,65 @@ import argparse
 import csv
 import json
 import math
-import os
 import sys
-from dataclasses import dataclass, field, asdict
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-# ── Paths & constants ─────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Config — all window dates and thresholds centralized here
+# ══════════════════════════════════════════════════════════════════════════════
 
-_HERE = Path(__file__).resolve()
-_REPO_ROOT_DEFAULT = _HERE.parents[2]
+EVALUATION_CONTRACT_VERSION   = "v1"
 
 SINCE_INCEPTION_START_DEFAULT = "2026-03-23"
-STABLE_WINDOW_START_DEFAULT = "2026-04-24"
+STABLE_WINDOW_START_DEFAULT   = "2026-04-24"
+ROLLING_14D_DAYS              = 14
+ROLLING_30D_DAYS              = 30
+ROLLING_30D_MIN_RECORDS       = 5   # suppress rolling-30D section below this count
+
+_HERE              = Path(__file__).resolve()
+_REPO_ROOT_DEFAULT = _HERE.parents[2]
 
 STRATEGY_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra")
-BENCHMARK_SLUG = "spy_benchmark"
-ALL_SLUGS = STRATEGY_SLUGS + (BENCHMARK_SLUG,)
+BENCHMARK_SLUG  = "spy_benchmark"
+ALL_SLUGS       = STRATEGY_SLUGS + (BENCHMARK_SLUG,)
 
-DISPLAY = {
+DISPLAY: dict[str, str] = {
     "caerus_polaris": "Polaris",
-    "caerus_orion": "Orion",
-    "caerus_lyra": "Lyra",
-    "spy_benchmark": "SPY",
+    "caerus_orion":   "Orion",
+    "caerus_lyra":    "Lyra",
+    "spy_benchmark":  "SPY",
 }
 
+MODE_LABEL: dict[str, str] = {
+    "strict": "STRICT  [EXECUTED + OK_RECONCILED]",
+    "loose":  "LOOSE   [EXECUTED, recon not required]",
+}
+MODE_DEFINITION: dict[str, str] = {
+    "strict": (
+        "execution_status == EXECUTED  AND  reconciliation_status == OK_RECONCILED  "
+        "AND  shadow data_status == OK for all strategies  AND  no halt/skip flag"
+    ),
+    "loose": (
+        "execution_status == EXECUTED  AND  shadow data_status == OK for all strategies  "
+        "AND  no halt/skip flag  (reconciliation not required)"
+    ),
+}
 
-# ── Data classes ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Data classes
+# ══════════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class ShadowDay:
     trade_date: str
-    returns: dict[str, float] = field(default_factory=dict)   # slug → daily_return
-    navs: dict[str, float] = field(default_factory=dict)      # slug → nav (informational)
-    data_status: dict[str, str] = field(default_factory=dict) # slug → OK / NO_DATA / …
+    returns: dict[str, float] = field(default_factory=dict)
+    navs: dict[str, float] = field(default_factory=dict)
+    data_status: dict[str, str] = field(default_factory=dict)
     avg_turnover: dict[str, float | None] = field(default_factory=dict)
-    shadow_ok: bool = False   # True if ALL strategy slugs have data_status OK
+    shadow_ok: bool = False
 
 
 @dataclass
@@ -80,8 +105,8 @@ class ProductionDay:
     trade_date: str
     run_id: str
     executed: bool = False
-    recon_ok: bool = False          # from actual recon file, not operator_summary
-    recon_status: str = ""          # raw status string
+    recon_ok: bool = False
+    recon_status: str = ""
     halt_reason: str | None = None
     skipped_duplicate: bool = False
 
@@ -94,8 +119,7 @@ class DayRecord:
 
     def fully_valid(self) -> bool:
         return (
-            self.shadow is not None
-            and self.shadow.shadow_ok
+            self.shadow is not None and self.shadow.shadow_ok
             and self.production is not None
             and self.production.executed
             and self.production.recon_ok
@@ -104,10 +128,8 @@ class DayRecord:
         )
 
     def execution_valid(self) -> bool:
-        """Looser: executed + shadow OK, regardless of recon."""
         return (
-            self.shadow is not None
-            and self.shadow.shadow_ok
+            self.shadow is not None and self.shadow.shadow_ok
             and self.production is not None
             and self.production.executed
             and not self.production.skipped_duplicate
@@ -132,7 +154,9 @@ class DayRecord:
         return "valid"
 
 
-# ── Loaders ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Loaders
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _load_json(path: Path) -> dict | None:
     try:
@@ -151,10 +175,14 @@ def _is_date(s: str) -> bool:
 
 
 def load_shadow_days(repo_root: Path) -> dict[str, ShadowDay]:
-    """Return dict keyed by trade_date for every shadow_evaluation.json found."""
     shadow_dir = repo_root / "outputs" / "shadow_candidates"
     result: dict[str, ShadowDay] = {}
     if not shadow_dir.exists():
+        print(
+            "[stable_window_eval] WARNING: shadow_candidates directory not found — "
+            "shadow data will be empty",
+            file=sys.stderr,
+        )
         return result
 
     for date_dir in sorted(shadow_dir.iterdir()):
@@ -177,8 +205,8 @@ def load_shadow_days(repo_root: Path) -> dict[str, ShadowDay]:
             status = str(s.get("data_status") or "UNAVAILABLE").upper()
             day.data_status[slug] = status
             if status == "OK":
-                dr = s.get("daily_return")
-                nav = s.get("nav")
+                dr   = s.get("daily_return")
+                nav  = s.get("nav")
                 turn = s.get("avg_turnover")
                 if dr is not None:
                     day.returns[slug] = float(dr)
@@ -189,7 +217,6 @@ def load_shadow_days(repo_root: Path) -> dict[str, ShadowDay]:
             else:
                 all_ok = False
 
-        # Require ALL strategies (including benchmark) to have OK data
         day.shadow_ok = all_ok and all(slug in day.returns for slug in ALL_SLUGS)
         result[trade_date] = day
 
@@ -197,97 +224,97 @@ def load_shadow_days(repo_root: Path) -> dict[str, ShadowDay]:
 
 
 def load_production_days(repo_root: Path) -> dict[str, ProductionDay]:
-    """
-    Return the best production day record for each trade_date.
-    'Best' = highest score: executed + recon_ok > executed > not executed.
-    Multiple runs on the same date → pick the one with the best score.
-    """
     runs_dir = repo_root / "outputs" / "runs"
     candidates: dict[str, list[dict]] = {}
 
     if not runs_dir.exists():
+        print(
+            "[stable_window_eval] WARNING: outputs/runs directory not found — "
+            "production data will be empty",
+            file=sys.stderr,
+        )
         return {}
 
     for run_dir in sorted(runs_dir.iterdir()):
         if not run_dir.is_dir() or not run_dir.name[0].isdigit():
             continue
+        try:
+            summary = _load_json(run_dir / "operator_summary.json") or {}
+            results = _load_json(run_dir / "execution_results.json") or {}
 
-        summary = _load_json(run_dir / "operator_summary.json") or {}
-        results = _load_json(run_dir / "execution_results.json") or {}
+            trade_date = (
+                str(summary.get("trade_date") or results.get("trade_date") or "").strip()
+                or run_dir.name[:10]
+            )
+            if not _is_date(trade_date):
+                continue
 
-        # Resolve trade_date
-        trade_date = (
-            str(summary.get("trade_date") or results.get("trade_date") or "").strip()
-            or run_dir.name[:10]
-        )
-        if not _is_date(trade_date):
-            continue
+            op_exec   = str(summary.get("operator_execution_status") or "").strip().lower()
+            terminal  = str(summary.get("terminal_status") or "").strip().lower()
+            res_status = str(results.get("status") or "").strip().upper()
+            submitted = int(
+                summary.get("submitted_count")
+                or summary.get("orders_submitted_count")
+                or results.get("submitted_count")
+                or 0
+            )
+            executed = (
+                op_exec == "executed"
+                or terminal == "success"
+                or res_status == "EXECUTED"
+                or submitted > 0
+            )
 
-        # Execution status
-        op_exec = str(summary.get("operator_execution_status") or "").strip().lower()
-        terminal = str(summary.get("terminal_status") or "").strip().lower()
-        res_status = str(results.get("status") or "").strip().upper()
-        submitted = int(
-            summary.get("submitted_count")
-            or summary.get("orders_submitted_count")
-            or results.get("submitted_count")
-            or 0
-        )
-        executed = (
-            op_exec == "executed"
-            or terminal == "success"
-            or res_status == "EXECUTED"
-            or submitted > 0
-        )
+            halt_reason = (
+                str(summary.get("halt_reason") or results.get("halt_reason") or "").strip()
+                or None
+            )
+            skipped_duplicate = bool(
+                summary.get("skipped_duplicate")
+                or res_status == "SKIPPED_DUPLICATE"
+                or op_exec == "skipped_duplicate"
+            )
 
-        halt_reason = (
-            str(summary.get("halt_reason") or results.get("halt_reason") or "").strip()
-            or None
-        )
-        skipped_duplicate = bool(
-            summary.get("skipped_duplicate")
-            or res_status == "SKIPPED_DUPLICATE"
-            or op_exec == "skipped_duplicate"
-        )
+            recon_ok     = False
+            recon_status = str(summary.get("post_execution_recon_status") or "").strip().upper()
+            rp_str       = str(summary.get("post_execution_recon_path") or "").strip()
+            if rp_str:
+                rp = Path(rp_str)
+                if not rp.is_absolute():
+                    rp = repo_root / rp
+                if rp.exists():
+                    recon_payload = _load_json(rp)
+                    if recon_payload:
+                        file_status = str(
+                            recon_payload.get("drift_status")
+                            or recon_payload.get("reconciliation_status")
+                            or recon_payload.get("status")
+                            or ""
+                        ).strip().upper()
+                        recon_status = file_status
+                        recon_ok = file_status in {"OK_RECONCILED", "OK"}
 
-        # Recon: read the actual recon file (operator_summary field may be stale)
-        recon_ok = False
-        recon_status = str(summary.get("post_execution_recon_status") or "").strip().upper()
-        recon_path_str = str(summary.get("post_execution_recon_path") or "").strip()
-        if recon_path_str:
-            rp = Path(recon_path_str)
-            if not rp.is_absolute():
-                rp = repo_root / rp
-            if rp.exists():
-                recon_payload = _load_json(rp)
-                if recon_payload:
-                    file_status = str(
-                        recon_payload.get("drift_status")
-                        or recon_payload.get("reconciliation_status")
-                        or recon_payload.get("status")
-                        or ""
-                    ).strip().upper()
-                    recon_status = file_status
-                    recon_ok = file_status in {"OK_RECONCILED", "OK"}
+            score = (
+                (10 if executed else 0)
+                + (5 if recon_ok else 0)
+                + (3 if terminal == "success" else 0)
+                + (1 if submitted > 0 else 0)
+            )
+            candidates.setdefault(trade_date, []).append({
+                "run_id":            run_dir.name,
+                "executed":          executed,
+                "recon_ok":          recon_ok,
+                "recon_status":      recon_status,
+                "halt_reason":       halt_reason,
+                "skipped_duplicate": skipped_duplicate,
+                "score":             score,
+            })
+        except Exception as exc:
+            print(
+                f"[stable_window_eval] WARNING: skipping run {run_dir.name}: {exc}",
+                file=sys.stderr,
+            )
 
-        score = (
-            (10 if executed else 0)
-            + (5 if recon_ok else 0)
-            + (3 if terminal == "success" else 0)
-            + (1 if submitted > 0 else 0)
-        )
-
-        candidates.setdefault(trade_date, []).append({
-            "run_id": run_dir.name,
-            "executed": executed,
-            "recon_ok": recon_ok,
-            "recon_status": recon_status,
-            "halt_reason": halt_reason,
-            "skipped_duplicate": skipped_duplicate,
-            "score": score,
-        })
-
-    # Pick best run per date
     result: dict[str, ProductionDay] = {}
     for trade_date, runs in candidates.items():
         best = max(runs, key=lambda r: r["score"])
@@ -304,12 +331,23 @@ def load_production_days(repo_root: Path) -> dict[str, ProductionDay]:
 
 
 def load_backtest_summary(repo_root: Path) -> dict[str, Any]:
-    """Load long-run backtest summary from shadow_summary.json for reference context."""
-    summary_path = repo_root / "outputs" / "shadow_candidates" / "performance" / "shadow_summary.json"
-    return _load_json(summary_path) or {}
+    p = (
+        repo_root
+        / "outputs" / "shadow_candidates" / "performance" / "shadow_summary.json"
+    )
+    result = _load_json(p) or {}
+    if not result:
+        print(
+            "[stable_window_eval] NOTE: shadow_summary.json not found — "
+            "backtest reference will be absent",
+            file=sys.stderr,
+        )
+    return result
 
 
-# ── Window construction ───────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Window construction
+# ══════════════════════════════════════════════════════════════════════════════
 
 def build_records(
     shadow_days: dict[str, ShadowDay],
@@ -318,19 +356,25 @@ def build_records(
     end: str,
 ) -> list[DayRecord]:
     all_dates = sorted(set(shadow_days) | set(production_days))
-    records: list[DayRecord] = []
-    for d in all_dates:
-        if d < start or d > end:
-            continue
-        records.append(DayRecord(
+    return [
+        DayRecord(
             trade_date=d,
             shadow=shadow_days.get(d),
             production=production_days.get(d),
-        ))
-    return records
+        )
+        for d in all_dates
+        if start <= d <= end
+    ]
 
 
-# ── Metrics ───────────────────────────────────────────────────────────────────
+def _rolling_start(end_date: str, n_days: int) -> str:
+    d = datetime.strptime(end_date, "%Y-%m-%d")
+    return (d - timedelta(days=n_days)).strftime("%Y-%m-%d")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Metrics
+# ══════════════════════════════════════════════════════════════════════════════
 
 def compute_metrics(returns: list[float]) -> dict[str, Any]:
     n = len(returns)
@@ -349,7 +393,6 @@ def compute_metrics(returns: list[float]) -> dict[str, Any]:
         cum *= (1.0 + r)
     cum_return = cum - 1.0
 
-    # Annualized volatility (252-day convention)
     if n > 1:
         mean_r = sum(returns) / n
         var = sum((r - mean_r) ** 2 for r in returns) / (n - 1)
@@ -357,7 +400,6 @@ def compute_metrics(returns: list[float]) -> dict[str, Any]:
     else:
         ann_vol = None
 
-    # Max drawdown
     peak = nav = 1.0
     max_dd = 0.0
     for r in returns:
@@ -368,8 +410,7 @@ def compute_metrics(returns: list[float]) -> dict[str, Any]:
         if dd < max_dd:
             max_dd = dd
 
-    hit_rate = sum(1 for r in returns if r > 0) / n if n > 0 else None
-
+    hit_rate = sum(1 for r in returns if r > 0) / n
     note = "low_confidence" if n < 10 else ("moderate_confidence" if n < 30 else "ok")
 
     return {
@@ -377,43 +418,71 @@ def compute_metrics(returns: list[float]) -> dict[str, Any]:
         "cumulative_return": round(cum_return, 6),
         "annualized_vol": round(ann_vol, 6) if ann_vol is not None else None,
         "max_drawdown": round(max_dd, 6),
-        "hit_rate": round(hit_rate, 4) if hit_rate is not None else None,
+        "hit_rate": round(hit_rate, 4),
         "note": note,
     }
 
 
-def extract_returns(records: list[DayRecord], slug: str, *, require_recon: bool) -> list[float]:
-    result = []
+def extract_returns(
+    records: list[DayRecord], slug: str, *, require_recon: bool
+) -> list[float]:
+    out = []
     for rec in records:
-        if require_recon and rec.fully_valid():
-            if slug in rec.shadow.returns:  # type: ignore[union-attr]
-                result.append(rec.shadow.returns[slug])
-        elif not require_recon and rec.execution_valid():
-            if slug in rec.shadow.returns:  # type: ignore[union-attr]
-                result.append(rec.shadow.returns[slug])
-    return result
+        if require_recon:
+            valid = rec.fully_valid()
+        else:
+            valid = rec.execution_valid()
+        if valid and rec.shadow and slug in rec.shadow.returns:
+            out.append(rec.shadow.returns[slug])
+    return out
 
 
 def extract_shadow_only_returns(records: list[DayRecord], slug: str) -> list[float]:
-    """Returns for all shadow-OK days regardless of production run state."""
-    result = []
-    for rec in records:
-        if rec.shadow and rec.shadow.shadow_ok and slug in rec.shadow.returns:
-            result.append(rec.shadow.returns[slug])
-    return result
+    return [
+        rec.shadow.returns[slug]
+        for rec in records
+        if rec.shadow and rec.shadow.shadow_ok and slug in rec.shadow.returns
+    ]
 
 
 def avg_turnover_from_records(records: list[DayRecord], slug: str) -> float | None:
-    vals = []
-    for rec in records:
-        if rec.shadow and rec.shadow.shadow_ok and slug in rec.shadow.avg_turnover:
-            t = rec.shadow.avg_turnover[slug]
-            if t is not None:
-                vals.append(t)
-    return round(sum(vals) / len(vals), 6) if vals else None
+    vals = [
+        rec.shadow.avg_turnover[slug]
+        for rec in records
+        if (
+            rec.shadow
+            and rec.shadow.shadow_ok
+            and slug in rec.shadow.avg_turnover
+            and rec.shadow.avg_turnover[slug] is not None
+        )
+    ]
+    return round(sum(vals) / len(vals), 6) if vals else None  # type: ignore[arg-type]
 
 
-# ── Formatting ────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Status helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _eval_status(n_valid: int, pol_cum: float | None, spy_cum: float | None) -> str:
+    if n_valid == 0:
+        return "INSUFFICIENT DATA"
+    if n_valid < 5:
+        return "BUILDING EVIDENCE"
+    if pol_cum is None or spy_cum is None:
+        return "DATA PENDING"
+    excess = pol_cum - spy_cum
+    if excess > 0.05:
+        return "OPERATIONALLY TRUSTWORTHY"
+    if excess > 0.01:
+        return "SIGNAL HEALTHY"
+    if excess >= -0.01:
+        return "MONITORING"
+    return "UNDERPERFORMING"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Formatting helpers
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _pct(v: float | None, *, signed: bool = True, na: str = "n/a") -> str:
     if v is None:
@@ -426,7 +495,9 @@ def _days_label(n: int) -> str:
     return f"({n}d)" if n > 0 else "(0d)"
 
 
-# ── Report builders ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Report helpers
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _exclusion_tally(records: list[DayRecord], *, require_recon: bool) -> dict[str, int]:
     tally: dict[str, int] = {}
@@ -447,111 +518,142 @@ def _shadow_ok_rows(records: list[DayRecord]) -> list[DayRecord]:
     return [r for r in records if r.shadow and r.shadow.shadow_ok]
 
 
+def _build_diagnostic_rows(
+    records: list[DayRecord],
+    *,
+    require_recon: bool,
+) -> list[dict[str, Any]]:
+    rows = []
+    for rec in records:
+        reason = rec.exclusion_reason(require_recon=require_recon)
+        if reason == "valid":
+            continue
+        if rec.shadow is None:
+            shadow_brief = "missing"
+        elif rec.shadow.shadow_ok:
+            shadow_brief = "All_OK"
+        else:
+            bad = [
+                f"{DISPLAY.get(s, s)}:{rec.shadow.data_status.get(s, '?')}"
+                for s in ALL_SLUGS
+                if rec.shadow.data_status.get(s) != "OK"
+            ]
+            shadow_brief = " ".join(bad) if bad else "NO_DATA"
+        rows.append({
+            "trade_date":       rec.trade_date,
+            "exclusion_reason": reason,
+            "shadow_brief":     shadow_brief,
+            "executed":         rec.production.executed if rec.production else None,
+            "recon_status":     rec.production.recon_status if rec.production else None,
+            "halt_reason":      rec.production.halt_reason if rec.production else None,
+        })
+    return rows
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Strategy table builder
+# ══════════════════════════════════════════════════════════════════════════════
+
 def build_strategy_table(
-    since_records: list[DayRecord],
-    stable_records: list[DayRecord],
+    windows: dict[str, list[DayRecord]],
     *,
     require_recon: bool,
     backtest_summary: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    rows = []
+    rows: list[dict[str, Any]] = []
     for slug in STRATEGY_SLUGS + (BENCHMARK_SLUG,):
-        since_returns = extract_returns(since_records, slug, require_recon=require_recon)
-        stable_returns = extract_returns(stable_records, slug, require_recon=require_recon)
-        # Shadow-only (no production filter) for reference
-        since_shadow_returns = extract_shadow_only_returns(since_records, slug)
-        stable_shadow_returns = extract_shadow_only_returns(stable_records, slug)
+        row: dict[str, Any] = {"slug": slug, "display": DISPLAY.get(slug, slug)}
+        for wname, records in windows.items():
+            row[f"{wname}_prod"]   = compute_metrics(
+                extract_returns(records, slug, require_recon=require_recon)
+            )
+            row[f"{wname}_shadow"] = compute_metrics(
+                extract_shadow_only_returns(records, slug)
+            )
 
-        since_m = compute_metrics(since_returns)
-        stable_m = compute_metrics(stable_returns)
-        since_s = compute_metrics(since_shadow_returns)
-        stable_s = compute_metrics(stable_shadow_returns)
+        row["avg_turnover"] = avg_turnover_from_records(windows.get("since", []), slug)
 
-        avg_turn = avg_turnover_from_records(since_records, slug)
-
-        # Pull long-run backtest context
         bt_strats = (
             backtest_summary.get("strategies")
             if isinstance(backtest_summary.get("strategies"), dict)
             else {}
         )
-        bt_s = bt_strats.get(slug) if isinstance(bt_strats.get(slug), dict) else {}
+        bt_s    = bt_strats.get(slug) if isinstance(bt_strats.get(slug), dict) else {}
         bt_summ = bt_s.get("summary") if isinstance(bt_s.get("summary"), dict) else {}
+        row["backtest_cagr"]        = bt_summ.get("cagr")
+        row["backtest_sharpe"]      = bt_summ.get("sharpe")
+        row["backtest_max_dd"]      = bt_summ.get("max_drawdown")
+        row["backtest_vol"]         = bt_summ.get("annualised_vol")
+        row["backtest_excess_spy"]  = bt_summ.get("excess_return_vs_spy")
+        row["backtest_n_years"]     = bt_summ.get("n_years")
 
-        rows.append({
-            "slug": slug,
-            "display": DISPLAY.get(slug, slug),
-            "since_inception_prod": since_m,
-            "stable_window_prod": stable_m,
-            "since_inception_shadow": since_s,
-            "stable_window_shadow": stable_s,
-            "avg_turnover": avg_turn,
-            "backtest_cagr": bt_summ.get("cagr"),
-            "backtest_sharpe": bt_summ.get("sharpe"),
-            "backtest_max_dd": bt_summ.get("max_drawdown"),
-            "backtest_vol": bt_summ.get("annualised_vol"),
-            "backtest_excess_spy": bt_summ.get("excess_return_vs_spy"),
-            "backtest_n_years": bt_summ.get("n_years"),
-        })
+        rows.append(row)
     return rows
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Markdown report
+# ══════════════════════════════════════════════════════════════════════════════
+
 def generate_markdown(
-    since_records: list[DayRecord],
-    stable_records: list[DayRecord],
+    windows: dict[str, list[DayRecord]],
     strategy_rows: list[dict[str, Any]],
     *,
+    mode: str,
     since_start: str,
     stable_start: str,
     end_date: str,
-    require_recon: bool,
     generated_at: str,
+    rolling14_start: str,
+    rolling30_start: str,
+    show_rolling30: bool,
 ) -> str:
-    since_valid = _valid_day_rows(since_records, require_recon=require_recon)
-    stable_valid = _valid_day_rows(stable_records, require_recon=require_recon)
-    since_shadow = _shadow_ok_rows(since_records)
-    stable_shadow = _shadow_ok_rows(stable_records)
-    since_excl = _exclusion_tally(since_records, require_recon=require_recon)
-    stable_excl = _exclusion_tally(stable_records, require_recon=require_recon)
+    require_recon = (mode == "strict")
 
-    validity_note = (
-        "fully valid (executed + OK_RECONCILED + shadow OK)"
-        if require_recon
-        else "execution valid (executed + shadow OK, recon not required)"
+    since_recs   = windows.get("since", [])
+    stable_recs  = windows.get("stable", [])
+    r14_recs     = windows.get("rolling14", [])
+    r30_recs     = windows.get("rolling30", [])
+
+    since_valid  = _valid_day_rows(since_recs,  require_recon=require_recon)
+    stable_valid = _valid_day_rows(stable_recs, require_recon=require_recon)
+    r14_valid    = _valid_day_rows(r14_recs,    require_recon=require_recon)
+    r30_valid    = _valid_day_rows(r30_recs,    require_recon=require_recon)
+
+    since_shadow  = _shadow_ok_rows(since_recs)
+    stable_shadow = _shadow_ok_rows(stable_recs)
+    r14_shadow    = _shadow_ok_rows(r14_recs)
+    r30_shadow    = _shadow_ok_rows(r30_recs)
+
+    since_excl  = _exclusion_tally(since_recs,  require_recon=require_recon)
+    stable_excl = _exclusion_tally(stable_recs, require_recon=require_recon)
+    diag_rows   = _build_diagnostic_rows(since_recs, require_recon=require_recon)
+
+    bt_n_years = next(
+        (r["backtest_n_years"] for r in strategy_rows if r.get("backtest_n_years")), "?"
     )
 
     lines: list[str] = [
-        "# Caerus Operational Stability Window Evaluation",
+        f"# Caerus Operational Stability Evaluation — {MODE_LABEL[mode]}",
         "",
-        f"Generated: {generated_at}",
-        f"Validity filter: {validity_note}",
+        f"Generated: {generated_at}  |  End Date: {end_date}  |  Contract: {EVALUATION_CONTRACT_VERSION}",
+        "",
+        f"**Mode Definition:** {MODE_DEFINITION[mode]}",
         "",
         "---",
         "",
         "## Window Summary",
         "",
-        "| Window | Start | End | Shadow OK Days | Prod Valid Days | Excluded |",
-        "|--------|-------|-----|----------------|-----------------|----------|",
-        f"| Since Inception | {since_start} | {end_date} | {len(since_shadow)} | {len(since_valid)} | {len(since_records) - len(since_valid)} |",
-        f"| Stability Window | {stable_start} | {end_date} | {len(stable_shadow)} | {len(stable_valid)} | {len(stable_records) - len(stable_valid)} |",
-        "",
-        "### Since Inception — Exclusion Reasons",
-        "",
+        "| Window | Start | End | Shadow OK Days | Valid Days | Excluded |",
+        "|--------|-------|-----|----------------|------------|----------|",
+        f"| Since Inception  | {since_start}  | {end_date} | {len(since_shadow)}  | {len(since_valid)}  | {len(since_recs)  - len(since_valid)}  |",
+        f"| Stability Window | {stable_start} | {end_date} | {len(stable_shadow)} | {len(stable_valid)} | {len(stable_recs) - len(stable_valid)} |",
+        f"| Rolling 14D      | {rolling14_start} | {end_date} | {len(r14_shadow)} | {len(r14_valid)} | {len(r14_recs) - len(r14_valid)} |",
     ]
-    for reason, count in sorted(since_excl.items(), key=lambda x: -x[1]):
-        lines.append(f"- `{reason}`: {count}")
-    if not since_excl:
-        lines.append("- None (all days valid)")
-
-    lines += [
-        "",
-        "### Stability Window — Exclusion Reasons",
-        "",
-    ]
-    for reason, count in sorted(stable_excl.items(), key=lambda x: -x[1]):
-        lines.append(f"- `{reason}`: {count}")
-    if not stable_excl:
-        lines.append("- None (all days valid)")
+    if show_rolling30:
+        lines.append(
+            f"| Rolling 30D      | {rolling30_start} | {end_date} | {len(r30_shadow)} | {len(r30_valid)} | {len(r30_recs) - len(r30_valid)} |"
+        )
 
     lines += [
         "",
@@ -559,19 +661,18 @@ def generate_markdown(
         "",
         "## Performance Comparison Table",
         "",
-        "> **Columns explained:**",
-        "> - *Prod-Validated*: returns on days meeting full validity filter only",
-        "> - *Shadow-Only*: all shadow-OK days regardless of production run state",
-        "> - *Backtest*: multi-year historical simulation from shadow_summary.json",
+        "> **Prod-Validated**: days meeting this mode's full validity filter.",
+        "> **Shadow-Only**: all shadow-OK days regardless of production state.",
+        "> **Backtest**: multi-year simulation from shadow_summary.json (reference only).",
         "",
-        "### Since Inception Window",
+        "### Since Inception",
         "",
-        f"| Strategy | Prod-Validated Return {_days_label(len(since_valid))} | Shadow-Only Return {_days_label(len(since_shadow))} | Ann. Vol | Max DD | Avg Turnover | Backtest CAGR ({next((r['backtest_n_years'] for r in strategy_rows if r['backtest_n_years']), '?')}y) |",
-        "|----------|---------------------------|------------------------|----------|--------|--------------|--------------|",
+        f"| Strategy | Prod {_days_label(len(since_valid))} | Shadow {_days_label(len(since_shadow))} | Ann.Vol | Max DD | Avg Turn | BT CAGR ({bt_n_years}y) |",
+        "|----------|------|--------|---------|--------|----------|-----------|",
     ]
     for row in strategy_rows:
-        p = row["since_inception_prod"]
-        s = row["since_inception_shadow"]
+        p = row["since_prod"]
+        s = row["since_shadow"]
         lines.append(
             f"| {row['display']} "
             f"| {_pct(p.get('cumulative_return'))} "
@@ -586,12 +687,12 @@ def generate_markdown(
         "",
         "### Stability Window",
         "",
-        f"| Strategy | Prod-Validated Return {_days_label(len(stable_valid))} | Shadow-Only Return {_days_label(len(stable_shadow))} | Ann. Vol | Max DD | Backtest Sharpe |",
-        "|----------|---------------------------|------------------------|----------|--------|-----------------|",
+        f"| Strategy | Prod {_days_label(len(stable_valid))} | Shadow {_days_label(len(stable_shadow))} | Ann.Vol | Max DD | BT Sharpe |",
+        "|----------|------|--------|---------|--------|-----------|",
     ]
     for row in strategy_rows:
-        p = row["stable_window_prod"]
-        s = row["stable_window_shadow"]
+        p = row["stable_prod"]
+        s = row["stable_shadow"]
         lines.append(
             f"| {row['display']} "
             f"| {_pct(p.get('cumulative_return'))} "
@@ -601,44 +702,77 @@ def generate_markdown(
             f"| {row.get('backtest_sharpe') or 'n/a'} |"
         )
 
-    # Valid and near-valid day listings
+    # Rolling windows table
+    r14_hdr = (
+        f"| Strategy | Rolling14 Prod {_days_label(len(r14_valid))} "
+        f"| Rolling14 Shadow {_days_label(len(r14_shadow))} |"
+    )
+    r14_sep = "|----------|---------|---------|"
+    if show_rolling30:
+        r14_hdr += (
+            f" Rolling30 Prod {_days_label(len(r30_valid))} "
+            f"| Rolling30 Shadow {_days_label(len(r30_shadow))} |"
+        )
+        r14_sep += " ---- | ---- |"
+
+    lines += ["", "### Rolling Windows", "", r14_hdr, r14_sep]
+    for row in strategy_rows:
+        p14 = row["rolling14_prod"]
+        s14 = row["rolling14_shadow"]
+        if show_rolling30:
+            p30 = row["rolling30_prod"]
+            s30 = row["rolling30_shadow"]
+            lines.append(
+                f"| {row['display']} "
+                f"| {_pct(p14.get('cumulative_return'))} "
+                f"| {_pct(s14.get('cumulative_return'))} "
+                f"| {_pct(p30.get('cumulative_return'))} "
+                f"| {_pct(s30.get('cumulative_return'))} |"
+            )
+        else:
+            lines.append(
+                f"| {row['display']} "
+                f"| {_pct(p14.get('cumulative_return'))} "
+                f"| {_pct(s14.get('cumulative_return'))} |"
+            )
+
+    # Day-level detail
     lines += [
         "",
         "---",
         "",
         "## Day-Level Detail",
         "",
-        "### Fully Valid Days (Production-Validated) — Since Inception",
+        "### Valid Days — Since Inception",
         "",
     ]
     if since_valid:
         for rec in since_valid:
             returns_str = " ".join(
-                f"{DISPLAY[s]}={_pct(rec.shadow.returns.get(s))}"  # type: ignore[union-attr]
-                for s in STRATEGY_SLUGS + (BENCHMARK_SLUG,)
+                f"{DISPLAY[s]}={_pct(rec.shadow.returns.get(s))}"
+                for s in ALL_SLUGS
                 if rec.shadow and s in rec.shadow.returns
             )
-            lines.append(f"- {rec.trade_date} [{rec.production.run_id[:30] if rec.production else '?'}]  {returns_str}")  # type: ignore[union-attr]
+            lines.append(
+                f"- {rec.trade_date}  "
+                f"[{rec.production.run_id[:30] if rec.production else '?'}]  "
+                f"{returns_str}"
+            )
     else:
-        lines.append("*No fully valid days yet. See near-valid days below.*")
+        lines.append("*No valid days yet in this mode. See shadow-OK days below.*")
 
-    lines += [
-        "",
-        "### Shadow-OK Days (Shadow Data Available, Any Production State) — Since Inception",
-        "",
-    ]
+    lines += ["", "### Shadow-OK Days — Since Inception", ""]
     for rec in since_shadow:
-        prod_note = ""
-        if rec.production:
-            prod_note = f"exec={rec.production.executed} recon={rec.production.recon_ok}"
-        else:
-            prod_note = "no_prod_run"
-        pol = _pct(rec.shadow.returns.get("caerus_polaris")) if rec.shadow else "n/a"  # type: ignore[union-attr]
-        spy = _pct(rec.shadow.returns.get("spy_benchmark")) if rec.shadow else "n/a"  # type: ignore[union-attr]
+        prod_note = (
+            f"exec={rec.production.executed} recon={rec.production.recon_ok}"
+            if rec.production
+            else "no_prod_run"
+        )
+        pol = _pct(rec.shadow.returns.get("caerus_polaris")) if rec.shadow else "n/a"
+        spy = _pct(rec.shadow.returns.get("spy_benchmark")) if rec.shadow else "n/a"
         lines.append(f"- {rec.trade_date}: Pol={pol} SPY={spy} | {prod_note}")
 
-    # Production run overview (all dates in since window)
-    prod_runs_in_window = [r for r in since_records if r.production is not None]
+    prod_in_window = [r for r in since_recs if r.production is not None]
     lines += [
         "",
         "### Production Run Overview — Since Inception",
@@ -646,32 +780,77 @@ def generate_markdown(
         "| Date | Executed | Recon OK | Recon Status | Has Shadow | Shadow OK |",
         "|------|----------|----------|--------------|------------|-----------|",
     ]
-    for rec in prod_runs_in_window:
+    for rec in prod_in_window:
         p = rec.production
-        shadow_exists = rec.shadow is not None
-        shadow_ok = rec.shadow.shadow_ok if rec.shadow else False
         lines.append(
             f"| {rec.trade_date} "
-            f"| {'✓' if p.executed else '✗'} "  # type: ignore[union-attr]
-            f"| {'✓' if p.recon_ok else '✗'} "  # type: ignore[union-attr]
-            f"| {p.recon_status or 'n/a'} "  # type: ignore[union-attr]
-            f"| {'✓' if shadow_exists else '✗'} "
-            f"| {'✓' if shadow_ok else '✗'} |"
+            f"| {'Y' if p.executed else 'N'} "
+            f"| {'Y' if p.recon_ok else 'N'} "
+            f"| {p.recon_status or 'n/a'} "
+            f"| {'Y' if rec.shadow else 'N'} "
+            f"| {'Y' if (rec.shadow and rec.shadow.shadow_ok) else 'N'} |"
         )
 
+    # Diagnostic section
     lines += [
         "",
         "---",
         "",
-        "## Data Coverage Assessment",
+        "## Diagnostic — Excluded Days",
         "",
-        "### Shadow Evaluation Coverage",
+        f"### Since Inception — Exclusion Summary ({mode.upper()} mode)",
         "",
     ]
-    all_shadow_dates = [r for r in since_records if r.shadow is not None]
-    for rec in all_shadow_dates:
+    for reason, count in sorted(since_excl.items(), key=lambda x: -x[1]):
+        lines.append(f"- `{reason}`: {count} day(s)")
+    if not since_excl:
+        lines.append("- None (all days are valid)")
+
+    lines += [
+        "",
+        f"### Stability Window — Exclusion Summary ({mode.upper()} mode)",
+        "",
+    ]
+    for reason, count in sorted(stable_excl.items(), key=lambda x: -x[1]):
+        lines.append(f"- `{reason}`: {count} day(s)")
+    if not stable_excl:
+        lines.append("- None (all days are valid)")
+
+    lines += [
+        "",
+        "### Per-Date Exclusion Detail — Since Inception",
+        "",
+    ]
+    if diag_rows:
+        lines += [
+            "| Date | Exclusion Reason | Shadow Status | Executed | Recon Status |",
+            "|------|-----------------|---------------|----------|--------------|",
+        ]
+        for dr in diag_rows:
+            exec_str = {True: "Y", False: "N", None: "—"}[dr["executed"]]
+            lines.append(
+                f"| {dr['trade_date']} "
+                f"| `{dr['exclusion_reason']}` "
+                f"| {dr['shadow_brief']} "
+                f"| {exec_str} "
+                f"| {dr['recon_status'] or '—'} |"
+            )
+    else:
+        lines.append("*No excluded days — all dates in window are valid.*")
+
+    # Shadow data coverage
+    lines += [
+        "",
+        "---",
+        "",
+        "## Shadow Evaluation Data Coverage",
+        "",
+    ]
+    for rec in since_recs:
+        if rec.shadow is None:
+            continue
         statuses = " ".join(
-            f"{DISPLAY[s]}:{rec.shadow.data_status.get(s, '?')}"  # type: ignore[union-attr]
+            f"{DISPLAY[s]}:{rec.shadow.data_status.get(s, '?')}"
             for s in ALL_SLUGS
         )
         lines.append(f"- {rec.trade_date}: {statuses}")
@@ -682,142 +861,107 @@ def generate_markdown(
         "",
         "## Interpretation Notes",
         "",
-        f"### Current Overlap Status",
-        "",
-        "The system currently has two non-overlapping valid data sets:",
-        "",
-        "**Production-valid runs (executed + OK_RECONCILED):**",
-    ]
-    prod_valid_all = [r for r in since_records if r.production and r.production.executed and r.production.recon_ok]
-    for rec in prod_valid_all:
-        lines.append(f"- {rec.trade_date}: {rec.production.run_id[:35] if rec.production else '?'}  (shadow: {'OK' if rec.shadow and rec.shadow.shadow_ok else 'missing/NO_DATA'})")  # type: ignore[union-attr]
-
-    lines += [
-        "",
-        "**Shadow-OK days (model data available):**",
-    ]
-    for rec in since_shadow:
-        prod_status = "prod_valid" if (rec.production and rec.production.executed and rec.production.recon_ok) else ("prod_executed" if (rec.production and rec.production.executed) else "no_prod")
-        lines.append(f"- {rec.trade_date}  ({prod_status})")
-
-    lines += [
-        "",
-        "**Overlap** (both shadow OK and production valid): "
-        + str(len([r for r in since_records if r.fully_valid()])),
-        "",
-        "This gap is expected: shadow evaluation began generating consistent artifacts",
-        "in late April 2026, while the first confirmed-reconciled production runs were",
-        "April 7–10 and May 6–7. As the system matures and both pipelines run reliably",
-        "on the same dates, valid-day count will grow.",
-        "",
-        "### Reliability Warning",
-        "",
-        "- Statistics computed from < 10 days are flagged `low_confidence` in the JSON artifact.",
+        "- Statistics from < 10 days are flagged `low_confidence` in the JSON artifact.",
         "- Shadow returns are model-portfolio returns, NOT realized execution returns.",
         "  Realized returns may differ due to partial fills, execution timing, and slippage.",
-        "- Avg Turnover is the average of the strategy's reported `avg_turnover` metric",
-        "  across shadow-OK days; this reflects the model's historical average, not just",
-        "  the production window.",
-        "",
-        "### What Changes This Picture",
-        "",
-        "The table becomes statistically meaningful when:",
-        "1. Shadow evaluation pipeline runs consistently on execution days (same date).",
-        "2. Production runs consistently achieve OK_RECONCILED status.",
-        "3. At least 20 overlapping valid days accumulate (rough threshold for vol estimates).",
-        "",
-        "### Backtest Context",
-        "",
-        "Long-run backtest metrics from `shadow_summary.json` are shown for context only.",
-        "Backtest results cover ~12 years and are based on simulated daily rebalancing",
-        "with no transaction costs assumed. They should not be taken as expected live",
-        "performance.",
+        "- Backtest metrics from `shadow_summary.json` cover ~12 years of simulated daily",
+        "  rebalancing with no transaction costs assumed.",
+        "- Table becomes statistically meaningful when >= 20 overlapping valid days accumulate.",
+        "- Rolling windows are computed from calendar days, not trading days.",
     ]
 
     return "\n".join(lines)
 
 
-# ── JSON artifact ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# JSON artifact
+# ══════════════════════════════════════════════════════════════════════════════
 
 def build_artifact(
-    since_records: list[DayRecord],
-    stable_records: list[DayRecord],
+    windows: dict[str, list[DayRecord]],
     strategy_rows: list[dict[str, Any]],
     *,
+    mode: str,
     since_start: str,
     stable_start: str,
     end_date: str,
-    require_recon: bool,
     generated_at: str,
+    rolling14_start: str,
+    rolling30_start: str,
 ) -> dict[str, Any]:
-    since_valid = _valid_day_rows(since_records, require_recon=require_recon)
-    stable_valid = _valid_day_rows(stable_records, require_recon=require_recon)
-    since_shadow = _shadow_ok_rows(since_records)
-    stable_shadow = _shadow_ok_rows(stable_records)
+    require_recon = (mode == "strict")
+
+    window_starts = {
+        "since":     since_start,
+        "stable":    stable_start,
+        "rolling14": rolling14_start,
+        "rolling30": rolling30_start,
+    }
+    window_meta: dict[str, Any] = {}
+    for wname, records in windows.items():
+        valid  = _valid_day_rows(records, require_recon=require_recon)
+        shadow = _shadow_ok_rows(records)
+        window_meta[wname] = {
+            "start_date":    window_starts.get(wname, "?"),
+            "end_date":      end_date,
+            "total_records": len(records),
+            "shadow_ok_days": len(shadow),
+            "valid_days":    len(valid),
+        }
 
     def _day_row(rec: DayRecord) -> dict:
         return {
             "trade_date": rec.trade_date,
-            "run_id": rec.production.run_id if rec.production else None,
-            "executed": rec.production.executed if rec.production else False,
-            "recon_ok": rec.production.recon_ok if rec.production else False,
-            "returns": {
-                slug: rec.shadow.returns.get(slug)
-                for slug in ALL_SLUGS
-            } if rec.shadow else {},
+            "run_id":     rec.production.run_id if rec.production else None,
+            "executed":   rec.production.executed if rec.production else False,
+            "recon_ok":   rec.production.recon_ok if rec.production else False,
+            "returns":    {slug: rec.shadow.returns.get(slug) for slug in ALL_SLUGS}
+                          if rec.shadow else {},
         }
 
+    since_valid  = _valid_day_rows(windows.get("since",  []), require_recon=require_recon)
+    stable_valid = _valid_day_rows(windows.get("stable", []), require_recon=require_recon)
+
     return {
-        "schema_version": "1.1",
-        "generated_at": generated_at,
-        "validity_mode": "strict_recon" if require_recon else "execution_only",
-        "windows": {
-            "since_inception": {
-                "start_date": since_start,
-                "end_date": end_date,
-                "total_records": len(since_records),
-                "shadow_ok_days": len(since_shadow),
-                "valid_days": len(since_valid),
-            },
-            "stable_window": {
-                "start_date": stable_start,
-                "end_date": end_date,
-                "total_records": len(stable_records),
-                "shadow_ok_days": len(stable_shadow),
-                "valid_days": len(stable_valid),
-            },
-        },
+        "schema_version":              "1.1",
+        "evaluation_contract_version": EVALUATION_CONTRACT_VERSION,
+        "generated_at":                generated_at,
+        "validity_mode":               mode,
+        "mode_definition":             MODE_DEFINITION[mode],
+        "windows":                     window_meta,
         "strategies": {
             row["slug"]: {
                 "display_name": row["display"],
-                "since_inception": {
-                    "prod_validated": row["since_inception_prod"],
-                    "shadow_only": row["since_inception_shadow"],
-                },
-                "stable_window": {
-                    "prod_validated": row["stable_window_prod"],
-                    "shadow_only": row["stable_window_shadow"],
+                **{
+                    f"{wname}_{mtype}": row[f"{wname}_{mtype}"]
+                    for wname in windows
+                    for mtype in ("prod", "shadow")
+                    if f"{wname}_{mtype}" in row
                 },
                 "avg_turnover_observed": row["avg_turnover"],
                 "backtest_reference": {
-                    "cagr": row["backtest_cagr"],
-                    "sharpe": row["backtest_sharpe"],
-                    "max_drawdown": row["backtest_max_dd"],
-                    "annualized_vol": row["backtest_vol"],
+                    "cagr":                 row["backtest_cagr"],
+                    "sharpe":               row["backtest_sharpe"],
+                    "max_drawdown":         row["backtest_max_dd"],
+                    "annualized_vol":       row["backtest_vol"],
                     "excess_return_vs_spy": row["backtest_excess_spy"],
-                    "n_years": row["backtest_n_years"],
+                    "n_years":              row["backtest_n_years"],
                 },
             }
             for row in strategy_rows
         },
-        "valid_days_since_inception": [_day_row(r) for r in since_valid],
-        "valid_days_stable_window": [_day_row(r) for r in stable_valid],
-        "shadow_only_days_since_inception": [_day_row(r) for r in since_shadow],
-        "shadow_only_days_stable_window": [_day_row(r) for r in stable_shadow],
+        "valid_days_since_inception":        [_day_row(r) for r in since_valid],
+        "valid_days_stable_window":          [_day_row(r) for r in stable_valid],
+        "shadow_only_days_since_inception":  [_day_row(r) for r in _shadow_ok_rows(windows.get("since",  []))],
+        "shadow_only_days_stable_window":    [_day_row(r) for r in _shadow_ok_rows(windows.get("stable", []))],
+        "diagnostic_excluded_since":
+            _build_diagnostic_rows(windows.get("since", []), require_recon=require_recon),
     }
 
 
-# ── CSV export ────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# CSV export
+# ══════════════════════════════════════════════════════════════════════════════
 
 def write_daily_returns_csv(
     records: list[DayRecord],
@@ -830,14 +974,13 @@ def write_daily_returns_csv(
         if shadow_ok_only and not (rec.shadow and rec.shadow.shadow_ok):
             continue
         row: dict[str, Any] = {
-            "date": rec.trade_date,
-            "production_executed": rec.production.executed if rec.production else False,
-            "recon_ok": rec.production.recon_ok if rec.production else False,
+            "date":                 rec.trade_date,
+            "production_executed":  rec.production.executed if rec.production else False,
+            "recon_ok":             rec.production.recon_ok if rec.production else False,
         }
         for slug in ALL_SLUGS:
             row[f"return_{slug}"] = (
-                rec.shadow.returns.get(slug)  # type: ignore[union-attr]
-                if rec.shadow else None
+                rec.shadow.returns.get(slug) if rec.shadow else None
             )
         rows.append(row)
 
@@ -851,229 +994,265 @@ def write_daily_returns_csv(
         writer.writerows(rows)
 
 
-# ── Console summary ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Operator console summary
+# ══════════════════════════════════════════════════════════════════════════════
 
-def print_summary(
-    strategy_rows: list[dict[str, Any]],
-    since_valid_n: int,
-    stable_valid_n: int,
-    since_shadow_n: int,
-    stable_shadow_n: int,
+def print_operator_summary(
+    strict_rows: list[dict[str, Any]],
+    strict_since_n: int,
+    strict_stable_n: int,
+    loose_rows: list[dict[str, Any]],
+    loose_since_n: int,
+    loose_stable_n: int,
+    *,
+    end_date: str,
+    since_start: str,
+    stable_start: str,
+    output_dir: Path,
 ) -> None:
-    width = 102
-    print()
-    print("=" * width)
-    print("  CAERUS OPERATIONAL STABILITY WINDOW EVALUATION")
-    print("=" * width)
-    print(
-        f"  Since Inception:  {since_valid_n} prod-valid days  |  {since_shadow_n} shadow-only days"
-    )
-    print(
-        f"  Stability Window: {stable_valid_n} prod-valid days  |  {stable_shadow_n} shadow-only days"
-    )
-    print("-" * width)
+    W = 80
 
-    hdr = (
-        f"{'Strategy':<10}"
-        f"{'SInc Prod':>12} {'SInc Shad':>12}"
-        f"{'Stbl Prod':>12} {'Stbl Shad':>12}"
-        f"{'Ann.Vol':>9} {'Max DD':>9} {'Avt.Turn':>10}"
-        f"{'BT CAGR':>9} {'BT Shrp':>9}"
-    )
-    print(hdr)
-    print("-" * width)
-    for row in strategy_rows:
-        sp = row["since_inception_prod"]
-        ss = row["since_inception_shadow"]
-        wp = row["stable_window_prod"]
-        ws = row["stable_window_shadow"]
+    def _cum(rows: list[dict], slug: str, window: str) -> float | None:
+        row = next((r for r in rows if r["slug"] == slug), {})
+        return row.get(f"{window}_prod", {}).get("cumulative_return")
+
+    print()
+    print("=" * W)
+    print(f"  CAERUS DAILY STABILITY EVALUATION  —  {end_date}")
+    print("=" * W)
+
+    for label, rows, since_n, stable_n in (
+        ("STRICT  [EXECUTED + OK_RECONCILED]",     strict_rows, strict_since_n, strict_stable_n),
+        ("LOOSE   [EXECUTED, recon not required]",  loose_rows,  loose_since_n,  loose_stable_n),
+    ):
+        pol_si = _cum(rows, "caerus_polaris", "since")
+        spy_si = _cum(rows, "spy_benchmark",  "since")
+        pol_st = _cum(rows, "caerus_polaris", "stable")
+        spy_st = _cum(rows, "spy_benchmark",  "stable")
+
+        print()
+        print(f"  {label}")
         print(
-            f"{row['display']:<10}"
-            f"{_pct(sp.get('cumulative_return')):>12}"
-            f"{_pct(ss.get('cumulative_return')):>12}"
-            f"{_pct(wp.get('cumulative_return')):>12}"
-            f"{_pct(ws.get('cumulative_return')):>12}"
-            f"{_pct(ss.get('annualized_vol'), signed=False):>9}"
-            f"{_pct(ss.get('max_drawdown')):>9}"
-            f"{_pct(row.get('avg_turnover'), signed=False):>10}"
-            f"{_pct(row.get('backtest_cagr'), signed=False):>9}"
-            f"{str(round(row['backtest_sharpe'], 2) if row.get('backtest_sharpe') else 'n/a'):>9}"
+            f"  Since Inception  ({since_start} → {end_date}):  "
+            f"{since_n}d valid  |  "
+            f"Polaris {_pct(pol_si)} vs SPY {_pct(spy_si)}  |  "
+            f"{_eval_status(since_n, pol_si, spy_si)}"
         )
-    print("=" * width)
-    print(
-        "  Columns: SInc=Since Inception, Stbl=Stability Window, "
-        "Prod=prod-validated, Shad=shadow-only"
+        print(
+            f"  Stability Window ({stable_start} → {end_date}):  "
+            f"{stable_n}d valid  |  "
+            f"Polaris {_pct(pol_st)} vs SPY {_pct(spy_st)}  |  "
+            f"{_eval_status(stable_n, pol_st, spy_st)}"
+        )
+
+    # Key insight
+    drag = loose_since_n - strict_since_n
+    print()
+    print("  KEY INSIGHT:")
+    if drag > 0:
+        rate = strict_since_n / loose_since_n if loose_since_n > 0 else 0.0
+        print(
+            f"  Strict ({strict_since_n}d) < Loose ({loose_since_n}d) — "
+            f"operational drag present ({drag} day(s) excluded by recon gate)."
+        )
+        print(
+            f"  Recon convergence: {strict_since_n}/{loose_since_n} = {rate:.0%}  "
+            f"(target >= 80%)"
+        )
+    elif drag == 0 and loose_since_n > 0:
+        print(
+            f"  Strict == Loose ({strict_since_n}d) — "
+            f"recon is keeping pace with execution. No operational drag."
+        )
+    else:
+        print("  Insufficient data. Run more trading days to build evaluation window.")
+
+    # Polaris vs SPY context
+    pol_strict_cum = _cum(strict_rows, "caerus_polaris", "since")
+    spy_strict_cum = _cum(strict_rows, "spy_benchmark", "since")
+    pol_loose_cum  = _cum(loose_rows,  "caerus_polaris", "since")
+    spy_loose_cum  = _cum(loose_rows,  "spy_benchmark",  "since")
+    ref_pol, ref_spy, ref_label = (
+        (pol_strict_cum, spy_strict_cum, "strict")
+        if pol_strict_cum is not None
+        else (pol_loose_cum, spy_loose_cum, "loose")
     )
-    print(
-        "  Ann.Vol / Max DD / Avg.Turn computed from shadow-only days (n may be < 10 → low conf.)"
-    )
+    if ref_pol is not None and ref_spy is not None:
+        excess = ref_pol - ref_spy
+        direction = "outperforming" if excess >= 0 else "underperforming"
+        print(
+            f"  Polaris is {direction} SPY by {_pct(abs(excess))} "
+            f"({ref_label} mode, since inception)."
+        )
+
+    print()
+    print("  ARTIFACTS:")
+    print(f"  {output_dir / 'latest_strict.md'}")
+    print(f"  {output_dir / 'latest_loose.md'}")
+    print("=" * W)
     print()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Operational Stability Window Evaluation for Caerus strategies"
+        description=(
+            "Caerus Operational Stability Window Evaluation — "
+            "dual-mode (strict + loose) daily analytics"
+        )
     )
     parser.add_argument(
-        "--since-start",
-        default=SINCE_INCEPTION_START_DEFAULT,
-        metavar="DATE",
+        "--since-start", default=SINCE_INCEPTION_START_DEFAULT, metavar="DATE",
         help=f"Since-inception start date YYYY-MM-DD (default: {SINCE_INCEPTION_START_DEFAULT})",
     )
     parser.add_argument(
-        "--stable-start",
-        default=STABLE_WINDOW_START_DEFAULT,
-        metavar="DATE",
+        "--stable-start", default=STABLE_WINDOW_START_DEFAULT, metavar="DATE",
         help=f"Stability window start date YYYY-MM-DD (default: {STABLE_WINDOW_START_DEFAULT})",
     )
     parser.add_argument(
-        "--end-date",
-        default=None,
-        metavar="DATE",
+        "--end-date", default=None, metavar="DATE",
         help="End date YYYY-MM-DD (default: today)",
     )
     parser.add_argument(
-        "--repo-root",
-        default=None,
-        metavar="PATH",
+        "--repo-root", default=None, metavar="PATH",
         help="Repo root path (default: auto-detected from script location)",
     )
     parser.add_argument(
-        "--output-dir",
-        default=None,
-        metavar="PATH",
+        "--output-dir", default=None, metavar="PATH",
         help="Override output directory",
     )
     parser.add_argument(
-        "--loose-recon",
-        action="store_true",
-        help="Include executed days even when recon not confirmed OK_RECONCILED",
-    )
-    parser.add_argument(
-        "--csv",
-        action="store_true",
-        help="Export daily returns CSV in addition to JSON/markdown",
+        "--csv", action="store_true",
+        help="Export daily returns CSV (shadow-OK days)",
     )
     args = parser.parse_args(argv)
 
-    repo_root = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT_DEFAULT
+    repo_root  = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT_DEFAULT
     output_dir = (
         Path(args.output_dir).resolve()
         if args.output_dir
         else repo_root / "outputs" / "research" / "stable_window_evaluation"
     )
     end_date = args.end_date or date.today().strftime("%Y-%m-%d")
-    require_recon = not args.loose_recon
 
-    print(f"[stable_window_eval] repo_root    = {repo_root}")
-    print(f"[stable_window_eval] since_start  = {args.since_start}")
-    print(f"[stable_window_eval] stable_start = {args.stable_start}")
-    print(f"[stable_window_eval] end_date     = {end_date}")
-    print(f"[stable_window_eval] require_recon= {require_recon}")
+    print(f"[stable_window_eval] repo_root     = {repo_root}")
+    print(f"[stable_window_eval] since_start   = {args.since_start}")
+    print(f"[stable_window_eval] stable_start  = {args.stable_start}")
+    print(f"[stable_window_eval] end_date      = {end_date}")
+    print(f"[stable_window_eval] contract      = {EVALUATION_CONTRACT_VERSION}")
 
-    # Load artifacts
+    # Load all data once
     print("[stable_window_eval] Loading shadow evaluation artifacts...")
     shadow_days = load_shadow_days(repo_root)
-    print(f"[stable_window_eval]   Found {len(shadow_days)} shadow evaluation date(s)")
+    print(f"[stable_window_eval]   {len(shadow_days)} shadow date(s) found")
 
     print("[stable_window_eval] Loading production run data...")
     production_days = load_production_days(repo_root)
-    print(f"[stable_window_eval]   Found {len(production_days)} production run date(s)")
+    print(f"[stable_window_eval]   {len(production_days)} production date(s) found")
 
-    print("[stable_window_eval] Loading backtest summary (reference context)...")
+    print("[stable_window_eval] Loading backtest reference...")
     backtest_summary = load_backtest_summary(repo_root)
-    has_bt = bool(backtest_summary)
-    print(f"[stable_window_eval]   Backtest summary: {'found' if has_bt else 'not found'}")
+    print(f"[stable_window_eval]   backtest summary: {'found' if backtest_summary else 'not found'}")
 
-    # Build windows
-    since_records = build_records(shadow_days, production_days, args.since_start, end_date)
-    stable_records = build_records(shadow_days, production_days, args.stable_start, end_date)
+    # Build all windows
+    rolling14_start = _rolling_start(end_date, ROLLING_14D_DAYS)
+    rolling30_start = _rolling_start(end_date, ROLLING_30D_DAYS)
 
-    since_valid = _valid_day_rows(since_records, require_recon=require_recon)
-    stable_valid = _valid_day_rows(stable_records, require_recon=require_recon)
-    since_shadow = _shadow_ok_rows(since_records)
-    stable_shadow = _shadow_ok_rows(stable_records)
+    windows: dict[str, list[DayRecord]] = {
+        "since":     build_records(shadow_days, production_days, args.since_start, end_date),
+        "stable":    build_records(shadow_days, production_days, args.stable_start, end_date),
+        "rolling14": build_records(shadow_days, production_days, rolling14_start, end_date),
+        "rolling30": build_records(shadow_days, production_days, rolling30_start, end_date),
+    }
+    show_rolling30 = len(windows["rolling30"]) >= ROLLING_30D_MIN_RECORDS
 
-    print(f"[stable_window_eval] Since inception  : {len(since_records)} dates  {len(since_shadow)} shadow-OK  {len(since_valid)} prod-valid")
-    print(f"[stable_window_eval] Stability window : {len(stable_records)} dates  {len(stable_shadow)} shadow-OK  {len(stable_valid)} prod-valid")
-
-    # Compute strategy metrics
-    strategy_rows = build_strategy_table(
-        since_records,
-        stable_records,
-        require_recon=require_recon,
-        backtest_summary=backtest_summary,
-    )
-
-    # Print console table
-    print_summary(
-        strategy_rows,
-        len(since_valid),
-        len(stable_valid),
-        len(since_shadow),
-        len(stable_shadow),
-    )
-
-    # Generate outputs
-    now_str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    ts_compact = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-
-    md = generate_markdown(
-        since_records,
-        stable_records,
-        strategy_rows,
-        since_start=args.since_start,
-        stable_start=args.stable_start,
-        end_date=end_date,
-        require_recon=require_recon,
-        generated_at=now_str,
-    )
-
-    artifact = build_artifact(
-        since_records,
-        stable_records,
-        strategy_rows,
-        since_start=args.since_start,
-        stable_start=args.stable_start,
-        end_date=end_date,
-        require_recon=require_recon,
-        generated_at=now_str,
-    )
+    for wname, records in windows.items():
+        sv       = len(_shadow_ok_rows(records))
+        pv_strict = len(_valid_day_rows(records, require_recon=True))
+        pv_loose  = len(_valid_day_rows(records, require_recon=False))
+        print(
+            f"[stable_window_eval]   {wname:<12}  "
+            f"{len(records):>3} records  "
+            f"{sv:>2} shadow-OK  "
+            f"{pv_strict:>2} strict-valid  "
+            f"{pv_loose:>2} loose-valid"
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    now_str    = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts_compact = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
 
-    md_path = output_dir / f"stable_window_eval_{ts_compact}.md"
-    json_path = output_dir / f"stable_window_eval_{ts_compact}.json"
-    latest_md = output_dir / "latest.md"
-    latest_json = output_dir / "latest.json"
+    mode_rows: dict[str, list[dict[str, Any]]] = {}
 
-    md_path.write_text(md, encoding="utf-8")
-    json_path.write_text(json.dumps(artifact, indent=2, default=str), encoding="utf-8")
-    latest_md.write_text(md, encoding="utf-8")
-    latest_json.write_text(json.dumps(artifact, indent=2, default=str), encoding="utf-8")
+    for mode in ("strict", "loose"):
+        require_recon = (mode == "strict")
+        print(f"[stable_window_eval] Generating {mode} evaluation...")
 
-    print(f"[stable_window_eval] Outputs written to {output_dir}")
-    print(f"  {md_path.name}")
-    print(f"  {json_path.name}")
-    print(f"  latest.md / latest.json")
+        rows = build_strategy_table(
+            windows, require_recon=require_recon, backtest_summary=backtest_summary
+        )
+        md = generate_markdown(
+            windows, rows,
+            mode=mode,
+            since_start=args.since_start,
+            stable_start=args.stable_start,
+            end_date=end_date,
+            generated_at=now_str,
+            rolling14_start=rolling14_start,
+            rolling30_start=rolling30_start,
+            show_rolling30=show_rolling30,
+        )
+        artifact = build_artifact(
+            windows, rows,
+            mode=mode,
+            since_start=args.since_start,
+            stable_start=args.stable_start,
+            end_date=end_date,
+            generated_at=now_str,
+            rolling14_start=rolling14_start,
+            rolling30_start=rolling30_start,
+        )
+        artifact_json = json.dumps(artifact, indent=2, default=str)
 
+        (output_dir / f"latest_{mode}.md").write_text(md, encoding="utf-8")
+        (output_dir / f"latest_{mode}.json").write_text(artifact_json, encoding="utf-8")
+        (output_dir / f"stable_window_eval_{mode}_{ts_compact}.md").write_text(md, encoding="utf-8")
+        (output_dir / f"stable_window_eval_{mode}_{ts_compact}.json").write_text(artifact_json, encoding="utf-8")
+
+        mode_rows[mode] = rows
+
+    # Optional CSV — raw daily returns for shadow-OK days (mode-agnostic raw data)
     if args.csv:
-        csv_path = output_dir / f"daily_returns_{ts_compact}.csv"
-        write_daily_returns_csv(since_records, csv_path)
+        since_records = windows["since"]
+        csv_path   = output_dir / f"daily_returns_{ts_compact}.csv"
         latest_csv = output_dir / "latest_daily_returns.csv"
+        write_daily_returns_csv(since_records, csv_path)
         write_daily_returns_csv(since_records, latest_csv)
-        print(f"  {csv_path.name}")
-        print(f"  latest_daily_returns.csv")
+        print(f"[stable_window_eval] CSV: {csv_path.name}")
 
-    if len(since_valid) == 0 and len(stable_valid) == 0:
-        print()
-        print("[stable_window_eval] NOTE: 0 fully valid days in either window.")
-        print("  Shadow-OK days exist and production runs executed, but the two")
-        print("  sets do not overlap on the same dates yet. Shadow-only metrics")
-        print("  are shown in the report for reference.")
-        print("  Re-run with --loose-recon to see execution-only filtered metrics.")
+    strict_since_n  = len(_valid_day_rows(windows["since"],  require_recon=True))
+    strict_stable_n = len(_valid_day_rows(windows["stable"], require_recon=True))
+    loose_since_n   = len(_valid_day_rows(windows["since"],  require_recon=False))
+    loose_stable_n  = len(_valid_day_rows(windows["stable"], require_recon=False))
+
+    print_operator_summary(
+        mode_rows["strict"], strict_since_n, strict_stable_n,
+        mode_rows["loose"],  loose_since_n,  loose_stable_n,
+        end_date=end_date,
+        since_start=args.since_start,
+        stable_start=args.stable_start,
+        output_dir=output_dir,
+    )
+
+    print(f"[stable_window_eval] Output dir: {output_dir}")
+    print(f"  latest_strict.md / latest_strict.json")
+    print(f"  latest_loose.md  / latest_loose.json")
+    print(f"  stable_window_eval_strict_{ts_compact}.*")
+    print(f"  stable_window_eval_loose_{ts_compact}.*")
 
     return 0
 
