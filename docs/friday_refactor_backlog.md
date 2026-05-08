@@ -343,7 +343,7 @@ Do not over-engineer until there is repeated memory or runtime pressure.
 **Title:** Clean git/VM deployment workflow
 **Category:** Operations
 **Priority:** HIGH
-**Status:** READY_VALIDATED
+**Status:** DEPLOYED
 **Blast Radius:** HIGH
 
 **Why it matters:**
@@ -355,10 +355,10 @@ Local and VM state can drift, source cron can diverge from installed cron, and r
 **Current state:**
 The 2026-05-08 reconciliation restored deterministic VM git deployment. The VM
 was backed up, stashed, fast-forwarded to canonical `origin/main` at `3de68f8`,
-and validated clean. Recovery patches and VM stashes remain intentionally
-preserved. SCP is now exception-only. Local WIP still exists, so this item should
-not be marked fully `DONE` or `DEPLOYED` until local WIP is resolved
-intentionally and the governance docs are committed.
+then governance documentation was committed as `c8c0e10` and deployed to the VM
+through `git pull --ff-only`. Recovery patches and VM stashes remain
+intentionally preserved. SCP is now exception-only. Local non-governance WIP
+still exists and remains outside the FR-008 deployment scope.
 
 **Proposed approach:**
 Define a clean deploy flow:
@@ -393,9 +393,8 @@ Do not use destructive reset/clean as normal rollback. If cron changed, restore
 the prior tracked cron source and reinstall only as an explicit cron deployment.
 
 **Notes:**
-Operational reconciliation phase is effectively complete. Remaining work is
-local WIP resolution, committing governance docs, and any future deployment
-automation or checklist refinement.
+Operational reconciliation and governance documentation deployment are complete.
+Future work should treat automation/checklist refinements as separate FRs.
 
 ## Friday Review Checklist
 
@@ -415,4 +414,4 @@ automation or checklist refinement.
 | Date | Item | Action | Result | Follow-up |
 |---|---|---|---|---|
 | 2026-05-04 | FR-003 | Implemented managed ticker exceptions with `MMC` ignored. | DONE | Monitor hydration status for additional provider failures. |
-| 2026-05-08 | FR-008 | Reconciled VM to canonical `origin/main` and documented git-based deployment governance. | READY_VALIDATED | Resolve local WIP intentionally before marking fully DONE/DEPLOYED. |
+| 2026-05-08 | FR-008 | Reconciled VM to canonical `origin/main`, documented git-based deployment governance, and deployed via VM fast-forward. | DEPLOYED | Keep local non-governance WIP separated into future commits. |
