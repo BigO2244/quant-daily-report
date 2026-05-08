@@ -2,9 +2,21 @@
 
 **System:** Caerus Quant — Daily Execution & Research System
 **Author:** Brett Olson
-**Last reviewed:** March 2026
+**Last reviewed:** 2026-05-08
 
 This runbook covers day-to-day operation of the Caerus trading system. It assumes you have access to the GitHub repository (Actions tab, Secrets/Variables), and optionally a local checkout.
+
+Current deployment governance:
+
+- `origin/main` is canonical deployable source.
+- The scheduler VM is a deploy target and the production scheduler for daily
+  paper execution through cron.
+- GitHub daily precompute/live workflows are dispatch-only safety paths, not the
+  normal scheduler.
+- Standard source deployment is `commit -> push -> fast-forward pull on VM -> validate`.
+- SCP is exception-only and must be reconciled back through git.
+- See `docs/deployment_workflow.md` before changing deployment, cron, or VM
+  source state.
 
 ---
 
@@ -18,7 +30,7 @@ This runbook covers day-to-day operation of the Caerus trading system. It assume
 6. [Recovery and Rollback Steps](#recovery-and-rollback-steps)
 7. [Reconciliation Procedure](#reconciliation-procedure)
 8. [What to Do If Broker State and Model State Diverge](#what-to-do-if-broker-state-and-model-state-diverge)
-9. [GitHub Actions vs Local Runs](#github-actions-vs-local-runs)
+9. [VM Cron, GitHub Actions, and Local Runs](#vm-cron-github-actions-and-local-runs)
 10. [Escalation and Manual Intervention Points](#escalation-and-manual-intervention-points)
 
 ---
@@ -131,15 +143,38 @@ Operator note:
 
 ## How to Verify a Run Succeeded
 
-### Via GitHub Actions
+### Via VM Cron
 
-1. Go to **Actions → Daily Alpaca Paper Run** and click the most recent run.
-2. Confirm `engine_run` and `email` jobs both show green.
-3. Expand the **"Run daily quant execution"** step and scan for:
+The VM cron is the normal production scheduler. Inspect these first for current
+daily operations:
+
+1. SSH to the VM and go to `~/quant-daily-report`.
+2. Confirm git state if source drift is relevant:
+   - `git status`
+   - `git log -1 --oneline`
+3. Inspect the relevant logs:
+   - `logs/cron_precompute.log`
+   - `logs/cron_execute.log`
+   - `logs/cron_confirm.log`
+   - `logs/shadow_<DATE>.log`
+4. Scan for:
    - `[RECON] PRETRADE verdict: PASS` — reconciliation passed
    - `[ORDERS]` lines showing planned or sent orders
    - No `[ERROR]` lines
-4. Download the **`alpaca-paper`** artifact and inspect:
+5. Inspect artifacts under `outputs/runs/<RUN_ID>/`, `outputs/broker/`, and
+   `outputs/precompute/<DATE>/`.
+
+### Via GitHub Actions
+
+GitHub daily precompute/live workflows are dispatch-only and should not be used
+as evidence of the normal scheduled run unless an operator intentionally
+triggered them.
+
+For manually dispatched runs:
+
+1. Go to the relevant workflow and click the most recent run.
+2. Confirm jobs show green.
+3. Download artifacts and inspect:
    - `outputs/runs/<RUN_ID>/meta.json` — verify `mode: "alpaca"` and correct `report_date`
    - `outputs/runs/<RUN_ID>/logs/ci_alpaca_run.log` — check exit status and key log lines
    - `outputs/paper_state/canonical_positions.json` — verify positions match Alpaca dashboard
@@ -347,14 +382,20 @@ Resolution:
 
 ---
 
-## GitHub Actions vs Local Runs
+## VM Cron, GitHub Actions, and Local Runs
+
+### When to Use VM Cron
+
+- Normal production-like paper trading schedule.
+- Daily precompute, execution, confirmation, shadow lane, and weekly review.
+- Broker-authoritative dashboard refreshes and VM-hosted operational surfaces.
 
 ### When to Use GitHub Actions
 
-- All production execution (paper trading orders must go through the scheduled workflow)
-- Bootstrap operations to sync canonical snapshot
-- Audit trail — each Actions run produces a timestamped, versioned artifact
-- Research digest (requires ANTHROPIC_API_KEY and FRED_API_KEY in Secrets)
+- Manual dispatch-only recovery or diagnostics when explicitly selected.
+- Bootstrap operations if the current recovery path requires workflow_dispatch.
+- Audit trail for manually dispatched runs.
+- Research digest or historical workflows when intentionally triggered.
 
 ### When to Use Local Runs
 
@@ -365,13 +406,14 @@ Resolution:
 
 ### Key differences
 
-| Concern | GitHub Actions | Local |
-|---|---|---|
-| Canonical snapshot | Restored from Actions cache; saved back after run | Read from / written to `outputs/paper_state/` directly |
-| Credentials | Loaded from GitHub Secrets | Set as environment variables manually |
-| Python environment | Freshly created venv per run | Local `.venv` (macOS-only binary) |
-| Artifact retention | 30–90 days in Actions; can download | Local disk only |
-| Email sending | Controlled by `EMAIL_DRY_RUN` variable | Set `EMAIL_DRY_RUN=1` to prevent accidental sends |
+| Concern | VM Cron | GitHub Actions | Local |
+|---|---|---|---|
+| Role | Normal scheduler | Dispatch-only recovery/diagnostics | Development and diagnostics |
+| Canonical source | Fast-forwarded from `origin/main` | Checks out workflow commit | Current checkout |
+| Credentials | VM `.env` and runtime env | GitHub Secrets | Manually exported env vars |
+| Python environment | VM venv via `scripts/runtime_env.sh` | Fresh workflow venv | Local `.venv` |
+| Artifact retention | VM disk and published surfaces | Actions artifacts/cache | Local disk only |
+| Email sending | Cron/runtime env controlled | Workflow env controlled | Set `EMAIL_DRY_RUN=1` to prevent accidental sends |
 
 ### Local shadow run (no orders, no email)
 

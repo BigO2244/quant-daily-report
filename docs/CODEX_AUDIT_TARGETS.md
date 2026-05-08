@@ -6,9 +6,10 @@ the stated invariant, and flag any deviation with a specific line reference and
 a proposed fix.
 
 **Context**: This is a paper-trading quantitative equity + options system running
-on Alpaca. Production runs on a GCP VM via cron. All code changes go through
-GitHub → SCP deploy. The test suite (955 tests) is the correctness baseline —
-run it first, then audit.
+on Alpaca. Production runs on a GCP VM via cron. Canonical deployable source is
+`origin/main`; normal VM deployment is git fast-forward and validation. SCP is
+exception-only and requires later git reconciliation. The test suite (955 tests)
+is the correctness baseline — run it first, then audit.
 
 ---
 

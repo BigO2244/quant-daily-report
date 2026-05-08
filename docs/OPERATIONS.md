@@ -8,6 +8,19 @@
 - `SPY` remains the benchmark.
 - Shadow is model-portfolio based and artifact-only; it is not broker-authoritative execution state.
 
+## Deployment Governance
+
+- Canonical deployable source is `origin/main`.
+- The scheduler VM at `~/quant-daily-report` is a deploy target, not the source
+  of truth.
+- Standard deployment flow is `commit -> push -> fast-forward pull on VM -> validate`.
+- SCP is exception-only for emergency hotfixes or bounded recovery diagnostics.
+  Any SCP use requires later git reconciliation.
+- Preserve recovery patches and VM stashes until explicitly reviewed.
+- Full deployment procedure and rollback rules live in
+  `docs/deployment_workflow.md`.
+- Documentation synchronization rules live in `docs/documentation_governance.md`.
+
 ## Daily Shadow Automation
 
 - After successful precompute, `scripts/cron_precompute.sh` calls `scripts/run_shadow_candidates_daily.sh`.

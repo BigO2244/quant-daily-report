@@ -25,10 +25,9 @@ Automation:
 Single agent-facing handoff for this repository. Operational, architecture,
 scheduler, and workflow guidance lives here.
 
-Last updated: 2026-04-22 — named strategy framework documented, Orion/Lyra
-shadow lane added post-precompute as a non-blocking artifact-only step,
-dashboard remains broker-authoritative V2 prototype, options still
-paper-executed, last known full test suite clean at 955 on 2026-04-20.
+Last updated: 2026-05-08 — deterministic git-based VM deployment restored;
+`origin/main` is canonical source of truth, the VM is a deploy target, SCP is
+exception-only, and rollback/recovery preservation is mandatory.
 
 ---
 
@@ -401,11 +400,35 @@ Four independent layers prevent position and regime whipsaw:
 
 ## Deployment and Verification Rules
 
-- Local commits do not deploy to the VM.
-- Prefer local development first, then explicit SCP deploy.
-- After SCP, verify remote content with `md5sum` or `grep`. Never assume SCP succeeded.
-- Do not edit the VM directly unless an explicit hotfix.
-- After deploying, install the updated cron: `crontab scripts/crontab.txt`
+Canonical deployment model:
+- `origin/main` is the canonical source of truth for deployable source.
+- The scheduler VM is a deploy target, not a canonical source.
+- Standard flow is `commit -> push -> pull/fast-forward on VM -> validate`.
+- VM deployment must be fast-forwardable from `origin/main`; do not create VM
+  merge commits, rebase VM history, or force-overwrite VM source.
+- Local commits do not deploy to the VM until pushed and pulled on the VM.
+
+SCP governance:
+- SCP is exception-only for emergency hotfixes or recovery diagnostics.
+- Any SCP use must be documented, verified, and later reconciled back through git.
+- After SCP, verify remote content with `md5sum`, `sha256sum`, or `grep`; never
+  assume SCP succeeded.
+- Do not leave SCP-only source as production drift.
+
+Deterministic deployment philosophy:
+- Reproducibility, rollback safety, and operational auditability are required.
+- No undocumented production drift is acceptable.
+- Preserve rollback capability before mutation: record HEAD, status, diffs, and
+  untracked source candidates before changing the VM.
+- Stop on unexplained staged, unstaged, or untracked production source drift.
+- Prefer reconciliation over overwrite. Do not use destructive cleanup to make a
+  state look clean.
+
+Cron and deployed services:
+- `scripts/crontab.txt` is the source cron definition.
+- Do not reinstall cron unless the task explicitly includes cron deployment.
+- If cron is changed, validate source cron, installed cron, and rollback path.
+- Deployment details live in `docs/deployment_workflow.md`.
 
 For scheduler incidents, inspect:
 - `outputs/latest_run.json`
@@ -487,6 +510,13 @@ Changes in these areas require explicit caution and validation:
 
 - Inspect the current implementation before making broad changes.
 - Prefer minimal, surgical edits unless the task explicitly calls for restructuring.
+- Audit before mutation, especially on the VM or in execution-adjacent code.
+- Preserve rollback capability before changing deployment, cron, broker,
+  reconciliation, or reporting paths.
+- Avoid destructive cleanup. Do not run `git reset --hard`, broad `git clean`,
+  stash drops, artifact deletion, or VM overwrites unless explicitly requested
+  and recoverability is already established.
+- Stop and report if source ownership or canonical state becomes ambiguous.
 - If you touch execution, reconciliation, or reporting contracts, run the
   narrowest relevant validation first, then a broader check.
 - Report exact commands run and whether they passed.
@@ -502,13 +532,50 @@ Changes in these areas require explicit caution and validation:
 - Prefer promoting risky dashboard/UI experiments to `/dashboardDEV/` first,
   then push to `/dashboard/` only after data and route verification pass.
 
+FR governance:
+- Friday refactor work should default to Friday after market close.
+- FR work must have a status, blast-radius assessment, dependencies, selected
+  validation, rollback plan, and documentation impact before implementation.
+- Preferred FR status flow: `BACKLOG -> READY -> READY_VALIDATED -> IN_PROGRESS -> DONE -> DEPLOYED`.
+- Do not mark an FR `DONE` when local WIP, unreconciled VM state, missing docs,
+  or incomplete validation still blocks operational completion.
+- Track completed FR work in `docs/fr_execution_ledger.md`.
+
+Documentation governance:
+- Documentation drift is operational risk.
+- Architecture, deployment, cron, scheduler, dashboard, execution, and artifact
+  contract changes require documentation review in the same change set or an
+  explicit follow-up blocker.
+- Agent-facing operational rules in this file must stay synchronized with
+  `docs/deployment_workflow.md`, `docs/documentation_governance.md`,
+  `docs/OPERATIONS.md`, and `docs/runbook.md`.
+
+Runtime separation:
+- Source code: tracked files intended to flow through git.
+- Runtime artifacts: `outputs/`, broker snapshots, generated reports, and
+  dated research outputs. These are evidence, not deployable source.
+- Logs: `logs/` are operational evidence and should not be used to define source
+  truth.
+- Generated files: dashboard payloads, reports, caches, and model artifacts may
+  be regenerated by scheduled jobs; do not treat them as canonical source unless
+  the repo explicitly tracks them.
+- Deployment state: VM working tree, installed cron, nginx config, services, and
+  stashes/backups must be audited before mutation.
+
 ---
 
 ## Ops Handoff
 
 - Scheduler host path: `~/quant-daily-report`
 - Cron source: `scripts/crontab.txt` — install with `crontab scripts/crontab.txt`
-- After SCP: run `python -m pytest Tests/ -q --tb=no` on the VM to confirm clean suite
+- Canonical deploy source: `origin/main`
+- Standard VM deploy: fetch/pull fast-forward from `origin/main`, then validate
+- SCP is exception-only; reconcile any SCP hotfix back through git before
+  considering deployment deterministic again
+- Preserve recovery patches and VM stashes until they have been explicitly
+  reviewed and declared obsolete
+- After source deployment: run targeted validation first; run the full suite only
+  when blast radius justifies it
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute now also triggers `scripts/run_shadow_candidates_daily.sh`
