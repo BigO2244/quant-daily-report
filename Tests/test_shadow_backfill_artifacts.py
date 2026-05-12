@@ -43,6 +43,24 @@ def test_backfill_plan_processes_dates_chronologically(tmp_path: Path) -> None:
     assert all(row["planned_action"] == "refresh_artifacts_and_append_nav" for row in rows)
 
 
+def test_backfill_force_rebuild_reprocesses_existing_nav_dates(tmp_path: Path) -> None:
+    output = tmp_path / "outputs" / "shadow_candidates"
+    _write_nav(output / "performance" / "shadow_nav_series.csv", ["2026-04-27", "2026-04-28"])
+
+    rows = backfill._build_plan(
+        output_root=output,
+        signals=_signals(["2026-04-28"]),
+        start_date="2026-04-28",
+        end_date="2026-04-28",
+        anchor_date="2026-04-27",
+        force_rebuild=True,
+    )
+
+    assert rows[0]["included_in_nav_series"] is True
+    assert rows[0]["needs_recovery"] is True
+    assert rows[0]["planned_action"] == "refresh_artifacts_and_append_nav"
+
+
 def test_backfill_dry_run_does_not_create_backup_or_call_refresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _write_nav(Path("outputs/shadow_candidates/performance/shadow_nav_series.csv"), ["2026-04-27"])

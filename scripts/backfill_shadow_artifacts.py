@@ -34,7 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--universe-path", default="data/universe.csv")
     parser.add_argument("--diagnostics-dir", default="outputs/diagnostics")
     parser.add_argument("--backup-root", default="outputs/recovery_backups")
-    parser.add_argument("--shadow-start-date", default=None, help="Defaults to Jan 1 of the start-date year.")
+    parser.add_argument("--shadow-start-date", default=None, help="Defaults to Jan 1 of the year before start-date.")
+    parser.add_argument("--force-rebuild", action="store_true", help="Rebuild every trading date in the requested range.")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--artifact-only", action="store_true", help="Required safety acknowledgement.")
     parser.add_argument("--dry-run", action="store_true")
@@ -134,7 +135,15 @@ def _status_for_date(output_root: Path, date: str) -> dict[str, Any]:
     }
 
 
-def _build_plan(*, output_root: Path, signals: pd.DataFrame, start_date: str, end_date: str, anchor_date: str) -> list[dict[str, Any]]:
+def _build_plan(
+    *,
+    output_root: Path,
+    signals: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    anchor_date: str,
+    force_rebuild: bool = False,
+) -> list[dict[str, Any]]:
     dates = _trading_dates(signals, start_date=start_date, end_date=end_date)
     nav_dates = _nav_dates(output_root)
     prior_anchor = anchor_date in nav_dates
@@ -143,7 +152,7 @@ def _build_plan(*, output_root: Path, signals: pd.DataFrame, start_date: str, en
         status = _status_for_date(output_root, date)
         in_nav = date in nav_dates
         has_price = shadow.trade_date_has_data(signals, trade_date=date)
-        needs_recovery = bool(has_price and (not in_nav or status.get("current_data_status") != "OK"))
+        needs_recovery = bool(has_price and (force_rebuild or not in_nav or status.get("current_data_status") != "OK"))
         planned_action = "refresh_artifacts_and_append_nav" if needs_recovery else "skip_already_in_nav"
         if not has_price:
             planned_action = "skip_missing_price_data"
@@ -274,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     end_date = pd.Timestamp(args.end_date).strftime("%Y-%m-%d")
     anchor_date = pd.Timestamp(args.anchor_date).strftime("%Y-%m-%d")
     run_id = args.run_id or datetime.now(timezone.utc).strftime("shadow-backfill-%Y%m%dT%H%M%SZ")
-    shadow_start_date = args.shadow_start_date or f"{start_date[:4]}-01-01"
+    shadow_start_date = args.shadow_start_date or f"{int(start_date[:4]) - 1}-01-01"
     output_root = Path(args.output_dir)
     cache_path = Path(args.price_cache_path)
     diagnostics_dir = Path(args.diagnostics_dir)
@@ -292,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
         start_date=start_date,
         end_date=end_date,
         anchor_date=anchor_date,
+        force_rebuild=bool(args.force_rebuild),
     )
     plan_csv = diagnostics_dir / f"shadow_backfill_plan_{datetime.now().date().isoformat()}.csv"
     plan_md = diagnostics_dir / f"shadow_backfill_plan_{datetime.now().date().isoformat()}.md"

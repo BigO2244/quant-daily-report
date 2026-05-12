@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--shadow-start-date",
         default=None,
-        help="Start date for artifact-only shadow scorecard refresh. Defaults to Jan 1 of the trade-date year.",
+        help="Start date for artifact-only shadow scorecard refresh. Defaults to Jan 1 of the prior year.",
     )
     parser.add_argument(
         "--refresh-shadow-artifacts",
@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     universe_path = _resolve_path(args.universe_path)
     ticker_exceptions_path = _resolve_path(args.ticker_exceptions_path)
     shadow_output_dir = _resolve_path(args.shadow_output_dir)
-    shadow_start_date = args.shadow_start_date or f"{as_of_date[:4]}-01-01"
+    shadow_start_date = args.shadow_start_date or f"{int(as_of_date[:4]) - 1}-01-01"
     before_max_date = cache_max_date(cache_path)
 
     symbols = _load_symbols(universe_path)
