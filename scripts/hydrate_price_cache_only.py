@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hydration-source", default="vm_cache_only")
     parser.add_argument("--chunk-size", type=int, default=25)
     parser.add_argument(
+        "--shadow-start-date",
+        default=None,
+        help="Start date for artifact-only shadow scorecard refresh. Defaults to Jan 1 of the trade-date year.",
+    )
+    parser.add_argument(
         "--refresh-shadow-artifacts",
         action="store_true",
         help="After verified cache hydration, regenerate and publish artifact-only shadow outputs for the completed day.",
@@ -100,6 +105,7 @@ def _refresh_shadow_artifacts(
         "status": "OK" if rc == 0 else "FAILED",
         "exit_code": int(rc),
         "trade_date": trade_date,
+        "shadow_start_date": start_date,
         "shadow_output_dir": str(shadow_output_dir),
     }
 
@@ -112,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     universe_path = _resolve_path(args.universe_path)
     ticker_exceptions_path = _resolve_path(args.ticker_exceptions_path)
     shadow_output_dir = _resolve_path(args.shadow_output_dir)
+    shadow_start_date = args.shadow_start_date or f"{as_of_date[:4]}-01-01"
     before_max_date = cache_max_date(cache_path)
 
     symbols = _load_symbols(universe_path)
@@ -126,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         "hydration_source": args.hydration_source,
         "refresh_shadow_artifacts": bool(args.refresh_shadow_artifacts),
         "shadow_output_dir": str(shadow_output_dir),
+        "shadow_start_date": shadow_start_date,
         "dry_run": bool(args.dry_run),
         "artifact_only": True,
     }
@@ -174,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             shadow_refresh = _refresh_shadow_artifacts(
                 trade_date=as_of_date,
-                start_date=args.start_date,
+                start_date=shadow_start_date,
                 cache_path=cache_path,
                 shadow_output_dir=shadow_output_dir,
             )
