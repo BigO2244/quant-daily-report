@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backup-root", default="outputs/recovery_backups")
     parser.add_argument("--shadow-start-date", default=None, help="Defaults to Jan 1 of the year before start-date.")
     parser.add_argument("--force-rebuild", action="store_true", help="Rebuild every trading date in the requested range.")
+    parser.add_argument(
+        "--seed-anchor-from-nav-series",
+        action="store_true",
+        help="Before rebuilding, rewrite the anchor date shadow_performance.json from shadow_nav_series.csv.",
+    )
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--artifact-only", action="store_true", help="Required safety acknowledgement.")
     parser.add_argument("--dry-run", action="store_true")
@@ -172,8 +177,61 @@ def _build_plan(
     return rows
 
 
-def _affected_dates(plan_rows: list[dict[str, Any]]) -> list[str]:
-    return [str(row["date"]) for row in plan_rows if str(row.get("planned_action")) == "refresh_artifacts_and_append_nav"]
+def _affected_dates(plan_rows: list[dict[str, Any]], *, anchor_date: str | None = None) -> list[str]:
+    dates = [str(row["date"]) for row in plan_rows if str(row.get("planned_action")) == "refresh_artifacts_and_append_nav"]
+    if anchor_date and anchor_date not in dates:
+        return [anchor_date, *dates]
+    return dates
+
+
+def _nav_rows(output_root: Path) -> list[dict[str, str]]:
+    path = output_root / "performance" / "shadow_nav_series.csv"
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _seed_anchor_performance_from_nav_series(*, output_root: Path, anchor_date: str) -> Path:
+    rows = _nav_rows(output_root)
+    index = next((idx for idx, row in enumerate(rows) if row.get("date") == anchor_date), None)
+    if index is None:
+        raise RuntimeError(f"anchor date {anchor_date} is missing from shadow_nav_series.csv")
+    current = rows[index]
+    previous = rows[index - 1] if index > 0 else None
+    previous_date = previous.get("date") if previous else None
+    names = {
+        "caerus_polaris": "Caerus Polaris",
+        "caerus_orion": "Caerus Orion",
+        "caerus_lyra": "Caerus Lyra",
+        "spy_benchmark": "SPY",
+    }
+    strategies: dict[str, dict[str, Any]] = {}
+    for slug in MODEL_SLUGS:
+        nav = float(current[slug])
+        previous_nav = float(previous[slug]) if previous and previous.get(slug) else nav
+        daily_return = 0.0 if previous_nav == 0 else round((nav / previous_nav) - 1.0, 10)
+        strategies[slug] = {
+            "strategy_name": names[slug],
+            "daily_return": daily_return,
+            "nav": round(nav, 10),
+            "previous_nav": round(previous_nav, 10),
+            "weights_count": 1 if slug == "spy_benchmark" else None,
+        }
+    payload = {
+        "trade_date": anchor_date,
+        "previous_trade_date": previous_date,
+        "status": "OK",
+        "data_status": "OK",
+        "data_reason": None,
+        "return_convention": "weights_as_of_t",
+        "recovery_note": "Seeded from shadow_nav_series.csv anchor row during artifact-only backfill.",
+        "strategies": strategies,
+    }
+    path = output_root / anchor_date / "shadow_performance.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return path
 
 
 def _copy_for_backup(source: Path, backup_dir: Path, *, root: Path) -> list[dict[str, str]]:
@@ -308,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     _write_table(plan_rows, csv_path=plan_csv, md_path=plan_md, title="Shadow Backfill Plan")
 
     dry_run_md = diagnostics_dir / f"shadow_backfill_dry_run_{datetime.now().date().isoformat()}.md"
-    affected = _affected_dates(plan_rows)
+    affected = _affected_dates(plan_rows, anchor_date=anchor_date if args.seed_anchor_from_nav_series else None)
     dry_run_md.write_text(
         "\n".join(
             [
@@ -343,8 +401,28 @@ def main(argv: list[str] | None = None) -> int:
         price_cache_max_date=price_cache_max_date,
         anchor_date=anchor_date,
     )
+    seeded_anchor_path = None
+    if args.seed_anchor_from_nav_series:
+        seeded_anchor_path = _seed_anchor_performance_from_nav_series(output_root=output_root, anchor_date=anchor_date)
 
     result_rows: list[dict[str, Any]] = []
+    if seeded_anchor_path is not None:
+        result_rows.append(
+            {
+                "date": anchor_date,
+                "action": "seed_anchor_from_nav_series",
+                "status_before": "",
+                "status_after": "OK",
+                "performance_status_after": "OK",
+                "data_status_after": "OK",
+                "prior_date_used": "",
+                "price_max_date_used": anchor_date,
+                "included_in_nav_series": True,
+                "files_written": str(seeded_anchor_path),
+                "result_status": "OK",
+                "warnings": "",
+            }
+        )
     exit_code = 0
     for row in plan_rows:
         date = str(row["date"])

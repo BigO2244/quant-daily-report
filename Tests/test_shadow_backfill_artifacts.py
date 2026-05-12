@@ -145,3 +145,18 @@ def test_backfill_backup_manifest_hashes_existing_artifacts(tmp_path: Path, monk
     written = json.loads(manifest_path.read_text())
     assert "outputs/shadow_candidates/2026-04-28/shadow_performance.json" in written["files_backed_up"]
     assert written["last_valid_anchor_date"] == "2026-04-27"
+
+
+def test_seed_anchor_from_nav_series_rewrites_anchor_performance(tmp_path: Path) -> None:
+    output = tmp_path / "outputs" / "shadow_candidates"
+    _write_nav(output / "performance" / "shadow_nav_series.csv", ["2026-04-24", "2026-04-27"])
+
+    path = backfill._seed_anchor_performance_from_nav_series(output_root=output, anchor_date="2026-04-27")
+    payload = json.loads(path.read_text())
+
+    assert payload["status"] == "OK"
+    assert payload["data_status"] == "OK"
+    assert payload["previous_trade_date"] == "2026-04-24"
+    assert payload["strategies"]["caerus_polaris"]["nav"] == 2.0
+    assert payload["strategies"]["caerus_polaris"]["previous_nav"] == 1.0
+    assert payload["strategies"]["caerus_polaris"]["daily_return"] == 1.0
