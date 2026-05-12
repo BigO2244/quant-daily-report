@@ -73,9 +73,19 @@ def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: 
 
 
 def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any]) -> dict[str, Any]:
-    if shadow_performance.get("data_status") != "OK":
-        return {"status": "SKIPPED", "reason": f"data_status={shadow_performance.get('data_status')}"}
     trade_date = str(shadow_performance.get("trade_date") or "")
+    if shadow_performance.get("data_status") != "OK":
+        return _remove_nav_series_date(
+            output_root=output_root,
+            trade_date=trade_date,
+            reason=f"data_status={shadow_performance.get('data_status')}",
+        )
+    if shadow_performance.get("status") != "OK":
+        return _remove_nav_series_date(
+            output_root=output_root,
+            trade_date=trade_date,
+            reason=f"performance_status={shadow_performance.get('status')}",
+        )
     strategies = shadow_performance.get("strategies") or {}
     row = {"date": trade_date}
     for slug in MODEL_SLUGS:
@@ -101,6 +111,31 @@ def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any])
         for date in sorted(rows):
             writer.writerow({field: rows[date].get(field, "") for field in fieldnames})
     return {"status": "OK", "path": str(path), "rows": len(rows), "latest_date": trade_date}
+
+
+def _remove_nav_series_date(*, output_root: Path, trade_date: str, reason: str) -> dict[str, Any]:
+    path = output_root / "performance" / "shadow_nav_series.csv"
+    if not trade_date or not path.exists():
+        return {"status": "SKIPPED", "reason": reason}
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = reader.fieldnames or ["date", *MODEL_SLUGS]
+        rows = [dict(row) for row in reader if str(row.get("date") or "") != trade_date]
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    latest_date = rows[-1].get("date") if rows else None
+    return {
+        "status": "SKIPPED",
+        "path": str(path),
+        "rows": len(rows),
+        "latest_date": latest_date,
+        "reason": reason,
+    }
 
 
 def _publish_latest(output_root: Path, trade_date: str) -> dict[str, Any]:
