@@ -18,8 +18,8 @@ from core.price_hydration import (  # noqa: E402
     resolve_completed_trading_day,
     write_status,
 )
-from research.shadow_tracking import run as shadow_run  # noqa: E402
 from research.flow_detection.data import ensure_price_panel, load_universe  # noqa: E402
+from scripts import refresh_shadow_scorecard_artifacts  # noqa: E402
 
 
 BENCHMARK_SYMBOL = "SPY"
@@ -97,15 +97,12 @@ def _refresh_shadow_artifacts(
         "--price-cache-path",
         str(cache_path),
     ]
-    rc = shadow_run.main(argv)
-    publish = _publish_shadow_latest(shadow_output_dir, trade_date) if rc == 0 else {}
-    status = "OK" if rc == 0 and publish.get("status") == "OK" else "FAILED" if rc != 0 else "PARTIAL"
+    rc = refresh_shadow_scorecard_artifacts.main(argv)
     return {
-        "status": status,
+        "status": "OK" if rc == 0 else "FAILED",
         "exit_code": int(rc),
         "trade_date": trade_date,
         "shadow_output_dir": str(shadow_output_dir),
-        "publish": publish,
     }
 
 

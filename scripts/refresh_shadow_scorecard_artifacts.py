@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
+from research.alpha_lab_v2.engine import build_target_snapshot
+from research.flow_detection.data import ensure_price_panel, load_universe
+from research.shadow_tracking import run as shadow
+from research.shadow_tracking.strategies import build_shadow_definitions
+
+
+BENCHMARK_SYMBOL = "SPY"
+MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Regenerate artifact-only daily shadow scorecard inputs without full historical backtests."
+    )
+    parser.add_argument("--trade-date", required=True)
+    parser.add_argument("--start-date", default="2014-01-01")
+    parser.add_argument("--output-dir", default="outputs/shadow_candidates")
+    parser.add_argument("--price-cache-path", default="outputs/research/flow_detection_v1/price_panel.parquet")
+    return parser
+
+
+def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: str) -> dict[str, Any]:
+    weights = snapshot["weights"]
+    weights = weights[weights > 0].sort_values(ascending=False)
+    rank_table = snapshot["rank_table"]
+    holdings = []
+    for ticker, weight in weights.items():
+        row = rank_table[rank_table["ticker"] == ticker]
+        momentum_rank = float(row["momentum_rank"].iloc[0]) if not row.empty else None
+        momentum_score = float(row["momentum_score"].iloc[0]) if not row.empty else None
+        holdings.append(
+            {
+                "ticker": ticker,
+                "target_weight": round(float(weight), 6),
+                "momentum_rank": momentum_rank,
+                "momentum_score": round(momentum_score, 6) if momentum_score is not None else None,
+                "estimated_holding_period_days": snapshot["holding_period_by_ticker"].get(str(ticker)),
+            }
+        )
+    concentration = {
+        "holdings_count": int(len(weights)),
+        "max_weight": round(float(weights.max()), 6) if not weights.empty else 0.0,
+        "top3_concentration": round(float(weights.head(3).sum()), 6) if not weights.empty else 0.0,
+    }
+    return {
+        "strategy_name": definition.strategy_name,
+        "strategy_slug": definition.strategy_slug,
+        "source_variant": definition.source_variant,
+        "trade_date": trade_date,
+        "effective_trade_date": snapshot["effective_trade_date"],
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "holdings": holdings,
+        "target_weights": {str(ticker): round(float(weight), 6) for ticker, weight in weights.items()},
+        "rank_table": rank_table.head(15).to_dict(orient="records"),
+        "expected_turnover": snapshot["expected_turnover"],
+        "estimated_holding_period_days": snapshot["estimated_holding_period_days"],
+        "weight_concentration": concentration,
+        "performance_summary": None,
+        "scorecard_refresh_mode": "incremental_no_full_backtest",
+    }
+
+
+def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any]) -> dict[str, Any]:
+    if shadow_performance.get("data_status") != "OK":
+        return {"status": "SKIPPED", "reason": f"data_status={shadow_performance.get('data_status')}"}
+    trade_date = str(shadow_performance.get("trade_date") or "")
+    strategies = shadow_performance.get("strategies") or {}
+    row = {"date": trade_date}
+    for slug in MODEL_SLUGS:
+        nav = (strategies.get(slug) or {}).get("nav")
+        if nav is None:
+            return {"status": "SKIPPED", "reason": f"missing_nav:{slug}"}
+        row[slug] = str(nav)
+
+    path = output_root / "performance" / "shadow_nav_series.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows: dict[str, dict[str, str]] = {}
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as handle:
+            for existing in csv.DictReader(handle):
+                date = str(existing.get("date") or "")
+                if date:
+                    rows[date] = dict(existing)
+    rows[trade_date] = row
+    fieldnames = ["date", *MODEL_SLUGS]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for date in sorted(rows):
+            writer.writerow({field: rows[date].get(field, "") for field in fieldnames})
+    return {"status": "OK", "path": str(path), "rows": len(rows), "latest_date": trade_date}
+
+
+def _publish_latest(output_root: Path, trade_date: str) -> dict[str, Any]:
+    dated_dir = output_root / trade_date
+    latest_dir = output_root / "latest"
+    latest_dir.mkdir(parents=True, exist_ok=True)
+    missing: list[str] = []
+    published: list[str] = []
+    for artifact in ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json"):
+        source = dated_dir / artifact
+        if not source.exists():
+            missing.append(artifact)
+            continue
+        (latest_dir / artifact).write_bytes(source.read_bytes())
+        published.append(artifact)
+    return {
+        "status": "OK" if not missing else "PARTIAL",
+        "latest_dir": str(latest_dir),
+        "published_artifacts": published,
+        "missing_artifacts": missing,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    trade_date = pd.Timestamp(args.trade_date).strftime("%Y-%m-%d")
+    output_root = Path(args.output_dir)
+    dated_dir = output_root / trade_date
+    dated_dir.mkdir(parents=True, exist_ok=True)
+
+    universe = load_universe("data/universe.csv")
+    panel, panel_meta = ensure_price_panel(
+        symbols=sorted(set(universe + [BENCHMARK_SYMBOL])),
+        start_date=args.start_date,
+        end_date=trade_date,
+        cache_path=args.price_cache_path,
+        prefer_local=True,
+        allow_download=False,
+    )
+    signals = build_alpha_lab_signal_frame(panel)
+    if not shadow.trade_date_has_data(signals, trade_date=trade_date):
+        reason = shadow.classify_no_data_reason(signals, trade_date=trade_date, allow_download=False)
+        raise RuntimeError(f"cannot refresh scorecard artifacts for {trade_date}: {reason}")
+
+    strategy_payloads: dict[str, dict[str, Any]] = {}
+    for definition in build_shadow_definitions():
+        snapshot = build_target_snapshot(signals, definition.spec, trade_date=trade_date, start_date=args.start_date)
+        payload = _strategy_payload(definition=definition, snapshot=snapshot, trade_date=trade_date)
+        strategy_payloads[definition.strategy_slug] = payload
+        (dated_dir / f"{definition.strategy_slug}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    previous_trade_date = shadow.find_previous_trading_date(signals, trade_date=trade_date)
+    delta_payload = shadow.build_delta_payload(
+        output_root=output_root,
+        trade_date=trade_date,
+        previous_trade_date=previous_trade_date,
+        strategy_payloads=strategy_payloads,
+    )
+    comparison_payload = shadow.build_comparison_payload(strategy_payloads, trade_date=trade_date, delta_payload=delta_payload)
+    shadow_performance = shadow.build_shadow_performance_payload(
+        panel=panel,
+        output_root=output_root,
+        trade_date=trade_date,
+        previous_trade_date=previous_trade_date,
+        strategy_payloads=strategy_payloads,
+        data_status="OK",
+    )
+    (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2), encoding="utf-8")
+    (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2), encoding="utf-8")
+    (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2), encoding="utf-8")
+    (dated_dir / "shadow_performance.json").write_text(json.dumps(shadow_performance, indent=2), encoding="utf-8")
+    evaluation = shadow.build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
+    (dated_dir / "shadow_evaluation.json").write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
+    (dated_dir / "comparison.md").write_text(shadow.build_comparison_markdown(comparison_payload, dated_dir=dated_dir), encoding="utf-8")
+
+    nav_status = _append_nav_series(output_root=output_root, shadow_performance=shadow_performance)
+    publish_status = _publish_latest(output_root, trade_date)
+    result = {
+        "trade_date": trade_date,
+        "status": "OK" if nav_status.get("status") == "OK" and publish_status.get("status") == "OK" else "PARTIAL",
+        "panel_meta": panel_meta,
+        "nav_series": nav_status,
+        "latest_publish": publish_status,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["status"] == "OK" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

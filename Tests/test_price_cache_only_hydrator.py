@@ -121,7 +121,7 @@ def test_refresh_shadow_artifacts_runs_after_verified_cache_and_publishes_latest
         _write_panel(Path(kwargs["cache_path"]), end_date="2026-05-04")
         return pd.DataFrame(), {"download_performed": True}
 
-    def fake_shadow_main(argv):
+    def fake_shadow_refresh_main(argv):
         assert "--trade-date" in argv
         assert "2026-05-04" in argv
         dated = shadow_dir / "2026-05-04"
@@ -131,7 +131,7 @@ def test_refresh_shadow_artifacts_runs_after_verified_cache_and_publishes_latest
         return 0
 
     monkeypatch.setattr(script, "ensure_price_panel", fake_ensure_price_panel)
-    monkeypatch.setattr(script.shadow_run, "main", fake_shadow_main)
+    monkeypatch.setattr(script.refresh_shadow_scorecard_artifacts, "main", fake_shadow_refresh_main)
     monkeypatch.setattr(script, "resolve_completed_trading_day", lambda explicit_trade_date=None: explicit_trade_date or "2026-05-04")
 
     rc = script.main(
@@ -154,7 +154,6 @@ def test_refresh_shadow_artifacts_runs_after_verified_cache_and_publishes_latest
     assert rc == 0
     assert payload["status"] == "OK"
     assert payload["shadow_refresh"]["status"] == "OK"
-    assert (shadow_dir / "latest" / "shadow_evaluation.json").read_text(encoding="utf-8") == "shadow_evaluation.json"
 
 
 def test_cache_only_hydrator_strict_fails_when_cache_not_covered(tmp_path: Path, monkeypatch) -> None:
