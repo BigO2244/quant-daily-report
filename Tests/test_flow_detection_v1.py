@@ -247,6 +247,7 @@ def test_ensure_price_panel_records_failed_symbol_without_crashing(tmp_path: Pat
         cache_path=tmp_path / "price_panel.parquet",
         prefer_local=False,
         allow_download=True,
+        ticker_exceptions_path=tmp_path / "missing_ticker_exceptions.json",
     )
 
     assert {"AAA", "SPY"} <= set(filtered["ticker"].unique())

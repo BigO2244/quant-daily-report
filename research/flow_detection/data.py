@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_LOCAL_PANEL_PATHS = (
     Path("outputs/research/ma_vol_hypothesis/price_panel.parquet"),
 )
+DEFAULT_TICKER_EXCEPTIONS_PATH = Path("data/ticker_exceptions.json")
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,31 @@ def load_universe(universe_path: str | Path = "data/universe.csv") -> list[str]:
         raise ValueError(f"{universe_path} must contain a ticker column")
     tickers = sorted({str(t).strip().upper() for t in df["ticker"].dropna() if str(t).strip()})
     return tickers
+
+
+def load_ticker_exceptions(path: str | Path = DEFAULT_TICKER_EXCEPTIONS_PATH) -> dict[str, dict | list]:
+    path_obj = Path(path)
+    if not path_obj.exists():
+        return {"ignore": [], "aliases": {}, "notes": {}}
+    try:
+        payload = json.loads(path_obj.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("[FLOW] Ticker exceptions unreadable: %s", path_obj)
+        return {"ignore": [], "aliases": {}, "notes": {}}
+    if not isinstance(payload, dict):
+        return {"ignore": [], "aliases": {}, "notes": {}}
+    ignore = sorted({str(item).strip().upper() for item in payload.get("ignore", []) if str(item).strip()})
+    aliases = {
+        str(key).strip().upper(): str(value).strip().upper()
+        for key, value in (payload.get("aliases") or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    notes = {
+        str(key).strip().upper(): str(value)
+        for key, value in (payload.get("notes") or {}).items()
+        if str(key).strip()
+    }
+    return {"ignore": ignore, "aliases": aliases, "notes": notes}
 
 
 def standardize_panel(df: pd.DataFrame) -> pd.DataFrame:
@@ -184,21 +211,44 @@ def ensure_price_panel(
     prefer_local: bool = True,
     allow_download: bool = True,
     chunk_size: int = 25,
+    ticker_exceptions_path: str | Path = DEFAULT_TICKER_EXCEPTIONS_PATH,
 ) -> tuple[pd.DataFrame, dict]:
     symbol_set = {str(sym).upper() for sym in symbols}
+    exceptions = load_ticker_exceptions(ticker_exceptions_path)
+    ignored_tickers = sorted(symbol_set & set(exceptions.get("ignore") or []))
+    aliases_all = dict(exceptions.get("aliases") or {})
+    aliased_tickers = {
+        sym: aliases_all[sym]
+        for sym in sorted(symbol_set)
+        if sym in aliases_all and sym not in ignored_tickers
+    }
+    for ticker in ignored_tickers:
+        logger.info("Skipping ignored ticker: %s", ticker)
+    active_symbol_set = symbol_set - set(ignored_tickers)
+
+    def apply_provider_aliases(frame: pd.DataFrame, requested_to_provider: dict[str, str]) -> pd.DataFrame:
+        if frame.empty or "ticker" not in frame.columns or not requested_to_provider:
+            return frame
+        provider_to_requested = {provider: requested for requested, provider in requested_to_provider.items()}
+        out = frame.copy()
+        out["ticker"] = out["ticker"].replace(provider_to_requested)
+        return out
+
     raw_cache_panel = pd.DataFrame()
     cache_panel = pd.DataFrame()
     cache_source = None
     cache_path_obj = Path(cache_path) if cache_path else None
     if cache_path_obj and cache_path_obj.exists():
         raw_cache_panel = standardize_panel(pd.read_parquet(cache_path_obj))
+        raw_cache_panel = apply_provider_aliases(raw_cache_panel, aliased_tickers)
         cache_panel = filter_panel_window(raw_cache_panel, start_date=start_date, end_date=end_date)
-        cache_panel = cache_panel[cache_panel["ticker"].isin(symbol_set)].copy()
+        cache_panel = cache_panel[cache_panel["ticker"].isin(active_symbol_set)].copy()
         cache_source = str(cache_path_obj)
 
     local_panel = pd.DataFrame()
     if prefer_local:
         local_panel = load_local_price_panel(symbols=symbols, start_date=start_date, end_date=end_date)
+        local_panel = apply_provider_aliases(local_panel, aliased_tickers)
 
     panel = pd.concat([cache_panel, local_panel], ignore_index=True) if not cache_panel.empty or not local_panel.empty else pd.DataFrame()
     if not panel.empty:
@@ -207,12 +257,11 @@ def ensure_price_panel(
         panel = panel.reset_index(drop=True)
 
     coverage = _coverage_by_symbol(panel)
-    missing_symbols = sorted(symbol_set - set(coverage))
+    missing_symbols = sorted(active_symbol_set - set(coverage))
     incomplete_symbols = sorted(
         sym for sym, meta in coverage.items()
-        if meta["max_date"] < pd.Timestamp(end_date)
+        if sym in active_symbol_set and meta["max_date"] < pd.Timestamp(end_date)
     )
-    needs_download = allow_download and (missing_symbols or incomplete_symbols)
 
     fetched_frames: list[pd.DataFrame] = []
     fetched = pd.DataFrame()
@@ -220,8 +269,9 @@ def ensure_price_panel(
     download_start_date: str | None = None
     download_failed_symbols: list[str] = []
     download_errors: dict[str, str] = {}
+    download_symbols = sorted(set(missing_symbols + incomplete_symbols))
+    needs_download = allow_download and bool(download_symbols)
     if needs_download:
-        download_symbols = sorted(set(missing_symbols + incomplete_symbols))
         # Build per-symbol start dates: missing symbols need full history;
         # incomplete symbols can tail from their own max_date + 1 day.
         download_start_by_symbol = {
@@ -232,13 +282,16 @@ def ensure_price_panel(
         download_start_date = min(download_start_by_symbol.values()) if download_start_by_symbol else None
 
         def fetch_group(group_symbols: Sequence[str], group_start_date: str) -> pd.DataFrame:
+            group_aliases = {sym: aliased_tickers[sym] for sym in group_symbols if sym in aliased_tickers}
+            provider_symbols = [group_aliases.get(sym, sym) for sym in group_symbols]
             try:
                 frame = download_price_panel(
-                    symbols=group_symbols,
+                    symbols=provider_symbols,
                     start_date=group_start_date,
                     end_date=end_date,
                     chunk_size=chunk_size,
                 )
+                frame = apply_provider_aliases(frame, group_aliases)
             except Exception as exc:
                 logger.warning(
                     "[FLOW] Download group failed; retrying symbols individually: symbols=%s error=%s",
@@ -247,13 +300,15 @@ def ensure_price_panel(
                 )
                 frames: list[pd.DataFrame] = []
                 for sym in group_symbols:
+                    provider_sym = group_aliases.get(sym, sym)
                     try:
                         single = download_price_panel(
-                            symbols=[sym],
+                            symbols=[provider_sym],
                             start_date=group_start_date,
                             end_date=end_date,
                             chunk_size=1,
                         )
+                        single = apply_provider_aliases(single, {sym: provider_sym} if provider_sym != sym else {})
                     except Exception as single_exc:
                         download_failed_symbols.append(str(sym).upper())
                         download_errors[str(sym).upper()] = str(single_exc)
@@ -313,6 +368,13 @@ def ensure_price_panel(
         "download_start_by_symbol": download_start_by_symbol if needs_download else {},
         "download_failed_symbols": download_failed_symbols,
         "download_errors": download_errors,
+        "ignored_tickers": ignored_tickers,
+        "aliased_tickers": aliased_tickers,
+        "ticker_exception_notes": {
+            ticker: str((exceptions.get("notes") or {}).get(ticker) or "")
+            for ticker in sorted(set(ignored_tickers) | set(aliased_tickers))
+            if (exceptions.get("notes") or {}).get(ticker)
+        },
         "cache_path": str(cache_path_obj) if cache_path_obj else None,
         "local_sources": [str(path) for path in DEFAULT_LOCAL_PANEL_PATHS if path.exists()],
         "cache_source": cache_source,
