@@ -90,8 +90,6 @@ def _refresh_shadow_artifacts(
         trade_date,
         "--start-date",
         start_date,
-        "--end-date",
-        trade_date,
         "--output-dir",
         str(shadow_output_dir),
         "--price-cache-path",
