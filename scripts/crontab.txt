@@ -33,7 +33,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 21 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.send_shadow_cio_report >> logs/shadow_cio_report.log 2>&1
 
 # Post-close artifact-only price cache hydration for shadow/reporting reads
-30 18 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts >> logs/price_hydration.cron.log 2>&1
+30 18 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict >> logs/price_hydration.cron.log 2>&1
 
 # Weekly Model Review (Monday 8:00 AM ET)
 0 8 * * 1 $HOME/quant-daily-report/scripts/cron_weekly_review.sh >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1

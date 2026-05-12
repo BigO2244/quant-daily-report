@@ -101,13 +101,43 @@ def _refresh_shadow_artifacts(
         str(cache_path),
     ]
     rc = refresh_shadow_scorecard_artifacts.main(argv)
-    return {
+    details: dict[str, Any] = {}
+    performance_path = shadow_output_dir / trade_date / "shadow_performance.json"
+    if performance_path.exists():
+        try:
+            performance = json.loads(performance_path.read_text(encoding="utf-8"))
+            details["performance_status"] = performance.get("status")
+            details["data_status"] = performance.get("data_status")
+            details["data_reason"] = performance.get("data_reason")
+        except Exception as exc:
+            details["performance_read_error"] = str(exc)
+    nav_path = shadow_output_dir / "performance" / "shadow_nav_series.csv"
+    if nav_path.exists():
+        try:
+            import csv
+
+            with nav_path.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            details["nav_series_rows"] = len(rows)
+            details["nav_series_latest_date"] = rows[-1].get("date") if rows else None
+        except Exception as exc:
+            details["nav_series_read_error"] = str(exc)
+    reason = None
+    if details.get("performance_status") and details.get("performance_status") != "OK":
+        reason = f"performance_status={details['performance_status']}"
+    elif details.get("data_status") and details.get("data_status") != "OK":
+        reason = f"data_status={details['data_status']}"
+    result = {
         "status": "OK" if rc == 0 else "FAILED",
         "exit_code": int(rc),
         "trade_date": trade_date,
         "shadow_start_date": start_date,
         "shadow_output_dir": str(shadow_output_dir),
     }
+    result.update(details)
+    if reason:
+        result["reason"] = reason
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
