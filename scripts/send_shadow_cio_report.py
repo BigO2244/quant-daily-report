@@ -53,11 +53,16 @@ class ModelSnapshot:
 @dataclass(frozen=True)
 class ShadowCioReport:
     trade_date: str
+    as_of_date: str
     subject: str
     body: str
     models: list[ModelSnapshot]
     data_health: str
     data_health_reason: str
+    latest_source_path: str
+    latest_source_date: str | None
+    requested_report_date: str
+    latest_source_warning: str | None
 
 
 @dataclass(frozen=True)
@@ -131,6 +136,25 @@ def _load_nav_history(path: Path) -> dict[str, list[tuple[str, float]]]:
     return history
 
 
+def _latest_valid_shadow_performance_date(nav_history: dict[str, list[tuple[str, float]]]) -> str | None:
+    date_sets = [set(points_date for points_date, _ in nav_history.get(slug, [])) for slug in MODEL_ORDER]
+    if not date_sets or any(not dates for dates in date_sets):
+        return None
+    common_dates = set.intersection(*date_sets)
+    return max(common_dates) if common_dates else None
+
+
+def _daily_return_for_as_of(points: list[tuple[str, float]], as_of_date: str) -> float | None:
+    filtered = _filtered_points(points, as_of_date)
+    if len(filtered) < 2 or filtered[-1][0] != as_of_date:
+        return None
+    previous = filtered[-2][1]
+    current = filtered[-1][1]
+    if previous == 0:
+        return None
+    return (current / previous) - 1.0
+
+
 def _return_over_last_valid_days(points: list[tuple[str, float]], days: int = 7) -> PeriodReturn:
     if len(points) < 2:
         return PeriodReturn(None, "7-Day", None, points[-1][0] if points else None)
@@ -175,8 +199,10 @@ def _collect_data_reasons(
     *,
     evaluation: dict[str, Any] | None,
     comparison: dict[str, Any] | None,
+    hydration_status: dict[str, Any] | None,
     nav_history: dict[str, list[tuple[str, float]]],
     trade_date: str,
+    as_of_date: str,
 ) -> tuple[str, str]:
     reasons: list[str] = []
     if evaluation is None:
@@ -193,10 +219,23 @@ def _collect_data_reasons(
             reason = payload.get("data_reason") or "NO_DATA"
             reasons.append(str(reason))
 
-    latest_nav_dates = [points[-1][0] for points in nav_history.values() if points]
-    latest_nav_date = max(latest_nav_dates) if latest_nav_dates else None
-    if latest_nav_date and latest_nav_date < trade_date:
-        reasons.append("Current trade date missing; results reflect last valid data")
+    if as_of_date < trade_date:
+        reasons.append("Current trade date not yet available; report uses latest fully available shadow data.")
+    if hydration_status:
+        shadow_refresh = hydration_status.get("shadow_refresh") or {}
+        if shadow_refresh.get("status") not in (None, "OK"):
+            refresh_reason = shadow_refresh.get("reason") or shadow_refresh.get("status")
+            latest_nav_date = shadow_refresh.get("nav_series_latest_date")
+            cache_path = hydration_status.get("canonical_cache_path")
+            max_cache_date = hydration_status.get("max_cache_date")
+            details = f"shadow refresh blocked: {refresh_reason}"
+            if latest_nav_date:
+                details += f"; nav_series_latest_date={latest_nav_date}"
+            if max_cache_date:
+                details += f"; max_cache_date={max_cache_date}"
+            if cache_path:
+                details += f"; canonical_cache_path={cache_path}"
+            reasons.append(details)
 
     if not reasons:
         return "Fresh", "Shadow artifacts are current."
@@ -208,16 +247,15 @@ def _build_model_snapshots(
     *,
     evaluation: dict[str, Any] | None,
     nav_history: dict[str, list[tuple[str, float]]],
-    trade_date: str,
-    stale_daily: bool,
+    as_of_date: str,
 ) -> list[ModelSnapshot]:
     strategies = _strategy_payloads(evaluation)
     period_by_slug: dict[str, PeriodReturn] = {}
     seven_by_slug: dict[str, PeriodReturn] = {}
     for slug in MODEL_ORDER:
-        points = _filtered_points(nav_history.get(slug, []), trade_date)
+        points = _filtered_points(nav_history.get(slug, []), as_of_date)
         seven_by_slug[slug] = _return_over_last_valid_days(points)
-        period_by_slug[slug] = _period_return(points, trade_date)
+        period_by_slug[slug] = _period_return(points, as_of_date)
 
     snapshots: list[ModelSnapshot] = []
     spy_period = period_by_slug.get(BENCHMARK_SLUG)
@@ -231,12 +269,12 @@ def _build_model_snapshots(
         period_end_date = period.end_date
         if period_return is None:
             period_return = _as_float(payload.get("cumulative_return"))
-            period_start_date = trade_date if period_start_date is None else period_start_date
-            period_end_date = trade_date if period_end_date is None else period_end_date
+            period_start_date = as_of_date if period_start_date is None else period_start_date
+            period_end_date = as_of_date if period_end_date is None else period_end_date
         seven_day = seven_by_slug.get(slug) or PeriodReturn(None, "7-Day", None, None)
-        daily_return = _as_float(payload.get("daily_return"))
-        if stale_daily or payload.get("data_status") == "NO_DATA":
-            daily_return = None
+        daily_return = _daily_return_for_as_of(nav_history.get(slug, []), as_of_date)
+        if daily_return is None and str((evaluation or {}).get("trade_date") or "") == as_of_date:
+            daily_return = _as_float(payload.get("daily_return"))
         if slug == BENCHMARK_SLUG:
             excess_vs_spy = 0.0 if period_return is not None else None
         elif period_return is not None and spy_period_return is not None:
@@ -332,9 +370,10 @@ def _takeaway(models: list[ModelSnapshot]) -> str:
     spy = _model_by_slug(models, BENCHMARK_SLUG)
     ranked_candidates = [model for model in _rankable_models(models) if model.slug != BENCHMARK_SLUG]
     if not ranked_candidates:
-        return "Shadow performance is not decision-useful yet. Keep monitoring until fresh model data is available."
+        return "Shadow performance is not decision-useful yet. Keep monitoring until complete model data is available."
     leader = ranked_candidates[0]
-    sentences = [f"{leader.name} leads the model set on {leader.period_label} performance."]
+    end_date = leader.period_end_date or "the latest fully available shadow date"
+    sentences = [f"Through {end_date}, {leader.name} leads the model set on {leader.period_label} performance."]
     if polaris and spy and polaris.excess_vs_spy_period is not None:
         sentences.append(f"Polaris is {_fmt_pct(polaris.excess_vs_spy_period)} versus SPY {polaris.period_label}.")
     else:
@@ -368,7 +407,17 @@ def _seven_day_header(models: list[ModelSnapshot], report_date: str) -> str:
     return header
 
 
-def render_email_body(report_date: str, models: list[ModelSnapshot], data_health: str, data_health_reason: str) -> str:
+def render_email_body(
+    report_date: str,
+    as_of_date: str,
+    models: list[ModelSnapshot],
+    data_health: str,
+    data_health_reason: str,
+    latest_source_path: str,
+    latest_source_date: str | None,
+    requested_report_date: str,
+    latest_source_warning: str | None,
+) -> str:
     ranked_all = _rankable_models(models)
     ranked_models = [model for model in ranked_all if model.slug != BENCHMARK_SLUG]
     leader = ranked_models[0] if ranked_models else None
@@ -390,25 +439,36 @@ def render_email_body(report_date: str, models: list[ModelSnapshot], data_health
     lines: list[str] = [
         "=== DAILY MODEL SCORECARD ===",
         "",
-        f"Leader: {leader.name if leader else 'N/A'} ({_fmt_pct(leader.period_return) if leader else 'N/A'} {period_label})",
-        f"Runner-up: {runner_up.name if runner_up else 'N/A'} ({_fmt_pct(runner_up.period_return) if runner_up else 'N/A'} {period_label})",
-        f"Laggard: {laggard.name if laggard else 'N/A'} ({_fmt_pct(laggard.period_return) if laggard else 'N/A'} {period_label})",
-        "",
-        "=== PERFORMANCE SNAPSHOT ===",
-        "",
-        f"Model | Daily | {seven_day_header} | {period_header} | Excess vs SPY ({period_label})",
-        "--- | ---: | ---: | ---: | ---:",
+        f"Data through: {as_of_date}",
     ]
+    if report_date > as_of_date:
+        lines.extend(
+            [
+                "Current trade date not yet available; report uses latest fully available shadow data.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            f"Leader: {leader.name if leader else 'N/A'} ({_fmt_pct(leader.period_return) if leader else 'N/A'} {period_label})",
+            f"Runner-up: {runner_up.name if runner_up else 'N/A'} ({_fmt_pct(runner_up.period_return) if runner_up else 'N/A'} {period_label})",
+            f"Laggard: {laggard.name if laggard else 'N/A'} ({_fmt_pct(laggard.period_return) if laggard else 'N/A'} {period_label})",
+            "",
+            "=== PERFORMANCE SNAPSHOT ===",
+            "",
+            f"Model | Daily | {seven_day_header} | {period_header} | Excess vs SPY ({period_label})",
+            "--- | ---: | ---: | ---: | ---:",
+        ]
+    )
     for slug in MODEL_ORDER:
         model = _model_by_slug(models, slug)
         if model is None:
             continue
-        daily_stale = model.daily_return is None and (model.data_status == "NO_DATA" or data_health == "Stale")
         lines.append(
             " | ".join(
                 [
                     model.name,
-                    _fmt_pct(model.daily_return, stale=daily_stale),
+                    _fmt_pct(model.daily_return),
                     _fmt_pct(model.seven_day_return),
                     _fmt_pct(model.period_return),
                     _fmt_pct(model.excess_vs_spy_period),
@@ -442,8 +502,17 @@ def render_email_body(report_date: str, models: list[ModelSnapshot], data_health
             "",
             f"- {data_health}",
             f"- {data_health_reason}",
-            f"- Daily uses latest shadow_evaluation.json for {report_date}.",
-            f"- 7-Day and {period_label} use shadow_nav_series.csv over {period_dates}.",
+            f"- Latest source path: {latest_source_path}",
+            f"- Latest source date: {latest_source_date or 'UNAVAILABLE'}",
+            f"- Requested/report date: {requested_report_date}",
+            f"- Daily, 7-Day, and {period_label} are anchored to Data through: {as_of_date}.",
+            f"- Performance windows use shadow_nav_series.csv over {period_dates}.",
+        ]
+    )
+    if latest_source_warning:
+        lines.append(f"- WARNING: {latest_source_warning}")
+    lines.extend(
+        [
             "",
             "=== CIO TAKEAWAY ===",
             "",
@@ -460,29 +529,52 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
     trade_date = (
         str((evaluation or {}).get("trade_date") or (comparison or {}).get("trade_date") or dt.date.today().isoformat())
     )
+    latest_source_date = str((evaluation or {}).get("trade_date") or (comparison or {}).get("trade_date") or "") or None
+    latest_source_warning = (
+        f"latest shadow source date {latest_source_date} is older than requested/report date {trade_date}"
+        if latest_source_date and latest_source_date < trade_date
+        else None
+    )
     nav_history = _load_nav_history(repo_root / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv")
+    as_of_date = _latest_valid_shadow_performance_date(nav_history) or trade_date
+    hydration_status = _read_json(repo_root / "outputs" / "price_hydration" / trade_date / "status.json")
     data_health, data_health_reason = _collect_data_reasons(
         evaluation=evaluation,
         comparison=comparison,
+        hydration_status=hydration_status,
         nav_history=nav_history,
         trade_date=trade_date,
+        as_of_date=as_of_date,
     )
-    stale_daily = data_health == "Stale" and "PRICE_CACHE_STALE" in data_health_reason
     models = _build_model_snapshots(
         evaluation=evaluation,
         nav_history=nav_history,
-        trade_date=trade_date,
-        stale_daily=stale_daily,
+        as_of_date=as_of_date,
     )
     subject = f"Caerus Model Scorecard \u2014 {trade_date}"
-    body = render_email_body(trade_date, models, data_health, data_health_reason)
+    body = render_email_body(
+        trade_date,
+        as_of_date,
+        models,
+        data_health,
+        data_health_reason,
+        str(latest_dir.as_posix()),
+        latest_source_date,
+        trade_date,
+        latest_source_warning,
+    )
     return ShadowCioReport(
         trade_date=trade_date,
+        as_of_date=as_of_date,
         subject=subject,
         body=body,
         models=models,
         data_health=data_health,
         data_health_reason=data_health_reason,
+        latest_source_path=str(latest_dir.as_posix()),
+        latest_source_date=latest_source_date,
+        requested_report_date=trade_date,
+        latest_source_warning=latest_source_warning,
     )
 
 
