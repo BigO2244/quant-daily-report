@@ -83,7 +83,12 @@ def test_shadow_cio_report_renders_readable_scorecard(tmp_path: Path) -> None:
     assert "Leader: Lyra (+12.00% YTD)" in report.body
     assert "Runner-up: Polaris (+10.00% YTD)" in report.body
     assert "Laggard: Orion (+5.00% YTD)" in report.body
-    assert "Lyra | +1.20% | +9.80% | +12.00% | +9.00%" in report.body
+    assert "Data through: 2026-01-13" in report.body
+    assert "Latest source path: " in report.body
+    assert "outputs/shadow_candidates/latest" in report.body
+    assert "Latest source date: 2026-01-13" in report.body
+    assert "Requested/report date: 2026-01-13" in report.body
+    assert "Lyra | +0.90% | +9.80% | +12.00% | +9.00%" in report.body
     assert "SPY -> +3.00%" in report.body
     assert "{" not in report.body
     assert "}" not in report.body
@@ -103,9 +108,9 @@ def test_shadow_cio_report_calculates_excess_vs_spy_ytd(tmp_path: Path) -> None:
 
     body = build_report(tmp_path).body
 
-    assert "Polaris | +1.00% | +8.91% | +10.00% | +7.00%" in body
-    assert "Orion | -0.20% | +5.00% | +5.00% | +2.00%" in body
-    assert "SPY | +0.40% | +3.00% | +3.00% | +0.00%" in body
+    assert "Polaris | +1.85% | +8.91% | +10.00% | +7.00%" in body
+    assert "Orion | +0.48% | +5.00% | +5.00% | +2.00%" in body
+    assert "SPY | +0.49% | +3.00% | +3.00% | +0.00%" in body
 
 
 def test_shadow_cio_report_handles_no_data_price_cache_stale(tmp_path: Path) -> None:
@@ -113,7 +118,8 @@ def test_shadow_cio_report_handles_no_data_price_cache_stale(tmp_path: Path) -> 
 
     report = build_report(tmp_path)
 
-    assert "N/A (stale)" in report.body
+    assert "N/A (stale)" not in report.body
+    assert "Polaris | +1.85% | +8.91% | +10.00% | +7.00%" in report.body
     assert "PRICE_CACHE_STALE" in report.body
     assert "=== DATA HEALTH ===" in report.body
     assert "- Stale" in report.body
@@ -189,5 +195,25 @@ def test_shadow_cio_report_labels_since_inception_when_ytd_history_unavailable(t
 
     body = build_report(tmp_path).body
 
-    assert "Since Shadow Inception (from 2025-12-30) through 2025-12-31" in body
-    assert "Excess vs SPY (Since Shadow Inception)" in body
+    assert "Data through: 2025-12-31" in body
+    assert "YTD (from 2025-12-30) through 2025-12-31" in body
+    assert "Excess vs SPY (YTD)" in body
+
+
+def test_shadow_cio_report_anchors_all_windows_to_latest_valid_nav_date(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path)
+    latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
+    evaluation = _evaluation(no_data=True)
+    evaluation["trade_date"] = "2026-01-14"
+    _write_json(latest / "shadow_evaluation.json", evaluation)
+    _write_json(latest / "comparison.json", {"trade_date": "2026-01-14", "status": "NO_DATA", "reason_code": "PRICE_CACHE_STALE"})
+
+    report = build_report(tmp_path)
+
+    assert report.trade_date == "2026-01-14"
+    assert report.as_of_date == "2026-01-13"
+    assert "Data through: 2026-01-13" in report.body
+    assert "Current trade date not yet available; report uses latest fully available shadow data." in report.body
+    assert "Model | Daily | 7-Day (through 2026-01-13) | YTD (from 2026-01-02) through 2026-01-13 | Excess vs SPY (YTD)" in report.body
+    assert "Polaris | +1.85% | +8.91% | +10.00% | +7.00%" in report.body
+    assert "N/A (stale)" not in report.body
