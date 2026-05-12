@@ -25,9 +25,9 @@ Automation:
 Single agent-facing handoff for this repository. Operational, architecture,
 scheduler, and workflow guidance lives here.
 
-Last updated: 2026-05-08 — deterministic git-based VM deployment restored;
-`origin/main` is canonical source of truth, the VM is a deploy target, SCP is
-exception-only, and rollback/recovery preservation is mandatory.
+Last updated: 2026-05-12 — deterministic git-based VM deployment remains the
+operating model; post-recovery Shadow scorecard health, promotion readiness, and
+cron command validation guardrails are documented for operator use.
 
 ---
 
@@ -91,6 +91,8 @@ Five phases run on the VM weekdays. Install with `crontab scripts/crontab.txt`.
 | 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | `outputs/precompute/YYYY-MM-DD/` bundle + best-effort shadow artifacts |
 | 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Alpaca paper equity orders + gated protective-put options |
 | 10:00 AM | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
+| 6:30 PM | Post-close price hydration | `python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict` | `outputs/price_hydration/YYYY-MM-DD/status.json` + refreshed Shadow scorecard artifacts |
+| 9:00 PM | Shadow CIO report | `python3 -m scripts.send_shadow_cio_report` | Daily Shadow scorecard/reporting email |
 | Monday 8 AM | Weekly model review | `scripts/cron_weekly_review.sh` | Review artifacts |
 
 **Data flow**: Phase 0a runs overnight agents → Phase 0b runs Claude to score
@@ -107,6 +109,20 @@ Shadow generation is best-effort only:
 - outputs: `outputs/shadow_candidates/YYYY-MM-DD/` and `outputs/shadow_candidates/performance/`
 - failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed
 - shadow cannot block production execution
+
+Post-close Shadow reporting guardrails:
+- `scripts/hydrate_price_cache_only.py` is the routine VM cache-only hydrator.
+- `scripts/check_shadow_scorecard_health.py` is a read-only post-recovery health
+  check for scorecard freshness, NAV continuity, valid-day advancement, and
+  post-baseline stale reasons.
+- `scripts/audit_shadow_promotion_readiness.py` is a read-only governance audit.
+  It never promotes Orion or Lyra and must not alter strategy selection.
+- `scripts/backfill_shadow_artifacts.py` is artifact-only recovery tooling. Use
+  dry-run, backups, manifest, chronological processing, and look-ahead guards.
+- `scripts/validate_cron_commands.py` validates repo-owned cron module/script
+  references before deployment.
+- Shadow scorecard recovery procedure lives in
+  `docs/runbooks/shadow_scorecard_recovery.md`.
 
 ---
 
@@ -428,6 +444,9 @@ Cron and deployed services:
 - `scripts/crontab.txt` is the source cron definition.
 - Do not reinstall cron unless the task explicitly includes cron deployment.
 - If cron is changed, validate source cron, installed cron, and rollback path.
+- Before deploying cron-adjacent changes, run
+  `python3 scripts/validate_cron_commands.py scripts/crontab.txt` to catch
+  missing repo-owned Python modules or scripts.
 - Deployment details live in `docs/deployment_workflow.md`.
 
 For scheduler incidents, inspect:
@@ -576,6 +595,12 @@ Runtime separation:
   reviewed and declared obsolete
 - After source deployment: run targeted validation first; run the full suite only
   when blast radius justifies it
+- For post-recovery Shadow checks, run
+  `python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-05-11 --baseline-valid-days 16 --strict`.
+- For promotion governance review, run
+  `python3 scripts/audit_shadow_promotion_readiness.py`; Polaris remains the
+  paper baseline, and Orion/Lyra are artifact-only challengers until explicitly
+  promoted through governance.
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute now also triggers `scripts/run_shadow_candidates_daily.sh`
