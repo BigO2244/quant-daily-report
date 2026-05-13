@@ -228,6 +228,9 @@ h1 {
 .check-item.pass { border-color: rgba(42, 214, 125, 0.35); }
 .check-item.warn { border-color: rgba(255, 191, 71, 0.35); }
 .check-item.fail { border-color: rgba(255, 111, 97, 0.35); }
+.check-item.pos { border-color: rgba(42, 214, 125, 0.35); }
+.check-item.neg { border-color: rgba(255, 111, 97, 0.35); }
+.check-item.neutral { border-color: rgba(79, 209, 255, 0.3); }
 
 .table-wrap {
   overflow-x: auto;
@@ -258,6 +261,14 @@ td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+tr.control-row td {
+  background: rgba(79, 209, 255, 0.035);
+}
+
+tbody tr:hover td {
+  background: rgba(79, 209, 255, 0.055);
 }
 
 .pos { color: var(--green); }

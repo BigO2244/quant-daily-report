@@ -595,6 +595,29 @@ The V2 spec is satisfied when:
 4. same-day trades show realized exit P&L separately from open buy P&L
 5. the VM can publish the dashboard as a static site after the daily run
 
+## CIO / Operator Console Additive Contract
+
+The Caerus Terminal v2 surface may add operator sections without breaking the
+existing `dashboard-v2-prototype` payload fields. Additive sections should live
+under `sections` and must degrade visibly when optional artifacts are missing.
+
+Current additive sections:
+
+- `shadow_command_center`: Polaris / Orion / Lyra comparison, Shadow NAV
+  freshness, rolling excess, valid-day counts, and promotion readiness state.
+- `system_health_console`: daily health, hydration status, reconciliation
+  status, failed/warning counts, and latest execution artifact reference.
+- `regime_market_state`: VIX regime, portfolio scale, max position envelope,
+  gate blockers, and fallback/confidence state.
+- `daily_decision_intelligence`: same-day buys/sells, turnover proxy, latest
+  daily return, and largest decision changes.
+- `live_readiness`: validation integrity, artifact completeness, Shadow
+  continuity, operational health, and deployment-confidence summary.
+
+These sections are read-only. They must not introduce trading controls, broker
+submission paths, portfolio construction changes, cron behavior changes, or
+implicit strategy promotion.
+
 ## Recommended Immediate Next Step
 
 Implement the V2 builder contract first, before visual redesign:

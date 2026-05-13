@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caerus Quant — Engine Review</title>
+  <link rel="stylesheet" href="quant_daily_executive.css">
+</head>
+<body>
+  <header class="dash-header">
+    <div class="dash-header__left">
+      <div class="dash-header__logo">CAERUS QUANT</div>
+      <div class="dash-header__subtitle">Engine Review vs SPY</div>
+    </div>
+    <div class="dash-header__center">
+      <div id="review-pill" class="status-pill">LOADING</div>
+      <div id="review-detail" class="status-detail">Loading attribution diagnostics…</div>
+    </div>
+    <div class="dash-header__right">
+      <div class="meta-item"><span class="meta-label">WINDOW</span><span id="meta-window" class="meta-val">—</span></div>
+      <div class="meta-item"><span class="meta-label">PORTFOLIO</span><span id="meta-portfolio-date" class="meta-val">—</span></div>
+      <div class="meta-item"><span class="meta-label">BENCHMARK</span><span id="meta-benchmark-date" class="meta-val">—</span></div>
+      <div class="meta-item"><span class="meta-label">SOURCE</span><span id="meta-source" class="meta-val">—</span></div>
+    </div>
+  </header>
+
+  <div id="review-banner" class="status-banner hidden"></div>
+
+  <main class="dash-main">
+    <section class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Cumulative Alpha</div><div id="kpi-cum-alpha" class="kpi-value">—</div><div class="kpi-sub">portfolio minus SPY</div></div>
+      <div class="kpi-card"><div class="kpi-label">Alpha Annualized</div><div id="kpi-alpha-ann" class="kpi-value">—</div><div class="kpi-sub">regression intercept</div></div>
+      <div class="kpi-card"><div class="kpi-label">Beta</div><div id="kpi-beta" class="kpi-value">—</div><div class="kpi-sub">vs SPY</div></div>
+      <div class="kpi-card"><div class="kpi-label">Info Ratio</div><div id="kpi-info-ratio" class="kpi-value">—</div><div class="kpi-sub">active return quality</div></div>
+      <div class="kpi-card"><div class="kpi-label">Upside Capture</div><div id="kpi-upside" class="kpi-value">—</div><div class="kpi-sub">SPY up sessions</div></div>
+      <div class="kpi-card"><div class="kpi-label">Downside Capture</div><div id="kpi-downside" class="kpi-value">—</div><div class="kpi-sub">SPY down sessions</div></div>
+      <div class="kpi-card"><div class="kpi-label">Cash Ratio</div><div id="kpi-cash-ratio" class="kpi-value">—</div><div class="kpi-sub">current broker cash</div></div>
+      <div class="kpi-card"><div class="kpi-label">Filled Turnover</div><div id="kpi-turnover" class="kpi-value">—</div><div class="kpi-sub">today's notional churn</div></div>
+    </section>
+
+    <section class="edge-row">
+      <article class="card">
+        <div class="card-head"><span class="card-title">Observed Signals</span><span class="card-meta" id="signals-window">—</span></div>
+        <div class="edge-list" id="signals-list"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><span class="card-title">Experiments To Run</span><span class="card-meta">improvement queue</span></div>
+        <div class="edge-list" id="recommendations-list"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><span class="card-title">Contribution Snapshot</span><span class="card-meta" id="contribution-meta">—</span></div>
+        <div class="contribution-panel" id="contribution-panel"></div>
+      </article>
+    </section>
+
+    <section class="portfolio-row">
+      <article class="card">
+        <div class="card-head"><span class="card-title">Current Top Positions</span><span class="card-meta">live Alpaca snapshot</span></div>
+        <table class="data-table">
+          <thead>
+            <tr><th>Ticker</th><th>Weight</th><th>Market Value</th><th>Unrealized P/L</th></tr>
+          </thead>
+          <tbody id="positions-body"></tbody>
+        </table>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><span class="card-title">Best / Worst Relative Days</span><span class="card-meta">portfolio vs SPY</span></div>
+        <div class="perf-stats" id="relative-days"></div>
+      </article>
+    </section>
+
+    <footer class="dash-footer">
+      <span id="footer-run">—</span>
+      <span id="footer-updated">—</span>
+      <span>Primary monitor: <a href="quant_daily_executive.html" style="color: var(--c-blue);">Portfolio Monitor</a></span>
+    </footer>
+  </main>
+
+  <script src="engine_review.js"></script>
+</body>
+</html>

@@ -59,6 +59,9 @@ paper/holdings_latest.csv
 
 # Internal dashboard artifacts (not part of repo)
 Dashboard/
+!web/
+!web/dashboard/
+!web/dashboard/index.html
 _gha/
 # Data files and caches (runtime only)
 data/fundamental/

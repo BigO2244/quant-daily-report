@@ -61,6 +61,13 @@ def _latest_glob(path: Path, pattern: str) -> Path | None:
     return matches[-1] if matches else None
 
 
+def _latest_dated_dir(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    dated = [child for child in path.iterdir() if child.is_dir() and _parse_date(child.name) is not None]
+    return sorted(dated, key=lambda child: child.name)[-1] if dated else None
+
+
 def _status_entry(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
 
@@ -615,6 +622,256 @@ class DashboardV1Builder:
             return None
         return (end / start) - 1.0
 
+    def _build_shadow_command_center(self) -> dict[str, Any]:
+        shadow_root = self.repo_root / "outputs" / "shadow_candidates"
+        latest_dir = _latest_dated_dir(shadow_root)
+        latest_eval_path = latest_dir / "shadow_evaluation.json" if latest_dir is not None else shadow_root / "latest" / "shadow_evaluation.json"
+        latest_eval = _read_json(latest_eval_path)
+        nav_path = shadow_root / "performance" / "shadow_nav_series.csv"
+        nav_rows = _read_csv_rows(nav_path)
+        self._record_source(
+            section="shadow_command_center",
+            label="shadow evaluation",
+            path=latest_eval_path,
+            source_type="shadow_evaluation",
+            trust_level="diagnostic" if isinstance(latest_eval, dict) else "missing",
+            as_of=(latest_eval or {}).get("trade_date") if isinstance(latest_eval, dict) else None,
+            used=isinstance(latest_eval, dict),
+        )
+        self._record_source(
+            section="shadow_command_center",
+            label="shadow nav series",
+            path=nav_path,
+            source_type="shadow_nav_series",
+            trust_level="diagnostic" if nav_rows else "missing",
+            as_of=nav_rows[-1].get("date") if nav_rows else None,
+            used=bool(nav_rows),
+        )
+
+        if not isinstance(latest_eval, dict):
+            self._mark(_check("shadow_command_center_source_present", "warn", "non_blocking", "Shadow evaluation artifact unavailable."))
+            return {
+                "as_of": None,
+                "is_stale": True,
+                "status": "NO_DATA",
+                "summary": {"latest_nav_date": nav_rows[-1].get("date") if nav_rows else None, "candidate_count": 0},
+                "strategies": [],
+                "rolling_excess_series": [],
+            }
+        self._mark(_check("shadow_command_center_source_present", "pass", "non_blocking", "Shadow evaluation artifact loaded."))
+
+        strategy_meta = {
+            "caerus_polaris": {"role": "CONTROL", "display": "Polaris"},
+            "caerus_orion": {"role": "CHALLENGER", "display": "Orion"},
+            "caerus_lyra": {"role": "CHALLENGER", "display": "Lyra"},
+        }
+        nav_by_slug: dict[str, list[float]] = {}
+        spy_values: list[float] = []
+        rolling_series: list[dict[str, Any]] = []
+        for row in nav_rows:
+            spy_value = _to_float(row.get("spy_benchmark"))
+            if spy_value is not None:
+                spy_values.append(spy_value)
+            point: dict[str, Any] = {"date": row.get("date")}
+            for slug in strategy_meta:
+                value = _to_float(row.get(slug))
+                nav_by_slug.setdefault(slug, []).append(value) if value is not None else None
+                values = nav_by_slug.get(slug, [])
+                if len(values) >= 6 and len(spy_values) >= 6:
+                    strategy_5d = self._compute_window_return(values, 5)
+                    spy_5d = self._compute_window_return(spy_values, 5)
+                    point[slug] = strategy_5d - spy_5d if strategy_5d is not None and spy_5d is not None else None
+            if any(key in point for key in strategy_meta):
+                rolling_series.append(point)
+
+        strategies: list[dict[str, Any]] = []
+        eval_strategies = latest_eval.get("strategies") if isinstance(latest_eval.get("strategies"), dict) else {}
+        baseline_excess = _to_float((eval_strategies.get("caerus_polaris") or {}).get("excess_return_vs_spy"))
+        for slug, meta in strategy_meta.items():
+            raw = eval_strategies.get(slug) or {}
+            values = [_to_float(row.get(slug)) for row in nav_rows if _to_float(row.get(slug)) is not None]
+            spy = [_to_float(row.get("spy_benchmark")) for row in nav_rows if _to_float(row.get("spy_benchmark")) is not None]
+            rolling_5d = self._compute_window_return(values, 5)
+            rolling_20d = self._compute_window_return(values, 20)
+            spy_5d = self._compute_window_return(spy, 5)
+            spy_20d = self._compute_window_return(spy, 20)
+            valid_days = _to_float(raw.get("rolling_count_of_valid_days"))
+            excess = _to_float(raw.get("excess_return_vs_spy"))
+            failed: list[str] = []
+            if raw.get("data_status") == "NO_DATA":
+                failed.append(str(raw.get("data_reason") or "NO_DATA"))
+            if raw.get("status") not in ("OK", None):
+                failed.append(str(raw.get("status")))
+            if valid_days is None or valid_days < 30:
+                failed.append("INSUFFICIENT_VALID_DAYS")
+            if meta["role"] == "CHALLENGER" and baseline_excess is not None and excess is not None and excess <= baseline_excess:
+                failed.append("BEHIND_POLARIS_EXCESS")
+            readiness = "CONTROL" if meta["role"] == "CONTROL" else "WATCHLIST" if failed == ["INSUFFICIENT_VALID_DAYS"] else "NOT_READY" if failed else "PROMOTION_ELIGIBLE"
+            strategies.append(
+                {
+                    "slug": slug,
+                    "name": raw.get("strategy_name") or meta["display"],
+                    "role": meta["role"],
+                    "status": raw.get("status"),
+                    "data_status": raw.get("data_status"),
+                    "data_reason": raw.get("data_reason"),
+                    "daily_return": _to_float(raw.get("daily_return")),
+                    "cumulative_return": _to_float(raw.get("cumulative_return")),
+                    "excess_return_vs_spy": excess,
+                    "rolling_5d_excess": rolling_5d - spy_5d if rolling_5d is not None and spy_5d is not None else None,
+                    "rolling_20d_excess": rolling_20d - spy_20d if rolling_20d is not None and spy_20d is not None else None,
+                    "max_drawdown": _to_float(raw.get("max_drawdown")),
+                    "realized_volatility_ann": _to_float(raw.get("realized_volatility_ann")),
+                    "avg_turnover": _to_float(raw.get("avg_turnover")),
+                    "avg_top_3_concentration": _to_float(raw.get("avg_top_3_concentration")),
+                    "valid_evaluation_days": int(valid_days) if valid_days is not None else None,
+                    "promotion_readiness": readiness,
+                    "failed_criteria": failed,
+                }
+            )
+
+        latest_nav_date = nav_rows[-1].get("date") if nav_rows else None
+        eval_date = str(latest_eval.get("trade_date") or "")
+        is_stale = bool(latest_nav_date and eval_date and latest_nav_date < eval_date)
+        if is_stale:
+            self._mark(_check("shadow_nav_current", "warn", "non_blocking", "Shadow NAV latest date lags latest evaluation date.", latest_nav_date=latest_nav_date, evaluation_date=eval_date))
+        else:
+            self._mark(_check("shadow_nav_current", "pass", "non_blocking", "Shadow NAV and evaluation dates are aligned or sufficient."))
+        return {
+            "as_of": eval_date or None,
+            "is_stale": is_stale,
+            "status": "OK" if not any(strategy["data_status"] == "NO_DATA" for strategy in strategies) else "NO_DATA",
+            "summary": {
+                "latest_nav_date": latest_nav_date,
+                "candidate_count": len([s for s in strategies if s["role"] == "CHALLENGER"]),
+                "control": "caerus_polaris",
+                "benchmark": latest_eval.get("benchmark_symbol") or "SPY",
+            },
+            "strategies": strategies,
+            "rolling_excess_series": rolling_series[-80:],
+        }
+
+    def _build_system_health_console(self, sections: dict[str, Any]) -> dict[str, Any]:
+        health_path = self.repo_root / "outputs" / "health" / "caerus_daily_health_check" / "latest" / "health_check.json"
+        health_payload = _read_json(health_path)
+        hydration_root = self.repo_root / "outputs" / "price_hydration"
+        hydration_path = _latest_glob(hydration_root, "*/status.json")
+        hydration_payload = _read_json(hydration_path) if hydration_path else None
+        recon_path = self.repo_root / "outputs" / "reconciliation" / "live_vs_shadow" / "latest" / "live_vs_shadow_reconciliation.json"
+        recon_payload = _read_json(recon_path)
+
+        self._record_source(section="system_health_console", label="daily health check", path=health_path, source_type="health_check", trust_level="diagnostic" if isinstance(health_payload, dict) else "missing", as_of=(health_payload or {}).get("trade_date") if isinstance(health_payload, dict) else None, used=isinstance(health_payload, dict))
+        self._record_source(section="system_health_console", label="hydration status", path=hydration_path, source_type="price_hydration", trust_level="diagnostic" if isinstance(hydration_payload, dict) else "missing", as_of=(hydration_payload or {}).get("as_of_date") if isinstance(hydration_payload, dict) else None, used=isinstance(hydration_payload, dict))
+        self._record_source(section="system_health_console", label="live vs shadow reconciliation", path=recon_path, source_type="reconciliation", trust_level="diagnostic" if isinstance(recon_payload, dict) else "missing", as_of=(recon_payload or {}).get("generated_at") if isinstance(recon_payload, dict) else None, used=isinstance(recon_payload, dict))
+
+        health_checks = health_payload.get("checks") if isinstance(health_payload, dict) and isinstance(health_payload.get("checks"), list) else []
+        failed = [check for check in health_checks if str(check.get("status") or "").upper() in {"RED", "FAIL", "ERROR"}]
+        warned = [check for check in health_checks if str(check.get("status") or "").upper() in {"YELLOW", "WARN", "WARNING"}]
+        status = "FAIL" if failed else "WARN" if warned or not health_checks else "PASS"
+        rows = [
+            {"name": "Daily health", "status": status, "detail": f"{len(failed)} fail · {len(warned)} warn · {len(health_checks)} checks"},
+            {"name": "Hydration", "status": str((hydration_payload or {}).get("status") or "MISSING"), "detail": f"max cache {(hydration_payload or {}).get('max_cache_date') or '—'}"},
+            {"name": "Reconciliation", "status": str((recon_payload or {}).get("classification") or "MISSING"), "detail": f"generated {(recon_payload or {}).get('generated_at') or '—'}"},
+            {"name": "Dashboard validation", "status": sections.get("nav", {}).get("trust_level") or "unknown", "detail": f"{len(self.errors)} errors · {len(self.warnings)} warnings"},
+        ]
+        latest_execution = _latest_glob(self.repo_root / "outputs" / "runs", "*/trading_day_summary.json")
+        if latest_execution:
+            rows.append({"name": "Latest execution artifact", "status": "PRESENT", "detail": str(latest_execution.relative_to(self.repo_root))})
+        return {
+            "as_of": self.generated_at.isoformat(),
+            "is_stale": status != "PASS",
+            "summary": {
+                "status": status,
+                "failed_pipeline_count": len(failed),
+                "warning_count": len(warned) + len(self.warnings),
+                "latest_successful_execution": str(latest_execution.relative_to(self.repo_root)) if latest_execution else None,
+                "hydration_max_cache_date": (hydration_payload or {}).get("max_cache_date") if isinstance(hydration_payload, dict) else None,
+                "shadow_generation_date": sections.get("shadow_command_center", {}).get("as_of"),
+            },
+            "checks": rows,
+        }
+
+    def _build_regime_market_state(self) -> dict[str, Any]:
+        vix_path = self.repo_root / "outputs" / "vix_regime" / "regime_current.json"
+        review_path = self.repo_root / "outputs" / "engine_review" / "live_regime_review_latest.json"
+        vix_payload = _read_json(vix_path)
+        review_payload = _read_json(review_path)
+        self._record_source(section="regime_market_state", label="vix regime", path=vix_path, source_type="vix_regime", trust_level="diagnostic" if isinstance(vix_payload, dict) else "missing", as_of=(vix_payload or {}).get("as_of") if isinstance(vix_payload, dict) else None, used=isinstance(vix_payload, dict))
+        self._record_source(section="regime_market_state", label="engine review", path=review_path, source_type="engine_review", trust_level="diagnostic" if isinstance(review_payload, dict) else "missing", as_of=(review_payload or {}).get("asof_date") if isinstance(review_payload, dict) else None, used=isinstance(review_payload, dict))
+        gate = review_payload.get("promotion_gate") if isinstance(review_payload, dict) and isinstance(review_payload.get("promotion_gate"), dict) else {}
+        checks = gate.get("checks") if isinstance(gate.get("checks"), list) else []
+        return {
+            "as_of": (vix_payload or {}).get("as_of") if isinstance(vix_payload, dict) else None,
+            "is_stale": False if isinstance(vix_payload, dict) else True,
+            "current_regime": (vix_payload or {}).get("regime") if isinstance(vix_payload, dict) else None,
+            "vix": _to_float((vix_payload or {}).get("vix")) if isinstance(vix_payload, dict) else None,
+            "portfolio_scale": _to_float((vix_payload or {}).get("position_scale")) if isinstance(vix_payload, dict) else None,
+            "max_positions": _to_float((vix_payload or {}).get("max_positions")) if isinstance(vix_payload, dict) else None,
+            "promotion_gate_blockers": gate.get("blockers") or [],
+            "confidence_state": "FALLBACK" if not isinstance(vix_payload, dict) else "AVAILABLE",
+            "checks": checks[:8],
+        }
+
+    def _build_daily_decision_intelligence(self, sections: dict[str, Any]) -> dict[str, Any]:
+        positions = sections["positions"].get("rows") or []
+        trades = sections["trades_today"].get("rows") or []
+        performance = sections["performance_history"]
+        daily_returns = performance.get("series", {}).get("daily_return") or []
+        latest_return = daily_returns[-1].get("value") if daily_returns else None
+        buy_rows = [row for row in trades if row.get("side") == "buy"]
+        sell_rows = [row for row in trades if row.get("side") == "sell"]
+        largest_buys = sorted(buy_rows, key=lambda row: row.get("notional") or 0.0, reverse=True)[:5]
+        largest_sells = sorted(sell_rows, key=lambda row: row.get("notional") or 0.0, reverse=True)[:5]
+        leaders = sorted([row for row in positions if row.get("unrealized_pnl") is not None], key=lambda row: row.get("unrealized_pnl") or 0.0, reverse=True)[:3]
+        laggards = sorted([row for row in positions if row.get("unrealized_pnl") is not None], key=lambda row: row.get("unrealized_pnl") or 0.0)[:3]
+        notes: list[dict[str, Any]] = []
+        if latest_return is not None:
+            notes.append({"label": "Portfolio daily return", "value": latest_return, "kind": "return"})
+        if largest_buys:
+            notes.append({"label": "Largest buy", "value": largest_buys[0].get("ticker"), "detail": largest_buys[0].get("notional"), "kind": "trade"})
+        if largest_sells:
+            notes.append({"label": "Largest sell", "value": largest_sells[0].get("ticker"), "detail": largest_sells[0].get("notional"), "kind": "trade"})
+        return {
+            "as_of": self.report_date,
+            "is_stale": False,
+            "summary": {
+                "buy_count": len(buy_rows),
+                "sell_count": len(sell_rows),
+                "latest_daily_return": latest_return,
+                "turnover_proxy_notional": sum(row.get("notional") or 0.0 for row in trades),
+            },
+            "largest_increases": largest_buys,
+            "largest_decreases": largest_sells,
+            "leaders": leaders,
+            "laggards": laggards,
+            "notes": notes,
+        }
+
+    def _build_live_readiness(self, sections: dict[str, Any]) -> dict[str, Any]:
+        perf_series = sections["performance_history"].get("series", {}).get("nav") or []
+        shadow = sections.get("shadow_command_center", {})
+        system = sections.get("system_health_console", {})
+        validation_failures = len(self.errors)
+        artifact_complete = all(source.get("used") for source in self.sources if source.get("section") in {"nav", "positions", "trades_today", "performance_history"})
+        criteria = [
+            {"name": "Validation integrity", "status": "PASS" if validation_failures == 0 else "FAIL", "detail": f"{validation_failures} blocking errors"},
+            {"name": "Artifact completeness", "status": "PASS" if artifact_complete else "WARN", "detail": "canonical dashboard sources loaded" if artifact_complete else "one or more canonical sources missing"},
+            {"name": "Shadow continuity", "status": "PASS" if not shadow.get("is_stale") else "WARN", "detail": f"NAV through {shadow.get('summary', {}).get('latest_nav_date') or '—'}"},
+            {"name": "Operational health", "status": system.get("summary", {}).get("status") or "UNKNOWN", "detail": f"{system.get('summary', {}).get('failed_pipeline_count', 0)} fail · {system.get('summary', {}).get('warning_count', 0)} warn"},
+        ]
+        return {
+            "as_of": self.generated_at.isoformat(),
+            "is_stale": False,
+            "summary": {
+                "consecutive_healthy_days": len(perf_series),
+                "artifact_completeness_streak": len(perf_series) if artifact_complete else 0,
+                "shadow_evaluation_continuity": shadow.get("summary", {}).get("latest_nav_date"),
+                "successful_execution_streak": None,
+                "deployment_confidence": "HIGH" if all(row["status"] == "PASS" for row in criteria[:3]) else "WATCH",
+            },
+            "criteria": criteria,
+        }
+
     def _build_terminal_view(self, sections: dict[str, Any]) -> dict[str, Any]:
         nav = sections["nav"]
         positions = sections["positions"]
@@ -777,12 +1034,22 @@ class DashboardV1Builder:
         positions_section, nav_section = self._build_positions_and_nav()
         trades_section = self._build_trades_today()
         performance_section = self._build_performance_history(nav_section)
+        shadow_section = self._build_shadow_command_center()
+        regime_section = self._build_regime_market_state()
         sections = {
             "positions": positions_section,
             "nav": nav_section,
             "trades_today": trades_section,
             "performance_history": performance_section,
+            "shadow_command_center": shadow_section,
+            "regime_market_state": regime_section,
         }
+        decision_section = self._build_daily_decision_intelligence(sections)
+        sections["daily_decision_intelligence"] = decision_section
+        system_health_section = self._build_system_health_console(sections)
+        sections["system_health_console"] = system_health_section
+        live_readiness_section = self._build_live_readiness(sections)
+        sections["live_readiness"] = live_readiness_section
         self._freshness_checks(sections)
         terminal = self._build_terminal_view(sections)
 

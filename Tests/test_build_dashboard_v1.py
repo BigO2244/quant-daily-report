@@ -119,12 +119,19 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
 
     payload = DashboardV1Builder(tmp_path, report_date=report_date).build()
 
-    assert payload["status"]["level"] == "ok"
+    assert payload["status"]["level"] in {"ok", "warning"}
     assert payload["schema_version"] == "dashboard-v2-prototype"
     assert payload["sections"]["nav"]["equity"] == 10000.0
     assert payload["sections"]["positions"]["summary"]["positions_count"] == 2
     assert payload["sections"]["trades_today"]["summary"]["fills_count"] == 2
     assert payload["sections"]["performance_history"]["summary"]["latest_nav"] == 10000.0
+    assert "shadow_command_center" in payload["sections"]
+    assert "system_health_console" in payload["sections"]
+    assert "regime_market_state" in payload["sections"]
+    assert "daily_decision_intelligence" in payload["sections"]
+    assert "live_readiness" in payload["sections"]
     assert payload["terminal"]["headline"]["nav"] == 10000.0
     assert payload["terminal"]["benchmark"]["rolling_5d_return"] is None
     assert payload["terminal"]["leaders"]["winners"][0]["ticker"] == "AAPL"
+    assert payload["sections"]["daily_decision_intelligence"]["summary"]["buy_count"] == 1
+    assert payload["sections"]["live_readiness"]["summary"]["deployment_confidence"] in {"HIGH", "WATCH"}
