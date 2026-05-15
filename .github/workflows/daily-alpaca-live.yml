@@ -84,14 +84,14 @@ jobs:
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/paper_state/canonical_positions.json
           key: canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}
           restore-keys: |
             canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}-
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
           key: alpaca-precompute-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}-bootstrap
@@ -318,7 +318,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/paper_state/canonical_positions.json
           key: canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}
@@ -345,7 +345,7 @@ jobs:
           source .venv/bin/activate
           python3 daily_quant_report.py --plan-only --write-precompute-bundle
 
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae
         if: always()
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
@@ -397,7 +397,7 @@ jobs:
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
           key: alpaca-precompute-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}-bootstrap
@@ -598,7 +598,7 @@ jobs:
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
           key: alpaca-precompute-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}-bootstrap

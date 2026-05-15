@@ -62,14 +62,14 @@ jobs:
           echo "workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC" >> "$GITHUB_OUTPUT"
           echo "[WORKFLOW_META] workflow_kind=precompute report_date=$REPORT_DATE workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC force_refresh_precompute=$FORCE_REFRESH_PRECOMPUTE"
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/paper_state/canonical_positions.json
           key: canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}
           restore-keys: |
             canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}-
 
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
           key: alpaca-precompute-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}-bootstrap
@@ -179,13 +179,13 @@ jobs:
           (out_dir / "precompute_workflow_summary.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
           PY
 
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae
         if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
         with:
           path: outputs/paper_state/canonical_positions.json
           key: canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}
 
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae
         if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
