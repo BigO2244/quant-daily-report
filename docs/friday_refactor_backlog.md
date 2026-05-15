@@ -74,7 +74,7 @@ Documentation expectations:
 **Title:** Split shadow wrapper responsibilities
 **Category:** Shadow / Workflow
 **Priority:** HIGH
-**Status:** BACKLOG
+**Status:** DONE_LOCAL_WIP
 
 **Why it matters:**
 `scripts/run_shadow_candidates_daily.sh` currently handles generation, latest publication, desktop symlink, and reconciliation. Those are related operationally, but they are separate responsibilities with separate failure modes.

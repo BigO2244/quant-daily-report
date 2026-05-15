@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -78,6 +79,9 @@ def test_wrapper_returns_success_even_when_shadow_runner_fails(tmp_path: Path) -
     log_path = log_dir / f"shadow_{trade_date}.log"
     assert log_path.exists()
     assert "[SHADOW] failed but non-blocking" in log_path.read_text()
+    status = json.loads((repo_root / "outputs" / "workflow" / trade_date / "shadow_generate.json").read_text())
+    assert status["status"] == "FAILED"
+    assert status["step"] == "generate"
 
 
 def test_wrapper_smoke_writes_expected_log_lines(tmp_path: Path) -> None:
@@ -119,6 +123,15 @@ def test_wrapper_smoke_writes_expected_log_lines(tmp_path: Path) -> None:
     assert f"[SHADOW] latest artifacts published to {latest_dir}/" in text
     assert "[SHADOW] desktop path unavailable; latest artifacts published to" in text
     assert "[SHADOW] updated Desktop Orion.md" not in text
+    workflow_dir = repo_root / "outputs" / "workflow" / trade_date
+    generate_status = json.loads((workflow_dir / "shadow_generate.json").read_text())
+    latest_status = json.loads((workflow_dir / "shadow_latest.json").read_text())
+    reconciliation_status = json.loads((workflow_dir / "shadow_reconciliation.json").read_text())
+    summary_status = json.loads((workflow_dir / "shadow.json").read_text())
+    assert generate_status["status"] == "OK"
+    assert latest_status["status"] == "OK"
+    assert reconciliation_status["status"] in {"OK", "FAILED"}
+    assert summary_status["latest_publish_status"] == "OK"
 
 
 def test_wrapper_logs_local_hydration_guidance_for_stale_cache(tmp_path: Path) -> None:
