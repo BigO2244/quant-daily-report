@@ -1,6 +1,6 @@
 pandas
 numpy
-yfinance>=0.2.40
+yfinance>=1.3.0
 matplotlib
 alpaca-py
 requests
