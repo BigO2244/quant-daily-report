@@ -467,6 +467,36 @@ Disable Dependabot configuration or remove automated monitoring if operational n
 **Notes:**
 Keep automated updates advisory-first. Avoid unattended dependency auto-merge behavior.
 
+### FR-012
+
+**Title:** CI Cache Namespace Isolation and Workflow Hardening
+**Category:** CI/CD Security
+**Priority:** MEDIUM
+**Status:** DONE_LOCAL_WIP
+**Blast Radius:** MEDIUM
+
+**Why it matters:**
+Current cache restore keys include broad fallback patterns that can restore cache
+entries across repository scopes.
+
+**Proposed approach:**
+Harden cache key namespaces using immutable repository identifiers.
+
+Example:
+
+```yaml
+key: canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}
+```
+
+**Validation required:**
+
+- workflow YAML validation
+- cache key formatting review
+- historical-date workflow observation after deployment
+
+**Rollback plan:**
+Restore previous cache key structure if cache misses create unacceptable workflow instability.
+
 ## Friday Review Checklist
 
 - [ ] Market closed
