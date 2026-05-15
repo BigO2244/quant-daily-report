@@ -233,7 +233,7 @@ Index should be additive first. Do not remove existing artifacts.
 **Title:** Add self-heal-only precompute mode
 **Category:** Execution Safety / Scheduler
 **Priority:** HIGH
-**Status:** BACKLOG
+**Status:** DONE_LOCAL_WIP
 
 **Why it matters:**
 `scripts/cron_execute.sh` can call `scripts/cron_precompute.sh` when a precompute bundle is missing. That recovery path should avoid non-critical emails and shadow side effects.
@@ -248,6 +248,9 @@ Add a self-heal mode that:
 - suppresses precompute email
 - suppresses shadow lane
 - writes explicit recovery status
+- validates the full precompute bundle before execution continuation
+- records recovery attempts and suppressed side effects
+- marks stale shadow latest visibility without overwriting latest artifacts
 
 **Files likely involved:**
 
@@ -259,11 +262,13 @@ Add a self-heal mode that:
 **Validation required:**
 
 - targeted shell tests if available
-- `python3 -m pytest Tests/test_execution_pipeline_integration.py -q`
+- `python3 -m pytest Tests/test_execution_pipeline_integration.py Tests/test_precompute_bundle_validation.py -q`
+- `python3 scripts/operational_validation.py`
+- `bash -n scripts/cron_execute.sh` and `bash -n scripts/cron_precompute.sh`
 - manual VM simulation with missing precompute bundle in a safe historical date directory
 
 **Rollback plan:**
-Restore the existing `cron_execute.sh` self-heal invocation.
+Revert the FR-005 commit to restore the previous recovery gate and remove additive validation/status artifacts.
 
 **Notes:**
 Do not change normal execution behavior. This is recovery-path-only work.

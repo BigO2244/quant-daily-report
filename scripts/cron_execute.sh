@@ -38,6 +38,9 @@ export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/execute_${REPORT_DATE}.log"
+WORKFLOW_DIR="${REPO_ROOT}/outputs/workflow/${REPORT_DATE}"
+EXECUTION_SELF_HEAL_STATUS_PATH="${WORKFLOW_DIR}/execution_self_heal.json"
+BUNDLE_VALIDATION_PATH="${WORKFLOW_DIR}/execution_bundle_validation.json"
 
 # --- Options overlay execution (default enabled for paper trading) ---
 export ALLOW_OPTIONS_EXECUTION="${ALLOW_OPTIONS_EXECUTION:-1}"
@@ -59,22 +62,67 @@ echo "started_at=${WORKFLOW_STARTED_AT_UTC}" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
 echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
 
-# --- Verify precompute bundle exists ---
+# --- Verify precompute bundle integrity ---
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
-if [[ ! -f "${BUNDLE_DIR}/contract.json" ]]; then
-    echo "WARN: precompute bundle not found at ${BUNDLE_DIR}/contract.json" | tee -a "${LOG_FILE}"
+mkdir -p "${WORKFLOW_DIR}"
+RECOVERY_ATTEMPTED=0
+RECOVERY_RESULT="not_attempted"
+RECOVERY_STARTED_AT=""
+RECOVERY_FINISHED_AT=""
+
+if ! python3 -m core.precompute_bundle_validation \
+    --bundle-dir "${BUNDLE_DIR}" \
+    --trade-date "${REPORT_DATE}" \
+    --json-output "${BUNDLE_VALIDATION_PATH}" >> "${LOG_FILE}" 2>&1; then
+    echo "WARN: precompute bundle validation failed; details=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
     echo "WARN: attempting self-heal by rebuilding today's precompute bundle before giving up." | tee -a "${LOG_FILE}"
-    if ! REPORT_DATE="${REPORT_DATE}" "${REPO_ROOT}/scripts/cron_precompute.sh" >> "${LOG_FILE}" 2>&1; then
+    RECOVERY_ATTEMPTED=1
+    RECOVERY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if SELF_HEAL_PRECOMPUTE_ONLY=1 REPORT_DATE="${REPORT_DATE}" "${REPO_ROOT}/scripts/cron_precompute.sh" >> "${LOG_FILE}" 2>&1; then
+        RECOVERY_RESULT="completed"
+    else
+        RECOVERY_RESULT="failed"
         echo "ERROR: self-heal precompute rebuild failed" | tee -a "${LOG_FILE}"
     fi
-    if [[ ! -f "${BUNDLE_DIR}/contract.json" ]]; then
-        echo "FATAL: precompute bundle still missing at ${BUNDLE_DIR}/contract.json" | tee -a "${LOG_FILE}"
-        echo "Phase 1 (cron_precompute.sh) must complete successfully before Phase 2." | tee -a "${LOG_FILE}"
+    RECOVERY_FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    if ! python3 -m core.precompute_bundle_validation \
+        --bundle-dir "${BUNDLE_DIR}" \
+        --trade-date "${REPORT_DATE}" \
+        --json-output "${BUNDLE_VALIDATION_PATH}" >> "${LOG_FILE}" 2>&1; then
+        python3 -m core.precompute_bundle_validation \
+            --bundle-dir "${BUNDLE_DIR}" \
+            --trade-date "${REPORT_DATE}" \
+            --json-output "${BUNDLE_VALIDATION_PATH}" \
+            --recovery-status-output "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
+            --previous-recovery-status "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
+            --recovery-attempted \
+            --recovery-result "${RECOVERY_RESULT}" \
+            --execution-continued false \
+            --recovery-started-at "${RECOVERY_STARTED_AT}" \
+            --recovery-finished-at "${RECOVERY_FINISHED_AT}" >> "${LOG_FILE}" 2>&1 || true
+        echo "FATAL: precompute bundle validation failed after self-heal; details=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
+        echo "FATAL: execution halted to avoid degraded bundle execution." | tee -a "${LOG_FILE}"
+        echo "self_heal_status=${EXECUTION_SELF_HEAL_STATUS_PATH}" | tee -a "${LOG_FILE}"
         echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1" | tee -a "${LOG_FILE}"
         exit 1
     fi
+
+    python3 -m core.precompute_bundle_validation \
+        --bundle-dir "${BUNDLE_DIR}" \
+        --trade-date "${REPORT_DATE}" \
+        --json-output "${BUNDLE_VALIDATION_PATH}" \
+        --recovery-status-output "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
+        --previous-recovery-status "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
+        --recovery-attempted \
+        --recovery-result "${RECOVERY_RESULT}" \
+        --execution-continued true \
+        --recovery-started-at "${RECOVERY_STARTED_AT}" \
+        --recovery-finished-at "${RECOVERY_FINISHED_AT}" >> "${LOG_FILE}" 2>&1
+    echo "self_heal_status=${EXECUTION_SELF_HEAL_STATUS_PATH}" | tee -a "${LOG_FILE}"
 fi
-echo "OK: precompute bundle found at ${BUNDLE_DIR}" | tee -a "${LOG_FILE}"
+echo "OK: precompute bundle validated at ${BUNDLE_DIR}" | tee -a "${LOG_FILE}"
+echo "bundle_validation=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
 
 # --- Set bundle environment (replaces GitHub artifact download step) ---
 export PRECOMPUTE_BUNDLE_REQUIRED=true

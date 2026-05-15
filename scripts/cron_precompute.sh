@@ -38,6 +38,10 @@ export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/precompute_${REPORT_DATE}.log"
+SELF_HEAL_PRECOMPUTE_ONLY="${SELF_HEAL_PRECOMPUTE_ONLY:-0}"
+WORKFLOW_DIR="${REPO_ROOT}/outputs/workflow/${REPORT_DATE}"
+SELF_HEAL_STATUS_PATH="${WORKFLOW_DIR}/precompute_self_heal.json"
+BUNDLE_VALIDATION_PATH="${WORKFLOW_DIR}/precompute_bundle_validation.json"
 
 # --- Suppress emails during precompute (planning only) ---
 export EMAIL_INLINE_REPORTS=0
@@ -54,6 +58,9 @@ echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
 echo "repo_root=${REPO_ROOT}" | tee -a "${LOG_FILE}"
 echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
+if [[ "${SELF_HEAL_PRECOMPUTE_ONLY}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
+    echo "self_heal_precompute_only=1" | tee -a "${LOG_FILE}"
+fi
 
 # --- Run precompute planner ---
 EXIT_CODE=0
@@ -62,23 +69,40 @@ python3 daily_quant_report.py --plan-only --write-precompute-bundle >> "${LOG_FI
 # --- Verify bundle was written ---
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
 if [[ ${EXIT_CODE} -eq 0 ]]; then
-    MISSING=""
-    for f in contract.json daily_snapshot.json signals.json planned_execution_payload.json; do
-        if [[ ! -f "${BUNDLE_DIR}/${f}" ]]; then
-            MISSING="${MISSING} ${f}"
-        fi
-    done
-    if [[ -n "${MISSING}" ]]; then
-        echo "ERROR: precompute completed but bundle incomplete — missing:${MISSING}" | tee -a "${LOG_FILE}"
+    mkdir -p "${WORKFLOW_DIR}"
+    if ! python3 -m core.precompute_bundle_validation \
+        --bundle-dir "${BUNDLE_DIR}" \
+        --trade-date "${REPORT_DATE}" \
+        --json-output "${BUNDLE_VALIDATION_PATH}" >> "${LOG_FILE}" 2>&1; then
+        echo "ERROR: precompute completed but bundle validation failed; details=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
         EXIT_CODE=1
     else
         echo "OK: precompute bundle written to ${BUNDLE_DIR}" | tee -a "${LOG_FILE}"
+        echo "bundle_validation=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
     fi
 else
     echo "ERROR: precompute failed with exit code ${EXIT_CODE}" | tee -a "${LOG_FILE}"
 fi
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${EXIT_CODE}" | tee -a "${LOG_FILE}"
+
+if [[ "${SELF_HEAL_PRECOMPUTE_ONLY}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
+    mkdir -p "${WORKFLOW_DIR}"
+    {
+        printf '{\n'
+        printf '  "bundle_dir": "%s",\n' "${BUNDLE_DIR}"
+        printf '  "bundle_validation_path": "%s",\n' "${BUNDLE_VALIDATION_PATH}"
+        printf '  "exit_code": %s,\n' "${EXIT_CODE}"
+        printf '  "mode": "self_heal_precompute_only",\n'
+        printf '  "noncritical_side_effects_suppressed": true,\n'
+        printf '  "suppressed_side_effects": ["email", "shadow", "shadow_latest", "shadow_reconciliation"],\n'
+        printf '  "status": "%s",\n' "$([[ ${EXIT_CODE} -eq 0 ]] && printf "OK" || printf "FAILED")"
+        printf '  "trade_date": "%s"\n' "${REPORT_DATE}"
+        printf '}\n'
+    } > "${SELF_HEAL_STATUS_PATH}"
+    echo "self_heal_status=${SELF_HEAL_STATUS_PATH}" | tee -a "${LOG_FILE}"
+    exit ${EXIT_CODE}
+fi
 
 # --- Send precompute-complete email (best-effort, non-blocking) ---
 if [[ ${EXIT_CODE} -eq 0 ]]; then

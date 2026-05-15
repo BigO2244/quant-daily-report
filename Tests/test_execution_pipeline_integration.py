@@ -11,6 +11,8 @@ from core.run_pointer import write_trade_stage_pointer
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXECUTE_SCRIPT = REPO_ROOT / "scripts" / "execute_alpaca_orders.py"
 CONFIRM_SCRIPT = REPO_ROOT / "scripts" / "send_trading_confirmation_email.py"
+CRON_EXECUTE_SCRIPT = REPO_ROOT / "scripts" / "cron_execute.sh"
+CRON_PRECOMPUTE_SCRIPT = REPO_ROOT / "scripts" / "cron_precompute.sh"
 
 
 def _load_module(path: Path, module_name: str):
@@ -24,6 +26,30 @@ def _load_module(path: Path, module_name: str):
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def test_cron_execute_self_heal_invokes_precompute_recovery_mode() -> None:
+    text = CRON_EXECUTE_SCRIPT.read_text(encoding="utf-8")
+
+    assert "core.precompute_bundle_validation" in text
+    assert 'SELF_HEAL_PRECOMPUTE_ONLY=1 REPORT_DATE="${REPORT_DATE}"' in text
+    assert '"${REPO_ROOT}/scripts/cron_precompute.sh"' in text
+    assert "execution_self_heal.json" in text
+    assert "execution halted to avoid degraded bundle execution" in text
+    assert "run_precomputed_alpaca_execution" in text.split("precompute bundle validation failed after self-heal", 1)[-1]
+
+
+def test_cron_precompute_self_heal_suppresses_noncritical_side_effects() -> None:
+    text = CRON_PRECOMPUTE_SCRIPT.read_text(encoding="utf-8")
+    self_heal_block = text.split('if [[ "${SELF_HEAL_PRECOMPUTE_ONLY}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then', 2)[-1]
+
+    assert "precompute_self_heal.json" in text
+    assert "precompute_bundle_validation.json" in text
+    assert '"noncritical_side_effects_suppressed": true' in text
+    assert '"suppressed_side_effects": ["email", "shadow", "shadow_latest", "shadow_reconciliation"]' in text
+    assert "exit ${EXIT_CODE}" in self_heal_block
+    assert "scripts.send_precompute_email" not in self_heal_block.split("# --- Send precompute-complete email", 1)[0]
+    assert "run_shadow_candidates_daily.sh" not in self_heal_block.split("# --- Send precompute-complete email", 1)[0]
 
 
 def test_canonical_execution_payload_written_under_run_root(tmp_path: Path) -> None:
