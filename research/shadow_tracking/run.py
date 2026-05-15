@@ -12,6 +12,8 @@ from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot, run_backtest
 from research.flow_detection.data import ensure_price_panel, load_universe
 
+from core.feedback_loop_artifacts import write_feedback_loop_artifacts
+
 from .strategies import build_shadow_definitions
 
 
@@ -86,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
         shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
         (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
         (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload, dated_dir=dated_dir))
+        try:
+            write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
+            print(f"[SHADOW] feedback loop artifacts written for trade_date={trade_date}")
+        except Exception as exc:
+            print(f"[SHADOW] feedback loop artifacts skipped: {exc}")
         print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
         print("[SHADOW] delta status: NO_PRIOR")
         print(f"[SHADOW] wrote {dated_dir}/...")
@@ -137,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
     shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
     (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
     (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload, dated_dir=dated_dir))
+    try:
+        write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
+        print(f"[SHADOW] feedback loop artifacts written for trade_date={trade_date}")
+    except Exception as exc:
+        print(f"[SHADOW] feedback loop artifacts skipped: {exc}")
     print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
     print(f"[SHADOW] wrote {dated_dir}/...")
 

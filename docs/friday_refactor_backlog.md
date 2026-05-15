@@ -198,7 +198,7 @@ Implemented after the initial architecture audit. Keep the item for tracking and
 **Title:** Create feedback-loop rolling index
 **Category:** Learning / Reporting
 **Priority:** MEDIUM
-**Status:** BACKLOG
+**Status:** DONE_LOCAL_WIP
 
 **Why it matters:**
 Weekly learning reports should not need to scan many dated JSON files as history grows.
@@ -273,7 +273,7 @@ Do not change normal execution behavior. This is recovery-path-only work.
 **Title:** Separate required vs optional artifact health in portfolio learning report
 **Category:** Reporting
 **Priority:** LOW
-**Status:** BACKLOG
+**Status:** DONE_LOCAL_WIP
 
 **Why it matters:**
 The weekly portfolio learning report can look weak when optional learning artifacts are missing even if the scoreboard is usable.
