@@ -3,6 +3,9 @@ name: Daily Alpaca Precompute
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -36,7 +39,7 @@ jobs:
       EMAIL_TRADING_CONFIRMATION: "0"
       EMAIL_INTERNAL_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Resolve workflow metadata
         id: meta
@@ -59,21 +62,21 @@ jobs:
           echo "workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC" >> "$GITHUB_OUTPUT"
           echo "[WORKFLOW_META] workflow_kind=precompute report_date=$REPORT_DATE workflow_started_at_utc=$WORKFLOW_STARTED_AT_UTC force_refresh_precompute=$FORCE_REFRESH_PRECOMPUTE"
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: outputs/paper_state/canonical_positions.json
           key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
           restore-keys: |
             canonical-model-snapshot-v2-
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
           key: alpaca-precompute-v2-${{ env.REPORT_DATE }}-bootstrap
           restore-keys: |
             alpaca-precompute-v2-${{ env.REPORT_DATE }}-
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
 
@@ -176,13 +179,13 @@ jobs:
           (out_dir / "precompute_workflow_summary.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
           PY
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
         with:
           path: outputs/paper_state/canonical_positions.json
           key: canonical-model-snapshot-v2-${{ env.REPORT_DATE }}
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         if: steps.guard.outputs.allow_run == 'true' && steps.bundle.outputs.bundle_should_rebuild == 'true'
         with:
           path: outputs/precompute/${{ env.REPORT_DATE }}
@@ -218,7 +221,7 @@ jobs:
 
       - name: Upload precompute artifacts
         if: always() && steps.bundle_integrity.outputs.bundle_uploadable == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpaca-precompute-${{ env.REPORT_DATE }}
           if-no-files-found: error
@@ -228,7 +231,7 @@ jobs:
 
       - name: Upload workflow status (always, for diagnostics)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpaca-precompute-status-${{ env.REPORT_DATE }}
           if-no-files-found: warn

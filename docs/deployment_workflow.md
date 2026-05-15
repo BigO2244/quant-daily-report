@@ -50,6 +50,7 @@ Use this sequence for normal source deployments:
 8. Validate:
    - `git status`
    - `git log -1 --oneline`
+   - `python3 scripts/operational_validation.py`
    - targeted syntax/tests based on changed files
 
 Do not use VM merge commits, rebase, force push, `git reset --hard`, or broad
@@ -62,6 +63,7 @@ Minimum validation after a source fast-forward:
 - `git status` reports a clean working tree.
 - `git log -1 --oneline` matches the expected `origin/main` commit.
 - `git branch --show-current` is `main`.
+- `python3 scripts/operational_validation.py` reports no `FAIL` checks.
 - Shell scripts touched by the deployment pass `bash -n`.
 - Targeted pytest slices pass when Python behavior changed.
 
@@ -155,6 +157,7 @@ SCP-only source must not remain the production truth.
 
 - [ ] VM HEAD matches expected `origin/main`.
 - [ ] VM working tree is clean.
+- [ ] `python3 scripts/operational_validation.py` has no `FAIL` checks.
 - [ ] Relevant syntax checks passed.
 - [ ] Targeted pytest slices passed if required.
 - [ ] Cron/service state verified if changed.

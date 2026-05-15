@@ -396,6 +396,77 @@ the prior tracked cron source and reinstall only as an explicit cron deployment.
 Operational reconciliation and governance documentation deployment are complete.
 Future work should treat automation/checklist refinements as separate FRs.
 
+### FR-009
+
+**Title:** GitHub Actions SHA Pinning and Supply-Chain Hardening
+**Category:** CI/CD Security
+**Priority:** HIGH
+**Status:** DONE_LOCAL_WIP
+**Blast Radius:** HIGH
+
+**Why it matters:**
+Mutable GitHub Action tags can be re-pointed upstream.
+
+**Proposed approach:**
+Replace mutable action tags with immutable commit SHA references.
+
+**Validation required:**
+
+- validate workflow syntax after SHA conversion
+- verify artifact upload/download paths still reference pinned actions
+
+**Rollback plan:**
+Restore prior tag-based action references if a pinned SHA becomes invalid or unavailable.
+
+
+### FR-011
+
+**Title:** GitHub Workflow Permission Minimization
+**Category:** CI/CD Security
+**Priority:** MEDIUM
+**Status:** DONE_LOCAL_WIP
+**Blast Radius:** MEDIUM
+
+**Why it matters:**
+Several workflows granted `contents: write` at workflow scope.
+
+**Proposed approach:**
+Adopt `contents: read` as the default workflow permission and use job-level elevation only where a workflow must commit.
+
+**Validation required:**
+
+- workflow permission validation
+- repository write-path validation
+
+**Rollback plan:**
+Restore prior workflow permission blocks if workflow execution breaks unexpectedly.
+
+
+### FR-013
+
+**Title:** Dependency Monitoring and Automated Security Governance
+**Category:** Security / Operations
+**Priority:** LOW
+**Status:** DONE_LOCAL_WIP
+**Blast Radius:** LOW
+
+**Why it matters:**
+There is currently no automated dependency monitoring or security notification workflow.
+
+**Proposed approach:**
+Add advisory-first Dependabot monitoring for pip dependencies and GitHub Actions updates.
+
+**Validation required:**
+
+- Dependabot configuration syntax review
+- workflow update notification validation
+
+**Rollback plan:**
+Disable Dependabot configuration or remove automated monitoring if operational noise becomes excessive.
+
+**Notes:**
+Keep automated updates advisory-first. Avoid unattended dependency auto-merge behavior.
+
 ## Friday Review Checklist
 
 - [ ] Market closed
@@ -415,3 +486,4 @@ Future work should treat automation/checklist refinements as separate FRs.
 |---|---|---|---|---|
 | 2026-05-04 | FR-003 | Implemented managed ticker exceptions with `MMC` ignored. | DONE | Monitor hydration status for additional provider failures. |
 | 2026-05-08 | FR-008 | Reconciled VM to canonical `origin/main`, documented git-based deployment governance, and deployed via VM fast-forward. | DEPLOYED | Keep local non-governance WIP separated into future commits. |
+| 2026-05-12 | Security Audit | Completed CI/CD and dependency governance audit after industry supply-chain review. | REVIEWED | Added FR-009 through FR-013 for operational security hardening roadmap. |

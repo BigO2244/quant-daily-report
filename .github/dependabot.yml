@@ -1,0 +1,51 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "17:30"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "fr-013"
+    commit-message:
+      prefix: "deps"
+    groups:
+      python-runtime:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/quant_research_agent"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "17:45"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "fr-013"
+    commit-message:
+      prefix: "deps"
+    groups:
+      research-agent:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "18:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "fr-013"
+    commit-message:
+      prefix: "ci"
