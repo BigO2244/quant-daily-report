@@ -2,114 +2,159 @@
 
 ## Purpose
 
-This backlog captures larger Caerus architecture improvements that are valuable but should be reviewed and implemented only during controlled maintenance windows, preferably Friday after market close.
+This document is the canonical Friday Refactor (FR) register after the 2026-05-15
+Wave 1-3 deployment cycle. It separates deployed operational history from future
+work so the backlog reads as an operations handbook, not a staging scratchpad.
 
-These items are not emergency fixes. They are intended to reduce workflow scope, improve observability, simplify operations, and lower the chance that reporting or research work interferes with trading-critical paths.
+FR work remains maintenance-window work by default. Changes that touch cron,
+execution, reconciliation, broker state, deployment, or artifact contracts must
+be audited, validated, and rolled out with explicit rollback plans.
 
-## Maintenance Window Rule
+## Governance Model
 
-- Default implementation window: Friday after market close.
-- No changes during active trading windows unless there is an urgent safety issue.
-- Every refactor requires:
-  - scoped Codex prompt
-  - status and dependency review
-  - blast-radius assessment
-  - targeted tests
-  - rollback plan
-  - VM validation
-  - documentation impact review
-  - no execution behavior changes unless explicitly approved
-
-## FR Governance
-
-Recommended status flow:
+Preferred promotion flow:
 
 ```text
-BACKLOG -> READY -> READY_VALIDATED -> IN_PROGRESS -> DONE -> DEPLOYED
+BACKLOG -> READY -> READY_VALIDATED -> IN_PROGRESS -> PROMOTION_READY -> DEPLOYED -> DEPLOYED_OBSERVING -> DEPLOYED
 ```
 
 Status meanings:
 
 - `BACKLOG`: useful work, not ready for implementation.
 - `READY`: scope, dependencies, rollback path, and validation plan are clear.
-- `READY_VALIDATED`: pre-work audit confirms source ownership, VM state, and
-  dependencies are safe enough to begin.
-- `IN_PROGRESS`: implementation is actively underway.
-- `DONE`: implementation and local validation are complete, but deployment may
-  still be pending.
-- `DEPLOYED`: committed, pushed, pulled on VM through git, validated, and docs
-  updated.
+- `READY_VALIDATED`: pre-work audit confirms source ownership, runtime exposure,
+  and dependencies are safe enough to begin.
+- `IN_PROGRESS`: implementation is underway.
+- `PROMOTION_READY`: locally committed and validated, but not deployed.
+- `DEPLOYED_OBSERVING`: deployed and healthy, with an explicit observation window.
+- `DEPLOYED`: deployed, validated, and no special observation window remains.
+- `REVIEWED_DEFERRED`: reviewed but intentionally not promoted.
 
 Blast-radius framework:
 
 - `LOW`: docs, tests, or isolated reporting with no scheduler/runtime effect.
 - `MEDIUM`: research/reporting code, generated artifacts, dashboard rendering,
-  or non-blocking shadow behavior.
+  CI hardening, or non-blocking shadow behavior.
 - `HIGH`: cron, deployment, execution, reconciliation, broker state, order
   submission, or canonical runtime state.
-
-Dependency expectations:
-
-- Identify upstream FRs, source ownership, and runtime assumptions before work.
-- Audit local and VM git state before any deployment-related FR.
-- Stop if canonical source or VM ownership is ambiguous.
 
 Validation expectations:
 
 - Select targeted validation before implementation.
-- Validate the smallest relevant slice first.
-- Do not run trading workflows or regenerate broker artifacts as FR validation
-  unless the FR explicitly requires it and the risk is approved.
+- Prefer simulation before promotion for recovery, scheduler, and execution-adjacent work.
+- Do not run trading workflows or regenerate broker artifacts as validation
+  unless explicitly required and approved.
+- Document rollback and observation surfaces before deployment.
 
-Documentation expectations:
+## Deployed Wave Summary
 
-- Update docs in the same change when operational behavior changes.
-- Add or update `docs/fr_execution_ledger.md` for completed FR work.
-- Documentation drift is operational risk and can block `DONE` or `DEPLOYED`.
+| Wave | FRs | Status | Operational Result |
+|---|---|---|---|
+| Wave 1 | FR-004, FR-006, FR-009, FR-011, FR-013 | Deployed | Reporting resilience, advisory dependency monitoring, SHA-pinned Actions, minimized workflow permissions. |
+| Wave 2 | FR-001, FR-012 | Deployed observing | Shadow wrapper step observability and repository-scoped CI cache keys. |
+| Wave 3 | FR-005 | Deployed observing | Self-heal recovery now fails closed unless full precompute bundle validation passes. |
 
-## Backlog Items
+## Phase 4 Framework: Artifact Governance + Operational Telemetry
+
+Phase 4 is the next operational hardening phase after Waves 1-3. It is a
+non-trading, non-execution phase focused on state governance, artifact clarity,
+operator trust surfaces, and additive observability.
+
+Phase 4 must not change broker submission, strategy selection, portfolio
+construction, cron timing, or production execution behavior unless a later FR is
+explicitly promoted with a separate HIGH blast-radius review.
+
+Phase 4 principles:
+
+- Keep changes additive and read-only first.
+- Prefer deterministic metadata over inferred state.
+- Make canonical, derived, diagnostic, and generated artifacts explicit.
+- Eliminate stale `latest` ambiguity through freshness metadata and manifests.
+- Improve operator clarity before increasing scheduler or infrastructure complexity.
+- Preserve rollback clarity: new telemetry can be ignored or disabled without
+  altering trading-critical flows.
+
+Current platform maturity note:
+
+Caerus is transitioning from execution automation toward operational state
+governance, artifact governance, resilience telemetry, and operator-grade
+observability. The current bottleneck is operational clarity, not distributed
+compute scale. Phase 4 should not introduce microservices, Kubernetes, Airflow,
+or broad scheduler rewrites.
+
+Phase 4 priority order:
+
+| Order | FR | Theme | Why first/next |
+|---:|---|---|---|
+| 1 | FR-015 | Artifact registry | Establishes ownership and taxonomy before downstream telemetry depends on artifact interpretation. |
+| 2 | FR-017 | Health aggregator | Gives operators one synthesis surface while remaining read-only and additive. |
+| 3 | FR-018 | Latest freshness manifests | Reduces the highest recurring ambiguity: whether `latest` means current, stale, partial, or diagnostic-only. |
+| 4 | FR-023 | Documentation taxonomy | Prevents governance docs, generated reports, and operator notes from continuing to blur together. |
+| 5 | FR-019 | Retention and backup policy | Uses the artifact taxonomy before defining cleanup, archive, and safe-to-delete rules. |
+| 6 | FR-020 | Validation isolation | Stops tests and smoke flows from polluting runtime evidence after ownership rules are clear. |
+| 7 | FR-016 | Semantic bundle validation | Builds on artifact ownership to add deeper contract validation without broad execution changes. |
+| 8 | FR-021 | Partial execution normalization | Important but execution-adjacent; schedule after lower-risk observability and artifact work. |
+| 9 | FR-022 | Dependency hash enforcement | Deferred until dependency baselines, clean installs, and rollback procedures are proven. |
+| 10 | FR-014 | Shadow learning reliability | Remains useful, but should inherit Phase 4 artifact taxonomy and health aggregation conventions. |
+
+Phase 4 output taxonomy recommendation:
+
+```text
+docs/
+  governance/
+  architecture/
+  deployment/
+  operations/
+  recovery/
+  runbooks/
+  historical/
+
+outputs/
+  reports/
+  diagnostics/
+  research/
+  workflow/
+  operations/
+```
+
+Generated markdown should not live beside canonical operator documentation. If a
+report is generated from runtime state, it belongs under `outputs/` or a clearly
+marked generated-report area, not beside source-of-truth governance docs.
+
+Phase 4 foundation documents:
+
+- `docs/artifact_governance.md` — artifact taxonomy, ownership semantics,
+  initial registry, freshness semantics, latest publication rules, and retention
+  classes.
+- `docs/operational_health_aggregator.md` — read-only daily health synthesis
+  design and proposed `outputs/operations/` artifacts.
+- `docs/documentation_taxonomy.md` — canonical documentation vs generated
+  artifact separation rules and future directory taxonomy.
+
+## Current FR Register
 
 ### FR-001
 
 **Title:** Split shadow wrapper responsibilities
 **Category:** Shadow / Workflow
 **Priority:** HIGH
-**Status:** DONE_LOCAL_WIP
+**Status:** DEPLOYED_OBSERVING
+**Blast Radius:** MEDIUM
 
-**Why it matters:**
-`scripts/run_shadow_candidates_daily.sh` currently handles generation, latest publication, desktop symlink, and reconciliation. Those are related operationally, but they are separate responsibilities with separate failure modes.
+**Deployed behavior:** `scripts/run_shadow_candidates_daily.sh` now separates
+generation, latest publication, and live-vs-shadow reconciliation into helper
+steps. Each helper writes a status artifact under `outputs/workflow/<date>/`.
+The wrapper remains best-effort and cannot block precompute or execution.
 
-**Risk if ignored:**
-Shadow generation can appear healthy or unhealthy for the wrong reason. Non-blocking failures may be hard to diagnose, and future additions could make the wrapper too broad.
+**Validation summary:** `Tests/test_shadow_daily_wrapper.py`,
+`Tests/test_execution_pipeline_integration.py`, shell syntax, operational
+validator, and local shadow smoke testing.
 
-**Proposed approach:**
-Split into small helpers:
+**Observation focus:** `shadow_generate.json`, `shadow_latest.json`,
+`shadow_reconciliation.json`, `shadow.json`, and `logs/shadow_<date>.log`.
 
-- `generate_shadow_artifacts`
-- `publish_shadow_latest`
-- `reconcile_live_vs_shadow`
-
-Each helper should write its own status artifact. The top-level wrapper should remain non-blocking and summarize substep status.
-
-**Files likely involved:**
-
-- `scripts/run_shadow_candidates_daily.sh`
-- `research/shadow_tracking/run.py`
-- `scripts/live_vs_shadow_reconciliation.py`
-- `outputs/workflow/YYYY-MM-DD/shadow.json`
-
-**Validation required:**
-
-- `python3 -m pytest Tests/test_shadow_daily_wrapper.py -q`
-- `python3 -m pytest Tests/test_shadow_tracking.py -q`
-- Manual dry run with a historical trade date
-- VM validation after git-based deploy
-
-**Rollback plan:**
-Restore the prior `scripts/run_shadow_candidates_daily.sh` and remove any new helper invocations from the wrapper.
-
-**Notes:**
-Keep shadow non-blocking. Do not allow shadow failures to block precompute or execution.
+**Rollback reference:** Revert the Wave 2 shadow wrapper commit to restore the
+previous inline wrapper body.
 
 ### FR-002
 
@@ -117,231 +162,105 @@ Keep shadow non-blocking. Do not allow shadow failures to block precompute or ex
 **Category:** Data / Hydration
 **Priority:** MEDIUM
 **Status:** BACKLOG
+**Blast Radius:** MEDIUM
 
-**Why it matters:**
-Freshness checks should not need to inspect the full `price_panel.parquet` when only max date and symbol coverage are needed.
+**Intent:** Add an advisory coverage sidecar so freshness checks do not need to
+inspect the full `price_panel.parquet` for max date and symbol coverage.
 
-**Risk if ignored:**
-Full parquet reads remain acceptable now, but will become more expensive as history and universe size grow.
-
-**Proposed approach:**
-Create:
-
-```text
-outputs/research/flow_detection_v1/price_panel_coverage.json
-```
-
-Include max cache date, row count, ticker count, ignored tickers, aliased tickers, provider, and generation timestamp.
-
-**Files likely involved:**
-
-- `research/flow_detection/data.py`
-- `core/price_hydration.py`
-- `scripts/hydrate_price_cache_only.py`
-- `Tests/test_price_cache_only_hydrator.py`
-
-**Validation required:**
-
-- `python3 -m pytest Tests/test_price_cache_only_hydrator.py -q`
-- Manual cache-only dry run
-- Manual cache-only strict run on VM
-
-**Rollback plan:**
-Stop writing/reading the sidecar and fall back to current parquet inspection.
-
-**Notes:**
-Sidecar must be advisory. The parquet remains canonical.
+**Rollback reference:** Stop writing/reading the sidecar and fall back to current
+parquet inspection. The parquet remains canonical until a replacement is proven.
 
 ### FR-003
 
 **Title:** Add managed bad ticker / ticker exceptions
 **Category:** Data Quality
 **Priority:** MEDIUM
-**Status:** DONE
+**Status:** REVIEWED_DEFERRED
+**Blast Radius:** MEDIUM
 
-**Why it matters:**
-Repeated provider failures, such as empty Yahoo downloads for `MMC`, create log noise and wasted work.
-
-**Risk if ignored:**
-Hydration diagnostics remain noisy and can obscure real freshness issues.
-
-**Proposed approach:**
-Add `data/ticker_exceptions.json` with:
-
-- `ignore`
-- `aliases`
-- `notes`
-
-Hydration should explicitly report ignored and aliased tickers.
-
-**Files likely involved:**
-
-- `data/ticker_exceptions.json`
-- `research/flow_detection/data.py`
-- `scripts/hydrate_price_cache_only.py`
-- `docs/price_hydration.md`
-- `Tests/test_ticker_exceptions.py`
-
-**Validation required:**
-
-- `python3 -m pytest Tests/test_price_cache_only_hydrator.py Tests/test_ticker_exceptions.py -q`
-- `python3 -m scripts.hydrate_price_cache_only --dry-run`
-
-**Rollback plan:**
-Remove the config or empty the `ignore` and `aliases` sections to restore default provider behavior.
-
-**Notes:**
-Implemented after the initial architecture audit. Keep the item for tracking and future additions.
+**Current state:** Local WIP exists outside Waves 1-3. Do not treat it as
+deployed until it receives an isolated promotion package.
 
 ### FR-004
 
 **Title:** Create feedback-loop rolling index
 **Category:** Learning / Reporting
 **Priority:** MEDIUM
-**Status:** DONE_LOCAL_WIP
+**Status:** DEPLOYED
+**Blast Radius:** LOW
 
-**Why it matters:**
-Weekly learning reports should not need to scan many dated JSON files as history grows.
+**Deployed behavior:** Compact daily learning/performance rows are written under
+`outputs/shadow_candidates/performance/` while dated JSON artifacts remain
+canonical.
 
-**Risk if ignored:**
-Reporting may become slower and harder to reason about. Missing per-day files may create noisy partial status even when the key data exists.
+**Validation summary:** `Tests/test_feedback_loop_artifacts.py`,
+`Tests/test_portfolio_learning_report.py`, combined Wave 1 validation, and
+operational validator.
 
-**Proposed approach:**
-Write compact daily rows for return, turnover, top-3 concentration, valid days, attribution status, regime, and readiness. Weekly reports can eventually read the index instead of scanning per-date artifacts.
-
-**Files likely involved:**
-
-- `core/feedback_loop_artifacts.py`
-- `core/portfolio_learning_report.py`
-- `scripts/send_portfolio_learning_review.py`
-- `outputs/shadow_candidates/performance/`
-
-**Validation required:**
-
-- `python3 -m pytest Tests/test_feedback_loop_artifacts.py -q`
-- `python3 -m pytest Tests/test_portfolio_learning_report.py -q`
-- Manual generation for a historical trade date
-
-**Rollback plan:**
-Leave existing per-date artifact reads in place until the index is proven. Disable index reads if mismatches appear.
-
-**Notes:**
-Index should be additive first. Do not remove existing artifacts.
+**Rollback reference:** Revert the Wave 1 reporting commit or stop reading the
+additive index; existing dated artifacts remain the source of truth.
 
 ### FR-005
 
-**Title:** Add self-heal-only precompute mode
+**Title:** Self-heal-only precompute mode and recovery integrity
 **Category:** Execution Safety / Scheduler
 **Priority:** HIGH
-**Status:** DONE_LOCAL_WIP
+**Status:** DEPLOYED_OBSERVING
+**Blast Radius:** HIGH
 
-**Why it matters:**
-`scripts/cron_execute.sh` can call `scripts/cron_precompute.sh` when a precompute bundle is missing. That recovery path should avoid non-critical emails and shadow side effects.
+**Deployed behavior:** When execution sees an invalid or missing precompute
+bundle, it invokes precompute with `SELF_HEAL_PRECOMPUTE_ONLY=1`. Self-heal
+suppresses precompute email, shadow generation, latest shadow publication, and
+shadow reconciliation. Execution continues only after the full bundle validator
+confirms:
 
-**Risk if ignored:**
-Execution-window recovery can run broader work than necessary and blend recovery logs with normal precompute side effects.
+- `contract.json`
+- `daily_snapshot.json`
+- `signals.json`
+- `planned_execution_payload.json`
 
-**Proposed approach:**
-Add a self-heal mode that:
+Partial recovery output fails closed and writes degraded-state observability.
 
-- rebuilds only the required precompute bundle
-- suppresses precompute email
-- suppresses shadow lane
-- writes explicit recovery status
-- validates the full precompute bundle before execution continuation
-- records recovery attempts and suppressed side effects
-- marks stale shadow latest visibility without overwriting latest artifacts
+**Validation summary:** `Tests/test_execution_pipeline_integration.py`,
+`Tests/test_precompute_bundle_validation.py`, shell syntax, operational
+validator, and controlled degraded-state simulations.
 
-**Files likely involved:**
+**Observation focus:** `execution_self_heal.json`,
+`execution_bundle_validation.json`, `precompute_self_heal.json`, and
+`precompute_bundle_validation.json`.
 
-- `scripts/cron_execute.sh`
-- `scripts/cron_precompute.sh`
-- `daily_quant_report.py` only if strictly necessary
-- `outputs/workflow/YYYY-MM-DD/`
-
-**Validation required:**
-
-- targeted shell tests if available
-- `python3 -m pytest Tests/test_execution_pipeline_integration.py Tests/test_precompute_bundle_validation.py -q`
-- `python3 scripts/operational_validation.py`
-- `bash -n scripts/cron_execute.sh` and `bash -n scripts/cron_precompute.sh`
-- manual VM simulation with missing precompute bundle in a safe historical date directory
-
-**Rollback plan:**
-Revert the FR-005 commit to restore the previous recovery gate and remove additive validation/status artifacts.
-
-**Notes:**
-Do not change normal execution behavior. This is recovery-path-only work.
+**Rollback reference:** Revert the Wave 3 FR-005 commit. Post-rollback, inspect
+any existing self-heal artifacts as evidence and do not delete runtime outputs as
+part of rollback.
 
 ### FR-006
 
 **Title:** Separate required vs optional artifact health in portfolio learning report
 **Category:** Reporting
 **Priority:** LOW
-**Status:** DONE_LOCAL_WIP
+**Status:** DEPLOYED
+**Blast Radius:** LOW
 
-**Why it matters:**
-The weekly portfolio learning report can look weak when optional learning artifacts are missing even if the scoreboard is usable.
+**Deployed behavior:** Required scoreboard artifacts, optional learning
+artifacts, and diagnostic-only artifacts are classified separately so missing
+optional artifacts remain visible without making the core report unavailable.
 
-**Risk if ignored:**
-Operator diagnosis may overstate reporting weakness and create unnecessary concern.
+**Validation summary:** `Tests/test_portfolio_learning_report.py`, combined Wave
+1 validation, and operational validator.
 
-**Proposed approach:**
-Split artifact health into:
-
-- core required artifacts
-- optional learning artifacts
-- diagnostics-only artifacts
-
-**Files likely involved:**
-
-- `core/portfolio_learning_report.py`
-- `Tests/test_portfolio_learning_report.py`
-
-**Validation required:**
-
-- `python3 -m pytest Tests/test_portfolio_learning_report.py -q`
-- Manual dry run of weekly portfolio learning report
-
-**Rollback plan:**
-Restore the current single artifact-health classification.
-
-**Notes:**
-Keep missing data explicit. Do not hide unavailable artifacts.
+**Rollback reference:** Revert the Wave 1 reporting commit to restore the prior
+single artifact-health classification.
 
 ### FR-007
 
 **Title:** Revisit full parquet read/write scaling
 **Category:** Data Engineering
 **Priority:** LOW
-**Status:** BACKLOG
+**Status:** REVIEWED_DEFERRED
+**Blast Radius:** LOW
 
-**Why it matters:**
-`ensure_price_panel` is acceptable now, but full parquet reads/writes may become expensive if universe size, history length, or report frequency increases.
-
-**Risk if ignored:**
-Hydration may become slower or memory-heavy again.
-
-**Proposed approach:**
-Evaluate partitioning by date or ticker, or maintain a compact coverage/index sidecar before attempting larger storage changes.
-
-**Files likely involved:**
-
-- `research/flow_detection/data.py`
-- `scripts/hydrate_price_cache_only.py`
-- `Tests/test_flow_detection_v1.py`
-
-**Validation required:**
-
-- existing flow detection tests
-- cache-only hydration tests
-- VM runtime/memory comparison
-
-**Rollback plan:**
-Keep the current single parquet as canonical until the replacement is fully validated.
-
-**Notes:**
-Do not over-engineer until there is repeated memory or runtime pressure.
+**Current state:** Advisory review only. The single parquet remains canonical.
+Prefer compact coverage/index sidecars before partitioning or migration.
 
 ### FR-008
 
@@ -351,174 +270,500 @@ Do not over-engineer until there is repeated memory or runtime pressure.
 **Status:** DEPLOYED
 **Blast Radius:** HIGH
 
-**Why it matters:**
-Recent production updates have used SCP due to dirty local and VM worktrees. This is pragmatic but not durable.
-
-**Risk if ignored:**
-Local and VM state can drift, source cron can diverge from installed cron, and rollback becomes harder.
-
-**Current state:**
-The 2026-05-08 reconciliation restored deterministic VM git deployment. The VM
-was backed up, stashed, fast-forwarded to canonical `origin/main` at `3de68f8`,
-then governance documentation was committed as `c8c0e10` and deployed to the VM
-through `git pull --ff-only`. Recovery patches and VM stashes remain
-intentionally preserved. SCP is now exception-only. Local non-governance WIP
-still exists and remains outside the FR-008 deployment scope.
-
-**Proposed approach:**
-Define a clean deploy flow:
+**Deployed behavior:** `origin/main` is canonical deployable source and the VM is
+a fast-forward deploy target. Standard deployment is:
 
 ```text
-commit -> push -> pull on VM -> validate -> rollback path
+local validation -> isolated commit -> push -> VM git pull --ff-only -> validation -> observation
 ```
 
-Also define the exceptional hotfix SCP path and required post-SCP verification.
+SCP is exception-only and must be reconciled back through git.
 
-**Files likely involved:**
-
-- `AGENTS.md`
-- `docs/deployment_workflow.md`
-- `docs/documentation_governance.md`
-- `docs/fr_execution_ledger.md`
-- `docs/OPERATIONS.md`
-- `docs/runbook.md`
-- `scripts/deploy_*`
-- `scripts/crontab.txt`
-
-**Validation required:**
-
-- dry-run deployment checklist
-- VM `git status`
-- targeted tests after pull
-- cron source vs installed cron comparison
-
-**Rollback plan:**
-Preserve VM patches/stashes first. Prefer git revert for bad committed changes.
-Do not use destructive reset/clean as normal rollback. If cron changed, restore
-the prior tracked cron source and reinstall only as an explicit cron deployment.
-
-**Notes:**
-Operational reconciliation and governance documentation deployment are complete.
-Future work should treat automation/checklist refinements as separate FRs.
+**Rollback reference:** Prefer `git revert`, push, and VM fast-forward. Preserve
+drift evidence before mutation and avoid destructive reset/clean behavior.
 
 ### FR-009
 
-**Title:** GitHub Actions SHA Pinning and Supply-Chain Hardening
+**Title:** GitHub Actions SHA pinning
 **Category:** CI/CD Security
 **Priority:** HIGH
-**Status:** DONE_LOCAL_WIP
-**Blast Radius:** HIGH
+**Status:** DEPLOYED
+**Blast Radius:** MEDIUM
 
-**Why it matters:**
-Mutable GitHub Action tags can be re-pointed upstream.
+**Deployed behavior:** Workflow `uses:` references are pinned to immutable
+40-character SHAs.
 
-**Proposed approach:**
-Replace mutable action tags with immutable commit SHA references.
+**Validation summary:** Workflow YAML parsing and operational validator.
 
-**Validation required:**
+**Rollback reference:** Restore prior tag references only if a pinned SHA is
+invalid or unavailable.
 
-- validate workflow syntax after SHA conversion
-- verify artifact upload/download paths still reference pinned actions
+### FR-010
 
-**Rollback plan:**
-Restore prior tag-based action references if a pinned SHA becomes invalid or unavailable.
+**Title:** Deterministic Python dependency and lockfile governance
+**Category:** Supply Chain / Dependency Management
+**Priority:** HIGH
+**Status:** REVIEWED_DEFERRED
+**Blast Radius:** MEDIUM
 
+**Current state:** Not deployed in Waves 1-3. Do not mix dependency pinning,
+constraints, hash enforcement, or requirements rewrites into operational
+governance commits.
+
+**Future validation:** Clean environment install, VM install validation,
+workflow install validation, dependency audit, and rollback plan.
 
 ### FR-011
 
-**Title:** GitHub Workflow Permission Minimization
+**Title:** GitHub workflow permission minimization
 **Category:** CI/CD Security
 **Priority:** MEDIUM
-**Status:** DONE_LOCAL_WIP
+**Status:** DEPLOYED
 **Blast Radius:** MEDIUM
 
-**Why it matters:**
-Several workflows granted `contents: write` at workflow scope.
+**Deployed behavior:** Workflow-scope `contents: write` has been removed.
+Workflows default to read permissions with job-level elevation only where needed.
 
-**Proposed approach:**
-Adopt `contents: read` as the default workflow permission and use job-level elevation only where a workflow must commit.
+**Validation summary:** Operational validator workflow permission check.
 
-**Validation required:**
-
-- workflow permission validation
-- repository write-path validation
-
-**Rollback plan:**
-Restore prior workflow permission blocks if workflow execution breaks unexpectedly.
-
-
-### FR-013
-
-**Title:** Dependency Monitoring and Automated Security Governance
-**Category:** Security / Operations
-**Priority:** LOW
-**Status:** DONE_LOCAL_WIP
-**Blast Radius:** LOW
-
-**Why it matters:**
-There is currently no automated dependency monitoring or security notification workflow.
-
-**Proposed approach:**
-Add advisory-first Dependabot monitoring for pip dependencies and GitHub Actions updates.
-
-**Validation required:**
-
-- Dependabot configuration syntax review
-- workflow update notification validation
-
-**Rollback plan:**
-Disable Dependabot configuration or remove automated monitoring if operational noise becomes excessive.
-
-**Notes:**
-Keep automated updates advisory-first. Avoid unattended dependency auto-merge behavior.
+**Rollback reference:** Restore prior permission blocks only if a workflow write
+path fails and the failure is confirmed to be permission-related.
 
 ### FR-012
 
-**Title:** CI Cache Namespace Isolation and Workflow Hardening
+**Title:** CI cache namespace isolation
 **Category:** CI/CD Security
 **Priority:** MEDIUM
-**Status:** DONE_LOCAL_WIP
+**Status:** DEPLOYED_OBSERVING
 **Blast Radius:** MEDIUM
 
-**Why it matters:**
-Current cache restore keys include broad fallback patterns that can restore cache
-entries across repository scopes.
+**Deployed behavior:** Canonical model snapshot and precompute cache keys include
+`${{ github.repository_id }}` to isolate cache namespaces.
 
-**Proposed approach:**
-Harden cache key namespaces using immutable repository identifiers.
+**Observation focus:** First post-deploy runs may miss existing caches and
+regenerate under the repository-scoped namespace. This is expected.
 
-Example:
+**Rollback reference:** Revert the Wave 2 cache namespace commit if cache misses
+create unacceptable workflow instability.
 
-```yaml
-key: canonical-model-snapshot-v2-${{ github.repository_id }}-${{ env.REPORT_DATE }}
-```
+### FR-013
 
-**Validation required:**
+**Title:** Dependency monitoring and automated security governance
+**Category:** Security / Operations
+**Priority:** LOW
+**Status:** DEPLOYED
+**Blast Radius:** LOW
 
-- workflow YAML validation
-- cache key formatting review
-- historical-date workflow observation after deployment
+**Deployed behavior:** Dependabot advisory monitoring covers pip and GitHub
+Actions without auto-merge.
 
-**Rollback plan:**
-Restore previous cache key structure if cache misses create unacceptable workflow instability.
+**Observation focus:** Dependabot PR noise and advisory cadence.
 
-## Friday Review Checklist
+**Rollback reference:** Disable or remove `.github/dependabot.yml` if advisory
+noise becomes operationally unacceptable.
 
-- [ ] Market closed
-- [ ] No live execution window active
-- [ ] Current VM status clean
-- [ ] Latest trading confirmation reviewed
-- [ ] Latest hydration status OK
-- [ ] Current branch and git status recorded
-- [ ] Backups or rollback path identified
-- [ ] Tests selected before implementation
-- [ ] Deployment plan clear
-- [ ] Post-change validation complete
+### FR-014
 
-## Change Log
+**Title:** Shadow artifact reliability and feedback loop integrity
+**Category:** Shadow / Learning / Observability
+**Priority:** MEDIUM
+**Status:** BACKLOG
+**Blast Radius:** MEDIUM
 
-| Date | Item | Action | Result | Follow-up |
-|---|---|---|---|---|
-| 2026-05-04 | FR-003 | Implemented managed ticker exceptions with `MMC` ignored. | DONE | Monitor hydration status for additional provider failures. |
-| 2026-05-08 | FR-008 | Reconciled VM to canonical `origin/main`, documented git-based deployment governance, and deployed via VM fast-forward. | DEPLOYED | Keep local non-governance WIP separated into future commits. |
-| 2026-05-12 | Security Audit | Completed CI/CD and dependency governance audit after industry supply-chain review. | REVIEWED | Added FR-009 through FR-013 for operational security hardening roadmap. |
+**Intent:** Further separate trading-critical health from shadow-learning health
+by documenting required vs optional shadow artifacts and improving visibility
+for partial learning-layer degradation.
+
+**Constraint:** Shadow or learning failures must not block trading-critical
+workflows.
+
+### FR-015
+
+**Title:** Artifact registry and ownership matrix
+**Category:** Artifact Governance / Operations
+**Priority:** HIGH
+**Status:** IN_PROGRESS
+**Blast Radius:** LOW
+
+**Purpose:** Define formal artifact classification, ownership metadata, producer
+and consumer relationships, freshness semantics, and retention metadata.
+
+**Scope:**
+
+- Classify artifacts as canonical, derived, diagnostic, generated report,
+  runtime evidence, cache, backup, or local-only scratch.
+- Document owners for precompute, workflow, shadow, reconciliation, broker,
+  dashboard, hydration, diagnostics, reports, and research artifacts.
+- Define `latest` publication semantics, including when latest artifacts are
+  trustworthy, stale, partial, or diagnostic-only.
+- Propose an artifact manifest structure that can be adopted incrementally.
+- Produce `docs/artifact_governance.md` as the canonical artifact taxonomy.
+
+**Rationale:** The largest remaining operational risk after Waves 1-3 is not
+order submission logic; it is ambiguity around which artifacts are authoritative,
+which are derived, which can be stale, and which can safely be ignored.
+
+**Dependencies:** None. This should be the first Phase 4 FR because later
+telemetry and retention work should depend on a shared artifact vocabulary.
+
+**Rollout guidance:** Start as documentation and read-only inventory. Do not
+move files or change producers in the first pass.
+
+**Rollback reference:** Revert or ignore the documentation and registry proposal.
+No runtime behavior should depend on FR-015 until a later implementation FR
+explicitly opts in.
+
+**Observation focus:** Operator review confirms that artifact classes, owners,
+freshness rules, and retention hints are understandable and complete enough to
+guide later work.
+
+**Foundation progress:** Initial governance foundation exists in
+`docs/artifact_governance.md`. No producers or runtime artifacts have been
+changed.
+
+### FR-016
+
+**Title:** Semantic precompute contract validation
+**Category:** Execution Safety / Artifact Contracts
+**Priority:** HIGH
+**Status:** BACKLOG
+**Blast Radius:** MEDIUM
+
+**Purpose:** Extend precompute validation beyond file existence, JSON
+parseability, and trade-date checks.
+
+**Scope:**
+
+- Validate schema version and artifact type.
+- Validate strategy identity metadata: Polaris remains paper baseline, Orion and
+  Lyra remain shadow-only, and SPY remains benchmark.
+- Validate execution mode and paper-only assumptions.
+- Validate planner provenance, source run id, and workflow stage.
+- Validate payload integrity semantics such as expected sections, count
+  consistency, signal path references, and execution eligibility fields.
+- Keep validation deterministic, local, and lightweight.
+
+**Rationale:** Current bundle validation is an essential fail-closed guard, but
+it is still shallow. A bundle can be present and parseable while carrying
+semantic drift that should block execution.
+
+**Dependencies:** Prefer FR-015 first so contract fields map to formal artifact
+ownership and trust semantics.
+
+**Rollout guidance:** Introduce semantic validation in advisory/reporting mode
+first, then promote specific failures to blocking only after tests and degraded
+simulations prove the behavior.
+
+**Rollback reference:** Disable semantic-only checks or revert to the current
+file-level validator. File presence and parseability checks must remain intact.
+
+**Observation focus:** `precompute_bundle_validation.json`,
+`execution_bundle_validation.json`, degraded-state simulations, and any advisory
+semantic warnings.
+
+### FR-017
+
+**Title:** Operational health aggregator
+**Category:** Observability / Operations
+**Priority:** HIGH
+**Status:** IN_PROGRESS
+**Blast Radius:** LOW
+
+**Purpose:** Create a single operator-grade daily health synthesis surface.
+
+**Scope:**
+
+- Read existing artifacts only.
+- Summarize precompute health, execution health, shadow health, hydration,
+  dashboard freshness, recovery attempts, stale latest detection, validator
+  outputs, and dependency warnings.
+- Proposed outputs:
+  - `outputs/operations/daily_health_summary.json`
+  - `outputs/operations/daily_health_summary.md`
+- Include explicit status levels, evidence paths, and operator recommendations.
+
+**Rationale:** Operational telemetry is currently fragmented across logs,
+workflow artifacts, shadow status files, hydration status, dashboard payloads,
+and emails. Operators need one synthesis surface that preserves the underlying
+evidence paths.
+
+**Dependencies:** FR-015 is preferred but not strictly required. FR-017 can start
+with current artifacts and adopt the registry later.
+
+**Rollout guidance:** Build read-only, artifact-only, and non-blocking. Do not
+trigger precompute, execution, hydration, shadow generation, broker calls, or
+dashboard refreshes.
+
+**Rollback reference:** Stop producing or ignore the summary artifacts. Existing
+underlying artifacts remain canonical.
+
+**Observation focus:** Daily summary correctness, evidence-path completeness,
+false positive rate, repeated recovery visibility, and stale/latest detection.
+
+**Foundation progress:** Initial read-only design exists in
+`docs/operational_health_aggregator.md`. No telemetry producer has been built.
+
+### FR-018
+
+**Title:** Latest publication freshness manifest
+**Category:** Artifact Governance / Freshness
+**Priority:** HIGH
+**Status:** IN_PROGRESS
+**Blast Radius:** LOW
+
+**Purpose:** Eliminate stale `latest` ambiguity by requiring publication
+metadata for latest-style artifacts.
+
+**Scope:**
+
+- Define a freshness manifest format with:
+  - `source_trade_date`
+  - `published_at`
+  - `producer`
+  - `freshness_status`
+  - `staleness_policy`
+  - `source_artifact_path`
+  - `publication_status`
+  - `partial_reason`
+- Define interpretation rules for fresh, stale, suppressed, partial, diagnostic,
+  and missing latest publications.
+- Start with shadow latest artifacts, then extend to dashboard, broker snapshot,
+  options review, health check, and report latest pointers where appropriate.
+
+**Rationale:** Latest files are convenient but operationally ambiguous. A stale
+latest artifact can look healthy unless consumers also inspect adjacent status
+files.
+
+**Dependencies:** FR-015 should define artifact classes and ownership first.
+
+**Rollout guidance:** Add manifests beside existing latest outputs. Do not remove
+or rename existing latest files in the initial rollout.
+
+**Rollback reference:** Ignore or stop writing manifests. Existing latest
+publication behavior remains unchanged.
+
+**Observation focus:** Manifest freshness status, source/date alignment, partial
+publication reasons, and downstream health aggregator consumption.
+
+**Foundation progress:** Freshness vocabulary and manifest examples are defined
+in `docs/artifact_governance.md`. Existing latest artifacts have not been
+mutated.
+
+### FR-019
+
+**Title:** Runtime artifact retention and backup policy
+**Category:** Artifact Lifecycle / Operations
+**Priority:** MEDIUM
+**Status:** BACKLOG
+**Blast Radius:** LOW
+
+**Purpose:** Formalize retention windows, archive rules, backup boundaries,
+cleanup rules, and safe-to-delete semantics for runtime artifacts.
+
+**Scope:**
+
+- Define retention classes for workflow artifacts, precompute bundles, broker
+  snapshots, reconciliation evidence, reports, diagnostics, research outputs,
+  recovery backups, logs, caches, dashboard payloads, and generated emails.
+- Address `outputs/` growth and operator expectations for archive vs deletion.
+- Define backup philosophy for critical state and recovery evidence.
+- Define what must never be deleted as a rollback shortcut.
+- Keep cleanup policy separate from any cleanup implementation.
+
+**Rationale:** `outputs/` growth and mixed artifact purposes make operational
+review noisy and increase the risk of deleting evidence that should be retained.
+
+**Dependencies:** FR-015 should define artifact ownership first. FR-018 should
+clarify latest publication semantics before cleanup rules are automated.
+
+**Rollout guidance:** Start with documentation and dry-run inventory. Any actual
+cleanup command should be a later, explicit FR with dry-run, manifest, backup,
+and rollback behavior.
+
+**Rollback reference:** Ignore the policy document. Do not delete artifacts as
+part of rolling back the policy.
+
+**Observation focus:** Operator agreement on retention classes, backup
+boundaries, and safe-to-delete categories.
+
+### FR-020
+
+**Title:** Read-only validation isolation
+**Category:** Testing / Operational Hygiene
+**Priority:** MEDIUM
+**Status:** BACKLOG
+**Blast Radius:** MEDIUM
+
+**Purpose:** Prevent tests, smoke flows, and read-only validation from mutating
+repo-level runtime `outputs/` and `logs/`.
+
+**Scope:**
+
+- Identify tests and smoke commands that write to repo-level `outputs/` or
+  `logs/`.
+- Move those tests to isolated temporary directories or injectable output roots.
+- Add deterministic cleanup for test-only artifacts where needed.
+- Preserve runtime/test separation so operational evidence cannot be confused
+  with validation residue.
+
+**Rationale:** Runtime evidence should be trustworthy. Tests that write into the
+same ignored artifact tree make local audits noisy and weaken confidence in
+read-only validation claims.
+
+**Dependencies:** FR-015 should classify runtime vs test artifacts. FR-017 can
+later flag test residue if needed.
+
+**Rollout guidance:** Start with non-trading tests and shadow wrapper tests.
+Avoid changing production output paths while introducing test-only output root
+overrides.
+
+**Rollback reference:** Revert test harness changes. Production behavior should
+remain unchanged.
+
+**Observation focus:** Clean `git status`, clean ignored runtime tree after
+targeted validation, and no loss of test coverage.
+
+### FR-021
+
+**Title:** Partial execution state normalization
+**Category:** Execution Observability / Operator Semantics
+**Priority:** HIGH
+**Status:** BACKLOG
+**Blast Radius:** HIGH
+
+**Purpose:** Clarify partial-success semantics when one execution phase succeeds
+but a later execution-adjacent stage fails.
+
+**Scope:**
+
+- Define normalized operator states for cases such as:
+  - Equity orders accepted but options stage fails.
+  - Orders submitted but post-submit artifact writing fails.
+  - Execution succeeds but reconciliation/reporting confirmation fails.
+- Separate broker-side submission truth from workflow exit code.
+- Add explicit partial-success artifacts and operator recommendations.
+- Avoid changing order-submission behavior in the first pass.
+
+**Rationale:** A phase can be operationally failed while broker-side orders were
+already accepted. Operators need precise semantics so failure handling does not
+accidentally imply no trades occurred.
+
+**Dependencies:** FR-017 should provide the health surface and FR-015 should
+define artifact ownership. This is intentionally later because it is
+execution-adjacent.
+
+**Rollout guidance:** Start as reporting/summary normalization. Do not alter
+broker submission, retry behavior, or options allowlists without a separate
+HIGH blast-radius promotion.
+
+**Rollback reference:** Revert reporting/summary semantics while preserving raw
+broker and execution artifacts.
+
+**Observation focus:** Operator summaries, execution results, confirmation
+emails, broker snapshots, and any partial-state daily health fields.
+
+### FR-022
+
+**Title:** Dependency hash enforcement
+**Category:** Supply Chain / Dependency Management
+**Priority:** HIGH
+**Status:** REVIEWED_DEFERRED
+**Blast Radius:** MEDIUM
+
+**Purpose:** Move from advisory dependency baselines toward deterministic,
+hash-enforced installs when operational prerequisites are met.
+
+**Deferred rationale:** Premature hash enforcement can break VM recovery,
+GitHub workflow installs, research-agent installs, or emergency dependency
+patches if clean-install validation, rollback procedures, and exception handling
+are not ready.
+
+**Prerequisites before promotion:**
+
+- Clean environment install validation for local, VM, and GitHub Actions.
+- Resolution of the documented APScheduler dependency exception.
+- Agreement on whether workflows install with `constraints.txt`.
+- Advisory `pip-audit` or equivalent review before hard gates.
+- Emergency dependency update and rollback procedure.
+
+**Rollback reference:** Keep current dependency install behavior unchanged until
+hash enforcement is explicitly promoted. If promoted later, rollback by
+restoring non-hash install commands and preserving the advisory lock artifacts
+for review.
+
+**Observation focus:** Dependency drift, Dependabot advisory noise, clean install
+results, and VM/GitHub parity.
+
+### FR-023
+
+**Title:** Documentation and generated artifact separation
+**Category:** Documentation Governance / Artifact Hygiene
+**Priority:** MEDIUM
+**Status:** IN_PROGRESS
+**Blast Radius:** LOW
+
+**Purpose:** Separate canonical documentation from generated markdown, runtime
+reports, diagnostics, research outputs, and operator notes.
+
+**Scope:**
+
+- Propose a documentation taxonomy:
+  - `docs/governance/`
+  - `docs/architecture/`
+  - `docs/deployment/`
+  - `docs/operations/`
+  - `docs/recovery/`
+  - `docs/runbooks/`
+  - `docs/historical/`
+- Propose an output taxonomy:
+  - `outputs/reports/`
+  - `outputs/diagnostics/`
+  - `outputs/research/`
+  - `outputs/workflow/`
+  - `outputs/operations/`
+- Establish that generated markdown should not live beside canonical operator
+  docs unless it is clearly historical or explicitly checked in as source.
+
+**Rationale:** Documentation drift is operational risk. Mixing canonical docs,
+generated reports, diagnostics, and historical notes makes operator guidance
+harder to trust.
+
+**Dependencies:** FR-015 should define artifact classes first. FR-023 can then
+apply those classes to docs and generated reports.
+
+**Rollout guidance:** Start with a taxonomy proposal and migration map. Do not
+move many files in the first pass unless each move has redirect/update coverage.
+
+**Rollback reference:** Revert documentation moves or keep compatibility links.
+Do not delete historical docs as cleanup.
+
+**Observation focus:** Reduced doc ambiguity, clear canonical owner per doc, and
+no broken runbook/deployment references.
+
+**Foundation progress:** Initial taxonomy proposal exists in
+`docs/documentation_taxonomy.md`. No files have been moved.
+
+## Operational Lessons Learned
+
+- Wave-based promotion made blast radius and rollback boundaries explicit.
+- Runtime smoke testing found orchestration issues that static validation would
+  not prove.
+- Degraded-state simulation identified the FR-005 fail-open risk before
+  deployment.
+- Additive status artifacts improved observability without deleting or
+  overwriting canonical outputs.
+- Governance-driven release management is now the default: implementation speed
+  is useful, but deployment speed is not the goal.
+- Phase 4 should make operational state easier to trust before adding scheduler
+  or infrastructure complexity.
+
+## Maintenance Checklist
+
+- [ ] Market/execution window risk reviewed.
+- [ ] Current local and VM source ownership clear.
+- [ ] Blast radius classified.
+- [ ] Targeted validation selected before mutation.
+- [ ] Rollback path identified.
+- [ ] Runtime artifact impact documented.
+- [ ] Deployment plan uses FR-008 git fast-forward governance.
+- [ ] Observation surfaces identified for `DEPLOYED_OBSERVING` changes.

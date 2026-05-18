@@ -14,6 +14,11 @@
 - The scheduler VM at `~/quant-daily-report` is a deploy target, not the source
   of truth.
 - Standard deployment flow is `commit -> push -> fast-forward pull on VM -> validate`.
+- Rollback-first governance is canonical: prefer `git revert`, push, VM
+  fast-forward, then validation.
+- Wave deployments group related changes by rollback boundary and observation
+  surface. Scheduler, cache, and recovery changes remain `DEPLOYED_OBSERVING`
+  until runtime artifacts confirm healthy behavior.
 - SCP is exception-only for emergency hotfixes or bounded recovery diagnostics.
   Any SCP use requires later git reconciliation.
 - Preserve recovery patches and VM stashes until explicitly reviewed.
@@ -21,14 +26,60 @@
   `docs/deployment_workflow.md`.
 - Documentation synchronization rules live in `docs/documentation_governance.md`.
 
+Canonical validation:
+
+```bash
+python3 scripts/operational_validation.py
+bash -n scripts/cron_precompute.sh
+bash -n scripts/cron_execute.sh
+```
+
 ## Daily Shadow Automation
 
 - After successful precompute, `scripts/cron_precompute.sh` calls `scripts/run_shadow_candidates_daily.sh`.
 - The shadow wrapper writes to:
   - `outputs/shadow_candidates/YYYY-MM-DD/`
   - `outputs/shadow_candidates/performance/`
+  - `outputs/workflow/YYYY-MM-DD/shadow_generate.json`
+  - `outputs/workflow/YYYY-MM-DD/shadow_latest.json`
+  - `outputs/workflow/YYYY-MM-DD/shadow_reconciliation.json`
+  - `outputs/workflow/YYYY-MM-DD/shadow.json`
 - Failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed.
 - Shadow generation must never block production paper execution.
+
+## Self-Heal Recovery Integrity
+
+- `scripts/cron_execute.sh` validates the full precompute bundle before running
+  execution.
+- Required files are `contract.json`, `daily_snapshot.json`, `signals.json`,
+  and `planned_execution_payload.json`.
+- If validation fails, execution invokes `scripts/cron_precompute.sh` with
+  `SELF_HEAL_PRECOMPUTE_ONLY=1`.
+- Self-heal suppresses precompute email, shadow generation, latest shadow
+  publication, and shadow reconciliation.
+- Execution continues only after full bundle validation passes.
+- Partial recovery output fails closed.
+
+Recovery artifacts:
+
+- `outputs/workflow/YYYY-MM-DD/execution_bundle_validation.json`
+- `outputs/workflow/YYYY-MM-DD/execution_self_heal.json`
+- `outputs/workflow/YYYY-MM-DD/precompute_bundle_validation.json`
+- `outputs/workflow/YYYY-MM-DD/precompute_self_heal.json`
+
+## Phase 4 Governance Direction
+
+The next planned hardening phase is **Phase 4: Artifact Governance +
+Operational Telemetry**. It is a non-trading, non-execution governance phase
+focused on artifact ownership, daily health synthesis, latest freshness
+manifests, retention policy, validation isolation, and documentation taxonomy.
+
+Phase 4 should improve operator trust surfaces without changing broker
+submission, strategy selection, cron timing, or portfolio construction. The
+canonical backlog and priority order live in `docs/friday_refactor_backlog.md`.
+The current foundation references are `docs/artifact_governance.md`,
+`docs/operational_health_aggregator.md`, and
+`docs/documentation_taxonomy.md`.
 
 ## Table of Contents
 - [Reconciliation Failure Recovery](#reconciliation-failure-recovery)

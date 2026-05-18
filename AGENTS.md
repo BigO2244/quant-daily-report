@@ -25,9 +25,11 @@ Automation:
 Single agent-facing handoff for this repository. Operational, architecture,
 scheduler, and workflow guidance lives here.
 
-Last updated: 2026-05-12 — deterministic git-based VM deployment remains the
-operating model; post-recovery Shadow scorecard health, promotion readiness, and
-cron command validation guardrails are documented for operator use.
+Last updated: 2026-05-16 — Waves 1-3 are deployed under deterministic
+git-based VM deployment. Current operations include rollback-first deployment
+governance, shadow orchestration observability, repository-scoped CI caches, and
+fail-closed self-heal recovery integrity validation. Phase 4 is planned as a
+non-trading Artifact Governance + Operational Telemetry backlog phase.
 
 ---
 
@@ -107,8 +109,31 @@ Shadow generation is best-effort only:
 - wrapper: `scripts/run_shadow_candidates_daily.sh`
 - invoked from: `scripts/cron_precompute.sh`
 - outputs: `outputs/shadow_candidates/YYYY-MM-DD/` and `outputs/shadow_candidates/performance/`
+- status artifacts:
+  - `outputs/workflow/YYYY-MM-DD/shadow_generate.json`
+  - `outputs/workflow/YYYY-MM-DD/shadow_latest.json`
+  - `outputs/workflow/YYYY-MM-DD/shadow_reconciliation.json`
+  - `outputs/workflow/YYYY-MM-DD/shadow.json`
 - failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed
 - shadow cannot block production execution
+
+Self-heal execution recovery is fail-closed:
+- `scripts/cron_execute.sh` validates the full precompute bundle before
+  execution continuation.
+- If the bundle is missing or invalid, execution invokes
+  `scripts/cron_precompute.sh` with `SELF_HEAL_PRECOMPUTE_ONLY=1`.
+- Self-heal precompute suppresses precompute email, shadow generation, latest
+  shadow publication, and shadow reconciliation.
+- Execution continues only when `core/precompute_bundle_validation.py` confirms
+  `contract.json`, `daily_snapshot.json`, `signals.json`, and
+  `planned_execution_payload.json`.
+- Recovery writes:
+  - `outputs/workflow/YYYY-MM-DD/execution_bundle_validation.json`
+  - `outputs/workflow/YYYY-MM-DD/execution_self_heal.json`
+  - `outputs/workflow/YYYY-MM-DD/precompute_bundle_validation.json`
+  - `outputs/workflow/YYYY-MM-DD/precompute_self_heal.json`
+- Partial recovery output fails closed. Do not bypass bundle validation to force
+  execution.
 
 Post-close Shadow reporting guardrails:
 - `scripts/hydrate_price_cache_only.py` is the routine VM cache-only hydrator.
@@ -392,6 +417,7 @@ Four independent layers prevent position and regime whipsaw:
 | `quant_research_agent/config/strategy_context.yaml` | Themes, watchlist, scoring calibration |
 | `core/options_overlay_shadow.py` | Options strategy selection + shadow artifacts |
 | `core/options_execution.py` | Options live execution — OCC symbol, Alpaca submission |
+| `core/precompute_bundle_validation.py` | Full precompute bundle validation and recovery status payload generation |
 | `config/options_execution_policy.json` | Options execution gates — `allow_live_submission` flag |
 | `brokers/alpaca_broker.py` | Alpaca broker — equity + options order submission |
 | `scripts/crontab.txt` | Full cron schedule — install with `crontab scripts/crontab.txt` |
@@ -423,6 +449,47 @@ Canonical deployment model:
 - VM deployment must be fast-forwardable from `origin/main`; do not create VM
   merge commits, rebase VM history, or force-overwrite VM source.
 - Local commits do not deploy to the VM until pushed and pulled on the VM.
+
+Wave deployment methodology:
+- Group changes by blast radius and rollback boundary.
+- Promote independent waves in order of lowest operational risk first.
+- Use simulation before promotion for scheduler, recovery, and
+  execution-adjacent changes.
+- Mark sensitive changes `DEPLOYED_OBSERVING` until runtime artifacts show the
+  expected behavior in production.
+- Do not assume implemented FRs are deployable; use the FR ledger/backlog status
+  model in `docs/fr_execution_ledger.md` and `docs/friday_refactor_backlog.md`.
+
+Canonical validation commands:
+- Reporting/learning changes:
+  `python3 -m pytest Tests/test_feedback_loop_artifacts.py Tests/test_portfolio_learning_report.py -q`
+- Shadow orchestration changes:
+  `python3 -m pytest Tests/test_shadow_daily_wrapper.py Tests/test_execution_pipeline_integration.py -q`
+- Recovery integrity changes:
+  `python3 -m pytest Tests/test_execution_pipeline_integration.py Tests/test_precompute_bundle_validation.py -q`
+- Governance check:
+  `python3 scripts/operational_validation.py`
+- Cron-adjacent shell syntax:
+  `bash -n scripts/cron_precompute.sh` and `bash -n scripts/cron_execute.sh`
+
+Canonical deployment sequence:
+1. Local audit and targeted validation.
+2. Isolated commit with rollback boundary clear.
+3. Push to `origin/main`.
+4. VM audit: status, HEAD, staged/unstaged/untracked drift.
+5. VM fast-forward only from `origin/main`.
+6. Run operational validation and targeted checks.
+7. Observe the wave-specific runtime artifacts before considering the wave
+   fully settled.
+
+Canonical rollback process:
+1. Record VM status, HEAD, and relevant runtime evidence.
+2. Prefer `git revert <bad-commit>` locally.
+3. Push the revert commit.
+4. VM fast-forward to the revert.
+5. Re-run operational validation and targeted checks.
+6. Preserve generated recovery/status artifacts as evidence; do not delete them
+   as a rollback shortcut.
 
 SCP governance:
 - SCP is exception-only for emergency hotfixes or recovery diagnostics.
@@ -457,6 +524,14 @@ For scheduler incidents, inspect:
 - `logs/research_<date>.log`
 - `outputs/broker/recon_pretrade_<date>.json`
 - `outputs/precompute/<date>/contract.json`
+- `outputs/workflow/<date>/execution_bundle_validation.json`
+- `outputs/workflow/<date>/execution_self_heal.json`
+- `outputs/workflow/<date>/precompute_bundle_validation.json`
+- `outputs/workflow/<date>/precompute_self_heal.json`
+- `outputs/workflow/<date>/shadow_generate.json`
+- `outputs/workflow/<date>/shadow_latest.json`
+- `outputs/workflow/<date>/shadow_reconciliation.json`
+- `outputs/workflow/<date>/shadow.json`
 - `outputs/overnight_signals/<date>.json`
 - `outputs/shadow_candidates/<date>/comparison.md`
 - `outputs/shadow_candidates/performance/shadow_summary.json`
@@ -555,10 +630,31 @@ FR governance:
 - Friday refactor work should default to Friday after market close.
 - FR work must have a status, blast-radius assessment, dependencies, selected
   validation, rollback plan, and documentation impact before implementation.
-- Preferred FR status flow: `BACKLOG -> READY -> READY_VALIDATED -> IN_PROGRESS -> DONE -> DEPLOYED`.
-- Do not mark an FR `DONE` when local WIP, unreconciled VM state, missing docs,
-  or incomplete validation still blocks operational completion.
+- Preferred FR status flow:
+  `BACKLOG -> READY -> READY_VALIDATED -> IN_PROGRESS -> PROMOTION_READY -> DEPLOYED_OBSERVING -> DEPLOYED`.
+- Do not mark an FR `DEPLOYED` when local WIP, unreconciled VM state, missing
+  docs, incomplete validation, or unresolved observation requirements still
+  block operational completion.
 - Track completed FR work in `docs/fr_execution_ledger.md`.
+- Phase 4 backlog work centers on artifact governance, operational telemetry,
+  freshness manifests, retention policy, validation isolation, documentation
+  taxonomy, and operator trust surfaces. It is non-trading and non-execution by
+  default; do not use it as justification for broker, strategy, cron, or
+  scheduler rewrites.
+- Phase 4 foundation docs:
+  `docs/artifact_governance.md`,
+  `docs/operational_health_aggregator.md`, and
+  `docs/documentation_taxonomy.md`.
+
+Degraded-state engineering:
+- Fail safe over fail open.
+- Recovery paths must validate their own outputs before allowing execution to
+  continue.
+- Suppressed side effects must be explicit in status artifacts.
+- Do not overwrite or delete latest artifacts to hide stale state; add metadata
+  that makes stale/degraded state visible.
+- Use controlled local simulations before promoting recovery or scheduler
+  changes.
 
 Documentation governance:
 - Documentation drift is operational risk.
@@ -605,6 +701,8 @@ Runtime separation:
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute now also triggers `scripts/run_shadow_candidates_daily.sh`
   as a non-blocking reporting step for Polaris / Orion / Lyra shadow artifacts
+- Missing or invalid precompute bundles trigger `SELF_HEAL_PRECOMPUTE_ONLY=1`;
+  execution continues only after full bundle validation passes
 - If a `SELF_HEAL` pretrade reconciliation occurs, the wrapper re-runs reconciliation
   once against the refreshed canonical state before proceeding
 - Same-day retry locks block duplicate successful executions but must not strand
