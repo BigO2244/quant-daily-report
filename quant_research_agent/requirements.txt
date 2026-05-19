@@ -1,10 +1,17 @@
-anthropic>=0.40.0
-arxiv>=2.1.0
-yfinance>=0.2.40
-feedparser>=6.0.11
-fredapi>=0.5.2
-pyyaml>=6.0.1
-python-dotenv>=1.0.0
-requests>=2.32.0
+# FR-010 Phase 1 deterministic baseline.
+# Research-only package versions were captured from the local development venv.
+# Shared runtime packages use the VM production baseline where available.
+anthropic==0.96.0
+arxiv==3.0.0
+feedparser==6.0.12
+fredapi==0.5.2
+python-dotenv==1.2.2
+requests==2.32.5
+PyYAML==6.0.3
+yfinance==1.2.0
+pytest==9.0.3
+
+# Phase 1 exception: APScheduler was listed previously but was not installed in
+# either the local or VM baseline environment, so no exact installed version
+# exists to pin without introducing a new dependency version.
 APScheduler>=3.10.0
-pytest>=8.0.0

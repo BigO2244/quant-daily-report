@@ -1,0 +1,10 @@
+# Abstract production runtime requirements retained from the pre-FR-010 baseline.
+# Compile/pin output for Phase 1 lives in requirements.txt.
+pandas
+numpy
+yfinance>=0.2.40
+matplotlib
+alpaca-py
+requests
+pyarrow
+PyYAML

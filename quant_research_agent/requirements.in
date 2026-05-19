@@ -1,0 +1,12 @@
+# Abstract research-agent requirements retained from the pre-FR-010 baseline.
+# Compile/pin output for Phase 1 lives in quant_research_agent/requirements.txt.
+anthropic>=0.40.0
+arxiv>=2.1.0
+yfinance>=0.2.40
+feedparser>=6.0.11
+fredapi>=0.5.2
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+requests>=2.32.0
+APScheduler>=3.10.0
+pytest>=8.0.0

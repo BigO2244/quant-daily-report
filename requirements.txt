@@ -1,8 +1,10 @@
-pandas
-numpy
-yfinance>=0.2.40
-matplotlib
-alpaca-py
-requests
-pyarrow
-PyYAML
+# FR-010 Phase 1 deterministic baseline.
+# Baseline source: VM production venv at ~/quant-daily-report, captured 2026-05-12.
+alpaca-py==0.43.2
+matplotlib==3.10.8
+numpy==2.2.6
+pandas==2.3.3
+pyarrow==23.0.1
+PyYAML==6.0.3
+requests==2.32.5
+yfinance==1.2.0
