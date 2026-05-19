@@ -66,7 +66,7 @@ def _load_symbols(universe_path: Path) -> list[str]:
 def _publish_shadow_latest(shadow_output_dir: Path, trade_date: str) -> dict[str, Any]:
     dated_dir = shadow_output_dir / trade_date
     latest_dir = shadow_output_dir / "latest"
-    artifacts = ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json")
+    artifacts = ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json", "feedback_loop_summary.json")
     missing: list[str] = []
     latest_dir.mkdir(parents=True, exist_ok=True)
     for artifact in artifacts:

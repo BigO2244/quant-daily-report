@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from scripts import hydrate_price_cache_only as script
+from scripts import refresh_shadow_scorecard_artifacts as refresh_script
 
 
 def _write_universe(path: Path) -> None:
@@ -200,3 +201,106 @@ def test_cache_only_script_does_not_import_execution_modules() -> None:
         "brokers.alpaca_broker",
     )
     assert not any(token in script_text for token in forbidden)
+
+
+def _shadow_panel() -> pd.DataFrame:
+    dates = pd.date_range("2022-01-03", periods=340, freq="B")
+    rows = []
+    slopes = {
+        "AAA": 0.0026,
+        "BBB": 0.0017,
+        "CCC": 0.0012,
+        "DDD": 0.0007,
+        "EEE": 0.0002,
+        "FFF": -0.0002,
+        "SPY": 0.0011,
+    }
+    for ticker, slope in slopes.items():
+        price = 100.0
+        for idx, value in enumerate(dates):
+            price *= 1.0 + slope
+            rows.append(
+                {
+                    "date": value,
+                    "ticker": ticker,
+                    "open": price * 0.99,
+                    "high": price * 1.01,
+                    "low": price * 0.98,
+                    "close": price,
+                    "volume": 1_000_000 + 10_000 * (idx % 5),
+                    "sector": "Tech",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_shadow_scorecard_refresh_regenerates_feedback_before_latest_publish(tmp_path: Path, monkeypatch) -> None:
+    panel = _shadow_panel()
+    output_dir = tmp_path / "shadow"
+    cache_path = tmp_path / "price_panel.parquet"
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    panel.to_parquet(cache_path, index=False)
+
+    monkeypatch.setattr(refresh_script, "load_universe", lambda _path: ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"])
+
+    def fake_ensure_price_panel(**_kwargs):
+        return panel, {"download_performed": False}
+
+    monkeypatch.setattr(refresh_script, "ensure_price_panel", fake_ensure_price_panel)
+
+    assert refresh_script.main(
+        [
+            "--trade-date",
+            "2023-03-30",
+            "--start-date",
+            "2022-01-03",
+            "--output-dir",
+            str(output_dir),
+            "--price-cache-path",
+            str(cache_path),
+        ]
+    ) == 1
+
+    stale_feedback = output_dir / "2023-03-31" / "feedback_loop_summary.json"
+    stale_feedback.parent.mkdir(parents=True, exist_ok=True)
+    stale_feedback.write_text(
+        json.dumps(
+            {
+                "trade_date": "2023-03-31",
+                "status": "NO_DATA",
+                "strategies": {
+                    "polaris": {
+                        "learning_readiness": "LOW",
+                        "primary_learning_gap": "stale placeholder",
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    assert refresh_script.main(
+        [
+            "--trade-date",
+            "2023-03-31",
+            "--start-date",
+            "2022-01-03",
+            "--output-dir",
+            str(output_dir),
+            "--price-cache-path",
+            str(cache_path),
+        ]
+    ) == 0
+
+    feedback = json.loads(stale_feedback.read_text(encoding="utf-8"))
+    comparison = json.loads((output_dir / "2023-03-31" / "comparison.json").read_text(encoding="utf-8"))
+    latest_feedback = output_dir / "latest" / "feedback_loop_summary.json"
+    rolling_index = output_dir / "performance" / "feedback_loop_rolling_index.csv"
+
+    assert set(comparison["strategies"]) == {"caerus_polaris", "caerus_orion", "caerus_lyra"}
+    assert feedback["status"] != "NO_DATA"
+    assert feedback["strategies"]["polaris"]["primary_learning_gap"] != "stale placeholder"
+    assert latest_feedback.exists()
+    assert json.loads(latest_feedback.read_text(encoding="utf-8")) == feedback
+    assert rolling_index.exists()

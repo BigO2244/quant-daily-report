@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from core.feedback_loop_artifacts import write_feedback_loop_artifacts
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot
 from research.flow_detection.data import ensure_price_panel, load_universe
@@ -144,7 +145,7 @@ def _publish_latest(output_root: Path, trade_date: str) -> dict[str, Any]:
     latest_dir.mkdir(parents=True, exist_ok=True)
     missing: list[str] = []
     published: list[str] = []
-    for artifact in ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json"):
+    for artifact in ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json", "feedback_loop_summary.json"):
         source = dated_dir / artifact
         if not source.exists():
             missing.append(artifact)
@@ -212,12 +213,17 @@ def main(argv: list[str] | None = None) -> int:
     (dated_dir / "comparison.md").write_text(shadow.build_comparison_markdown(comparison_payload, dated_dir=dated_dir), encoding="utf-8")
 
     nav_status = _append_nav_series(output_root=output_root, shadow_performance=shadow_performance)
+    feedback_summary = write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
     publish_status = _publish_latest(output_root, trade_date)
     result = {
         "trade_date": trade_date,
         "status": "OK" if nav_status.get("status") == "OK" and publish_status.get("status") == "OK" else "PARTIAL",
         "panel_meta": panel_meta,
         "nav_series": nav_status,
+        "feedback_loop": {
+            "status": feedback_summary.get("status"),
+            "path": str(dated_dir / "feedback_loop_summary.json"),
+        },
         "latest_publish": publish_status,
     }
     print(json.dumps(result, indent=2, sort_keys=True))
