@@ -16,6 +16,7 @@ coverage.xml
 
 # Logs
 *.log
+*.err
 
 # Runtime outputs
 outputs/
@@ -62,7 +63,17 @@ Dashboard/
 !web/
 !web/dashboard/
 !web/dashboard/index.html
+web/dashboard/dashboard-data.js
+web/dashboard/dashboard-data.json
+web/dashboard/trading_day_summary.json
+web/dashboardDEV/dashboard-data.js
+web/dashboardDEV/dashboard-data.json
+web/dashboardDEV/dashboard_data.json
 _gha/
+
+# Generated research reports
+weekly_quant_research/*.md
+
 # Data files and caches (runtime only)
 data/fundamental/
 data/macro/
