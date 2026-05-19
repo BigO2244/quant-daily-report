@@ -25,8 +25,8 @@ For documentation:
 2. `docs/deployment_workflow.md` controls deployment governance.
 3. `docs/OPERATIONS.md` and `docs/runbook.md` control operator procedures.
 4. Architecture-specific docs control subsystem contracts.
-5. `docs/friday_refactor_backlog.md` and `docs/fr_execution_ledger.md` track FR
-   work and completion evidence.
+5. `docs/governance/` tracks FR active work, deployed/deferred history,
+   governance methodology, and operational lessons.
 
 ## Documentation Update Triggers
 
@@ -51,7 +51,7 @@ Update or review docs when a change affects:
 | Dashboard publishing change | `AGENTS.md`, dashboard specs, deployment workflow if VM state changes |
 | Artifact schema change | owning subsystem doc, tests, operator docs if used operationally |
 | Strategy promotion or execution scope | `AGENTS.md`, architecture docs, runbook |
-| Friday refactor | `docs/friday_refactor_backlog.md`, `docs/fr_execution_ledger.md` |
+| Friday refactor | `docs/governance/fr_active_backlog.md`, `docs/governance/fr_registry.md`, `docs/governance/fr_governance_model.md`, `docs/governance/operational_lessons.md` |
 
 If documentation cannot be updated in the same change, record an explicit
 blocker or follow-up. Do not silently leave stale operational instructions.
@@ -77,8 +77,12 @@ Agent instructions must remain aligned with operational docs:
 - `AGENTS.md` should summarize the current rules.
 - Detailed deployment procedure belongs in `docs/deployment_workflow.md`.
 - Operator procedures belong in `docs/OPERATIONS.md` and `docs/runbook.md`.
-- FR work belongs in `docs/friday_refactor_backlog.md`.
-- Completed FR evidence belongs in `docs/fr_execution_ledger.md`.
+- Active FR work belongs in `docs/governance/fr_active_backlog.md`.
+- Deployed and reviewed deferred FR history belongs in
+  `docs/governance/fr_registry.md`.
+- FR methodology belongs in `docs/governance/fr_governance_model.md`.
+- FR deployment and recovery lessons belong in
+  `docs/governance/operational_lessons.md`.
 
 If these conflict, stop and reconcile before changing production-adjacent code.
 

@@ -46,15 +46,38 @@ Use this sequence for normal source deployments:
    - `git fetch origin`
    - `git log origin/main -1 --oneline`
 7. Fast-forward only:
-   - `git merge --ff-only origin/main`
+   - preferred: `git pull --ff-only origin main`
+   - equivalent when already fetched: `git merge --ff-only origin/main`
 8. Validate:
    - `git status`
    - `git log -1 --oneline`
    - `python3 scripts/operational_validation.py`
    - targeted syntax/tests based on changed files
+9. Observe wave-specific runtime artifacts before closing the deployment:
+   - shadow orchestration: `outputs/workflow/<date>/shadow*.json`
+   - self-heal recovery: `outputs/workflow/<date>/*self_heal.json`
+   - bundle integrity: `outputs/workflow/<date>/*bundle_validation.json`
+   - cache migration: first-run cache misses followed by regeneration
 
 Do not use VM merge commits, rebase, force push, `git reset --hard`, or broad
 cleanup to force deployment state.
+
+## Wave Promotion Model
+
+Caerus now uses wave deployment for related FR work:
+
+- **Wave 1:** low-risk reporting and CI governance hardening.
+- **Wave 2:** orchestration observability and cache namespace hardening.
+- **Wave 3:** recovery integrity and degraded-state fail-closed behavior.
+
+Wave rules:
+
+- Keep wave commits isolated by rollback boundary.
+- Deploy the lowest-risk independent wave first.
+- Run local validation and smoke simulations before push.
+- Stop between waves for VM validation and observation.
+- Mark scheduler, cache, and recovery changes `DEPLOYED_OBSERVING` until the
+  expected runtime artifacts are present and healthy.
 
 ## VM Validation Steps
 
@@ -87,6 +110,20 @@ Rollback must preserve recoverability:
    explicit. Do not use `git reset --hard` as an implicit cleanup tool.
 5. If cron or service files changed, verify the installed state and preserve the
    prior known-good source.
+
+Canonical source rollback:
+
+```text
+git revert <commit>
+git push origin main
+VM: git fetch origin
+VM: git pull --ff-only origin main
+VM: python3 scripts/operational_validation.py
+```
+
+Runtime artifacts created before rollback are evidence. Do not delete
+`outputs/workflow/<date>/`, logs, broker snapshots, or generated reports as a
+rollback shortcut.
 
 Existing recovery patches and stash entries must not be deleted until explicitly
 reviewed and declared obsolete.
@@ -125,6 +162,40 @@ Classify drift as:
 
 Stop if VM-only production source changes are unexplained.
 
+## Operational Observation Surfaces
+
+The following artifacts are produced by deployed orchestration/recovery
+hardening and should be inspected when relevant:
+
+| Artifact | Producer | Meaning | Blocking |
+|---|---|---|---|
+| `outputs/workflow/<date>/shadow_generate.json` | `scripts/run_shadow_candidates_daily.sh` | Shadow generation substep result. | Non-blocking |
+| `outputs/workflow/<date>/shadow_latest.json` | `scripts/run_shadow_candidates_daily.sh` | Latest shadow publication result. | Non-blocking |
+| `outputs/workflow/<date>/shadow_reconciliation.json` | `scripts/run_shadow_candidates_daily.sh` | Live-vs-shadow reconciliation substep result. | Non-blocking |
+| `outputs/workflow/<date>/shadow.json` | `scripts/run_shadow_candidates_daily.sh` | Aggregate shadow wrapper status. | Non-blocking |
+| `outputs/workflow/<date>/execution_bundle_validation.json` | `scripts/cron_execute.sh` | Full precompute bundle validation before execution continuation. | Blocking |
+| `outputs/workflow/<date>/execution_self_heal.json` | `scripts/cron_execute.sh` | Execution recovery attempt, result, continuation decision, and suppressed side effects. | Blocking when validation fails |
+| `outputs/workflow/<date>/precompute_bundle_validation.json` | `scripts/cron_precompute.sh` | Full bundle validation after precompute writes. | Blocking for precompute success |
+| `outputs/workflow/<date>/precompute_self_heal.json` | `scripts/cron_precompute.sh` | Self-heal-only precompute status and suppressed side effects. | Feeds execution recovery |
+
+Failure interpretation:
+
+- Shadow artifacts are diagnostic; shadow failure must not block production
+  execution.
+- Bundle validation artifacts are execution-integrity gates; missing or invalid
+  required precompute files must block execution continuation.
+- Self-heal artifacts document degraded-state recovery. Repeated recovery
+  attempts require operator review even if the final status is healthy.
+
+Cache namespace migration:
+
+- FR-012 added `github.repository_id` to precompute and canonical snapshot cache
+  keys.
+- First post-deploy GitHub workflow runs may miss old caches and regenerate new
+  repository-scoped caches.
+- Cache misses are expected during migration; stale or cross-repository restores
+  are not.
+
 ## SCP Exception Process
 
 SCP is exception-only. Valid uses are emergency hotfixes, recovery diagnostics,
@@ -161,7 +232,7 @@ SCP-only source must not remain the production truth.
 - [ ] Relevant syntax checks passed.
 - [ ] Targeted pytest slices passed if required.
 - [ ] Cron/service state verified if changed.
-- [ ] Recovery notes or FR ledger updated when applicable.
+- [ ] Recovery notes or FR registry updated when applicable.
 - [ ] Any SCP exception has a git reconciliation follow-up.
 
 ## Do Not Deploy Conditions

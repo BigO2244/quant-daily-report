@@ -76,10 +76,12 @@ manifests, retention policy, validation isolation, and documentation taxonomy.
 
 Phase 4 should improve operator trust surfaces without changing broker
 submission, strategy selection, cron timing, or portfolio construction. The
-canonical backlog and priority order live in `docs/friday_refactor_backlog.md`.
-The current foundation references are `docs/artifact_governance.md`,
-`docs/operational_health_aggregator.md`, and
-`docs/documentation_taxonomy.md`.
+canonical active backlog and priority order live in
+`docs/governance/fr_active_backlog.md`. FR methodology lives in
+`docs/governance/fr_governance_model.md`, while deployed and deferred history
+lives in `docs/governance/fr_registry.md`. The current foundation references
+are `docs/artifact_governance.md`, `docs/operational_health_aggregator.md`,
+and `docs/documentation_taxonomy.md`.
 
 ## Table of Contents
 - [Reconciliation Failure Recovery](#reconciliation-failure-recovery)

@@ -457,8 +457,10 @@ Wave deployment methodology:
   execution-adjacent changes.
 - Mark sensitive changes `DEPLOYED_OBSERVING` until runtime artifacts show the
   expected behavior in production.
-- Do not assume implemented FRs are deployable; use the FR ledger/backlog status
-  model in `docs/fr_execution_ledger.md` and `docs/friday_refactor_backlog.md`.
+- Do not assume implemented FRs are deployable; use the FR governance model in
+  `docs/governance/fr_governance_model.md`, active work in
+  `docs/governance/fr_active_backlog.md`, and deployed/deferred history in
+  `docs/governance/fr_registry.md`.
 
 Canonical validation commands:
 - Reporting/learning changes:
@@ -635,7 +637,13 @@ FR governance:
 - Do not mark an FR `DEPLOYED` when local WIP, unreconciled VM state, missing
   docs, incomplete validation, or unresolved observation requirements still
   block operational completion.
-- Track completed FR work in `docs/fr_execution_ledger.md`.
+- Track active FR work in `docs/governance/fr_active_backlog.md`.
+- Track deployed and reviewed deferred FR history in
+  `docs/governance/fr_registry.md`.
+- Track FR methodology, observation-window exits, blast radius, validation, and
+  rollback rules in `docs/governance/fr_governance_model.md`.
+- Track FR deployment and recovery lessons in
+  `docs/governance/operational_lessons.md`.
 - Phase 4 backlog work centers on artifact governance, operational telemetry,
   freshness manifests, retention policy, validation isolation, documentation
   taxonomy, and operator trust surfaces. It is non-trading and non-execution by

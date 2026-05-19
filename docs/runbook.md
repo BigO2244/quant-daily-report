@@ -2,7 +2,7 @@
 
 **System:** Caerus Quant — Daily Execution & Research System
 **Author:** Brett Olson
-**Last reviewed:** 2026-05-08
+**Last reviewed:** 2026-05-15
 
 This runbook covers day-to-day operation of the Caerus trading system. It assumes you have access to the GitHub repository (Actions tab, Secrets/Variables), and optionally a local checkout.
 
@@ -14,9 +14,18 @@ Current deployment governance:
 - GitHub daily precompute/live workflows are dispatch-only safety paths, not the
   normal scheduler.
 - Standard source deployment is `commit -> push -> fast-forward pull on VM -> validate`.
+- Rollback is by git revert plus VM fast-forward whenever possible.
+- Wave deployments are validated locally, deployed through git, then observed
+  through runtime status artifacts before being considered fully settled.
 - SCP is exception-only and must be reconciled back through git.
 - See `docs/deployment_workflow.md` before changing deployment, cron, or VM
   source state.
+- The next planned hardening phase is Phase 4: Artifact Governance +
+  Operational Telemetry. It is backlog/planning only until individual FRs are
+  promoted, and it must remain non-trading and non-execution by default.
+- FR planning, history, and methodology are separated under `docs/governance/`:
+  active work in `fr_active_backlog.md`, deployed/deferred history in
+  `fr_registry.md`, and methodology in `fr_governance_model.md`.
 
 ---
 
@@ -46,24 +55,23 @@ Review this before 9:35 AM ET each trading day.
 - `Caerus Lyra` = secondary shadow challenger
 - `SPY` = benchmark
 
-### 1. Confirm Alpha Daily completed (~6:15 AM ET)
+### 1. Confirm VM precompute completed (~7:00 AM ET)
 
-- Go to **Actions → Alpha Daily Run** and confirm the most recent scheduled run completed with a green checkmark.
-- Check that `data/live_nav.csv` was committed by `github-actions` in the repo's commit history.
-- If the alpha run failed, it does not block execution — but the alpha email will not be sent. Investigate separately.
+- SSH to the VM and inspect `logs/precompute_<DATE>.log`.
+- Confirm `outputs/precompute/<DATE>/contract.json` and companion bundle files exist.
+- Confirm `outputs/workflow/<DATE>/precompute_bundle_validation.json` reports `status: OK`.
 
 ### 2. Check research digest (~7:00 AM ET)
 
-- Confirm **Actions → Research Digest — Nightly** ran and produced an artifact.
+- Confirm `logs/research_<DATE>.log` and the latest digest artifact are present.
 - Email digest failures are isolated and do not affect trading.
 
-### 3. Verify canonical model snapshot exists
+### 3. Verify execution recovery state is clean
 
-The `daily-alpaca-paper` workflow will fail in the "Verify canonical model snapshot exists" step if the cache is missing. This happens on the very first run or after cache eviction.
-
-- Go to **Actions → Daily Alpaca Paper Run** → any recent successful run.
-- Check that the `canonical-model-snapshot` artifact is present.
-- If missing, manually bootstrap before market open (see [Bootstrap procedure](#manual-bootstrap-procedure) below).
+- Inspect `outputs/workflow/<DATE>/execution_bundle_validation.json` after the
+  9:35 AM execution phase.
+- If `execution_self_heal.json` exists, confirm whether `execution_continued`
+  is `true` or `false` and review `validation_failures`.
 
 ### 4. Confirm Alpaca API credentials are valid
 
@@ -83,15 +91,16 @@ Or trigger the workflow and watch the "Alpaca smoke test" and "Diag Alpaca auth"
 
 ## Expected Daily Workflow Sequence
 
-| Time (ET) | Workflow | Job | Key Steps |
+| Time (ET) | Scheduler | Phase | Key Steps |
 |---|---|---|---|
-| ~6:15 AM | `alpha_daily` | `alpha` | alpha_report.py → daily_alpha_run.py → commit live_nav.csv → email alpha report |
-| ~7:00 AM | `research-digest` | `digest` | quant_research_agent/main.py → email digest |
-| ~7:00 AM after precompute | local VM cron | shadow lane | `scripts/cron_precompute.sh` → `scripts/run_shadow_candidates_daily.sh` → write `outputs/shadow_candidates/YYYY-MM-DD/` |
-| 9:35 AM | `daily-alpaca-paper` | `engine_run` | restore cache → smoke test → env check → daily_quant_report.py → auto-bootstrap if recon fails → upload artifacts |
-| After engine_run | `daily-alpaca-paper` | `email` | download artifacts → send execution email → send snapshot email |
+| 1:00 AM | VM cron | Overnight agents | `scripts/cron_overnight.sh` writes overnight signals. |
+| 6:30 AM | VM cron | Research digest | `scripts/cron_research.sh` writes research digest. |
+| 7:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` writes the precompute bundle and then non-blocking shadow artifacts. |
+| 9:35 AM | VM cron | Execution | `scripts/cron_execute.sh` validates the bundle, self-heals if needed, then executes from the validated bundle. |
+| 10:00 AM | VM cron | Confirmation | `scripts/cron_confirm.sh` sends confirmation/reporting email. |
 
-Both cron entries for each workflow handle DST shifts (EST vs EDT). Both entries fire every weekday, but one fires on the correct ET hour depending on the current UTC offset. The duplicate is harmless — the second fires 1 hour off-peak and will either be a no-op or produce a redundant run depending on how `REPORT_DATE` resolves.
+GitHub daily precompute/live workflows are dispatch-only safety paths. They are
+not the normal production scheduler.
 
 ---
 
@@ -106,22 +115,54 @@ Both cron entries for each workflow handle DST shifts (EST vs EDT). Both entries
 - `outputs/shadow_candidates/<DATE>/comparison.md`
 - `outputs/shadow_candidates/performance/shadow_nav_series.csv`
 - `outputs/shadow_candidates/performance/shadow_summary.json`
+- `outputs/workflow/<DATE>/shadow_generate.json`
+- `outputs/workflow/<DATE>/shadow_latest.json`
+- `outputs/workflow/<DATE>/shadow_reconciliation.json`
+- `outputs/workflow/<DATE>/shadow.json`
 - `logs/shadow_<DATE>.log`
 
 Operator note:
 - `comparison.md` is the fastest daily shadow artifact to review
 - broker context appendix, if present, is informational only
 - shadow remains model-portfolio based and does not reflect broker-authoritative holdings
+- shadow status artifacts are diagnostic and non-blocking
 
-### After `alpha_daily`
+### Self-heal recovery and bundle validation
 
-- `data/live_nav.csv` — updated and committed to repo
-- `outputs/runs/<RUN_ID>/reports/` — alpha report artifacts
-- `outputs/runs/<RUN_ID>/snapshots/live_nav.csv` — NAV snapshot
-- `outputs/runs/<RUN_ID>/meta.json` — run metadata
-- Alpha report email received at `EMAIL_RECIPIENT`
+Execution validates the full precompute bundle before order execution. Required
+files are:
 
-### After `daily-alpaca-paper` (engine_run job)
+- `outputs/precompute/<DATE>/contract.json`
+- `outputs/precompute/<DATE>/daily_snapshot.json`
+- `outputs/precompute/<DATE>/signals.json`
+- `outputs/precompute/<DATE>/planned_execution_payload.json`
+
+If validation fails, `scripts/cron_execute.sh` runs a self-heal precompute with
+`SELF_HEAL_PRECOMPUTE_ONLY=1`. That recovery suppresses:
+
+- precompute email
+- shadow generation
+- latest shadow publication
+- shadow reconciliation
+
+Recovery artifacts:
+
+- `outputs/workflow/<DATE>/execution_bundle_validation.json`
+- `outputs/workflow/<DATE>/execution_self_heal.json`
+- `outputs/workflow/<DATE>/precompute_bundle_validation.json`
+- `outputs/workflow/<DATE>/precompute_self_heal.json`
+
+Operational interpretation:
+
+- `execution_continued: true` means recovery produced a fully valid bundle.
+- `execution_continued: false` means execution was intentionally halted.
+- Missing required files in `validation_failures` are blocking.
+- `recovery_attempt_count > 1` means repeated degraded recovery and should be reviewed.
+- Shadow latest artifacts may be stale after self-heal because shadow side
+  effects are intentionally suppressed; inspect the degraded-state flags rather
+  than deleting latest artifacts.
+
+### After VM execution
 
 - `outputs/runs/<RUN_ID>/logs/ci_alpaca_run.log` — full execution log
 - `outputs/runs/<RUN_ID>/reports/quant_report_<DATE>.html` — HTML daily report
@@ -134,7 +175,7 @@ Operator note:
 - `signals/<DATE>.json` — daily signal snapshot
 - Orders sent to Alpaca (or blocked if recon failed)
 
-### After `daily-alpaca-paper` (email job)
+### After VM confirmation
 
 - Execution email received with trade details, position changes, and status
 - Snapshot email received with daily portfolio HTML report
@@ -163,6 +204,7 @@ daily operations:
    - No `[ERROR]` lines
 5. Inspect artifacts under `outputs/runs/<RUN_ID>/`, `outputs/broker/`, and
    `outputs/precompute/<DATE>/`.
+6. For orchestration/recovery questions, inspect `outputs/workflow/<DATE>/`.
 
 ### Via GitHub Actions
 
