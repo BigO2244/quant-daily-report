@@ -1,0 +1,11 @@
+{
+  "run_id": "2026-05-18T093507-0400_71f60c1",
+  "trade_date": "2026-05-18",
+  "execution_status": "HALTED",
+  "execution_outcome": "post_submit_artifact_failure",
+  "execution_reason": "posttrade_state_capture_failed",
+  "halt_reason": "post_submit_artifact_failure:posttrade_state_capture_failed",
+  "submitted_count": 5,
+  "accepted_count": 5,
+  "completed_at": "2026-05-18T13:36:55Z"
+}

@@ -1,0 +1,15 @@
+{
+  "orders_intended": [
+    {"ticker": "ELV", "side": "SELL", "shares": 1, "notional": 393.28, "reason": "rebalance_to_target"},
+    {"ticker": "DELL", "side": "SELL", "shares": 1, "notional": 239.8, "reason": "removed_from_targets"},
+    {"ticker": "GILD", "side": "SELL", "shares": 6, "notional": 778.94, "reason": "removed_from_targets"},
+    {"ticker": "PFE", "side": "SELL", "shares": 14, "notional": 359.59, "reason": "removed_from_targets"},
+    {"ticker": "SBUX", "side": "SELL", "shares": 6, "notional": 639.31, "reason": "removed_from_targets"},
+    {"ticker": "MRK", "side": "BUY", "shares": 7, "notional": 799.29, "reason": "rebalance_to_target"},
+    {"ticker": "UNH", "side": "BUY", "shares": 1, "notional": 395.28, "reason": "rebalance_to_target"},
+    {"ticker": "PANW", "side": "BUY", "shares": 2, "notional": 479.0, "reason": "rebalance_to_target"},
+    {"ticker": "CSCO", "side": "BUY", "shares": 3, "notional": 357.35, "reason": "rebalance_to_target"},
+    {"ticker": "MNST", "side": "BUY", "shares": 4, "notional": 350.51, "reason": "rebalance_to_target"},
+    {"ticker": "NEM", "side": "BUY", "shares": 2, "notional": 225.02, "reason": "rebalance_to_target"}
+  ]
+}

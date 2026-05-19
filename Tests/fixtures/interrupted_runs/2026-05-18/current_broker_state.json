@@ -1,0 +1,35 @@
+{
+  "account": {
+    "status": "ACTIVE",
+    "cash": 3937.26,
+    "equity": 10359.36,
+    "buying_power": 14296.62,
+    "trading_blocked": false
+  },
+  "open_orders_count": 0,
+  "positions": {
+    "CVS": 5,
+    "ELV": 2,
+    "FTNT": 5,
+    "GM": 11,
+    "GOOG": 1,
+    "GOOGL": 1,
+    "PM": 2,
+    "PWR": 1,
+    "QCOM": 3,
+    "STX": 1,
+    "VZ": 10
+  },
+  "orders_report_date": [
+    {"client_order_id": "2026-05-18:main:growth_engine_v4:ELV:SELL", "symbol": "ELV", "side": "sell", "status": "filled", "qty": "1", "filled_qty": "1", "filled_avg_price": "387.35", "submitted_at": "2026-05-18T13:35:21.768666Z", "filled_at": "2026-05-18T13:36:44.813714Z"},
+    {"client_order_id": "2026-05-18:main:growth_engine_v4:DELL:SELL", "symbol": "DELL", "side": "sell", "status": "filled", "qty": "1", "filled_qty": "1", "filled_avg_price": "242", "submitted_at": "2026-05-18T13:35:21.898166Z", "filled_at": "2026-05-18T13:36:13.672595Z"},
+    {"client_order_id": "2026-05-18:main:growth_engine_v4:GILD:SELL", "symbol": "GILD", "side": "sell", "status": "filled", "qty": "6", "filled_qty": "6", "filled_avg_price": "130.2", "submitted_at": "2026-05-18T13:35:21.953329Z", "filled_at": "2026-05-18T13:36:25.834465Z"},
+    {"client_order_id": "2026-05-18:main:growth_engine_v4:PFE:SELL", "symbol": "PFE", "side": "sell", "status": "filled", "qty": "14", "filled_qty": "14", "filled_avg_price": "25.248571", "submitted_at": "2026-05-18T13:35:22.014351Z", "filled_at": "2026-05-18T13:37:23.908509Z"},
+    {"client_order_id": "2026-05-18:main:growth_engine_v4:SBUX:SELL", "symbol": "SBUX", "side": "sell", "status": "filled", "qty": "6", "filled_qty": "6", "filled_avg_price": "106.9", "submitted_at": "2026-05-18T13:35:22.107901Z", "filled_at": "2026-05-18T13:37:23.647516Z"}
+  ],
+  "fills_report_date": [
+    {"order_id": "a38eece1-32fb-480e-a756-84b20e0a4d5e", "symbol": "DELL", "side": "sell", "qty": "1", "price": "242", "transaction_time": "2026-05-18T13:36:13.672595Z"},
+    {"order_id": "262d4fd2-f5b8-46c4-b6a1-079ca5857976", "symbol": "SBUX", "side": "sell", "qty": "6", "price": "106.9", "transaction_time": "2026-05-18T13:37:23.647516Z"},
+    {"order_id": "f3170405-c093-4ad6-b3bc-619da1070827", "symbol": "PFE", "side": "sell", "qty": "14", "price": "25.248571", "transaction_time": "2026-05-18T13:37:23.908509Z"}
+  ]
+}
