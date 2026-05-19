@@ -458,6 +458,59 @@ def test_confirmation_email_falls_back_to_broker_snapshot_when_execution_results
     assert "broker_snapshot_2026-03-09.json" in sent["body_text"]
 
 
+def test_confirmation_email_falls_back_to_execution_payload_for_pre_submit_halt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_halted_payload")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-05-06")
+    monkeypatch.setenv("EMAIL_TRADING_CONFIRMATION", "1")
+    monkeypatch.delenv("EMAIL_DRY_RUN", raising=False)
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+
+    run_root = tmp_path / "outputs" / "runs" / "run-stale-prices"
+    write_trade_stage_pointer(
+        stage="execution",
+        run_id="run-stale-prices",
+        trade_date="2026-05-06",
+        mode="PAPER",
+        run_root=str(run_root),
+        status="failed_pre_execution",
+        workspace_root=str(tmp_path),
+    )
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "run_id": "run-stale-prices",
+            "trade_date": "2026-05-06",
+            "mode": "PAPER",
+            "execution_status": "HALTED",
+            "halt_reason": "[HALT] stale_prices detected (last_price_date=2026-05-05)",
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "trades": [],
+        },
+    )
+
+    sent = {}
+
+    def _fake_send_email(*, subject, body_text, body_html=None):
+        sent["subject"] = subject
+        sent["body_text"] = body_text
+        sent["body_html"] = body_html
+
+    monkeypatch.setattr(mod, "send_email", _fake_send_email)
+
+    mod.main()
+
+    assert "Trading Confirmation 2026-05-06 [HALTED]" in sent["subject"]
+    assert "Status: HALTED" in sent["body_text"]
+    assert "stale_prices" in sent["body_text"]
+    assert "Submitted: 0" in sent["body_text"]
+
+
 def test_confirmation_email_rejects_running_execution_pointer(tmp_path: Path, monkeypatch) -> None:
     mod = _load_module(CONFIRM_SCRIPT, "send_trading_confirmation_email_test_running_pointer")
     monkeypatch.chdir(tmp_path)
