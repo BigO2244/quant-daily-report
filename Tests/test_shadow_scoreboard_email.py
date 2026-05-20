@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from core.shadow_scoreboard import build_shadow_scoreboard
 from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED
 from scripts import send_trading_confirmation_email as confirmation
+
+
+ET = ZoneInfo("America/New_York")
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -126,6 +131,63 @@ def test_shadow_scoreboard_shows_no_data_daily_status(tmp_path: Path) -> None:
     assert "Data status: NO_DATA" in scoreboard["text"]
     assert "Today: unavailable (PRICE_CACHE_STALE; cache coverage through 2026-05-03)" in scoreboard["text"]
     assert "Since inception: +3.47%" in scoreboard["text"]
+
+
+def test_shadow_scoreboard_uses_completed_session_when_morning_artifact_is_false_stale(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path, trade_date="2026-05-19")
+    _write_shadow_artifacts(tmp_path, trade_date="2026-05-20")
+    comparison_path = tmp_path / "outputs" / "shadow_candidates" / "2026-05-20" / "comparison.json"
+    comparison = json.loads(comparison_path.read_text())
+    comparison["status"] = "NO_DATA"
+    comparison["reason_code"] = "PRICE_CACHE_STALE"
+    comparison["data"] = {"coverage": {"end_date": "2026-05-19"}}
+    _write_json(comparison_path, comparison)
+    evaluation_path = tmp_path / "outputs" / "shadow_candidates" / "2026-05-20" / "shadow_evaluation.json"
+    evaluation = json.loads(evaluation_path.read_text())
+    for payload in evaluation["strategies"].values():
+        payload["data_status"] = "NO_DATA"
+        payload["data_reason"] = "PRICE_CACHE_STALE"
+        payload["daily_return"] = 0.0
+    _write_json(evaluation_path, evaluation)
+
+    scoreboard = build_shadow_scoreboard(
+        tmp_path,
+        "2026-05-20",
+        now=dt.datetime(2026, 5, 20, 9, 45, tzinfo=ET),
+    )
+
+    assert scoreboard["status"] == "OK"
+    assert "Snapshot as of: 2026-05-19" in scoreboard["text"]
+    assert "Data status: OK" in scoreboard["text"]
+    assert "Today: +0.68%" in scoreboard["text"]
+    assert "PRICE_CACHE_STALE" not in scoreboard["text"]
+    assert "Data status: NO_DATA" not in scoreboard["text"]
+
+
+def test_shadow_scoreboard_preserves_genuinely_stale_completed_session(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path, trade_date="2026-05-19")
+    comparison_path = tmp_path / "outputs" / "shadow_candidates" / "2026-05-19" / "comparison.json"
+    comparison = json.loads(comparison_path.read_text())
+    comparison["status"] = "NO_DATA"
+    comparison["reason_code"] = "PRICE_CACHE_STALE"
+    comparison["data"] = {"coverage": {"end_date": "2026-05-16"}}
+    _write_json(comparison_path, comparison)
+    evaluation_path = tmp_path / "outputs" / "shadow_candidates" / "2026-05-19" / "shadow_evaluation.json"
+    evaluation = json.loads(evaluation_path.read_text())
+    evaluation["strategies"]["caerus_polaris"]["data_status"] = "NO_DATA"
+    evaluation["strategies"]["caerus_polaris"]["data_reason"] = "PRICE_CACHE_STALE"
+    evaluation["strategies"]["caerus_polaris"]["daily_return"] = 0.0
+    _write_json(evaluation_path, evaluation)
+
+    scoreboard = build_shadow_scoreboard(
+        tmp_path,
+        "2026-05-20",
+        now=dt.datetime(2026, 5, 20, 9, 45, tzinfo=ET),
+    )
+
+    assert "Snapshot as of: 2026-05-19" in scoreboard["text"]
+    assert "Data status: NO_DATA" in scoreboard["text"]
+    assert "PRICE_CACHE_STALE" in scoreboard["text"]
 
 
 def test_shadow_scoreboard_missing_artifact_is_explicit(tmp_path: Path) -> None:

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import html
 import json
+import datetime as dt
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+from paper.trading_calendar import is_trading_day, prev_trading_day
 
 
 MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra")
@@ -19,6 +23,8 @@ SUMMARY_KEYS = {
 }
 BENCHMARK_SLUG = "spy_benchmark"
 BLOCKED_LANGUAGE = ("promote", "replace", "deploy capital")
+ET = ZoneInfo("America/New_York")
+MARKET_EOD_READY_TIME = dt.time(hour=16, minute=15)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -49,6 +55,83 @@ def _fmt_pct(value: Any, *, signed: bool = True) -> str:
 def _fmt_status(value: Any) -> str:
     raw = str(value or "").strip()
     return raw if raw else "UNAVAILABLE"
+
+
+def _current_et(now: dt.datetime | None = None) -> dt.datetime:
+    if now is None:
+        return dt.datetime.now(ET)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(ET)
+
+
+def _latest_completed_trading_day(now: dt.datetime | None = None) -> str:
+    now_et = _current_et(now)
+    today = now_et.date().isoformat()
+    if is_trading_day(today) and now_et.time() >= MARKET_EOD_READY_TIME:
+        return today
+    return prev_trading_day(today)
+
+
+def _load_shadow_bundle(
+    repo_root: Path,
+    trade_date: str,
+) -> tuple[Path, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    dated_dir = repo_root / "outputs" / "shadow_candidates" / trade_date
+    return (
+        dated_dir,
+        _read_json(dated_dir / "shadow_evaluation.json"),
+        _read_json(dated_dir / "comparison.json"),
+        _read_json(dated_dir / "feedback_loop_summary.json"),
+    )
+
+
+def _price_cache_stale_no_data(
+    evaluation: dict[str, Any] | None,
+    comparison: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(comparison, dict):
+        return False
+    if comparison.get("status") == "NO_DATA" and comparison.get("reason_code") == "PRICE_CACHE_STALE":
+        return True
+    strategies = (evaluation or {}).get("strategies")
+    if not isinstance(strategies, dict):
+        return False
+    for payload in strategies.values():
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("data_status") == "NO_DATA" and payload.get("data_reason") == "PRICE_CACHE_STALE":
+            return True
+    return False
+
+
+def _has_complete_shadow_bundle(
+    evaluation: dict[str, Any] | None,
+    comparison: dict[str, Any] | None,
+    feedback: dict[str, Any] | None,
+) -> bool:
+    return evaluation is not None and comparison is not None and feedback is not None
+
+
+def _should_use_completed_session_snapshot(
+    *,
+    repo_root: Path,
+    requested_trade_date: str,
+    evaluation: dict[str, Any] | None,
+    comparison: dict[str, Any] | None,
+    now: dt.datetime | None,
+) -> str | None:
+    completed_trade_date = _latest_completed_trading_day(now)
+    if completed_trade_date >= requested_trade_date:
+        return None
+    if not _price_cache_stale_no_data(evaluation, comparison):
+        return None
+    _, completed_evaluation, completed_comparison, completed_feedback = _load_shadow_bundle(repo_root, completed_trade_date)
+    if not _has_complete_shadow_bundle(completed_evaluation, completed_comparison, completed_feedback):
+        return None
+    if _price_cache_stale_no_data(completed_evaluation, completed_comparison):
+        return None
+    return completed_trade_date
 
 
 def _data_unavailable_reason(payload: dict[str, Any], comparison: dict[str, Any]) -> str:
@@ -131,14 +214,45 @@ def _diagnostic_state(*, payload: dict[str, Any], feedback: dict[str, Any]) -> s
     return "stable"
 
 
-def build_shadow_scoreboard(repo_root: Path, trade_date: str) -> dict[str, str]:
-    dated_dir = repo_root / "outputs" / "shadow_candidates" / trade_date
+def build_shadow_scoreboard(
+    repo_root: Path,
+    trade_date: str,
+    *,
+    now: dt.datetime | None = None,
+) -> dict[str, str]:
+    dated_dir, evaluation, comparison, feedback = _load_shadow_bundle(repo_root, trade_date)
     if not dated_dir.exists():
-        reason = f"shadow directory missing for {trade_date}"
-        return _unavailable(reason)
-    evaluation = _read_json(dated_dir / "shadow_evaluation.json")
-    comparison = _read_json(dated_dir / "comparison.json")
-    feedback = _read_json(dated_dir / "feedback_loop_summary.json")
+        completed_trade_date = _latest_completed_trading_day(now)
+        if completed_trade_date < trade_date:
+            completed_dir, completed_evaluation, completed_comparison, completed_feedback = _load_shadow_bundle(
+                repo_root,
+                completed_trade_date,
+            )
+            if completed_dir.exists() and _has_complete_shadow_bundle(
+                completed_evaluation,
+                completed_comparison,
+                completed_feedback,
+            ):
+                dated_dir = completed_dir
+                evaluation = completed_evaluation
+                comparison = completed_comparison
+                feedback = completed_feedback
+                trade_date = completed_trade_date
+            else:
+                reason = f"shadow directory missing for {trade_date}"
+                return _unavailable(reason)
+        else:
+            reason = f"shadow directory missing for {trade_date}"
+            return _unavailable(reason)
+    fallback_trade_date = _should_use_completed_session_snapshot(
+        repo_root=repo_root,
+        requested_trade_date=trade_date,
+        evaluation=evaluation,
+        comparison=comparison,
+        now=now,
+    )
+    if fallback_trade_date:
+        dated_dir, evaluation, comparison, feedback = _load_shadow_bundle(repo_root, fallback_trade_date)
     missing = []
     if evaluation is None:
         missing.append("shadow_evaluation.json")
@@ -154,6 +268,7 @@ def build_shadow_scoreboard(repo_root: Path, trade_date: str) -> dict[str, str]:
         "--- Shadow Strategy Snapshot ---",
         "Diagnostic only; no trading or strategy-change instruction is implied.",
         f"Artifact status: {'DEGRADED' if comparison.get('status') == 'NO_DATA' else 'OK'}",
+        f"Snapshot as of: {fallback_trade_date or trade_date}",
         "",
     ]
     for slug in MODEL_SLUGS:
