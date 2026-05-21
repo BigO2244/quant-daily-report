@@ -11,6 +11,7 @@ from research_registry.ingestion.families import (
     RegimeIntelligenceArtifactAdapter,
     ShadowEvaluationArtifactAdapter,
     ValidationArtifactAdapter,
+    ingest_artifact_family,
 )
 
 GrandfatheredArtifactAdapter = ArtifactFamilyAdapter
@@ -29,4 +30,5 @@ __all__ = [
     "RegimeIntelligenceArtifactAdapter",
     "ShadowEvaluationArtifactAdapter",
     "ValidationArtifactAdapter",
+    "ingest_artifact_family",
 ]

@@ -282,3 +282,68 @@ class ExposureIntelligenceArtifactAdapter(ArtifactFamilyAdapter):
 
 class ValidationArtifactAdapter(ArtifactFamilyAdapter):
     family = "validation"
+
+
+FAMILY_ADAPTERS = {
+    "generic": ArtifactFamilyAdapter,
+    "grandfathered": ArtifactFamilyAdapter,
+    "audit": AuditArtifactAdapter,
+    "governance": GovernanceArtifactAdapter,
+    "attribution": AttributionArtifactAdapter,
+    "shadow_evaluation": ShadowEvaluationArtifactAdapter,
+    "regime_intelligence": RegimeIntelligenceArtifactAdapter,
+    "performance_veracity": PerformanceVeracityArtifactAdapter,
+    "exposure_intelligence": ExposureIntelligenceArtifactAdapter,
+    "validation": ValidationArtifactAdapter,
+}
+
+
+def ingest_artifact_family(
+    *,
+    family: str,
+    artifact_paths: list[str | Path],
+    registry=None,
+) -> HydrationResult:
+    """Hydrate a bounded artifact family and optionally ingest into a registry.
+
+    The function is the stable institutional ingestion boundary for VM
+    shadow hydration. It is deterministic: paths are sorted by their string
+    representation, adapters are selected from a closed family map, and no
+    global state is mutated. When a registry is supplied, only the caller's
+    derived registry index is written; source artifacts are never mutated.
+    """
+
+    adapter_cls = FAMILY_ADAPTERS.get(family)
+    if adapter_cls is None:
+        return HydrationResult(
+            findings=[
+                HydrationFinding(
+                    code="UNKNOWN_ARTIFACT_FAMILY",
+                    severity="HIGH",
+                    message=f"unknown artifact family: {family}",
+                )
+            ]
+        )
+
+    adapter = adapter_cls()
+    envelopes: list[ResearchObjectEnvelope] = []
+    findings: list[HydrationFinding] = []
+    for path in sorted([Path(path) for path in artifact_paths], key=lambda item: str(item)):
+        result = adapter.hydrate_path(path)
+        findings.extend(result.findings)
+        for envelope in result.envelopes:
+            if registry is not None:
+                try:
+                    registry.ingest(envelope)
+                except Exception as exc:
+                    findings.append(
+                        HydrationFinding(
+                            code="REGISTRY_INGEST_FAILED",
+                            severity="HIGH",
+                            message=str(exc),
+                            artifact_ref=str(path),
+                        )
+                    )
+                    continue
+            envelopes.append(envelope)
+    return HydrationResult(envelopes=envelopes, findings=findings)
