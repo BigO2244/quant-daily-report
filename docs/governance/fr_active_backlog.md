@@ -33,6 +33,12 @@ Fully deployed history and reviewed deferred items belong in
 | FR-020 read-only validation isolation | Phase 4 | `BACKLOG` | MEDIUM | FR-015 | not_started | Future isolation of tests and smoke flows from repo-level runtime outputs. | Leave current validation layout unchanged. |
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
 | FR-023 documentation and generated artifact separation | Phase 4 | `IN_PROGRESS` | LOW | FR-015 preferred | not_required | Taxonomy documented in `docs/documentation_taxonomy.md`; no large file moves yet. | Ignore taxonomy proposal or revert docs-only change. |
+| FR-024 NAV surface registry and performance provenance enforcement | Research Integrity | `PROMOTION_READY` | LOW | FR-015 | not_required | Additive registry artifacts separate research backtest, operational shadow, and broker NAV surfaces. | Stop publishing registry artifacts and ignore generated outputs. |
+| FR-025 immutable daily shadow holdings and weights history | Attribution Infrastructure | `PROMOTION_READY` | MEDIUM | FR-024 | not_required | Additive daily portfolio history snapshots enable realized attribution once multiple days accumulate. | Stop writing new snapshots; preserve existing immutable evidence. |
+| FR-026 exposure intelligence and concentration risk observability | Portfolio Intelligence | `PROMOTION_READY` | LOW | FR-024, FR-025 | not_required | Additive exposure summaries and hidden risk flags make beta, sector, concentration, liquidity, and turnover visible. | Remove report integration and ignore exposure artifacts. |
+| FR-027 regime decomposition and fragility reporting | Regime Intelligence | `PROMOTION_READY` | LOW | FR-026 | not_required | Additive regime performance, fragility, exposure matrix, and attribution-by-regime artifacts. | Stop publishing regime hardening artifacts; no strategy behavior changes. |
+| FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
+| FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `BACKLOG` | MEDIUM | FR-028 | not_started | Future promotion gates should consume provenance, exposure, and timing confidence after accounting semantics are governed. | Revert promotion-readiness checks to existing scorecard criteria. |
 
 ## Phase 4 Priority Order
 
@@ -49,6 +55,12 @@ non-trading, non-execution, additive, and low blast radius by default.
 | 6 | FR-020 | Prevents validation/test pollution after runtime ownership boundaries are documented. |
 | 7 | FR-016 | Adds deeper semantic checks after artifact ownership and freshness semantics exist. |
 | 8 | FR-021 | Important but execution-adjacent; defer until telemetry and state language are stable. |
+| 9 | FR-024 | Establishes explicit performance provenance before additional research metrics are surfaced. |
+| 10 | FR-025 | Daily immutable holdings history depends on surface ownership and becomes the base for realized attribution. |
+| 11 | FR-026 | Exposure intelligence can then consume stable holdings and provenance. |
+| 12 | FR-027 | Regime fragility is more interpretable after exposure and concentration are visible. |
+| 13 | FR-028 | Accounting semantics are high blast-radius and must wait for provenance, history, and observability baselines. |
+| 14 | FR-029 | Promotion hardening should follow timing semantics review so gates do not encode unstable accounting assumptions. |
 
 FR-022 remains `REVIEWED_DEFERRED` in the registry. Hash enforcement should not
 be promoted until dependency baselines, clean installs, and emergency update
@@ -64,6 +76,10 @@ procedures are proven.
    after trust semantics are reviewed.
 4. Use FR-023 to reduce documentation entropy without large file moves in the
    same change as runtime producers.
+5. Promote FR-024 through FR-027 as additive Track A research infrastructure
+   before starting FR-028 accounting semantics work.
+6. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
+   comparison artifacts, rollback plans, and observation criteria are reviewed.
 
 ## Roadmap Boundaries
 
