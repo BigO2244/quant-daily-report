@@ -147,6 +147,8 @@ def _load_inputs(repo_root: Path, trade_date: str, shadow_dir: Path | None, clar
         "manifest": _read_json(actual_clarity_dir / "manifest.json"),
         "shadow_performance": _read_json(actual_shadow_dir / "shadow_performance.json"),
         "comparison": _read_json(actual_shadow_dir / "comparison.json"),
+        "price_hydration_status": _read_json(repo_root / "outputs" / "price_hydration" / trade_date / "status.json"),
+        "vix_regime": _read_json(repo_root / "outputs" / "vix_regime" / "regime_current.json"),
     }
     source_diagnostics = {
         name: {
@@ -178,6 +180,52 @@ def _load_inputs(repo_root: Path, trade_date: str, shadow_dir: Path | None, clar
         "artifacts": artifacts,
         "freshness": freshness,
         "source_diagnostics": source_diagnostics,
+        "source_readiness": _source_readiness(artifacts, trade_date),
+    }
+
+
+def _source_readiness(artifacts: dict[str, Any], trade_date: str) -> dict[str, Any]:
+    performance = artifacts.get("shadow_performance") if isinstance(artifacts.get("shadow_performance"), dict) else {}
+    comparison = artifacts.get("comparison") if isinstance(artifacts.get("comparison"), dict) else {}
+    hydration = artifacts.get("price_hydration_status") if isinstance(artifacts.get("price_hydration_status"), dict) else {}
+    strategies = comparison.get("strategies") if isinstance(comparison.get("strategies"), dict) else {}
+
+    shadow_data_status = performance.get("data_status")
+    shadow_data_reason = performance.get("data_reason")
+    comparison_status = comparison.get("status", "OK" if strategies else "UNKNOWN")
+    strategy_count = len(strategies)
+    hydration_status_path = f"outputs/price_hydration/{trade_date}/status.json"
+    price_hydration_status = hydration.get("status") if hydration else "MISSING"
+    max_cache_date = hydration.get("max_cache_date") or hydration.get("as_of_date")
+    hydration_covers_trade_date = bool(max_cache_date and str(max_cache_date) >= trade_date)
+
+    failures = []
+    if shadow_data_status != "OK":
+        failures.append("shadow_performance.data_status is not OK")
+    if shadow_data_reason not in (None, "", "OK"):
+        failures.append("shadow_performance.data_reason is present")
+    if comparison_status != "OK":
+        failures.append("comparison.status is not OK")
+    if strategy_count == 0:
+        failures.append("comparison.strategies is empty")
+    if not hydration:
+        failures.append("price hydration status is missing")
+    elif price_hydration_status != "OK":
+        failures.append("price hydration status is not OK")
+    elif not hydration_covers_trade_date:
+        failures.append("price hydration max cache date does not cover trade date")
+
+    return {
+        "status": "READY" if not failures else "INCOMPLETE",
+        "failures": failures,
+        "shadow_data_status": shadow_data_status,
+        "shadow_data_reason": shadow_data_reason,
+        "comparison_status": comparison_status,
+        "strategy_count": strategy_count,
+        "hydration_status_path": hydration_status_path,
+        "price_hydration_status": price_hydration_status,
+        "price_hydration_max_cache_date": max_cache_date,
+        "hydration_covers_trade_date": hydration_covers_trade_date,
     }
 
 
@@ -205,9 +253,10 @@ def _operational_trust(inputs: dict[str, Any]) -> dict[str, Any]:
     if not shadow_confidences and "OPERATIONAL_SHADOW_NAV" in surfaces:
         shadow_confidences.append(str(surfaces["OPERATIONAL_SHADOW_NAV"].get("confidence", "LOW")))
     confidence_floor = "LOW" if "LOW" in shadow_confidences or any("LOW" in value for value in shadow_confidences) else "LOW"
-    status = "PARTIAL" if missing else "FRESH" if not stale_or_unknown else "PARTIAL"
+    status = "PARTIAL" if missing or inputs["source_readiness"]["status"] != "READY" else "FRESH" if not stale_or_unknown else "PARTIAL"
     return {
         "status": status,
+        "source_readiness": inputs["source_readiness"],
         "research_only": True,
         "advisory_only": True,
         "source_surface_count": len(registry.get("surfaces", {})),
@@ -454,6 +503,10 @@ def _regime_review(inputs: dict[str, Any]) -> dict[str, Any]:
     fragility = inputs["artifacts"]["regime_fragility_report"]
     matrix = inputs["artifacts"]["regime_exposure_matrix"]
     regime = breakdown.get("regime", {})
+    if _regime_missing(regime):
+        fallback = _vix_regime_fallback(inputs["artifacts"].get("vix_regime"))
+        if fallback:
+            regime = fallback
     regime_sentence = _regime_sentence(regime)
     return {
         "regime": regime,
@@ -466,11 +519,39 @@ def _regime_review(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _regime_missing(regime: Any) -> bool:
+    if not isinstance(regime, dict) or not regime:
+        return True
+    if regime.get("regime_source") == "not_present_in_shadow_artifact":
+        return True
+    return not any(regime.get(key) and regime.get(key) != "UNKNOWN" for key in ("risk", "volatility", "trend", "breadth"))
+
+
+def _vix_regime_fallback(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict) or not payload:
+        return None
+    regime = payload.get("regime")
+    if not regime:
+        return None
+    return {
+        "risk": "UNKNOWN",
+        "volatility": str(regime).lower(),
+        "trend": "UNKNOWN",
+        "breadth": "UNKNOWN",
+        "vix": payload.get("vix"),
+        "regime_source": "vix_regime_current_fallback",
+        "fallback_confidence": "LOW",
+    }
+
+
 def _regime_sentence(regime: Any) -> str:
     if not isinstance(regime, dict) or not regime:
         return "Regime metadata was not present in the shadow artifact; interpretation remains LOW confidence."
     if regime.get("regime_source") == "not_present_in_shadow_artifact":
         return "Regime metadata was not present in the shadow artifact; interpretation remains LOW confidence."
+    if regime.get("regime_source") == "vix_regime_current_fallback":
+        vix_text = f" with VIX {regime['vix']}" if regime.get("vix") is not None else ""
+        return f"Shadow artifact lacked regime metadata; VIX fallback indicates volatility is {str(regime.get('volatility')).replace('_', ' ')}{vix_text}. Interpretation remains LOW confidence."
     parts = []
     labels = (
         ("risk", "risk"),
@@ -565,6 +646,13 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
             "shadow_dir": str(inputs["shadow_dir"]),
             "research_clarity_dir": str(inputs["clarity_dir"]),
         },
+        "source_state": inputs["source_readiness"],
+        "source_readiness": inputs["source_readiness"]["status"],
+        "shadow_data_status": inputs["source_readiness"]["shadow_data_status"],
+        "shadow_data_reason": inputs["source_readiness"]["shadow_data_reason"],
+        "comparison_status": inputs["source_readiness"]["comparison_status"],
+        "strategy_count": inputs["source_readiness"]["strategy_count"],
+        "price_hydration_status": inputs["source_readiness"]["price_hydration_status"],
         "dashboard": dashboard,
         "executive_summary": executive_summary,
         "operator_takeaway": operator_takeaway,
@@ -609,19 +697,25 @@ def _dashboard_summary(
 ) -> dict[str, Any]:
     ranking_basis = comparison[0].get("ranking_basis", "unavailable") if comparison else "unavailable"
     regime_status = "missing" if "not present" in regime["regime_summary"] else "available"
+    source_status = trust.get("source_readiness", {}).get("status", "UNKNOWN")
+    source_ready = source_status == "READY"
+    main_takeaway = operator_takeaway[0] if operator_takeaway else "Review packet evidence before drawing conclusions."
+    if not source_ready:
+        main_takeaway = "Do not use this packet for strategy interpretation until post-close hydration and shadow artifacts are complete."
     return {
         "packet_status": trust["status"],
+        "source_readiness": source_status,
         "confidence_floor": trust["shadow_confidence_floor"],
         "ranking_basis": ranking_basis,
         "ranking_basis_label": _ranking_basis_label(ranking_basis),
         "exposure_data_status": data_completeness["exposure_data_status"],
         "regime_data_status": regime_status,
-        "main_operator_takeaway": operator_takeaway[0] if operator_takeaway else "Review packet evidence before drawing conclusions.",
+        "main_operator_takeaway": main_takeaway,
         "can_use": {
             "execution_promotion_use": "NO",
-            "research_review_use": "YES",
-            "exposure_adjusted_conclusions": "YES" if exposure.get("risk_assessable", False) else "NO until fields are present",
-            "strategy_quality_comparison": "LIMITED" if data_completeness["exposure_data_status"] != "complete" else "YES with caveats",
+            "research_review_use": "YES" if source_ready else "LIMITED",
+            "exposure_adjusted_conclusions": "YES" if source_ready and exposure.get("risk_assessable", False) else "NO until fields are present",
+            "strategy_quality_comparison": "LIMITED" if (not source_ready or data_completeness["exposure_data_status"] != "complete") else "YES with caveats",
         },
     }
 
@@ -644,6 +738,14 @@ def _operator_takeaway(
 ) -> list[str]:
     if not comparison:
         return ["Packet inputs are insufficient to rank strategies today."]
+    source_readiness = trust.get("source_readiness", {})
+    if source_readiness.get("status") != "READY":
+        return [
+            "Do not use this packet for strategy interpretation until post-close hydration and shadow artifacts are complete.",
+            f"Source readiness is {source_readiness.get('status', 'UNKNOWN')}; shadow_data_status={source_readiness.get('shadow_data_status')}, shadow_data_reason={source_readiness.get('shadow_data_reason')}, comparison_status={source_readiness.get('comparison_status')}.",
+            f"Confidence floor is {trust['shadow_confidence_floor']} because operational shadow NAV remains governed by unresolved FR-028 timing semantics.",
+            regime["regime_summary"],
+        ]
     leader = comparison[0]
     ranking_basis = leader.get("ranking_basis")
     if ranking_basis == "cumulative_nav":
@@ -676,6 +778,7 @@ def _markdown(packet: dict[str, Any]) -> str:
         "| Field | Status |",
         "|---|---|",
         f"| Packet status | {dashboard['packet_status']} |",
+        f"| Source readiness | {dashboard['source_readiness']} |",
         f"| Confidence floor | {dashboard['confidence_floor']} |",
         f"| Ranking basis | {dashboard['ranking_basis_label']} |",
         f"| Exposure data | {dashboard['exposure_data_status']} |",
@@ -725,9 +828,16 @@ def _markdown(packet: dict[str, Any]) -> str:
         )
     lines.extend(["", "## Operational Trust Summary", ""])
     trust = packet["operational_trust_summary"]
+    source_state = packet["source_state"]
     lines.extend(
         [
             f"- Status: `{trust['status']}`",
+            f"- Source readiness: `{source_state['status']}`",
+            f"- Shadow data status: `{source_state['shadow_data_status']}`",
+            f"- Shadow data reason: `{source_state['shadow_data_reason']}`",
+            f"- Comparison status: `{source_state['comparison_status']}`",
+            f"- Strategy count: `{source_state['strategy_count']}`",
+            f"- Price hydration status: `{source_state['price_hydration_status']}`",
             f"- Shadow confidence floor: `{trust['shadow_confidence_floor']}`",
             f"- Confidence reason: {trust['confidence_reason']}",
             f"- Missing inputs: {', '.join(trust['missing_artifacts']) if trust['missing_artifacts'] else 'none'}",
@@ -816,6 +926,7 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
         "<section class=\"card wide\"><h2>Top Dashboard</h2>",
         "<section class=\"grid cards\">",
         _metric_card("Packet Status", dashboard["packet_status"]),
+        _metric_card("Source Readiness", dashboard["source_readiness"]),
         _metric_card("Confidence Floor", dashboard["confidence_floor"]),
         _metric_card("Ranking Basis", dashboard["ranking_basis_label"]),
         _metric_card("Exposure Data", dashboard["exposure_data_status"]),
@@ -911,6 +1022,12 @@ def _summary(packet: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "daily_research_packet_summary_v1",
         "trade_date": packet["trade_date"],
         "status": packet["operational_trust_summary"]["status"],
+        "source_readiness": packet["source_readiness"],
+        "shadow_data_status": packet["shadow_data_status"],
+        "shadow_data_reason": packet["shadow_data_reason"],
+        "comparison_status": packet["comparison_status"],
+        "strategy_count": packet["strategy_count"],
+        "price_hydration_status": packet["price_hydration_status"],
         "confidence_floor": packet["confidence_freshness_caveats"]["confidence_floor"],
         "leader": packet["strategy_comparison"][0] if packet["strategy_comparison"] else None,
         "risk_flag_count": len(packet["exposure_concentration_review"]["risk_flags"]),

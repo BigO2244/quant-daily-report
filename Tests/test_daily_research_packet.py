@@ -53,6 +53,7 @@ def _fixture_sources(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         shadow_dir / "comparison.json",
         {
             "trade_date": "2026-05-22",
+            "status": "OK",
             "regime": {"risk": "risk_on", "volatility": "calm", "trend": "trending"},
             "strategies": strategies,
         },
@@ -63,6 +64,8 @@ def _fixture_sources(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             "trade_date": "2026-05-22",
             "previous_trade_date": "2026-05-21",
             "status": "OK",
+            "data_status": "OK",
+            "data_reason": None,
             "return_convention": "weights_as_of_t",
             "strategies": {
                 "caerus_polaris": {"daily_return": 0.004, "nav": 1.004, "weights_count": 2},
@@ -71,12 +74,56 @@ def _fixture_sources(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             },
         },
     )
+    _write_json(
+        repo / "outputs" / "price_hydration" / "2026-05-22" / "status.json",
+        {
+            "as_of_date": "2026-05-22",
+            "max_cache_date": "2026-05-22",
+            "status": "OK",
+        },
+    )
     build_research_clarity_wave(repo, "2026-05-22", shadow_dir, clarity_dir)
     return repo, shadow_dir, clarity_dir, packet_dir
 
 
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _no_data_sources(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    repo = tmp_path / "repo"
+    shadow_dir = repo / "outputs" / "shadow_candidates" / "2026-05-22"
+    clarity_dir = repo / "outputs" / "research_clarity" / "2026-05-22"
+    packet_dir = repo / "outputs" / "research_packets" / "2026-05-22"
+    (repo / "data").mkdir(parents=True)
+    (repo / "data" / "universe.csv").write_text("ticker,sector\nAAPL,Information Technology\n", encoding="utf-8")
+    _write_json(
+        shadow_dir / "comparison.json",
+        {
+            "trade_date": "2026-05-22",
+            "status": "NO_DATA",
+            "reason_code": "PRICE_CACHE_STALE",
+            "strategies": {},
+        },
+    )
+    _write_json(
+        shadow_dir / "shadow_performance.json",
+        {
+            "trade_date": "2026-05-22",
+            "previous_trade_date": "2026-05-21",
+            "status": "OK",
+            "data_status": "NO_DATA",
+            "data_reason": "PRICE_CACHE_STALE",
+            "return_convention": "weights_as_of_t",
+            "strategies": {
+                "caerus_polaris": {"daily_return": 0.0, "nav": 1.1, "weights_count": 0},
+                "caerus_orion": {"daily_return": 0.0, "nav": 1.2, "weights_count": 0},
+                "caerus_lyra": {"daily_return": 0.0, "nav": 1.3, "weights_count": 0},
+            },
+        },
+    )
+    build_research_clarity_wave(repo, "2026-05-22", shadow_dir, clarity_dir)
+    return repo, shadow_dir, clarity_dir, packet_dir
 
 
 def test_daily_research_packet_generates_operator_outputs(tmp_path):
@@ -94,6 +141,11 @@ def test_daily_research_packet_generates_operator_outputs(tmp_path):
     assert packet["accounting_semantics_changed"] is False
     assert packet["timing_semantics_changed"] is False
     assert packet["promotion_logic_changed"] is False
+    assert packet["source_readiness"] == "READY"
+    assert packet["shadow_data_status"] == "OK"
+    assert packet["comparison_status"] == "OK"
+    assert packet["strategy_count"] == 3
+    assert packet["price_hydration_status"] == "OK"
     assert packet["operational_trust_summary"]["shadow_confidence_floor"] == "LOW"
     assert "FR-028 timing semantics remain unresolved" in packet["key_risks"][0]
 
@@ -133,6 +185,7 @@ def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     assert "`LOW`" not in html
     assert summary["advisory_only"] is True
     assert summary["confidence_floor"] == "LOW"
+    assert summary["source_readiness"] == "READY"
     assert summary["leader"]["strategy_id"] == "caerus_orion"
     assert summary["leader"]["top3_concentration"] == 1.0
     assert summary["leader"]["max_position_weight"] == 0.5
@@ -240,3 +293,49 @@ def test_daily_research_packet_html_is_dashboard_style_and_utf8_clean(tmp_path):
     assert "`" not in html_text
     assert '{"risk":' not in html_text
     assert "{&quot;risk&quot;" not in html_text
+
+
+def test_daily_research_packet_marks_price_cache_stale_source_incomplete(tmp_path):
+    repo, shadow_dir, clarity_dir, packet_dir = _no_data_sources(tmp_path)
+
+    build_daily_research_packet(repo, "2026-05-22", shadow_dir, clarity_dir, packet_dir)
+
+    packet = _read_json(packet_dir / "packet.json")
+    summary = _read_json(packet_dir / "summary.json")
+    markdown = (packet_dir / "packet.md").read_text(encoding="utf-8")
+    html = (packet_dir / "packet.html").read_text(encoding="utf-8")
+
+    assert packet["source_readiness"] == "INCOMPLETE"
+    assert packet["shadow_data_status"] == "NO_DATA"
+    assert packet["shadow_data_reason"] == "PRICE_CACHE_STALE"
+    assert packet["comparison_status"] == "NO_DATA"
+    assert packet["strategy_count"] == 0
+    assert packet["price_hydration_status"] == "MISSING"
+    assert summary["source_readiness"] == "INCOMPLETE"
+    assert summary["shadow_data_status"] == "NO_DATA"
+    assert "Source readiness | INCOMPLETE" in markdown
+    assert "Do not use this packet for strategy interpretation until post-close hydration and shadow artifacts are complete." in markdown
+    assert "Source Readiness" in html
+    assert "INCOMPLETE" in html
+
+
+def test_daily_research_packet_uses_vix_regime_fallback_when_shadow_regime_missing(tmp_path):
+    repo, shadow_dir, clarity_dir, packet_dir = _fixture_sources(tmp_path)
+    comparison = _read_json(shadow_dir / "comparison.json")
+    comparison.pop("regime")
+    _write_json(shadow_dir / "comparison.json", comparison)
+    fallback_clarity_dir = repo / "outputs" / "research_clarity_fallback" / "2026-05-22"
+    _write_json(
+        repo / "outputs" / "vix_regime" / "regime_current.json",
+        {"as_of": "2026-05-22", "regime": "ELEVATED", "vix": 23.4},
+    )
+    build_research_clarity_wave(repo, "2026-05-22", shadow_dir, fallback_clarity_dir)
+
+    build_daily_research_packet(repo, "2026-05-22", shadow_dir, fallback_clarity_dir, packet_dir)
+
+    packet = _read_json(packet_dir / "packet.json")
+    markdown = (packet_dir / "packet.md").read_text(encoding="utf-8")
+
+    assert packet["regime_interpretation"]["regime"]["regime_source"] == "vix_regime_current_fallback"
+    assert packet["regime_interpretation"]["confidence_classification"] == "LOW"
+    assert "VIX fallback indicates volatility is elevated" in markdown

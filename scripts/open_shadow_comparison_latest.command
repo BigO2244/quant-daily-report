@@ -23,6 +23,8 @@ REMOTE_REPO="${ORION_REMOTE_REPO:-~/quant-daily-report}"
 LOCAL_DIR="${ORION_LOCAL_DIR:-$HOME/Downloads/caerus_research_packets/latest}"
 REQUESTED_TRADE_DATE="${ORION_TRADE_DATE:-}"
 SKIP_OPEN="${ORION_SKIP_OPEN:-${SHADOW_SKIP_OPEN:-0}}"
+ALLOW_INCOMPLETE_PACKET="${ORION_ALLOW_INCOMPLETE_PACKET:-0}"
+REFRESH_BEFORE_PACKET="${ORION_REFRESH_BEFORE_PACKET:-0}"
 
 LOCAL_PACKET_MD="${LOCAL_DIR}/packet.md"
 LOCAL_PACKET_HTML="${LOCAL_DIR}/packet.html"
@@ -37,7 +39,7 @@ echo "[FR-030] Remote repo: ${REMOTE_REPO}"
 echo "[FR-030] Local packet dir: ${LOCAL_DIR}"
 
 echo "[FR-030] Building latest research packet on VM..."
-if ! REMOTE_OUTPUT=$(ssh "${VM}" "cd ${REMOTE_REPO} && ORION_TRADE_DATE='${REQUESTED_TRADE_DATE}' bash -s" <<'REMOTE_SCRIPT'
+if ! REMOTE_OUTPUT=$(ssh "${VM}" "cd ${REMOTE_REPO} && ORION_TRADE_DATE='${REQUESTED_TRADE_DATE}' ORION_ALLOW_INCOMPLETE_PACKET='${ALLOW_INCOMPLETE_PACKET}' ORION_REFRESH_BEFORE_PACKET='${REFRESH_BEFORE_PACKET}' bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 if [[ -x venv/bin/python ]]; then
@@ -61,6 +63,90 @@ fi
 if [[ ! -d "outputs/shadow_candidates/${TRADE_DATE}" ]]; then
     echo "[FR-030][ERROR] Missing shadow candidate source: outputs/shadow_candidates/${TRADE_DATE}" >&2
     exit 21
+fi
+
+if [[ "${ORION_REFRESH_BEFORE_PACKET:-0}" == "1" ]]; then
+    echo "[FR-030][ERROR] Refresh-before-packet is not implemented yet; run the approved hydration workflow separately." >&2
+    exit 23
+fi
+
+PREFLIGHT_JSON="$("${PY}" - "${TRADE_DATE}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+trade_date = sys.argv[1]
+shadow_dir = Path("outputs/shadow_candidates") / trade_date
+performance_path = shadow_dir / "shadow_performance.json"
+comparison_path = shadow_dir / "comparison.json"
+hydration_path = Path("outputs/price_hydration") / trade_date / "status.json"
+
+def read_json(path):
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"_read_error": str(exc)}
+    return payload if isinstance(payload, dict) else {"_read_error": "not_json_object"}
+
+performance = read_json(performance_path)
+comparison = read_json(comparison_path)
+hydration = read_json(hydration_path)
+strategies = comparison.get("strategies") if isinstance(comparison.get("strategies"), dict) else {}
+shadow_data_status = performance.get("data_status")
+shadow_data_reason = performance.get("data_reason")
+comparison_status = comparison.get("status", "OK" if strategies else "UNKNOWN")
+strategy_count = len(strategies)
+price_hydration_status = hydration.get("status") if hydration else "MISSING"
+max_cache_date = hydration.get("max_cache_date") or hydration.get("as_of_date")
+hydration_covers_trade_date = bool(max_cache_date and str(max_cache_date) >= trade_date)
+
+failures = []
+if not performance_path.exists():
+    failures.append("missing shadow_performance.json")
+if shadow_data_status != "OK":
+    failures.append("shadow_performance.data_status is not OK")
+if shadow_data_reason not in (None, "", "OK"):
+    failures.append("shadow_performance.data_reason is present")
+if not comparison_path.exists():
+    failures.append("missing comparison.json")
+if comparison_status != "OK":
+    failures.append("comparison.status is not OK")
+if strategy_count == 0:
+    failures.append("comparison.strategies is empty")
+if not hydration_path.exists():
+    failures.append("missing price hydration status")
+elif price_hydration_status != "OK":
+    failures.append("price hydration status is not OK")
+elif not hydration_covers_trade_date:
+    failures.append("price hydration max cache date does not cover trade date")
+
+print(json.dumps({
+    "source_readiness": "READY" if not failures else "INCOMPLETE",
+    "failures": failures,
+    "shadow_data_status": shadow_data_status,
+    "shadow_data_reason": shadow_data_reason,
+    "comparison_status": comparison_status,
+    "strategy_count": strategy_count,
+    "hydration_status_path": str(hydration_path),
+    "price_hydration_status": price_hydration_status,
+    "price_hydration_max_cache_date": max_cache_date,
+    "hydration_covers_trade_date": hydration_covers_trade_date,
+}, sort_keys=True))
+PY
+)"
+
+echo "__FR030_PREFLIGHT__:${PREFLIGHT_JSON}"
+SOURCE_READINESS="$(printf '%s\n' "${PREFLIGHT_JSON}" | "${PY}" -c 'import json,sys; print(json.load(sys.stdin)["source_readiness"])')"
+if [[ "${SOURCE_READINESS}" != "READY" ]]; then
+    echo "[FR-030][WARN] Post-close research source is not ready; packet would be incomplete." >&2
+    printf '%s\n' "${PREFLIGHT_JSON}" | "${PY}" -c 'import json,sys; payload=json.load(sys.stdin); [print(f"[FR-030][WARN] {key}: {payload.get(key)}") for key in ("shadow_data_status", "shadow_data_reason", "comparison_status", "strategy_count", "hydration_status_path", "price_hydration_status", "price_hydration_max_cache_date")]; [print(f"[FR-030][WARN] failure: {failure}") for failure in payload.get("failures", [])]' >&2
+    if [[ "${ORION_ALLOW_INCOMPLETE_PACKET:-0}" != "1" ]]; then
+        echo "[FR-030][ERROR] Source readiness failed. Set ORION_ALLOW_INCOMPLETE_PACKET=1 to build an explicitly incomplete advisory packet." >&2
+        exit 24
+    fi
+    echo "[FR-030][WARN] ORION_ALLOW_INCOMPLETE_PACKET=1 set; building packet with INCOMPLETE source readiness." >&2
 fi
 
 "${PY}" -m scripts.research.build_research_clarity_wave \
