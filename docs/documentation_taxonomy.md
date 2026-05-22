@@ -107,6 +107,44 @@ Historical research should:
 - include enough context to know whether it influenced current strategy state;
 - not imply promotion without explicit promotion governance.
 
+## Generated-Vs-Canonical Promotion Guardrails
+
+Generated artifacts can become governance evidence, but they do not become
+canonical operator documentation merely because they are readable or useful.
+
+Promotion from generated output to canonical documentation requires:
+
+- an explicit human review;
+- stable source artifact paths or path patterns;
+- a documented producer;
+- freshness and confidence interpretation;
+- truth-surface classification where performance is referenced;
+- rollback or supersession guidance if the promoted interpretation becomes
+  stale.
+
+Generated research clarity bundles, including additive NAV surface registries,
+holdings snapshots, exposure summaries, and regime reports, should remain under
+`outputs/` unless a separate FR promotes their interpretation into `docs/`.
+
+## Current Research Clarity Classification
+
+The FR-024 through FR-027 research clarity bundle follows this taxonomy:
+
+| Artifact Family | Classification | Canonical Status |
+|---|---|---|
+| `outputs/research_clarity/<DATE>/nav_surface_registry.json` | `research_output` / provenance overlay | Generated evidence, not canonical docs. |
+| `outputs/research_clarity/<DATE>/surface_metadata.json` | `research_output` / truth-surface metadata | Generated evidence, not canonical docs. |
+| `outputs/research_clarity/<DATE>/holdings_snapshot.json` | `research_output` / immutable daily snapshot | Generated evidence, immutable once written. |
+| `outputs/research_clarity/<DATE>/weights_snapshot.json` | `research_output` / immutable daily snapshot | Generated evidence, immutable once written. |
+| `outputs/research_clarity/<DATE>/exposure_summary.json` | `research_output` / advisory telemetry | Generated advisory interpretation. |
+| `outputs/research_clarity/<DATE>/regime_*` | `research_output` / advisory regime intelligence | Generated advisory interpretation. |
+| `outputs/research_clarity/<DATE>/research_clarity_summary.md` | `generated_report` | Operator-readable generated summary. |
+| `docs/research_clarity_wave.md` | `architecture_doc` / governance interpretation | Canonical guidance for the additive bundle. |
+
+These artifacts must not be used to rewrite historical NAV chains, modify
+promotion logic, or alter execution behavior. They exist to make evidence more
+interpretable while FR-028 timing semantics remain separately governed.
+
 ## Current Known Mixed Areas
 
 - `docs/` contains current operations, architecture, runbooks, historical audits,
