@@ -40,20 +40,40 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _pct(value: Any) -> str:
     if value is None:
-        return "n/a"
+        return "unavailable"
     try:
         return f"{float(value) * 100:.2f}%"
     except (TypeError, ValueError):
-        return "n/a"
+        return "unavailable"
 
 
 def _num(value: Any, digits: int = 2) -> str:
     if value is None:
-        return "n/a"
+        return "unavailable"
     try:
         return f"{float(value):.{digits}f}"
     except (TypeError, ValueError):
-        return "n/a"
+        return "unavailable"
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _by_strategy(rows: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(rows, list):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        strategy_id = row.get("strategy_id")
+        if strategy_id:
+            result[str(strategy_id)] = row
+    return result
 
 
 def _strategy_name(strategy_id: str, payloads: dict[str, dict[str, Any]]) -> str:
@@ -141,7 +161,11 @@ def _operational_trust(inputs: dict[str, Any]) -> dict[str, Any]:
             confidence = payload.get("confidence_classification")
             if confidence:
                 shadow_confidences.append(confidence)
-    status = "PARTIAL" if missing else "FRESH" if not stale_or_unknown else "UNKNOWN"
+    surfaces = registry.get("surfaces", {}) if isinstance(registry.get("surfaces"), dict) else {}
+    if not shadow_confidences and "OPERATIONAL_SHADOW_NAV" in surfaces:
+        shadow_confidences.append(str(surfaces["OPERATIONAL_SHADOW_NAV"].get("confidence", "LOW")))
+    confidence_floor = "LOW" if "LOW" in shadow_confidences or any("LOW" in value for value in shadow_confidences) else "LOW"
+    status = "PARTIAL" if missing else "FRESH" if not stale_or_unknown else "PARTIAL"
     return {
         "status": status,
         "research_only": True,
@@ -149,7 +173,8 @@ def _operational_trust(inputs: dict[str, Any]) -> dict[str, Any]:
         "source_surface_count": len(registry.get("surfaces", {})),
         "missing_artifacts": missing,
         "stale_or_unknown_artifacts": stale_or_unknown,
-        "shadow_confidence_floor": "LOW" if "LOW" in shadow_confidences else "UNKNOWN",
+        "shadow_confidence_floor": confidence_floor,
+        "confidence_reason": LOW_CONFIDENCE_REASON,
         "interpretation": "Packet is suitable for operator review, not execution or promotion decisions.",
     }
 
@@ -158,10 +183,47 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     artifacts = inputs["artifacts"]
     shadow_performance = artifacts["shadow_performance"].get("strategies", {})
     exposures = artifacts["exposures_snapshot"].get("strategies", {})
+    exposure_summary = artifacts["exposure_summary"].get("strategies", {})
+    concentration = _by_strategy(artifacts["concentration_monitor"].get("strategies", []))
+    regime_matrix = artifacts["regime_exposure_matrix"].get("strategies", {})
+    flags_by_strategy: dict[str, list[dict[str, Any]]] = {strategy_id: [] for strategy_id in STRATEGY_ORDER}
+    for flag in artifacts["factor_risk_flags"].get("flags", []):
+        if isinstance(flag, dict) and flag.get("strategy_id") in flags_by_strategy:
+            flags_by_strategy[str(flag["strategy_id"])].append(flag)
     rows = []
     for strategy_id in STRATEGY_ORDER:
         perf = shadow_performance.get(strategy_id, {}) if isinstance(shadow_performance, dict) else {}
         exposure = exposures.get(strategy_id, {}) if isinstance(exposures, dict) else {}
+        exposure_from_summary = exposure_summary.get(strategy_id, {}) if isinstance(exposure_summary, dict) else {}
+        concentration_row = concentration.get(strategy_id, {})
+        regime_row = regime_matrix.get(strategy_id, {}) if isinstance(regime_matrix, dict) else {}
+        top3 = _first_present(
+            exposure.get("top3_concentration"),
+            exposure_from_summary.get("top3_concentration"),
+            concentration_row.get("top3_concentration"),
+            regime_row.get("top3_concentration"),
+        )
+        max_position = _first_present(
+            exposure.get("max_position_weight"),
+            exposure_from_summary.get("max_position_weight"),
+            concentration_row.get("max_position_weight"),
+            regime_row.get("max_position_weight"),
+        )
+        max_sector = _first_present(
+            exposure.get("max_sector_exposure"),
+            exposure_from_summary.get("max_sector_exposure"),
+            concentration_row.get("max_sector_exposure"),
+            regime_row.get("max_sector_exposure"),
+        )
+        missing_sources = []
+        if top3 is None:
+            missing_sources.append("top3_concentration from exposures_snapshot/concentration_monitor")
+        if max_position is None:
+            missing_sources.append("max_position_weight from exposures_snapshot/concentration_monitor")
+        if max_sector is None:
+            missing_sources.append("max_sector_exposure from exposures_snapshot/concentration_monitor/regime_exposure_matrix")
+        risk_flags = flags_by_strategy.get(strategy_id, [])
+        main_risk = _main_risk(strategy_id, top3, max_position, max_sector, risk_flags, missing_sources)
         rows.append(
             {
                 "strategy_id": strategy_id,
@@ -169,10 +231,14 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 "daily_return": perf.get("daily_return"),
                 "nav": perf.get("nav"),
                 "weights_count": perf.get("weights_count"),
-                "top3_concentration": exposure.get("top3_concentration"),
-                "max_position_weight": exposure.get("max_position_weight"),
-                "max_sector_exposure": exposure.get("max_sector_exposure"),
-                "turnover_proxy": exposure.get("turnover_proxy"),
+                "top3_concentration": top3,
+                "max_position_weight": max_position,
+                "max_sector_exposure": max_sector,
+                "turnover_proxy": _first_present(exposure.get("turnover_proxy"), exposure_from_summary.get("turnover_proxy")),
+                "risk_flags": risk_flags,
+                "main_risk_caveat": main_risk,
+                "missing_exposure_sources": missing_sources,
+                "operator_interpretation": _strategy_interpretation(strategy_id, perf.get("daily_return"), top3, max_position, max_sector, risk_flags, missing_sources),
                 "confidence_classification": exposure.get("confidence_classification", "LOW"),
             }
         )
@@ -180,6 +246,53 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     for index, row in enumerate(rows, start=1):
         row["daily_rank"] = index
     return rows
+
+
+def _main_risk(
+    strategy_id: str,
+    top3: Any,
+    max_position: Any,
+    max_sector: Any,
+    risk_flags: list[dict[str, Any]],
+    missing_sources: list[str],
+) -> str:
+    if missing_sources:
+        return f"Exposure data incomplete: missing {', '.join(missing_sources)}."
+    flag_names = [str(flag.get("flag")) for flag in risk_flags if flag.get("flag")]
+    if "POSITION_CONCENTRATION" in flag_names:
+        return "High position concentration may amplify outperformance and drawdown."
+    if "SECTOR_CONCENTRATION" in flag_names:
+        return "Sector concentration may dominate selection effects."
+    if "MOMENTUM_FACTOR_SENSITIVITY" in flag_names:
+        return "Momentum sensitivity may explain part of the move."
+    if max_sector is not None and float(max_sector) >= 0.5:
+        return "Sector exposure is elevated."
+    if top3 is not None and float(top3) >= 0.6:
+        return "Top-three concentration is elevated."
+    return "No threshold concentration flag fired; continue normal evidence review."
+
+
+def _strategy_interpretation(
+    strategy_id: str,
+    daily_return: Any,
+    top3: Any,
+    max_position: Any,
+    max_sector: Any,
+    risk_flags: list[dict[str, Any]],
+    missing_sources: list[str],
+) -> str:
+    name = strategy_id.replace("caerus_", "").title()
+    if missing_sources:
+        return f"{name} has incomplete exposure evidence today, so performance should be interpreted cautiously."
+    concentrated = bool(risk_flags) or any(
+        value is not None and float(value) >= threshold
+        for value, threshold in ((top3, 0.6), (max_position, 0.2), (max_sector, 0.5))
+    )
+    if concentrated:
+        return f"{name} performance may be concentration- or exposure-amplified; review risk flags before treating it as durable edge."
+    if daily_return is not None and float(daily_return) > 0:
+        return f"{name} was positive today without a high concentration flag in the available evidence."
+    return f"{name} requires normal follow-up; current packet evidence does not support a stronger conclusion."
 
 
 def _exposure_review(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -201,14 +314,38 @@ def _regime_review(inputs: dict[str, Any]) -> dict[str, Any]:
     breakdown = inputs["artifacts"]["regime_performance_breakdown"]
     fragility = inputs["artifacts"]["regime_fragility_report"]
     matrix = inputs["artifacts"]["regime_exposure_matrix"]
+    regime = breakdown.get("regime", {})
+    regime_sentence = _regime_sentence(regime)
     return {
-        "regime": breakdown.get("regime", {}),
+        "regime": regime,
+        "regime_summary": regime_sentence,
         "performance_by_strategy": breakdown.get("strategies", {}),
         "fragility_indicators": fragility.get("fragility_indicators", []),
         "exposure_matrix": matrix.get("strategies", {}),
         "confidence_classification": breakdown.get("confidence_classification", "LOW"),
         "interpretation": "Regime interpretation is advisory and inherits source artifact confidence.",
     }
+
+
+def _regime_sentence(regime: Any) -> str:
+    if not isinstance(regime, dict) or not regime:
+        return "Regime metadata was not present in the shadow artifact; interpretation remains LOW confidence."
+    if regime.get("regime_source") == "not_present_in_shadow_artifact":
+        return "Regime metadata was not present in the shadow artifact; interpretation remains LOW confidence."
+    parts = []
+    labels = (
+        ("risk", "risk"),
+        ("volatility", "volatility"),
+        ("trend", "trend"),
+        ("breadth", "breadth"),
+    )
+    for key, label in labels:
+        value = regime.get(key)
+        if value and value != "UNKNOWN":
+            parts.append(f"{label} is {str(value).replace('_', ' ')}")
+    if not parts:
+        return "Regime metadata was not present in the shadow artifact; interpretation remains LOW confidence."
+    return "Available regime evidence indicates " + ", ".join(parts) + "."
 
 
 def _what_changed(inputs: dict[str, Any]) -> list[str]:
@@ -252,9 +389,10 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
     regime = _regime_review(inputs)
     key_risks = _key_risks(trust, exposure, regime)
     followups = _research_followups(exposure, regime)
+    operator_takeaway = _operator_takeaway(comparison, exposure, regime, trust)
     executive_summary = [
         f"Packet status: {trust['status']}; advisory research-only interpretation.",
-        f"Strategy rank leader: {comparison[0]['strategy_name'] if comparison else 'n/a'} based on available daily shadow return.",
+        f"Strategy rank leader: {comparison[0]['strategy_name'] if comparison else 'unavailable'} based on available daily shadow return.",
         f"Exposure flags: {len(exposure['risk_flags'])}; regime fragility indicators: {len(regime['fragility_indicators'])}.",
         "Operational shadow NAV confidence remains LOW pending FR-028.",
     ]
@@ -272,6 +410,13 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
             "research_clarity_dir": str(inputs["clarity_dir"]),
         },
         "executive_summary": executive_summary,
+        "operator_takeaway": operator_takeaway,
+        "how_to_read": [
+            "Start with confidence and freshness before interpreting returns.",
+            "Treat shadow outperformance as advisory until FR-028 timing semantics are governed.",
+            "Use concentration and sector exposure to separate possible selection edge from exposure amplification.",
+            "Use regime evidence as context, not as promotion or execution guidance.",
+        ],
         "operational_trust_summary": trust,
         "strategy_comparison": comparison,
         "exposure_concentration_review": exposure,
@@ -296,6 +441,27 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
     }
 
 
+def _operator_takeaway(
+    comparison: list[dict[str, Any]],
+    exposure: dict[str, Any],
+    regime: dict[str, Any],
+    trust: dict[str, Any],
+) -> list[str]:
+    if not comparison:
+        return ["Packet inputs are insufficient to rank strategies today."]
+    leader = comparison[0]
+    takeaways = [
+        f"{leader['strategy_name']} leads today's available shadow return ranking, but the evidence remains advisory.",
+        f"Confidence floor is {trust['shadow_confidence_floor']} because operational shadow NAV remains governed by unresolved FR-028 timing semantics.",
+    ]
+    if exposure["risk_flags"]:
+        takeaways.append("Risk flags are present; review concentration and exposure before treating outperformance as durable.")
+    else:
+        takeaways.append("No exposure risk flags fired from available FR-026 artifacts.")
+    takeaways.append(regime["regime_summary"])
+    return takeaways
+
+
 def _markdown(packet: dict[str, Any]) -> str:
     lines = [
         f"# Daily Research Packet - {packet['trade_date']}",
@@ -304,25 +470,40 @@ def _markdown(packet: dict[str, Any]) -> str:
         "",
     ]
     lines.extend(f"- {item}" for item in packet["executive_summary"])
+    lines.extend(["", "## Operator Takeaway", ""])
+    lines.extend(f"- {item}" for item in packet["operator_takeaway"])
+    lines.extend(["", "## How To Read This Packet", ""])
+    lines.extend(f"- {item}" for item in packet["how_to_read"])
     lines.extend(["", "## Operational Trust Summary", ""])
     trust = packet["operational_trust_summary"]
     lines.extend(
         [
             f"- Status: `{trust['status']}`",
             f"- Shadow confidence floor: `{trust['shadow_confidence_floor']}`",
+            f"- Confidence reason: {trust['confidence_reason']}",
             f"- Missing inputs: {', '.join(trust['missing_artifacts']) if trust['missing_artifacts'] else 'none'}",
+            f"- Stale or unknown inputs: {', '.join(trust['stale_or_unknown_artifacts']) if trust['stale_or_unknown_artifacts'] else 'none'}",
             f"- Interpretation: {trust['interpretation']}",
         ]
     )
-    lines.extend(["", "## Strategy Comparison Summary", ""])
+    lines.extend(["", "## Strategy Briefs", ""])
     for row in packet["strategy_comparison"]:
-        lines.append(
-            f"- #{row['daily_rank']} `{row['strategy_id']}`: return {_pct(row['daily_return'])}, "
-            f"NAV {_num(row['nav'], 4)}, top-3 {_pct(row['top3_concentration'])}, "
-            f"max sector {_pct(row['max_sector_exposure'])}."
+        lines.extend(
+            [
+                f"### #{row['daily_rank']} {row['strategy_name']}",
+                "",
+                f"- Daily return: {_pct(row['daily_return'])}",
+                f"- NAV: {_num(row['nav'], 4)}",
+                f"- Concentration: top-3 {_pct(row['top3_concentration'])}; max position {_pct(row['max_position_weight'])}",
+                f"- Sector exposure: max sector {_pct(row['max_sector_exposure'])}",
+                f"- Main risk caveat: {row['main_risk_caveat']}",
+                f"- Interpretation: {row['operator_interpretation']}",
+                "",
+            ]
         )
     lines.extend(["", "## Exposure + Concentration Review", ""])
     exposure = packet["exposure_concentration_review"]
+    lines.append(f"- {exposure['interpretation']}")
     if exposure["risk_flags"]:
         for flag in exposure["risk_flags"]:
             lines.append(f"- `{flag['strategy_id']}`: `{flag['flag']}` severity `{flag['severity']}`.")
@@ -330,8 +511,9 @@ def _markdown(packet: dict[str, Any]) -> str:
         lines.append("- No exposure risk flags fired.")
     lines.extend(["", "## Regime Interpretation", ""])
     regime = packet["regime_interpretation"]
-    lines.append(f"- Regime evidence: `{json.dumps(regime['regime'], sort_keys=True)}`")
+    lines.append(f"- {regime['regime_summary']}")
     lines.append(f"- Confidence: `{regime['confidence_classification']}`")
+    lines.append(f"- Interpretation: {regime['interpretation']}")
     lines.extend(["", "## Fragility Observations", ""])
     if regime["fragility_indicators"]:
         for item in regime["fragility_indicators"]:
@@ -359,6 +541,8 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
             body.append(f"<h1>{html.escape(line[2:])}</h1>")
         elif line.startswith("## "):
             body.append(f"<h2>{html.escape(line[3:])}</h2>")
+        elif line.startswith("### "):
+            body.append(f"<h3>{html.escape(line[4:])}</h3>")
         elif line.startswith("- "):
             body.append(f"<li>{html.escape(line[2:])}</li>")
         elif not line.strip():
