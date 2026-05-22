@@ -19,7 +19,7 @@ jobs:
         run: |
           python -m backtests.sleeve1_robustness --start 2005-01-01 --top_n 10
       - name: Upload robustness artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: sleeve1-robustness
           path: outputs/backtests/sleeve1_robustness/**
