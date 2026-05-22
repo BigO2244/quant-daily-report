@@ -17,6 +17,12 @@ from typing import Any
 
 LOW_CONFIDENCE_REASON = "FR-028 timing semantics remain unresolved for operational shadow NAV."
 STRATEGY_ORDER = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+EXPOSURE_SOURCE_ARTIFACTS = (
+    "exposures_snapshot.json",
+    "exposure_summary.json",
+    "concentration_monitor.json",
+    "regime_exposure_matrix.json",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -124,6 +130,13 @@ def _load_inputs(repo_root: Path, trade_date: str, shadow_dir: Path | None, clar
         "shadow_performance": _read_json(actual_shadow_dir / "shadow_performance.json"),
         "comparison": _read_json(actual_shadow_dir / "comparison.json"),
     }
+    source_diagnostics = {
+        name: {
+            "artifact": name,
+            "status": "FOUND" if _artifact_has_payload(artifacts[_artifact_key(name)]) else "MISSING",
+        }
+        for name in EXPOSURE_SOURCE_ARTIFACTS
+    }
     freshness = [
         _artifact_state(actual_clarity_dir / name, trade_date)
         for name in (
@@ -146,7 +159,16 @@ def _load_inputs(repo_root: Path, trade_date: str, shadow_dir: Path | None, clar
         "clarity_dir": actual_clarity_dir,
         "artifacts": artifacts,
         "freshness": freshness,
+        "source_diagnostics": source_diagnostics,
     }
+
+
+def _artifact_key(artifact_name: str) -> str:
+    return artifact_name.removesuffix(".json")
+
+
+def _artifact_has_payload(payload: Any) -> bool:
+    return isinstance(payload, dict) and bool(payload)
 
 
 def _operational_trust(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +208,7 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     exposure_summary = artifacts["exposure_summary"].get("strategies", {})
     concentration = _by_strategy(artifacts["concentration_monitor"].get("strategies", []))
     regime_matrix = artifacts["regime_exposure_matrix"].get("strategies", {})
+    source_diagnostics = inputs["source_diagnostics"]
     flags_by_strategy: dict[str, list[dict[str, Any]]] = {strategy_id: [] for strategy_id in STRATEGY_ORDER}
     for flag in artifacts["factor_risk_flags"].get("flags", []):
         if isinstance(flag, dict) and flag.get("strategy_id") in flags_by_strategy:
@@ -224,6 +247,10 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             missing_sources.append("max_sector_exposure from exposures_snapshot/concentration_monitor/regime_exposure_matrix")
         risk_flags = flags_by_strategy.get(strategy_id, [])
         main_risk = _main_risk(strategy_id, top3, max_position, max_sector, risk_flags, missing_sources)
+        per_strategy_sources = {
+            name: payload["status"]
+            for name, payload in source_diagnostics.items()
+        }
         rows.append(
             {
                 "strategy_id": strategy_id,
@@ -238,14 +265,29 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 "risk_flags": risk_flags,
                 "main_risk_caveat": main_risk,
                 "missing_exposure_sources": missing_sources,
+                "source_diagnostics": per_strategy_sources,
                 "operator_interpretation": _strategy_interpretation(strategy_id, perf.get("daily_return"), top3, max_position, max_sector, risk_flags, missing_sources),
                 "confidence_classification": exposure.get("confidence_classification", "LOW"),
             }
         )
-    rows.sort(key=lambda row: (row["daily_return"] is None, -(row["daily_return"] or 0.0), row["strategy_id"]))
+    ranking_basis = _ranking_basis(rows)
+    if ranking_basis == "cumulative_nav":
+        rows.sort(key=lambda row: (row["nav"] is None, -(row["nav"] or 0.0), row["strategy_id"]))
+    else:
+        rows.sort(key=lambda row: (row["daily_return"] is None, -(row["daily_return"] or 0.0), row["strategy_id"]))
     for index, row in enumerate(rows, start=1):
         row["daily_rank"] = index
+        row["ranking_basis"] = ranking_basis
     return rows
+
+
+def _ranking_basis(rows: list[dict[str, Any]]) -> str:
+    daily_returns = [row.get("daily_return") for row in rows if row.get("daily_return") is not None]
+    if daily_returns and any(abs(float(value)) > 1e-12 for value in daily_returns):
+        return "daily_return"
+    if any(row.get("nav") is not None for row in rows):
+        return "cumulative_nav"
+    return "fallback_ordering"
 
 
 def _main_risk(
@@ -283,7 +325,11 @@ def _strategy_interpretation(
 ) -> str:
     name = strategy_id.replace("caerus_", "").title()
     if missing_sources:
-        return f"{name} has incomplete exposure evidence today, so performance should be interpreted cautiously."
+        return (
+            f"{name} has incomplete exposure evidence today. Performance ranking is available, "
+            "but exposure-adjusted interpretation is not yet available. Do not compare strategy "
+            "quality until exposure data is present."
+        )
     concentrated = bool(risk_flags) or any(
         value is not None and float(value) >= threshold
         for value, threshold in ((top3, 0.6), (max_position, 0.2), (max_sector, 0.5))
@@ -295,18 +341,67 @@ def _strategy_interpretation(
     return f"{name} requires normal follow-up; current packet evidence does not support a stronger conclusion."
 
 
-def _exposure_review(inputs: dict[str, Any]) -> dict[str, Any]:
+def _exposure_review(inputs: dict[str, Any], data_completeness: dict[str, Any]) -> dict[str, Any]:
     concentration = inputs["artifacts"]["concentration_monitor"].get("strategies", [])
     flags = inputs["artifacts"]["factor_risk_flags"].get("flags", [])
     high_concentration = [
         row for row in concentration
         if isinstance(row, dict) and row.get("concentration_score") == "HIGH"
     ]
+    assessable = data_completeness["exposure_data_status"] == "complete"
     return {
         "concentration_rows": concentration,
         "risk_flags": flags,
+        "risk_assessable": assessable,
         "high_concentration_strategy_count": len(high_concentration),
-        "interpretation": "High concentration means outperformance may be amplified by position or sector exposure.",
+        "interpretation": (
+            "High concentration means outperformance may be amplified by position or sector exposure."
+            if assessable
+            else "Exposure risk not assessable because required exposure artifacts are incomplete."
+        ),
+    }
+
+
+def _data_completeness(inputs: dict[str, Any], comparison: list[dict[str, Any]]) -> dict[str, Any]:
+    missing_artifacts = [
+        name for name, payload in inputs["source_diagnostics"].items()
+        if payload["status"] != "FOUND"
+    ]
+    strategies_missing_fields = {
+        row["strategy_id"]: row["missing_exposure_sources"]
+        for row in comparison
+        if row["missing_exposure_sources"]
+    }
+    if len(missing_artifacts) == len(EXPOSURE_SOURCE_ARTIFACTS):
+        status = "missing"
+    elif missing_artifacts or strategies_missing_fields:
+        status = "partial"
+    else:
+        status = "complete"
+    impacted_sections = []
+    if status != "complete":
+        impacted_sections = [
+            "Strategy Briefs",
+            "Exposure + Concentration Review",
+            "Operator Takeaway",
+            "Research Follow-Ups",
+        ]
+    return {
+        "exposure_data_status": status,
+        "expected_sources": inputs["source_diagnostics"],
+        "missing_artifacts": missing_artifacts,
+        "strategies_missing_fields": strategies_missing_fields,
+        "impacted_sections": impacted_sections,
+        "operator_consequence": (
+            "Exposure-adjusted interpretation is available."
+            if status == "complete"
+            else "Performance ranking is available, but exposure-adjusted interpretation is not yet available."
+        ),
+        "next_action": (
+            "Use exposure and concentration flags in normal review."
+            if status == "complete"
+            else "Regenerate or inspect FR-026/FR-027 research clarity artifacts before comparing strategy quality."
+        ),
     }
 
 
@@ -358,12 +453,25 @@ def _what_changed(inputs: dict[str, Any]) -> list[str]:
     return [f"Rebalance delta status is {delta_basis}; review source artifacts before drawing change conclusions."]
 
 
+def _ranking_change_note(comparison: list[dict[str, Any]]) -> str:
+    if not comparison:
+        return "Strategy ranking is unavailable because packet inputs are incomplete."
+    basis = comparison[0].get("ranking_basis")
+    if basis == "daily_return":
+        return "Strategy ordering is based on available same-day shadow daily return."
+    if basis == "cumulative_nav":
+        return "All available daily returns are 0.00%; strategy ordering is based on cumulative NAV instead of daily return."
+    return "Strategy ordering uses fallback strategy order because daily return and NAV evidence are unavailable."
+
+
 def _key_risks(trust: dict[str, Any], exposure: dict[str, Any], regime: dict[str, Any]) -> list[str]:
     risks = [LOW_CONFIDENCE_REASON]
     if trust["missing_artifacts"]:
         risks.append("One or more expected packet inputs are missing; packet confidence is partial.")
     if exposure["risk_flags"]:
         risks.append("Exposure risk flags are present; inspect concentration and factor sensitivity before interpreting returns.")
+    if not exposure.get("risk_assessable", True):
+        risks.append("Exposure risk could not be evaluated because required FR-026/FR-027 artifacts are incomplete.")
     if regime["fragility_indicators"]:
         risks.append("Regime fragility indicators are present; challenger outperformance may be regime-dependent.")
     return risks
@@ -376,6 +484,8 @@ def _research_followups(exposure: dict[str, Any], regime: dict[str, Any]) -> lis
     ]
     if exposure["high_concentration_strategy_count"]:
         followups.append("Review whether Orion/Lyra outperformance is concentration-amplified rather than selection-only.")
+    if not exposure.get("risk_assessable", True):
+        followups.append("Restore complete FR-026/FR-027 exposure artifacts before comparing strategy quality.")
     if regime["fragility_indicators"]:
         followups.append("Track whether fragility indicators persist across regime transitions.")
     return followups
@@ -385,14 +495,15 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
     inputs = _load_inputs(repo_root, trade_date, shadow_dir, clarity_dir)
     trust = _operational_trust(inputs)
     comparison = _strategy_comparison(inputs)
-    exposure = _exposure_review(inputs)
+    data_completeness = _data_completeness(inputs, comparison)
+    exposure = _exposure_review(inputs, data_completeness)
     regime = _regime_review(inputs)
     key_risks = _key_risks(trust, exposure, regime)
     followups = _research_followups(exposure, regime)
     operator_takeaway = _operator_takeaway(comparison, exposure, regime, trust)
     executive_summary = [
         f"Packet status: {trust['status']}; advisory research-only interpretation.",
-        f"Strategy rank leader: {comparison[0]['strategy_name'] if comparison else 'unavailable'} based on available daily shadow return.",
+        f"Strategy rank leader: {comparison[0]['strategy_name'] if comparison else 'unavailable'} based on {comparison[0]['ranking_basis'].replace('_', ' ') if comparison else 'unavailable'}.",
         f"Exposure flags: {len(exposure['risk_flags'])}; regime fragility indicators: {len(regime['fragility_indicators'])}.",
         "Operational shadow NAV confidence remains LOW pending FR-028.",
     ]
@@ -417,6 +528,7 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
             "Use concentration and sector exposure to separate possible selection edge from exposure amplification.",
             "Use regime evidence as context, not as promotion or execution guidance.",
         ],
+        "data_completeness": data_completeness,
         "operational_trust_summary": trust,
         "strategy_comparison": comparison,
         "exposure_concentration_review": exposure,
@@ -430,7 +542,7 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
                 "Packet does not assert promotion readiness or timing-corrected performance.",
             ],
         },
-        "what_changed_today": _what_changed(inputs),
+        "what_changed_today": [_ranking_change_note(comparison), *_what_changed(inputs)],
         "key_risks": key_risks,
         "research_followups": followups,
         "delivery_preparation": {
@@ -454,7 +566,9 @@ def _operator_takeaway(
         f"{leader['strategy_name']} leads today's available shadow return ranking, but the evidence remains advisory.",
         f"Confidence floor is {trust['shadow_confidence_floor']} because operational shadow NAV remains governed by unresolved FR-028 timing semantics.",
     ]
-    if exposure["risk_flags"]:
+    if not exposure.get("risk_assessable", True):
+        takeaways.append("Exposure risk is not assessable because required FR-026/FR-027 artifacts are incomplete.")
+    elif exposure["risk_flags"]:
         takeaways.append("Risk flags are present; review concentration and exposure before treating outperformance as durable.")
     else:
         takeaways.append("No exposure risk flags fired from available FR-026 artifacts.")
@@ -474,6 +588,19 @@ def _markdown(packet: dict[str, Any]) -> str:
     lines.extend(f"- {item}" for item in packet["operator_takeaway"])
     lines.extend(["", "## How To Read This Packet", ""])
     lines.extend(f"- {item}" for item in packet["how_to_read"])
+    lines.extend(["", "## Data Completeness", ""])
+    completeness = packet["data_completeness"]
+    lines.extend(
+        [
+            f"- Exposure data status: `{completeness['exposure_data_status']}`",
+            f"- Impacted sections: {', '.join(completeness['impacted_sections']) if completeness['impacted_sections'] else 'none'}",
+            f"- Operator consequence: {completeness['operator_consequence']}",
+            f"- Next action: {completeness['next_action']}",
+        ]
+    )
+    lines.append("- Source diagnostics:")
+    for name, payload in sorted(completeness["expected_sources"].items()):
+        lines.append(f"  - `{name}`: `{payload['status']}`")
     lines.extend(["", "## Operational Trust Summary", ""])
     trust = packet["operational_trust_summary"]
     lines.extend(
@@ -496,6 +623,7 @@ def _markdown(packet: dict[str, Any]) -> str:
                 f"- NAV: {_num(row['nav'], 4)}",
                 f"- Concentration: top-3 {_pct(row['top3_concentration'])}; max position {_pct(row['max_position_weight'])}",
                 f"- Sector exposure: max sector {_pct(row['max_sector_exposure'])}",
+                f"- Source diagnostics: {_source_diagnostics_sentence(row['source_diagnostics'])}",
                 f"- Main risk caveat: {row['main_risk_caveat']}",
                 f"- Interpretation: {row['operator_interpretation']}",
                 "",
@@ -503,11 +631,14 @@ def _markdown(packet: dict[str, Any]) -> str:
         )
     lines.extend(["", "## Exposure + Concentration Review", ""])
     exposure = packet["exposure_concentration_review"]
-    lines.append(f"- {exposure['interpretation']}")
-    if exposure["risk_flags"]:
+    if not exposure.get("risk_assessable", True):
+        lines.append(f"- {exposure['interpretation']}")
+    elif exposure["risk_flags"]:
+        lines.append(f"- {exposure['interpretation']}")
         for flag in exposure["risk_flags"]:
             lines.append(f"- `{flag['strategy_id']}`: `{flag['flag']}` severity `{flag['severity']}`.")
     else:
+        lines.append(f"- {exposure['interpretation']}")
         lines.append("- No exposure risk flags fired.")
     lines.extend(["", "## Regime Interpretation", ""])
     regime = packet["regime_interpretation"]
@@ -531,6 +662,14 @@ def _markdown(packet: dict[str, Any]) -> str:
     lines.extend(f"- {item}" for item in packet["research_followups"])
     lines.append("")
     return "\n".join(lines)
+
+
+def _source_diagnostics_sentence(source_diagnostics: dict[str, str]) -> str:
+    found = [name for name, status in sorted(source_diagnostics.items()) if status == "FOUND"]
+    missing = [name for name, status in sorted(source_diagnostics.items()) if status != "FOUND"]
+    found_text = ", ".join(found) if found else "none"
+    missing_text = ", ".join(missing) if missing else "none"
+    return f"found {found_text}; missing {missing_text}."
 
 
 def _html(packet: dict[str, Any], markdown: str) -> str:
@@ -571,6 +710,8 @@ def _summary(packet: dict[str, Any]) -> dict[str, Any]:
         "confidence_floor": packet["confidence_freshness_caveats"]["confidence_floor"],
         "leader": packet["strategy_comparison"][0] if packet["strategy_comparison"] else None,
         "risk_flag_count": len(packet["exposure_concentration_review"]["risk_flags"]),
+        "exposure_data_status": packet["data_completeness"]["exposure_data_status"],
+        "exposure_risk_assessable": packet["exposure_concentration_review"]["risk_assessable"],
         "fragility_indicator_count": len(packet["regime_interpretation"]["fragility_indicators"]),
         "advisory_only": True,
         "execution_behavior_changed": False,
@@ -629,3 +770,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+    source_diagnostics = inputs["source_diagnostics"]

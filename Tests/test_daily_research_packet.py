@@ -134,6 +134,8 @@ def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     assert summary["leader"]["top3_concentration"] == 1.0
     assert summary["leader"]["max_position_weight"] == 0.5
     assert summary["leader"]["max_sector_exposure"] == 1.0
+    assert summary["exposure_data_status"] == "complete"
+    assert summary["exposure_risk_assessable"] is True
 
 
 def test_daily_research_packet_surfaces_missing_freshness_inputs(tmp_path):
@@ -167,8 +169,19 @@ def test_daily_research_packet_missing_exposure_fields_are_explained(tmp_path):
     assert leader["top3_concentration"] is None
     assert leader["missing_exposure_sources"]
     assert "Exposure data incomplete: missing" in leader["main_risk_caveat"]
+    assert packet["data_completeness"]["exposure_data_status"] == "missing"
+    assert "Strategy Briefs" in packet["data_completeness"]["impacted_sections"]
+    assert packet["exposure_concentration_review"]["risk_assessable"] is False
     assert "unavailable" in markdown
     assert "Exposure data incomplete" in markdown
+    assert "Exposure risk not assessable because required exposure artifacts are incomplete." in markdown
+    assert markdown.count("Exposure risk not assessable because required exposure artifacts are incomplete.") == 1
+    assert "No exposure risk flags fired" not in markdown
+    assert "Performance ranking is available, but exposure-adjusted interpretation is not yet available." in markdown
+    assert "Do not compare strategy quality until exposure data is present." in markdown
+    assert "## Data Completeness" in markdown
+    assert "exposures_snapshot.json" in markdown
+    assert "regime_exposure_matrix.json" in markdown
     assert "n/a" not in markdown
 
 
@@ -186,3 +199,21 @@ def test_daily_research_packet_confidence_floor_is_consistently_low(tmp_path):
     assert summary["confidence_floor"] == "LOW"
     assert "Shadow confidence floor: `LOW`" in markdown
     assert "Shadow confidence floor: `UNKNOWN`" not in markdown
+
+
+def test_daily_research_packet_zero_daily_returns_rank_by_nav(tmp_path):
+    repo, shadow_dir, clarity_dir, packet_dir = _fixture_sources(tmp_path)
+    shadow_performance = _read_json(shadow_dir / "shadow_performance.json")
+    shadow_performance["strategies"]["caerus_polaris"]["daily_return"] = 0.0
+    shadow_performance["strategies"]["caerus_orion"]["daily_return"] = 0.0
+    shadow_performance["strategies"]["caerus_lyra"]["daily_return"] = 0.0
+    _write_json(shadow_dir / "shadow_performance.json", shadow_performance)
+
+    build_daily_research_packet(repo, "2026-05-22", shadow_dir, clarity_dir, packet_dir)
+
+    packet = _read_json(packet_dir / "packet.json")
+    markdown = (packet_dir / "packet.md").read_text(encoding="utf-8")
+
+    assert packet["strategy_comparison"][0]["strategy_id"] == "caerus_orion"
+    assert packet["strategy_comparison"][0]["ranking_basis"] == "cumulative_nav"
+    assert "All available daily returns are 0.00%; strategy ordering is based on cumulative NAV instead of daily return." in markdown
