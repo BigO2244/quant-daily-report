@@ -234,6 +234,7 @@ def test_daily_research_packet_html_is_dashboard_style_and_utf8_clean(tmp_path):
     html_text = html_bytes.decode("utf-8")
 
     assert "<style>" in html_text
+    assert "Top Dashboard" in html_text
     assert "class=\"card metric\"" in html_text
     assert "<table>" in html_text
     assert "`" not in html_text

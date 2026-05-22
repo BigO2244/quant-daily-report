@@ -813,13 +813,14 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
     regime = packet["regime_interpretation"]
     body = [
         f"<h1>Daily Research Packet - {html.escape(packet['trade_date'])}</h1>",
+        "<section class=\"card wide\"><h2>Top Dashboard</h2>",
         "<section class=\"grid cards\">",
         _metric_card("Packet Status", dashboard["packet_status"]),
         _metric_card("Confidence Floor", dashboard["confidence_floor"]),
         _metric_card("Ranking Basis", dashboard["ranking_basis_label"]),
         _metric_card("Exposure Data", dashboard["exposure_data_status"]),
         _metric_card("Regime Data", dashboard["regime_data_status"]),
-        "</section>",
+        "</section></section>",
         "<section class=\"card wide\"><h2>Operator Takeaway</h2>",
         f"<p>{html.escape(dashboard['main_operator_takeaway'])}</p>",
         "<ul>",
