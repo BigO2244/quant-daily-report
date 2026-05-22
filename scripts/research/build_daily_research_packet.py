@@ -16,6 +16,12 @@ from typing import Any
 
 
 LOW_CONFIDENCE_REASON = "FR-028 timing semantics remain unresolved for operational shadow NAV."
+INCOMPLETE_EXPOSURE_MESSAGE = (
+    "Required exposure fields are absent despite source artifacts being present, likely because upstream shadow artifacts were generated from a stale/no-data price source."
+)
+INCOMPLETE_NEXT_ACTION = (
+    "Wait for post-close hydration and shadow artifact refresh, then rerun Orion.command. Do not force an incomplete packet unless diagnosing source readiness."
+)
 STRATEGY_ORDER = ("caerus_polaris", "caerus_orion", "caerus_lyra")
 EXPOSURE_SOURCE_ARTIFACTS = (
     "exposures_snapshot.json",
@@ -74,6 +80,15 @@ def _num(value: Any, digits: int = 2) -> str:
         return f"{float(value):.{digits}f}"
     except (TypeError, ValueError):
         return "unavailable"
+
+
+def _plain_num(value: Any, digits: int = 2) -> str | None:
+    if value is None:
+        return None
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return None
 
 
 def _label(value: str) -> str:
@@ -366,7 +381,7 @@ def _main_risk(
     missing_sources: list[str],
 ) -> str:
     if missing_sources:
-        return f"Exposure data incomplete: missing {', '.join(missing_sources)}."
+        return INCOMPLETE_EXPOSURE_MESSAGE
     flag_names = [str(flag.get("flag")) for flag in risk_flags if flag.get("flag")]
     if "POSITION_CONCENTRATION" in flag_names:
         return "High position concentration may amplify outperformance and drawdown."
@@ -426,6 +441,7 @@ def _exposure_review(inputs: dict[str, Any], data_completeness: dict[str, Any]) 
 
 
 def _data_completeness(inputs: dict[str, Any], comparison: list[dict[str, Any]]) -> dict[str, Any]:
+    source_ready = inputs["source_readiness"]["status"] == "READY"
     missing_artifacts = [
         name for name, payload in inputs["source_diagnostics"].items()
         if payload["status"] != "FOUND"
@@ -460,12 +476,12 @@ def _data_completeness(inputs: dict[str, Any], comparison: list[dict[str, Any]])
         "operator_consequence": (
             "Exposure-adjusted interpretation is available."
             if status == "complete"
-            else "Performance ranking is available, but exposure-adjusted interpretation is not yet available."
+            else INCOMPLETE_EXPOSURE_MESSAGE if not source_ready else "Performance ranking is available, but exposure-adjusted interpretation is not yet available."
         ),
         "next_action": (
             "Use exposure and concentration flags in normal review."
             if status == "complete"
-            else "Regenerate or inspect FR-026/FR-027 research clarity artifacts. Do not compare strategy quality until exposure data is present."
+            else INCOMPLETE_NEXT_ACTION if not source_ready else "Regenerate or inspect FR-026/FR-027 research clarity artifacts. Do not compare strategy quality until exposure data is present."
         ),
     }
 
@@ -491,7 +507,7 @@ def _field_diagnostics(inputs: dict[str, Any], comparison: list[dict[str, Any]])
                 "operator_consequence": (
                     "Available for exposure-adjusted review."
                     if field_exists
-                    else "Exposure-adjusted strategy comparison is limited until this field is populated."
+                    else INCOMPLETE_EXPOSURE_MESSAGE
                 ),
             }
         )
@@ -550,7 +566,8 @@ def _regime_sentence(regime: Any) -> str:
     if regime.get("regime_source") == "not_present_in_shadow_artifact":
         return "Regime metadata was not present in the shadow artifact; interpretation remains LOW confidence."
     if regime.get("regime_source") == "vix_regime_current_fallback":
-        vix_text = f" with VIX {regime['vix']}" if regime.get("vix") is not None else ""
+        vix_value = _plain_num(regime.get("vix"), 2)
+        vix_text = f" with VIX {vix_value}" if vix_value is not None else ""
         return f"Shadow artifact lacked regime metadata; VIX fallback indicates volatility is {str(regime.get('volatility')).replace('_', ' ')}{vix_text}. Interpretation remains LOW confidence."
     parts = []
     labels = (
@@ -800,6 +817,18 @@ def _markdown(packet: dict[str, Any]) -> str:
     lines.extend(f"- {item}" for item in packet["executive_summary"])
     lines.extend(["", "## Operator Takeaway", ""])
     lines.extend(f"- {item}" for item in packet["operator_takeaway"])
+    if packet["source_readiness"] != "READY":
+        lines.extend(["", "## Why This Is Incomplete", ""])
+        source_state = packet["source_state"]
+        lines.extend(
+            [
+                f"- Shadow data status: `{source_state['shadow_data_status']}`",
+                f"- Shadow data reason: `{source_state['shadow_data_reason']}`",
+                f"- Comparison status: `{source_state['comparison_status']}`",
+                f"- Price hydration status: `{source_state['price_hydration_status']}`",
+                f"- Strategy count: `{source_state['strategy_count']}`",
+            ]
+        )
     lines.extend(["", "## How To Read This Packet", ""])
     lines.extend(f"- {item}" for item in packet["how_to_read"])
     lines.extend(["", "## Data Completeness", ""])
@@ -845,7 +874,10 @@ def _markdown(packet: dict[str, Any]) -> str:
             f"- Interpretation: {trust['interpretation']}",
         ]
     )
-    lines.extend(["", "## Strategy Briefs", ""])
+    strategy_heading = "## Strategy Briefs - Context Only" if packet["source_readiness"] != "READY" else "## Strategy Briefs"
+    lines.extend(["", strategy_heading, ""])
+    if packet["source_readiness"] != "READY":
+        lines.append("- Strategy ordering is not analytically meaningful while source readiness is INCOMPLETE; NAV values are context only.")
     lines.extend(
         [
             "| Rank | Strategy | NAV | Daily Return | Concentration | Exposure | Interpretation |",
@@ -921,6 +953,25 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
     trust = packet["operational_trust_summary"]
     exposure = packet["exposure_concentration_review"]
     regime = packet["regime_interpretation"]
+    source_state = packet["source_state"]
+    why_incomplete = []
+    if packet["source_readiness"] != "READY":
+        why_incomplete = [
+            "<section class=\"card warning\"><h2>Why This Is Incomplete</h2>",
+            "<table><tbody>",
+            f"<tr><th>Shadow data status</th><td>{html.escape(str(source_state['shadow_data_status']))}</td></tr>",
+            f"<tr><th>Shadow data reason</th><td>{html.escape(str(source_state['shadow_data_reason']))}</td></tr>",
+            f"<tr><th>Comparison status</th><td>{html.escape(str(source_state['comparison_status']))}</td></tr>",
+            f"<tr><th>Price hydration status</th><td>{html.escape(str(source_state['price_hydration_status']))}</td></tr>",
+            f"<tr><th>Strategy count</th><td>{html.escape(str(source_state['strategy_count']))}</td></tr>",
+            "</tbody></table></section>",
+        ]
+    strategy_title = "Strategy Briefs - Context Only" if packet["source_readiness"] != "READY" else "Strategy Briefs"
+    strategy_context_note = []
+    if packet["source_readiness"] != "READY":
+        strategy_context_note = [
+            "<p><strong>Context only:</strong> Strategy ordering is not analytically meaningful while source readiness is INCOMPLETE.</p>"
+        ]
     body = [
         f"<h1>Daily Research Packet - {html.escape(packet['trade_date'])}</h1>",
         "<section class=\"card wide\"><h2>Top Dashboard</h2>",
@@ -937,6 +988,7 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
         "<ul>",
         *(f"<li>{html.escape(item)}</li>" for item in packet["operator_takeaway"][1:]),
         "</ul></section>",
+        *why_incomplete,
         "<section class=\"card\"><h2>Can I Use This Today?</h2>",
         "<table><thead><tr><th>Use</th><th>Answer</th></tr></thead><tbody>",
         *(f"<tr><td>{html.escape(_label(key))}</td><td>{html.escape(value)}</td></tr>" for key, value in dashboard["can_use"].items()),
@@ -957,7 +1009,8 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
             for diagnostic in completeness["field_diagnostics"]
         ),
         "</tbody></table></section>",
-        "<section class=\"card\"><h2>Strategy Briefs</h2>",
+        f"<section class=\"card muted\"><h2>{html.escape(strategy_title)}</h2>",
+        *strategy_context_note,
         "<table><thead><tr><th>Rank</th><th>Strategy</th><th>NAV</th><th>Daily Return</th><th>Concentration</th><th>Exposure</th><th>Interpretation</th></tr></thead><tbody>",
         *(
             "<tr>"
@@ -995,6 +1048,7 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
             "h1{margin-bottom:16px;} h2{margin:0 0 12px 0;} h3{margin:16px 0 8px 0;}",
             ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px;}",
             ".card{background:#fff;border:1px solid #d9dee7;border-radius:8px;padding:16px;margin:14px 0;box-shadow:0 1px 2px rgba(0,0,0,.04);}",
+            ".warning{border-color:#f59e0b;background:#fffbeb;} .muted{background:#f9fafb;}",
             ".metric .label{font-size:12px;text-transform:uppercase;color:#667085;} .metric .value{font-size:20px;font-weight:700;margin-top:4px;}",
             "table{width:100%;border-collapse:collapse;font-size:14px;} th,td{border-bottom:1px solid #e5e7eb;text-align:left;padding:8px;vertical-align:top;} th{background:#f3f4f6;}",
             "ul{margin:8px 0 0 20px;} p{line-height:1.45;}",

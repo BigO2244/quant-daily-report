@@ -224,12 +224,12 @@ def test_daily_research_packet_missing_exposure_fields_are_explained(tmp_path):
 
     assert leader["top3_concentration"] is None
     assert leader["missing_exposure_sources"]
-    assert "Exposure data incomplete: missing" in leader["main_risk_caveat"]
+    assert "Required exposure fields are absent" in leader["main_risk_caveat"]
     assert packet["data_completeness"]["exposure_data_status"] == "missing"
     assert "Strategy Briefs" in packet["data_completeness"]["impacted_sections"]
     assert packet["exposure_concentration_review"]["risk_assessable"] is False
     assert "not assessable" in markdown
-    assert "Exposure-adjusted strategy comparison is limited until this field is populated." in markdown
+    assert "Required exposure fields are absent" in markdown
     assert "Exposure risk not assessable because required exposure artifacts are incomplete." in markdown
     assert markdown.count("Exposure risk not assessable because required exposure artifacts are incomplete.") == 1
     assert "No exposure risk flags fired" not in markdown
@@ -314,9 +314,23 @@ def test_daily_research_packet_marks_price_cache_stale_source_incomplete(tmp_pat
     assert summary["source_readiness"] == "INCOMPLETE"
     assert summary["shadow_data_status"] == "NO_DATA"
     assert "Source readiness | INCOMPLETE" in markdown
+    assert "## Why This Is Incomplete" in markdown
+    assert "Shadow data status: `NO_DATA`" in markdown
+    assert "Shadow data reason: `PRICE_CACHE_STALE`" in markdown
+    assert "Comparison status: `NO_DATA`" in markdown
+    assert "Price hydration status: `MISSING`" in markdown
+    assert "Strategy count: `0`" in markdown
+    assert "## Strategy Briefs - Context Only" in markdown
+    assert "Strategy ordering is not analytically meaningful" in markdown
+    assert "Wait for post-close hydration and shadow artifact refresh, then rerun Orion.command. Do not force an incomplete packet unless diagnosing source readiness." in markdown
     assert "Do not use this packet for strategy interpretation until post-close hydration and shadow artifacts are complete." in markdown
+    assert "Required exposure fields are absent despite source artifacts being present, likely because upstream shadow artifacts were generated from a stale/no-data price source." in markdown
+    assert '{"risk":' not in markdown
     assert "Source Readiness" in html
+    assert "Why This Is Incomplete" in html
+    assert "Strategy Briefs - Context Only" in html
     assert "INCOMPLETE" in html
+    assert "LOW" in markdown
 
 
 def test_daily_research_packet_uses_vix_regime_fallback_when_shadow_regime_missing(tmp_path):
@@ -327,7 +341,7 @@ def test_daily_research_packet_uses_vix_regime_fallback_when_shadow_regime_missi
     fallback_clarity_dir = repo / "outputs" / "research_clarity_fallback" / "2026-05-22"
     _write_json(
         repo / "outputs" / "vix_regime" / "regime_current.json",
-        {"as_of": "2026-05-22", "regime": "ELEVATED", "vix": 23.4},
+        {"as_of": "2026-05-22", "regime": "ELEVATED", "vix": 23.456},
     )
     build_research_clarity_wave(repo, "2026-05-22", shadow_dir, fallback_clarity_dir)
 
@@ -338,4 +352,4 @@ def test_daily_research_packet_uses_vix_regime_fallback_when_shadow_regime_missi
 
     assert packet["regime_interpretation"]["regime"]["regime_source"] == "vix_regime_current_fallback"
     assert packet["regime_interpretation"]["confidence_classification"] == "LOW"
-    assert "VIX fallback indicates volatility is elevated" in markdown
+    assert "VIX fallback indicates volatility is elevated with VIX 23.46" in markdown
