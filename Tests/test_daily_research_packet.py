@@ -113,14 +113,15 @@ def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     html = (packet_dir / "packet.html").read_text(encoding="utf-8")
     summary = _read_json(packet_dir / "summary.json")
 
-    assert "## Executive Summary" in markdown
+    assert "## Executive Notes" in markdown
+    assert "## Top Dashboard" in markdown
+    assert "## Can I Use This Today?" in markdown
     assert "## Operator Takeaway" in markdown
     assert "## How To Read This Packet" in markdown
+    assert "## Data Completeness" in markdown
     assert "## Operational Trust Summary" in markdown
     assert "## Confidence + Freshness Caveats" in markdown
-    assert "### #1 Caerus Orion" in markdown
-    assert "Concentration: top-3 100.00%; max position 50.00%" in markdown
-    assert "Sector exposure: max sector 100.00%" in markdown
+    assert "| 1 | Caerus Orion | 1.0180 | 1.80% | top-3 100.0%; max 50.0% | max sector 100.0% |" in markdown
     assert "Regime evidence:" not in markdown
     assert '{"risk":' not in markdown
     assert "{&quot;risk&quot;" not in html
@@ -128,6 +129,8 @@ def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     assert "Operational shadow NAV confidence remains LOW" in markdown
     assert "<h1>Daily Research Packet - 2026-05-22</h1>" in html
     assert "<h2>Operator Takeaway</h2>" in html
+    assert "<table>" in html
+    assert "`LOW`" not in html
     assert summary["advisory_only"] is True
     assert summary["confidence_floor"] == "LOW"
     assert summary["leader"]["strategy_id"] == "caerus_orion"
@@ -172,14 +175,16 @@ def test_daily_research_packet_missing_exposure_fields_are_explained(tmp_path):
     assert packet["data_completeness"]["exposure_data_status"] == "missing"
     assert "Strategy Briefs" in packet["data_completeness"]["impacted_sections"]
     assert packet["exposure_concentration_review"]["risk_assessable"] is False
-    assert "unavailable" in markdown
-    assert "Exposure data incomplete" in markdown
+    assert "not assessable" in markdown
+    assert "Exposure-adjusted strategy comparison is limited until this field is populated." in markdown
     assert "Exposure risk not assessable because required exposure artifacts are incomplete." in markdown
     assert markdown.count("Exposure risk not assessable because required exposure artifacts are incomplete.") == 1
     assert "No exposure risk flags fired" not in markdown
     assert "Performance ranking is available, but exposure-adjusted interpretation is not yet available." in markdown
     assert "Do not compare strategy quality until exposure data is present." in markdown
     assert "## Data Completeness" in markdown
+    assert "Field Diagnostics" in markdown
+    assert "field missing" in markdown
     assert "exposures_snapshot.json" in markdown
     assert "regime_exposure_matrix.json" in markdown
     assert "n/a" not in markdown
@@ -216,4 +221,21 @@ def test_daily_research_packet_zero_daily_returns_rank_by_nav(tmp_path):
 
     assert packet["strategy_comparison"][0]["strategy_id"] == "caerus_orion"
     assert packet["strategy_comparison"][0]["ranking_basis"] == "cumulative_nav"
-    assert "All available daily returns are 0.00%; strategy ordering is based on cumulative NAV instead of daily return." in markdown
+    assert "No meaningful daily return ranking available; cumulative NAV shown for context." in markdown
+    assert "daily shadow return ranking" not in markdown
+
+
+def test_daily_research_packet_html_is_dashboard_style_and_utf8_clean(tmp_path):
+    repo, shadow_dir, clarity_dir, packet_dir = _fixture_sources(tmp_path)
+
+    build_daily_research_packet(repo, "2026-05-22", shadow_dir, clarity_dir, packet_dir)
+
+    html_bytes = (packet_dir / "packet.html").read_bytes()
+    html_text = html_bytes.decode("utf-8")
+
+    assert "<style>" in html_text
+    assert "class=\"card metric\"" in html_text
+    assert "<table>" in html_text
+    assert "`" not in html_text
+    assert '{"risk":' not in html_text
+    assert "{&quot;risk&quot;" not in html_text

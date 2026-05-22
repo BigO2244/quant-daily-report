@@ -23,6 +23,11 @@ EXPOSURE_SOURCE_ARTIFACTS = (
     "concentration_monitor.json",
     "regime_exposure_matrix.json",
 )
+EXPOSURE_FIELD_SOURCES = {
+    "top3_concentration": ("exposures_snapshot.json", "exposure_summary.json", "concentration_monitor.json", "regime_exposure_matrix.json"),
+    "max_position_weight": ("exposures_snapshot.json", "exposure_summary.json", "concentration_monitor.json", "regime_exposure_matrix.json"),
+    "max_sector_exposure": ("exposures_snapshot.json", "exposure_summary.json", "concentration_monitor.json", "regime_exposure_matrix.json"),
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -53,6 +58,15 @@ def _pct(value: Any) -> str:
         return "unavailable"
 
 
+def _short_pct(value: Any) -> str:
+    if value is None:
+        return "missing"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "missing"
+
+
 def _num(value: Any, digits: int = 2) -> str:
     if value is None:
         return "unavailable"
@@ -60,6 +74,10 @@ def _num(value: Any, digits: int = 2) -> str:
         return f"{float(value):.{digits}f}"
     except (TypeError, ValueError):
         return "unavailable"
+
+
+def _label(value: str) -> str:
+    return value.replace("_", " ").title()
 
 
 def _first_present(*values: Any) -> Any:
@@ -325,11 +343,7 @@ def _strategy_interpretation(
 ) -> str:
     name = strategy_id.replace("caerus_", "").title()
     if missing_sources:
-        return (
-            f"{name} has incomplete exposure evidence today. Performance ranking is available, "
-            "but exposure-adjusted interpretation is not yet available. Do not compare strategy "
-            "quality until exposure data is present."
-        )
+        return f"{name}: exposure-adjusted read unavailable; use ranking only as context."
     concentrated = bool(risk_flags) or any(
         value is not None and float(value) >= threshold
         for value, threshold in ((top3, 0.6), (max_position, 0.2), (max_sector, 0.5))
@@ -378,6 +392,7 @@ def _data_completeness(inputs: dict[str, Any], comparison: list[dict[str, Any]])
         status = "partial"
     else:
         status = "complete"
+    field_diagnostics = _field_diagnostics(inputs, comparison)
     impacted_sections = []
     if status != "complete":
         impacted_sections = [
@@ -389,6 +404,7 @@ def _data_completeness(inputs: dict[str, Any], comparison: list[dict[str, Any]])
     return {
         "exposure_data_status": status,
         "expected_sources": inputs["source_diagnostics"],
+        "field_diagnostics": field_diagnostics,
         "missing_artifacts": missing_artifacts,
         "strategies_missing_fields": strategies_missing_fields,
         "impacted_sections": impacted_sections,
@@ -400,9 +416,37 @@ def _data_completeness(inputs: dict[str, Any], comparison: list[dict[str, Any]])
         "next_action": (
             "Use exposure and concentration flags in normal review."
             if status == "complete"
-            else "Regenerate or inspect FR-026/FR-027 research clarity artifacts before comparing strategy quality."
+            else "Regenerate or inspect FR-026/FR-027 research clarity artifacts. Do not compare strategy quality until exposure data is present."
         ),
     }
+
+
+def _field_diagnostics(inputs: dict[str, Any], comparison: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for field_name, sources in EXPOSURE_FIELD_SOURCES.items():
+        strategy_values = {
+            row["strategy_id"]: row.get(field_name)
+            for row in comparison
+        }
+        field_exists = any(value is not None for value in strategy_values.values())
+        source_status = {
+            source: inputs["source_diagnostics"].get(source, {}).get("status", "MISSING")
+            for source in sources
+        }
+        rows.append(
+            {
+                "field": field_name,
+                "expected_sources": list(sources),
+                "artifact_status": source_status,
+                "field_exists": field_exists,
+                "operator_consequence": (
+                    "Available for exposure-adjusted review."
+                    if field_exists
+                    else "Exposure-adjusted strategy comparison is limited until this field is populated."
+                ),
+            }
+        )
+    return rows
 
 
 def _regime_review(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -460,7 +504,7 @@ def _ranking_change_note(comparison: list[dict[str, Any]]) -> str:
     if basis == "daily_return":
         return "Strategy ordering is based on available same-day shadow daily return."
     if basis == "cumulative_nav":
-        return "All available daily returns are 0.00%; strategy ordering is based on cumulative NAV instead of daily return."
+        return "No meaningful daily return ranking available; cumulative NAV shown for context."
     return "Strategy ordering uses fallback strategy order because daily return and NAV evidence are unavailable."
 
 
@@ -501,6 +545,7 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
     key_risks = _key_risks(trust, exposure, regime)
     followups = _research_followups(exposure, regime)
     operator_takeaway = _operator_takeaway(comparison, exposure, regime, trust)
+    dashboard = _dashboard_summary(trust, comparison, exposure, regime, data_completeness, operator_takeaway)
     executive_summary = [
         f"Packet status: {trust['status']}; advisory research-only interpretation.",
         f"Strategy rank leader: {comparison[0]['strategy_name'] if comparison else 'unavailable'} based on {comparison[0]['ranking_basis'].replace('_', ' ') if comparison else 'unavailable'}.",
@@ -520,6 +565,7 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
             "shadow_dir": str(inputs["shadow_dir"]),
             "research_clarity_dir": str(inputs["clarity_dir"]),
         },
+        "dashboard": dashboard,
         "executive_summary": executive_summary,
         "operator_takeaway": operator_takeaway,
         "how_to_read": [
@@ -553,6 +599,43 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
     }
 
 
+def _dashboard_summary(
+    trust: dict[str, Any],
+    comparison: list[dict[str, Any]],
+    exposure: dict[str, Any],
+    regime: dict[str, Any],
+    data_completeness: dict[str, Any],
+    operator_takeaway: list[str],
+) -> dict[str, Any]:
+    ranking_basis = comparison[0].get("ranking_basis", "unavailable") if comparison else "unavailable"
+    regime_status = "missing" if "not present" in regime["regime_summary"] else "available"
+    return {
+        "packet_status": trust["status"],
+        "confidence_floor": trust["shadow_confidence_floor"],
+        "ranking_basis": ranking_basis,
+        "ranking_basis_label": _ranking_basis_label(ranking_basis),
+        "exposure_data_status": data_completeness["exposure_data_status"],
+        "regime_data_status": regime_status,
+        "main_operator_takeaway": operator_takeaway[0] if operator_takeaway else "Review packet evidence before drawing conclusions.",
+        "can_use": {
+            "execution_promotion_use": "NO",
+            "research_review_use": "YES",
+            "exposure_adjusted_conclusions": "YES" if exposure.get("risk_assessable", False) else "NO until fields are present",
+            "strategy_quality_comparison": "LIMITED" if data_completeness["exposure_data_status"] != "complete" else "YES with caveats",
+        },
+    }
+
+
+def _ranking_basis_label(ranking_basis: str) -> str:
+    if ranking_basis == "daily_return":
+        return "Daily return"
+    if ranking_basis == "cumulative_nav":
+        return "Cumulative NAV context"
+    if ranking_basis == "fallback_ordering":
+        return "Fallback ordering"
+    return "Unavailable"
+
+
 def _operator_takeaway(
     comparison: list[dict[str, Any]],
     exposure: dict[str, Any],
@@ -562,8 +645,15 @@ def _operator_takeaway(
     if not comparison:
         return ["Packet inputs are insufficient to rank strategies today."]
     leader = comparison[0]
+    ranking_basis = leader.get("ranking_basis")
+    if ranking_basis == "cumulative_nav":
+        lead_text = f"{leader['strategy_name']} has the highest cumulative NAV in this packet; no meaningful daily return ranking is available."
+    elif ranking_basis == "daily_return":
+        lead_text = f"{leader['strategy_name']} leads today's available daily shadow return ranking, but the evidence remains advisory."
+    else:
+        lead_text = "Strategy ordering is a fallback because daily return and NAV evidence are incomplete."
     takeaways = [
-        f"{leader['strategy_name']} leads today's available shadow return ranking, but the evidence remains advisory.",
+        lead_text,
         f"Confidence floor is {trust['shadow_confidence_floor']} because operational shadow NAV remains governed by unresolved FR-028 timing semantics.",
     ]
     if not exposure.get("risk_assessable", True):
@@ -577,10 +667,31 @@ def _operator_takeaway(
 
 
 def _markdown(packet: dict[str, Any]) -> str:
+    dashboard = packet["dashboard"]
     lines = [
         f"# Daily Research Packet - {packet['trade_date']}",
         "",
-        "## Executive Summary",
+        "## Top Dashboard",
+        "",
+        "| Field | Status |",
+        "|---|---|",
+        f"| Packet status | {dashboard['packet_status']} |",
+        f"| Confidence floor | {dashboard['confidence_floor']} |",
+        f"| Ranking basis | {dashboard['ranking_basis_label']} |",
+        f"| Exposure data | {dashboard['exposure_data_status']} |",
+        f"| Regime data | {dashboard['regime_data_status']} |",
+        f"| Main takeaway | {dashboard['main_operator_takeaway']} |",
+        "",
+        "## Can I Use This Today?",
+        "",
+        "| Use | Answer |",
+        "|---|---|",
+        f"| Execution/promotion use | {dashboard['can_use']['execution_promotion_use']} |",
+        f"| Research review use | {dashboard['can_use']['research_review_use']} |",
+        f"| Exposure-adjusted conclusions | {dashboard['can_use']['exposure_adjusted_conclusions']} |",
+        f"| Strategy quality comparison | {dashboard['can_use']['strategy_quality_comparison']} |",
+        "",
+        "## Executive Notes",
         "",
     ]
     lines.extend(f"- {item}" for item in packet["executive_summary"])
@@ -601,6 +712,17 @@ def _markdown(packet: dict[str, Any]) -> str:
     lines.append("- Source diagnostics:")
     for name, payload in sorted(completeness["expected_sources"].items()):
         lines.append(f"  - `{name}`: `{payload['status']}`")
+    lines.append("")
+    lines.append("### Field Diagnostics")
+    for diagnostic in completeness["field_diagnostics"]:
+        source_text = ", ".join(
+            f"{source}={status}"
+            for source, status in sorted(diagnostic["artifact_status"].items())
+        )
+        field_status = "present" if diagnostic["field_exists"] else "missing"
+        lines.append(
+            f"  - {diagnostic['field']}: field {field_status}; sources {source_text}; {diagnostic['operator_consequence']}"
+        )
     lines.extend(["", "## Operational Trust Summary", ""])
     trust = packet["operational_trust_summary"]
     lines.extend(
@@ -614,20 +736,18 @@ def _markdown(packet: dict[str, Any]) -> str:
         ]
     )
     lines.extend(["", "## Strategy Briefs", ""])
+    lines.extend(
+        [
+            "| Rank | Strategy | NAV | Daily Return | Concentration | Exposure | Interpretation |",
+            "|---:|---|---:|---:|---|---|---|",
+        ]
+    )
     for row in packet["strategy_comparison"]:
-        lines.extend(
-            [
-                f"### #{row['daily_rank']} {row['strategy_name']}",
-                "",
-                f"- Daily return: {_pct(row['daily_return'])}",
-                f"- NAV: {_num(row['nav'], 4)}",
-                f"- Concentration: top-3 {_pct(row['top3_concentration'])}; max position {_pct(row['max_position_weight'])}",
-                f"- Sector exposure: max sector {_pct(row['max_sector_exposure'])}",
-                f"- Source diagnostics: {_source_diagnostics_sentence(row['source_diagnostics'])}",
-                f"- Main risk caveat: {row['main_risk_caveat']}",
-                f"- Interpretation: {row['operator_interpretation']}",
-                "",
-            ]
+        concentration_status = _compact_concentration_status(row)
+        exposure_status = _compact_exposure_status(row)
+        lines.append(
+            f"| {row['daily_rank']} | {row['strategy_name']} | {_num(row['nav'], 4)} | {_pct(row['daily_return'])} | "
+            f"{concentration_status} | {exposure_status} | {row['operator_interpretation']} |"
         )
     lines.extend(["", "## Exposure + Concentration Review", ""])
     exposure = packet["exposure_concentration_review"]
@@ -672,33 +792,116 @@ def _source_diagnostics_sentence(source_diagnostics: dict[str, str]) -> str:
     return f"found {found_text}; missing {missing_text}."
 
 
+def _compact_concentration_status(row: dict[str, Any]) -> str:
+    if row["top3_concentration"] is None and row["max_position_weight"] is None:
+        return "not assessable"
+    return f"top-3 {_short_pct(row['top3_concentration'])}; max {_short_pct(row['max_position_weight'])}"
+
+
+def _compact_exposure_status(row: dict[str, Any]) -> str:
+    if row["max_sector_exposure"] is None:
+        return "not assessable"
+    return f"max sector {_short_pct(row['max_sector_exposure'])}"
+
+
 def _html(packet: dict[str, Any], markdown: str) -> str:
-    body = []
-    for line in markdown.splitlines():
-        escaped = html.escape(line)
-        if line.startswith("# "):
-            body.append(f"<h1>{html.escape(line[2:])}</h1>")
-        elif line.startswith("## "):
-            body.append(f"<h2>{html.escape(line[3:])}</h2>")
-        elif line.startswith("### "):
-            body.append(f"<h3>{html.escape(line[4:])}</h3>")
-        elif line.startswith("- "):
-            body.append(f"<li>{html.escape(line[2:])}</li>")
-        elif not line.strip():
-            body.append("")
-        else:
-            body.append(f"<p>{escaped}</p>")
+    del markdown
+    dashboard = packet["dashboard"]
+    completeness = packet["data_completeness"]
+    trust = packet["operational_trust_summary"]
+    exposure = packet["exposure_concentration_review"]
+    regime = packet["regime_interpretation"]
+    body = [
+        f"<h1>Daily Research Packet - {html.escape(packet['trade_date'])}</h1>",
+        "<section class=\"grid cards\">",
+        _metric_card("Packet Status", dashboard["packet_status"]),
+        _metric_card("Confidence Floor", dashboard["confidence_floor"]),
+        _metric_card("Ranking Basis", dashboard["ranking_basis_label"]),
+        _metric_card("Exposure Data", dashboard["exposure_data_status"]),
+        _metric_card("Regime Data", dashboard["regime_data_status"]),
+        "</section>",
+        "<section class=\"card wide\"><h2>Operator Takeaway</h2>",
+        f"<p>{html.escape(dashboard['main_operator_takeaway'])}</p>",
+        "<ul>",
+        *(f"<li>{html.escape(item)}</li>" for item in packet["operator_takeaway"][1:]),
+        "</ul></section>",
+        "<section class=\"card\"><h2>Can I Use This Today?</h2>",
+        "<table><thead><tr><th>Use</th><th>Answer</th></tr></thead><tbody>",
+        *(f"<tr><td>{html.escape(_label(key))}</td><td>{html.escape(value)}</td></tr>" for key, value in dashboard["can_use"].items()),
+        "</tbody></table></section>",
+        "<section class=\"card\"><h2>Data Completeness</h2>",
+        f"<p><strong>Status:</strong> {html.escape(completeness['exposure_data_status'])}</p>",
+        f"<p><strong>Operator consequence:</strong> {html.escape(completeness['operator_consequence'])}</p>",
+        f"<p><strong>Next action:</strong> {html.escape(completeness['next_action'])}</p>",
+        "<h3>Field Diagnostics</h3>",
+        "<table><thead><tr><th>Field</th><th>Expected Sources</th><th>Field Exists</th><th>Operator Consequence</th></tr></thead><tbody>",
+        *(
+            "<tr>"
+            f"<td>{html.escape(diagnostic['field'])}</td>"
+            f"<td>{html.escape(', '.join(diagnostic['expected_sources']))}</td>"
+            f"<td>{'YES' if diagnostic['field_exists'] else 'NO'}</td>"
+            f"<td>{html.escape(diagnostic['operator_consequence'])}</td>"
+            "</tr>"
+            for diagnostic in completeness["field_diagnostics"]
+        ),
+        "</tbody></table></section>",
+        "<section class=\"card\"><h2>Strategy Briefs</h2>",
+        "<table><thead><tr><th>Rank</th><th>Strategy</th><th>NAV</th><th>Daily Return</th><th>Concentration</th><th>Exposure</th><th>Interpretation</th></tr></thead><tbody>",
+        *(
+            "<tr>"
+            f"<td>{row['daily_rank']}</td>"
+            f"<td>{html.escape(row['strategy_name'])}</td>"
+            f"<td>{html.escape(_num(row['nav'], 4))}</td>"
+            f"<td>{html.escape(_pct(row['daily_return']))}</td>"
+            f"<td>{html.escape(_compact_concentration_status(row))}</td>"
+            f"<td>{html.escape(_compact_exposure_status(row))}</td>"
+            f"<td>{html.escape(row['operator_interpretation'])}</td>"
+            "</tr>"
+            for row in packet["strategy_comparison"]
+        ),
+        "</tbody></table></section>",
+        "<section class=\"card\"><h2>Trust And Caveats</h2>",
+        f"<p><strong>Shadow confidence floor:</strong> {html.escape(trust['shadow_confidence_floor'])}</p>",
+        f"<p>{html.escape(trust['confidence_reason'])}</p>",
+        f"<p><strong>Exposure review:</strong> {html.escape(exposure['interpretation'])}</p>",
+        f"<p><strong>Regime:</strong> {html.escape(regime['regime_summary'])}</p>",
+        "</section>",
+        "<section class=\"card\"><h2>What Changed Today</h2><ul>",
+        *(f"<li>{html.escape(item)}</li>" for item in packet["what_changed_today"]),
+        "</ul></section>",
+        "<section class=\"card\"><h2>Research Follow-Ups</h2><ul>",
+        *(f"<li>{html.escape(item)}</li>" for item in packet["research_followups"]),
+        "</ul></section>",
+    ]
     return "\n".join(
         [
             "<!doctype html>",
             "<html>",
-            "<head><meta charset=\"utf-8\"><title>Daily Research Packet</title></head>",
+            "<head><meta charset=\"utf-8\"><title>Daily Research Packet</title>",
+            "<style>",
+            "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:24px;background:#f6f7f9;color:#1f2933;}",
+            "h1{margin-bottom:16px;} h2{margin:0 0 12px 0;} h3{margin:16px 0 8px 0;}",
+            ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px;}",
+            ".card{background:#fff;border:1px solid #d9dee7;border-radius:8px;padding:16px;margin:14px 0;box-shadow:0 1px 2px rgba(0,0,0,.04);}",
+            ".metric .label{font-size:12px;text-transform:uppercase;color:#667085;} .metric .value{font-size:20px;font-weight:700;margin-top:4px;}",
+            "table{width:100%;border-collapse:collapse;font-size:14px;} th,td{border-bottom:1px solid #e5e7eb;text-align:left;padding:8px;vertical-align:top;} th{background:#f3f4f6;}",
+            "ul{margin:8px 0 0 20px;} p{line-height:1.45;}",
+            "</style></head>",
             "<body>",
             *body,
             "</body>",
             "</html>",
             "",
         ]
+    )
+
+
+def _metric_card(label: str, value: Any) -> str:
+    return (
+        "<div class=\"card metric\">"
+        f"<div class=\"label\">{html.escape(str(label))}</div>"
+        f"<div class=\"value\">{html.escape(str(value))}</div>"
+        "</div>"
     )
 
 
@@ -770,4 +973,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-    source_diagnostics = inputs["source_diagnostics"]
