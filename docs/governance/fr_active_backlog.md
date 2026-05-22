@@ -37,7 +37,8 @@ Fully deployed history and reviewed deferred items belong in
 | FR-025 immutable daily shadow holdings and weights history | Attribution Infrastructure | `PROMOTION_READY` | MEDIUM | FR-024 | not_required | Additive research clarity builder writes immutable dated holdings, weights, exposure, rebalance delta, and manifest evidence for shadow attribution lineage. | Stop writing new snapshots; preserve existing immutable evidence. |
 | FR-026 exposure intelligence and concentration risk observability | Portfolio Intelligence | `PROMOTION_READY` | LOW | FR-024, FR-025 | not_required | Additive exposure summaries, concentration monitor, drift baseline, and risk flags make sector, concentration, turnover, and momentum sensitivity visible. | Remove report integration and ignore exposure artifacts. |
 | FR-027 regime decomposition and fragility reporting | Regime Intelligence | `PROMOTION_READY` | LOW | FR-026 | not_required | Additive regime performance, fragility, exposure matrix, and attribution-by-regime artifacts are generated as advisory research-only surfaces. | Stop publishing regime hardening artifacts; no strategy behavior changes. |
-| FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
+| FR-030 daily research interpretation packet v1 | Research Operations | `PROMOTION_READY` | LOW | FR-015, FR-017, FR-018, FR-024, FR-025, FR-026, FR-027 | not_required | Additive packet builder synthesizes provenance, freshness, confidence, exposure, concentration, and regime telemetry into daily operator-facing Markdown, JSON, HTML, and summary artifacts. | Stop publishing packet artifacts and ignore generated outputs. |
+| FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
 | FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `BACKLOG` | MEDIUM | FR-028 | not_started | Future promotion gates should consume provenance, exposure, and timing confidence after accounting semantics are governed. | Revert promotion-readiness checks to existing scorecard criteria. |
 
 ## Phase 4 Priority Order
@@ -59,8 +60,9 @@ non-trading, non-execution, additive, and low blast radius by default.
 | 10 | FR-025 | Daily immutable holdings history depends on surface ownership and becomes the base for realized attribution. |
 | 11 | FR-026 | Exposure intelligence can then consume stable holdings and provenance. |
 | 12 | FR-027 | Regime fragility is more interpretable after exposure and concentration are visible. |
-| 13 | FR-028 | Accounting semantics are high blast-radius and must wait for provenance, history, and observability baselines. |
-| 14 | FR-029 | Promotion hardening should follow timing semantics review so gates do not encode unstable accounting assumptions. |
+| 13 | FR-030 | Daily packet consumes existing telemetry without changing execution, accounting, timing, dashboard, or promotion behavior. |
+| 14 | FR-028 | Accounting semantics are high blast-radius and must wait for provenance, history, observability, and packet interpretation baselines. |
+| 15 | FR-029 | Promotion hardening should follow timing semantics review so gates do not encode unstable accounting assumptions. |
 
 FR-022 remains `REVIEWED_DEFERRED` in the registry. Hash enforcement should not
 be promoted until dependency baselines, clean installs, and emergency update
@@ -80,6 +82,8 @@ procedures are proven.
    before starting FR-028 accounting semantics work.
 6. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
    comparison artifacts, rollback plans, and observation criteria are reviewed.
+7. Use FR-030 to operationalize telemetry consumption through a daily advisory
+   research packet before adding delivery automation.
 
 ## Roadmap Boundaries
 
