@@ -52,8 +52,9 @@ Each artifact family should answer:
 
 This is the first-pass static registry. It should be refined before any cleanup
 or telemetry enforcement is built. Retention and backup semantics are governed
-by `docs/artifact_retention_policy.md`; no cleanup automation is implied by that
-policy.
+by `docs/artifact_retention_policy.md`; validation isolation semantics are
+governed by `docs/validation_isolation_policy.md`. No cleanup automation is
+implied by either policy.
 
 | Family | Representative Paths | Category | Producer | Primary Consumers | Freshness Assumption | Overwrite Semantics | Retention Ambiguity |
 |---|---|---|---|---|---|---|---|
@@ -72,7 +73,7 @@ policy.
 | Dashboard payloads | `web/dashboard*/dashboard_data.json`, deployed `/var/www/.../dashboard_data.json` | `derived`, `generated_report` | `scripts/refresh_quant_dashboard.py`, dashboard builder | Dashboard UI, operators | Must expose source trust and stale sections. | Overwritten on refresh. | Local tracked/untracked payload hygiene needs separation. |
 | Generated emails/reports | `outputs/execution_email/<date>.json`, report markdown/html | `generated_report`, `runtime` | Email/report scripts | Email sender, operators | Should reflect source run id and execution status. | Dated, sometimes overwritten by rerun. | Archive policy not formalized. |
 | Research outputs | `outputs/research/**`, weekly research markdown | `historical`, `generated_report`, sometimes `derived` | Research/backtest scripts | Research review, future strategy work | Not live operating state unless explicitly promoted. | Usually append by experiment; latest files may exist. | Needs separation from operator docs. |
-| Test/smoke residue | Repo-level `outputs/` or `logs/` from tests | `ephemeral` | Tests and smoke scripts | Test assertions only | Should not be production evidence. | May overwrite ignored runtime files. | FR-020 should isolate. |
+| Test/smoke residue | Repo-level `outputs/` or `logs/` from tests | `ephemeral` | Tests and smoke scripts | Test assertions only | Should not be production evidence. | May overwrite ignored runtime files. | FR-020 defines isolation policy; code-level migration remains future work. |
 
 ## Proposed Manifest Structure
 
@@ -162,3 +163,5 @@ No cleanup automation has been added.
 - Bundle validation is strong on existence but shallow on semantics.
 - Runtime producers do not yet emit retention manifests.
 - Cleanup automation remains intentionally unimplemented.
+- Some tests and smoke checks still need code-level migration to the FR-020
+  validation isolation policy.
