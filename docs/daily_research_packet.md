@@ -68,12 +68,13 @@ Read the packet in this order:
 2. Operational Trust Summary
 3. Strategy Comparison Summary
 4. Exposure + Concentration Review
-5. Regime Interpretation
-6. Fragility Observations
-7. Confidence + Freshness Caveats
-8. What Changed Today
-9. Key Risks
-10. Research Follow-Ups
+5. Research Intelligence
+6. Regime Interpretation
+7. Fragility Observations
+8. Confidence + Freshness Caveats
+9. What Changed Today
+10. Key Risks
+11. Research Follow-Ups
 
 This ordering is intentional. Confidence and provenance frame interpretation
 before the operator draws conclusions from returns.
@@ -154,6 +155,32 @@ The packet should distinguish:
 
 Outperformance with high concentration deserves follow-up before it is treated
 as durable.
+
+## Research Intelligence
+
+Research Intelligence is a lightweight read-only interpretation layer that
+answers: "what actually changed, and should the operator care?"
+
+It compares current packet evidence with the prior available dated research
+clarity bundle when that evidence exists. It may summarize:
+
+- largest additions and removals;
+- largest weight increases and decreases;
+- turnover interpretation;
+- top-three concentration changes;
+- sector exposure drift;
+- challenger stability;
+- whether changes look material or incremental.
+
+Research Intelligence is advisory. It is not attribution proof, not promotion
+logic, not an execution recommendation, and not a timing-corrected performance
+claim. If prior dated evidence is missing, or source readiness is incomplete,
+the section must visibly degrade to baseline/context-only interpretation.
+
+Attention flags are operator prompts only. They can identify high turnover,
+composition rotation, concentration widening, major sector drift, challenger
+instability, or missing attribution evidence, but they do not gate any runtime
+workflow.
 
 ## What Must Not Appear
 

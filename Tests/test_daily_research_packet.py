@@ -86,6 +86,44 @@ def _fixture_sources(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return repo, shadow_dir, clarity_dir, packet_dir
 
 
+def _write_prior_research_clarity(repo: Path) -> None:
+    prior_dir = repo / "outputs" / "research_clarity" / "2026-05-21"
+    _write_json(
+        prior_dir / "weights_snapshot.json",
+        {
+            "trade_date": "2026-05-21",
+            "strategies": {
+                "caerus_polaris": {"target_weights": {"AAPL": 0.38, "JPM": 0.42}},
+                "caerus_orion": {"target_weights": {"AAPL": 0.30, "JPM": 0.30, "MSFT": 0.40}},
+                "caerus_lyra": {"target_weights": {"AAPL": 0.34, "MSFT": 0.33, "JPM": 0.33}},
+            },
+        },
+    )
+    _write_json(
+        prior_dir / "exposures_snapshot.json",
+        {
+            "trade_date": "2026-05-21",
+            "strategies": {
+                "caerus_polaris": {
+                    "top3_concentration": 0.80,
+                    "max_sector_exposure": 0.42,
+                    "sector_exposure": {"Information Technology": 0.38, "Financials": 0.42},
+                },
+                "caerus_orion": {
+                    "top3_concentration": 1.00,
+                    "max_sector_exposure": 0.70,
+                    "sector_exposure": {"Information Technology": 0.70, "Financials": 0.30},
+                },
+                "caerus_lyra": {
+                    "top3_concentration": 1.00,
+                    "max_sector_exposure": 0.67,
+                    "sector_exposure": {"Information Technology": 0.67, "Financials": 0.33},
+                },
+            },
+        },
+    )
+
+
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -128,6 +166,7 @@ def _no_data_sources(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 
 def test_daily_research_packet_generates_operator_outputs(tmp_path):
     repo, shadow_dir, clarity_dir, packet_dir = _fixture_sources(tmp_path)
+    _write_prior_research_clarity(repo)
 
     result = build_daily_research_packet(repo, "2026-05-22", shadow_dir, clarity_dir, packet_dir)
 
@@ -154,10 +193,13 @@ def test_daily_research_packet_generates_operator_outputs(tmp_path):
     assert leader["daily_rank"] == 1
     assert packet["exposure_concentration_review"]["high_concentration_strategy_count"] >= 1
     assert packet["regime_interpretation"]["regime"]["risk"] == "risk_on"
+    assert packet["research_intelligence"]["status"] == "ASSESSABLE"
+    assert packet["research_intelligence"]["previous_trade_date"] == "2026-05-21"
 
 
 def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     repo, shadow_dir, clarity_dir, packet_dir = _fixture_sources(tmp_path)
+    _write_prior_research_clarity(repo)
 
     build_daily_research_packet(repo, "2026-05-22", shadow_dir, clarity_dir, packet_dir)
 
@@ -179,8 +221,14 @@ def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     assert "{&quot;risk&quot;" not in html
     assert "Available regime evidence indicates risk is risk on" in markdown
     assert "Operational shadow NAV confidence remains LOW" in markdown
+    assert "## Research Intelligence" in markdown
+    assert "Research attention flags" in markdown
+    assert "Turnover increased materially vs prior day." in markdown
+    assert "JPM change -30.0%" in markdown
+    assert "Composition rotation is material" in markdown
     assert "<h1>Daily Research Packet - 2026-05-22</h1>" in html
     assert "<h2>Operator Takeaway</h2>" in html
+    assert "<h2>Research Intelligence</h2>" in html
     assert "<table>" in html
     assert "`LOW`" not in html
     assert summary["advisory_only"] is True
@@ -192,6 +240,29 @@ def test_daily_research_packet_renders_concise_markdown_and_html(tmp_path):
     assert summary["leader"]["max_sector_exposure"] == 1.0
     assert summary["exposure_data_status"] == "complete"
     assert summary["exposure_risk_assessable"] is True
+    assert summary["research_intelligence_status"] == "ASSESSABLE"
+    assert summary["research_attention_flag_count"] > 0
+
+
+def test_daily_research_packet_research_intelligence_flags_material_drift(tmp_path):
+    repo, shadow_dir, clarity_dir, packet_dir = _fixture_sources(tmp_path)
+    _write_prior_research_clarity(repo)
+
+    build_daily_research_packet(repo, "2026-05-22", shadow_dir, clarity_dir, packet_dir)
+
+    packet = _read_json(packet_dir / "packet.json")
+    intelligence = packet["research_intelligence"]
+    orion = next(row for row in intelligence["strategy_change_summaries"] if row["strategy_id"] == "caerus_orion")
+    flag_names = {flag["flag"] for flag in intelligence["attention_flags"]}
+
+    assert intelligence["status"] == "ASSESSABLE"
+    assert intelligence["material_vs_noise"] in {"material", "mixed"}
+    assert orion["material_vs_noise"] == "material"
+    assert orion["largest_removals"][0]["ticker"] == "JPM"
+    assert orion["largest_weight_increases"][0]["ticker"] == "AAPL"
+    assert {row["sector"] for row in orion["sector_exposure_drift"][:2]} == {"Information Technology", "Financials"}
+    assert "SUDDEN_COMPOSITION_ROTATION" in flag_names
+    assert "CHALLENGER_INSTABILITY" in flag_names
 
 
 def test_daily_research_packet_surfaces_missing_freshness_inputs(tmp_path):
@@ -306,6 +377,8 @@ def test_daily_research_packet_marks_price_cache_stale_source_incomplete(tmp_pat
     html = (packet_dir / "packet.html").read_text(encoding="utf-8")
 
     assert packet["source_readiness"] == "INCOMPLETE"
+    assert packet["research_intelligence"]["status"] == "NOT_ASSESSABLE"
+    assert packet["research_intelligence"]["attention_flags"][0]["flag"] == "MISSING_ATTRIBUTION_EVIDENCE"
     assert packet["shadow_data_status"] == "NO_DATA"
     assert packet["shadow_data_reason"] == "PRICE_CACHE_STALE"
     assert packet["comparison_status"] == "NO_DATA"

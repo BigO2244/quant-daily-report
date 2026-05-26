@@ -193,9 +193,30 @@ def _load_inputs(repo_root: Path, trade_date: str, shadow_dir: Path | None, clar
         "shadow_dir": actual_shadow_dir,
         "clarity_dir": actual_clarity_dir,
         "artifacts": artifacts,
+        "prior_artifacts": _load_prior_research_artifacts(repo_root, artifacts),
         "freshness": freshness,
         "source_diagnostics": source_diagnostics,
         "source_readiness": _source_readiness(artifacts, trade_date),
+    }
+
+
+def _load_prior_research_artifacts(repo_root: Path, artifacts: dict[str, Any]) -> dict[str, Any]:
+    performance = artifacts.get("shadow_performance") if isinstance(artifacts.get("shadow_performance"), dict) else {}
+    comparison = artifacts.get("comparison") if isinstance(artifacts.get("comparison"), dict) else {}
+    previous_date = performance.get("previous_trade_date") or comparison.get("delta", {}).get("previous_date")
+    if not previous_date:
+        return {"previous_trade_date": None, "status": "MISSING"}
+    prior_dir = repo_root / "outputs" / "research_clarity" / str(previous_date)
+    if not prior_dir.exists():
+        return {"previous_trade_date": str(previous_date), "status": "MISSING", "path": str(prior_dir)}
+    return {
+        "previous_trade_date": str(previous_date),
+        "status": "FOUND",
+        "path": str(prior_dir),
+        "weights_snapshot": _read_json(prior_dir / "weights_snapshot.json"),
+        "exposures_snapshot": _read_json(prior_dir / "exposures_snapshot.json"),
+        "concentration_monitor": _read_json(prior_dir / "concentration_monitor.json"),
+        "exposure_summary": _read_json(prior_dir / "exposure_summary.json"),
     }
 
 
@@ -595,6 +616,351 @@ def _what_changed(inputs: dict[str, Any]) -> list[str]:
     return [f"Rebalance delta status is {delta_basis}; review source artifacts before drawing change conclusions."]
 
 
+def _research_intelligence(inputs: dict[str, Any], comparison: list[dict[str, Any]], data_completeness: dict[str, Any]) -> dict[str, Any]:
+    if inputs["source_readiness"]["status"] != "READY":
+        return {
+            "status": "NOT_ASSESSABLE",
+            "previous_trade_date": inputs["artifacts"]["shadow_performance"].get("previous_trade_date"),
+            "interpretation": "Research intelligence is context-only until post-close hydration and shadow artifacts are complete.",
+            "material_vs_noise": "not_assessable",
+            "strategy_change_summaries": [],
+            "attention_flags": [
+                {
+                    "severity": "HIGH",
+                    "flag": "MISSING_ATTRIBUTION_EVIDENCE",
+                    "scope": "packet",
+                    "interpretation": "Source readiness is incomplete; do not infer composition drift or strategy stability.",
+                }
+            ],
+        }
+    artifacts = inputs["artifacts"]
+    prior = inputs.get("prior_artifacts", {})
+    prior_status = prior.get("status")
+    if prior_status != "FOUND":
+        return {
+            "status": "BASELINE_ONLY",
+            "previous_trade_date": prior.get("previous_trade_date"),
+            "interpretation": "Current composition is available, but prior research clarity artifacts are missing; drift is not assessable.",
+            "material_vs_noise": "baseline_only",
+            "strategy_change_summaries": [_baseline_strategy_summary(row) for row in comparison],
+            "attention_flags": [
+                {
+                    "severity": "MEDIUM",
+                    "flag": "MISSING_PRIOR_RESEARCH_CLARITY",
+                    "scope": "packet",
+                    "interpretation": "Prior immutable research clarity artifacts are required for turnover, drift, and stability comparison.",
+                }
+            ],
+        }
+
+    current_weights = artifacts["weights_snapshot"].get("strategies", {})
+    prior_weights = prior.get("weights_snapshot", {}).get("strategies", {})
+    current_exposures = artifacts["exposures_snapshot"].get("strategies", {})
+    prior_exposures = prior.get("exposures_snapshot", {}).get("strategies", {})
+    summaries = []
+    flags = []
+    for row in comparison:
+        strategy_id = row["strategy_id"]
+        current_weight_map = _target_weights(current_weights.get(strategy_id, {}))
+        prior_weight_map = _target_weights(prior_weights.get(strategy_id, {}))
+        current_exposure = current_exposures.get(strategy_id, {}) if isinstance(current_exposures, dict) else {}
+        prior_exposure = prior_exposures.get(strategy_id, {}) if isinstance(prior_exposures, dict) else {}
+        summary = _strategy_research_change_summary(
+            strategy_id=strategy_id,
+            strategy_name=row["strategy_name"],
+            current_weights=current_weight_map,
+            prior_weights=prior_weight_map,
+            current_exposure=current_exposure,
+            prior_exposure=prior_exposure,
+            fallback_turnover=row.get("turnover_proxy"),
+            data_completeness=data_completeness,
+        )
+        summaries.append(summary)
+        flags.extend(summary["attention_flags"])
+    material_count = sum(1 for item in summaries if item["material_vs_noise"] == "material")
+    if material_count >= 2:
+        packet_materiality = "material"
+        interpretation = "Multiple strategies show material composition or exposure movement; operator should review whether change reflects rotation or fragility."
+    elif material_count == 1:
+        packet_materiality = "mixed"
+        interpretation = "One strategy shows material movement; most changes appear incremental."
+    else:
+        packet_materiality = "incremental"
+        interpretation = "Most changes appear incremental rather than structural."
+    return {
+        "status": "ASSESSABLE",
+        "previous_trade_date": prior.get("previous_trade_date"),
+        "interpretation": interpretation,
+        "material_vs_noise": packet_materiality,
+        "strategy_change_summaries": summaries,
+        "attention_flags": flags,
+    }
+
+
+def _baseline_strategy_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "strategy_id": row["strategy_id"],
+        "strategy_name": row["strategy_name"],
+        "turnover": row.get("turnover_proxy"),
+        "turnover_interpretation": _turnover_interpretation(row.get("turnover_proxy")),
+        "largest_additions": [],
+        "largest_removals": [],
+        "largest_weight_increases": [],
+        "largest_weight_decreases": [],
+        "concentration_change": None,
+        "sector_exposure_drift": [],
+        "stability_interpretation": "Baseline only; prior composition evidence is missing.",
+        "material_vs_noise": "baseline_only",
+        "attention_flags": [],
+    }
+
+
+def _target_weights(payload: dict[str, Any]) -> dict[str, float]:
+    weights = payload.get("target_weights") if isinstance(payload, dict) else {}
+    if not isinstance(weights, dict):
+        return {}
+    result: dict[str, float] = {}
+    for ticker, weight in weights.items():
+        try:
+            result[str(ticker).upper()] = float(weight)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _strategy_research_change_summary(
+    *,
+    strategy_id: str,
+    strategy_name: str,
+    current_weights: dict[str, float],
+    prior_weights: dict[str, float],
+    current_exposure: dict[str, Any],
+    prior_exposure: dict[str, Any],
+    fallback_turnover: Any,
+    data_completeness: dict[str, Any],
+) -> dict[str, Any]:
+    all_tickers = sorted(set(current_weights) | set(prior_weights))
+    deltas = {
+        ticker: round(current_weights.get(ticker, 0.0) - prior_weights.get(ticker, 0.0), 10)
+        for ticker in all_tickers
+    }
+    additions = _top_weight_changes(
+        [
+            {"ticker": ticker, "weight": current_weights[ticker], "change": current_weights[ticker]}
+            for ticker in current_weights.keys() - prior_weights.keys()
+        ]
+    )
+    removals = _top_weight_changes(
+        [
+            {"ticker": ticker, "weight": prior_weights[ticker], "change": -prior_weights[ticker]}
+            for ticker in prior_weights.keys() - current_weights.keys()
+        ]
+    )
+    increases = _top_weight_changes(
+        [
+            {"ticker": ticker, "weight": current_weights.get(ticker, 0.0), "change": change}
+            for ticker, change in deltas.items()
+            if change > 1e-9 and ticker in prior_weights and ticker in current_weights
+        ]
+    )
+    decreases = _top_weight_changes(
+        [
+            {"ticker": ticker, "weight": current_weights.get(ticker, 0.0), "change": change}
+            for ticker, change in deltas.items()
+            if change < -1e-9 and ticker in prior_weights and ticker in current_weights
+        ],
+        reverse=False,
+    )
+    computed_turnover = round(sum(abs(change) for change in deltas.values()) / 2.0, 10) if deltas else None
+    turnover = _first_present(computed_turnover, fallback_turnover)
+    top3_delta = _delta_metric(current_exposure, prior_exposure, "top3_concentration")
+    max_sector_delta = _delta_metric(current_exposure, prior_exposure, "max_sector_exposure")
+    sector_drift = _sector_drift(current_exposure.get("sector_exposure"), prior_exposure.get("sector_exposure"))
+    flags = _research_attention_flags(
+        strategy_id=strategy_id,
+        turnover=turnover,
+        additions=additions,
+        removals=removals,
+        increases=increases,
+        decreases=decreases,
+        top3_delta=top3_delta,
+        max_sector_delta=max_sector_delta,
+        sector_drift=sector_drift,
+        data_completeness=data_completeness,
+    )
+    material = _is_material_change(turnover, additions, removals, increases, decreases, top3_delta, max_sector_delta, sector_drift)
+    return {
+        "strategy_id": strategy_id,
+        "strategy_name": strategy_name,
+        "turnover": turnover,
+        "computed_turnover": computed_turnover,
+        "turnover_interpretation": _turnover_interpretation(turnover),
+        "largest_additions": additions[:3],
+        "largest_removals": removals[:3],
+        "largest_weight_increases": increases[:3],
+        "largest_weight_decreases": decreases[:3],
+        "concentration_change": {
+            "top3_concentration_delta": top3_delta,
+            "max_sector_exposure_delta": max_sector_delta,
+            "interpretation": _concentration_change_interpretation(top3_delta, max_sector_delta),
+        },
+        "sector_exposure_drift": sector_drift[:3],
+        "stability_interpretation": _stability_interpretation(turnover, additions, removals, top3_delta, sector_drift),
+        "material_vs_noise": "material" if material else "incremental",
+        "attention_flags": flags,
+    }
+
+
+def _top_weight_changes(rows: list[dict[str, Any]], reverse: bool = True) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda item: abs(float(item.get("change") or 0.0)), reverse=reverse)
+
+
+def _delta_metric(current: dict[str, Any], prior: dict[str, Any], key: str) -> float | None:
+    if current.get(key) is None or prior.get(key) is None:
+        return None
+    try:
+        return round(float(current[key]) - float(prior[key]), 10)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sector_drift(current: Any, prior: Any) -> list[dict[str, Any]]:
+    if not isinstance(current, dict) or not isinstance(prior, dict):
+        return []
+    rows = []
+    for sector in sorted(set(current) | set(prior)):
+        try:
+            change = round(float(current.get(sector, 0.0)) - float(prior.get(sector, 0.0)), 10)
+        except (TypeError, ValueError):
+            continue
+        if abs(change) > 1e-9:
+            rows.append({"sector": sector, "change": change, "current": current.get(sector), "previous": prior.get(sector)})
+    return sorted(rows, key=lambda item: abs(float(item["change"])), reverse=True)
+
+
+def _research_attention_flags(
+    *,
+    strategy_id: str,
+    turnover: Any,
+    additions: list[dict[str, Any]],
+    removals: list[dict[str, Any]],
+    increases: list[dict[str, Any]],
+    decreases: list[dict[str, Any]],
+    top3_delta: float | None,
+    max_sector_delta: float | None,
+    sector_drift: list[dict[str, Any]],
+    data_completeness: dict[str, Any],
+) -> list[dict[str, Any]]:
+    flags = []
+    turnover_value = _as_float(turnover)
+    if turnover_value is not None and turnover_value >= 0.25:
+        flags.append(_attention_flag(strategy_id, "HIGH", "UNUSUALLY_HIGH_TURNOVER", {"turnover": turnover_value}, "Turnover increased materially vs prior composition."))
+    elif turnover_value is not None and turnover_value >= 0.10:
+        flags.append(_attention_flag(strategy_id, "MEDIUM", "ELEVATED_TURNOVER", {"turnover": turnover_value}, "Turnover is elevated enough to review composition changes."))
+    if top3_delta is not None and top3_delta >= 0.10:
+        flags.append(_attention_flag(strategy_id, "MEDIUM", "CONCENTRATION_WIDENING", {"top3_delta": top3_delta}, "Top-3 concentration widened materially."))
+    if max_sector_delta is not None and max_sector_delta >= 0.15:
+        flags.append(_attention_flag(strategy_id, "MEDIUM", "MAJOR_SECTOR_DRIFT", {"max_sector_delta": max_sector_delta}, "Dominant sector exposure increased materially."))
+    if sector_drift and abs(float(sector_drift[0]["change"])) >= 0.20:
+        flags.append(_attention_flag(strategy_id, "MEDIUM", "MAJOR_SECTOR_DRIFT", {"sector": sector_drift[0]["sector"], "change": sector_drift[0]["change"]}, "Sector exposure drift is large enough to review."))
+    max_rotation = max([abs(float(item["change"])) for item in [*additions, *removals, *increases, *decreases]] or [0.0])
+    if max_rotation >= 0.20 or len(additions) + len(removals) >= 3:
+        flags.append(_attention_flag(strategy_id, "HIGH", "SUDDEN_COMPOSITION_ROTATION", {"largest_weight_change": max_rotation}, "Composition rotation appears structural rather than routine."))
+    if strategy_id in {"caerus_orion", "caerus_lyra"} and flags:
+        flags.append(_attention_flag(strategy_id, "MEDIUM", "CHALLENGER_INSTABILITY", {"flag_count": len(flags)}, "Challenger stability should be reviewed before interpreting outperformance as durable."))
+    if data_completeness["exposure_data_status"] != "complete":
+        flags.append(_attention_flag(strategy_id, "MEDIUM", "MISSING_ATTRIBUTION_EVIDENCE", {"exposure_data_status": data_completeness["exposure_data_status"]}, "Missing exposure evidence limits attribution and drift interpretation."))
+    return flags
+
+
+def _attention_flag(strategy_id: str, severity: str, flag: str, evidence: dict[str, Any], interpretation: str) -> dict[str, Any]:
+    return {
+        "strategy_id": strategy_id,
+        "severity": severity,
+        "flag": flag,
+        "evidence": evidence,
+        "interpretation": interpretation,
+    }
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _turnover_interpretation(turnover: Any) -> str:
+    value = _as_float(turnover)
+    if value is None:
+        return "Turnover evidence is unavailable."
+    if value >= 0.25:
+        return "Turnover increased materially vs prior day."
+    if value >= 0.10:
+        return "Turnover is elevated but not extreme."
+    if value >= 0.03:
+        return "Turnover appears moderate and likely incremental."
+    return "Strategy composition was stable."
+
+
+def _concentration_change_interpretation(top3_delta: float | None, max_sector_delta: float | None) -> str:
+    if top3_delta is None and max_sector_delta is None:
+        return "Concentration change is not assessable from available evidence."
+    if top3_delta is not None and top3_delta >= 0.10:
+        return "Top-3 concentration widened."
+    if max_sector_delta is not None and max_sector_delta >= 0.15:
+        return "Sector exposure increased materially."
+    if (top3_delta is not None and top3_delta <= -0.10) or (max_sector_delta is not None and max_sector_delta <= -0.15):
+        return "Concentration or sector exposure narrowed."
+    return "Concentration changes appear incremental."
+
+
+def _stability_interpretation(
+    turnover: Any,
+    additions: list[dict[str, Any]],
+    removals: list[dict[str, Any]],
+    top3_delta: float | None,
+    sector_drift: list[dict[str, Any]],
+) -> str:
+    value = _as_float(turnover)
+    large_constituent_change = any(abs(float(item.get("change") or 0.0)) >= 0.20 for item in [*additions, *removals])
+    large_sector_drift = bool(sector_drift and abs(float(sector_drift[0]["change"])) >= 0.20)
+    if (value is not None and value >= 0.25) or large_constituent_change:
+        return "Composition rotation is material; review why this changed before treating the signal as stable."
+    if large_sector_drift:
+        return "Observed drift likely reflects sector rotation rather than a clean selection signal."
+    if top3_delta is not None and top3_delta >= 0.10:
+        return "Strategy remains investable as context, but concentration widened."
+    return "Strategy composition was stable; most changes appear incremental rather than structural."
+
+
+def _is_material_change(
+    turnover: Any,
+    additions: list[dict[str, Any]],
+    removals: list[dict[str, Any]],
+    increases: list[dict[str, Any]],
+    decreases: list[dict[str, Any]],
+    top3_delta: float | None,
+    max_sector_delta: float | None,
+    sector_drift: list[dict[str, Any]],
+) -> bool:
+    value = _as_float(turnover)
+    if value is not None and value >= 0.10:
+        return True
+    all_weight_changes = [*additions, *removals, *increases, *decreases]
+    if any(abs(float(item.get("change") or 0.0)) >= 0.15 for item in all_weight_changes):
+        return True
+    if top3_delta is not None and abs(top3_delta) >= 0.10:
+        return True
+    if max_sector_delta is not None and abs(max_sector_delta) >= 0.15:
+        return True
+    if sector_drift and abs(float(sector_drift[0]["change"])) >= 0.15:
+        return True
+    return False
+
+
 def _ranking_change_note(comparison: list[dict[str, Any]]) -> str:
     if not comparison:
         return "Strategy ranking is unavailable because packet inputs are incomplete."
@@ -633,6 +999,20 @@ def _research_followups(exposure: dict[str, Any], regime: dict[str, Any]) -> lis
     return followups
 
 
+def _research_intelligence_followups(intelligence: dict[str, Any]) -> list[str]:
+    flags = intelligence.get("attention_flags", [])
+    followups = []
+    if any(flag.get("flag") == "UNUSUALLY_HIGH_TURNOVER" for flag in flags):
+        followups.append("Review high-turnover strategies for avoidable churn before interpreting outperformance.")
+    if any(flag.get("flag") == "MAJOR_SECTOR_DRIFT" for flag in flags):
+        followups.append("Check whether sector exposure drift explains challenger leadership.")
+    if any(flag.get("flag") == "CHALLENGER_INSTABILITY" for flag in flags):
+        followups.append("Track Orion/Lyra stability over repeated packets before treating the move as durable.")
+    if intelligence.get("status") in {"BASELINE_ONLY", "NOT_ASSESSABLE"}:
+        followups.append("Preserve prior-day research clarity artifacts so composition drift and turnover can be compared.")
+    return followups
+
+
 def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, clarity_dir: Path | None) -> dict[str, Any]:
     inputs = _load_inputs(repo_root, trade_date, shadow_dir, clarity_dir)
     trust = _operational_trust(inputs)
@@ -640,8 +1020,9 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
     data_completeness = _data_completeness(inputs, comparison)
     exposure = _exposure_review(inputs, data_completeness)
     regime = _regime_review(inputs)
+    intelligence = _research_intelligence(inputs, comparison, data_completeness)
     key_risks = _key_risks(trust, exposure, regime)
-    followups = _research_followups(exposure, regime)
+    followups = [*_research_followups(exposure, regime), *_research_intelligence_followups(intelligence)]
     operator_takeaway = _operator_takeaway(comparison, exposure, regime, trust)
     dashboard = _dashboard_summary(trust, comparison, exposure, regime, data_completeness, operator_takeaway)
     executive_summary = [
@@ -683,6 +1064,7 @@ def _packet_payload(repo_root: Path, trade_date: str, shadow_dir: Path | None, c
         "operational_trust_summary": trust,
         "strategy_comparison": comparison,
         "exposure_concentration_review": exposure,
+        "research_intelligence": intelligence,
         "regime_interpretation": regime,
         "confidence_freshness_caveats": {
             "freshness": inputs["freshness"],
@@ -902,6 +1284,39 @@ def _markdown(packet: dict[str, Any]) -> str:
     else:
         lines.append(f"- {exposure['interpretation']}")
         lines.append("- No exposure risk flags fired.")
+    lines.extend(["", "## Research Intelligence", ""])
+    intelligence = packet["research_intelligence"]
+    lines.extend(
+        [
+            f"- Status: `{intelligence['status']}`",
+            f"- Prior comparison date: `{intelligence.get('previous_trade_date') or 'unavailable'}`",
+            f"- Material vs noise: `{intelligence['material_vs_noise']}`",
+            f"- Interpretation: {intelligence['interpretation']}",
+        ]
+    )
+    if intelligence["attention_flags"]:
+        lines.append("- Research attention flags:")
+        for flag in intelligence["attention_flags"]:
+            scope = flag.get("strategy_id") or flag.get("scope", "packet")
+            lines.append(f"  - `{scope}`: `{flag['flag']}` severity `{flag['severity']}` - {flag['interpretation']}")
+    else:
+        lines.append("- Research attention flags: none")
+    for summary in intelligence["strategy_change_summaries"]:
+        lines.extend(
+            [
+                f"",
+                f"### {_strategy_name_for_heading(summary['strategy_name'])}",
+                f"- Turnover: {_short_pct(summary.get('turnover'))} - {summary['turnover_interpretation']}",
+                f"- Material vs noise: `{summary['material_vs_noise']}`",
+                f"- Concentration: {summary['concentration_change']['interpretation'] if isinstance(summary.get('concentration_change'), dict) else 'not assessable'}",
+                f"- Stability: {summary['stability_interpretation']}",
+                f"- Largest additions: {_format_weight_change_list(summary['largest_additions'])}",
+                f"- Largest removals: {_format_weight_change_list(summary['largest_removals'])}",
+                f"- Largest increases: {_format_weight_change_list(summary['largest_weight_increases'])}",
+                f"- Largest decreases: {_format_weight_change_list(summary['largest_weight_decreases'])}",
+                f"- Sector drift: {_format_sector_drift(summary['sector_exposure_drift'])}",
+            ]
+        )
     lines.extend(["", "## Regime Interpretation", ""])
     regime = packet["regime_interpretation"]
     lines.append(f"- {regime['regime_summary']}")
@@ -934,6 +1349,28 @@ def _source_diagnostics_sentence(source_diagnostics: dict[str, str]) -> str:
     return f"found {found_text}; missing {missing_text}."
 
 
+def _strategy_name_for_heading(value: str) -> str:
+    return value.replace("|", "").strip()
+
+
+def _format_weight_change_list(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "none"
+    parts = []
+    for item in items[:3]:
+        ticker = item.get("ticker", "UNKNOWN")
+        change = _short_pct(item.get("change"))
+        weight = _short_pct(item.get("weight"))
+        parts.append(f"{ticker} change {change} current/prior weight {weight}")
+    return "; ".join(parts)
+
+
+def _format_sector_drift(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "none"
+    return "; ".join(f"{item.get('sector', 'UNKNOWN')} { _short_pct(item.get('change')) }" for item in items[:3])
+
+
 def _compact_concentration_status(row: dict[str, Any]) -> str:
     if row["top3_concentration"] is None and row["max_position_weight"] is None:
         return "not assessable"
@@ -953,6 +1390,7 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
     trust = packet["operational_trust_summary"]
     exposure = packet["exposure_concentration_review"]
     regime = packet["regime_interpretation"]
+    intelligence = packet["research_intelligence"]
     source_state = packet["source_state"]
     why_incomplete = []
     if packet["source_readiness"] != "READY":
@@ -1031,6 +1469,31 @@ def _html(packet: dict[str, Any], markdown: str) -> str:
         f"<p><strong>Exposure review:</strong> {html.escape(exposure['interpretation'])}</p>",
         f"<p><strong>Regime:</strong> {html.escape(regime['regime_summary'])}</p>",
         "</section>",
+        "<section class=\"card\"><h2>Research Intelligence</h2>",
+        "<table><tbody>",
+        f"<tr><th>Status</th><td>{html.escape(str(intelligence['status']))}</td></tr>",
+        f"<tr><th>Prior comparison date</th><td>{html.escape(str(intelligence.get('previous_trade_date') or 'unavailable'))}</td></tr>",
+        f"<tr><th>Material vs noise</th><td>{html.escape(str(intelligence['material_vs_noise']))}</td></tr>",
+        f"<tr><th>Interpretation</th><td>{html.escape(str(intelligence['interpretation']))}</td></tr>",
+        "</tbody></table>",
+        "<h3>Research Attention Flags</h3>",
+        "<ul>",
+        *_html_attention_flags(intelligence["attention_flags"]),
+        "</ul>",
+        "<h3>Strategy Change Summary</h3>",
+        "<table><thead><tr><th>Strategy</th><th>Turnover</th><th>Largest Additions</th><th>Largest Removals</th><th>Sector Drift</th><th>Stability</th></tr></thead><tbody>",
+        *(
+            "<tr>"
+            f"<td>{html.escape(summary['strategy_name'])}</td>"
+            f"<td>{html.escape(_short_pct(summary.get('turnover')))} - {html.escape(summary['turnover_interpretation'])}</td>"
+            f"<td>{html.escape(_format_weight_change_list(summary['largest_additions']))}</td>"
+            f"<td>{html.escape(_format_weight_change_list(summary['largest_removals']))}</td>"
+            f"<td>{html.escape(_format_sector_drift(summary['sector_exposure_drift']))}</td>"
+            f"<td>{html.escape(summary['stability_interpretation'])}</td>"
+            "</tr>"
+            for summary in intelligence["strategy_change_summaries"]
+        ),
+        "</tbody></table></section>",
         "<section class=\"card\"><h2>What Changed Today</h2><ul>",
         *(f"<li>{html.escape(item)}</li>" for item in packet["what_changed_today"]),
         "</ul></section>",
@@ -1071,6 +1534,16 @@ def _metric_card(label: str, value: Any) -> str:
     )
 
 
+def _html_attention_flags(flags: list[dict[str, Any]]) -> list[str]:
+    if not flags:
+        return ["<li>none</li>"]
+    return [
+        f"<li><strong>{html.escape(str(flag.get('severity')))}</strong> {html.escape(str(flag.get('flag')))} "
+        f"({html.escape(str(flag.get('strategy_id') or flag.get('scope', 'packet')))}): {html.escape(str(flag.get('interpretation')))}</li>"
+        for flag in flags
+    ]
+
+
 def _summary(packet: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "daily_research_packet_summary_v1",
@@ -1088,6 +1561,9 @@ def _summary(packet: dict[str, Any]) -> dict[str, Any]:
         "exposure_data_status": packet["data_completeness"]["exposure_data_status"],
         "exposure_risk_assessable": packet["exposure_concentration_review"]["risk_assessable"],
         "fragility_indicator_count": len(packet["regime_interpretation"]["fragility_indicators"]),
+        "research_attention_flag_count": len(packet["research_intelligence"]["attention_flags"]),
+        "research_intelligence_status": packet["research_intelligence"]["status"],
+        "research_material_vs_noise": packet["research_intelligence"]["material_vs_noise"],
         "advisory_only": True,
         "execution_behavior_changed": False,
     }

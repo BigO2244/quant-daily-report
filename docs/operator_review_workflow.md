@@ -15,11 +15,12 @@ Review in this order:
 3. Executive Summary
 4. Strategy Comparison Summary
 5. Exposure + Concentration Review
-6. Regime Interpretation
-7. Fragility Observations
-8. Confidence + Freshness Caveats
-9. Key Risks
-10. Research Follow-Ups
+6. Research Intelligence
+7. Regime Interpretation
+8. Fragility Observations
+9. Confidence + Freshness Caveats
+10. Key Risks
+11. Research Follow-Ups
 
 Trust comes first. A strong return with weak evidence should not outrank a clear
 confidence caveat.
@@ -34,8 +35,10 @@ Use this when checking daily status quickly.
 3. Read the strategy rank leader and daily return context.
 4. Check whether Orion or Lyra outperformance coincides with concentration
    flags.
-5. Check whether regime fragility indicators fired.
-6. Read the LOW confidence caveat for operational shadow NAV.
+5. Check Research Intelligence for high turnover, composition rotation, or
+   challenger instability.
+6. Check whether regime fragility indicators fired.
+7. Read the LOW confidence caveat for operational shadow NAV.
 
 Escalate if:
 
@@ -43,6 +46,8 @@ Escalate if:
 - source readiness is incomplete after market close;
 - expected shadow or research clarity artifacts are missing;
 - Orion or Lyra lead with high concentration;
+- Research Intelligence flags sudden composition rotation or challenger
+  instability;
 - freshness is unknown on core inputs;
 - regime fragility indicators are present.
 
@@ -53,10 +58,12 @@ Use this for research interpretation.
 1. Compare Polaris, Orion, and Lyra daily returns.
 2. Inspect top-three concentration and max position weight.
 3. Review sector exposure and momentum sensitivity.
-4. Check regime evidence and fragility indicators.
-5. Compare today with prior packets if available.
-6. Separate selection alpha hypotheses from concentration amplification.
-7. Record follow-up questions for weekly synthesis.
+4. Review Research Intelligence for additions, removals, weight changes,
+   turnover, concentration drift, and sector drift.
+5. Check regime evidence and fragility indicators.
+6. Compare today with prior packets if available.
+7. Separate selection alpha hypotheses from concentration amplification.
+8. Record follow-up questions for weekly synthesis.
 
 ## Weekly Synthesis Mode
 
@@ -87,6 +94,8 @@ Initial review thresholds:
 - top-three concentration at or above 60%: high concentration review;
 - max position weight at or above 20%: high position concentration review;
 - max sector exposure at or above 50%: sector concentration review;
+- turnover at or above 25%: high turnover review;
+- single-name or sector drift around 15-20%: composition change review;
 - missing core packet input: partial confidence;
 - unknown freshness on core packet input: do not treat the packet as complete.
 
@@ -110,5 +119,7 @@ Examples:
 - Did Orion outperform because of stock selection or top-three concentration?
 - Is Lyra more regime-fragile than Polaris?
 - Is the winning strategy concentrated in Information Technology?
+- Did the leader change because of turnover, sector drift, or composition
+  rotation?
 - Are packet inputs fresh enough to trust today's interpretation?
 - Which findings should be carried into the weekly research synthesis?
