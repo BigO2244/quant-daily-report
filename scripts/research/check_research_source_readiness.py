@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from scripts.research.check_price_hydration_health import inspect_hydration_health
+
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -107,6 +109,12 @@ def inspect_source_readiness(
             "cache_max_date": None,
             "max_cache_date": None,
             "hydration_covers_trade_date": False,
+            "hydration_health": {},
+            "stale_days": None,
+            "cache_lag_interpretation": "structurally_broken",
+            "symbols_missing_count": None,
+            "missing_symbols_sample": [],
+            "partial_or_complete": "UNKNOWN",
             "source_readiness": "UNKNOWN",
             "blocking_reasons": ["no dated shadow candidate directory found"],
             "recommended_next_action": "Inspect shadow candidate generation before running FR-030.",
@@ -116,6 +124,7 @@ def inspect_source_readiness(
     performance_path = shadow_dir / "shadow_performance.json"
     comparison_path = shadow_dir / "comparison.json"
     hydration_path = repo_root / "outputs" / "price_hydration" / resolved_trade_date / "status.json"
+    hydration_health = inspect_hydration_health(repo_root=repo_root, trade_date=resolved_trade_date)
 
     performance, performance_error = _read_json(performance_path)
     comparison, comparison_error = _read_json(comparison_path)
@@ -175,6 +184,12 @@ def inspect_source_readiness(
         "cache_max_date": max_cache_date,
         "max_cache_date": max_cache_date,
         "hydration_covers_trade_date": hydration_covers_trade_date,
+        "hydration_health": hydration_health,
+        "stale_days": hydration_health.get("stale_days"),
+        "cache_lag_interpretation": hydration_health.get("hydration_interpretation"),
+        "symbols_missing_count": hydration_health.get("symbols_missing_count"),
+        "missing_symbols_sample": list(hydration_health.get("missing_symbols_sample") or []),
+        "partial_or_complete": hydration_health.get("partial_or_complete"),
         "source_readiness": source_readiness,
         "blocking_reasons": blocking_reasons,
         "recommended_next_action": _recommended_next_action(blocking_reasons),
@@ -193,6 +208,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Strategy count: {payload.get('strategy_count')}",
         f"- Price hydration status: {payload.get('price_hydration_status')}",
         f"- Max cache date: {payload.get('max_cache_date') or 'unknown'}",
+        f"- Stale days: {payload.get('stale_days') if payload.get('stale_days') is not None else 'unknown'}",
+        f"- Hydration interpretation: {payload.get('cache_lag_interpretation') or 'unknown'}",
+        f"- Missing symbols: {payload.get('symbols_missing_count') if payload.get('symbols_missing_count') is not None else 'unknown'}",
         "",
         "## Blocking Reasons",
     ]
@@ -221,6 +239,7 @@ def render_text(payload: dict[str, Any]) -> str:
         f"[SOURCE] Shadow: status={payload.get('shadow_data_status')} reason={payload.get('shadow_data_reason') or 'none'}",
         f"[SOURCE] Comparison: status={payload.get('comparison_status')} strategies={payload.get('strategy_count')}",
         f"[SOURCE] Hydration: status={payload.get('price_hydration_status')} max_cache_date={payload.get('max_cache_date') or 'unknown'}",
+        f"[SOURCE] Hydration Detail: stale_days={payload.get('stale_days') if payload.get('stale_days') is not None else 'unknown'} missing_symbols={payload.get('symbols_missing_count') if payload.get('symbols_missing_count') is not None else 'unknown'} cause={payload.get('cache_lag_interpretation') or 'unknown'}",
     ]
     if reasons:
         lines.append("[SOURCE] Blocking Reasons:")

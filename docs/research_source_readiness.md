@@ -43,6 +43,9 @@ state, ranking and exposure-adjusted interpretation should not be used.
 
 `price_hydration_status = MISSING` means the expected
 `outputs/price_hydration/<TRADE_DATE>/status.json` evidence was not present.
+Use `docs/price_hydration_health.md` and
+`scripts/research/check_price_hydration_health.py` to inspect cache lag,
+missing symbols, partial hydration, and the last successful hydration context.
 
 ## Operator Workflow
 
@@ -52,6 +55,7 @@ Use the diagnostic before forcing an incomplete packet:
 python3 -m scripts.research.check_research_source_readiness --latest
 python3 -m scripts.research.check_research_source_readiness --trade-date YYYY-MM-DD --markdown
 python3 -m scripts.research.check_research_source_readiness --trade-date YYYY-MM-DD --json --strict
+python3 -m scripts.research.check_price_hydration_health --trade-date YYYY-MM-DD --markdown
 ```
 
 If readiness is `READY`, run Orion.command normally.

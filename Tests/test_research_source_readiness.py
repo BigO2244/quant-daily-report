@@ -103,6 +103,7 @@ def test_missing_price_hydration_status_reports_incomplete(tmp_path):
 
     assert payload["source_readiness"] == "INCOMPLETE"
     assert payload["price_hydration_status"] == "MISSING"
+    assert payload["cache_lag_interpretation"] == "waiting_for_post_close"
     assert "missing price hydration status" in payload["blocking_reasons"]
 
 
@@ -171,6 +172,7 @@ def test_markdown_and_json_include_blocking_reasons(tmp_path):
     json_payload = json.loads(result.stdout)
 
     assert "## Blocking Reasons" in markdown
+    assert "Hydration interpretation" in markdown
     assert "missing price hydration status" in markdown
     assert json_payload["blocking_reasons"] == ["missing price hydration status"]
-
+    assert "hydration_health" in json_payload

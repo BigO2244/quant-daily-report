@@ -13,6 +13,9 @@ def test_orion_launcher_blocks_incomplete_sources_by_default():
     assert "strategy_count" in script
     assert "scripts.research.check_research_source_readiness" in script
     assert "price_hydration_status_path" in script
+    assert "stale_days" in script
+    assert "symbols_missing_count" in script
+    assert "cache_lag_interpretation" in script
 
 
 def test_orion_launcher_has_explicit_incomplete_override_and_no_auto_refresh():
