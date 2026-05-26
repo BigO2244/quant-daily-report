@@ -30,6 +30,27 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
 - Runtime evidence should be preserved during rollback. Deleting artifacts or
   logs to make a state look clean is not a rollback strategy.
 
+## Execution Reliability Lessons
+
+- On 2026-05-26, the paper run halted `PARTIAL` after four sell orders were
+  accepted and before five planned buys were submitted. The immediate trigger
+  was `post_submit_artifact_failure:posttrade_state_capture_failed`.
+- The failure pattern was sell-phase timeout plus a transient Alpaca
+  `PARTIALLY_FILLED` order state without a resolvable `filled_qty`. The system
+  halted conservatively instead of submitting buys against uncertain sell
+  completion, which prevented state corruption and overbuying risk.
+- The missing artifact was posttrade reconciliation evidence, not order
+  submission evidence. Pretrade, postsell, and posttrade broker snapshots were
+  preserved; `recon_posttrade_2026-05-26.json` was missing because posttrade
+  state capture raised before publishing reconciliation.
+- Hotfix `40fce71` keeps the conservative buy block when sell state is unsafe,
+  but preserves posttrade evidence. If a partial sell can be resolved from
+  broker position deltas, reconciliation proceeds. If it cannot be resolved,
+  posttrade reconciliation is written as `NOT_COMPARABLE` with unresolved order
+  metadata instead of failing artifact capture.
+- Future execution-adjacent fixes should preserve this distinction: never mask
+  unresolved broker state, but avoid losing available posttrade evidence.
+
 ## Artifact Lessons
 
 - Additive observability artifacts are safer than overwriting or deleting

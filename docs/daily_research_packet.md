@@ -12,6 +12,9 @@ only, and confidence-aware.
 It does not change execution behavior, accounting semantics, timing semantics,
 broker behavior, dashboard behavior, promotion logic, cron, or workflow state.
 
+Deployment state: deployed/current. The packet is a telemetry consumption layer,
+not a promotion gate or execution recommendation layer.
+
 ## Packet Philosophy
 
 The packet should answer what matters today before showing telemetry detail.
@@ -46,6 +49,16 @@ Each packet should help answer:
 - Is outperformance concentration-driven?
 - Are regime conditions favorable?
 - Is telemetry trustworthy and fresh?
+
+## Source Readiness Boundary
+
+The current operational bottleneck is post-close source readiness, not packet
+rendering. If shadow artifacts are stale, `NO_DATA`, or generated before price
+hydration is complete, the packet must clearly downgrade interpretation.
+
+Incomplete-source packets should say that strategy ordering is context only and
+not analytically meaningful. Operators should wait for post-close hydration and
+shadow artifact refresh before drawing exposure-adjusted conclusions.
 
 ## Interpretation Hierarchy
 
@@ -164,3 +177,8 @@ FR-030 prepares three delivery surfaces:
 
 Delivery automation is not part of FR-030. Future email, dashboard, and MCP
 integration should consume these artifacts as read-only evidence.
+
+Orion.command / `scripts/open_shadow_comparison_latest.command` is the current
+operator launcher for the FR-030 workflow. It is operational tooling only: it
+builds/retrieves packet evidence and surfaces readiness warnings, but it does
+not trigger execution, hydration, scheduling, promotion, or broker activity.

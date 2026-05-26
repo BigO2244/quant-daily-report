@@ -25,21 +25,18 @@ Fully deployed history and reviewed deferred items belong in
 | FR-005 self-heal recovery integrity | Wave 3 | `DEPLOYED_OBSERVING` | HIGH | Wave 3 deployment | observing | Execution continues only after full bundle validation. | Revert FR-005 commit; preserve recovery artifacts. |
 | FR-012 CI cache namespace isolation | Wave 2 | `DEPLOYED_OBSERVING` | MEDIUM | Wave 2 deployment | observing | Cache keys include `github.repository_id`. | Revert cache namespace commit. |
 | FR-014 shadow learning reliability | Shadow / Learning | `BACKLOG` | MEDIUM | FR-015 and FR-017 preferred | not_started | Useful follow-up once artifact taxonomy and health aggregation are clearer. | Keep current shadow learning behavior. |
-| FR-015 artifact registry and ownership matrix | Phase 4 | `IN_PROGRESS` | LOW | None | not_required | Static registry foundation implemented in `docs/artifact_registry.md`; ownership matrix documented in `docs/artifact_ownership_matrix.md`; provenance, freshness, truth-surface, and confidence semantics formalized without runtime producer changes. | Ignore new governance docs or revert docs-only change. |
 | FR-016 semantic precompute contract validation | Phase 4 | `BACKLOG` | MEDIUM | FR-015 | not_started | Future lightweight validation beyond existence and parseability. | Leave current bundle validation unchanged. |
-| FR-017 operational health aggregator | Phase 4 | `IN_PROGRESS` | LOW | FR-015 preferred | not_required | Formal health synthesis model documented in `docs/operational_health_model.md` with operator examples in `docs/operational_health_examples.md`; no runtime producer changed. | Ignore design docs or revert docs-only change. |
-| FR-018 latest publication freshness manifest | Phase 4 | `IN_PROGRESS` | LOW | FR-015 preferred | not_required | Freshness semantics foundation documented in `docs/freshness_semantics.md`; latest publication interpretation formalized with examples in `docs/freshness_examples.md`; no runtime freshness enforcement implemented. | Ignore documented semantics until implemented. |
 | FR-019 runtime artifact retention and backup policy | Phase 4 | `BACKLOG` | LOW | FR-015, FR-018 | not_started | Policy work only; no cleanup automation selected. | Leave current retention behavior unchanged. |
 | FR-020 read-only validation isolation | Phase 4 | `BACKLOG` | MEDIUM | FR-015 | not_started | Future isolation of tests and smoke flows from repo-level runtime outputs. | Leave current validation layout unchanged. |
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
-| FR-023 documentation and generated artifact separation | Phase 4 | `IN_PROGRESS` | LOW | FR-015 preferred | not_required | Taxonomy documented in `docs/documentation_taxonomy.md`; generated-vs-canonical promotion guardrails added; no large file moves performed. | Ignore taxonomy proposal or revert docs-only change. |
-| FR-024 NAV surface registry and performance provenance enforcement | Research Integrity | `PROMOTION_READY` | LOW | FR-015 | not_required | Additive research clarity builder generates NAV surface registry and metadata separating broker, operational shadow, backtest, and latest/convenience surfaces. | Stop publishing registry artifacts and ignore generated outputs. |
-| FR-025 immutable daily shadow holdings and weights history | Attribution Infrastructure | `PROMOTION_READY` | MEDIUM | FR-024 | not_required | Additive research clarity builder writes immutable dated holdings, weights, exposure, rebalance delta, and manifest evidence for shadow attribution lineage. | Stop writing new snapshots; preserve existing immutable evidence. |
-| FR-026 exposure intelligence and concentration risk observability | Portfolio Intelligence | `PROMOTION_READY` | LOW | FR-024, FR-025 | not_required | Additive exposure summaries, concentration monitor, drift baseline, and risk flags make sector, concentration, turnover, and momentum sensitivity visible. | Remove report integration and ignore exposure artifacts. |
-| FR-027 regime decomposition and fragility reporting | Regime Intelligence | `PROMOTION_READY` | LOW | FR-026 | not_required | Additive regime performance, fragility, exposure matrix, and attribution-by-regime artifacts are generated as advisory research-only surfaces. | Stop publishing regime hardening artifacts; no strategy behavior changes. |
-| FR-030 daily research interpretation packet v1 | Research Operations | `PROMOTION_READY` | LOW | FR-015, FR-017, FR-018, FR-024, FR-025, FR-026, FR-027 | not_required | Additive packet builder synthesizes provenance, freshness, confidence, exposure, concentration, and regime telemetry into daily operator-facing Markdown, JSON, HTML, and summary artifacts. | Stop publishing packet artifacts and ignore generated outputs. |
 | FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
 | FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `BACKLOG` | MEDIUM | FR-028 | not_started | Future promotion gates should consume provenance, exposure, and timing confidence after accounting semantics are governed. | Revert promotion-readiness checks to existing scorecard criteria. |
+
+Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
+FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
+are deployed/current. They remain additive telemetry, provenance, and research
+interpretation infrastructure, not execution, promotion, accounting, or timing
+semantic changes.
 
 ## Phase 4 Priority Order
 
@@ -70,20 +67,14 @@ procedures are proven.
 
 ## Immediate Focus
 
-1. Complete FR-015 by turning the documented taxonomy into a lightweight static
-   artifact registry structure.
-2. Keep FR-017 as read-only synthesis; do not let it mutate execution or
-   runtime state.
-3. Add FR-018 freshness manifests incrementally to `latest`-style artifacts only
-   after trust semantics are reviewed.
-4. Use FR-023 to reduce documentation entropy without large file moves in the
-   same change as runtime producers.
-5. Promote FR-024 through FR-027 as additive Track A research infrastructure
-   before starting FR-028 accounting semantics work.
-6. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
+1. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
    comparison artifacts, rollback plans, and observation criteria are reviewed.
-7. Use FR-030 to operationalize telemetry consumption through a daily advisory
-   research packet before adding delivery automation.
+2. Treat FR-030 as deployed telemetry consumption, not promotion logic.
+3. Focus the next research-operations bottleneck on post-close hydration and
+   source readiness, not packet rendering.
+4. Continue to separate MCP planning from FR-028 accounting/timing work.
+5. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
+   source-readiness, and governance reviews without changing execution paths.
 
 ## Roadmap Boundaries
 

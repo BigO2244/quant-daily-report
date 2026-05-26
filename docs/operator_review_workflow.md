@@ -10,15 +10,16 @@ research telemetry with execution or promotion logic.
 
 Review in this order:
 
-1. Operational Trust Summary
-2. Executive Summary
-3. Strategy Comparison Summary
-4. Exposure + Concentration Review
-5. Regime Interpretation
-6. Fragility Observations
-7. Confidence + Freshness Caveats
-8. Key Risks
-9. Research Follow-Ups
+1. Source Readiness / Data Completeness
+2. Operational Trust Summary
+3. Executive Summary
+4. Strategy Comparison Summary
+5. Exposure + Concentration Review
+6. Regime Interpretation
+7. Fragility Observations
+8. Confidence + Freshness Caveats
+9. Key Risks
+10. Research Follow-Ups
 
 Trust comes first. A strong return with weak evidence should not outrank a clear
 confidence caveat.
@@ -28,15 +29,18 @@ confidence caveat.
 Use this when checking daily status quickly.
 
 1. Confirm packet status is not `PARTIAL` due to missing core evidence.
-2. Read the strategy rank leader and daily return context.
-3. Check whether Orion or Lyra outperformance coincides with concentration
+2. Confirm source readiness is `READY`; if it is incomplete, treat strategy
+   briefs as context only.
+3. Read the strategy rank leader and daily return context.
+4. Check whether Orion or Lyra outperformance coincides with concentration
    flags.
-4. Check whether regime fragility indicators fired.
-5. Read the LOW confidence caveat for operational shadow NAV.
+5. Check whether regime fragility indicators fired.
+6. Read the LOW confidence caveat for operational shadow NAV.
 
 Escalate if:
 
 - packet status is `PARTIAL`;
+- source readiness is incomplete after market close;
 - expected shadow or research clarity artifacts are missing;
 - Orion or Lyra lead with high concentration;
 - freshness is unknown on core inputs;

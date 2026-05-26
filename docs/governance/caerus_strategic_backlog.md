@@ -1,5 +1,5 @@
 ---
-last_reviewed: 2026-05-22
+last_reviewed: 2026-05-26
 owner: governance
 category: strategic_backlog
 criticality: high
@@ -122,36 +122,39 @@ Focus areas:
 
 | Initiative | Category | Priority | Blast Radius | Research Clarity Impact | Dependencies | Estimated Horizon | Current Status |
 |---|---|---:|---|---|---|---|---|
-| FR-015 artifact registry and ownership matrix | Governance / Operational Integrity | 1 | LOW | HIGH | None | Week 1 | `IN_PROGRESS` |
-| FR-017 operational health aggregator | Governance / Operational Integrity | 2 | LOW | HIGH | FR-015 preferred | Week 1 | `IN_PROGRESS` |
-| FR-018 latest publication freshness manifest | Governance / Operational Integrity | 3 | LOW | HIGH | FR-015 preferred | Week 1 | `IN_PROGRESS` |
-| FR-023 documentation and generated artifact separation | Governance / Operational Integrity | 4 | LOW | MEDIUM | FR-015 preferred | Week 1 | `IN_PROGRESS` |
-| Strategic backlog consolidation | Governance / Operational Integrity | 5 | LOW | HIGH | Existing FR docs | Week 1 | Drafted here |
+| FR-015 artifact registry and ownership matrix | Governance / Operational Integrity | 1 | LOW | HIGH | None | Week 1 | `DEPLOYED` |
+| FR-017 operational health aggregator | Governance / Operational Integrity | 2 | LOW | HIGH | FR-015 preferred | Week 1 | `DEPLOYED` |
+| FR-018 latest publication freshness manifest | Governance / Operational Integrity | 3 | LOW | HIGH | FR-015 preferred | Week 1 | `DEPLOYED` |
+| FR-023 documentation and generated artifact separation | Governance / Operational Integrity | 4 | LOW | MEDIUM | FR-015 preferred | Week 1 | `DEPLOYED` |
+| Strategic backlog consolidation | Governance / Operational Integrity | 5 | LOW | HIGH | Existing FR docs | Week 1 | `DEPLOYED` |
 | Interpretation layer planning | Research Clarity Acceleration | 6 | LOW | HIGH | FR-015, FR-017 | Week 1 | BACKLOG |
-| FR-024 NAV surface registry and performance provenance enforcement | Research Clarity Acceleration | 7 | LOW | HIGH | FR-015 | Week 2 | `PROMOTION_READY` |
-| FR-025 immutable daily shadow holdings and weights history | Research Clarity Acceleration | 8 | MEDIUM | HIGH | FR-024 | Week 2 | `PROMOTION_READY` |
-| FR-026 exposure intelligence and concentration risk observability | Research Clarity Acceleration | 9 | LOW | HIGH | FR-024, FR-025 | Week 2 | `PROMOTION_READY` |
-| FR-027 regime decomposition and fragility reporting | Research Clarity Acceleration | 10 | LOW | HIGH | FR-026 | Week 2 | `PROMOTION_READY` |
-| FR-030 daily research interpretation packet v1 | Research Clarity Acceleration | 11 | LOW | HIGH | FR-015, FR-017, FR-018, FR-024 through FR-027 | Week 2-3 | `PROMOTION_READY` |
-| Attribution acceleration packet | Research Clarity Acceleration | 12 | LOW | HIGH | FR-025, FR-026, FR-030 | Week 2-3 | BACKLOG |
-| Regime diagnostics packet | Research Clarity Acceleration | 13 | LOW | HIGH | FR-027, FR-030 | Week 2-3 | BACKLOG |
-| Exposure intelligence weekly review | Research Clarity Acceleration | 14 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
-| FR-028 timing semantics candidate review | Governance / Operational Integrity | 15 | HIGH | HIGH | FR-024 through FR-027, FR-030 interpretation evidence | Week 3-4 | `BACKLOG` |
-| FR-029 promotion governance hardening | Capital Deployment Readiness | 16 | MEDIUM | HIGH | FR-028 | Week 4-6 | `BACKLOG` |
-| MCP research operating system architecture | MCP / Research Operating System | 17 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | Planning only |
-| CIO-style research packet | Research Clarity Acceleration | 18 | LOW | HIGH | Attribution, exposure, regime artifacts, FR-030 | Week 3-4 | BACKLOG |
-| Slippage and execution realism review | Capital Deployment Readiness | 19 | MEDIUM | MEDIUM | Broker/reconciliation evidence | Week 4-6 | BACKLOG |
-| Constrained capital rollout plan | Capital Deployment Readiness | 20 | HIGH | MEDIUM | FR-029, broker trust, timing confidence | Week 5-6 | BACKLOG |
-| Regime switching / Markov research | Advanced Modeling Roadmap | 21 | LOW | MEDIUM | Regime diagnostics stable | Later | Deferred |
-| Meta-labeling and ensemble weighting | Advanced Modeling Roadmap | 22 | LOW | MEDIUM | Attribution and signal diagnostics stable | Later | Deferred |
-| Optimization research | Advanced Modeling Roadmap | 23 | MEDIUM | LOW until telemetry matures | Exposure and capital rules stable | Later | Deferred |
+| FR-024 NAV surface registry and performance provenance enforcement | Research Clarity Acceleration | 7 | LOW | HIGH | FR-015 | Week 2 | `DEPLOYED` |
+| FR-025 immutable daily shadow holdings and weights history | Research Clarity Acceleration | 8 | MEDIUM | HIGH | FR-024 | Week 2 | `DEPLOYED` |
+| FR-026 exposure intelligence and concentration risk observability | Research Clarity Acceleration | 9 | LOW | HIGH | FR-024, FR-025 | Week 2 | `DEPLOYED` |
+| FR-027 regime decomposition and fragility reporting | Research Clarity Acceleration | 10 | LOW | HIGH | FR-026 | Week 2 | `DEPLOYED` |
+| FR-030 daily research interpretation packet v1 | Research Clarity Acceleration | 11 | LOW | HIGH | FR-015, FR-017, FR-018, FR-024 through FR-027 | Week 2-3 | `DEPLOYED` |
+| Post-close source readiness and hydration confidence | Research Clarity Acceleration | 12 | LOW | HIGH | FR-030, hydration artifacts | Week 2-3 | BACKLOG |
+| Attribution acceleration packet | Research Clarity Acceleration | 13 | LOW | HIGH | FR-025, FR-026, FR-030 | Week 2-3 | BACKLOG |
+| Regime diagnostics packet | Research Clarity Acceleration | 14 | LOW | HIGH | FR-027, FR-030 | Week 2-3 | BACKLOG |
+| Exposure intelligence weekly review | Research Clarity Acceleration | 15 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
+| FR-028 timing semantics candidate review | Governance / Operational Integrity | 16 | HIGH | HIGH | FR-024 through FR-027, FR-030 interpretation evidence | Week 3-4 | `BACKLOG` |
+| FR-029 promotion governance hardening | Capital Deployment Readiness | 17 | MEDIUM | HIGH | FR-028 | Week 4-6 | `BACKLOG` |
+| MCP research operating system architecture | MCP / Research Operating System | 18 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | Planning only |
+| CIO-style research packet | Research Clarity Acceleration | 19 | LOW | HIGH | Attribution, exposure, regime artifacts, FR-030 | Week 3-4 | BACKLOG |
+| Slippage and execution realism review | Capital Deployment Readiness | 20 | MEDIUM | MEDIUM | Broker/reconciliation evidence | Week 4-6 | BACKLOG |
+| Constrained capital rollout plan | Capital Deployment Readiness | 21 | HIGH | MEDIUM | FR-029, broker trust, timing confidence | Week 5-6 | BACKLOG |
+| Regime switching / Markov research | Advanced Modeling Roadmap | 22 | LOW | MEDIUM | Regime diagnostics stable | Later | Deferred |
+| Meta-labeling and ensemble weighting | Advanced Modeling Roadmap | 23 | LOW | MEDIUM | Attribution and signal diagnostics stable | Later | Deferred |
+| Optimization research | Advanced Modeling Roadmap | 24 | MEDIUM | LOW until telemetry matures | Exposure and capital rules stable | Later | Deferred |
 
 ## Two-Week Tactical Roadmap
 
 ### Week 1
 
-Primary objective: make operational interpretation clearer without touching
-execution behavior.
+Status: deployed.
+
+Primary objective was to make operational interpretation clearer without
+touching execution behavior.
 
 Work items:
 
@@ -172,7 +175,11 @@ Validation posture:
 
 ### Week 2
 
-Primary objective: convert research outputs into faster confidence formation.
+Status: deployed, with post-close source readiness still active as the next
+research-operations bottleneck.
+
+Primary objective was to convert research outputs into faster confidence
+formation.
 
 Work items:
 
@@ -182,6 +189,10 @@ Work items:
 - FR-027: expand regime decomposition and fragility reporting.
 - FR-030: generate the first daily research interpretation packet from
   provenance, freshness, exposure, concentration, and regime telemetry.
+- Orion.command: launch the FR-030 packet workflow from the VM, retrieve the
+  packet bundle locally, and keep source-readiness warnings operator-visible.
+- Source readiness: improve post-close hydration and shadow artifact freshness
+  before interpreting incomplete packet fields.
 - Attribution acceleration: identify daily top contributors, detractors,
   concentration contribution, and turnover effects.
 - Regime diagnostics: summarize what regimes help or hurt Polaris, Orion, and
@@ -218,6 +229,14 @@ FR-030 is not:
 - cron or workflow integration;
 - dashboard deployment;
 - autonomous research interpretation.
+
+Current bottleneck:
+
+- post-close hydration and source readiness, not packet rendering;
+- stale or `NO_DATA` shadow artifacts should block or clearly downgrade packet
+  interpretation;
+- incomplete packet generation remains advisory and requires explicit operator
+  override.
 
 ## MCP Planning Boundary
 

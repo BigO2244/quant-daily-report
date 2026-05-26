@@ -7,6 +7,9 @@ The bundle is designed to improve operator interpretation speed without changing
 execution behavior, accounting semantics, broker behavior, cron behavior,
 dashboard behavior, or promotion logic.
 
+Deployment state: deployed/current as additive research infrastructure. The
+bundle remains advisory and does not change runtime execution.
+
 FR-028 timing semantics remain out of scope. Operational shadow NAV remains LOW
 confidence until that governed accounting review is completed.
 
