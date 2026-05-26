@@ -61,6 +61,10 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   beside canonical operator docs without clear generated-file labeling.
 - Artifact ownership, freshness, retention, and consumer semantics should be
   documented before cleanup automation is introduced.
+- Source-readiness diagnostics should distinguish expected waiting states from
+  actual failure states. Before the post-close hydration window, stale same-day
+  shadow artifacts can be expected; after the window, missing hydration evidence
+  becomes an operator action item.
 
 ## Governance Lessons
 

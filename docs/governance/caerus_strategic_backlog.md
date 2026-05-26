@@ -135,7 +135,7 @@ Focus areas:
 | FR-026 exposure intelligence and concentration risk observability | Research Clarity Acceleration | 11 | LOW | HIGH | FR-024, FR-025 | Week 2 | `DEPLOYED` |
 | FR-027 regime decomposition and fragility reporting | Research Clarity Acceleration | 12 | LOW | HIGH | FR-026 | Week 2 | `DEPLOYED` |
 | FR-030 daily research interpretation packet v1 | Research Clarity Acceleration | 13 | LOW | HIGH | FR-015, FR-017, FR-018, FR-024 through FR-027 | Week 2-3 | `DEPLOYED` |
-| Post-close source readiness and hydration confidence | Research Clarity Acceleration | 14 | LOW | HIGH | FR-030, hydration artifacts | Week 2-3 | BACKLOG |
+| Post-close source readiness and hydration confidence | Research Clarity Acceleration | 14 | LOW | HIGH | FR-030, hydration artifacts | Week 2-3 | `DEPLOYED_OBSERVING` |
 | Attribution acceleration packet | Research Clarity Acceleration | 15 | LOW | HIGH | FR-025, FR-026, FR-030 | Week 2-3 | BACKLOG |
 | Regime diagnostics packet | Research Clarity Acceleration | 16 | LOW | HIGH | FR-027, FR-030 | Week 2-3 | BACKLOG |
 | Exposure intelligence weekly review | Research Clarity Acceleration | 17 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
@@ -177,8 +177,8 @@ Validation posture:
 
 ### Week 2
 
-Status: deployed, with post-close source readiness still active as the next
-research-operations bottleneck.
+Status: deployed, with post-close hydration reliability still active as the
+next research-operations bottleneck.
 
 Primary objective was to convert research outputs into faster confidence
 formation.
@@ -197,8 +197,9 @@ Work items:
   mistaken for production runtime evidence.
 - Orion.command: launch the FR-030 packet workflow from the VM, retrieve the
   packet bundle locally, and keep source-readiness warnings operator-visible.
-- Source readiness: improve post-close hydration and shadow artifact freshness
-  before interpreting incomplete packet fields.
+- Source readiness: deployed read-only diagnostics for research source
+  readiness, price hydration health, cache lag, hydration-window
+  classification, and Orion blocking guidance.
 - Attribution acceleration: identify daily top contributors, detractors,
   concentration contribution, and turnover effects.
 - Regime diagnostics: summarize what regimes help or hurt Polaris, Orion, and
@@ -238,7 +239,8 @@ FR-030 is not:
 
 Current bottleneck:
 
-- post-close hydration and source readiness, not packet rendering;
+- post-close hydration reliability and refreshed shadow artifact availability,
+  not packet rendering;
 - stale or `NO_DATA` shadow artifacts should block or clearly downgrade packet
   interpretation;
 - incomplete packet generation remains advisory and requires explicit operator
