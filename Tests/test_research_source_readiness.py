@@ -1,12 +1,15 @@
 import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from scripts.research.check_research_source_readiness import inspect_source_readiness, render_markdown
 
 
 TRADE_DATE = "2026-05-26"
+BEFORE_HYDRATION = datetime.fromisoformat("2026-05-26T15:46:00-04:00")
+AFTER_HYDRATION = datetime.fromisoformat("2026-05-26T18:31:00-04:00")
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -64,13 +67,14 @@ def _run_cli(root: Path, *args: str) -> subprocess.CompletedProcess:
 def test_ready_source_reports_ready(tmp_path):
     _write_ready_fixture(tmp_path)
 
-    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE)
+    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE, now=AFTER_HYDRATION)
 
     assert payload["source_readiness"] == "READY"
     assert payload["shadow_data_status"] == "OK"
     assert payload["comparison_status"] == "OK"
     assert payload["strategy_count"] == 2
     assert payload["price_hydration_status"] == "OK"
+    assert payload["hydration_state_classification"] == "healthy"
     assert payload["blocking_reasons"] == []
 
 
@@ -85,7 +89,7 @@ def test_price_cache_stale_source_reports_incomplete(tmp_path):
         },
     )
 
-    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE)
+    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE, now=BEFORE_HYDRATION)
 
     assert payload["source_readiness"] == "INCOMPLETE"
     assert payload["shadow_data_status"] == "NO_DATA"
@@ -99,12 +103,60 @@ def test_missing_price_hydration_status_reports_incomplete(tmp_path):
     hydration_path = tmp_path / "outputs" / "price_hydration" / TRADE_DATE / "status.json"
     hydration_path.unlink()
 
-    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE)
+    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE, now=BEFORE_HYDRATION)
 
     assert payload["source_readiness"] == "INCOMPLETE"
     assert payload["price_hydration_status"] == "MISSING"
     assert payload["cache_lag_interpretation"] == "waiting_for_post_close"
     assert "missing price hydration status" in payload["blocking_reasons"]
+
+
+def test_source_readiness_explains_waiting_for_post_close(tmp_path):
+    _write_ready_fixture(tmp_path)
+    (tmp_path / "outputs" / "price_hydration" / TRADE_DATE / "status.json").unlink()
+    _write_json(
+        tmp_path / "outputs" / "price_hydration" / "2026-05-22" / "status.json",
+        {
+            "trade_date": "2026-05-22",
+            "status": "OK",
+            "max_cache_date": "2026-05-22",
+        },
+    )
+    _write_json(
+        tmp_path / "outputs" / "shadow_candidates" / TRADE_DATE / "shadow_performance.json",
+        {
+            "trade_date": TRADE_DATE,
+            "data_status": "NO_DATA",
+            "data_reason": "PRICE_CACHE_STALE",
+        },
+    )
+
+    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE, now=BEFORE_HYDRATION)
+
+    assert payload["source_readiness"] == "INCOMPLETE"
+    assert payload["hydration_state_classification"] == "waiting_for_post_close"
+    assert payload["hydration_window_passed"] is False
+    assert "not occurred yet" in payload["readiness_explanation"]
+    assert "18:30 ET" in payload["recommended_next_action"]
+
+
+def test_source_readiness_explains_stale_after_hydration_window(tmp_path):
+    _write_ready_fixture(tmp_path)
+    (tmp_path / "outputs" / "price_hydration" / TRADE_DATE / "status.json").unlink()
+    _write_json(
+        tmp_path / "outputs" / "price_hydration" / "2026-05-22" / "status.json",
+        {
+            "trade_date": "2026-05-22",
+            "status": "OK",
+            "max_cache_date": "2026-05-22",
+        },
+    )
+
+    payload = inspect_source_readiness(repo_root=tmp_path, trade_date=TRADE_DATE, now=AFTER_HYDRATION)
+
+    assert payload["hydration_state_classification"] == "stale_but_recoverable"
+    assert payload["hydration_window_passed"] is True
+    assert "stale, missing, or partial" in payload["readiness_explanation"]
 
 
 def test_comparison_no_data_reports_incomplete(tmp_path):
@@ -172,7 +224,7 @@ def test_markdown_and_json_include_blocking_reasons(tmp_path):
     json_payload = json.loads(result.stdout)
 
     assert "## Blocking Reasons" in markdown
-    assert "Hydration interpretation" in markdown
+    assert "Hydration classification" in markdown
     assert "missing price hydration status" in markdown
     assert json_payload["blocking_reasons"] == ["missing price hydration status"]
     assert "hydration_health" in json_payload

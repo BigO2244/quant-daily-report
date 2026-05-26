@@ -47,6 +47,15 @@ Use `docs/price_hydration_health.md` and
 `scripts/research/check_price_hydration_health.py` to inspect cache lag,
 missing symbols, partial hydration, and the last successful hydration context.
 
+If the hydration classification is `waiting_for_post_close`, the same-day
+packet is incomplete because the scheduled post-close hydration window has not
+occurred yet. That is expected before 18:30 ET on a trading day when the cache
+still covers the latest completed trading day.
+
+If the hydration classification is `stale_but_recoverable` after the hydration
+window has passed, operators should treat the source as stalled or failed until
+the approved hydration workflow refreshes the cache and shadow artifacts.
+
 ## Operator Workflow
 
 Use the diagnostic before forcing an incomplete packet:
@@ -63,6 +72,14 @@ If readiness is `READY`, run Orion.command normally.
 If readiness is `INCOMPLETE`, wait for post-close hydration and shadow artifact
 refresh, then rerun Orion.command. Only use `ORION_ALLOW_INCOMPLETE_PACKET=1`
 when diagnosing source readiness. Incomplete packets are advisory context only.
+
+Expected same-day flow:
+
+1. Morning stale/no-data shadow artifacts may exist before same-day close data
+   is available.
+2. Post-close hydration runs after 18:30 ET.
+3. Shadow comparison and performance artifacts refresh from the hydrated cache.
+4. FR-030 / Orion can produce a `READY` daily research packet.
 
 ## Why Orion Does Not Hydrate Automatically
 

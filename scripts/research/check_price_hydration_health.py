@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+from core.price_hydration import EOD_READY_TIME, current_et, resolve_completed_trading_day
+
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HYDRATION_WINDOW_TIME = dt.time(hour=18, minute=30)
 
 
 def _read_json(path: Path) -> tuple[dict[str, Any], str | None]:
@@ -120,10 +130,10 @@ def _last_successful_hydration(repo_root: Path) -> dict[str, Any]:
 
 
 def _recommended_next_action(classification: str) -> str:
-    if classification == "ready":
+    if classification == "healthy":
         return "Hydration appears complete for the expected trade date; run Orion.command normally."
     if classification == "waiting_for_post_close":
-        return "Wait for the scheduled post-close hydration window, then rerun the source readiness check."
+        return "Post-close hydration window has not occurred yet. Wait until after 18:30 ET, then rerun the source readiness check."
     if classification == "partial":
         return "Hydration appears partial; inspect missing symbols and rerun the approved hydration workflow if needed."
     if classification == "stale_but_recoverable":
@@ -136,15 +146,37 @@ def inspect_hydration_health(
     repo_root: Path,
     trade_date: str | None = None,
     latest: bool = False,
+    now: dt.datetime | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root.resolve()
+    now_et = current_et(now)
+    expected_latest_trade_date = resolve_completed_trading_day(now=now_et)
     expected_trade_date = trade_date
     if latest or not expected_trade_date:
         expected_trade_date = _latest_expected_trade_date(repo_root)
 
+    market_close_reference_time = EOD_READY_TIME.strftime("%H:%M:%S")
+    hydration_window_time = HYDRATION_WINDOW_TIME.strftime("%H:%M:%S")
+
+    def _hydration_window_passed(target_trade_date: str | None) -> bool:
+        target_dt = _parse_date(target_trade_date)
+        today = now_et.date()
+        if target_dt is None:
+            return False
+        if target_dt < today:
+            return True
+        if target_dt > today:
+            return False
+        return now_et.time() >= HYDRATION_WINDOW_TIME
+
     if not expected_trade_date:
         return {
             "expected_trade_date": None,
+            "expected_latest_trade_date": expected_latest_trade_date,
+            "current_et_time": now_et.isoformat(),
+            "market_close_reference_time": market_close_reference_time,
+            "hydration_window_time": hydration_window_time,
+            "hydration_window_passed": False,
             "hydration_status": "UNKNOWN",
             "hydration_source": "none",
             "hydrated_at": None,
@@ -155,6 +187,7 @@ def inspect_hydration_health(
             "symbols_missing_count": None,
             "missing_symbols_sample": [],
             "partial_or_complete": "UNKNOWN",
+            "hydration_state_classification": "unknown",
             "hydration_interpretation": "structurally_broken",
             "last_successful_hydration": {},
             "recommended_next_action": _recommended_next_action("structurally_broken"),
@@ -182,6 +215,7 @@ def inspect_hydration_health(
     expected_dt = _parse_date(expected_trade_date)
     cache_dt = _parse_date(cache_max_date)
     stale_days = (expected_dt - cache_dt).days if expected_dt and cache_dt else None
+    hydration_window_passed = _hydration_window_passed(expected_trade_date)
 
     expected_symbols = _symbol_list(hydration, "symbols_expected", "expected_symbols", "requested_symbols", "universe")
     present_symbols = _symbol_list(hydration, "symbols_present", "present_symbols", "hydrated_symbols", "cached_symbols")
@@ -202,16 +236,28 @@ def inspect_hydration_health(
     else:
         partial_or_complete = "UNKNOWN"
 
+    cache_matches_latest_completed = bool(cache_max_date and str(cache_max_date) >= str(expected_latest_trade_date))
+    is_same_day_before_hydration = (
+        expected_dt == now_et.date()
+        and not hydration_window_passed
+        and not status_path.exists()
+        and cache_matches_latest_completed
+    )
+
     if status_path.exists() and read_error:
         interpretation = "structurally_broken"
     elif partial_or_complete == "PARTIAL":
         interpretation = "partial"
     elif hydration_status == "OK" and (stale_days is None or stale_days <= 0):
-        interpretation = "ready"
+        interpretation = "healthy"
+    elif is_same_day_before_hydration:
+        interpretation = "waiting_for_post_close"
     elif not status_path.exists() and last_success:
         interpretation = "stale_but_recoverable"
     elif stale_days is not None and stale_days > 0:
         interpretation = "stale_but_recoverable"
+    elif not status_path.exists() and hydration_window_passed:
+        interpretation = "structurally_broken"
     elif not status_path.exists():
         interpretation = "waiting_for_post_close"
     else:
@@ -219,6 +265,11 @@ def inspect_hydration_health(
 
     return {
         "expected_trade_date": expected_trade_date,
+        "expected_latest_trade_date": expected_latest_trade_date,
+        "current_et_time": now_et.isoformat(),
+        "market_close_reference_time": market_close_reference_time,
+        "hydration_window_time": hydration_window_time,
+        "hydration_window_passed": hydration_window_passed,
         "hydration_status_path": str(status_path.relative_to(repo_root)),
         "hydration_status": hydration_status,
         "hydration_source": hydration_source,
@@ -230,6 +281,7 @@ def inspect_hydration_health(
         "symbols_missing_count": symbols_missing_count,
         "missing_symbols_sample": missing_symbols[:20],
         "partial_or_complete": partial_or_complete,
+        "hydration_state_classification": interpretation,
         "hydration_interpretation": interpretation,
         "read_error": read_error,
         "last_successful_hydration": last_success,
@@ -242,8 +294,13 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "# Price Hydration Health",
         "",
         f"- Expected trade date: {payload.get('expected_trade_date') or 'UNKNOWN'}",
+        f"- Expected latest completed trade date: {payload.get('expected_latest_trade_date') or 'UNKNOWN'}",
+        f"- Current ET time: {payload.get('current_et_time') or 'unknown'}",
+        f"- Market close reference time: {payload.get('market_close_reference_time') or 'unknown'}",
+        f"- Hydration window time: {payload.get('hydration_window_time') or 'unknown'}",
+        f"- Hydration window passed: {payload.get('hydration_window_passed')}",
         f"- Hydration status: {payload.get('hydration_status')}",
-        f"- Interpretation: {payload.get('hydration_interpretation')}",
+        f"- Classification: {payload.get('hydration_state_classification') or payload.get('hydration_interpretation')}",
         f"- Partial or complete: {payload.get('partial_or_complete')}",
         f"- Hydrated at: {payload.get('hydrated_at') or 'unknown'}",
         f"- Cache max date: {payload.get('cache_max_date') or 'unknown'}",
@@ -263,8 +320,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
 def render_text(payload: dict[str, Any]) -> str:
     return (
         f"[HYDRATION] Expected Trade Date: {payload.get('expected_trade_date') or 'UNKNOWN'}\n"
+        f"[HYDRATION] Expected Latest Completed Trade Date: {payload.get('expected_latest_trade_date') or 'UNKNOWN'}\n"
         f"[HYDRATION] Status: {payload.get('hydration_status')}\n"
-        f"[HYDRATION] Interpretation: {payload.get('hydration_interpretation')}\n"
+        f"[HYDRATION] Classification: {payload.get('hydration_state_classification') or payload.get('hydration_interpretation')}\n"
+        f"[HYDRATION] Hydration Window Passed: {payload.get('hydration_window_passed')}\n"
         f"[HYDRATION] Cache Max Date: {payload.get('cache_max_date') or 'unknown'}\n"
         f"[HYDRATION] Stale Days: {payload.get('stale_days') if payload.get('stale_days') is not None else 'unknown'}\n"
         f"[HYDRATION] Missing Symbols: {payload.get('symbols_missing_count') if payload.get('symbols_missing_count') is not None else 'unknown'}\n"
@@ -297,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render_markdown(payload))
     else:
         print(render_text(payload), end="")
-    if args.strict and payload.get("hydration_interpretation") != "ready":
+    if args.strict and payload.get("hydration_state_classification") != "healthy":
         return 2
     return 0
 
