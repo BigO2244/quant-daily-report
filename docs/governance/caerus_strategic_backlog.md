@@ -127,25 +127,26 @@ Focus areas:
 | FR-018 latest publication freshness manifest | Governance / Operational Integrity | 3 | LOW | HIGH | FR-015 preferred | Week 1 | `DEPLOYED` |
 | FR-023 documentation and generated artifact separation | Governance / Operational Integrity | 4 | LOW | MEDIUM | FR-015 preferred | Week 1 | `DEPLOYED` |
 | Strategic backlog consolidation | Governance / Operational Integrity | 5 | LOW | HIGH | Existing FR docs | Week 1 | `DEPLOYED` |
-| Interpretation layer planning | Research Clarity Acceleration | 6 | LOW | HIGH | FR-015, FR-017 | Week 1 | BACKLOG |
-| FR-024 NAV surface registry and performance provenance enforcement | Research Clarity Acceleration | 7 | LOW | HIGH | FR-015 | Week 2 | `DEPLOYED` |
-| FR-025 immutable daily shadow holdings and weights history | Research Clarity Acceleration | 8 | MEDIUM | HIGH | FR-024 | Week 2 | `DEPLOYED` |
-| FR-026 exposure intelligence and concentration risk observability | Research Clarity Acceleration | 9 | LOW | HIGH | FR-024, FR-025 | Week 2 | `DEPLOYED` |
-| FR-027 regime decomposition and fragility reporting | Research Clarity Acceleration | 10 | LOW | HIGH | FR-026 | Week 2 | `DEPLOYED` |
-| FR-030 daily research interpretation packet v1 | Research Clarity Acceleration | 11 | LOW | HIGH | FR-015, FR-017, FR-018, FR-024 through FR-027 | Week 2-3 | `DEPLOYED` |
-| Post-close source readiness and hydration confidence | Research Clarity Acceleration | 12 | LOW | HIGH | FR-030, hydration artifacts | Week 2-3 | BACKLOG |
-| Attribution acceleration packet | Research Clarity Acceleration | 13 | LOW | HIGH | FR-025, FR-026, FR-030 | Week 2-3 | BACKLOG |
-| Regime diagnostics packet | Research Clarity Acceleration | 14 | LOW | HIGH | FR-027, FR-030 | Week 2-3 | BACKLOG |
-| Exposure intelligence weekly review | Research Clarity Acceleration | 15 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
-| FR-028 timing semantics candidate review | Governance / Operational Integrity | 16 | HIGH | HIGH | FR-024 through FR-027, FR-030 interpretation evidence | Week 3-4 | `BACKLOG` |
-| FR-029 promotion governance hardening | Capital Deployment Readiness | 17 | MEDIUM | HIGH | FR-028 | Week 4-6 | `BACKLOG` |
-| MCP research operating system architecture | MCP / Research Operating System | 18 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | Planning only |
-| CIO-style research packet | Research Clarity Acceleration | 19 | LOW | HIGH | Attribution, exposure, regime artifacts, FR-030 | Week 3-4 | BACKLOG |
-| Slippage and execution realism review | Capital Deployment Readiness | 20 | MEDIUM | MEDIUM | Broker/reconciliation evidence | Week 4-6 | BACKLOG |
-| Constrained capital rollout plan | Capital Deployment Readiness | 21 | HIGH | MEDIUM | FR-029, broker trust, timing confidence | Week 5-6 | BACKLOG |
-| Regime switching / Markov research | Advanced Modeling Roadmap | 22 | LOW | MEDIUM | Regime diagnostics stable | Later | Deferred |
-| Meta-labeling and ensemble weighting | Advanced Modeling Roadmap | 23 | LOW | MEDIUM | Attribution and signal diagnostics stable | Later | Deferred |
-| Optimization research | Advanced Modeling Roadmap | 24 | MEDIUM | LOW until telemetry matures | Exposure and capital rules stable | Later | Deferred |
+| FR-019 runtime artifact retention and backup policy | Governance / Operational Integrity | 6 | LOW | MEDIUM | FR-015, FR-018 | Week 2-3 | `DEPLOYED` |
+| Interpretation layer planning | Research Clarity Acceleration | 7 | LOW | HIGH | FR-015, FR-017 | Week 1 | BACKLOG |
+| FR-024 NAV surface registry and performance provenance enforcement | Research Clarity Acceleration | 8 | LOW | HIGH | FR-015 | Week 2 | `DEPLOYED` |
+| FR-025 immutable daily shadow holdings and weights history | Research Clarity Acceleration | 9 | MEDIUM | HIGH | FR-024 | Week 2 | `DEPLOYED` |
+| FR-026 exposure intelligence and concentration risk observability | Research Clarity Acceleration | 10 | LOW | HIGH | FR-024, FR-025 | Week 2 | `DEPLOYED` |
+| FR-027 regime decomposition and fragility reporting | Research Clarity Acceleration | 11 | LOW | HIGH | FR-026 | Week 2 | `DEPLOYED` |
+| FR-030 daily research interpretation packet v1 | Research Clarity Acceleration | 12 | LOW | HIGH | FR-015, FR-017, FR-018, FR-024 through FR-027 | Week 2-3 | `DEPLOYED` |
+| Post-close source readiness and hydration confidence | Research Clarity Acceleration | 13 | LOW | HIGH | FR-030, hydration artifacts | Week 2-3 | BACKLOG |
+| Attribution acceleration packet | Research Clarity Acceleration | 14 | LOW | HIGH | FR-025, FR-026, FR-030 | Week 2-3 | BACKLOG |
+| Regime diagnostics packet | Research Clarity Acceleration | 15 | LOW | HIGH | FR-027, FR-030 | Week 2-3 | BACKLOG |
+| Exposure intelligence weekly review | Research Clarity Acceleration | 16 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
+| FR-028 timing semantics candidate review | Governance / Operational Integrity | 17 | HIGH | HIGH | FR-024 through FR-027, FR-030 interpretation evidence | Week 3-4 | `BACKLOG` |
+| FR-029 promotion governance hardening | Capital Deployment Readiness | 18 | MEDIUM | HIGH | FR-028 | Week 4-6 | `BACKLOG` |
+| MCP research operating system architecture | MCP / Research Operating System | 19 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | Planning only |
+| CIO-style research packet | Research Clarity Acceleration | 20 | LOW | HIGH | Attribution, exposure, regime artifacts, FR-030 | Week 3-4 | BACKLOG |
+| Slippage and execution realism review | Capital Deployment Readiness | 21 | MEDIUM | MEDIUM | Broker/reconciliation evidence | Week 4-6 | BACKLOG |
+| Constrained capital rollout plan | Capital Deployment Readiness | 22 | HIGH | MEDIUM | FR-029, broker trust, timing confidence | Week 5-6 | BACKLOG |
+| Regime switching / Markov research | Advanced Modeling Roadmap | 23 | LOW | MEDIUM | Regime diagnostics stable | Later | Deferred |
+| Meta-labeling and ensemble weighting | Advanced Modeling Roadmap | 24 | LOW | MEDIUM | Attribution and signal diagnostics stable | Later | Deferred |
+| Optimization research | Advanced Modeling Roadmap | 25 | MEDIUM | LOW until telemetry matures | Exposure and capital rules stable | Later | Deferred |
 
 ## Two-Week Tactical Roadmap
 
@@ -189,6 +190,8 @@ Work items:
 - FR-027: expand regime decomposition and fragility reporting.
 - FR-030: generate the first daily research interpretation packet from
   provenance, freshness, exposure, concentration, and regime telemetry.
+- FR-019: define retention classes, backup boundaries, and evidence holds
+  before any cleanup automation exists.
 - Orion.command: launch the FR-030 packet workflow from the VM, retrieve the
   packet bundle locally, and keep source-readiness warnings operator-visible.
 - Source readiness: improve post-close hydration and shadow artifact freshness

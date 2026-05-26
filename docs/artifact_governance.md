@@ -51,7 +51,9 @@ Each artifact family should answer:
 ## Initial Artifact Registry
 
 This is the first-pass static registry. It should be refined before any cleanup
-or telemetry enforcement is built.
+or telemetry enforcement is built. Retention and backup semantics are governed
+by `docs/artifact_retention_policy.md`; no cleanup automation is implied by that
+policy.
 
 | Family | Representative Paths | Category | Producer | Primary Consumers | Freshness Assumption | Overwrite Semantics | Retention Ambiguity |
 |---|---|---|---|---|---|---|---|
@@ -147,8 +149,9 @@ or a sidecar manifest provides `source_trade_date`, `published_at`, `producer`,
 | `research_historical` | Backtests, alpha lab outputs. | Archive by project milestone, not daily runtime policy. |
 | `ephemeral_test` | Test outputs and smoke residue. | Should live outside repo-level runtime paths. |
 
-No cleanup automation should be added until FR-019 defines concrete retention
-windows, dry-run reporting, backup boundaries, and rollback expectations.
+FR-019 now defines retention classes, backup boundaries, evidence holds, and
+future cleanup automation requirements in `docs/artifact_retention_policy.md`.
+No cleanup automation has been added.
 
 ## Current Gaps To Address Later
 
@@ -157,4 +160,5 @@ windows, dry-run reporting, backup boundaries, and rollback expectations.
 - Research markdown, generated reports, and canonical docs are not fully
   separated.
 - Bundle validation is strong on existence but shallow on semantics.
-- Artifact retention and backup windows are not yet formal.
+- Runtime producers do not yet emit retention manifests.
+- Cleanup automation remains intentionally unimplemented.

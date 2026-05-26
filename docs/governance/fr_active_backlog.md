@@ -26,7 +26,6 @@ Fully deployed history and reviewed deferred items belong in
 | FR-012 CI cache namespace isolation | Wave 2 | `DEPLOYED_OBSERVING` | MEDIUM | Wave 2 deployment | observing | Cache keys include `github.repository_id`. | Revert cache namespace commit. |
 | FR-014 shadow learning reliability | Shadow / Learning | `BACKLOG` | MEDIUM | FR-015 and FR-017 preferred | not_started | Useful follow-up once artifact taxonomy and health aggregation are clearer. | Keep current shadow learning behavior. |
 | FR-016 semantic precompute contract validation | Phase 4 | `BACKLOG` | MEDIUM | FR-015 | not_started | Future lightweight validation beyond existence and parseability. | Leave current bundle validation unchanged. |
-| FR-019 runtime artifact retention and backup policy | Phase 4 | `BACKLOG` | LOW | FR-015, FR-018 | not_started | Policy work only; no cleanup automation selected. | Leave current retention behavior unchanged. |
 | FR-020 read-only validation isolation | Phase 4 | `BACKLOG` | MEDIUM | FR-015 | not_started | Future isolation of tests and smoke flows from repo-level runtime outputs. | Leave current validation layout unchanged. |
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
 | FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
@@ -34,9 +33,10 @@ Fully deployed history and reviewed deferred items belong in
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
-are deployed/current. They remain additive telemetry, provenance, and research
-interpretation infrastructure, not execution, promotion, accounting, or timing
-semantic changes.
+are deployed/current. FR-019 is also deployed as a docs-only retention and
+backup policy. These remain additive telemetry, provenance, governance, and
+research interpretation infrastructure, not execution, promotion, accounting,
+or timing semantic changes.
 
 ## Phase 4 Priority Order
 
@@ -49,7 +49,7 @@ non-trading, non-execution, additive, and low blast radius by default.
 | 2 | FR-017 | Gives operators a single health synthesis surface while staying read-only and additive. |
 | 3 | FR-018 | Reduces stale `latest` ambiguity after ownership semantics are clear. |
 | 4 | FR-023 | Separates canonical docs from generated reports before more operational docs accumulate. |
-| 5 | FR-019 | Uses the taxonomy and freshness model before defining cleanup, archive, and safe-to-delete rules. |
+| 5 | FR-019 | Deployed docs-only policy for cleanup, archive, evidence hold, and backup rules; no cleanup automation. |
 | 6 | FR-020 | Prevents validation/test pollution after runtime ownership boundaries are documented. |
 | 7 | FR-016 | Adds deeper semantic checks after artifact ownership and freshness semantics exist. |
 | 8 | FR-021 | Important but execution-adjacent; defer until telemetry and state language are stable. |
