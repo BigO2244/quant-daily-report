@@ -42,7 +42,9 @@ echo "[FR-030] Building latest research packet on VM..."
 if ! REMOTE_OUTPUT=$(ssh "${VM}" "cd ${REMOTE_REPO} && ORION_TRADE_DATE='${REQUESTED_TRADE_DATE}' ORION_ALLOW_INCOMPLETE_PACKET='${ALLOW_INCOMPLETE_PACKET}' ORION_REFRESH_BEFORE_PACKET='${REFRESH_BEFORE_PACKET}' bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
-if [[ -x venv/bin/python ]]; then
+if [[ -x "${HOME}/.venvs/quant-daily-report/bin/python3" ]]; then
+    PY="${HOME}/.venvs/quant-daily-report/bin/python3"
+elif [[ -x venv/bin/python ]]; then
     PY="venv/bin/python"
 elif [[ -x .venv/bin/python ]]; then
     PY=".venv/bin/python"
