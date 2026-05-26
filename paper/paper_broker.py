@@ -1621,7 +1621,8 @@ def _order_filled_quantity(order: Dict[str, object] | None, fallback_quantity: o
         return None
     for key in ("filled_qty", "filled_quantity", "filled_shares"):
         if key in order:
-            return abs(_coerce_float(order.get(key), 0.0) or 0.0)
+            qty = _coerce_float(order.get(key), None)
+            return abs(qty) if qty is not None else None
     status = _order_status_value(order)
     if status == "FILLED":
         return abs(_coerce_float(order.get("quantity") or order.get("qty") or fallback_quantity, 0.0) or 0.0)
@@ -1630,9 +1631,35 @@ def _order_filled_quantity(order: Dict[str, object] | None, fallback_quantity: o
     return None
 
 
+def _filled_quantity_from_position_delta(
+    *,
+    symbol: str,
+    side: str,
+    submitted_qty: float,
+    starting_positions: Dict[str, float] | None,
+    actual_positions: Dict[str, float] | None,
+) -> float | None:
+    if not starting_positions or actual_positions is None:
+        return None
+    start_qty = float((starting_positions or {}).get(symbol, 0.0) or 0.0)
+    actual_qty = float((actual_positions or {}).get(symbol, 0.0) or 0.0)
+    side_norm = str(side or "").upper()
+    if side_norm in {"SELL", "CLOSE", "REDUCE"}:
+        delta = start_qty - actual_qty
+    else:
+        return None
+    if delta <= 1e-12:
+        return None
+    return float(min(abs(float(submitted_qty)), abs(float(delta))))
+
+
 def _resolve_filled_orders_for_recon(
     alpaca: AlpacaBroker,
     submitted_orders: List[Dict[str, object]],
+    *,
+    starting_positions: Dict[str, float] | None = None,
+    actual_positions: Dict[str, float] | None = None,
+    unresolved_orders: List[Dict[str, object]] | None = None,
 ) -> List[Dict[str, object]]:
     orders_for_recon: List[Dict[str, object]] = []
     submitted_count = 0
@@ -1668,7 +1695,32 @@ def _resolve_filled_orders_for_recon(
 
         status = _order_status_value(current_order)
         filled_qty = _order_filled_quantity(current_order, fallback_quantity=submitted_qty)
+        filled_quantity_source = "broker_order"
+        if filled_qty is None and status == "PARTIALLY_FILLED":
+            filled_qty = _filled_quantity_from_position_delta(
+                symbol=symbol,
+                side=side,
+                submitted_qty=float(submitted_qty),
+                starting_positions=starting_positions,
+                actual_positions=actual_positions,
+            )
+            if filled_qty is not None:
+                filled_quantity_source = "position_delta"
         if filled_qty is None:
+            if unresolved_orders is not None:
+                unresolved_orders.append(
+                    {
+                        "order_id": str(order.get("order_id") or "").strip(),
+                        "alpaca_order_id": alpaca_order_id,
+                        "ticker": symbol,
+                        "side": side,
+                        "submitted_quantity": float(submitted_qty),
+                        "resolved_order_status": status or "UNKNOWN",
+                        "reason": "filled_quantity_unresolved",
+                    }
+                )
+                pending_count += 1
+                continue
             raise RuntimeError(
                 f"unable to resolve filled quantity for submitted order {str(order.get('order_id') or '').strip() or symbol}: status={status or 'UNKNOWN'}"
             )
@@ -1682,6 +1734,7 @@ def _resolve_filled_orders_for_recon(
         resolved = dict(order)
         resolved["quantity"] = float(filled_qty)
         resolved["filled_quantity"] = float(filled_qty)
+        resolved["filled_quantity_source"] = filled_quantity_source
         resolved["resolved_order_status"] = status
         orders_for_recon.append(resolved)
         if filled_qty + 1e-12 < submitted_qty:
@@ -1700,6 +1753,50 @@ def _resolve_filled_orders_for_recon(
             len(orders_for_recon),
         )
     return orders_for_recon
+
+
+def _mark_posttrade_recon_unresolved_orders(
+    posttrade_recon: Dict[str, object],
+    unresolved_orders: List[Dict[str, object]],
+) -> Dict[str, object]:
+    if not unresolved_orders:
+        return posttrade_recon
+
+    payload = dict(posttrade_recon or {})
+    original_drift_status = str(payload.get("drift_status") or "")
+    input_issues = list(payload.get("input_issues") or [])
+    not_comparable_reasons = list(payload.get("not_comparable_reasons") or [])
+    if "unresolved_submitted_orders" not in input_issues:
+        input_issues.append("unresolved_submitted_orders")
+    if "unresolved_submitted_orders" not in not_comparable_reasons:
+        not_comparable_reasons.append("unresolved_submitted_orders")
+
+    payload.update(
+        {
+            "verdict": "WARN",
+            "drift_status": "NOT_COMPARABLE",
+            "comparison_status": "NOT_COMPARABLE",
+            "manual_intervention_required": True,
+            "operator_message": (
+                "Post-execution drift check is indeterminate because one or more "
+                "submitted orders had unresolved partial-fill state; inspect broker "
+                "orders before treating posttrade state as authoritative."
+            ),
+            "input_issues": input_issues,
+            "not_comparable_reasons": not_comparable_reasons,
+            "unresolved_submitted_orders": list(unresolved_orders),
+            "unresolved_submitted_orders_count": int(len(unresolved_orders)),
+            "resolved_recon_drift_status_before_unresolved_orders": original_drift_status,
+        }
+    )
+
+    report_path = str(payload.get("report_path") or "")
+    if report_path:
+        Path(report_path).write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return payload
 
 
 def _sell_phase_timeout_seconds() -> float:
@@ -2391,12 +2488,20 @@ def _capture_alpaca_posttrade_state(
         run_date,
         alpaca_positions_snapshot,
     )
-    orders_for_recon = _resolve_filled_orders_for_recon(alpaca, submitted_orders)
+    starting_positions = _holdings_to_quantity_map(holdings_prev)
+    actual_positions = _positions_to_quantity_map(alpaca_positions_snapshot)
+    unresolved_orders: List[Dict[str, object]] = []
+    orders_for_recon = _resolve_filled_orders_for_recon(
+        alpaca,
+        submitted_orders,
+        starting_positions=starting_positions,
+        actual_positions=actual_positions,
+        unresolved_orders=unresolved_orders,
+    )
     expected_positions = _expected_positions_after_orders(
-        _holdings_to_quantity_map(holdings_prev),
+        starting_positions,
         orders_for_recon,
     )
-    actual_positions = _positions_to_quantity_map(alpaca_positions_snapshot)
     posttrade_recon = write_post_execution_drift_report(
         run_date=run_date,
         expected_positions=expected_positions,
@@ -2410,6 +2515,10 @@ def _capture_alpaca_posttrade_state(
             None,
         ),
     )
+    posttrade_recon = _mark_posttrade_recon_unresolved_orders(
+        posttrade_recon,
+        unresolved_orders,
+    )
     return {
         "alpaca_account_snapshot": alpaca_account_snapshot,
         "alpaca_positions_snapshot": alpaca_positions_snapshot,
@@ -2417,6 +2526,7 @@ def _capture_alpaca_posttrade_state(
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
         "posttrade_recon_path": str(posttrade_recon.get("report_path") or ""),
         "posttrade_recon_status": str(posttrade_recon.get("drift_status") or ""),
+        "posttrade_unresolved_orders": list(unresolved_orders),
         "posttrade_repair_suggestions": list(posttrade_recon.get("repair_suggestions") or []),
         "posttrade_affected_symbols": list(posttrade_recon.get("affected_symbols") or []),
         "posttrade_duplicate_fill_suspicions_count": int(
@@ -3189,6 +3299,7 @@ def run_paper_day(
     posttrade_positions_snapshot_path: str | None = None
     posttrade_recon_path: str | None = None
     posttrade_recon_status: str | None = None
+    posttrade_unresolved_orders: List[Dict[str, object]] = []
     posttrade_repair_suggestions: List[str] = []
     posttrade_affected_symbols: List[str] = []
     posttrade_duplicate_fill_suspicions_count: int = 0
@@ -3602,6 +3713,11 @@ def run_paper_day(
                 ) or None
                 posttrade_recon_path = str(posttrade_state.get("posttrade_recon_path") or "") or None
                 posttrade_recon_status = str(posttrade_state.get("posttrade_recon_status") or "") or None
+                posttrade_unresolved_orders = list(posttrade_state.get("posttrade_unresolved_orders") or [])
+                if posttrade_unresolved_orders:
+                    alpaca_submission_summary["posttrade_unresolved_orders_count"] = int(
+                        len(posttrade_unresolved_orders)
+                    )
                 posttrade_repair_suggestions = list(posttrade_state.get("posttrade_repair_suggestions") or [])
                 posttrade_affected_symbols = list(posttrade_state.get("posttrade_affected_symbols") or [])
                 posttrade_duplicate_fill_suspicions_count = int(
@@ -3957,6 +4073,8 @@ def run_paper_day(
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
         "posttrade_recon_path": posttrade_recon_path,
         "posttrade_recon_status": posttrade_recon_status,
+        "posttrade_unresolved_orders": posttrade_unresolved_orders,
+        "posttrade_unresolved_orders_count": int(len(posttrade_unresolved_orders)),
         "posttrade_repair_suggestions": posttrade_repair_suggestions,
         "posttrade_affected_symbols": posttrade_affected_symbols,
         "posttrade_duplicate_fill_suspicions_count": posttrade_duplicate_fill_suspicions_count,

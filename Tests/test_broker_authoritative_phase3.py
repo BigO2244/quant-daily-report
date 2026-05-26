@@ -369,7 +369,7 @@ def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
             self._client_lookup_calls += 1
             if self._client_lookup_calls == 1:
                 return None
-            return {"id": "pending-sell", "status": "accepted", "submitted_at": "2026-03-11T10:00:00-05:00"}
+            return {"id": "pending-sell", "status": "partially_filled", "submitted_at": "2026-03-11T10:00:00-05:00"}
 
     fake = _PendingSellAlpaca(
         account_sequence=[
@@ -378,6 +378,7 @@ def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
             {"cash": "2000.0", "equity": "10000.0", "buying_power": "2000.0", "status": "ACTIVE"},
         ],
         positions_sequence=[
+            [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
             [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
             [{"symbol": "AAA", "qty": "1", "current_price": "100.0", "market_value": "100.0"}],
         ],
@@ -399,6 +400,8 @@ def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
     assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "sell_phase_timeout"
     assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 0
     assert [order["ticker"] for order in result["budget_skipped_orders"]] == ["BBB"]
+    assert result["posttrade_recon_status"] == "NOT_COMPARABLE"
+    assert result["posttrade_unresolved_orders"][0]["ticker"] == "AAA"
 
 
 def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypatch):

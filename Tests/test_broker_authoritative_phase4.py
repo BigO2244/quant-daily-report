@@ -266,6 +266,109 @@ def test_posttrade_expected_positions_apply_partial_fill_quantity_only():
     assert expected == {"GM": 13.5}
 
 
+def test_posttrade_recon_derives_partial_sell_fill_from_position_delta():
+    submitted = [{"alpaca_order_id": "sell-slb", "ticker": "SLB", "side": "SELL", "quantity": 12}]
+    alpaca = _ReconFillAlpaca({"sell-slb": {"status": "partially_filled"}})
+    unresolved = []
+
+    resolved = broker._resolve_filled_orders_for_recon(
+        alpaca,
+        submitted,
+        starting_positions={"SLB": 12},
+        actual_positions={"SLB": 1},
+        unresolved_orders=unresolved,
+    )
+    expected = broker._expected_positions_after_orders({"SLB": 12}, resolved)
+
+    assert unresolved == []
+    assert resolved[0]["quantity"] == pytest.approx(11.0)
+    assert resolved[0]["filled_quantity_source"] == "position_delta"
+    assert expected == {"SLB": 1.0}
+
+
+class _PosttradePartialAlpaca:
+    def __init__(self, *, order_status, positions):
+        self.order_status = order_status
+        self.positions = positions
+
+    def get_account(self):
+        return {"cash": "2186.55", "equity": "10583.10", "buying_power": "12769.65", "status": "ACTIVE"}
+
+    def get_positions(self):
+        return list(self.positions)
+
+    def get_order(self, order_id):
+        return self.order_status.get(order_id)
+
+    def find_order_by_client_id(self, client_id):
+        return self.order_status.get(client_id)
+
+
+def test_posttrade_state_capture_uses_position_delta_for_partial_sell_without_filled_qty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [{"alpaca_order_id": "sell-slb", "order_id": "day:SLB:SELL", "ticker": "SLB", "side": "SELL", "quantity": 12}]
+    holdings_prev = pd.DataFrame([{"ticker": "SLB", "sleeve": "core", "shares": 12.0}])
+    alpaca = _PosttradePartialAlpaca(
+        order_status={"sell-slb": {"status": "partially_filled"}},
+        positions=[{"symbol": "SLB", "qty": "1", "current_price": "57.0", "market_value": "57.0"}],
+    )
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-05-26",
+        holdings_prev=holdings_prev,
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+    )
+
+    recon_path = Path(state["posttrade_recon_path"])
+    recon_payload = json.loads(recon_path.read_text(encoding="utf-8"))
+    assert state["posttrade_recon_status"] == "OK_RECONCILED"
+    assert state["posttrade_unresolved_orders"] == []
+    assert recon_payload["expected_positions"] == {"SLB": 1.0}
+    assert recon_payload["actual_positions"] == {"SLB": 1.0}
+
+
+def test_posttrade_state_capture_records_unresolved_partial_without_fatal_artifact_failure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [{"alpaca_order_id": "sell-slb", "order_id": "day:SLB:SELL", "ticker": "SLB", "side": "SELL", "quantity": 12}]
+    holdings_prev = pd.DataFrame([{"ticker": "SLB", "sleeve": "core", "shares": 12.0}])
+    alpaca = _PosttradePartialAlpaca(
+        order_status={"sell-slb": {"status": "partially_filled"}},
+        positions=[{"symbol": "SLB", "qty": "12", "current_price": "57.0", "market_value": "684.0"}],
+    )
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-05-26",
+        holdings_prev=holdings_prev,
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+    )
+
+    recon_path = Path(state["posttrade_recon_path"])
+    recon_payload = json.loads(recon_path.read_text(encoding="utf-8"))
+    assert state["posttrade_recon_status"] == "NOT_COMPARABLE"
+    assert state["posttrade_unresolved_orders"][0]["ticker"] == "SLB"
+    assert recon_payload["manual_intervention_required"] is True
+    assert recon_payload["unresolved_submitted_orders_count"] == 1
+    assert "unresolved_submitted_orders" in recon_payload["not_comparable_reasons"]
+
+
 def test_posttrade_expected_positions_ignore_zero_share_orders():
     submitted = [{"alpaca_order_id": "buy-hlt", "ticker": "HLT", "side": "BUY", "quantity": 0}]
     alpaca = _ReconFillAlpaca({"buy-hlt": {"status": "filled", "filled_qty": "0"}})
