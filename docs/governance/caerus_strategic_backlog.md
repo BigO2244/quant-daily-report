@@ -129,7 +129,7 @@ Focus areas:
 | Strategic backlog consolidation | Governance / Operational Integrity | 5 | LOW | HIGH | Existing FR docs | Week 1 | `DEPLOYED` |
 | FR-019 runtime artifact retention and backup policy | Governance / Operational Integrity | 6 | LOW | MEDIUM | FR-015, FR-018 | Week 2-3 | `DEPLOYED` |
 | FR-020 read-only validation isolation policy | Governance / Operational Integrity | 7 | LOW | MEDIUM | FR-015, FR-019 | Week 2-3 | `DEPLOYED` |
-| Interpretation layer planning | Research Clarity Acceleration | 8 | LOW | HIGH | FR-015, FR-017 | Week 1 | BACKLOG |
+| Interpretation layer planning | Research Clarity Acceleration | 8 | LOW | HIGH | FR-015, FR-017 | Week 1 | `DEPLOYED` |
 | FR-024 NAV surface registry and performance provenance enforcement | Research Clarity Acceleration | 9 | LOW | HIGH | FR-015 | Week 2 | `DEPLOYED` |
 | FR-025 immutable daily shadow holdings and weights history | Research Clarity Acceleration | 10 | MEDIUM | HIGH | FR-024 | Week 2 | `DEPLOYED` |
 | FR-026 exposure intelligence and concentration risk observability | Research Clarity Acceleration | 11 | LOW | HIGH | FR-024, FR-025 | Week 2 | `DEPLOYED` |
@@ -165,8 +165,9 @@ Work items:
 - FR-018: define freshness manifests for `latest`-style artifacts.
 - FR-023: clarify generated artifacts versus canonical documentation.
 - Backlog consolidation: use this document as the strategic crosswalk.
-- Interpretation layer planning: define the weekly evidence packet, including
-  performance, provenance, attribution, exposure, regime, and open risks.
+- Interpretation layer planning: weekly evidence packet boundary documented in
+  `docs/weekly_research_synthesis.md`, including performance, provenance,
+  attribution, exposure, regime, and open risks.
 
 Validation posture:
 

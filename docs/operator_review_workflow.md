@@ -76,6 +76,10 @@ Use this to convert daily observations into research conclusions.
 5. Separate durable behavior from one-day amplification.
 6. Prepare FR-028 and FR-029 questions without changing governance rules.
 
+Planning guidance for a future generated weekly packet lives in
+`docs/weekly_research_synthesis.md`. That packet remains planning-only until a
+separate additive generator is implemented and validated.
+
 ## Escalation Triggers
 
 Escalate for operator review when:
