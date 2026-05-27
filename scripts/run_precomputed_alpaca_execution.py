@@ -75,6 +75,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="none",
         help="Allow buy-only continuation after a non-trading partial failure.",
     )
+    parser.add_argument(
+        "--continuation-intended-orders-path",
+        default="",
+        help=(
+            "Optional broker/intended_orders_<DATE>.json source for explicit "
+            "buy-only continuation recovery. Only BUY rows are hydrated."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -523,6 +531,42 @@ def _pending_buy_continuation_eligible(
     return bool(pending_buy_state.get("requires_partial")) and continuation_reason_allowed
 
 
+def _load_buy_continuation_plan_from_intended_orders(path: str | Path) -> list[dict[str, object]]:
+    source = Path(path)
+    if not source.is_file():
+        raise FileNotFoundError(f"continuation intended orders artifact not found: {source}")
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    rows = list((payload or {}).get("orders_intended") or [])
+    buys: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("side") or "").upper() != "BUY":
+            continue
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        shares = _safe_float(row.get("shares", row.get("quantity")), 0.0) or 0.0
+        notional = abs(_safe_float(row.get("notional"), 0.0) or 0.0)
+        price = _safe_float(row.get("price"))
+        if (price is None or price <= 0.0) and shares > 0.0 and notional > 0.0:
+            price = notional / abs(shares)
+        buys.append(
+            {
+                "ticker": ticker,
+                "side": "BUY",
+                "shares": abs(float(shares)),
+                "price": float(price or 0.0),
+                "notional": float(notional),
+                "reason": row.get("reason") or "buy_only_continuation",
+                "order_id": row.get("order_id"),
+            }
+        )
+    if not buys:
+        raise RuntimeError(f"continuation intended orders artifact has no BUY rows: {source}")
+    return buys
+
+
 def _operator_execution_status(execution_payload: dict[str, object]) -> str:
     submitted = int(
         execution_payload.get("submitted_count")
@@ -872,6 +916,23 @@ def main(argv: list[str] | None = None) -> int:
             release_lock_on_exit = True
             return 1
         planner_completed = True
+        continuation_intended_orders_path = str(args.continuation_intended_orders_path or "").strip()
+        if continuation_intended_orders_path:
+            if args.continuation_mode != "buy_only":
+                raise RuntimeError(
+                    "--continuation-intended-orders-path requires --continuation-mode buy_only"
+                )
+            buy_continuation_plan = _load_buy_continuation_plan_from_intended_orders(
+                continuation_intended_orders_path
+            )
+            planned_payload = dict(planned_payload or {})
+            planned_payload["trades"] = buy_continuation_plan
+            planned_payload["continuation_intended_orders_path"] = continuation_intended_orders_path
+            logger.warning(
+                "[CONTINUATION] hydrated buy-only plan from intended orders path=%s buys=%d",
+                continuation_intended_orders_path,
+                int(len(buy_continuation_plan)),
+            )
 
         pretrade_snapshot = fetch_pretrade_snapshot()
         write_pretrade_snapshot_artifacts(
@@ -1072,6 +1133,11 @@ def main(argv: list[str] | None = None) -> int:
         execution_payload["capital_allows_pending_buys"] = bool(
             pending_buy_state.get("capital_allows_pending_buys")
         )
+        if str(args.continuation_intended_orders_path or "").strip():
+            execution_payload["continuation_intended_orders_path"] = str(
+                args.continuation_intended_orders_path
+            ).strip()
+            execution_payload["continuation_source"] = "intended_orders"
         execution_payload["operator_execution_status"] = _operator_execution_status(execution_payload)
 
         # Extract capital budget metadata for operator summary and retry decisions.
@@ -1219,6 +1285,8 @@ def main(argv: list[str] | None = None) -> int:
             submitted_buy_count=int(execution_payload.get("submitted_buy_count") or 0),
             submitted_sell_count=int(execution_payload.get("submitted_sell_count") or 0),
             capital_allows_pending_buys=bool(execution_payload.get("capital_allows_pending_buys")),
+            continuation_intended_orders_path=execution_payload.get("continuation_intended_orders_path"),
+            continuation_source=execution_payload.get("continuation_source"),
             workflow_kind=execution_payload.get("workflow_kind"),
             event_freshness_status=execution_payload.get("event_freshness_status"),
             bundle_status=execution_payload.get("bundle_status"),

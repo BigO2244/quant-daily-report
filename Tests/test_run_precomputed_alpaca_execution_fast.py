@@ -350,6 +350,32 @@ def test_pending_buy_leg_with_cash_shortfall_is_partial_but_not_continuable(tmp_
     ) is False
 
 
+def test_buy_continuation_plan_hydrates_only_buys_from_intended_orders(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    intended_path = tmp_path / "intended_orders_2026-05-27.json"
+    intended_path.write_text(
+        json.dumps(
+            {
+                "orders_intended": [
+                    {"ticker": "CVS", "side": "SELL", "shares": 5, "notional": 464.13},
+                    {"ticker": "ELV", "side": "BUY", "shares": 1, "notional": 389.88, "reason": "rebalance_to_target"},
+                    {"ticker": "SLB", "side": "BUY", "shares": 14, "notional": 802.80, "reason": "rebalance_to_target"},
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    plan = live_exec._load_buy_continuation_plan_from_intended_orders(intended_path)
+
+    assert [row["ticker"] for row in plan] == ["ELV", "SLB"]
+    assert {row["side"] for row in plan} == {"BUY"}
+    assert plan[0]["shares"] == 1.0
+    assert round(float(plan[0]["price"]), 2) == 389.88
+
+
 def test_main_pending_buy_leg_does_not_report_clean_success(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-05-27")
