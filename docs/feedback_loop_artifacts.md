@@ -41,6 +41,11 @@ Portfolio learning reports classify artifact health as required, optional
 learning, and diagnostics-only. Missing optional learning artifacts are still
 reported, but they do not by themselves make the core scoreboard unavailable.
 
+FR-014 learning-health diagnostics are documented in
+`docs/shadow_learning_health.md`. The diagnostic is read-only and summarizes
+whether required, optional, diagnostic, stale, and LOW-readiness evidence should
+limit weekly learning interpretation.
+
 ## Promotion Logic Excluded
 
 `feedback_loop_summary.json` always sets:
