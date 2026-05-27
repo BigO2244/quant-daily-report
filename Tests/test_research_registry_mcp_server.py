@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+from research_registry.mcp_server import ToolContext, call_tool, list_tools
+from research_registry.mcp_server.server import handle_jsonrpc
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _fixture_roots(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    runs_root = tmp_path / "outputs" / "runs"
+    run_root = runs_root / "run-20260527-warn"
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "run_id": "run-20260527-warn",
+            "trade_date": "2026-05-27",
+            "execution_status": "EXECUTED",
+            "operator_execution_status": "executed",
+            "submitted_count": 1,
+            "accepted_count": 1,
+            "rejected_count": 0,
+            "trades": [{"ticker": "ELV", "side": "SELL"}],
+        },
+    )
+    _write_json(
+        run_root / "execution_results.json",
+        {
+            "run_id": "run-20260527-warn",
+            "trade_date": "2026-05-27",
+            "status": "EXECUTED",
+            "submitted_count": 1,
+            "accepted_count": 1,
+            "rejected_count": 0,
+            "broker_responses": [{"ticker": "ELV", "side": "SELL", "status": "ACCEPTED"}],
+        },
+    )
+    _write_json(
+        run_root / "operator_summary.json",
+        {
+            "run_id": "run-20260527-warn",
+            "trade_date": "2026-05-27",
+            "terminal_status": "warning",
+            "operator_execution_status": "executed",
+            "execution_integrity_status": "WARN",
+            "updated_at": "2026-05-27T14:05:00Z",
+        },
+    )
+    _write_json(
+        run_root / "audit" / "execution_integrity.json",
+        {
+            "run_id": "run-20260527-warn",
+            "trade_date": "2026-05-27",
+            "status": "WARN",
+            "pending_buy_count": 1,
+            "missing_buy_orders": [{"ticker": "SLB", "side": "BUY"}],
+            "findings": [{"code": "PENDING_BUY_WITHOUT_SUBMITTED_BUY", "severity": "WARN"}],
+        },
+    )
+
+    packets_root = tmp_path / "outputs" / "research_packets"
+    packet_root = packets_root / "2026-05-27"
+    _write_json(
+        packet_root / "packet.json",
+        {
+            "trade_date": "2026-05-27",
+            "status": "READY",
+            "confidence": "LOW",
+            "source_readiness": {"news": "READY"},
+            "stale_warnings": ["research digest one day old"],
+        },
+    )
+
+    docs_root = tmp_path / "docs" / "governance"
+    _write_text(
+        docs_root / "fr_active_backlog.md",
+        "\n".join(
+            [
+                "| FR | Phase | Status | Blast Radius |",
+                "|---|---|---|---|",
+                "| FR-031 stale active row | Execution Integrity | `PROMOTION_READY` | HIGH |",
+                "| HOTFIX-2026-05-27 stale hotfix row | HOTFIX | `BACKLOG` | HIGH |",
+            ]
+        )
+        + "\n",
+    )
+    _write_text(
+        docs_root / "fr_registry.md",
+        "\n".join(
+            [
+                "| FR | Phase | Status | Blast Radius |",
+                "|---|---|---|---|",
+                "| FR-031 current row | Execution Integrity | `DEPLOYED_OBSERVING` | HIGH |",
+                "| HOTFIX-2026-05-27 current hotfix row | HOTFIX | `DEPLOYED_OBSERVING` | HIGH |",
+            ]
+        )
+        + "\n",
+    )
+    return runs_root, packets_root, docs_root, run_root
+
+
+def _build_registry(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    runs_root, packets_root, docs_root, run_root = _fixture_roots(tmp_path)
+    db_path = tmp_path / "registry.db"
+    payload = call_tool(
+        "build_caerus_registry",
+        {
+            "db_path": str(db_path),
+            "runs_root": str(runs_root),
+            "packets_root": str(packets_root),
+            "docs_root": str(docs_root),
+            "limit": 10,
+        },
+    )
+    assert payload["status"] == "OK"
+    assert payload["db_path"] == str(db_path)
+    return db_path, runs_root, packets_root, docs_root
+
+
+def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
+    names = {tool["name"] for tool in list_tools()}
+    assert {
+        "build_caerus_registry",
+        "latest_runs",
+        "run_health",
+        "integrity_findings",
+        "governance_open",
+        "research_packet_status",
+        "registry_summary",
+        "query_registry",
+        "lineage",
+    }.issubset(names)
+
+
+def test_mcp_build_uses_fixture_roots_and_writes_only_db(tmp_path: Path) -> None:
+    runs_root, packets_root, docs_root, _ = _fixture_roots(tmp_path)
+    source_files = [path for root in [runs_root, packets_root, docs_root] for path in root.rglob("*") if path.is_file()]
+    before = {path: path.read_bytes() for path in source_files}
+    db_path = tmp_path / "registry.db"
+
+    payload = call_tool(
+        "build_caerus_registry",
+        {
+            "db_path": str(db_path),
+            "runs_root": str(runs_root),
+            "packets_root": str(packets_root),
+            "docs_root": str(docs_root),
+            "limit": 10,
+        },
+    )
+
+    assert payload["status"] == "OK"
+    assert db_path.exists()
+    assert {path: path.read_bytes() for path in source_files} == before
+
+
+def test_mcp_operator_tools_return_fixture_objects(tmp_path: Path) -> None:
+    db_path, _, _, _ = _build_registry(tmp_path)
+
+    latest = call_tool("latest_runs", {"db_path": str(db_path)})
+    assert latest["status"] == "OK"
+    assert latest["runs"][0]["run_id"] == "run-20260527-warn"
+    assert latest["runs"][0]["integrity_status"] == "WARN"
+
+    health = call_tool("run_health", {"db_path": str(db_path), "run_id": "run-20260527-warn"})
+    assert health["status"] == "FOUND"
+    assert health["execution_payload"]["trade_count"] == 1
+    assert health["execution_integrity"]["status"] == "WARN"
+
+    findings = call_tool("integrity_findings", {"db_path": str(db_path)})
+    assert findings["finding_object_count"] == 1
+    assert findings["integrity_findings"][0]["findings"][0]["code"] == "PENDING_BUY_WITHOUT_SUBMITTED_BUY"
+
+    packets = call_tool("research_packet_status", {"db_path": str(db_path)})
+    assert packets["packet_count"] == 1
+    assert packets["packets"][0]["stale_warnings"] == ["research digest one day old"]
+
+
+def test_mcp_governance_query_and_lineage_are_deterministic(tmp_path: Path) -> None:
+    db_path, _, _, _ = _build_registry(tmp_path)
+
+    governance = call_tool("governance_open", {"db_path": str(db_path)})
+    items = {item["fr_id"]: item for item in governance["items"]}
+    assert governance["mode"] == "deduped_current_state"
+    assert items["FR-031"]["status"] == "DEPLOYED_OBSERVING"
+    assert items["FR-031"]["suppressed_statuses"] == ["PROMOTION_READY"]
+    assert items["HOTFIX-2026-05-27"]["status"] == "DEPLOYED_OBSERVING"
+
+    raw = call_tool("governance_open", {"db_path": str(db_path), "show_duplicates": True})
+    assert raw["mode"] == "raw_duplicates"
+    assert raw["open_count"] > governance["open_count"]
+
+    queried = call_tool("query_registry", {"db_path": str(db_path), "artifact_type": "GovernanceFR", "limit": 1})
+    object_id = queried["objects"][0]["object_id"]
+    lineage = call_tool("lineage", {"db_path": str(db_path), "object_id": object_id})
+    assert lineage["status"] == "OK"
+    assert lineage["lineage"]["object_id"] == object_id
+    assert len(lineage["lineage"]["parents"]) == 1
+
+
+def test_mcp_registry_summary_and_query_filters(tmp_path: Path) -> None:
+    db_path, _, _, _ = _build_registry(tmp_path)
+
+    summary = call_tool("registry_summary", {"db_path": str(db_path)})
+    assert summary["status"] == "OK"
+    assert summary["summary"]["object_count"] >= 1
+
+    queried = call_tool("query_registry", {"db_path": str(db_path), "data_artifact_type": "execution_run"})
+    assert queried["object_count"] == 1
+    assert queried["objects"][0]["data"]["run_id"] == "run-20260527-warn"
+
+
+def test_mcp_server_jsonrpc_tools_call(tmp_path: Path) -> None:
+    db_path, _, _, _ = _build_registry(tmp_path)
+    context = ToolContext(db_path=db_path)
+    response = handle_jsonrpc(
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "latest_runs", "arguments": {}}},
+        context,
+    )
+    assert response["id"] == 1
+    assert response["result"]["isError"] is False
+    assert "run-20260527-warn" in response["result"]["content"][0]["text"]
+
+
+def test_mcp_safety_boundaries(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "SHOULD_NOT_APPEAR")
+    db_path, _, _, _ = _build_registry(tmp_path)
+
+    for forbidden in [
+        "brokers.alpaca_broker",
+        "scripts.run_precomputed_alpaca_execution",
+        "scripts.cron_execute",
+    ]:
+        assert forbidden not in sys.modules
+
+    output_db = Path.cwd() / "outputs" / "mcp-server-test.db"
+    denied = call_tool("build_caerus_registry", {"db_path": str(output_db)})
+    assert denied["status"] == "ERROR"
+    assert not output_db.exists()
+
+    payload = call_tool("registry_summary", {"db_path": str(db_path)})
+    assert "SHOULD_NOT_APPEAR" not in json.dumps(payload, sort_keys=True)
+    assert payload["db_path"] == str(db_path)
