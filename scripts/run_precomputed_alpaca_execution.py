@@ -1054,7 +1054,7 @@ def main(argv: list[str] | None = None) -> int:
                 ledger_path=paper_ledger_path,
                 trades_path=paper_trades_path,
                 config_path="paper/config_paper.json",
-                force=False,
+                force=args.continuation_mode == "buy_only",
                 plan_only=False,
                 constraints={
                     "cash_target_weight": adjusted_cash_target_weight,

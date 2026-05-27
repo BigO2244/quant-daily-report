@@ -560,6 +560,7 @@ def test_buy_only_continuation_filters_precompute_plan_to_buys(tmp_path, monkeyp
     exit_code = live_exec.main(["--continuation-mode", "buy_only"])
 
     assert exit_code == 0
+    assert observed_run_paper_day["force"] is True
     assert observed_run_paper_day["precomputed_trade_plan"] == [
         {"ticker": "ELV", "side": "BUY", "shares": 1, "price": 250.0, "notional": 250.0, "order_id": "run:ELV:BUY"},
         {"ticker": "SLB", "side": "BUY", "shares": 2, "price": 150.0, "notional": 300.0, "order_id": "run:SLB:BUY"},

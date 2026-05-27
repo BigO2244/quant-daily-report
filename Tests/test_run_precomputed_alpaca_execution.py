@@ -249,6 +249,7 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
     assert observed_run_paper_day["run_date"] == "2026-03-26"
     assert observed_run_paper_day["signals_path"] == str(signals_path)
     assert observed_run_paper_day["constraints"] == {"cash_target_weight": 0.278}
+    assert observed_run_paper_day["force"] is False
     assert observed_run_paper_day["precomputed_trade_plan"] == planned_trades
 
     execution_payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
