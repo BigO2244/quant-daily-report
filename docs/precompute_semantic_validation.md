@@ -5,10 +5,11 @@
 FR-016 defines the advisory validation boundary for precompute bundle semantics
 beyond file existence, JSON parseability, and trade-date matching.
 
-This document is specification only. It does not change `cron_precompute.sh`,
-`cron_execute.sh`, `core/precompute_bundle_validation.py`, execution gating,
-self-heal behavior, broker behavior, strategy logic, accounting semantics, or
-promotion logic.
+This document governs the advisory diagnostic in
+`scripts.research.check_precompute_semantic_validation`. The diagnostic does
+not change `cron_precompute.sh`, `cron_execute.sh`,
+`core/precompute_bundle_validation.py`, execution gating, self-heal behavior,
+broker behavior, strategy logic, accounting semantics, or promotion logic.
 
 ## Current Validation Baseline
 
@@ -64,7 +65,7 @@ bundle validation remains the only deployed blocking precompute validation.
 
 ## Output Shape For Future Implementation
 
-If implemented later, the advisory report should be additive and dated:
+The read-only diagnostic can print this advisory shape:
 
 ```json
 {
@@ -86,11 +87,25 @@ If implemented later, the advisory report should be additive and dated:
 }
 ```
 
-Potential path:
+Potential future persisted path:
 
 - `outputs/workflow/<DATE>/precompute_semantic_validation.json`
 
-This path is proposed only. It is not written by this documentation change.
+This path is proposed only. The current diagnostic writes nothing unless an
+operator redirects stdout.
+
+## Diagnostic Command
+
+```text
+python3 -m scripts.research.check_precompute_semantic_validation \
+  --bundle-dir outputs/precompute/YYYY-MM-DD \
+  --trade-date YYYY-MM-DD \
+  --markdown
+```
+
+Use `--json` for structured review and `--strict` when a nonzero exit is useful
+for manual validation. Strict mode remains advisory; it is not wired into cron
+or execution.
 
 ## Operator Guidance
 
