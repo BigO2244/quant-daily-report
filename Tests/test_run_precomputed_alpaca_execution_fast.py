@@ -64,6 +64,7 @@ def _load_module(tmp_path: Path):
     sys.modules["brokers"] = _module("brokers")
     sys.modules["brokers.alpaca_broker"] = _module(
         "brokers.alpaca_broker",
+        CASH_REBALANCE_INCOMPLETE="cash_rebalance_incomplete",
         EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT="partial_broker_abort",
         EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE="post_submit_artifact_failure",
     )
@@ -224,3 +225,223 @@ def test_pretrade_self_heal_releases_same_day_lock(tmp_path, monkeypatch) -> Non
         (tmp_path / "outputs" / "runs" / "run-self-heal" / "execution_payload.json").read_text(encoding="utf-8")
     )
     assert payload["halt_reason"] == "precompute_reconciliation_self_heal"
+
+
+def test_pending_capital_allowed_buy_leg_marks_partial_and_continuable(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    paper_summary = {
+        "alpaca_submissions": [
+            {"ticker": "CVS", "side": "SELL", "quantity": 1, "order_id": "run:CVS:SELL"},
+            {"ticker": "GOOG", "side": "SELL", "quantity": 1, "order_id": "run:GOOG:SELL"},
+        ],
+        "alpaca_submission_summary": {
+            "submit_success": 2,
+            "submit_failed": 0,
+            "sell_phase_submitted": 2,
+            "buy_phase_submitted": 0,
+            "buy_phase_planned": 0,
+            "buy_phase_block_reason": "sell_phase_timeout",
+        },
+        "sell_phase_status": "TIMEOUT",
+        "sell_phase_completion_reason": "poll_timeout",
+        "budget_skipped_orders": [
+            {"ticker": "ELV", "side": "BUY", "quantity": 1, "notional": 250.0, "order_id": "run:ELV:BUY"},
+            {"ticker": "SLB", "side": "BUY", "quantity": 2, "notional": 300.0, "order_id": "run:SLB:BUY"},
+        ],
+        "capital_budget": {
+            "requested_buy_notional": 550.0,
+            "allowed_buy_notional": 550.0,
+            "capital_constraint_triggered": False,
+            "clipped_or_deferred_buys_count": 0,
+        },
+        "blocked_reasons": [],
+    }
+
+    state = live_exec._apply_pending_buy_leg_guard(paper_summary)
+
+    assert state["pending_buy_count"] == 2
+    assert state["capital_allows_pending_buys"] is True
+    assert paper_summary["execution_outcome"] == "partial_broker_abort"
+    assert paper_summary["execution_reason"] == "sell_phase_timeout"
+    assert paper_summary["cash_rebalance_status"] == "cash_rebalance_incomplete"
+    assert live_exec._pending_buy_continuation_eligible(
+        paper_summary=paper_summary,
+        pending_buy_state=state,
+        submitted_count=2,
+        timing={"timing_status": "on_time"},
+    ) is True
+    assert live_exec._operator_execution_status(
+        {
+            "submitted_count": 2,
+            "execution_outcome": paper_summary["execution_outcome"],
+            "execution_status": "HALTED",
+        }
+    ) == "partial"
+
+
+def test_pending_buy_leg_with_broker_reject_is_not_continuable(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    paper_summary = {
+        "alpaca_submissions": [
+            {"ticker": "CVS", "side": "SELL", "quantity": 1, "order_id": "run:CVS:SELL"},
+        ],
+        "alpaca_submission_summary": {
+            "submit_success": 1,
+            "buy_phase_submitted": 0,
+            "buy_phase_block_reason": "broker_reject_pdt",
+        },
+        "broker_reject_status": "BROKER_REJECT_PDT",
+        "budget_skipped_orders": [
+            {"ticker": "ELV", "side": "BUY", "quantity": 1, "notional": 250.0, "order_id": "run:ELV:BUY"},
+        ],
+        "capital_budget": {
+            "requested_buy_notional": 250.0,
+            "allowed_buy_notional": 250.0,
+            "capital_constraint_triggered": False,
+            "clipped_or_deferred_buys_count": 0,
+        },
+    }
+
+    state = live_exec._apply_pending_buy_leg_guard(paper_summary)
+
+    assert state["pending_buy_count"] == 1
+    assert state["has_broker_reject"] is True
+    assert "execution_outcome" not in paper_summary
+    assert live_exec._pending_buy_continuation_eligible(
+        paper_summary=paper_summary,
+        pending_buy_state=state,
+        submitted_count=1,
+        timing={"timing_status": "on_time"},
+    ) is False
+
+
+def test_pending_buy_leg_with_cash_shortfall_is_partial_but_not_continuable(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    paper_summary = {
+        "alpaca_submissions": [
+            {"ticker": "CVS", "side": "SELL", "quantity": 1, "order_id": "run:CVS:SELL"},
+        ],
+        "alpaca_submission_summary": {
+            "submit_success": 1,
+            "buy_phase_submitted": 0,
+            "buy_phase_block_reason": "post_sell_cash_below_reserve",
+        },
+        "budget_skipped_orders": [
+            {"ticker": "ELV", "side": "BUY", "quantity": 1, "notional": 250.0, "order_id": "run:ELV:BUY"},
+        ],
+        "capital_budget": {
+            "requested_buy_notional": 250.0,
+            "allowed_buy_notional": 250.0,
+            "capital_constraint_triggered": False,
+            "clipped_or_deferred_buys_count": 0,
+        },
+    }
+
+    state = live_exec._apply_pending_buy_leg_guard(paper_summary)
+
+    assert state["requires_partial"] is True
+    assert paper_summary["execution_outcome"] == "partial_broker_abort"
+    assert live_exec._pending_buy_continuation_eligible(
+        paper_summary=paper_summary,
+        pending_buy_state=state,
+        submitted_count=1,
+        timing={"timing_status": "on_time"},
+    ) is False
+
+
+def test_main_pending_buy_leg_does_not_report_clean_success(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-05-27")
+    monkeypatch.setenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "1")
+    live_exec = _load_module(tmp_path)
+
+    planned_trades = [
+        {"ticker": "CVS", "side": "SELL", "shares": 1, "price": 60.0, "notional": 60.0, "order_id": "run:CVS:SELL"},
+        {"ticker": "ELV", "side": "BUY", "shares": 1, "price": 250.0, "notional": 250.0, "order_id": "run:ELV:BUY"},
+        {"ticker": "SLB", "side": "BUY", "shares": 2, "price": 150.0, "notional": 300.0, "order_id": "run:SLB:BUY"},
+    ]
+    snapshot = {
+        "holdings": [{"ticker": "CVS", "shares": 1, "last_price": 60.0}],
+        "risk_levels": [],
+        "proposed_trades": [dict(item) for item in planned_trades],
+        "performance_diagnostics": {"current_equity": 10000.0},
+        "target_cash_weight": 0.05,
+    }
+    planned_payload = {"trade_date": "2026-05-27", "mode": "PAPER", "trades": planned_trades}
+    paper_summary = {
+        "trading_mode": "PAPER",
+        "market_status": "OPEN",
+        "planned_for": "2026-05-27T09:35:00-04:00",
+        "execution_trades": [dict(item) for item in planned_trades],
+        "trade_plan": [dict(item) for item in planned_trades],
+        "alpaca_submissions": [
+            {"ticker": "CVS", "side": "SELL", "quantity": 1, "order_id": "run:CVS:SELL", "submitted_at": "2026-05-27T09:35:31-04:00"},
+        ],
+        "alpaca_submission_summary": {
+            "submit_success": 1,
+            "submit_failed": 0,
+            "sell_phase_submitted": 1,
+            "buy_phase_submitted": 0,
+            "buy_phase_planned": 0,
+            "buy_phase_block_reason": "sell_phase_timeout",
+        },
+        "sell_phase_status": "TIMEOUT",
+        "sell_phase_completion_reason": "poll_timeout",
+        "budget_skipped_orders": [dict(item) for item in planned_trades if item["side"] == "BUY"],
+        "capital_budget": {
+            "requested_buy_notional": 550.0,
+            "allowed_buy_notional": 550.0,
+            "capital_constraint_triggered": False,
+            "clipped_or_deferred_buys_count": 0,
+        },
+        "cash": 3823.0,
+        "target_cash_weight": 0.05,
+        "achieved_cash_weight": 0.3823,
+        "execution_submitted_symbols": ["CVS"],
+        "alpaca_positions_snapshot": [],
+    }
+
+    def _build_payload(*, trade_date, daily_snapshot, paper_summary):
+        return {
+            "trade_date": trade_date,
+            "mode": "PAPER",
+            "execution_status": "HALTED" if paper_summary.get("execution_outcome") else "READY",
+            "halt_reason": paper_summary.get("halt_reason"),
+            "execution_outcome": paper_summary.get("execution_outcome"),
+            "execution_reason": paper_summary.get("execution_reason"),
+            "cash_rebalance_status": paper_summary.get("cash_rebalance_status"),
+            "trades": [
+                {"ticker": "CVS", "side": "SELL", "shares": 1, "order_id": "run:CVS:SELL"},
+            ],
+            "planner_intended_trades_count": 3,
+            "execution_eligible_trades_count": 1,
+            "orders_submitted_count": 1,
+            "submitted_count": 1,
+            "accepted_count": 1,
+            "rejected_count": 0,
+            "target_cash_weight": paper_summary.get("target_cash_weight"),
+            "achieved_cash_weight": paper_summary.get("achieved_cash_weight"),
+        }
+
+    monkeypatch.setattr(live_exec, "load_precompute_inputs", lambda **_kwargs: (snapshot, planned_payload, {"version": 1}, None))
+    monkeypatch.setattr(live_exec, "pre_trade_reconcile_and_classify", lambda **_kwargs: {"reconciliation_decision": "PASS"})
+    monkeypatch.setattr(live_exec, "_apply_pre_execution_risk_controls", lambda **_kwargs: ("signals.json", 0.05))
+    monkeypatch.setattr(live_exec, "run_paper_day", lambda **_kwargs: dict(paper_summary))
+    monkeypatch.setattr(live_exec.dqr, "build_execution_email_payload", _build_payload)
+    monkeypatch.setattr(live_exec, "evaluate_live_retry", lambda **_kwargs: {"retry_allowed": False, "retry_reason": ""})
+    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda _trade_date: tmp_path / "execution.lock")
+
+    exit_code = live_exec.main([])
+
+    payload = json.loads(
+        (tmp_path / "outputs" / "runs" / "run-self-heal" / "execution_payload.json").read_text(encoding="utf-8")
+    )
+    assert exit_code == 1
+    assert payload["operator_execution_status"] == "partial"
+    assert payload["execution_outcome"] == "partial_broker_abort"
+    assert payload["execution_reason"] == "sell_phase_timeout"
+    assert payload["pending_buy_count"] == 2
+    assert payload["continuation_eligible"] is True
+    assert [order["ticker"] for order in payload["pending_buy_orders"]] == ["ELV", "SLB"]
+    assert payload["submitted_sell_count"] == 1
+    assert payload["submitted_buy_count"] == 0

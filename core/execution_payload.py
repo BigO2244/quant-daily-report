@@ -129,6 +129,15 @@ def write_canonical_execution_payload(
         "continuation_eligible": (payload or {}).get("continuation_eligible"),
         "continuation_reason": (payload or {}).get("continuation_reason"),
         "pending_buy_count": int((payload or {}).get("pending_buy_count") or 0),
+        "pending_buy_orders": list((payload or {}).get("pending_buy_orders") or []),
+        "buy_phase_planned": int((payload or {}).get("buy_phase_planned") or 0),
+        "buy_phase_submitted": int((payload or {}).get("buy_phase_submitted") or 0),
+        "buy_phase_block_reason": (payload or {}).get("buy_phase_block_reason"),
+        "sell_phase_status": (payload or {}).get("sell_phase_status"),
+        "sell_phase_completion_reason": (payload or {}).get("sell_phase_completion_reason"),
+        "submitted_buy_count": int((payload or {}).get("submitted_buy_count") or 0),
+        "submitted_sell_count": int((payload or {}).get("submitted_sell_count") or 0),
+        "capital_allows_pending_buys": bool((payload or {}).get("capital_allows_pending_buys")),
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 

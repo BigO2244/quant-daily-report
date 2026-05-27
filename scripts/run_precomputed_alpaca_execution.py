@@ -29,6 +29,7 @@ if _env_path.exists():
 import pandas as pd
 
 from brokers.alpaca_broker import (
+    CASH_REBALANCE_INCOMPLETE,
     EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
     EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
 )
@@ -343,6 +344,183 @@ def _first_submit_et(paper_summary: dict[str, object]) -> dt.datetime | None:
         except Exception:
             continue
     return None
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return int(default)
+
+
+def _safe_float(value: object, default: float | None = None) -> float | None:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _pending_buy_orders_from_summary(paper_summary: dict[str, object]) -> list[dict[str, object]]:
+    pending: list[dict[str, object]] = []
+    for order in list((paper_summary or {}).get("budget_skipped_orders") or []):
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("side") or "").upper() != "BUY":
+            continue
+        pending.append(dict(order))
+    return pending
+
+
+def _submitted_side_counts(paper_summary: dict[str, object]) -> dict[str, int]:
+    counts = {"BUY": 0, "SELL": 0}
+    for item in list((paper_summary or {}).get("alpaca_submissions") or []):
+        if not isinstance(item, dict):
+            continue
+        side = str(item.get("side") or "").upper()
+        if side in {"BUY", "SELL"}:
+            counts[side] += 1
+    return counts
+
+
+def _capital_allows_pending_buys(
+    paper_summary: dict[str, object],
+    pending_buy_orders: list[dict[str, object]],
+) -> bool:
+    capital_budget = dict((paper_summary or {}).get("capital_budget") or {})
+    if bool(capital_budget.get("capital_constraint_triggered")):
+        return False
+    if _safe_int(capital_budget.get("clipped_or_deferred_buys_count")) > 0:
+        return False
+
+    requested = _safe_float(capital_budget.get("requested_buy_notional"))
+    allowed = _safe_float(capital_budget.get("allowed_buy_notional"))
+    if requested is None or requested <= 0.0:
+        requested = sum(
+            abs(_safe_float(order.get("notional"), 0.0) or 0.0)
+            for order in pending_buy_orders
+        )
+    if allowed is None or allowed <= 0.0:
+        # Exact precomputed execution can preserve planned buys without mutating
+        # a planning-time capital budget. In that case, absence of a constraint
+        # is enough to avoid misclassifying the pending buy leg as budget-clipped.
+        return True
+    return float(requested or 0.0) <= float(allowed) + 1e-6
+
+
+def _pending_buy_block_reason(paper_summary: dict[str, object]) -> str:
+    submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
+    for key in ("buy_phase_block_reason", "execution_reason"):
+        value = str(submission_summary.get(key) or (paper_summary or {}).get(key) or "").strip()
+        if value:
+            return value
+    sell_phase_status = str((paper_summary or {}).get("sell_phase_status") or "").strip()
+    if sell_phase_status:
+        return f"sell_phase_{sell_phase_status.lower()}"
+    return "pending_buy_leg_not_submitted"
+
+
+def _pending_buy_leg_state(paper_summary: dict[str, object]) -> dict[str, object]:
+    pending_buy_orders = _pending_buy_orders_from_summary(paper_summary)
+    submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
+    buy_phase_submitted = _safe_int(submission_summary.get("buy_phase_submitted"))
+    capital_allows = _capital_allows_pending_buys(paper_summary, pending_buy_orders)
+    reason = _pending_buy_block_reason(paper_summary)
+    reason_lower = reason.lower()
+    has_broker_reject = bool(
+        str((paper_summary or {}).get("broker_reject_status") or "").strip()
+        or str(submission_summary.get("broker_reject_status") or "").strip()
+        or "broker_reject" in reason_lower
+        or "pdt" in reason_lower
+    )
+    requires_partial = bool(
+        pending_buy_orders
+        and buy_phase_submitted == 0
+        and capital_allows
+        and not has_broker_reject
+    )
+    return {
+        "pending_buy_orders": pending_buy_orders,
+        "pending_buy_count": int(len(pending_buy_orders)),
+        "buy_phase_submitted": buy_phase_submitted,
+        "buy_phase_planned": _safe_int(submission_summary.get("buy_phase_planned")),
+        "buy_phase_block_reason": reason,
+        "capital_allows_pending_buys": bool(capital_allows),
+        "has_broker_reject": bool(has_broker_reject),
+        "requires_partial": bool(requires_partial),
+    }
+
+
+def _apply_pending_buy_leg_guard(paper_summary: dict[str, object]) -> dict[str, object]:
+    state = _pending_buy_leg_state(paper_summary)
+    if not bool(state.get("requires_partial")):
+        return state
+
+    reason = str(state.get("buy_phase_block_reason") or "pending_buy_leg_not_submitted")
+    paper_summary["execution_outcome"] = (
+        str((paper_summary or {}).get("execution_outcome") or "").strip()
+        or EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT
+    )
+    paper_summary["execution_reason"] = (
+        str((paper_summary or {}).get("execution_reason") or "").strip()
+        or reason
+    )
+    paper_summary["cash_rebalance_status"] = (
+        str((paper_summary or {}).get("cash_rebalance_status") or "").strip()
+        or CASH_REBALANCE_INCOMPLETE
+    )
+    paper_summary["halt_reason"] = (
+        str((paper_summary or {}).get("halt_reason") or "").strip()
+        or f"{paper_summary['execution_outcome']}:{paper_summary['execution_reason']}:{CASH_REBALANCE_INCOMPLETE}"
+    )
+
+    submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
+    submission_summary.setdefault("execution_outcome", paper_summary["execution_outcome"])
+    submission_summary.setdefault("execution_reason", paper_summary["execution_reason"])
+    submission_summary.setdefault("cash_rebalance_status", paper_summary["cash_rebalance_status"])
+    submission_summary.setdefault("halt_remaining_buys", True)
+    submission_summary.setdefault("buy_phase_block_reason", reason)
+    paper_summary["alpaca_submission_summary"] = submission_summary
+
+    blocked_reasons = list((paper_summary or {}).get("blocked_reasons") or [])
+    halt_reason = str(paper_summary.get("halt_reason") or "")
+    if halt_reason and halt_reason not in blocked_reasons:
+        blocked_reasons.append(halt_reason)
+    paper_summary["blocked_reasons"] = blocked_reasons
+    return state
+
+
+def _pending_buy_continuation_eligible(
+    *,
+    paper_summary: dict[str, object],
+    pending_buy_state: dict[str, object],
+    submitted_count: int,
+    timing: dict[str, object],
+) -> bool:
+    if int(submitted_count or 0) <= 0:
+        return False
+    if int(pending_buy_state.get("pending_buy_count") or 0) <= 0:
+        return False
+    if str((timing or {}).get("timing_status") or "") == "after_deadline":
+        return False
+    if bool(pending_buy_state.get("has_broker_reject")):
+        return False
+
+    outcome = str((paper_summary or {}).get("execution_outcome") or "").strip()
+    if outcome == EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE:
+        return True
+    if outcome != EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT:
+        return False
+    if not bool(pending_buy_state.get("capital_allows_pending_buys")):
+        return False
+
+    reason = str(pending_buy_state.get("buy_phase_block_reason") or "").lower()
+    continuation_reason_allowed = (
+        reason.startswith("sell_phase_")
+        or reason == "pending_buy_leg_not_submitted"
+    )
+    return bool(pending_buy_state.get("requires_partial")) and continuation_reason_allowed
 
 
 def _operator_execution_status(execution_payload: dict[str, object]) -> str:
@@ -822,6 +1000,7 @@ def main(argv: list[str] | None = None) -> int:
             first_submit_et=first_submit_et,
             retry_attempt=retry_attempt > 0,
         )
+        pending_buy_state = _apply_pending_buy_leg_guard(paper_summary)
 
         execution_payload = dqr.build_execution_email_payload(
             trade_date=trade_date,
@@ -841,25 +1020,37 @@ def main(argv: list[str] | None = None) -> int:
         execution_payload["rejected_count"] = rejected_count
         execution_payload["orders_submitted_count"] = submitted_count
 
-        pending_buy_count = len(
-            [
-                order
-                for order in list((paper_summary or {}).get("budget_skipped_orders") or [])
-                if str((order or {}).get("side") or "").upper() == "BUY"
-            ]
+        pending_buy_count = int(pending_buy_state.get("pending_buy_count") or 0)
+        continuation_eligible = _pending_buy_continuation_eligible(
+            paper_summary=paper_summary,
+            pending_buy_state=pending_buy_state,
+            submitted_count=submitted_count,
+            timing=timing,
         )
-        continuation_eligible = bool(
-            submitted_count > 0
-            and str((paper_summary or {}).get("execution_outcome") or "").strip() == EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE
-            and pending_buy_count > 0
-            and timing.get("timing_status") != "after_deadline"
-        )
+        submitted_side_counts = _submitted_side_counts(paper_summary)
         execution_payload["pending_buy_count"] = pending_buy_count
+        execution_payload["pending_buy_orders"] = list(pending_buy_state.get("pending_buy_orders") or [])
         execution_payload["continuation_eligible"] = continuation_eligible
         execution_payload["continuation_reason"] = (
-            str((paper_summary or {}).get("execution_reason") or "post_submit_artifact_failure")
+            str(
+                (paper_summary or {}).get("execution_reason")
+                or pending_buy_state.get("buy_phase_block_reason")
+                or "post_submit_artifact_failure"
+            )
             if continuation_eligible
             else None
+        )
+        execution_payload["buy_phase_planned"] = int(pending_buy_state.get("buy_phase_planned") or 0)
+        execution_payload["buy_phase_submitted"] = int(pending_buy_state.get("buy_phase_submitted") or 0)
+        execution_payload["buy_phase_block_reason"] = (
+            str(pending_buy_state.get("buy_phase_block_reason") or "") or None
+        )
+        execution_payload["sell_phase_status"] = (paper_summary or {}).get("sell_phase_status")
+        execution_payload["sell_phase_completion_reason"] = (paper_summary or {}).get("sell_phase_completion_reason")
+        execution_payload["submitted_buy_count"] = int(submitted_side_counts.get("BUY") or 0)
+        execution_payload["submitted_sell_count"] = int(submitted_side_counts.get("SELL") or 0)
+        execution_payload["capital_allows_pending_buys"] = bool(
+            pending_buy_state.get("capital_allows_pending_buys")
         )
         execution_payload["operator_execution_status"] = _operator_execution_status(execution_payload)
 
@@ -999,6 +1190,15 @@ def main(argv: list[str] | None = None) -> int:
             continuation_eligible=continuation_eligible,
             continuation_reason=str(execution_payload.get("continuation_reason") or ""),
             pending_buy_count=pending_buy_count,
+            pending_buy_orders=list(pending_buy_state.get("pending_buy_orders") or []),
+            buy_phase_planned=int(execution_payload.get("buy_phase_planned") or 0),
+            buy_phase_submitted=int(execution_payload.get("buy_phase_submitted") or 0),
+            buy_phase_block_reason=execution_payload.get("buy_phase_block_reason"),
+            sell_phase_status=execution_payload.get("sell_phase_status"),
+            sell_phase_completion_reason=execution_payload.get("sell_phase_completion_reason"),
+            submitted_buy_count=int(execution_payload.get("submitted_buy_count") or 0),
+            submitted_sell_count=int(execution_payload.get("submitted_sell_count") or 0),
+            capital_allows_pending_buys=bool(execution_payload.get("capital_allows_pending_buys")),
             workflow_kind=execution_payload.get("workflow_kind"),
             event_freshness_status=execution_payload.get("event_freshness_status"),
             bundle_status=execution_payload.get("bundle_status"),
