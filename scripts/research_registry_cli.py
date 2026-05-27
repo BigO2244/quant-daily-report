@@ -71,6 +71,38 @@ def _open_registry(db_path: Path) -> SQLiteResearchRegistry:
     return SQLiteResearchRegistry(db_path)
 
 
+def _limit_paths(paths: list[Path], limit: int | None) -> list[Path]:
+    paths = sorted(paths, key=lambda item: str(item), reverse=True)
+    if limit is None:
+        return paths
+    return paths[: max(0, int(limit))]
+
+
+def _ingest_family(
+    *,
+    db_path: Path,
+    family: str,
+    paths: list[Path],
+) -> dict[str, Any]:
+    registry = _open_registry(db_path)
+    try:
+        result = ingest_artifact_family(
+            family=family,
+            artifact_paths=paths,
+            registry=registry,
+        )
+        query = RegistryQuery(registry)
+        return {
+            "family": family,
+            "path_count": len(paths),
+            "envelope_count": len(result.envelopes),
+            "findings": [dataclasses.asdict(finding) for finding in result.findings],
+            "summary": query.registry_summary(),
+        }
+    finally:
+        registry.close()
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     manifest = _load_manifest(Path(args.manifest))
     registry = _open_registry(Path(args.db))
@@ -124,6 +156,10 @@ def _filtered_objects(args: argparse.Namespace, query: RegistryQuery) -> list[An
     objects = query.list_objects()
     if args.artifact_type:
         objects = [obj for obj in objects if obj.object_type == args.artifact_type]
+    if getattr(args, "data_artifact_type", None):
+        objects = [
+            obj for obj in objects if obj.data.get("artifact_type") == args.data_artifact_type
+        ]
     if args.surface:
         objects = [obj for obj in objects if obj.surface.get("nav_surface_type") == args.surface]
     if args.confidence:
@@ -162,6 +198,79 @@ def cmd_lineage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_runs(args: argparse.Namespace) -> int:
+    runs_root = Path(args.runs_root)
+    run_dirs = [path for path in runs_root.iterdir() if path.is_dir()] if runs_root.exists() else []
+    selected_runs = _limit_paths(run_dirs, args.limit)
+    integrity_paths = [
+        path / "audit" / "execution_integrity.json"
+        for path in selected_runs
+        if (path / "audit" / "execution_integrity.json").exists()
+    ]
+    execution_result = _ingest_family(
+        db_path=Path(args.db),
+        family="execution_run",
+        paths=selected_runs,
+    )
+    integrity_result = _ingest_family(
+        db_path=Path(args.db),
+        family="execution_integrity",
+        paths=integrity_paths,
+    )
+    _print_json(
+        {
+            "status": "INGESTED_RUNS",
+            "db_path": str(Path(args.db)),
+            "runs_root": str(runs_root),
+            "selected_run_count": len(selected_runs),
+            "execution_runs": execution_result,
+            "execution_integrity": integrity_result,
+        }
+    )
+    return 0
+
+
+def cmd_ingest_research_packets(args: argparse.Namespace) -> int:
+    packets_root = Path(args.packets_root)
+    packet_dirs = [path for path in packets_root.iterdir() if path.is_dir()] if packets_root.exists() else []
+    selected_packets = _limit_paths(packet_dirs, args.limit)
+    result = _ingest_family(
+        db_path=Path(args.db),
+        family="research_packet",
+        paths=selected_packets,
+    )
+    _print_json(
+        {
+            "status": "INGESTED_RESEARCH_PACKETS",
+            "db_path": str(Path(args.db)),
+            "packets_root": str(packets_root),
+            "selected_packet_count": len(selected_packets),
+            "research_packets": result,
+        }
+    )
+    return 0
+
+
+def cmd_ingest_governance(args: argparse.Namespace) -> int:
+    docs_root = Path(args.docs_root)
+    docs = sorted(docs_root.glob("*.md")) if docs_root.exists() else []
+    result = _ingest_family(
+        db_path=Path(args.db),
+        family="governance_doc",
+        paths=docs,
+    )
+    _print_json(
+        {
+            "status": "INGESTED_GOVERNANCE",
+            "db_path": str(Path(args.db)),
+            "docs_root": str(docs_root),
+            "selected_doc_count": len(docs),
+            "governance": result,
+        }
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Read-only Caerus research registry operator CLI."
@@ -181,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_cmd.add_argument("--db", required=True, help="SQLite registry path to open.")
     list_cmd.add_argument("--limit", type=int, default=None)
     list_cmd.add_argument("--artifact-type")
+    list_cmd.add_argument("--data-artifact-type")
     list_cmd.add_argument("--surface")
     list_cmd.add_argument("--confidence")
     list_cmd.add_argument("--governance", help="Governance state/category filter.")
@@ -190,6 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
     query_cmd.add_argument("--db", required=True, help="SQLite registry path to open.")
     query_cmd.add_argument("--limit", type=int, default=None)
     query_cmd.add_argument("--artifact-type")
+    query_cmd.add_argument("--data-artifact-type")
     query_cmd.add_argument("--surface")
     query_cmd.add_argument("--confidence")
     query_cmd.add_argument("--governance", help="Governance state/category filter.")
@@ -199,6 +310,29 @@ def build_parser() -> argparse.ArgumentParser:
     lineage.add_argument("--db", required=True, help="SQLite registry path to open.")
     lineage.add_argument("--object-id", required=True)
     lineage.set_defaults(func=cmd_lineage)
+
+    ingest_runs = subparsers.add_parser("ingest-runs", help="Read execution run artifacts into the registry.")
+    ingest_runs.add_argument("--db", required=True, help="SQLite registry path to create or update.")
+    ingest_runs.add_argument("--runs-root", default="outputs/runs")
+    ingest_runs.add_argument("--limit", type=int, default=None)
+    ingest_runs.set_defaults(func=cmd_ingest_runs)
+
+    ingest_packets = subparsers.add_parser(
+        "ingest-research-packets",
+        help="Read research packet artifacts into the registry.",
+    )
+    ingest_packets.add_argument("--db", required=True, help="SQLite registry path to create or update.")
+    ingest_packets.add_argument("--packets-root", default="outputs/research_packets")
+    ingest_packets.add_argument("--limit", type=int, default=None)
+    ingest_packets.set_defaults(func=cmd_ingest_research_packets)
+
+    ingest_governance = subparsers.add_parser(
+        "ingest-governance",
+        help="Read governance markdown documents into the registry.",
+    )
+    ingest_governance.add_argument("--db", required=True, help="SQLite registry path to create or update.")
+    ingest_governance.add_argument("--docs-root", default="docs/governance")
+    ingest_governance.set_defaults(func=cmd_ingest_governance)
     return parser
 
 
