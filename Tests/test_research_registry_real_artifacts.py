@@ -310,3 +310,115 @@ def test_build_caerus_registry_does_not_mutate_source_artifacts(tmp_path: Path) 
     after = {path: path.read_bytes() for path in watched_paths}
     assert after == before
     assert db_path.exists()
+
+
+def _cli_json(args: list[str], capsys) -> dict:
+    assert research_registry_cli.main(args) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_governance_open_resolves_duplicate_current_state(tmp_path: Path, capsys) -> None:
+    governance_root = tmp_path / "docs" / "governance"
+    _write_text(
+        governance_root / "fr_active_backlog.md",
+        "\n".join(
+            [
+                "| FR | Phase | Status | Blast Radius |",
+                "|---|---|---|---|",
+                "| FR-100 stale backlog | Test | `BACKLOG` | LOW |",
+                "| FR-101 observing row | Test | `DEPLOYED_OBSERVING` | HIGH |",
+                "| FR-102 active backlog beats deferred | Test | `BACKLOG` | LOW |",
+                "| HOTFIX-2026-05-27 stale hotfix | HOTFIX | `BACKLOG` | HIGH |",
+            ]
+        )
+        + "\n",
+    )
+    _write_text(
+        governance_root / "fr_registry.md",
+        "\n".join(
+            [
+                "| FR | Phase | Status | Blast Radius |",
+                "|---|---|---|---|",
+                "| FR-100 deployed observing current | Test | `DEPLOYED_OBSERVING` | HIGH |",
+                "| FR-101 deployed final | Test | `DEPLOYED` | HIGH |",
+                "| FR-102 deferred historical | Test | `REVIEWED_DEFERRED` | LOW |",
+                "| FR-103 deferred only | Test | `REVIEWED_DEFERRED` | LOW |",
+                "| HOTFIX-2026-05-27 observed hotfix | HOTFIX | `DEPLOYED_OBSERVING` | HIGH |",
+            ]
+        )
+        + "\n",
+    )
+    db_path = tmp_path / "registry.db"
+
+    build_payload = _cli_json(
+        [
+            "build-caerus-registry",
+            "--db",
+            str(db_path),
+            "--runs-root",
+            str(tmp_path / "missing-runs"),
+            "--packets-root",
+            str(tmp_path / "missing-packets"),
+            "--docs-root",
+            str(governance_root),
+            "--limit",
+            "10",
+        ],
+        capsys,
+    )
+    assert build_payload["status"] == "BUILT_CAERUS_REGISTRY"
+
+    payload = _cli_json(["governance-open", "--db", str(db_path)], capsys)
+    items = {item["fr_id"]: item for item in payload["items"]}
+
+    assert payload["mode"] == "deduped_current_state"
+    assert payload["open_count"] == len(items)
+    assert items["FR-100"]["status"] == "DEPLOYED_OBSERVING"
+    assert items["FR-100"]["duplicate_count"] == 1
+    assert items["FR-100"]["source_count"] == 2
+    assert items["FR-100"]["resolved_from"].endswith("fr_registry.md")
+    assert items["FR-100"]["suppressed_statuses"] == ["BACKLOG"]
+    assert items["FR-101"]["status"] == "DEPLOYED"
+    assert items["FR-102"]["status"] == "BACKLOG"
+    assert items["FR-103"]["status"] == "REVIEWED_DEFERRED"
+    assert items["HOTFIX-2026-05-27"]["status"] == "DEPLOYED_OBSERVING"
+    assert items["HOTFIX-2026-05-27"]["duplicate_count"] == 1
+
+
+def test_governance_open_show_duplicates_preserves_raw_entries(tmp_path: Path, capsys) -> None:
+    governance_root = tmp_path / "docs" / "governance"
+    _write_text(
+        governance_root / "fr_active_backlog.md",
+        "| FR | Phase | Status | Blast Radius |\n|---|---|---|---|\n| FR-100 stale backlog | Test | `BACKLOG` | LOW |\n",
+    )
+    _write_text(
+        governance_root / "fr_registry.md",
+        "| FR | Phase | Status | Blast Radius |\n|---|---|---|---|\n| FR-100 observed | Test | `DEPLOYED_OBSERVING` | HIGH |\n",
+    )
+    db_path = tmp_path / "registry.db"
+    _cli_json(
+        [
+            "build-caerus-registry",
+            "--db",
+            str(db_path),
+            "--runs-root",
+            str(tmp_path / "missing-runs"),
+            "--packets-root",
+            str(tmp_path / "missing-packets"),
+            "--docs-root",
+            str(governance_root),
+        ],
+        capsys,
+    )
+
+    deduped = _cli_json(["governance-open", "--db", str(db_path)], capsys)
+    raw = _cli_json(["governance-open", "--db", str(db_path), "--show-duplicates"], capsys)
+
+    assert deduped["mode"] == "deduped_current_state"
+    assert raw["mode"] == "raw_duplicates"
+    assert [item["fr_id"] for item in deduped["items"]] == ["FR-100"]
+    assert [item["status"] for item in deduped["items"]] == ["DEPLOYED_OBSERVING"]
+    assert sorted(item["status"] for item in raw["items"] if item["fr_id"] == "FR-100") == [
+        "BACKLOG",
+        "DEPLOYED_OBSERVING",
+    ]

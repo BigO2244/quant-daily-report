@@ -180,6 +180,107 @@ def _integrity_record(integrity_obj: Any) -> dict[str, Any]:
     }
 
 
+_GOVERNANCE_STATUS_RANK = {
+    "REVIEWED_DEFERRED": 5,
+    "BACKLOG": 10,
+    "READY": 20,
+    "READY_VALIDATED": 30,
+    "IN_PROGRESS": 40,
+    "PROMOTION_READY": 50,
+    "DEPLOYED_OBSERVING": 60,
+    "DEPLOYED": 70,
+}
+
+
+def _source_path(obj: Any) -> str | None:
+    source_paths = obj.provenance.get("source_paths") or []
+    if not source_paths:
+        return None
+    return str(source_paths[0])
+
+
+def _governance_source_rank(obj: Any) -> int:
+    source_path = _source_path(obj) or ""
+    if source_path.endswith("docs/governance/fr_active_backlog.md") or source_path.endswith("fr_active_backlog.md"):
+        return 30
+    if source_path.endswith("docs/governance/fr_registry.md") or source_path.endswith("fr_registry.md"):
+        return 20
+    return 10
+
+
+def _governance_raw_record(obj: Any) -> dict[str, Any]:
+    return {
+        "fr_id": obj.data.get("fr_id"),
+        "category": obj.data.get("category"),
+        "status": obj.data.get("status"),
+        "blast_radius": obj.data.get("blast_radius"),
+        "governance_state": obj.governance.get("state"),
+        "observation_status": obj.governance.get("observation_status"),
+        "source_path": _source_path(obj),
+        "object_id": obj.object_id,
+    }
+
+
+def _governance_record_rank(obj: Any) -> tuple[int, int, str]:
+    status = str(obj.data.get("status") or "")
+    return (
+        _GOVERNANCE_STATUS_RANK.get(status, 0),
+        _governance_source_rank(obj),
+        obj.object_id,
+    )
+
+
+def _resolve_governance_current_state(objects: list[Any]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Any]] = {}
+    for obj in objects:
+        fr_id = obj.data.get("fr_id")
+        if fr_id:
+            grouped.setdefault(str(fr_id), []).append(obj)
+
+    resolved: list[dict[str, Any]] = []
+    for fr_id, candidates in sorted(grouped.items()):
+        winner = max(candidates, key=_governance_record_rank)
+        raw_records = [_governance_raw_record(candidate) for candidate in candidates]
+        source_paths = sorted(
+            {
+                str(record["source_path"])
+                for record in raw_records
+                if record.get("source_path")
+            }
+        )
+        suppressed = [
+            str(record["status"])
+            for record in raw_records
+            if record["object_id"] != winner.object_id and record.get("status")
+        ]
+        record = _governance_raw_record(winner)
+        record.update(
+            {
+                "duplicate_count": max(0, len(candidates) - 1),
+                "source_count": len(source_paths),
+                "resolved_from": _source_path(winner),
+                "suppressed_statuses": sorted(set(suppressed)),
+            }
+        )
+        resolved.append(record)
+    return sorted(resolved, key=lambda item: (str(item["status"]), str(item["fr_id"])))
+
+
+def _governance_open_item(
+    item: dict[str, Any],
+    *,
+    include_deferred: bool = False,
+    resolved: bool = True,
+) -> bool:
+    status = str(item.get("status") or "")
+    blast_radius = str(item.get("blast_radius") or "").upper()
+    if status in {"BACKLOG", "DEPLOYED_OBSERVING"}:
+        return True
+    if status == "REVIEWED_DEFERRED":
+        return include_deferred or resolved
+    return blast_radius in {"HIGH", "CRITICAL"}
+
+
 def cmd_latest_runs(args: argparse.Namespace) -> int:
     registry, query = _registry_query(Path(args.db))
     try:
@@ -255,26 +356,37 @@ def cmd_integrity_findings(args: argparse.Namespace) -> int:
 def cmd_governance_open(args: argparse.Namespace) -> int:
     registry, query = _registry_query(Path(args.db))
     try:
-        open_statuses = {"BACKLOG", "DEPLOYED_OBSERVING"}
-        high_blast = {"HIGH", "CRITICAL"}
-        items = []
-        for obj in query.query_by_type("GovernanceFR"):
-            status = str(obj.data.get("status") or "")
-            blast_radius = str(obj.data.get("blast_radius") or "")
-            if status in open_statuses or blast_radius.upper() in high_blast:
-                items.append(
-                    {
-                        "fr_id": obj.data.get("fr_id"),
-                        "category": obj.data.get("category"),
-                        "status": status,
-                        "blast_radius": blast_radius,
-                        "governance_state": obj.governance.get("state"),
-                        "observation_status": obj.governance.get("observation_status"),
-                        "object_id": obj.object_id,
-                    }
-                )
-        items = sorted(items, key=lambda item: (str(item["status"]), str(item["fr_id"])))
-        _print_json({"db_path": str(Path(args.db)), "open_count": len(items), "items": items})
+        raw_items = [_governance_raw_record(obj) for obj in query.query_by_type("GovernanceFR")]
+        if args.show_duplicates:
+            items = [
+                item
+                for item in raw_items
+                if _governance_open_item(item, include_deferred=args.include_deferred, resolved=False)
+            ]
+            items = sorted(items, key=lambda item: (str(item["status"]), str(item["fr_id"]), str(item["object_id"])))
+            _print_json(
+                {
+                    "db_path": str(Path(args.db)),
+                    "mode": "raw_duplicates",
+                    "open_count": len(items),
+                    "items": items,
+                }
+            )
+        else:
+            resolved_items = _resolve_governance_current_state(query.query_by_type("GovernanceFR"))
+            items = [
+                item
+                for item in resolved_items
+                if _governance_open_item(item, include_deferred=args.include_deferred, resolved=True)
+            ]
+            _print_json(
+                {
+                    "db_path": str(Path(args.db)),
+                    "mode": "deduped_current_state",
+                    "open_count": len(items),
+                    "items": items,
+                }
+            )
     finally:
         registry.close()
     return 0
@@ -621,6 +733,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="List active or high-blast-radius governance items.",
     )
     governance_open.add_argument("--db", required=True, help="SQLite registry path to open.")
+    governance_open.add_argument(
+        "--show-duplicates",
+        action="store_true",
+        help="Show raw unresolved governance entries for debugging.",
+    )
+    governance_open.add_argument(
+        "--include-deferred",
+        action="store_true",
+        help="Include REVIEWED_DEFERRED items in governance-open output.",
+    )
     governance_open.set_defaults(func=cmd_governance_open)
 
     packet_status = subparsers.add_parser(
