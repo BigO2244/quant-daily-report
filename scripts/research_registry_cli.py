@@ -103,6 +103,213 @@ def _ingest_family(
         registry.close()
 
 
+def _registry_query(db_path: Path) -> tuple[SQLiteResearchRegistry, RegistryQuery]:
+    registry = _open_registry(db_path)
+    return registry, RegistryQuery(registry)
+
+
+def _artifact_objects(query: RegistryQuery, artifact_type: str) -> list[Any]:
+    return [
+        obj
+        for obj in query.list_objects()
+        if obj.object_type == "ResearchArtifact" and obj.data.get("artifact_type") == artifact_type
+    ]
+
+
+def _sort_recent(objects: list[Any]) -> list[Any]:
+    return sorted(
+        objects,
+        key=lambda obj: (
+            str(obj.data.get("trade_date") or obj.data.get("packet_date") or obj.identity.get("trade_date") or ""),
+            str(obj.temporal.get("as_of") or ""),
+            str(obj.data.get("run_id") or obj.object_id),
+        ),
+        reverse=True,
+    )
+
+
+def _execution_runs_by_id(query: RegistryQuery) -> dict[str, Any]:
+    runs: dict[str, Any] = {}
+    for obj in _artifact_objects(query, "execution_run"):
+        run_id = obj.data.get("run_id")
+        if run_id:
+            runs[str(run_id)] = obj
+    return runs
+
+
+def _integrity_objects_by_run_id(query: RegistryQuery) -> dict[str, Any]:
+    audits: dict[str, Any] = {}
+    for obj in _artifact_objects(query, "execution_integrity"):
+        run_id = obj.data.get("run_id")
+        if run_id:
+            audits[str(run_id)] = obj
+    return audits
+
+
+def _run_record(run_obj: Any, integrity_obj: Any | None = None) -> dict[str, Any]:
+    return {
+        "trade_date": run_obj.data.get("trade_date") or run_obj.identity.get("trade_date"),
+        "run_id": run_obj.data.get("run_id"),
+        "status": run_obj.data.get("status"),
+        "operator_execution_status": run_obj.data.get("operator_execution_status"),
+        "submitted_count": run_obj.data.get("submitted_count"),
+        "accepted_count": run_obj.data.get("accepted_count"),
+        "rejected_count": run_obj.data.get("rejected_count"),
+        "integrity_status": (
+            integrity_obj.data.get("status")
+            if integrity_obj is not None
+            else run_obj.data.get("execution_integrity_status")
+        ),
+        "object_id": run_obj.object_id,
+    }
+
+
+def _integrity_record(integrity_obj: Any) -> dict[str, Any]:
+    findings = integrity_obj.data.get("findings")
+    if not isinstance(findings, list):
+        findings = []
+    return {
+        "trade_date": integrity_obj.data.get("trade_date") or integrity_obj.identity.get("trade_date"),
+        "run_id": integrity_obj.data.get("run_id"),
+        "status": integrity_obj.data.get("status"),
+        "finding_count": integrity_obj.data.get("finding_count"),
+        "pending_buy_count": integrity_obj.data.get("pending_buy_count"),
+        "missing_buy_count": integrity_obj.data.get("missing_buy_count"),
+        "findings": findings,
+        "object_id": integrity_obj.object_id,
+    }
+
+
+def cmd_latest_runs(args: argparse.Namespace) -> int:
+    registry, query = _registry_query(Path(args.db))
+    try:
+        integrity_by_run = _integrity_objects_by_run_id(query)
+        runs = _sort_recent(_artifact_objects(query, "execution_run"))
+        if args.limit is not None:
+            runs = runs[: max(0, int(args.limit))]
+        _print_json(
+            {
+                "db_path": str(Path(args.db)),
+                "run_count": len(runs),
+                "runs": [
+                    _run_record(run_obj, integrity_by_run.get(str(run_obj.data.get("run_id"))))
+                    for run_obj in runs
+                ],
+            }
+        )
+    finally:
+        registry.close()
+    return 0
+
+
+def cmd_run_health(args: argparse.Namespace) -> int:
+    registry, query = _registry_query(Path(args.db))
+    try:
+        runs_by_id = _execution_runs_by_id(query)
+        integrity_by_run = _integrity_objects_by_run_id(query)
+        run_obj = runs_by_id.get(args.run_id)
+        integrity_obj = integrity_by_run.get(args.run_id)
+        _print_json(
+            {
+                "db_path": str(Path(args.db)),
+                "run_id": args.run_id,
+                "status": "FOUND" if run_obj or integrity_obj else "NOT_FOUND",
+                "execution_run": _run_record(run_obj, integrity_obj) if run_obj else None,
+                "execution_payload": run_obj.data.get("execution_payload") if run_obj else None,
+                "operator_summary": run_obj.data.get("operator_summary") if run_obj else None,
+                "execution_results": run_obj.data.get("execution_results") if run_obj else None,
+                "execution_integrity": _integrity_record(integrity_obj) if integrity_obj else None,
+                "source_paths": {
+                    "execution_run": run_obj.provenance.get("source_paths", []) if run_obj else [],
+                    "execution_integrity": integrity_obj.provenance.get("source_paths", []) if integrity_obj else [],
+                },
+            }
+        )
+    finally:
+        registry.close()
+    return 0
+
+
+def cmd_integrity_findings(args: argparse.Namespace) -> int:
+    registry, query = _registry_query(Path(args.db))
+    try:
+        audits = [
+            obj
+            for obj in _sort_recent(_artifact_objects(query, "execution_integrity"))
+            if obj.data.get("status") in {"WARN", "FAIL"}
+        ]
+        if args.limit is not None:
+            audits = audits[: max(0, int(args.limit))]
+        _print_json(
+            {
+                "db_path": str(Path(args.db)),
+                "finding_object_count": len(audits),
+                "integrity_findings": [_integrity_record(obj) for obj in audits],
+            }
+        )
+    finally:
+        registry.close()
+    return 0
+
+
+def cmd_governance_open(args: argparse.Namespace) -> int:
+    registry, query = _registry_query(Path(args.db))
+    try:
+        open_statuses = {"BACKLOG", "DEPLOYED_OBSERVING"}
+        high_blast = {"HIGH", "CRITICAL"}
+        items = []
+        for obj in query.query_by_type("GovernanceFR"):
+            status = str(obj.data.get("status") or "")
+            blast_radius = str(obj.data.get("blast_radius") or "")
+            if status in open_statuses or blast_radius.upper() in high_blast:
+                items.append(
+                    {
+                        "fr_id": obj.data.get("fr_id"),
+                        "category": obj.data.get("category"),
+                        "status": status,
+                        "blast_radius": blast_radius,
+                        "governance_state": obj.governance.get("state"),
+                        "observation_status": obj.governance.get("observation_status"),
+                        "object_id": obj.object_id,
+                    }
+                )
+        items = sorted(items, key=lambda item: (str(item["status"]), str(item["fr_id"])))
+        _print_json({"db_path": str(Path(args.db)), "open_count": len(items), "items": items})
+    finally:
+        registry.close()
+    return 0
+
+
+def cmd_research_packet_status(args: argparse.Namespace) -> int:
+    registry, query = _registry_query(Path(args.db))
+    try:
+        packets = _sort_recent(_artifact_objects(query, "research_packet"))
+        if args.limit is not None:
+            packets = packets[: max(0, int(args.limit))]
+        _print_json(
+            {
+                "db_path": str(Path(args.db)),
+                "packet_count": len(packets),
+                "packets": [
+                    {
+                        "packet_date": obj.data.get("packet_date") or obj.identity.get("trade_date"),
+                        "status": obj.data.get("status"),
+                        "source_readiness": obj.data.get("source_readiness"),
+                        "confidence": obj.data.get("confidence") or obj.confidence.get("level"),
+                        "stale_warnings": obj.data.get("stale_warnings") or [],
+                        "missing_warnings": obj.data.get("missing_warnings") or [],
+                        "warnings": obj.data.get("warnings") or [],
+                        "object_id": obj.object_id,
+                    }
+                    for obj in packets
+                ],
+            }
+        )
+    finally:
+        registry.close()
+    return 0
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     manifest = _load_manifest(Path(args.manifest))
     registry = _open_registry(Path(args.db))
@@ -271,6 +478,63 @@ def cmd_ingest_governance(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_caerus_registry(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    runs_root = Path(args.runs_root)
+    packets_root = Path(args.packets_root)
+    docs_root = Path(args.docs_root)
+
+    run_dirs = [path for path in runs_root.iterdir() if path.is_dir()] if runs_root.exists() else []
+    selected_runs = _limit_paths(run_dirs, args.limit)
+    integrity_paths = [
+        path / "audit" / "execution_integrity.json"
+        for path in selected_runs
+        if (path / "audit" / "execution_integrity.json").exists()
+    ]
+    packet_dirs = [path for path in packets_root.iterdir() if path.is_dir()] if packets_root.exists() else []
+    selected_packets = _limit_paths(packet_dirs, args.limit)
+    docs = sorted(docs_root.glob("*.md")) if docs_root.exists() else []
+
+    registry = _open_registry(db_path)
+    try:
+        family_results = []
+        for family, paths in [
+            ("execution_run", selected_runs),
+            ("execution_integrity", integrity_paths),
+            ("research_packet", selected_packets),
+            ("governance_doc", docs),
+        ]:
+            result = ingest_artifact_family(
+                family=family,
+                artifact_paths=paths,
+                registry=registry,
+            )
+            family_results.append(
+                {
+                    "family": family,
+                    "path_count": len(paths),
+                    "envelope_count": len(result.envelopes),
+                    "findings": [dataclasses.asdict(finding) for finding in result.findings],
+                }
+            )
+        query = RegistryQuery(registry)
+        _print_json(
+            {
+                "status": "BUILT_CAERUS_REGISTRY",
+                "db_path": str(db_path),
+                "runs_root": str(runs_root),
+                "packets_root": str(packets_root),
+                "docs_root": str(docs_root),
+                "limit": args.limit,
+                "families": family_results,
+                "summary": query.registry_summary(),
+            }
+        )
+    finally:
+        registry.close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Read-only Caerus research registry operator CLI."
@@ -333,6 +597,50 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_governance.add_argument("--db", required=True, help="SQLite registry path to create or update.")
     ingest_governance.add_argument("--docs-root", default="docs/governance")
     ingest_governance.set_defaults(func=cmd_ingest_governance)
+
+    latest_runs = subparsers.add_parser("latest-runs", help="Show latest registered execution runs.")
+    latest_runs.add_argument("--db", required=True, help="SQLite registry path to open.")
+    latest_runs.add_argument("--limit", type=int, default=10)
+    latest_runs.set_defaults(func=cmd_latest_runs)
+
+    run_health = subparsers.add_parser("run-health", help="Summarize one registered execution run.")
+    run_health.add_argument("--db", required=True, help="SQLite registry path to open.")
+    run_health.add_argument("--run-id", required=True)
+    run_health.set_defaults(func=cmd_run_health)
+
+    integrity_findings = subparsers.add_parser(
+        "integrity-findings",
+        help="List WARN/FAIL execution integrity objects.",
+    )
+    integrity_findings.add_argument("--db", required=True, help="SQLite registry path to open.")
+    integrity_findings.add_argument("--limit", type=int, default=None)
+    integrity_findings.set_defaults(func=cmd_integrity_findings)
+
+    governance_open = subparsers.add_parser(
+        "governance-open",
+        help="List active or high-blast-radius governance items.",
+    )
+    governance_open.add_argument("--db", required=True, help="SQLite registry path to open.")
+    governance_open.set_defaults(func=cmd_governance_open)
+
+    packet_status = subparsers.add_parser(
+        "research-packet-status",
+        help="Show latest registered research packet readiness.",
+    )
+    packet_status.add_argument("--db", required=True, help="SQLite registry path to open.")
+    packet_status.add_argument("--limit", type=int, default=10)
+    packet_status.set_defaults(func=cmd_research_packet_status)
+
+    build_caerus = subparsers.add_parser(
+        "build-caerus-registry",
+        help="Build a read-only Caerus operator registry from recent artifacts.",
+    )
+    build_caerus.add_argument("--db", required=True, help="SQLite registry path to create or update.")
+    build_caerus.add_argument("--runs-root", default="outputs/runs")
+    build_caerus.add_argument("--packets-root", default="outputs/research_packets")
+    build_caerus.add_argument("--docs-root", default="docs/governance")
+    build_caerus.add_argument("--limit", type=int, default=10)
+    build_caerus.set_defaults(func=cmd_build_caerus_registry)
     return parser
 
 

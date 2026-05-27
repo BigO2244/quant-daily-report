@@ -405,6 +405,8 @@ class ExecutionRunArtifactAdapter(ArtifactFamilyAdapter):
         payload = _safe_json(run_root / "execution_payload.json") or {}
         results = _safe_json(run_root / "execution_results.json") or {}
         summary = _safe_json(run_root / "operator_summary.json") or {}
+        payload_trades = payload.get("trades") if isinstance(payload.get("trades"), list) else []
+        broker_responses = results.get("broker_responses") if isinstance(results.get("broker_responses"), list) else []
         trade_date = _trade_date(payload) or _trade_date(results) or _trade_date(summary)
         as_of = _normalize_as_of(
             _first_present(summary, ["updated_at", "generated_at", "trade_date"])
@@ -420,6 +422,26 @@ class ExecutionRunArtifactAdapter(ArtifactFamilyAdapter):
             "accepted_count": summary.get("accepted_count") or results.get("accepted_count") or payload.get("accepted_count"),
             "rejected_count": summary.get("rejected_count") or results.get("rejected_count") or payload.get("rejected_count"),
             "execution_integrity_status": summary.get("execution_integrity_status"),
+            "execution_payload": {
+                "status": payload.get("status") or payload.get("execution_status"),
+                "trade_count": len(payload_trades),
+                "submitted_count": payload.get("submitted_count"),
+                "accepted_count": payload.get("accepted_count"),
+                "rejected_count": payload.get("rejected_count"),
+                "operator_execution_status": payload.get("operator_execution_status"),
+            },
+            "execution_results": {
+                "status": results.get("status"),
+                "submitted_count": results.get("submitted_count"),
+                "accepted_count": results.get("accepted_count"),
+                "rejected_count": results.get("rejected_count"),
+                "broker_response_count": len(broker_responses),
+            },
+            "operator_summary": {
+                "terminal_status": summary.get("terminal_status"),
+                "operator_execution_status": summary.get("operator_execution_status"),
+                "execution_integrity_status": summary.get("execution_integrity_status"),
+            },
             "artifact_role": "execution_run",
         }
         envelope = _artifact_envelope(
@@ -468,6 +490,7 @@ class ExecutionIntegrityArtifactAdapter(ArtifactFamilyAdapter):
                 "finding_count": len(payload.get("findings") or []),
                 "pending_buy_count": payload.get("pending_buy_count"),
                 "missing_buy_count": len(payload.get("missing_buy_orders") or []),
+                "findings": payload.get("findings") or [],
                 "artifact_role": "execution_integrity_audit",
             },
         )
@@ -561,6 +584,9 @@ class ResearchPacketArtifactAdapter(ArtifactFamilyAdapter):
                 "status": packet_payload.get("status") or summary_payload.get("status"),
                 "confidence": packet_payload.get("confidence") or summary_payload.get("confidence"),
                 "source_readiness": packet_payload.get("source_readiness") or summary_payload.get("source_readiness"),
+                "stale_warnings": packet_payload.get("stale_warnings") or summary_payload.get("stale_warnings") or [],
+                "missing_warnings": packet_payload.get("missing_warnings") or summary_payload.get("missing_warnings") or [],
+                "warnings": packet_payload.get("warnings") or summary_payload.get("warnings") or [],
                 "artifact_role": "research_packet",
             },
         )
@@ -609,6 +635,8 @@ class GovernanceDocArtifactAdapter(ArtifactFamilyAdapter):
                 ref_line,
             )
             status = status_match.group(1) if status_match else "BACKLOG"
+            blast_match = re.search(r"\b(CRITICAL|HIGH|MEDIUM|LOW)\b", ref_line)
+            blast_radius = blast_match.group(1) if blast_match else "UNKNOWN"
             if status == "DEPLOYED":
                 governance_state = GovernanceState.GOVERNED_DEPLOYED.value
             elif status == "DEPLOYED_OBSERVING":
@@ -621,7 +649,7 @@ class GovernanceDocArtifactAdapter(ArtifactFamilyAdapter):
                 fr_id=ref,
                 category="HOTFIX" if ref.startswith("HOTFIX") else "FR",
                 status=status,
-                blast_radius="UNKNOWN",
+                blast_radius=blast_radius,
                 observation_criteria="See source governance document.",
                 rollback_reference="See source governance document.",
                 validation_summary="Hydrated from governance markdown document.",
