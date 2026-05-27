@@ -162,6 +162,12 @@ Operational interpretation:
   effects are intentionally suppressed; inspect the degraded-state flags rather
   than deleting latest artifacts.
 
+FR-016 advisory semantic validation planning lives in
+`docs/precompute_semantic_validation.md`. That document defines future
+read-only checks for mixed-date evidence, malformed planned orders, surface
+classification, suppressed side-effect visibility, and provenance. It does not
+change the deployed blocking bundle validator or execution behavior.
+
 ### After VM execution
 
 - `outputs/runs/<RUN_ID>/logs/ci_alpaca_run.log` — full execution log
