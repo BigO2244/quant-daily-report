@@ -50,6 +50,26 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   metadata instead of failing artifact capture.
 - Future execution-adjacent fixes should preserve this distinction: never mask
   unresolved broker state, but avoid losing available posttrade evidence.
+- On 2026-05-27, buy-leg suppression required explicit governance because a
+  suppressed buy phase can look superficially similar to a clean no-buy day if
+  operator surfaces only show submitted orders. Planned buys, submitted buys,
+  budget-skipped buys, guard-suppressed buys, and repair-eligible buys need
+  separate state labels.
+- HOTFIX-2026-05-27 observation criteria: preserve incident artifacts and logs;
+  verify that operator/email evidence distinguishes planned-versus-submitted
+  buy counts; verify that suppressed buys carry an explicit guard or budget
+  reason; verify that repair guidance, if present, is broker-authoritative; and
+  verify on the next buy-capable paper run that buys are either submitted or
+  blocked with an explicit reason.
+- The durable follow-up is FR-031 execution integrity contract. That contract
+  should be designed before additional execution-contract changes so future
+  fixes do not mix order planning, broker submission, artifact publication,
+  suppression, and recovery eligibility into one ambiguous status.
+- FR-031 implements that follow-up as an additive audit artifact and compact
+  operator-summary status. The validator should remain non-routing in its first
+  deployed version: it observes and classifies integrity failures, but does not
+  create a new post-submit halt path unless a later FR explicitly promotes that
+  behavior with its own validation and rollback boundary.
 
 ## Artifact Lessons
 

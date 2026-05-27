@@ -24,6 +24,7 @@ def _load_module(tmp_path: Path):
         "brokers.alpaca_snapshot",
         "core",
         "core.execution_audit",
+        "core.execution_integrity",
         "core.execution_payload",
         "core.execution_summary",
         "core.live_retry_policy",
@@ -93,6 +94,20 @@ def _load_module(tmp_path: Path):
         "core.execution_audit",
         write_executor_audit=lambda **_kwargs: None,
         write_planner_audit=lambda **_kwargs: None,
+    )
+
+    def _write_execution_integrity_audit(**kwargs):
+        out_path = Path(kwargs["run_root"]) / "audit" / "execution_integrity.json"
+        _safe_write_text(
+            out_path,
+            json.dumps({"status": "OK", "findings": []}, indent=2) + "\n",
+            allow_overwrite=True,
+        )
+        return out_path
+
+    sys.modules["core.execution_integrity"] = _module(
+        "core.execution_integrity",
+        write_execution_integrity_audit=_write_execution_integrity_audit,
     )
     sys.modules["core.execution_payload"] = _module(
         "core.execution_payload",

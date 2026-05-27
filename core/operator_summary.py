@@ -156,6 +156,7 @@ def format_operator_summary_log(summary: dict[str, Any]) -> str:
         f"rejected={summary.get('rejected_count') or 0} "
         f"confirmation_email={bool(summary.get('confirmation_email_sent'))} "
         f"post_recon={summary.get('post_execution_recon_status') or 'UNKNOWN'} "
+        f"integrity={summary.get('execution_integrity_status') or 'UNKNOWN'} "
         f"authoritative={bool(summary.get('broker_authoritative_state'))}"
     )
 
@@ -169,6 +170,8 @@ def format_execution_health_banner(summary: dict[str, Any]) -> str:
     pdt_flags = ",".join(_normalize_list(summary.get("broker_pdt_flags"))) or "none"
     broker_reject = summary.get("broker_reject_status") or "none"
     broker_reject_message = summary.get("broker_reject_message") or "none"
+    integrity_status = summary.get("execution_integrity_status") or "UNKNOWN"
+    integrity_findings = "; ".join(_normalize_list(summary.get("execution_integrity_findings"))) or "none"
     capital_constraint = (
         "TRIGGERED" if bool(summary.get("capital_constraint_triggered")) else "CLEAR"
     )
@@ -189,5 +192,7 @@ def format_execution_health_banner(summary: dict[str, Any]) -> str:
         f"capital_constraint={capital_constraint} "
         f"requested_buys={summary.get('requested_buy_notional')} "
         f"allowed_buys={summary.get('allowed_buy_notional')} "
+        f"integrity={integrity_status} "
+        f"integrity_findings={integrity_findings} "
         f"state={authority}"
     )

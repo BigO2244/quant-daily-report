@@ -29,6 +29,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
 | FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
 | FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `BACKLOG` | MEDIUM | FR-028 | not_started | Future promotion gates should consume provenance, exposure, and timing confidence after accounting semantics are governed. | Revert promotion-readiness checks to existing scorecard criteria. |
+| FR-031 execution integrity contract | Execution Integrity | `PROMOTION_READY` | HIGH | HOTFIX-2026-05-27, FR-021, broker/order evidence | local_validation_passed | Additive validator implemented locally; writes `audit/execution_integrity.json` and compact operator-summary integrity fields without changing order routing. | Revert FR-031 implementation commit; ignore existing audit artifacts. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -66,13 +67,17 @@ procedures are proven.
 
 ## Immediate Focus
 
-1. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
+1. Promote FR-031 only after review of local validation, generated audit schema,
+   and rollback boundary. It remains separate from HOTFIX-2026-05-27: the
+   hotfix record preserves incident evidence, while FR-031 adds the durable
+   guardrail.
+2. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
    comparison artifacts, rollback plans, and observation criteria are reviewed.
-2. Treat FR-030 as deployed telemetry consumption, not promotion logic.
-3. Focus the next research-operations bottleneck on post-close hydration and
+3. Treat FR-030 as deployed telemetry consumption, not promotion logic.
+4. Focus the next research-operations bottleneck on post-close hydration and
    source readiness, not packet rendering.
-4. Continue to separate MCP planning from FR-028 accounting/timing work.
-5. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
+5. Continue to separate MCP planning from FR-028 accounting/timing work.
+6. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
    source-readiness, and governance reviews without changing execution paths.
 
 ## Roadmap Boundaries

@@ -138,8 +138,11 @@ def write_canonical_execution_payload(
         "submitted_buy_count": int((payload or {}).get("submitted_buy_count") or 0),
         "submitted_sell_count": int((payload or {}).get("submitted_sell_count") or 0),
         "capital_allows_pending_buys": bool((payload or {}).get("capital_allows_pending_buys")),
+        "continuation_mode": (payload or {}).get("continuation_mode"),
         "continuation_source": (payload or {}).get("continuation_source"),
         "continuation_intended_orders_path": (payload or {}).get("continuation_intended_orders_path"),
+        "cash_target_weight": (payload or {}).get("cash_target_weight"),
+        "achieved_cash_weight": (payload or {}).get("achieved_cash_weight"),
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 

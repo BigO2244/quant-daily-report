@@ -22,6 +22,7 @@ Methodology belongs in `docs/governance/fr_governance_model.md`.
 | Shadow learning observability | 2026-05-26 | FR-014 | `DEPLOYED_OBSERVING` | Read-only shadow learning health diagnostic. | Observe diagnostic usefulness against post-close refreshed artifacts. |
 | Price cache coverage observability | 2026-05-26 | FR-002 | `DEPLOYED_OBSERVING` | Read-only price cache coverage sidecar preview. | Parquet remains canonical; diagnostic writes no sidecar. |
 | Precompute semantic observability | 2026-05-26 | FR-016 | `DEPLOYED_OBSERVING` | Advisory read-only precompute semantic validator. | Not wired into cron, self-heal, or execution gates. |
+| Execution hotfix governance | 2026-05-27 | HOTFIX-2026-05-27 | `DEPLOYED_OBSERVING` | Buy-leg suppression incident evidence and follow-up execution integrity contract. | Observe buy-leg suppression surfaces, repair guidance, and next normal buy-capable run evidence. |
 | Research clarity wave | 2026-05-22 | FR-023, FR-024, FR-025, FR-026, FR-027 | `DEPLOYED` | Generated/canonical separation, NAV provenance, portfolio memory, exposure intelligence, and regime fragility. | Additive generated research artifacts; no execution/accounting/timing changes. |
 | Research operations | 2026-05-22 onward | FR-030 | `DEPLOYED` | Daily research interpretation packet and Orion operator launcher. | Packet source readiness, freshness, confidence, and incomplete-source handling. |
 
@@ -61,6 +62,16 @@ Methodology belongs in `docs/governance/fr_governance_model.md`.
 Do not mark an observing FR `DEPLOYED` until evidence satisfies its observation
 criteria. If evidence is unavailable, leave the FR observing.
 
+## Hotfix Records
+
+| Hotfix | Category | Status | Blast Radius | Incident Date | Observation Criteria | Current State | Rollback / Follow-up Reference |
+|---|---|---|---|---|---|---|---|
+| HOTFIX-2026-05-27 buy-leg suppression incident | `HOTFIX` / execution integrity | `DEPLOYED_OBSERVING` | HIGH | 2026-05-27 | Runtime evidence distinguishes planned buys, submitted buys, budget-skipped buys, intentionally suppressed buys, and repair-eligible buys; operator/email surfaces do not collapse suppression into a clean no-buy day; the next buy-capable paper run either submits buys or records an explicit guard reason; no shadow, dashboard, or research artifact is treated as broker truth. | Governance record created after the 2026-05-27 incident. Follow-up contract work is tracked as FR-031; this docs update adds no runtime code changes. | Preserve incident artifacts and logs. Use git revert for any source hotfix regression. FR-031 must define durable planned/submitted/skipped/suppressed/recovery order semantics before further execution-contract changes. |
+
+Hotfix observation remains open until evidence from at least one subsequent
+buy-capable paper execution confirms that suppressed buy legs are visible as a
+degraded execution state, not silently reported as absent planned buys.
+
 ## Reviewed Deferred FRs
 
 | FR | Phase | Status | Blast Radius | Current State | Deferred Rationale | Re-entry Criteria |
@@ -92,6 +103,8 @@ criteria. If evidence is unavailable, leave the FR observing.
 | 2026-05-26 | FR-014 | `Tests/test_shadow_learning_health.py`, `Tests/test_portfolio_learning_report.py`, py_compile, diff check, VM validation. | `scripts/research/check_shadow_learning_health.py`, `docs/shadow_learning_health.md`, `docs/feedback_loop_artifacts.md`. | Read-only learning-health diagnostic; no learning producer, shadow artifact, hydration, broker, execution, cron, workflow, promotion, accounting, or timing behavior changed. |
 | 2026-05-26 | FR-002 | `Tests/test_price_cache_coverage.py`, py_compile, diff check, VM validation. | `scripts/research/check_price_cache_coverage.py`, `docs/price_cache_coverage.md`, `docs/price_hydration_health.md`. | Read-only price cache coverage diagnostic; no cache mutation, sidecar writes, hydration, broker, execution, cron, workflow, promotion, accounting, or timing behavior changed. |
 | 2026-05-26 | FR-016 | `Tests/test_precompute_semantic_validation.py`, py_compile, diff check, VM validation. | `scripts/research/check_precompute_semantic_validation.py`, `docs/precompute_semantic_validation.md`. | Advisory read-only semantic validator; no cron, workflow, self-heal, execution gate, broker, promotion, accounting, timing, or strategy behavior changed. |
+| 2026-05-27 | HOTFIX-2026-05-27 | Markdown review, governance consistency review, and diff check. | `docs/governance/fr_active_backlog.md`, `docs/governance/fr_registry.md`, `docs/governance/operational_lessons.md`. | Docs-only hotfix governance record for buy-leg suppression observation and FR-031 backlog creation; no runtime code, cron, broker, execution, dashboard, shadow, accounting, or promotion behavior changed. |
+| 2026-05-27 | FR-031 local implementation | `Tests/test_execution_integrity.py`, `Tests/test_run_precomputed_alpaca_execution_fast.py`, py_compile, diff check, targeted execution-suite validation. | `core/execution_integrity.py`, `scripts/run_precomputed_alpaca_execution.py`, `docs/execution_integrity_contract.md`, active backlog and lessons updates. | Additive execution integrity audit writes `outputs/runs/<run_id>/audit/execution_integrity.json` and compact operator-summary fields; no strategy, broker credential, cron, scheduler, order-routing, continuation, dashboard, shadow, accounting, or promotion behavior changed. |
 
 ## Registry Rules
 

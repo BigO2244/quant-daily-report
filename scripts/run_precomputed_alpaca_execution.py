@@ -39,6 +39,7 @@ from brokers.alpaca_snapshot import (
     write_pretrade_snapshot_artifacts,
 )
 from core.execution_audit import write_executor_audit, write_planner_audit
+from core.execution_integrity import write_execution_integrity_audit
 from core.execution_payload import normalize_status, write_canonical_execution_payload
 from core.execution_summary import write_execution_artifacts
 from core.live_retry_policy import evaluate_live_retry
@@ -1138,6 +1139,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.continuation_intended_orders_path
             ).strip()
             execution_payload["continuation_source"] = "intended_orders"
+        if args.continuation_mode != "none":
+            execution_payload["continuation_mode"] = str(args.continuation_mode)
         execution_payload["operator_execution_status"] = _operator_execution_status(execution_payload)
 
         # Extract capital budget metadata for operator summary and retry decisions.
@@ -1287,11 +1290,34 @@ def main(argv: list[str] | None = None) -> int:
             capital_allows_pending_buys=bool(execution_payload.get("capital_allows_pending_buys")),
             continuation_intended_orders_path=execution_payload.get("continuation_intended_orders_path"),
             continuation_source=execution_payload.get("continuation_source"),
+            continuation_mode=execution_payload.get("continuation_mode"),
             workflow_kind=execution_payload.get("workflow_kind"),
             event_freshness_status=execution_payload.get("event_freshness_status"),
             bundle_status=execution_payload.get("bundle_status"),
             execution_window_status=execution_payload.get("execution_window_status"),
         )
+
+        try:
+            integrity_path = write_execution_integrity_audit(
+                run_root=run_root,
+                trade_date=trade_date,
+                run_id=run_id,
+                intended_orders_path=execution_payload.get("continuation_intended_orders_path"),
+            )
+            integrity_payload = json.loads(integrity_path.read_text(encoding="utf-8"))
+            findings = list(integrity_payload.get("findings") or [])
+            write_operator_summary(
+                run_root,
+                execution_integrity_status=integrity_payload.get("status"),
+                execution_integrity_findings=[
+                    str((finding or {}).get("code") or "")
+                    for finding in findings[:5]
+                    if str((finding or {}).get("code") or "").strip()
+                ],
+                execution_integrity_artifact=str(integrity_path),
+            )
+        except Exception as exc:
+            logger.warning("[EXECUTION_INTEGRITY] audit skipped: %s", exc)
 
         print(format_operator_summary_log(load_operator_summary(run_root) or {}))
         print(format_execution_health_banner(load_operator_summary(run_root) or {}))
