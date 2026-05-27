@@ -75,4 +75,9 @@ TOOL_DEFINITIONS: list[dict] = [
         "description": "Return lineage for one registered object.",
         "inputSchema": {"type": "object", "properties": {"db_path": {"type": "string"}, "object_id": {"type": "string"}}, "required": ["object_id"]},
     },
+    {
+        "name": "daily_operator_brief",
+        "description": "Return a compact read-only morning/evening operator brief.",
+        "inputSchema": {"type": "object", "properties": {"db_path": {"type": "string"}}},
+    },
 ]

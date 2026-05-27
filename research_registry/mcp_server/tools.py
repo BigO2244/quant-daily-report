@@ -48,6 +48,7 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "registry_summary": registry_summary,
         "query_registry": query_registry,
         "lineage": lineage,
+        "daily_operator_brief": daily_operator_brief,
     }
     if name not in dispatch:
         return _response("ERROR", _resolve_db_path(arguments, context), warnings=[f"unknown tool: {name}"])
@@ -271,6 +272,89 @@ def lineage(*, object_id: str, context: ToolContext | None = None, db_path: str 
     registry, query, resolved_db = _open_query(db_path, context)
     try:
         return _response("OK", resolved_db, lineage=query.get_lineage(object_id))
+    finally:
+        registry.close()
+
+
+def daily_operator_brief(*, context: ToolContext | None = None, db_path: str | None = None) -> dict[str, Any]:
+    registry, query, resolved_db = _open_query(db_path, context)
+    try:
+        warnings: list[str] = []
+        summary = query.registry_summary()
+
+        integrity_by_run = _integrity_objects_by_run_id(query)
+        runs = _sort_recent(_artifact_objects(query, "execution_run"))
+        latest_run = None
+        if runs:
+            run_obj = runs[0]
+            latest_run = _run_record(run_obj, integrity_by_run.get(str(run_obj.data.get("run_id"))))
+
+        integrity_objects = _sort_recent(_artifact_objects(query, "execution_integrity"))
+        warn_fail_integrity = [
+            _integrity_record(obj)
+            for obj in integrity_objects
+            if obj.data.get("status") in {"WARN", "FAIL"}
+        ]
+        if runs and not integrity_objects:
+            warnings.append("missing execution integrity artifacts")
+        if warn_fail_integrity:
+            warnings.append("WARN/FAIL execution integrity findings present")
+        execution_integrity = {
+            "status": "WARN_FAIL_PRESENT" if warn_fail_integrity else "OK",
+            "latest_warn_fail_findings": warn_fail_integrity,
+            "finding_count": len(warn_fail_integrity),
+        }
+
+        resolved_governance = _resolve_governance_current_state(query.query_by_type("GovernanceFR"))
+        open_items = [
+            item
+            for item in resolved_governance
+            if _governance_open_item(item, include_deferred=False, resolved=True)
+        ]
+        key_ids = {"FR-031", "HOTFIX-2026-05-27", "FR-021", "FR-028", "FR-029"}
+        key_items = [item for item in resolved_governance if item.get("fr_id") in key_ids]
+        unresolved_duplicates = [item for item in resolved_governance if item.get("duplicate_count", 0) and not item.get("resolved_from")]
+        if unresolved_duplicates:
+            warnings.append("governance duplicates unresolved after dedupe")
+        governance = {
+            "open_count": len(open_items),
+            "high_blast_radius_count": len([item for item in open_items if str(item.get("blast_radius")).upper() in {"HIGH", "CRITICAL"}]),
+            "deployed_observing_count": len([item for item in resolved_governance if item.get("status") == "DEPLOYED_OBSERVING"]),
+            "key_items": key_items,
+        }
+
+        packets = _sort_recent(_artifact_objects(query, "research_packet"))
+        if packets:
+            packet = packets[0]
+            research_packet = {
+                "packet_date": packet.data.get("packet_date") or packet.identity.get("trade_date"),
+                "status": packet.data.get("status"),
+                "source_readiness": packet.data.get("source_readiness"),
+                "confidence": packet.data.get("confidence") or packet.confidence.get("level"),
+                "stale_warnings": packet.data.get("stale_warnings") or [],
+                "missing_warnings": packet.data.get("missing_warnings") or [],
+                "warnings": packet.data.get("warnings") or [],
+                "object_id": packet.object_id,
+            }
+        else:
+            research_packet = None
+            warnings.append("missing research packet")
+
+        return _response(
+            "OK",
+            resolved_db,
+            warnings=warnings,
+            latest_run=latest_run,
+            execution_integrity=execution_integrity,
+            governance=governance,
+            research_packet=research_packet,
+            registry_summary={
+                "object_count": summary.get("object_count"),
+                "edge_count": summary.get("edge_count"),
+                "orphan_count": summary.get("orphan_count"),
+                "surface_conflict_count": summary.get("surface_conflict_count"),
+            },
+        )
     finally:
         registry.close()
 

@@ -19,6 +19,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from research_registry.ingestion import ingest_artifact_family
+from research_registry.mcp_server.tools import daily_operator_brief
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
 
@@ -422,6 +423,11 @@ def cmd_research_packet_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_daily_operator_brief(args: argparse.Namespace) -> int:
+    _print_json(daily_operator_brief(db_path=args.db))
+    return 0
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     manifest = _load_manifest(Path(args.manifest))
     registry = _open_registry(Path(args.db))
@@ -752,6 +758,13 @@ def build_parser() -> argparse.ArgumentParser:
     packet_status.add_argument("--db", required=True, help="SQLite registry path to open.")
     packet_status.add_argument("--limit", type=int, default=10)
     packet_status.set_defaults(func=cmd_research_packet_status)
+
+    daily_brief = subparsers.add_parser(
+        "daily-operator-brief",
+        help="Print a compact read-only operator brief from the registry.",
+    )
+    daily_brief.add_argument("--db", required=True, help="SQLite registry path to open.")
+    daily_brief.set_defaults(func=cmd_daily_operator_brief)
 
     build_caerus = subparsers.add_parser(
         "build-caerus-registry",

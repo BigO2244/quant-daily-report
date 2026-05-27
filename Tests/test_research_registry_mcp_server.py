@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 from research_registry.mcp_server import ToolContext, call_tool, list_tools
 from research_registry.mcp_server.server import handle_jsonrpc
+from scripts import research_registry_cli
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -141,6 +141,7 @@ def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
         "registry_summary",
         "query_registry",
         "lineage",
+        "daily_operator_brief",
     }.issubset(names)
 
 
@@ -253,3 +254,79 @@ def test_mcp_safety_boundaries(tmp_path: Path, monkeypatch) -> None:
     payload = call_tool("registry_summary", {"db_path": str(db_path)})
     assert "SHOULD_NOT_APPEAR" not in json.dumps(payload, sort_keys=True)
     assert payload["db_path"] == str(db_path)
+
+
+def test_daily_operator_brief_returns_compact_operator_summary(tmp_path: Path) -> None:
+    db_path, _, _, _ = _build_registry(tmp_path)
+
+    brief = call_tool("daily_operator_brief", {"db_path": str(db_path)})
+
+    assert brief["status"] == "OK"
+    assert brief["latest_run"]["run_id"] == "run-20260527-warn"
+    assert brief["latest_run"]["trade_date"] == "2026-05-27"
+    assert brief["latest_run"]["integrity_status"] == "WARN"
+    assert brief["execution_integrity"]["status"] == "WARN_FAIL_PRESENT"
+    assert brief["execution_integrity"]["latest_warn_fail_findings"][0]["run_id"] == "run-20260527-warn"
+    assert "WARN/FAIL execution integrity findings present" in brief["warnings"]
+    assert brief["governance"]["open_count"] >= 2
+    assert brief["governance"]["high_blast_radius_count"] >= 2
+    assert brief["governance"]["deployed_observing_count"] == 2
+    key_ids = {item["fr_id"] for item in brief["governance"]["key_items"]}
+    assert {"FR-031", "HOTFIX-2026-05-27"}.issubset(key_ids)
+    assert brief["research_packet"]["packet_date"] == "2026-05-27"
+    assert brief["research_packet"]["status"] == "READY"
+    assert brief["registry_summary"]["object_count"] >= 1
+    assert brief["registry_summary"]["edge_count"] >= 1
+    assert brief["registry_summary"]["orphan_count"] == 0
+    assert brief["registry_summary"]["surface_conflict_count"] == 0
+
+
+def test_daily_operator_brief_handles_missing_research_packet(tmp_path: Path) -> None:
+    runs_root, _, docs_root, _ = _fixture_roots(tmp_path)
+    db_path = tmp_path / "registry.db"
+    payload = call_tool(
+        "build_caerus_registry",
+        {
+            "db_path": str(db_path),
+            "runs_root": str(runs_root),
+            "packets_root": str(tmp_path / "missing-packets"),
+            "docs_root": str(docs_root),
+            "limit": 10,
+        },
+    )
+    assert payload["status"] == "OK"
+
+    brief = call_tool("daily_operator_brief", {"db_path": str(db_path)})
+
+    assert brief["research_packet"] is None
+    assert "missing research packet" in brief["warnings"]
+
+
+def test_daily_operator_brief_cli_and_no_source_mutation(tmp_path: Path, capsys) -> None:
+    runs_root, packets_root, docs_root, _ = _fixture_roots(tmp_path)
+    source_files = [path for root in [runs_root, packets_root, docs_root] for path in root.rglob("*") if path.is_file()]
+    before = {path: path.read_bytes() for path in source_files}
+    db_path = tmp_path / "registry.db"
+    assert research_registry_cli.main(
+        [
+            "build-caerus-registry",
+            "--db",
+            str(db_path),
+            "--runs-root",
+            str(runs_root),
+            "--packets-root",
+            str(packets_root),
+            "--docs-root",
+            str(docs_root),
+            "--limit",
+            "10",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert research_registry_cli.main(["daily-operator-brief", "--db", str(db_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["latest_run"]["run_id"] == "run-20260527-warn"
+    assert payload["execution_integrity"]["status"] == "WARN_FAIL_PRESENT"
+    assert {path: path.read_bytes() for path in source_files} == before
