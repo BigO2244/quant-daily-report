@@ -662,7 +662,7 @@ def _workflow_context() -> dict[str, object]:
     }
 
 
-def _acquire_execution_lock(trade_date: str) -> Path:
+def _acquire_execution_lock(trade_date: str, *, allow_existing: bool = False) -> Path | None:
     """Atomic single-flight guard: only one execution process per trade date.
 
     Uses O_CREAT|O_EXCL (open with 'x' mode) so the file-create is atomic on
@@ -676,6 +676,14 @@ def _acquire_execution_lock(trade_date: str) -> Path:
         with open(lock_path, "x") as fh:
             fh.write(f"pid={os.getpid()} started_at={dt.datetime.now(ZoneInfo('UTC')).isoformat()}\n")
     except FileExistsError:
+        if allow_existing:
+            logger.warning(
+                "[LOCK][CONTINUATION] Existing primary execution lock found for %s (%s); "
+                "continuing in explicit buy-only continuation mode.",
+                trade_date,
+                lock_path,
+            )
+            return None
         logger.error(
             "[LOCK] Execution lock already held for %s (%s) — "
             "a second process attempted to run. Aborting to prevent duplicate orders.",
@@ -783,7 +791,10 @@ def main(argv: list[str] | None = None) -> int:
     trade_date = _trade_date()
 
     # --- Atomic single-flight guard (prevents TOCTOU duplicate submissions) ---
-    lock_path = _acquire_execution_lock(trade_date)
+    lock_path = _acquire_execution_lock(
+        trade_date,
+        allow_existing=args.continuation_mode == "buy_only",
+    )
     release_lock_on_exit = False
     pretrade_policy: dict[str, object] | None = None
     timing: dict[str, object] | None = None
@@ -954,6 +965,17 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["ALLOW_PARTIAL_BUY_CONTINUATION"] = "1"
 
         exact_precomputed_execution = _env_truthy("PRECOMPUTE_EXECUTE_EXACT_PLAN")
+        planned_execution_trades = (
+            list((planned_payload or {}).get("trades") or [])
+            if (exact_precomputed_execution or args.continuation_mode == "buy_only")
+            else None
+        )
+        if args.continuation_mode == "buy_only" and planned_execution_trades is not None:
+            planned_execution_trades = [
+                dict(trade)
+                for trade in planned_execution_trades
+                if str((trade or {}).get("side") or "").upper() == "BUY"
+            ]
         adjusted_signals_path, adjusted_cash_target_weight = _apply_pre_execution_risk_controls(
             run_root=run_root,
             trade_date=trade_date,
@@ -976,11 +998,7 @@ def main(argv: list[str] | None = None) -> int:
                 constraints={
                     "cash_target_weight": adjusted_cash_target_weight,
                 },
-                precomputed_trade_plan=(
-                    list((planned_payload or {}).get("trades") or [])
-                    if exact_precomputed_execution
-                    else None
-                ),
+                precomputed_trade_plan=planned_execution_trades,
             )
         finally:
             if prior_run_output_root is None:
@@ -989,7 +1007,9 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ["RUN_OUTPUT_ROOT"] = prior_run_output_root
         paper_summary["run_id"] = run_id
         paper_summary["precomputed_execution_mode"] = (
-            "exact_payload" if exact_precomputed_execution else "rebuilt_from_signals"
+            "buy_only_continuation"
+            if args.continuation_mode == "buy_only"
+            else ("exact_payload" if exact_precomputed_execution else "rebuilt_from_signals")
         )
         paper_summary["planned_payload_trade_count"] = int(len((planned_payload or {}).get("trades") or []))
         first_submit_et = _first_submit_et(paper_summary)

@@ -211,7 +211,8 @@ def test_pretrade_self_heal_releases_same_day_lock(tmp_path, monkeypatch) -> Non
 
     lock_path = tmp_path / "2026-03-26.lock"
 
-    def _fake_acquire(_trade_date: str) -> Path:
+    def _fake_acquire(_trade_date: str, allow_existing: bool = False) -> Path:
+        del allow_existing
         lock_path.write_text("locked\n", encoding="utf-8")
         return lock_path
 
@@ -429,7 +430,7 @@ def test_main_pending_buy_leg_does_not_report_clean_success(tmp_path, monkeypatc
     monkeypatch.setattr(live_exec, "run_paper_day", lambda **_kwargs: dict(paper_summary))
     monkeypatch.setattr(live_exec.dqr, "build_execution_email_payload", _build_payload)
     monkeypatch.setattr(live_exec, "evaluate_live_retry", lambda **_kwargs: {"retry_allowed": False, "retry_reason": ""})
-    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda _trade_date: tmp_path / "execution.lock")
+    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda _trade_date, allow_existing=False: tmp_path / "execution.lock")
 
     exit_code = live_exec.main([])
 
@@ -445,3 +446,102 @@ def test_main_pending_buy_leg_does_not_report_clean_success(tmp_path, monkeypatc
     assert [order["ticker"] for order in payload["pending_buy_orders"]] == ["ELV", "SLB"]
     assert payload["submitted_sell_count"] == 1
     assert payload["submitted_buy_count"] == 0
+
+
+def test_buy_only_continuation_filters_precompute_plan_to_buys(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-05-27")
+    monkeypatch.delenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", raising=False)
+    live_exec = _load_module(tmp_path)
+
+    planned_trades = [
+        {"ticker": "CVS", "side": "SELL", "shares": 1, "price": 60.0, "notional": 60.0, "order_id": "run:CVS:SELL"},
+        {"ticker": "ELV", "side": "BUY", "shares": 1, "price": 250.0, "notional": 250.0, "order_id": "run:ELV:BUY"},
+        {"ticker": "SLB", "side": "BUY", "shares": 2, "price": 150.0, "notional": 300.0, "order_id": "run:SLB:BUY"},
+    ]
+    snapshot = {
+        "holdings": [{"ticker": "CVS", "shares": 1, "last_price": 60.0}],
+        "risk_levels": [],
+        "proposed_trades": [dict(item) for item in planned_trades],
+        "performance_diagnostics": {"current_equity": 10000.0},
+        "target_cash_weight": 0.05,
+    }
+    planned_payload = {"trade_date": "2026-05-27", "mode": "PAPER", "trades": planned_trades}
+    observed_run_paper_day: dict[str, object] = {}
+    paper_summary = {
+        "trading_mode": "PAPER",
+        "market_status": "OPEN",
+        "planned_for": "2026-05-27T09:35:00-04:00",
+        "execution_trades": [dict(item) for item in planned_trades if item["side"] == "BUY"],
+        "trade_plan": [dict(item) for item in planned_trades if item["side"] == "BUY"],
+        "alpaca_submissions": [
+            {"ticker": "ELV", "side": "BUY", "quantity": 1, "order_id": "run:ELV:BUY", "submitted_at": "2026-05-27T10:05:00-04:00"},
+            {"ticker": "SLB", "side": "BUY", "quantity": 2, "order_id": "run:SLB:BUY", "submitted_at": "2026-05-27T10:05:00-04:00"},
+        ],
+        "alpaca_submission_summary": {
+            "submit_success": 2,
+            "submit_failed": 0,
+            "sell_phase_submitted": 0,
+            "buy_phase_submitted": 2,
+            "buy_phase_planned": 2,
+        },
+        "budget_skipped_orders": [],
+        "capital_budget": {
+            "requested_buy_notional": 550.0,
+            "allowed_buy_notional": 550.0,
+            "capital_constraint_triggered": False,
+            "clipped_or_deferred_buys_count": 0,
+        },
+        "cash": 3273.0,
+        "execution_outcome": None,
+        "execution_reason": None,
+        "cash_rebalance_status": "complete",
+        "execution_submitted_symbols": ["ELV", "SLB"],
+        "alpaca_positions_snapshot": [],
+    }
+
+    def _fake_run_paper_day(**kwargs):
+        observed_run_paper_day.update(kwargs)
+        return dict(paper_summary)
+
+    def _build_payload(*, trade_date, daily_snapshot, paper_summary):
+        return {
+            "trade_date": trade_date,
+            "mode": "PAPER",
+            "execution_status": "READY",
+            "execution_outcome": paper_summary.get("execution_outcome"),
+            "execution_reason": paper_summary.get("execution_reason"),
+            "trades": [
+                {"ticker": "ELV", "side": "BUY", "shares": 1, "order_id": "run:ELV:BUY"},
+                {"ticker": "SLB", "side": "BUY", "shares": 2, "order_id": "run:SLB:BUY"},
+            ],
+            "planner_intended_trades_count": 3,
+            "execution_eligible_trades_count": 2,
+            "orders_submitted_count": 2,
+            "submitted_count": 2,
+            "accepted_count": 2,
+            "rejected_count": 0,
+        }
+
+    monkeypatch.setattr(live_exec, "load_precompute_inputs", lambda **_kwargs: (snapshot, planned_payload, {"version": 1}, None))
+    monkeypatch.setattr(live_exec, "pre_trade_reconcile_and_classify", lambda **_kwargs: {"reconciliation_decision": "PASS"})
+    monkeypatch.setattr(live_exec, "_apply_pre_execution_risk_controls", lambda **_kwargs: ("signals.json", 0.05))
+    monkeypatch.setattr(live_exec, "run_paper_day", _fake_run_paper_day)
+    monkeypatch.setattr(live_exec.dqr, "build_execution_email_payload", _build_payload)
+    monkeypatch.setattr(live_exec, "evaluate_live_retry", lambda **_kwargs: {"retry_allowed": False, "retry_reason": ""})
+    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda _trade_date, allow_existing=False: None)
+
+    exit_code = live_exec.main(["--continuation-mode", "buy_only"])
+
+    assert exit_code == 0
+    assert observed_run_paper_day["precomputed_trade_plan"] == [
+        {"ticker": "ELV", "side": "BUY", "shares": 1, "price": 250.0, "notional": 250.0, "order_id": "run:ELV:BUY"},
+        {"ticker": "SLB", "side": "BUY", "shares": 2, "price": 150.0, "notional": 300.0, "order_id": "run:SLB:BUY"},
+    ]
+    payload = json.loads(
+        (tmp_path / "outputs" / "runs" / "run-self-heal" / "execution_payload.json").read_text(encoding="utf-8")
+    )
+    assert payload["operator_execution_status"] == "executed"
+    assert payload["pending_buy_count"] == 0
+    assert payload["submitted_buy_count"] == 2
+    assert payload["submitted_sell_count"] == 0

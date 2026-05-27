@@ -153,7 +153,11 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
 
     observed_run_paper_day: dict[str, object] = {}
 
-    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda trade_date: Path(tmp_path / f"{trade_date}.lock"))
+    monkeypatch.setattr(
+        live_exec,
+        "_acquire_execution_lock",
+        lambda trade_date, allow_existing=False: Path(tmp_path / f"{trade_date}.lock"),
+    )
     monkeypatch.setattr(live_exec, "get_run_id", lambda: run_id)
     monkeypatch.setattr(live_exec, "get_run_dir", lambda _run_id: run_root)
     monkeypatch.setattr(
@@ -310,7 +314,8 @@ def test_main_stale_price_exception_finalizes_pointer_and_releases_lock(tmp_path
     planned_payload = {"trade_date": "2026-04-03", "mode": "PAPER", "trades": []}
     lock_path = tmp_path / "2026-04-03.lock"
 
-    def _fake_acquire(_trade_date: str) -> Path:
+    def _fake_acquire(_trade_date: str, allow_existing: bool = False) -> Path:
+        del allow_existing
         lock_path.write_text("locked\n", encoding="utf-8")
         return lock_path
 
