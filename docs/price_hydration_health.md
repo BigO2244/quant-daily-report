@@ -93,3 +93,13 @@ incomplete packets only to diagnose source-readiness behavior.
 
 These fields explain whether the system is simply early, stale but recoverable,
 partial, or structurally broken.
+
+## Price Cache Coverage
+
+FR-002 read-only coverage diagnostics live in `docs/price_cache_coverage.md`
+and `scripts.research.check_price_cache_coverage`.
+
+Hydration health explains whether the post-close refresh process completed.
+Cache coverage explains what symbols and dates are actually present in the
+parquet cache. Both are advisory observability surfaces; neither hydrates data
+or changes runtime behavior.
