@@ -29,7 +29,11 @@ Fully deployed history and reviewed deferred items belong in
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
 | FR-028 shadow execution timing semantics correction candidate | Accounting Correctness / Promotion Analytics | `DEPLOYED_OBSERVING` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | observing | Phase C adds research-only promotion readiness sidecars: `longitudinal_metrics.json`, `stability_surface.json`, `promotion_readiness.json`, and `promotion_readiness.md`; no historical migration, execution, broker, cron, strategy selection, or capital-allocation change. | Revert FR-028 Phase C commit; ignore new dated promotion-readiness sidecars and continue reading existing `shadow_evaluation.json` / `comparison.json`. |
 | FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `BACKLOG` | MEDIUM | FR-028 | not_started | Future promotion gates should consume provenance, exposure, and timing confidence after accounting semantics are governed. | Revert promotion-readiness checks to existing scorecard criteria. |
-| FR-031 execution integrity contract | Execution Integrity | `PROMOTION_READY` | HIGH | HOTFIX-2026-05-27, FR-021, broker/order evidence | local_validation_passed | Additive validator implemented locally; writes `audit/execution_integrity.json` and compact operator-summary integrity fields without changing order routing. | Revert FR-031 implementation commit; ignore existing audit artifacts. |
+| FR-031 execution integrity contract | Execution Integrity | `DEPLOYED_OBSERVING` | HIGH | HOTFIX-2026-05-27, FR-021, broker/order evidence | observing | Additive validator deployed; writes `audit/execution_integrity.json` and compact operator-summary integrity fields without changing order routing. | Revert FR-031 implementation commits; ignore existing audit artifacts. |
+| FR-032 execution lifecycle observability hardening | Execution Observability | `READY` | LOW | FR-031, 2026-05-28 recovery evidence | ready_for_low_risk_implementation | Backfill or generate lifecycle timeline artifacts from existing run artifacts when missing; improve latest-run/operator timeline usability without invoking execution. | Revert helper commit; delete only helper-generated timeline artifacts if they were created for validation. |
+| FR-033 dashboard/operator asset alignment | Operator Surfaces | `BACKLOG` | LOW | FR-031, dashboard architecture review | not_started | Resolve stale dashboard execution-integrity asset tests or align them to the current dashboard architecture without redesigning dashboard UI. | Revert test/asset alignment commit; preserve dashboard publishing behavior. |
+| FR-034 post-submit cash drift reconciliation review | Execution Accounting Review | `READY` | LOW | FR-031, latest paper execution artifacts | ready_for_audit | Determine whether `cash_target_drift` clears after fills/reconciliation, represents expected pending-fill drift, or indicates accounting/reconciliation mismatch. | Docs-only/audit rollback; no runtime behavior should change. |
+| FR-035 execution contract documentation hardening | Execution Documentation | `READY` | LOW | 2026-05-28 recovery, FR-031 | ready_for_docs | Canonicalize execution source, price basis, freshness scope, fail-closed boundaries, and operator provenance semantics. | Revert docs commit; runtime behavior unchanged. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -67,20 +71,22 @@ procedures are proven.
 
 ## Immediate Focus
 
-1. Promote FR-031 only after review of local validation, generated audit schema,
-   and rollback boundary. It remains separate from HOTFIX-2026-05-27: the
-   hotfix record preserves incident evidence, while FR-031 adds the durable
-   guardrail.
-2. Observe FR-028 Phase C for deterministic sidecar generation, conservative
+1. Implement FR-032 first because it is read-only/observability work and
+   directly closes the operator visibility gap from the 2026-05-28 recovery:
+   existing successful runs may predate timeline artifact generation.
+2. Keep FR-031 in `DEPLOYED_OBSERVING` until multiple execution runs show
+   integrity status and findings are accurate, visible, and not conflated with
+   broker/order-routing outcomes.
+3. Observe FR-028 Phase C for deterministic sidecar generation, conservative
    readiness classification, no prior-day mutation, and MCP consumption of
    artifact-backed evidence. Keep FR-029 in Friday-governed Track B until Phase
    C evidence is stable.
-3. Treat FR-030 as deployed telemetry consumption, not promotion logic.
-4. Focus the next research-operations bottleneck on post-close hydration and
+4. Treat FR-030 as deployed telemetry consumption, not promotion logic.
+5. Focus the next research-operations bottleneck on post-close hydration and
    source readiness, not packet rendering.
-5. Continue to separate MCP planning from FR-028 accounting/timing work except
+6. Continue to separate MCP planning from FR-028 accounting/timing work except
    for read-only MCP consumption of Phase C research artifacts.
-6. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
+7. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
    source-readiness, and governance reviews without changing execution paths.
 
 ## Roadmap Boundaries
