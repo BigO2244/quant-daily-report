@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +51,7 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "query_registry": query_registry,
         "lineage": lineage,
         "daily_operator_brief": daily_operator_brief,
+        "artifact_status": artifact_status,
     }
     if name not in dispatch:
         return _response("ERROR", _resolve_db_path(arguments, context), warnings=[f"unknown tool: {name}"])
@@ -359,6 +362,48 @@ def daily_operator_brief(*, context: ToolContext | None = None, db_path: str | N
         registry.close()
 
 
+def artifact_status(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    limit: int | None = 10,
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    root = Path(outputs_root) if outputs_root else Path("outputs")
+    resolved_limit = _safe_limit(limit)
+    warnings: list[str] = []
+
+    families = _artifact_family_status(root, resolved_limit)
+    latest_precompute = _latest_precompute_status(root)
+    latest_execution = _latest_execution_status(root)
+    latest_broker = _latest_broker_status(root)
+    latest_shadow = _latest_shadow_status(root)
+    latest_research_packet = _latest_research_packet_status(root)
+
+    for section_name, section in [
+        ("precompute", latest_precompute),
+        ("execution", latest_execution),
+        ("broker_confirmation", latest_broker),
+        ("shadow", latest_shadow),
+        ("research_packet", latest_research_packet),
+    ]:
+        if section.get("status") != "OK":
+            warnings.append(f"{section_name}: {section.get('status')}")
+
+    return _response(
+        "OK",
+        context.db_path,
+        warnings=warnings,
+        outputs_root=str(root),
+        artifact_families=families,
+        latest_precompute=latest_precompute,
+        latest_execution=latest_execution,
+        latest_broker_confirmation=latest_broker,
+        latest_shadow=latest_shadow,
+        latest_research_packet=latest_research_packet,
+    )
+
+
 def _response(status: str, db_path: Path, warnings: list[str] | None = None, **payload: Any) -> dict[str, Any]:
     response = {
         "status": status,
@@ -569,3 +614,206 @@ def _governance_open_item(item: dict[str, Any], *, include_deferred: bool = Fals
     if status == "REVIEWED_DEFERRED":
         return include_deferred or resolved
     return blast_radius in {"HIGH", "CRITICAL"}
+
+
+def _artifact_family_status(root: Path, limit: int) -> list[dict[str, Any]]:
+    families = [
+        ("precompute", root / "precompute", "dated_directories"),
+        ("execution_runs", root / "runs", "run_directories"),
+        ("broker", root / "broker", "files"),
+        ("workflow", root / "workflow", "dated_directories"),
+        ("shadow_candidates", root / "shadow_candidates", "dated_directories"),
+        ("research_packets", root / "research_packets", "dated_directories"),
+        ("overnight_signals", root / "overnight_signals", "json_files"),
+    ]
+    payload = []
+    for name, path, kind in families:
+        children = _family_children(path, kind)
+        payload.append(
+            {
+                "family": name,
+                "root": str(path),
+                "exists": path.exists(),
+                "kind": kind,
+                "count": len(children),
+                "latest": [str(item) for item in children[:limit]],
+            }
+        )
+    return payload
+
+
+def _family_children(path: Path, kind: str) -> list[Path]:
+    if not path.exists():
+        return []
+    if kind == "dated_directories":
+        children = [
+            child
+            for child in path.iterdir()
+            if child.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", child.name)
+        ]
+    elif kind == "run_directories":
+        children = [
+            child
+            for child in path.iterdir()
+            if child.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}T", child.name)
+        ]
+    elif kind == "json_files":
+        children = [child for child in path.glob("*.json") if child.is_file()]
+    else:
+        children = [child for child in path.iterdir() if child.is_file()]
+    return sorted(children, key=lambda item: item.name, reverse=True)
+
+
+def _latest_dated_dir(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    candidates = [
+        child
+        for child in path.iterdir()
+        if child.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", child.name)
+    ]
+    return sorted(candidates, key=lambda item: item.name, reverse=True)[0] if candidates else None
+
+
+def _latest_named_dir(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    candidates = [
+        child
+        for child in path.iterdir()
+        if child.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}T", child.name)
+    ]
+    return sorted(candidates, key=lambda item: item.name, reverse=True)[0] if candidates else None
+
+
+def _file_probe(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "size_bytes": path.stat().st_size if path.exists() and path.is_file() else None,
+    }
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _latest_precompute_status(root: Path) -> dict[str, Any]:
+    latest = _latest_dated_dir(root / "precompute")
+    if latest is None:
+        return {"status": "NEEDS_OPERATOR", "reason": "no precompute bundle found", "path": str(root / "precompute")}
+    required = ["contract.json", "daily_snapshot.json", "signals.json", "planned_execution_payload.json"]
+    files = {name: _file_probe(latest / name) for name in required}
+    missing = [name for name, probe in files.items() if not probe["exists"]]
+    contract = _read_json(latest / "contract.json")
+    return {
+        "status": "OK" if not missing else "NEEDS_OPERATOR",
+        "trade_date": latest.name,
+        "path": str(latest),
+        "missing_required": missing,
+        "files": files,
+        "contract_status": contract.get("status") or contract.get("phase_status"),
+        "run_id": contract.get("run_id"),
+    }
+
+
+def _latest_execution_status(root: Path) -> dict[str, Any]:
+    latest = _latest_named_dir(root / "runs")
+    if latest is None:
+        return {"status": "NEEDS_OPERATOR", "reason": "no execution run directory found", "path": str(root / "runs")}
+    payload = _read_json(latest / "execution_payload.json")
+    results = _read_json(latest / "execution_results.json")
+    summary = _read_json(latest / "operator_summary.json")
+    integrity = _read_json(latest / "audit" / "execution_integrity.json")
+    files = {
+        "execution_payload": _file_probe(latest / "execution_payload.json"),
+        "execution_results": _file_probe(latest / "execution_results.json"),
+        "operator_summary": _file_probe(latest / "operator_summary.json"),
+        "execution_integrity": _file_probe(latest / "audit" / "execution_integrity.json"),
+    }
+    return {
+        "status": "OK" if files["operator_summary"]["exists"] or files["execution_payload"]["exists"] else "NEEDS_OPERATOR",
+        "run_id": payload.get("run_id") or results.get("run_id") or summary.get("run_id") or latest.name,
+        "trade_date": payload.get("trade_date") or results.get("trade_date") or summary.get("trade_date"),
+        "path": str(latest),
+        "execution_status": summary.get("terminal_status") or results.get("status") or payload.get("status") or payload.get("execution_status"),
+        "operator_execution_status": summary.get("operator_execution_status") or payload.get("operator_execution_status"),
+        "integrity_status": integrity.get("status") or summary.get("execution_integrity_status"),
+        "files": files,
+    }
+
+
+def _latest_broker_status(root: Path) -> dict[str, Any]:
+    broker = root / "broker"
+    snapshot = root / "broker_snapshot"
+    if not broker.exists() and not snapshot.exists():
+        return {"status": "NEEDS_OPERATOR", "reason": "broker artifact roots missing", "paths": [str(broker), str(snapshot)]}
+    files = {
+        "broker_snapshot_latest": _file_probe(broker / "broker_snapshot_latest.json"),
+        "posttrade_positions": _file_probe(broker / "posttrade_positions.json"),
+        "posttrade_account": _file_probe(broker / "posttrade_account.json"),
+        "latest_snapshot_dir_file_count": len([item for item in snapshot.glob("*.json")]) if snapshot.exists() else 0,
+    }
+    recon_files = sorted(broker.glob("recon_*.json"), key=lambda item: item.name, reverse=True) if broker.exists() else []
+    latest_recon = recon_files[0] if recon_files else None
+    return {
+        "status": "OK" if any(probe.get("exists") for probe in files.values() if isinstance(probe, dict)) or latest_recon else "NEEDS_OPERATOR",
+        "path": str(broker),
+        "latest_reconciliation": _file_probe(latest_recon) if latest_recon else None,
+        "files": files,
+    }
+
+
+def _latest_shadow_status(root: Path) -> dict[str, Any]:
+    latest = _latest_dated_dir(root / "shadow_candidates")
+    workflow = _latest_dated_dir(root / "workflow")
+    if latest is None:
+        return {"status": "NEEDS_OPERATOR", "reason": "no dated shadow candidate directory found", "path": str(root / "shadow_candidates")}
+    files = {
+        "comparison_json": _file_probe(latest / "comparison.json"),
+        "comparison_md": _file_probe(latest / "comparison.md"),
+        "shadow_evaluation": _file_probe(latest / "shadow_evaluation.json"),
+        "summary": _file_probe(latest / "summary.json"),
+    }
+    workflow_files = {}
+    if workflow is not None:
+        workflow_files = {
+            "shadow": _file_probe(workflow / "shadow.json"),
+            "shadow_generate": _file_probe(workflow / "shadow_generate.json"),
+            "shadow_latest": _file_probe(workflow / "shadow_latest.json"),
+            "shadow_reconciliation": _file_probe(workflow / "shadow_reconciliation.json"),
+        }
+    return {
+        "status": "OK" if files["comparison_json"]["exists"] or files["comparison_md"]["exists"] else "NEEDS_OPERATOR",
+        "trade_date": latest.name,
+        "path": str(latest),
+        "files": files,
+        "workflow_trade_date": workflow.name if workflow else None,
+        "workflow_files": workflow_files,
+    }
+
+
+def _latest_research_packet_status(root: Path) -> dict[str, Any]:
+    latest = _latest_dated_dir(root / "research_packets")
+    if latest is None:
+        return {"status": "NEEDS_OPERATOR", "reason": "no research packet directory found", "path": str(root / "research_packets")}
+    packet = _read_json(latest / "packet.json")
+    summary = _read_json(latest / "summary.json")
+    return {
+        "status": "OK" if (latest / "packet.json").exists() or (latest / "summary.json").exists() else "NEEDS_OPERATOR",
+        "trade_date": latest.name,
+        "path": str(latest),
+        "packet_status": packet.get("status") or summary.get("status"),
+        "confidence": packet.get("confidence") or summary.get("confidence"),
+        "source_readiness": packet.get("source_readiness") or summary.get("source_readiness"),
+        "files": {
+            "packet_json": _file_probe(latest / "packet.json"),
+            "summary_json": _file_probe(latest / "summary.json"),
+            "packet_md": _file_probe(latest / "packet.md"),
+            "packet_html": _file_probe(latest / "packet.html"),
+        },
+    }

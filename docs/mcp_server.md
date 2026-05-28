@@ -62,9 +62,18 @@ Local smoke:
 - `registry_summary`
 - `query_registry`
 - `lineage`
+- `daily_operator_brief`
+- `artifact_status`
 
 Every tool returns a JSON object with `status`, `db_path`, `queried_at`,
 `warnings`, and `findings`.
+
+`artifact_status` is the direct read-only filesystem inspection surface. It
+does not build or require a registry DB. It lists artifact family roots and
+summarizes the latest precompute bundle, execution run, broker/confirmation
+artifacts, shadow comparison/readiness artifacts, and research packet. Missing
+artifact roots return `NEEDS_OPERATOR` style warnings instead of triggering any
+repair workflow.
 
 ## Example JSON-RPC Calls
 
@@ -125,6 +134,13 @@ Debug raw governance duplicates:
     }
   }
 }
+```
+
+Inspect current artifacts without rebuilding the registry:
+
+```bash
+.venv/bin/python3 scripts/research_registry_cli.py artifact-status --outputs-root outputs --json
+.venv/bin/python3 scripts/research_registry_cli.py artifact-status --outputs-root outputs --markdown
 ```
 
 ## Recommended VM Usage

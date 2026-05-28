@@ -19,7 +19,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from research_registry.ingestion import ingest_artifact_family
-from research_registry.mcp_server.tools import daily_operator_brief
+from research_registry.mcp_server.tools import artifact_status, daily_operator_brief
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
 
@@ -428,6 +428,60 @@ def cmd_daily_operator_brief(args: argparse.Namespace) -> int:
     return 0
 
 
+def _format_artifact_status_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# MCP Artifact Status",
+        "",
+        f"- Status: `{payload.get('status')}`",
+        f"- Outputs root: `{payload.get('outputs_root')}`",
+        f"- Queried at: `{payload.get('queried_at')}`",
+        "",
+        "## Latest Artifacts",
+    ]
+    sections = [
+        ("Precompute", payload.get("latest_precompute") or {}),
+        ("Execution", payload.get("latest_execution") or {}),
+        ("Broker / Confirmation", payload.get("latest_broker_confirmation") or {}),
+        ("Shadow", payload.get("latest_shadow") or {}),
+        ("Research Packet", payload.get("latest_research_packet") or {}),
+    ]
+    for label, section in sections:
+        lines.extend(
+            [
+                "",
+                f"### {label}",
+                f"- Status: `{section.get('status')}`",
+                f"- Path: `{section.get('path')}`",
+            ]
+        )
+        if section.get("trade_date"):
+            lines.append(f"- Trade date: `{section.get('trade_date')}`")
+        if section.get("run_id"):
+            lines.append(f"- Run ID: `{section.get('run_id')}`")
+        if section.get("reason"):
+            lines.append(f"- Reason: {section.get('reason')}")
+        if section.get("missing_required"):
+            lines.append(f"- Missing required: `{', '.join(section.get('missing_required') or [])}`")
+    lines.extend(["", "## Artifact Families", ""])
+    for family in payload.get("artifact_families") or []:
+        lines.append(
+            f"- `{family.get('family')}`: count={family.get('count')} root=`{family.get('root')}`"
+        )
+    if payload.get("warnings"):
+        lines.extend(["", "## Warnings", ""])
+        lines.extend(f"- {warning}" for warning in payload["warnings"])
+    return "\n".join(lines) + "\n"
+
+
+def cmd_artifact_status(args: argparse.Namespace) -> int:
+    payload = artifact_status(outputs_root=args.outputs_root, limit=args.limit)
+    if args.markdown:
+        print(_format_artifact_status_markdown(payload))
+    else:
+        _print_json(payload)
+    return 0
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     manifest = _load_manifest(Path(args.manifest))
     registry = _open_registry(Path(args.db))
@@ -765,6 +819,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     daily_brief.add_argument("--db", required=True, help="SQLite registry path to open.")
     daily_brief.set_defaults(func=cmd_daily_operator_brief)
+
+    artifact_status_cmd = subparsers.add_parser(
+        "artifact-status",
+        help="Inspect latest Caerus artifact families without writing or rebuilding.",
+    )
+    artifact_status_cmd.add_argument("--outputs-root", default="outputs")
+    artifact_status_cmd.add_argument("--limit", type=int, default=10)
+    artifact_status_cmd.add_argument("--json", action="store_true", help="Emit JSON output (default).")
+    artifact_status_cmd.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
+    artifact_status_cmd.set_defaults(func=cmd_artifact_status)
 
     build_caerus = subparsers.add_parser(
         "build-caerus-registry",

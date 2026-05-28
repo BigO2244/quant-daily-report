@@ -80,4 +80,15 @@ TOOL_DEFINITIONS: list[dict] = [
         "description": "Return a compact read-only morning/evening operator brief.",
         "inputSchema": {"type": "object", "properties": {"db_path": {"type": "string"}}},
     },
+    {
+        "name": "artifact_status",
+        "description": "Inspect latest Caerus artifact families directly from the read-only outputs tree.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "limit": {"type": "integer", "default": 10, "minimum": 0},
+            },
+        },
+    },
 ]

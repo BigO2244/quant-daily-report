@@ -142,6 +142,7 @@ def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
         "query_registry",
         "lineage",
         "daily_operator_brief",
+        "artifact_status",
     }.issubset(names)
 
 
@@ -330,3 +331,71 @@ def test_daily_operator_brief_cli_and_no_source_mutation(tmp_path: Path, capsys)
     assert payload["latest_run"]["run_id"] == "run-20260527-warn"
     assert payload["execution_integrity"]["status"] == "WARN_FAIL_PRESENT"
     assert {path: path.read_bytes() for path in source_files} == before
+
+
+def _artifact_status_fixture(tmp_path: Path) -> Path:
+    outputs = tmp_path / "outputs"
+    precompute = outputs / "precompute" / "2026-05-28"
+    _write_json(precompute / "contract.json", {"trade_date": "2026-05-28", "status": "READY", "run_id": "precompute-run"})
+    _write_json(precompute / "daily_snapshot.json", {"trade_date": "2026-05-28"})
+    _write_json(precompute / "signals.json", {"trade_date": "2026-05-28"})
+    _write_json(precompute / "planned_execution_payload.json", {"trade_date": "2026-05-28"})
+
+    run = outputs / "runs" / "2026-05-28T093500-0400_phase6"
+    _write_json(run / "execution_payload.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "execution_status": "EXECUTED"})
+    _write_json(run / "execution_results.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "status": "EXECUTED"})
+    _write_json(run / "operator_summary.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "terminal_status": "success"})
+    _write_json(run / "audit" / "execution_integrity.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "status": "OK"})
+
+    broker = outputs / "broker"
+    _write_json(broker / "broker_snapshot_latest.json", {"trade_date": "2026-05-28"})
+    _write_json(broker / "recon_posttrade_2026-05-28.json", {"trade_date": "2026-05-28", "status": "OK"})
+
+    shadow = outputs / "shadow_candidates" / "2026-05-28"
+    _write_json(shadow / "comparison.json", {"trade_date": "2026-05-28"})
+    _write_text(shadow / "comparison.md", "# Shadow\n")
+    workflow = outputs / "workflow" / "2026-05-28"
+    _write_json(workflow / "shadow.json", {"trade_date": "2026-05-28", "status": "OK"})
+    _write_json(workflow / "shadow_generate.json", {"trade_date": "2026-05-28", "status": "OK"})
+    _write_json(workflow / "shadow_latest.json", {"trade_date": "2026-05-28", "status": "OK"})
+    _write_json(workflow / "shadow_reconciliation.json", {"trade_date": "2026-05-28", "status": "OK"})
+
+    packet = outputs / "research_packets" / "2026-05-28"
+    _write_json(packet / "packet.json", {"trade_date": "2026-05-28", "status": "READY", "confidence": "LOW"})
+    _write_json(packet / "summary.json", {"trade_date": "2026-05-28", "status": "READY"})
+    _write_json(outputs / "overnight_signals" / "2026-05-28.json", {"trade_date": "2026-05-28"})
+    return outputs
+
+
+def test_artifact_status_discovers_latest_artifacts_read_only(tmp_path: Path) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+    source_files = [path for path in outputs.rglob("*") if path.is_file()]
+    before = {path: path.read_bytes() for path in source_files}
+
+    payload = call_tool("artifact_status", {"outputs_root": str(outputs), "limit": 3})
+
+    assert payload["status"] == "OK"
+    assert payload["warnings"] == []
+    assert payload["latest_precompute"]["trade_date"] == "2026-05-28"
+    assert payload["latest_precompute"]["missing_required"] == []
+    assert payload["latest_execution"]["run_id"] == "phase6-run"
+    assert payload["latest_execution"]["integrity_status"] == "OK"
+    assert payload["latest_broker_confirmation"]["status"] == "OK"
+    assert payload["latest_shadow"]["trade_date"] == "2026-05-28"
+    assert payload["latest_research_packet"]["packet_status"] == "READY"
+    families = {family["family"]: family for family in payload["artifact_families"]}
+    assert families["precompute"]["count"] == 1
+    assert families["overnight_signals"]["count"] == 1
+    assert {path: path.read_bytes() for path in source_files} == before
+
+
+def test_artifact_status_cli_markdown_and_missing_artifacts(tmp_path: Path, capsys) -> None:
+    outputs = tmp_path / "outputs"
+    (outputs / "precompute").mkdir(parents=True)
+
+    assert research_registry_cli.main(["artifact-status", "--outputs-root", str(outputs), "--markdown"]) == 0
+    markdown = capsys.readouterr().out
+
+    assert "# MCP Artifact Status" in markdown
+    assert "NEEDS_OPERATOR" in markdown
+    assert "precompute: NEEDS_OPERATOR" in markdown
