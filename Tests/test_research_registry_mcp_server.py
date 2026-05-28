@@ -439,6 +439,19 @@ def test_operator_daily_summary_missing_artifact_needs_operator(tmp_path: Path) 
     assert payload["summary"]["what_happened_today"]["execution_ran"] is False
 
 
+def test_operator_daily_summary_requires_execution_results_and_integrity(tmp_path: Path) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+    (outputs / "runs" / "2026-05-28T093500-0400_phase6" / "execution_results.json").unlink()
+    (outputs / "runs" / "2026-05-28T093500-0400_phase6" / "audit" / "execution_integrity.json").unlink()
+
+    payload = call_tool("operator_daily_summary", {"outputs_root": str(outputs), "trade_date": "2026-05-28"})
+
+    assert payload["status"] == "NEEDS_OPERATOR"
+    assert payload["summary"]["what_happened_today"]["execution_ran"] is False
+    assert "execution_results artifact is missing for 2026-05-28" in payload["warnings"]
+    assert "execution integrity artifact is missing for 2026-05-28" in payload["warnings"]
+
+
 def test_artifact_drilldown_omits_raw_large_payloads_and_is_read_only(tmp_path: Path, capsys) -> None:
     outputs = _artifact_status_fixture(tmp_path)
     secret = "DO_NOT_DUMP_PHASE6_SECRET"

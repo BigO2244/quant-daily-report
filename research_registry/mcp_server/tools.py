@@ -428,7 +428,7 @@ def operator_daily_summary(
         "what_happened_today": {
             "trade_date": target_date,
             "precompute_ran": _section_current(sections["precompute"], target_date),
-            "execution_ran": _section_current(sections["execution"], target_date),
+            "execution_ran": _execution_completed_current(sections["execution"], target_date),
             "broker_recon_present": sections["broker_confirmation"].get("status") == "OK",
             "shadow_ran": _section_current(sections["shadow"], target_date),
             "research_packet_current": _section_current(sections["research_packet"], target_date),
@@ -441,6 +441,12 @@ def operator_daily_summary(
         attention.append(f"precompute is not current for {target_date}")
     if not summary["what_happened_today"]["execution_ran"]:
         attention.append(f"execution is not current for {target_date}")
+    if _section_current(sections["execution"], target_date):
+        execution_files = sections["execution"].get("files") or {}
+        if not (execution_files.get("execution_results") or {}).get("exists"):
+            attention.append(f"execution_results artifact is missing for {target_date}")
+        if not (execution_files.get("execution_integrity") or {}).get("exists"):
+            attention.append(f"execution integrity artifact is missing for {target_date}")
     if not summary["what_happened_today"]["shadow_ran"]:
         attention.append(f"shadow lane is not current for {target_date}")
     if not summary["what_happened_today"]["research_packet_current"]:
@@ -908,3 +914,10 @@ def _latest_research_packet_status(root: Path) -> dict[str, Any]:
 
 def _section_current(section: dict[str, Any], trade_date: str) -> bool:
     return section.get("status") == "OK" and section.get("trade_date") == trade_date
+
+
+def _execution_completed_current(section: dict[str, Any], trade_date: str) -> bool:
+    if not _section_current(section, trade_date):
+        return False
+    files = section.get("files") or {}
+    return bool((files.get("execution_results") or {}).get("exists"))
