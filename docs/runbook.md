@@ -168,6 +168,12 @@ read-only checks for mixed-date evidence, malformed planned orders, surface
 classification, suppressed side-effect visibility, and provenance. It does not
 change the deployed blocking bundle validator or execution behavior.
 
+Execution source and price-freshness semantics live in
+`docs/execution_contract.md`. Cron-driven validated precompute execution should
+use `planned_payload_exact`, `PREV_CLOSE`, `PRECOMPUTE_VALIDATED`, and
+`precompute_bundle` provenance. The stale same-day open-price guard remains
+fail-closed for explicit `rebuilt_from_signals` execution.
+
 ### After VM execution
 
 - `outputs/runs/<RUN_ID>/logs/ci_alpaca_run.log` — full execution log

@@ -19,6 +19,10 @@ The validator is additive in its first version:
 - It does not change execution routing, continuation behavior, or recovery
   eligibility.
 
+Execution source, price basis, freshness scope, and fail-closed execution
+boundaries are defined in `docs/execution_contract.md`. FR-031 audits the
+artifacts produced under that contract; it does not choose the execution source.
+
 ## Inputs
 
 The validator compares these artifacts when available:
