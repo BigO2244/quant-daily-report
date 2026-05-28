@@ -114,3 +114,67 @@ Phase 4 should continue the move from execution automation toward operational
 state governance. The highest-leverage work is still explicit artifact ownership,
 freshness semantics, operator health synthesis, retention policy, validation
 isolation, and documentation hygiene.
+
+
+## 2026-05-28 — Precomputed Execution Source Contract Recovery
+
+## Status: DEPLOYED / VALIDATED
+
+Issue:
+Cron-driven execution halted with `stale_prices` even though the prior-close
+precompute bundle for `trade_date=2026-05-28` was complete and validated. The
+bundle carried `planned_execution_payload.json` with `pricing_source=PREV_CLOSE`,
+`pricing_asof=2026-05-27`, and 12 planned trades, but the runner rebuilt from
+signals because exact planned-payload mode was still opt-in.
+
+Root cause:
+Cron validated the precompute bundle but did not make the canonical
+`planned_execution_payload.trades` the default execution source. Without
+`PRECOMPUTE_EXECUTE_EXACT_PLAN=1`, execution entered the `rebuilt_from_signals`
+path, invoked same-day open-price freshness checks, and correctly failed closed
+on stale open-market prices. The stale-price guard was correct; the execution
+source contract was ambiguous.
+
+Fix:
+- Updated cron execution to use exact planned payload mode by default.
+- Preserved stale same-day open-price fail-closed behavior for
+  `rebuilt_from_signals`.
+- Fixed execution-integrity order lineage matching when intended orders lack
+  generated broker order IDs but payload orders carry them.
+- Fixed `scripts/precompute_bundle_status.py` direct repo-root invocation for
+  operator recovery use.
+- Added deterministic execution lifecycle timeline artifacts for run-level
+  incident review and future real-capital governance.
+- Added explicit execution provenance:
+  - `execution_source=planned_payload_exact`
+  - `planning_price_basis=PREV_CLOSE`
+  - `pricing_asof=2026-05-27`
+  - `execution_price_requirement=PRECOMPUTE_VALIDATED`
+  - `price_freshness_scope=precompute_bundle`
+
+Fix commits:
+- `d003f93` — Fix cron precomputed execution source contract.
+- `fc9c2f0` — Fix execution integrity order lineage matching.
+- `f3399d6` — Fix precompute bundle status direct invocation.
+- `6ae0e12` — Add execution lifecycle timeline artifacts.
+
+Validation:
+- VM fast-forward deployed through `6ae0e12`.
+- Planned-payload-exact paper rerun completed successfully.
+- Final execution provenance recorded `planned_payload_exact`, `PREV_CLOSE`,
+  and `precompute_bundle` freshness scope.
+- Alpaca accepted 13 orders: 13 submitted, 13 accepted, 0 rejected.
+- Execution integrity WARN findings were separated into lineage false positive
+  and real post-submit cash drift observation.
+
+Lesson:
+Execution source, price basis, freshness scope, and integrity findings must be
+explicit and operator-visible. A validated precompute bundle is not enough if
+the downstream runner can silently choose a different execution source. Future
+execution-adjacent fixes should preserve stale-price fail-closed guards while
+making source selection and provenance auditable in a single run narrative.
+
+Non-blocking follow-up:
+Continue observing post-submit cash drift in the execution integrity artifact.
+If drift persists after broker fills and reconciliation, promote it as a small
+accounting/reconciliation FR; do not weaken the current warning globally.
