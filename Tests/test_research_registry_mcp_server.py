@@ -145,6 +145,9 @@ def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
         "artifact_status",
         "operator_daily_summary",
         "artifact_drilldown",
+        "morning_cio_brief",
+        "promotion_readiness",
+        "anomaly_report",
     }.issubset(names)
 
 
@@ -339,9 +342,28 @@ def _artifact_status_fixture(tmp_path: Path) -> Path:
     outputs = tmp_path / "outputs"
     precompute = outputs / "precompute" / "2026-05-28"
     _write_json(precompute / "contract.json", {"trade_date": "2026-05-28", "status": "READY", "run_id": "precompute-run"})
-    _write_json(precompute / "daily_snapshot.json", {"trade_date": "2026-05-28"})
+    _write_json(
+        precompute / "daily_snapshot.json",
+        {
+            "trade_date": "2026-05-28",
+            "vix_regime": "normal",
+            "portfolio_scaling_state": "full",
+            "max_position_weight": 0.2,
+        },
+    )
     _write_json(precompute / "signals.json", {"trade_date": "2026-05-28"})
-    _write_json(precompute / "planned_execution_payload.json", {"trade_date": "2026-05-28"})
+    _write_json(
+        precompute / "planned_execution_payload.json",
+        {
+            "trade_date": "2026-05-28",
+            "trades": [
+                {"ticker": "NVDA", "side": "BUY", "quantity": 3, "target_weight": 0.12},
+                {"ticker": "ELV", "side": "SELL", "quantity": 2, "target_weight": 0.0},
+            ],
+            "turnover": 0.08,
+            "top5_weight": 0.52,
+        },
+    )
 
     run = outputs / "runs" / "2026-05-28T093500-0400_phase6"
     _write_json(run / "execution_payload.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "execution_status": "EXECUTED"})
@@ -354,7 +376,21 @@ def _artifact_status_fixture(tmp_path: Path) -> Path:
     _write_json(broker / "recon_posttrade_2026-05-28.json", {"trade_date": "2026-05-28", "status": "OK"})
 
     shadow = outputs / "shadow_candidates" / "2026-05-28"
-    _write_json(shadow / "comparison.json", {"trade_date": "2026-05-28"})
+    _write_json(
+        shadow / "comparison.json",
+        {
+            "trade_date": "2026-05-28",
+            "leader": "Lyra",
+            "excess_vs_spy": 0.012,
+            "drawdown": -0.01,
+            "turnover": 0.04,
+            "concentration": 0.48,
+            "strategies": {
+                "caerus_polaris": {"excess_vs_spy": 0.003, "drawdown": -0.02, "turnover": 0.03},
+                "caerus_lyra": {"excess_vs_spy": 0.012, "drawdown": -0.01, "turnover": 0.04},
+            },
+        },
+    )
     _write_text(shadow / "comparison.md", "# Shadow\n")
     workflow = outputs / "workflow" / "2026-05-28"
     _write_json(workflow / "shadow.json", {"trade_date": "2026-05-28", "status": "OK"})
@@ -473,3 +509,67 @@ def test_artifact_drilldown_omits_raw_large_payloads_and_is_read_only(tmp_path: 
     markdown = capsys.readouterr().out
     assert "# MCP Artifact Drilldown" in markdown
     assert secret not in markdown
+
+
+def test_morning_cio_brief_ok_state_and_cli_formats(tmp_path: Path, capsys) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+    source_files = [path for path in outputs.rglob("*") if path.is_file()]
+    before = {path: path.read_bytes() for path in source_files}
+
+    payload = call_tool("morning_cio_brief", {"outputs_root": str(outputs), "trade_date": "2026-05-28"})
+
+    assert payload["status"] == "OK"
+    assert payload["operational_status"]["precompute_ran"] is True
+    assert payload["operational_status"]["execution_ran"] is True
+    assert payload["strategy_leadership"]["current_leader"] == "Lyra"
+    assert payload["portfolio_exposure"]["top_adds"][0]["ticker"] == "NVDA"
+    assert payload["portfolio_exposure"]["top_removes"][0]["ticker"] == "ELV"
+    assert payload["regime_market_context"]["vix_regime"] == "normal"
+    assert {path: path.read_bytes() for path in source_files} == before
+
+    assert research_registry_cli.main(["morning-brief", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--json"]) == 0
+    json_payload = json.loads(capsys.readouterr().out)
+    assert json_payload["strategy_leadership"]["current_leader"] == "Lyra"
+
+    assert research_registry_cli.main(["morning-brief", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--markdown"]) == 0
+    assert "# MCP Morning CIO Brief" in capsys.readouterr().out
+
+
+def test_promotion_readiness_insufficient_evidence_and_cli_formats(tmp_path: Path, capsys) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+
+    payload = call_tool("promotion_readiness", {"outputs_root": str(outputs), "lookback_days": 5})
+
+    assert payload["status"] == "OK"
+    assert payload["current_leader"] == "Lyra"
+    assert payload["valid_observation_window_count"] == 1
+    assert payload["confidence_level"] == "LOW"
+    assert payload["recommendation"] == "NOT_READY"
+    assert payload["cumulative_excess_vs_spy"] == 0.012
+
+    assert research_registry_cli.main(["promotion-readiness", "--outputs-root", str(outputs), "--json"]) == 0
+    json_payload = json.loads(capsys.readouterr().out)
+    assert json_payload["recommendation"] == "NOT_READY"
+
+    assert research_registry_cli.main(["promotion-readiness", "--outputs-root", str(outputs), "--markdown"]) == 0
+    assert "# MCP Promotion Readiness" in capsys.readouterr().out
+
+
+def test_anomaly_report_detects_stale_and_missing_artifacts(tmp_path: Path, capsys) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+    (outputs / "research_packets" / "2026-05-28").rename(outputs / "research_packets" / "2026-05-27")
+    (outputs / "runs" / "2026-05-28T093500-0400_phase6" / "audit" / "execution_integrity.json").unlink()
+
+    payload = call_tool("anomaly_report", {"outputs_root": str(outputs), "trade_date": "2026-05-28"})
+
+    assert payload["status"] == "NEEDS_OPERATOR"
+    messages = {item["message"] for item in payload["anomalies"]}
+    assert "research packet is not current for 2026-05-28" in messages
+    assert "latest execution run is missing execution integrity audit" in messages
+
+    assert research_registry_cli.main(["anomaly-report", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--json"]) == 0
+    json_payload = json.loads(capsys.readouterr().out)
+    assert json_payload["severity"] == "NEEDS_OPERATOR"
+
+    assert research_registry_cli.main(["anomaly-report", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--markdown"]) == 0
+    assert "# MCP Anomaly Report" in capsys.readouterr().out

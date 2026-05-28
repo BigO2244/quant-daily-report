@@ -54,6 +54,9 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "artifact_status": artifact_status,
         "operator_daily_summary": operator_daily_summary,
         "artifact_drilldown": artifact_drilldown,
+        "morning_cio_brief": morning_cio_brief,
+        "promotion_readiness": promotion_readiness,
+        "anomaly_report": anomaly_report,
     }
     if name not in dispatch:
         return _response("ERROR", _resolve_db_path(arguments, context), warnings=[f"unknown tool: {name}"])
@@ -497,6 +500,107 @@ def artifact_drilldown(
     )
 
 
+def morning_cio_brief(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    trade_date: str | None = None,
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    root = Path(outputs_root) if outputs_root else Path("outputs")
+    target_date = trade_date or datetime.now().date().isoformat()
+    daily = operator_daily_summary(context=context, outputs_root=str(root), trade_date=target_date)
+    anomalies = _anomaly_findings(root, target_date=target_date, lookback_days=5)
+    needs_attention = sorted(
+        set(
+            list(daily.get("warnings") or [])
+            + [item["message"] for item in anomalies if item["severity"] == "NEEDS_OPERATOR"]
+        )
+    )
+    return _response(
+        "NEEDS_OPERATOR" if needs_attention else "OK",
+        context.db_path,
+        warnings=needs_attention,
+        outputs_root=str(root),
+        trade_date=target_date,
+        operational_status=_operational_status_from_daily(daily),
+        strategy_leadership=_strategy_leadership(root),
+        portfolio_exposure=_portfolio_exposure(root),
+        regime_market_context=_regime_market_context(root),
+        operator_attention=needs_attention,
+        anomaly_count=len(anomalies),
+        anomalies=anomalies[:10],
+        longitudinal_memory=_longitudinal_memory(root, lookback_days=5),
+    )
+
+
+def promotion_readiness(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    lookback_days: int | None = 5,
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    root = Path(outputs_root) if outputs_root else Path("outputs")
+    lookback = max(1, int(lookback_days or 5))
+    history = _shadow_history(root, limit=lookback)
+    leadership = _strategy_leadership(root)
+    metrics = _promotion_metrics(history)
+    sufficient = metrics["valid_observation_window_count"] >= 20 and metrics["cumulative_excess_vs_spy"] is not None
+    if sufficient and leadership.get("current_leader") not in {None, "unavailable"}:
+        confidence = "MODERATE"
+        recommendation = "CANDIDATE_FOR_CAPITAL"
+    elif metrics["valid_observation_window_count"] >= 5:
+        confidence = "LOW" if metrics["cumulative_excess_vs_spy"] is None else "MODERATE"
+        recommendation = "CONTINUE_SHADOW"
+    else:
+        confidence = "LOW"
+        recommendation = "NOT_READY"
+    return _response(
+        "OK",
+        context.db_path,
+        outputs_root=str(root),
+        lookback_days=lookback,
+        current_leader=leadership.get("current_leader"),
+        valid_observation_window_count=metrics["valid_observation_window_count"],
+        cumulative_excess_vs_spy=metrics["cumulative_excess_vs_spy"],
+        drawdown_comparison=metrics["drawdown_comparison"],
+        turnover_comparison=metrics["turnover_comparison"],
+        concentration_comparison=metrics["concentration_comparison"],
+        confidence_level=confidence,
+        recommendation=recommendation,
+        evidence=history,
+        guardrail="capital deployment is never recommended without a sufficient artifact-backed observation window",
+    )
+
+
+def anomaly_report(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    trade_date: str | None = None,
+    lookback_days: int | None = 5,
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    root = Path(outputs_root) if outputs_root else Path("outputs")
+    target_date = trade_date or datetime.now().date().isoformat()
+    lookback = max(1, int(lookback_days or 5))
+    anomalies = _anomaly_findings(root, target_date=target_date, lookback_days=lookback)
+    max_severity = _max_anomaly_severity(anomalies)
+    return _response(
+        "NEEDS_OPERATOR" if max_severity == "NEEDS_OPERATOR" else "OK",
+        context.db_path,
+        warnings=[item["message"] for item in anomalies if item["severity"] == "NEEDS_OPERATOR"],
+        outputs_root=str(root),
+        trade_date=target_date,
+        lookback_days=lookback,
+        severity=max_severity,
+        anomaly_count=len(anomalies),
+        anomalies=anomalies,
+        longitudinal_memory=_longitudinal_memory(root, lookback_days=lookback),
+    )
+
+
 def _response(status: str, db_path: Path, warnings: list[str] | None = None, **payload: Any) -> dict[str, Any]:
     response = {
         "status": status,
@@ -921,3 +1025,324 @@ def _execution_completed_current(section: dict[str, Any], trade_date: str) -> bo
         return False
     files = section.get("files") or {}
     return bool((files.get("execution_results") or {}).get("exists"))
+
+
+def _operational_status_from_daily(daily: dict[str, Any]) -> dict[str, Any]:
+    summary = daily.get("summary") or {}
+    happened = summary.get("what_happened_today") or {}
+    sections = summary.get("sections") or {}
+    return {
+        "status": daily.get("status"),
+        "precompute": _compact_section(sections.get("precompute")),
+        "execution": _compact_section(sections.get("execution")),
+        "broker_recon": _compact_section(sections.get("broker_confirmation")),
+        "shadow_lane": _compact_section(sections.get("shadow")),
+        "research_packet": _compact_section(sections.get("research_packet")),
+        "precompute_ran": happened.get("precompute_ran"),
+        "execution_ran": happened.get("execution_ran"),
+        "broker_recon_present": happened.get("broker_recon_present"),
+        "shadow_ran": happened.get("shadow_ran"),
+        "research_packet_current": happened.get("research_packet_current"),
+    }
+
+
+def _compact_section(section: dict[str, Any] | None) -> dict[str, Any]:
+    section = section or {}
+    return {
+        "status": section.get("status"),
+        "trade_date": section.get("trade_date"),
+        "path": section.get("path") or section.get("paths"),
+        "run_id": section.get("run_id"),
+        "reason": section.get("reason"),
+    }
+
+
+def _dated_dirs(path: Path, limit: int | None = None) -> list[Path]:
+    dirs = _family_children(path, "dated_directories")
+    return dirs[:limit] if limit is not None else dirs
+
+
+def _run_dirs(path: Path, limit: int | None = None) -> list[Path]:
+    dirs = _family_children(path, "run_directories")
+    return dirs[:limit] if limit is not None else dirs
+
+
+def _shadow_history(root: Path, *, limit: int = 5) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    for directory in _dated_dirs(root / "shadow_candidates", limit=limit):
+        payload = _read_first_json(directory, ["comparison.json", "summary.json", "shadow_evaluation.json"])
+        history.append(
+            {
+                "trade_date": directory.name,
+                "path": str(directory),
+                "status": payload.get("status") or payload.get("overall_status") or ("OK" if payload else "UNAVAILABLE"),
+                "leader": _extract_leader(payload),
+                "excess_vs_spy": _extract_numeric(payload, ["excess_vs_spy", "excess_return_vs_spy", "cumulative_excess_vs_spy"]),
+                "drawdown": _extract_numeric(payload, ["drawdown", "max_drawdown", "current_drawdown"]),
+                "turnover": _extract_numeric(payload, ["turnover", "turnover_ratio"]),
+                "concentration": _extract_numeric(payload, ["concentration", "top5_weight", "max_position_weight"]),
+                "polaris": _extract_strategy_record(payload, "polaris"),
+                "lyra": _extract_strategy_record(payload, "lyra"),
+                "orion": _extract_strategy_record(payload, "orion"),
+            }
+        )
+    return history
+
+
+def _strategy_leadership(root: Path) -> dict[str, Any]:
+    history = _shadow_history(root, limit=5)
+    latest = history[0] if history else None
+    if not latest:
+        return {
+            "status": "UNAVAILABLE",
+            "current_leader": "unavailable",
+            "reason": "no shadow comparison artifacts found",
+            "evidence": [],
+        }
+    leader = latest.get("leader") or _leader_from_strategy_records(latest)
+    return {
+        "status": "OK" if leader else "INSUFFICIENT_EVIDENCE",
+        "current_leader": leader or "unavailable",
+        "latest_trade_date": latest.get("trade_date"),
+        "polaris": latest.get("polaris"),
+        "lyra": latest.get("lyra"),
+        "orion": latest.get("orion"),
+        "latest_excess_vs_spy": latest.get("excess_vs_spy"),
+        "evidence_count": len(history),
+        "evidence": history,
+        "reason": None if leader else "latest shadow artifact did not expose comparable leadership metrics",
+    }
+
+
+def _leader_from_strategy_records(record: dict[str, Any]) -> str | None:
+    candidates: list[tuple[float, str]] = []
+    for name in ["polaris", "lyra", "orion"]:
+        data = record.get(name) or {}
+        value = _extract_numeric(data, ["excess_vs_spy", "excess_return", "return", "score"])
+        if value is not None:
+            candidates.append((float(value), name.title()))
+    if not candidates:
+        return None
+    return sorted(candidates, reverse=True)[0][1]
+
+
+def _portfolio_exposure(root: Path) -> dict[str, Any]:
+    precompute = _latest_dated_dir(root / "precompute")
+    if precompute is None:
+        return {"status": "UNAVAILABLE", "reason": "no precompute bundle found"}
+    payload = _read_json(precompute / "planned_execution_payload.json")
+    trades = _extract_trades(payload)
+    buys = [trade for trade in trades if str(trade.get("side") or "").upper() == "BUY"]
+    sells = [trade for trade in trades if str(trade.get("side") or "").upper() == "SELL"]
+    return {
+        "status": "OK" if trades else "UNAVAILABLE",
+        "trade_date": precompute.name,
+        "path": str(precompute / "planned_execution_payload.json"),
+        "trade_count": len(trades),
+        "top_adds": _compact_trades(buys[:5]),
+        "top_removes": _compact_trades(sells[:5]),
+        "turnover_indicator": payload.get("turnover") or payload.get("estimated_turnover") or payload.get("turnover_ratio"),
+        "concentration_indicator": payload.get("max_position_weight") or payload.get("top5_weight"),
+        "reason": None if trades else "planned payload did not expose a trade list",
+    }
+
+
+def _regime_market_context(root: Path) -> dict[str, Any]:
+    precompute = _latest_dated_dir(root / "precompute")
+    if precompute is None:
+        return {"status": "UNAVAILABLE", "reason": "no precompute bundle found"}
+    snapshot = _read_json(precompute / "daily_snapshot.json")
+    contract = _read_json(precompute / "contract.json")
+    return {
+        "status": "OK" if snapshot or contract else "UNAVAILABLE",
+        "trade_date": precompute.name,
+        "vix_regime": _nested_get(snapshot, ["regime", "vix_regime"]) or snapshot.get("vix_regime") or snapshot.get("volatility_regime"),
+        "portfolio_scaling_state": snapshot.get("portfolio_scaling_state") or _nested_get(snapshot, ["risk", "scaling_state"]),
+        "max_position_guidance": snapshot.get("max_position_weight") or contract.get("max_position_weight") or contract.get("max_weight"),
+        "regime": snapshot.get("regime") if isinstance(snapshot.get("regime"), str) else None,
+        "reason": None if snapshot or contract else "daily snapshot and contract were unreadable",
+    }
+
+
+def _promotion_metrics(history: list[dict[str, Any]]) -> dict[str, Any]:
+    excess_values = [item.get("excess_vs_spy") for item in history if item.get("excess_vs_spy") is not None]
+    return {
+        "valid_observation_window_count": len(history),
+        "cumulative_excess_vs_spy": sum(excess_values) if excess_values else None,
+        "drawdown_comparison": _latest_metric(history, "drawdown"),
+        "turnover_comparison": _latest_metric(history, "turnover"),
+        "concentration_comparison": _latest_metric(history, "concentration"),
+    }
+
+
+def _latest_metric(history: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    for item in history:
+        if item.get(key) is not None:
+            return {"trade_date": item.get("trade_date"), "value": item.get(key)}
+    return {"status": "UNAVAILABLE", "reason": f"{key} metric not found in shadow artifacts"}
+
+
+def _anomaly_findings(root: Path, *, target_date: str, lookback_days: int) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    status = artifact_status(outputs_root=str(root), limit=lookback_days)
+    for family in status.get("artifact_families") or []:
+        if not family.get("exists"):
+            findings.append(_anomaly("NEEDS_OPERATOR", "missing_artifact_family", f"{family['family']} root is missing", family.get("root")))
+        elif int(family.get("count") or 0) == 0:
+            findings.append(_anomaly("WARNING", "empty_artifact_family", f"{family['family']} root has no recognized artifacts", family.get("root")))
+    daily = operator_daily_summary(outputs_root=str(root), trade_date=target_date)
+    for warning in daily.get("warnings") or []:
+        findings.append(_anomaly("NEEDS_OPERATOR", "daily_summary_warning", str(warning), str(root)))
+    execution = status.get("latest_execution") or {}
+    if _section_current(execution, target_date):
+        files = execution.get("files") or {}
+        if not (files.get("execution_integrity") or {}).get("exists"):
+            findings.append(_anomaly("NEEDS_OPERATOR", "missing_execution_integrity", "latest execution run is missing execution integrity audit", execution.get("path")))
+        if not (files.get("execution_results") or {}).get("exists"):
+            findings.append(_anomaly("NEEDS_OPERATOR", "missing_execution_results", "latest execution run is missing execution results", execution.get("path")))
+    findings.extend(_date_gap_anomalies(root, lookback_days=lookback_days))
+    return _dedupe_anomalies(findings)
+
+
+def _anomaly(severity: str, code: str, message: str, path: str | None) -> dict[str, Any]:
+    return {"severity": severity, "code": code, "message": message, "path": path}
+
+
+def _date_gap_anomalies(root: Path, *, lookback_days: int) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for family, path in [
+        ("precompute", root / "precompute"),
+        ("shadow_candidates", root / "shadow_candidates"),
+        ("research_packets", root / "research_packets"),
+    ]:
+        dirs = _dated_dirs(path, limit=lookback_days)
+        if not dirs:
+            continue
+        dates = [directory.name for directory in dirs]
+        if len(dates) >= 2 and dates[0] == dates[1]:
+            findings.append(_anomaly("WARNING", "duplicate_latest_date", f"{family} has duplicate latest dates", str(path)))
+        if len(dates) < min(lookback_days, 3):
+            findings.append(_anomaly("INFO", "limited_history", f"{family} has only {len(dates)} recent observations", str(path)))
+    for run_dir in _run_dirs(root / "runs", limit=lookback_days):
+        if not any(run_dir.iterdir()):
+            findings.append(_anomaly("WARNING", "empty_run_directory", "execution run directory is empty", str(run_dir)))
+    return findings
+
+
+def _dedupe_anomalies(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str | None]] = set()
+    deduped: list[dict[str, Any]] = []
+    for finding in findings:
+        key = (str(finding.get("severity")), str(finding.get("message")), finding.get("path"))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(finding)
+    rank = {"NEEDS_OPERATOR": 0, "WARNING": 1, "INFO": 2}
+    return sorted(deduped, key=lambda item: (rank.get(str(item.get("severity")), 9), str(item.get("code")), str(item.get("path"))))
+
+
+def _max_anomaly_severity(findings: list[dict[str, Any]]) -> str:
+    severities = {item.get("severity") for item in findings}
+    if "NEEDS_OPERATOR" in severities:
+        return "NEEDS_OPERATOR"
+    if "WARNING" in severities:
+        return "WARNING"
+    if "INFO" in severities:
+        return "INFO"
+    return "INFO"
+
+
+def _longitudinal_memory(root: Path, *, lookback_days: int) -> dict[str, Any]:
+    return {
+        "mode": "computed_read_only",
+        "lookback_days": lookback_days,
+        "precompute_dates": [path.name for path in _dated_dirs(root / "precompute", limit=lookback_days)],
+        "execution_run_ids": [path.name for path in _run_dirs(root / "runs", limit=lookback_days)],
+        "shadow_dates": [path.name for path in _dated_dirs(root / "shadow_candidates", limit=lookback_days)],
+        "research_packet_dates": [path.name for path in _dated_dirs(root / "research_packets", limit=lookback_days)],
+    }
+
+
+def _read_first_json(directory: Path, names: list[str]) -> dict[str, Any]:
+    for name in names:
+        payload = _read_json(directory / name)
+        if payload:
+            return payload
+    return {}
+
+
+def _extract_trades(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ["trades", "orders", "intended_orders", "planned_orders"]:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _compact_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact = []
+    for trade in trades:
+        compact.append(
+            {
+                "ticker": trade.get("ticker") or trade.get("symbol"),
+                "side": trade.get("side"),
+                "quantity": trade.get("quantity") or trade.get("qty") or trade.get("shares"),
+                "target_weight": trade.get("target_weight") or trade.get("weight"),
+            }
+        )
+    return compact
+
+
+def _extract_leader(payload: dict[str, Any]) -> str | None:
+    for key in ["leader", "current_leader", "winner", "recommended_strategy"]:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _extract_strategy_record(payload: dict[str, Any], strategy: str) -> dict[str, Any] | None:
+    candidates = [strategy, strategy.title(), strategy.upper(), f"caerus_{strategy}"]
+    for key in candidates:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return {
+                "status": value.get("status"),
+                "excess_vs_spy": _extract_numeric(value, ["excess_vs_spy", "excess_return", "relative_return"]),
+                "drawdown": _extract_numeric(value, ["drawdown", "max_drawdown"]),
+                "turnover": _extract_numeric(value, ["turnover", "turnover_ratio"]),
+            }
+    strategies = payload.get("strategies") or payload.get("candidates")
+    if isinstance(strategies, dict):
+        for key in candidates:
+            value = strategies.get(key)
+            if isinstance(value, dict):
+                return {
+                    "status": value.get("status"),
+                    "excess_vs_spy": _extract_numeric(value, ["excess_vs_spy", "excess_return", "relative_return"]),
+                    "drawdown": _extract_numeric(value, ["drawdown", "max_drawdown"]),
+                    "turnover": _extract_numeric(value, ["turnover", "turnover_ratio"]),
+                }
+    return None
+
+
+def _extract_numeric(payload: dict[str, Any], keys: list[str]) -> float | None:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                continue
+    return None
+
+
+def _nested_get(payload: dict[str, Any], path: list[str]) -> Any:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current

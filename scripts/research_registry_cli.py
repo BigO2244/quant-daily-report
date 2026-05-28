@@ -19,7 +19,15 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from research_registry.ingestion import ingest_artifact_family
-from research_registry.mcp_server.tools import artifact_drilldown, artifact_status, daily_operator_brief, operator_daily_summary
+from research_registry.mcp_server.tools import (
+    anomaly_report,
+    artifact_drilldown,
+    artifact_status,
+    daily_operator_brief,
+    morning_cio_brief,
+    operator_daily_summary,
+    promotion_readiness,
+)
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
 
@@ -537,6 +545,88 @@ def _format_artifact_drilldown_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _format_morning_brief_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# MCP Morning CIO Brief",
+        "",
+        f"- Status: `{payload.get('status')}`",
+        f"- Trade date: `{payload.get('trade_date')}`",
+        f"- Outputs root: `{payload.get('outputs_root')}`",
+        f"- Queried at: `{payload.get('queried_at')}`",
+        "",
+        "## Operational Status",
+    ]
+    operational = payload.get("operational_status") or {}
+    for key in ["precompute", "execution", "broker_recon", "shadow_lane", "research_packet"]:
+        section = operational.get(key) or {}
+        lines.append(f"- `{key}`: status=`{section.get('status')}` date=`{section.get('trade_date')}` path=`{section.get('path')}`")
+    leadership = payload.get("strategy_leadership") or {}
+    lines.extend(
+        [
+            "",
+            "## Strategy Leadership",
+            f"- Status: `{leadership.get('status')}`",
+            f"- Current leader: `{leadership.get('current_leader')}`",
+            f"- Evidence count: `{leadership.get('evidence_count')}`",
+        ]
+    )
+    exposure = payload.get("portfolio_exposure") or {}
+    lines.extend(["", "## Portfolio / Exposure", f"- Status: `{exposure.get('status')}`", f"- Trade count: `{exposure.get('trade_count')}`"])
+    for trade in exposure.get("top_adds") or []:
+        lines.append(f"- Add: `{trade.get('ticker')}` qty=`{trade.get('quantity')}` target=`{trade.get('target_weight')}`")
+    for trade in exposure.get("top_removes") or []:
+        lines.append(f"- Remove: `{trade.get('ticker')}` qty=`{trade.get('quantity')}` target=`{trade.get('target_weight')}`")
+    regime = payload.get("regime_market_context") or {}
+    lines.extend(
+        [
+            "",
+            "## Regime / Market Context",
+            f"- VIX regime: `{regime.get('vix_regime')}`",
+            f"- Scaling state: `{regime.get('portfolio_scaling_state')}`",
+            f"- Max position guidance: `{regime.get('max_position_guidance')}`",
+        ]
+    )
+    if payload.get("operator_attention"):
+        lines.extend(["", "## Operator Attention"])
+        lines.extend(f"- {warning}" for warning in payload["operator_attention"])
+    return "\n".join(lines) + "\n"
+
+
+def _format_promotion_readiness_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# MCP Promotion Readiness",
+        "",
+        f"- Status: `{payload.get('status')}`",
+        f"- Current leader: `{payload.get('current_leader')}`",
+        f"- Observation windows: `{payload.get('valid_observation_window_count')}`",
+        f"- Cumulative excess vs SPY: `{payload.get('cumulative_excess_vs_spy')}`",
+        f"- Confidence: `{payload.get('confidence_level')}`",
+        f"- Recommendation: `{payload.get('recommendation')}`",
+        f"- Guardrail: {payload.get('guardrail')}",
+        "",
+        "## Latest Evidence",
+    ]
+    for item in payload.get("evidence") or []:
+        lines.append(f"- `{item.get('trade_date')}` leader=`{item.get('leader')}` excess=`{item.get('excess_vs_spy')}` path=`{item.get('path')}`")
+    return "\n".join(lines) + "\n"
+
+
+def _format_anomaly_report_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# MCP Anomaly Report",
+        "",
+        f"- Status: `{payload.get('status')}`",
+        f"- Severity: `{payload.get('severity')}`",
+        f"- Trade date: `{payload.get('trade_date')}`",
+        f"- Anomaly count: `{payload.get('anomaly_count')}`",
+        "",
+        "## Findings",
+    ]
+    for item in payload.get("anomalies") or []:
+        lines.append(f"- `{item.get('severity')}` `{item.get('code')}`: {item.get('message')} path=`{item.get('path')}`")
+    return "\n".join(lines) + "\n"
+
+
 def cmd_artifact_status(args: argparse.Namespace) -> int:
     payload = artifact_status(outputs_root=args.outputs_root, limit=args.limit)
     if args.markdown:
@@ -559,6 +649,33 @@ def cmd_artifact_drilldown(args: argparse.Namespace) -> int:
     payload = artifact_drilldown(outputs_root=args.outputs_root, family=args.family)
     if args.markdown:
         print(_format_artifact_drilldown_markdown(payload))
+    else:
+        _print_json(payload)
+    return 0
+
+
+def cmd_morning_brief(args: argparse.Namespace) -> int:
+    payload = morning_cio_brief(outputs_root=args.outputs_root, trade_date=args.trade_date)
+    if args.markdown:
+        print(_format_morning_brief_markdown(payload))
+    else:
+        _print_json(payload)
+    return 0
+
+
+def cmd_promotion_readiness(args: argparse.Namespace) -> int:
+    payload = promotion_readiness(outputs_root=args.outputs_root, lookback_days=args.lookback_days)
+    if args.markdown:
+        print(_format_promotion_readiness_markdown(payload))
+    else:
+        _print_json(payload)
+    return 0
+
+
+def cmd_anomaly_report(args: argparse.Namespace) -> int:
+    payload = anomaly_report(outputs_root=args.outputs_root, trade_date=args.trade_date, lookback_days=args.lookback_days)
+    if args.markdown:
+        print(_format_anomaly_report_markdown(payload))
     else:
         _print_json(payload)
     return 0
@@ -935,6 +1052,37 @@ def build_parser() -> argparse.ArgumentParser:
     artifact_drilldown_cmd.add_argument("--json", action="store_true", help="Emit JSON output (default).")
     artifact_drilldown_cmd.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
     artifact_drilldown_cmd.set_defaults(func=cmd_artifact_drilldown)
+
+    morning_brief = subparsers.add_parser(
+        "morning-brief",
+        help="Print a compact artifact-backed CIO/operator brief.",
+    )
+    morning_brief.add_argument("--outputs-root", default="outputs")
+    morning_brief.add_argument("--trade-date", default=None)
+    morning_brief.add_argument("--json", action="store_true", help="Emit JSON output (default).")
+    morning_brief.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
+    morning_brief.set_defaults(func=cmd_morning_brief)
+
+    readiness = subparsers.add_parser(
+        "promotion-readiness",
+        help="Assess challenger readiness from shadow artifacts only.",
+    )
+    readiness.add_argument("--outputs-root", default="outputs")
+    readiness.add_argument("--lookback-days", type=int, default=5)
+    readiness.add_argument("--json", action="store_true", help="Emit JSON output (default).")
+    readiness.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
+    readiness.set_defaults(func=cmd_promotion_readiness)
+
+    anomaly = subparsers.add_parser(
+        "anomaly-report",
+        help="Report operational and research anomalies from persisted artifacts.",
+    )
+    anomaly.add_argument("--outputs-root", default="outputs")
+    anomaly.add_argument("--trade-date", default=None)
+    anomaly.add_argument("--lookback-days", type=int, default=5)
+    anomaly.add_argument("--json", action="store_true", help="Emit JSON output (default).")
+    anomaly.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
+    anomaly.set_defaults(func=cmd_anomaly_report)
 
     build_caerus = subparsers.add_parser(
         "build-caerus-registry",

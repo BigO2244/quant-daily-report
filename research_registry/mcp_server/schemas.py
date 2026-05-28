@@ -113,4 +113,38 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "name": "morning_cio_brief",
+        "description": "Return a compact artifact-backed operator intelligence brief.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "trade_date": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "promotion_readiness",
+        "description": "Assess challenger readiness from shadow artifacts only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "lookback_days": {"type": "integer", "default": 5, "minimum": 1},
+            },
+        },
+    },
+    {
+        "name": "anomaly_report",
+        "description": "Report operational and research anomalies from persisted artifacts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "trade_date": {"type": "string"},
+                "lookback_days": {"type": "integer", "default": 5, "minimum": 1},
+            },
+        },
+    },
 ]

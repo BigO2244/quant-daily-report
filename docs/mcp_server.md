@@ -1,15 +1,18 @@
-# Caerus MCP Server Phase 6
+# Caerus MCP Server Phase 7
 
 ## Scope
 
-Caerus MCP Server Phase 6 is the local read-only operator inspection layer over
-existing Caerus artifacts. It wraps the deployed MCP-lite research registry in a
-stdio JSON-RPC compatible tool server and adds direct artifact inspection for
-operator status checks. It is not a trading, scheduling, or automation surface.
+Caerus MCP Server Phase 7 is the local read-only operator intelligence layer
+over existing Caerus artifacts. Phase 6 answered what artifacts exist; Phase 7
+adds compact artifact-backed interpretation of operational status, strategy
+leadership, promotion readiness, and anomalies. It is not a trading,
+scheduling, or automation surface.
 
 The server can index existing artifacts into a caller-specified disposable
 SQLite registry DB. Direct artifact inspection commands read `outputs/` in
-place and do not build, repair, or mutate runtime artifacts.
+place and do not build, repair, or mutate runtime artifacts. Phase 7 historical
+awareness is computed from existing artifact paths; it does not introduce a
+database, vector store, hidden cache, or external infrastructure.
 
 ## Non-Goals
 
@@ -67,6 +70,9 @@ Local smoke:
 - `artifact_status`
 - `operator_daily_summary`
 - `artifact_drilldown`
+- `morning_cio_brief`
+- `promotion_readiness`
+- `anomaly_report`
 
 Every tool returns a JSON object with `status`, `db_path`, `queried_at`,
 `warnings`, and `findings`.
@@ -88,6 +94,21 @@ the research packet current, and what needs operator attention. It returns
 required files. It reports path, existence, size, status, selected dates, and
 small status fields only. It does not dump raw JSON, markdown bodies, secrets,
 positions, broker payloads, or large artifact contents.
+
+`morning_cio_brief` composes the daily artifact summary with strategy
+leadership, portfolio/exposure hints, regime context, anomaly count, and an
+operator attention section. It never infers execution completion unless
+`execution_results.json` exists.
+
+`promotion_readiness` reviews recent shadow artifacts and reports current
+leader, observation count, available excess/drawdown/turnover/concentration
+metrics, confidence, and a conservative recommendation. It does not recommend
+capital deployment without a sufficient artifact-backed observation window.
+
+`anomaly_report` surfaces stale research packets, missing artifact families,
+limited continuity, stale shadow/research surfaces, missing execution integrity,
+missing execution results, and empty run folders with deterministic severity
+labels: `INFO`, `WARNING`, or `NEEDS_OPERATOR`.
 
 ## Example JSON-RPC Calls
 
@@ -171,6 +192,17 @@ Drill into latest artifact paths without dumping raw payloads:
 .venv/bin/python3 scripts/research_registry_cli.py artifact-drilldown --outputs-root outputs --family precompute --json
 ```
 
+Run Phase 7 operator intelligence commands:
+
+```bash
+.venv/bin/python3 scripts/research_registry_cli.py morning-brief --outputs-root outputs --json
+.venv/bin/python3 scripts/research_registry_cli.py morning-brief --outputs-root outputs --markdown
+.venv/bin/python3 scripts/research_registry_cli.py promotion-readiness --outputs-root outputs --json
+.venv/bin/python3 scripts/research_registry_cli.py promotion-readiness --outputs-root outputs --markdown
+.venv/bin/python3 scripts/research_registry_cli.py anomaly-report --outputs-root outputs --json
+.venv/bin/python3 scripts/research_registry_cli.py anomaly-report --outputs-root outputs --markdown
+```
+
 Expected daily-summary shape:
 
 ```json
@@ -216,7 +248,7 @@ python3 scripts/research_registry_mcp_server.py smoke \
   --limit 5
 ```
 
-Do not install cron or deploy services as part of Phase 6.
+Do not install cron or deploy services as part of Phase 7.
 
 ## Security Boundary
 
@@ -229,6 +261,9 @@ not contaminate runtime artifact directories.
 Direct artifact inspection uses compact probes and selected status metadata. It
 does not print raw artifact payloads and is designed to avoid exposing large
 broker, portfolio, or environment-derived payloads through the MCP interface.
+Phase 7 intelligence is artifact-backed only: missing evidence is reported as
+unavailable or `NEEDS_OPERATOR`; it does not fill gaps with model calls,
+external APIs, broker calls, or strategy assumptions.
 
 ## Known Limitations
 
@@ -236,10 +271,15 @@ broker, portfolio, or environment-derived payloads through the MCP interface.
   or scheduler APIs.
 - `broker_recon_present` confirms that broker/reconciliation artifacts exist; it
   does not call Alpaca or verify live account state.
-- Missing artifacts are reported as `NEEDS_OPERATOR`; Phase 6 intentionally does
+- Missing artifacts are reported as `NEEDS_OPERATOR`; Phase 7 intentionally does
   not self-heal or trigger workflows.
 - Direct artifact status does not require a registry DB, so its `db_path` field
   is informational for MCP response consistency.
+- Strategy leadership and promotion readiness depend on fields exposed by
+  shadow comparison artifacts. When those metrics are absent, the commands
+  report insufficient evidence.
+- Promotion readiness is advisory operator intelligence only. It is not an
+  allocator, promotion gate, scheduler, or execution trigger.
 
 ## Rollback
 
@@ -259,3 +299,13 @@ outside the source rollback.
 | Date | Commit | Local validation | VM validation | Observation |
 |---|---|---|---|---|
 | 2026-05-28 | `0ba7e1211cd768de18b5627327db2d3aafe35fd3`; completion fix `3f575fd1299b3ad2421343d83b3dc0545a5a8903` | `git diff --check`; compileall; py_compile; `Tests/test_research_registry_mcp_server.py` 16 passed; `Tests/test_research_registry_* Tests/test_execution_integrity.py` 61 passed; artifact-status JSON/Markdown; daily-summary JSON/Markdown | VM fast-forwarded from `227b579763b6dd2293bd6d20215dd1667d6b846c`; MCP server tests 16 passed; registry/integrity tests 61 passed; artifact-status Markdown; daily-summary Markdown/JSON | Production artifacts showed 2026-05-28 precompute, broker/recon, and shadow present; latest execution lacked `execution_results.json` / execution integrity and latest research packet was 2026-05-27, so daily-summary correctly returned `NEEDS_OPERATOR`. |
+
+## Phase 7 Deployment Notes
+
+Phase 7 deploys by the same git-only fast-forward flow. Validation should run
+the existing MCP/FR-031 tests plus `morning-brief`, `promotion-readiness`, and
+`anomaly-report` in both JSON and Markdown against the VM `outputs/` tree.
+
+Rollback is source-only via `git revert <phase-7-commit>` followed by a VM
+fast-forward pull. No generated registry DB or runtime output rollback is
+required because Phase 7 does not write source artifacts or production outputs.
