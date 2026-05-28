@@ -391,6 +391,31 @@ def _artifact_status_fixture(tmp_path: Path) -> Path:
             },
         },
     )
+    _write_json(
+        shadow / "promotion_readiness.json",
+        {
+            "trade_date": "2026-05-28",
+            "current_leader": "caerus_lyra",
+            "strategies": {
+                "caerus_lyra": {
+                    "strategy_name": "Caerus Lyra",
+                    "readiness_state": "EMERGING_CANDIDATE",
+                    "confidence": "MODERATE",
+                    "reason_codes": ["healthy_progression"],
+                    "valid_observation_windows": 24,
+                    "cumulative_excess_vs_polaris": 0.02,
+                    "cumulative_excess_vs_spy": 0.03,
+                    "max_drawdown": -0.02,
+                    "avg_turnover": 0.12,
+                    "avg_top_3_concentration": 0.45,
+                }
+            },
+        },
+    )
+    _write_json(
+        shadow / "longitudinal_metrics.json",
+        {"trade_date": "2026-05-28", "strategies": {"caerus_lyra": {"valid_observation_windows": 24}}},
+    )
     _write_text(shadow / "comparison.md", "# Shadow\n")
     workflow = outputs / "workflow" / "2026-05-28"
     _write_json(workflow / "shadow.json", {"trade_date": "2026-05-28", "status": "OK"})
@@ -521,7 +546,7 @@ def test_morning_cio_brief_ok_state_and_cli_formats(tmp_path: Path, capsys) -> N
     assert payload["status"] == "OK"
     assert payload["operational_status"]["precompute_ran"] is True
     assert payload["operational_status"]["execution_ran"] is True
-    assert payload["strategy_leadership"]["current_leader"] == "Lyra"
+    assert payload["strategy_leadership"]["current_leader"] == "caerus_lyra"
     assert payload["portfolio_exposure"]["top_adds"][0]["ticker"] == "NVDA"
     assert payload["portfolio_exposure"]["top_removes"][0]["ticker"] == "ELV"
     assert payload["regime_market_context"]["vix_regime"] == "normal"
@@ -529,7 +554,7 @@ def test_morning_cio_brief_ok_state_and_cli_formats(tmp_path: Path, capsys) -> N
 
     assert research_registry_cli.main(["morning-brief", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--json"]) == 0
     json_payload = json.loads(capsys.readouterr().out)
-    assert json_payload["strategy_leadership"]["current_leader"] == "Lyra"
+    assert json_payload["strategy_leadership"]["current_leader"] == "caerus_lyra"
 
     assert research_registry_cli.main(["morning-brief", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--markdown"]) == 0
     assert "# MCP Morning CIO Brief" in capsys.readouterr().out
@@ -541,15 +566,16 @@ def test_promotion_readiness_insufficient_evidence_and_cli_formats(tmp_path: Pat
     payload = call_tool("promotion_readiness", {"outputs_root": str(outputs), "lookback_days": 5})
 
     assert payload["status"] == "OK"
-    assert payload["current_leader"] == "Lyra"
-    assert payload["valid_observation_window_count"] == 1
-    assert payload["confidence_level"] == "LOW"
-    assert payload["recommendation"] == "NOT_READY"
-    assert payload["cumulative_excess_vs_spy"] == 0.012
+    assert payload["current_leader"] == "caerus_lyra"
+    assert payload["valid_observation_window_count"] == 24
+    assert payload["confidence_level"] == "MODERATE"
+    assert payload["recommendation"] == "EMERGING_CANDIDATE"
+    assert payload["cumulative_excess_vs_spy"] == 0.03
+    assert payload["phase_c_readiness"]["caerus_lyra"]["reason_codes"] == ["healthy_progression"]
 
     assert research_registry_cli.main(["promotion-readiness", "--outputs-root", str(outputs), "--json"]) == 0
     json_payload = json.loads(capsys.readouterr().out)
-    assert json_payload["recommendation"] == "NOT_READY"
+    assert json_payload["recommendation"] == "EMERGING_CANDIDATE"
 
     assert research_registry_cli.main(["promotion-readiness", "--outputs-root", str(outputs), "--markdown"]) == 0
     assert "# MCP Promotion Readiness" in capsys.readouterr().out

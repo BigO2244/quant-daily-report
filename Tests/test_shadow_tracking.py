@@ -12,7 +12,12 @@ import pandas as pd
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.shadow_tracking.run import (
     build_comparison_markdown,
+    build_longitudinal_metrics_payload,
+    build_phase_c_promotion_readiness_payload,
+    build_stability_surface_payload,
     classify_no_data_reason,
+    compute_downside_volatility,
+    compute_drawdown_recovery_speed,
     compute_returns_for_trade_date,
     compute_strategy_delta,
     find_previous_shadow_date,
@@ -22,6 +27,11 @@ from research.shadow_tracking.run import (
     trade_date_has_data,
 )
 from research.shadow_tracking.strategies import build_strategy_lookup
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _make_panel() -> pd.DataFrame:
@@ -109,9 +119,17 @@ def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_p
     assert (dated_dir / "delta.json").exists()
     assert (dated_dir / "shadow_performance.json").exists()
     assert (dated_dir / "shadow_evaluation.json").exists()
+    assert (dated_dir / "longitudinal_metrics.json").exists()
+    assert (dated_dir / "stability_surface.json").exists()
+    assert (dated_dir / "promotion_readiness.json").exists()
+    assert (dated_dir / "promotion_readiness.md").exists()
     assert (out_dir / "performance" / "shadow_nav_series.csv").exists()
     assert (out_dir / "performance" / "shadow_summary.json").exists()
     assert not (out_dir / "paper_state").exists()
+    readiness = json.loads((dated_dir / "promotion_readiness.json").read_text())
+    assert readiness["governance_label"] == "RESEARCH_ONLY"
+    assert readiness["execution_impact"] == "NON_EXECUTIONAL"
+    assert "caerus_lyra" in readiness["strategies"]
 
 
 def test_compute_strategy_delta_partial_overlap() -> None:
@@ -329,6 +347,114 @@ def test_compute_returns_for_trade_date_handles_empty_panel() -> None:
     assert compute_returns_for_trade_date(panel=pd.DataFrame(), trade_date="2023-04-02") == {}
 
 
+def test_phase_c_metrics_are_deterministic_and_no_lookahead(tmp_path: Path) -> None:
+    out_dir = tmp_path / "shadow"
+    for date, orion_return, polaris_return, spy_return in [
+        ("2026-05-01", 0.01, 0.005, 0.004),
+        ("2026-05-02", 0.02, 0.004, 0.003),
+        ("2026-05-03", -0.005, 0.003, 0.002),
+        ("2026-05-04", 0.015, 0.002, 0.001),
+        ("2026-05-05", 0.01, 0.001, 0.0),
+    ]:
+        dated = out_dir / date
+        _write_json(
+            dated / "shadow_performance.json",
+            {
+                "trade_date": date,
+                "status": "OK",
+                "data_status": "OK",
+                "return_convention": "weights_as_of_t",
+                "strategies": {
+                    "caerus_polaris": {"daily_return": polaris_return, "nav": 1.0 + polaris_return},
+                    "caerus_orion": {"daily_return": orion_return, "nav": 1.0 + orion_return},
+                    "caerus_lyra": {"daily_return": 0.0, "nav": 1.0},
+                    "spy_benchmark": {"daily_return": spy_return, "nav": 1.0 + spy_return},
+                },
+            },
+        )
+        for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra"):
+            _write_json(
+                dated / f"{slug}.json",
+                {
+                    "strategy_name": slug,
+                    "expected_turnover": 0.1,
+                    "holdings": [
+                        {"ticker": "AAA", "target_weight": 0.2},
+                        {"ticker": "BBB", "target_weight": 0.1},
+                    ],
+                    "weight_concentration": {"top3_concentration": 0.3},
+                },
+            )
+        _write_json(dated / "delta.json", {"status": "OK", "strategies": {"caerus_orion": {"adds": ["AAA"], "removes": []}}})
+    future = out_dir / "2026-05-06"
+    _write_json(future / "shadow_performance.json", {"trade_date": "2026-05-06", "status": "OK", "data_status": "OK", "strategies": {"caerus_orion": {"daily_return": 0.99, "nav": 9.0}}})
+    evaluation = {
+        "trade_date": "2026-05-05",
+        "strategies": {
+            "caerus_polaris": {"strategy_name": "Caerus Polaris", "status": "OK", "data_status": "OK", "cumulative_return": 0.015, "max_drawdown": 0.0, "realized_volatility_ann": 0.1},
+            "caerus_orion": {"strategy_name": "Caerus Orion", "status": "OK", "data_status": "OK", "cumulative_return": 0.05, "max_drawdown": -0.005, "realized_volatility_ann": 0.2},
+            "caerus_lyra": {"strategy_name": "Caerus Lyra", "status": "OK", "data_status": "OK", "cumulative_return": 0.0, "max_drawdown": 0.0, "realized_volatility_ann": 0.1},
+            "spy_benchmark": {"strategy_name": "SPY", "status": "OK", "data_status": "OK", "cumulative_return": 0.01, "max_drawdown": 0.0, "realized_volatility_ann": 0.1},
+        },
+    }
+
+    first = build_longitudinal_metrics_payload(output_root=out_dir, trade_date="2026-05-05", shadow_evaluation=evaluation)
+    second = build_longitudinal_metrics_payload(output_root=out_dir, trade_date="2026-05-05", shadow_evaluation=evaluation)
+
+    assert first == second
+    assert "2026-05-06" not in first["history_dates"]
+    assert first["strategies"]["caerus_orion"]["rolling_returns"]["5D"] == 0.05
+    assert first["strategies"]["caerus_orion"]["rolling_excess_return"]["vs_spy"]["5D"] == 0.04
+
+
+def test_phase_c_stability_and_promotion_transitions() -> None:
+    longitudinal = {
+        "trade_date": "2026-05-28",
+        "history_dates": [f"2026-05-{day:02d}" for day in range(1, 61)],
+        "strategies": {
+            "caerus_polaris": {
+                "strategy_name": "Caerus Polaris",
+                "role": "BASELINE",
+                "valid_observation_windows": 60,
+                "operational_metrics": {"avg_turnover": 0.1, "avg_top_3_concentration": 0.3},
+                "risk_metrics": {"max_drawdown": -0.02},
+                "rolling_excess_return": {"vs_polaris": {"cumulative": 0.0}, "vs_spy": {"cumulative": 0.05}},
+            },
+            "caerus_lyra": {
+                "strategy_name": "Caerus Lyra",
+                "role": "CHALLENGER",
+                "valid_observation_windows": 60,
+                "operational_metrics": {"avg_turnover": 0.1, "avg_top_3_concentration": 0.3},
+                "risk_metrics": {"max_drawdown": -0.02},
+                "rolling_excess_return": {"vs_polaris": {"cumulative": 0.04}, "vs_spy": {"cumulative": 0.09}},
+            },
+            "caerus_orion": {
+                "strategy_name": "Caerus Orion",
+                "role": "CHALLENGER",
+                "valid_observation_windows": 60,
+                "operational_metrics": {"avg_turnover": 0.8, "avg_top_3_concentration": 0.7},
+                "risk_metrics": {"max_drawdown": -0.2},
+                "rolling_excess_return": {"vs_polaris": {"cumulative": -0.01}, "vs_spy": {"cumulative": 0.0}},
+            },
+        },
+    }
+
+    stability = build_stability_surface_payload(longitudinal)
+    readiness = build_phase_c_promotion_readiness_payload(longitudinal=longitudinal, stability=stability)
+
+    assert readiness["strategies"]["caerus_lyra"]["readiness_state"] == "CANDIDATE_FOR_CAPITAL"
+    assert readiness["strategies"]["caerus_lyra"]["confidence"] == "HIGH"
+    assert readiness["strategies"]["caerus_orion"]["readiness_state"] == "CONTINUE_SHADOW"
+    assert "excessive_turnover" in readiness["strategies"]["caerus_orion"]["reason_codes"]
+    assert "concentration_risk" in readiness["strategies"]["caerus_orion"]["reason_codes"]
+    assert "drawdown_risk" in readiness["strategies"]["caerus_orion"]["reason_codes"]
+
+
+def test_phase_c_risk_helpers() -> None:
+    assert compute_downside_volatility([0.01, -0.02, -0.01]) is not None
+    assert compute_drawdown_recovery_speed([1.0, 0.9, 0.95, 1.01, 0.99]) == 2
+
+
 def test_cli_smoke(tmp_path: Path) -> None:
     panel = _make_panel()
     panel_path = tmp_path / "price_panel.parquet"
@@ -407,6 +533,7 @@ def test_runner_writes_no_data_folder_for_unavailable_date(tmp_path: Path) -> No
     assert evaluation["strategies"]["caerus_orion"]["data_status"] == "NO_DATA"
     assert evaluation["strategies"]["caerus_orion"]["data_reason"] == "PRICE_CACHE_STALE"
     assert evaluation["strategies"]["caerus_orion"]["return_convention"] == "weights_as_of_t"
+    assert (dated_dir / "promotion_readiness.json").exists()
 
 
 def test_delta_generation_when_prior_day_exists(tmp_path: Path) -> None:
@@ -468,6 +595,14 @@ def test_delta_generation_when_prior_day_exists(tmp_path: Path) -> None:
     spy_cum = evaluation_2["strategies"]["spy_benchmark"]["cumulative_return"]
     orion_cum = evaluation_2["strategies"]["caerus_orion"]["cumulative_return"]
     assert evaluation_2["strategies"]["caerus_orion"]["excess_return_vs_spy"] == round(orion_cum - spy_cum, 10)
+    longitudinal = json.loads((dated_dir / "longitudinal_metrics.json").read_text())
+    stability = json.loads((dated_dir / "stability_surface.json").read_text())
+    readiness = json.loads((dated_dir / "promotion_readiness.json").read_text())
+    assert longitudinal["return_convention"] == "weights_as_of_t"
+    assert longitudinal["strategies"]["caerus_orion"]["valid_observation_windows"] == 2
+    assert stability["strategies"]["caerus_orion"]["continuity_score"] == 1.0
+    assert readiness["strategies"]["caerus_orion"]["readiness_state"] == "OBSERVE"
+    assert "insufficient_history" in readiness["strategies"]["caerus_orion"]["reason_codes"]
 
 
 def test_shadow_performance_broken_chain_on_missing_prior_artifact(tmp_path: Path) -> None:

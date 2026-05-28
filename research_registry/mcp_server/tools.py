@@ -546,8 +546,21 @@ def promotion_readiness(
     history = _shadow_history(root, limit=lookback)
     leadership = _strategy_leadership(root)
     metrics = _promotion_metrics(history)
+    phase_c = (history[0].get("phase_c_readiness") if history else None) or {}
+    phase_c_states = {
+        slug: {
+            "readiness_state": item.get("readiness_state"),
+            "confidence": item.get("confidence"),
+            "reason_codes": item.get("reason_codes") or [],
+        }
+        for slug, item in (phase_c.get("strategies") or {}).items()
+    }
     sufficient = metrics["valid_observation_window_count"] >= 20 and metrics["cumulative_excess_vs_spy"] is not None
-    if sufficient and leadership.get("current_leader") not in {None, "unavailable"}:
+    if phase_c_states:
+        best_state = _strongest_phase_c_state(phase_c_states)
+        confidence = best_state.get("confidence") or "LOW"
+        recommendation = best_state.get("readiness_state") or "CONTINUE_SHADOW"
+    elif sufficient and leadership.get("current_leader") not in {None, "unavailable"}:
         confidence = "MODERATE"
         recommendation = "CANDIDATE_FOR_CAPITAL"
     elif metrics["valid_observation_window_count"] >= 5:
@@ -569,6 +582,7 @@ def promotion_readiness(
         concentration_comparison=metrics["concentration_comparison"],
         confidence_level=confidence,
         recommendation=recommendation,
+        phase_c_readiness=phase_c_states,
         evidence=history,
         guardrail="capital deployment is never recommended without a sufficient artifact-backed observation window",
     )
@@ -1070,20 +1084,26 @@ def _run_dirs(path: Path, limit: int | None = None) -> list[Path]:
 def _shadow_history(root: Path, *, limit: int = 5) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     for directory in _dated_dirs(root / "shadow_candidates", limit=limit):
+        readiness = _read_json(directory / "promotion_readiness.json")
+        longitudinal = _read_json(directory / "longitudinal_metrics.json")
         payload = _read_first_json(directory, ["comparison.json", "summary.json", "shadow_evaluation.json"])
+        readiness_strategies = readiness.get("strategies") or {}
+        leader_slug = readiness.get("current_leader")
         history.append(
             {
                 "trade_date": directory.name,
                 "path": str(directory),
                 "status": payload.get("status") or payload.get("overall_status") or ("OK" if payload else "UNAVAILABLE"),
-                "leader": _extract_leader(payload),
-                "excess_vs_spy": _extract_numeric(payload, ["excess_vs_spy", "excess_return_vs_spy", "cumulative_excess_vs_spy"]),
+                "leader": leader_slug or _extract_leader(payload),
+                "excess_vs_spy": _phase_c_leader_metric(readiness_strategies, leader_slug, "cumulative_excess_vs_spy") or _extract_numeric(payload, ["excess_vs_spy", "excess_return_vs_spy", "cumulative_excess_vs_spy"]),
                 "drawdown": _extract_numeric(payload, ["drawdown", "max_drawdown", "current_drawdown"]),
                 "turnover": _extract_numeric(payload, ["turnover", "turnover_ratio"]),
                 "concentration": _extract_numeric(payload, ["concentration", "top5_weight", "max_position_weight"]),
                 "polaris": _extract_strategy_record(payload, "polaris"),
                 "lyra": _extract_strategy_record(payload, "lyra"),
                 "orion": _extract_strategy_record(payload, "orion"),
+                "phase_c_readiness": readiness,
+                "phase_c_longitudinal_available": bool(longitudinal),
             }
         )
     return history
@@ -1100,6 +1120,7 @@ def _strategy_leadership(root: Path) -> dict[str, Any]:
             "evidence": [],
         }
     leader = latest.get("leader") or _leader_from_strategy_records(latest)
+    readiness = latest.get("phase_c_readiness") or {}
     return {
         "status": "OK" if leader else "INSUFFICIENT_EVIDENCE",
         "current_leader": leader or "unavailable",
@@ -1108,6 +1129,14 @@ def _strategy_leadership(root: Path) -> dict[str, Any]:
         "lyra": latest.get("lyra"),
         "orion": latest.get("orion"),
         "latest_excess_vs_spy": latest.get("excess_vs_spy"),
+        "readiness_states": {
+            slug: {
+                "state": item.get("readiness_state"),
+                "confidence": item.get("confidence"),
+                "reason_codes": item.get("reason_codes") or [],
+            }
+            for slug, item in (readiness.get("strategies") or {}).items()
+        },
         "evidence_count": len(history),
         "evidence": history,
         "reason": None if leader else "latest shadow artifact did not expose comparable leadership metrics",
@@ -1165,6 +1194,26 @@ def _regime_market_context(root: Path) -> dict[str, Any]:
 
 
 def _promotion_metrics(history: list[dict[str, Any]]) -> dict[str, Any]:
+    latest_readiness = (history[0].get("phase_c_readiness") if history else None) or {}
+    if latest_readiness:
+        strategies = latest_readiness.get("strategies") or {}
+        best = _best_phase_c_strategy(strategies)
+        return {
+            "valid_observation_window_count": max((int((item or {}).get("valid_observation_windows") or 0) for item in strategies.values()), default=len(history)),
+            "cumulative_excess_vs_spy": (best or {}).get("cumulative_excess_vs_spy"),
+            "drawdown_comparison": {
+                slug: item.get("max_drawdown")
+                for slug, item in strategies.items()
+            },
+            "turnover_comparison": {
+                slug: item.get("avg_turnover")
+                for slug, item in strategies.items()
+            },
+            "concentration_comparison": {
+                slug: item.get("avg_top_3_concentration")
+                for slug, item in strategies.items()
+            },
+        }
     excess_values = [item.get("excess_vs_spy") for item in history if item.get("excess_vs_spy") is not None]
     return {
         "valid_observation_window_count": len(history),
@@ -1173,6 +1222,40 @@ def _promotion_metrics(history: list[dict[str, Any]]) -> dict[str, Any]:
         "turnover_comparison": _latest_metric(history, "turnover"),
         "concentration_comparison": _latest_metric(history, "concentration"),
     }
+
+
+def _phase_c_leader_metric(strategies: dict[str, Any], leader_slug: str | None, field: str) -> float | None:
+    if not leader_slug:
+        return None
+    value = (strategies.get(str(leader_slug)) or {}).get(field)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _best_phase_c_strategy(strategies: dict[str, Any]) -> dict[str, Any] | None:
+    candidates = []
+    for strategy in strategies.values():
+        value = strategy.get("cumulative_excess_vs_spy")
+        if isinstance(value, (int, float)):
+            candidates.append((float(value), strategy))
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: item[0], reverse=True)[0][1]
+
+
+def _strongest_phase_c_state(states: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    rank = {
+        "NOT_READY": 0,
+        "OBSERVE": 1,
+        "CONTINUE_SHADOW": 2,
+        "EMERGING_CANDIDATE": 3,
+        "CANDIDATE_FOR_CAPITAL": 4,
+    }
+    candidates = sorted(
+        states.values(),
+        key=lambda item: rank.get(str(item.get("readiness_state")), -1),
+        reverse=True,
+    )
+    return candidates[0] if candidates else {"readiness_state": "NOT_READY", "confidence": "LOW"}
 
 
 def _latest_metric(history: list[dict[str, Any]], key: str) -> dict[str, Any]:

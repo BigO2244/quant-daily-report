@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[SHADOW] NAV updated")
         shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
         (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
+        write_phase_c_promotion_artifacts(output_root=output_root, trade_date=trade_date, shadow_evaluation=shadow_evaluation)
         (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload, dated_dir=dated_dir))
         try:
             write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
@@ -143,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     print("[SHADOW] NAV updated")
     shadow_evaluation = build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
     (dated_dir / "shadow_evaluation.json").write_text(json.dumps(shadow_evaluation, indent=2))
+    write_phase_c_promotion_artifacts(output_root=output_root, trade_date=trade_date, shadow_evaluation=shadow_evaluation)
     (dated_dir / "comparison.md").write_text(build_comparison_markdown(comparison_payload, dated_dir=dated_dir))
     try:
         write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
@@ -897,6 +899,260 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
     return evaluation
 
 
+def write_phase_c_promotion_artifacts(*, output_root: Path, trade_date: str, shadow_evaluation: dict) -> dict:
+    dated_dir = output_root / trade_date
+    longitudinal = build_longitudinal_metrics_payload(output_root=output_root, trade_date=trade_date, shadow_evaluation=shadow_evaluation)
+    stability = build_stability_surface_payload(longitudinal)
+    readiness = build_phase_c_promotion_readiness_payload(longitudinal=longitudinal, stability=stability)
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    (dated_dir / "longitudinal_metrics.json").write_text(json.dumps(longitudinal, indent=2, sort_keys=True))
+    (dated_dir / "stability_surface.json").write_text(json.dumps(stability, indent=2, sort_keys=True))
+    (dated_dir / "promotion_readiness.json").write_text(json.dumps(readiness, indent=2, sort_keys=True))
+    (dated_dir / "promotion_readiness.md").write_text(build_phase_c_promotion_markdown(readiness))
+    return readiness
+
+
+def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, shadow_evaluation: dict) -> dict:
+    history_dates = list_shadow_date_dirs(output_root=output_root, trade_date=trade_date)
+    performance_history = [
+        (date, safe_read_json(output_root / date / "shadow_performance.json"))
+        for date in history_dates
+    ]
+    strategies = {}
+    for slug in (*_model_strategy_slugs(), BENCHMARK_SLUG):
+        evaluation = (shadow_evaluation.get("strategies") or {}).get(slug) or {}
+        daily_returns = extract_valid_daily_returns(performance_history=performance_history, strategy_slug=slug)
+        nav_history = extract_chain_nav_history(performance_history=performance_history, strategy_slug=slug)
+        turnover_history = extract_strategy_metric_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="expected_turnover")
+        top3_history = extract_strategy_top3_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        top5_history = extract_strategy_top_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, top_n=5)
+        avg_position_history = extract_strategy_average_position_size_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        constituent_change_count = extract_constituent_change_count(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        strategy_returns = {f"{window}D": _rolling_sum(daily_returns, window) for window in (5, 10, 20)}
+        strategy_returns["cumulative"] = evaluation.get("cumulative_return")
+        strategies[slug] = {
+            "strategy_name": evaluation.get("strategy_name") or _strategy_label(slug),
+            "role": "BENCHMARK" if slug == BENCHMARK_SLUG else "BASELINE" if slug == "caerus_polaris" else "CHALLENGER",
+            "data_status": evaluation.get("data_status"),
+            "chain_status": evaluation.get("status"),
+            "rolling_returns": strategy_returns,
+            "rolling_excess_return": {
+                "vs_polaris": {},
+                "vs_spy": {},
+            },
+            "risk_metrics": {
+                "realized_volatility_ann": evaluation.get("realized_volatility_ann"),
+                "max_drawdown": evaluation.get("max_drawdown"),
+                "downside_volatility_proxy": compute_downside_volatility(daily_returns),
+                "drawdown_recovery_speed_days": compute_drawdown_recovery_speed(nav_history),
+            },
+            "operational_metrics": {
+                "avg_turnover": _mean_or_none(turnover_history),
+                "constituent_change_count": constituent_change_count,
+                "avg_top_3_concentration": _mean_or_none(top3_history),
+                "avg_top_5_concentration": _mean_or_none(top5_history),
+                "avg_position_size": _mean_or_none(avg_position_history),
+            },
+            "valid_observation_windows": len(daily_returns),
+            "available_observation_windows": len(history_dates),
+        }
+    for slug, payload in strategies.items():
+        for window in ("5", "10", "20", "cumulative"):
+            key = window if window == "cumulative" else f"{window}D"
+            left = payload["rolling_returns"].get(key)
+            polaris = strategies.get("caerus_polaris", {}).get("rolling_returns", {}).get(key)
+            spy = strategies.get(BENCHMARK_SLUG, {}).get("rolling_returns", {}).get(key)
+            payload["rolling_excess_return"]["vs_polaris"][f"{window}D" if window != "cumulative" else "cumulative"] = _diff_or_none(left, polaris)
+            payload["rolling_excess_return"]["vs_spy"][f"{window}D" if window != "cumulative" else "cumulative"] = _diff_or_none(left, spy)
+    return {
+        "schema_version": "fr_028_phase_c_longitudinal_metrics_v1",
+        "trade_date": trade_date,
+        "governance_label": "RESEARCH_ONLY",
+        "execution_impact": "NON_EXECUTIONAL",
+        "return_convention": "weights_as_of_t",
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "history_dates": history_dates,
+        "strategies": strategies,
+    }
+
+
+def build_stability_surface_payload(longitudinal: dict) -> dict:
+    expected = max(1, len(longitudinal.get("history_dates") or []))
+    strategies = {}
+    for slug, payload in (longitudinal.get("strategies") or {}).items():
+        valid = int(payload.get("valid_observation_windows") or 0)
+        continuity = round(valid / expected, 6)
+        missing_penalty = round(1.0 - continuity, 6)
+        turnover = _as_float((payload.get("operational_metrics") or {}).get("avg_turnover"))
+        concentration = _as_float((payload.get("operational_metrics") or {}).get("avg_top_3_concentration"))
+        drawdown = _as_float((payload.get("risk_metrics") or {}).get("max_drawdown"))
+        penalties = missing_penalty * 45.0
+        if turnover is not None and turnover > 0.50:
+            penalties += min(20.0, (turnover - 0.50) * 40.0)
+        if concentration is not None and concentration > 0.60:
+            penalties += min(20.0, (concentration - 0.60) * 50.0)
+        if drawdown is not None and drawdown < -0.10:
+            penalties += min(25.0, abs(drawdown + 0.10) * 100.0)
+        stability_score = round(max(0.0, 100.0 - penalties), 2)
+        strategies[slug] = {
+            "strategy_name": payload.get("strategy_name"),
+            "role": payload.get("role"),
+            "valid_observation_windows": valid,
+            "expected_observation_windows": expected,
+            "continuity_score": continuity,
+            "missing_data_penalty": missing_penalty,
+            "stability_score": stability_score,
+            "reason_codes": stability_reason_codes(valid=valid, expected=expected, turnover=turnover, concentration=concentration, drawdown=drawdown, stability_score=stability_score),
+        }
+    return {
+        "schema_version": "fr_028_phase_c_stability_surface_v1",
+        "trade_date": longitudinal.get("trade_date"),
+        "governance_label": "RESEARCH_ONLY",
+        "execution_impact": "NON_EXECUTIONAL",
+        "strategies": strategies,
+    }
+
+
+def build_phase_c_promotion_readiness_payload(*, longitudinal: dict, stability: dict) -> dict:
+    strategies = {}
+    current_leader = None
+    leader_score = None
+    for slug, payload in (longitudinal.get("strategies") or {}).items():
+        if payload.get("role") != "CHALLENGER":
+            continue
+        stable = ((stability.get("strategies") or {}).get(slug) or {})
+        readiness = classify_phase_c_readiness(strategy=payload, stability=stable)
+        strategies[slug] = readiness
+        score = _as_float((payload.get("rolling_excess_return") or {}).get("vs_polaris", {}).get("cumulative"))
+        if score is not None and (leader_score is None or score > leader_score):
+            leader_score = score
+            current_leader = slug
+    return {
+        "schema_version": "fr_028_phase_c_promotion_readiness_v1",
+        "trade_date": longitudinal.get("trade_date"),
+        "governance_label": "RESEARCH_ONLY",
+        "execution_impact": "NON_EXECUTIONAL",
+        "active_baseline": "caerus_polaris",
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "current_leader": current_leader if leader_score is not None and leader_score > 0 else None,
+        "leader_evidence": {
+            "cumulative_excess_vs_polaris": leader_score,
+            "threshold": "> 0 with sufficient stability/history for readiness",
+        },
+        "readiness_state_order": ["NOT_READY", "OBSERVE", "CONTINUE_SHADOW", "EMERGING_CANDIDATE", "CANDIDATE_FOR_CAPITAL"],
+        "strategies": strategies,
+        "non_goals": [
+            "no automatic promotion",
+            "no strategy selection changes",
+            "no capital allocation changes",
+            "no broker or execution behavior changes",
+        ],
+    }
+
+
+def classify_phase_c_readiness(*, strategy: dict, stability: dict) -> dict:
+    valid = int(strategy.get("valid_observation_windows") or 0)
+    stability_score = _as_float(stability.get("stability_score")) or 0.0
+    cumulative_vs_polaris = _as_float((strategy.get("rolling_excess_return") or {}).get("vs_polaris", {}).get("cumulative"))
+    cumulative_vs_spy = _as_float((strategy.get("rolling_excess_return") or {}).get("vs_spy", {}).get("cumulative"))
+    turnover = _as_float((strategy.get("operational_metrics") or {}).get("avg_turnover"))
+    concentration = _as_float((strategy.get("operational_metrics") or {}).get("avg_top_3_concentration"))
+    drawdown = _as_float((strategy.get("risk_metrics") or {}).get("max_drawdown"))
+    reason_codes = list(stability.get("reason_codes") or [])
+    if valid < 5:
+        reason_codes.append("insufficient_history")
+        return _readiness_record(strategy, stability, "OBSERVE", "LOW", reason_codes)
+    if valid < 20:
+        reason_codes.append("insufficient_history")
+        return _readiness_record(strategy, stability, "CONTINUE_SHADOW", "LOW", reason_codes)
+    if cumulative_vs_polaris is None or cumulative_vs_polaris <= 0 or cumulative_vs_spy is None or cumulative_vs_spy <= 0:
+        reason_codes.append("insufficient_excess_return")
+    if turnover is not None and turnover > 0.50:
+        reason_codes.append("excessive_turnover")
+    if concentration is not None and concentration > 0.60:
+        reason_codes.append("concentration_risk")
+    if drawdown is not None and drawdown < -0.10:
+        reason_codes.append("drawdown_risk")
+    if stability_score < 70:
+        reason_codes.append("unstable_performance")
+    reason_codes = sorted(set(reason_codes))
+    blocking = [code for code in reason_codes if code not in {"healthy_progression"}]
+    if not blocking and valid >= 60 and stability_score >= 85:
+        return _readiness_record(strategy, stability, "CANDIDATE_FOR_CAPITAL", "HIGH", ["healthy_progression"])
+    if not blocking:
+        return _readiness_record(strategy, stability, "EMERGING_CANDIDATE", "MODERATE", ["healthy_progression"])
+    return _readiness_record(strategy, stability, "CONTINUE_SHADOW", "MODERATE" if valid >= 20 else "LOW", reason_codes)
+
+
+def _readiness_record(strategy: dict, stability: dict, state: str, confidence: str, reason_codes: list[str]) -> dict:
+    return {
+        "strategy_name": strategy.get("strategy_name"),
+        "readiness_state": state,
+        "confidence": confidence,
+        "reason_codes": sorted(set(reason_codes)),
+        "valid_observation_windows": strategy.get("valid_observation_windows"),
+        "stability_score": stability.get("stability_score"),
+        "cumulative_excess_vs_polaris": (strategy.get("rolling_excess_return") or {}).get("vs_polaris", {}).get("cumulative"),
+        "cumulative_excess_vs_spy": (strategy.get("rolling_excess_return") or {}).get("vs_spy", {}).get("cumulative"),
+        "max_drawdown": (strategy.get("risk_metrics") or {}).get("max_drawdown"),
+        "avg_turnover": (strategy.get("operational_metrics") or {}).get("avg_turnover"),
+        "avg_top_3_concentration": (strategy.get("operational_metrics") or {}).get("avg_top_3_concentration"),
+    }
+
+
+def build_phase_c_promotion_markdown(payload: dict) -> str:
+    lines = [
+        "# FR-028 Phase C Promotion Readiness",
+        "",
+        f"- Trade date: `{payload.get('trade_date')}`",
+        f"- Governance label: `{payload.get('governance_label')}`",
+        f"- Execution impact: `{payload.get('execution_impact')}`",
+        f"- Current leader: `{payload.get('current_leader') or 'insufficient evidence'}`",
+        "",
+        "## Challenger Readiness",
+        "",
+        "| Strategy | State | Confidence | Valid Windows | Stability | Excess vs Polaris | Excess vs SPY | Reason Codes |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for slug, strategy in sorted((payload.get("strategies") or {}).items()):
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    strategy.get("strategy_name") or slug,
+                    str(strategy.get("readiness_state")),
+                    str(strategy.get("confidence")),
+                    str(strategy.get("valid_observation_windows")),
+                    str(strategy.get("stability_score")),
+                    _fmt_pct(strategy.get("cumulative_excess_vs_polaris")),
+                    _fmt_pct(strategy.get("cumulative_excess_vs_spy")),
+                    ", ".join(strategy.get("reason_codes") or []),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(["", "## Non-Goals"])
+    lines.extend(f"- {item}" for item in payload.get("non_goals") or [])
+    return "\n".join(lines) + "\n"
+
+
+def stability_reason_codes(*, valid: int, expected: int, turnover: float | None, concentration: float | None, drawdown: float | None, stability_score: float) -> list[str]:
+    reason_codes = []
+    if valid < expected:
+        reason_codes.append("missing_data_penalty")
+    if turnover is not None and turnover > 0.50:
+        reason_codes.append("excessive_turnover")
+    if concentration is not None and concentration > 0.60:
+        reason_codes.append("concentration_risk")
+    if drawdown is not None and drawdown < -0.10:
+        reason_codes.append("drawdown_risk")
+    if stability_score < 70:
+        reason_codes.append("unstable_performance")
+    if not reason_codes:
+        reason_codes.append("healthy_progression")
+    return reason_codes
+
+
 def list_shadow_date_dirs(*, output_root: Path, trade_date: str) -> list[str]:
     candidates = []
     for child in output_root.iterdir() if output_root.exists() else []:
@@ -975,6 +1231,43 @@ def extract_strategy_top3_concentration_history(*, output_root: Path, history_da
     return values
 
 
+def extract_strategy_top_concentration_history(*, output_root: Path, history_dates: list[str], strategy_slug: str, top_n: int) -> list[float]:
+    values = []
+    for date in history_dates:
+        payload = safe_read_json(output_root / date / f"{strategy_slug}.json")
+        if not payload:
+            continue
+        holdings = payload.get("holdings") or []
+        weights = sorted(
+            [
+                float(item.get("target_weight"))
+                for item in holdings
+                if isinstance(item, dict) and item.get("target_weight") is not None
+            ],
+            reverse=True,
+        )
+        if weights:
+            values.append(round(float(sum(weights[:top_n])), 10))
+    return values
+
+
+def extract_strategy_average_position_size_history(*, output_root: Path, history_dates: list[str], strategy_slug: str) -> list[float]:
+    values = []
+    for date in history_dates:
+        payload = safe_read_json(output_root / date / f"{strategy_slug}.json")
+        if not payload:
+            continue
+        holdings = payload.get("holdings") or []
+        weights = [
+            float(item.get("target_weight"))
+            for item in holdings
+            if isinstance(item, dict) and item.get("target_weight") is not None
+        ]
+        if weights:
+            values.append(round(float(sum(weights) / len(weights)), 10))
+    return values
+
+
 def extract_constituent_change_count(*, output_root: Path, history_dates: list[str], strategy_slug: str) -> int | None:
     total = 0
     found = False
@@ -996,12 +1289,61 @@ def compute_realized_volatility_ann(daily_returns: list[float]) -> float | None:
     return round(float(pd.Series(daily_returns, dtype=float).std(ddof=1) * (252.0 ** 0.5)), 10)
 
 
+def compute_downside_volatility(daily_returns: list[float]) -> float | None:
+    downside = [value for value in daily_returns if value < 0]
+    if len(downside) < 2:
+        return None
+    return round(float(pd.Series(downside, dtype=float).std(ddof=1) * (252.0 ** 0.5)), 10)
+
+
 def compute_max_drawdown(nav_history: list[float] | None) -> float | None:
     if not nav_history:
         return None
     nav = pd.Series(nav_history, dtype=float)
     drawdown = nav / nav.cummax() - 1.0
     return round(float(drawdown.min()), 10)
+
+
+def compute_drawdown_recovery_speed(nav_history: list[float] | None) -> int | None:
+    if not nav_history:
+        return None
+    peak = nav_history[0]
+    days_since_drawdown = 0
+    max_recovery = 0
+    in_drawdown = False
+    for nav in nav_history:
+        if nav >= peak:
+            peak = nav
+            if in_drawdown:
+                max_recovery = max(max_recovery, days_since_drawdown)
+            in_drawdown = False
+            days_since_drawdown = 0
+        else:
+            in_drawdown = True
+            days_since_drawdown += 1
+    if in_drawdown:
+        max_recovery = max(max_recovery, days_since_drawdown)
+    return max_recovery
+
+
+def _rolling_sum(values: list[float], window: int) -> float | None:
+    if len(values) < window:
+        return None
+    return round(float(sum(values[-window:])), 10)
+
+
+def _mean_or_none(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(float(sum(values) / len(values)), 10)
+
+
+def _diff_or_none(left: object, right: object) -> float | None:
+    left_number = _as_float(left)
+    right_number = _as_float(right)
+    if left_number is None or right_number is None:
+        return None
+    return round(left_number - right_number, 10)
 
 
 def compute_returns_for_trade_date(*, panel: pd.DataFrame, trade_date: str) -> dict[str, float]:

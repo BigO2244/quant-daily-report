@@ -27,7 +27,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-014 shadow learning reliability | Shadow / Learning | `DEPLOYED_OBSERVING` | LOW | FR-015 and FR-017 preferred | observing | Read-only learning-health diagnostic added; learning logic and artifacts unchanged. | Stop running `scripts.research.check_shadow_learning_health`; ignore diagnostic output. |
 | FR-016 semantic precompute contract validation | Phase 4 | `DEPLOYED_OBSERVING` | LOW | FR-015 | observing | Advisory read-only semantic validator added; not wired into cron or execution gates. | Stop running `scripts.research.check_precompute_semantic_validation`; keep current bundle validation unchanged. |
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
-| FR-028 shadow execution timing semantics correction candidate | Accounting Correctness | `BACKLOG` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | not_started | FR-governed candidate for prior-day weights against next-session returns; no historical migration. | Keep current published chain unchanged; disable candidate comparison reader. |
+| FR-028 shadow execution timing semantics correction candidate | Accounting Correctness / Promotion Analytics | `DEPLOYED_OBSERVING` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | observing | Phase C adds research-only promotion readiness sidecars: `longitudinal_metrics.json`, `stability_surface.json`, `promotion_readiness.json`, and `promotion_readiness.md`; no historical migration, execution, broker, cron, strategy selection, or capital-allocation change. | Revert FR-028 Phase C commit; ignore new dated promotion-readiness sidecars and continue reading existing `shadow_evaluation.json` / `comparison.json`. |
 | FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `BACKLOG` | MEDIUM | FR-028 | not_started | Future promotion gates should consume provenance, exposure, and timing confidence after accounting semantics are governed. | Revert promotion-readiness checks to existing scorecard criteria. |
 | FR-031 execution integrity contract | Execution Integrity | `PROMOTION_READY` | HIGH | HOTFIX-2026-05-27, FR-021, broker/order evidence | local_validation_passed | Additive validator implemented locally; writes `audit/execution_integrity.json` and compact operator-summary integrity fields without changing order routing. | Revert FR-031 implementation commit; ignore existing audit artifacts. |
 
@@ -71,12 +71,15 @@ procedures are proven.
    and rollback boundary. It remains separate from HOTFIX-2026-05-27: the
    hotfix record preserves incident evidence, while FR-031 adds the durable
    guardrail.
-2. Keep FR-028 and FR-029 in Friday-governed Track B until before/after
-   comparison artifacts, rollback plans, and observation criteria are reviewed.
+2. Observe FR-028 Phase C for deterministic sidecar generation, conservative
+   readiness classification, no prior-day mutation, and MCP consumption of
+   artifact-backed evidence. Keep FR-029 in Friday-governed Track B until Phase
+   C evidence is stable.
 3. Treat FR-030 as deployed telemetry consumption, not promotion logic.
 4. Focus the next research-operations bottleneck on post-close hydration and
    source readiness, not packet rendering.
-5. Continue to separate MCP planning from FR-028 accounting/timing work.
+5. Continue to separate MCP planning from FR-028 accounting/timing work except
+   for read-only MCP consumption of Phase C research artifacts.
 6. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
    source-readiness, and governance reviews without changing execution paths.
 

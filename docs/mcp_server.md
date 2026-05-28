@@ -104,6 +104,10 @@ operator attention section. It never infers execution completion unless
 leader, observation count, available excess/drawdown/turnover/concentration
 metrics, confidence, and a conservative recommendation. It does not recommend
 capital deployment without a sufficient artifact-backed observation window.
+When FR-028 Phase C sidecars are present, it consumes
+`promotion_readiness.json` and `longitudinal_metrics.json` from the latest
+dated shadow folder; otherwise it falls back to conservative Phase 7 evidence
+extraction and reports insufficient evidence where metrics are absent.
 
 `anomaly_report` surfaces stale research packets, missing artifact families,
 limited continuity, stale shadow/research surfaces, missing execution integrity,
@@ -278,6 +282,9 @@ external APIs, broker calls, or strategy assumptions.
 - Strategy leadership and promotion readiness depend on fields exposed by
   shadow comparison artifacts. When those metrics are absent, the commands
   report insufficient evidence.
+- FR-028 Phase C sidecars improve leadership/readiness evidence, but MCP remains
+  a read-only consumer and does not create, repair, promote, allocate, or
+  execute.
 - Promotion readiness is advisory operator intelligence only. It is not an
   allocator, promotion gate, scheduler, or execution trigger.
 
