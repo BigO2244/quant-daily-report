@@ -40,6 +40,7 @@ from brokers.alpaca_snapshot import (
 )
 from core.execution_audit import write_executor_audit, write_planner_audit
 from core.execution_integrity import write_execution_integrity_audit
+from core.execution_lifecycle_timeline import write_execution_lifecycle_timeline
 from core.execution_payload import normalize_status, write_canonical_execution_payload
 from core.execution_summary import write_execution_artifacts
 from core.live_retry_policy import evaluate_live_retry
@@ -722,6 +723,17 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
     return out_path
 
 
+def _write_execution_timeline_artifacts(*, run_root: Path, trade_date: str, run_id: str) -> None:
+    try:
+        write_execution_lifecycle_timeline(
+            run_root=run_root,
+            trade_date=trade_date,
+            run_id=run_id,
+        )
+    except Exception as exc:
+        logger.warning("[EXECUTION_TIMELINE] timeline artifacts skipped: %s", exc)
+
+
 def _failure_payload(*, trade_date: str, run_id: str, reason: str, timing: dict[str, object]) -> dict[str, object]:
     workflow_context = _workflow_context()
     payload = {
@@ -913,6 +925,7 @@ def _persist_terminal_exception_state(
         status_message=reason,
     )
     write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
+    _write_execution_timeline_artifacts(run_root=run_root, run_id=run_id, trade_date=trade_date)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -998,6 +1011,7 @@ def main(argv: list[str] | None = None) -> int:
                 status_message=str(precompute_reason or ""),
             )
             write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
+            _write_execution_timeline_artifacts(run_root=run_root, run_id=run_id, trade_date=trade_date)
             logger.error("[LIVE_EXECUTION] precompute unavailable reason=%s", precompute_reason)
             release_lock_on_exit = True
             return 1
@@ -1099,6 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
                 status_message=reason,
             )
             write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
+            _write_execution_timeline_artifacts(run_root=run_root, run_id=run_id, trade_date=trade_date)
             logger.error(
                 "[LIVE_EXECUTION] blocked by pretrade reconciliation decision=%s reason=%s report=%s",
                 str((recon_result or {}).get("reconciliation_decision") or "UNKNOWN"),
@@ -1456,6 +1471,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.warning("[LIVE_EXECUTION] execution summary artifacts skipped: %s", exc)
 
         write_trading_day_summary(run_root=run_root, run_id=run_id, trade_date=trade_date)
+        _write_execution_timeline_artifacts(run_root=run_root, run_id=run_id, trade_date=trade_date)
 
         try:
             from core.benchmark_tracking import update_benchmark_vs_spy

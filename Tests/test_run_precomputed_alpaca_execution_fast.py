@@ -25,6 +25,7 @@ def _load_module(tmp_path: Path):
         "core",
         "core.execution_audit",
         "core.execution_integrity",
+        "core.execution_lifecycle_timeline",
         "core.execution_payload",
         "core.execution_summary",
         "core.live_retry_policy",
@@ -108,6 +109,10 @@ def _load_module(tmp_path: Path):
     sys.modules["core.execution_integrity"] = _module(
         "core.execution_integrity",
         write_execution_integrity_audit=_write_execution_integrity_audit,
+    )
+    sys.modules["core.execution_lifecycle_timeline"] = _module(
+        "core.execution_lifecycle_timeline",
+        write_execution_lifecycle_timeline=lambda **_kwargs: None,
     )
     sys.modules["core.execution_payload"] = _module(
         "core.execution_payload",
