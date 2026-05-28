@@ -256,6 +256,6 @@ outside the source rollback.
 
 ## Phase 6 Deployment Ledger
 
-The final Phase 6 implementation commit and validation evidence are recorded in
-the operator deployment report after local validation, GitHub push, VM
-fast-forward, and VM validation complete.
+| Date | Commit | Local validation | VM validation | Observation |
+|---|---|---|---|---|
+| 2026-05-28 | `0ba7e1211cd768de18b5627327db2d3aafe35fd3` | `git diff --check`; compileall; py_compile; `Tests/test_research_registry_mcp_server.py` 15 passed; `Tests/test_research_registry_* Tests/test_execution_integrity.py` 60 passed; artifact-status JSON/Markdown; daily-summary JSON/Markdown | VM fast-forwarded from `227b579763b6dd2293bd6d20215dd1667d6b846c`; MCP server tests 15 passed; registry/integrity tests 60 passed; artifact-status Markdown; daily-summary Markdown/JSON | Production artifacts showed 2026-05-28 precompute, execution, broker/recon, and shadow present; latest research packet was 2026-05-27, so daily-summary correctly returned `NEEDS_OPERATOR` for stale research packet. |
