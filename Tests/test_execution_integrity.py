@@ -18,6 +18,14 @@ def _order(ticker: str, side: str, shares: float = 1.0) -> dict[str, object]:
     }
 
 
+def _order_without_id(ticker: str, side: str, shares: float = 1.0) -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "side": side,
+        "shares": shares,
+    }
+
+
 def _intended(orders: list[dict[str, object]]) -> dict[str, object]:
     return {
         "report_date": "2026-05-27",
@@ -83,6 +91,34 @@ def test_mixed_buy_sell_intended_orders_preserved_in_execution_payload() -> None
     assert audit["intended_buy_count"] == 2
     assert audit["execution_payload_buy_count"] == 2
     assert audit["missing_buy_orders"] == []
+
+
+def test_generated_payload_order_ids_do_not_create_false_missing_buys() -> None:
+    intended_orders = [
+        _order_without_id("ABNB", "BUY", 4),
+        _order_without_id("ELV", "SELL", 1),
+    ]
+    payload_orders = [
+        _order("ABNB", "BUY", 4),
+        _order("ELV", "SELL", 1),
+    ]
+
+    audit = validate_execution_integrity(
+        trade_date="2026-05-27",
+        run_id="run-fr031",
+        intended_orders=_intended(intended_orders),
+        execution_payload=_payload(payload_orders, execution_source="planned_payload_exact"),
+        execution_results=_results(payload_orders),
+        operator_summary={"terminal_status": "success"},
+    )
+
+    assert audit["status"] == "OK"
+    assert audit["missing_intended_orders"] == []
+    assert audit["missing_buy_orders"] == []
+    assert audit["unexpected_payload_orders"] == []
+    assert "intended_buy_missing_from_payload_with_exception" not in {
+        finding["code"] for finding in audit["findings"]
+    }
 
 
 def test_intended_buy_missing_from_payload_produces_fail() -> None:

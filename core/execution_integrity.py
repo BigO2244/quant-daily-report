@@ -80,6 +80,29 @@ def _order_key(order: Mapping[str, Any]) -> str:
     return f"{_order_symbol(order)}:{_order_side(order)}:{_order_qty(order)}"
 
 
+def _order_id(order: Mapping[str, Any]) -> str:
+    return str(order.get("order_id") or order.get("client_order_id") or "").strip()
+
+
+def _semantic_order_key(order: Mapping[str, Any]) -> str:
+    return f"{_order_symbol(order)}:{_order_side(order)}:{_order_qty(order)}"
+
+
+def _orders_match_for_lineage(
+    order: Mapping[str, Any],
+    candidates_by_key: Mapping[str, Mapping[str, Any]],
+    candidates_by_semantic_key: Mapping[str, list[Mapping[str, Any]]],
+) -> bool:
+    if _order_key(order) in candidates_by_key:
+        return True
+    order_id = _order_id(order)
+    semantic_key = _semantic_order_key(order)
+    for candidate in candidates_by_semantic_key.get(semantic_key, []):
+        if not order_id or not _order_id(candidate):
+            return True
+    return False
+
+
 def _order_ref(order: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "ticker": _order_symbol(order),
@@ -279,25 +302,41 @@ def validate_execution_integrity(
 
     intended_keys = {_order_key(order): order for order in intended}
     payload_keys = {_order_key(order): order for order in payload_orders}
-    comparable_intended_keys = dict(intended_keys)
+    payload_semantic_keys: dict[str, list[Mapping[str, Any]]] = {}
+    for order in payload_orders:
+        payload_semantic_keys.setdefault(_semantic_order_key(order), []).append(order)
+    comparable_intended = list(intended)
     if continuation_side:
-        comparable_intended_keys = {
-            key: order
-            for key, order in intended_keys.items()
-            if _order_side(order) == continuation_side
-        }
+        comparable_intended = [
+            order for order in intended if _order_side(order) == continuation_side
+        ]
     missing_intended = [
         _order_ref(order)
-        for key, order in sorted(comparable_intended_keys.items())
-        if key not in payload_keys
+        for order in sorted(
+            comparable_intended,
+            key=lambda candidate: (_semantic_order_key(candidate), _order_key(candidate)),
+        )
+        if not _orders_match_for_lineage(order, payload_keys, payload_semantic_keys)
     ]
     missing_buy_orders = [
         order for order in missing_intended if _order_side(order) == "BUY"
     ]
+    comparable_intended_keys = {_order_key(order): order for order in comparable_intended}
+    comparable_intended_semantic_keys: dict[str, list[Mapping[str, Any]]] = {}
+    for order in comparable_intended:
+        comparable_intended_semantic_keys.setdefault(_semantic_order_key(order), []).append(order)
     unexpected_payload_orders = [
         _order_ref(order)
-        for key, order in sorted(payload_keys.items())
-        if key not in comparable_intended_keys and intended
+        for order in sorted(
+            payload_orders,
+            key=lambda candidate: (_semantic_order_key(candidate), _order_key(candidate)),
+        )
+        if intended
+        and not _orders_match_for_lineage(
+            order,
+            comparable_intended_keys,
+            comparable_intended_semantic_keys,
+        )
     ]
 
     findings: list[dict[str, str]] = []
