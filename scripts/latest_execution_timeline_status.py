@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any, Mapping
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from core.run_pointer import read_latest_run_pointer
+
+
+def _read_json(path: Path) -> tuple[dict[str, Any], str | None]:
+    if not path.exists():
+        return {}, "MISSING_FILE"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {}, f"UNREADABLE_JSON:{type(exc).__name__}"
+    if not isinstance(payload, dict):
+        return {}, "JSON_NOT_OBJECT"
+    return payload, None
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _to_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _resolve_run_root(repo_root: Path, latest: Mapping[str, Any]) -> Path:
+    raw = _text(latest.get("run_root") or latest.get("path"))
+    if not raw:
+        raw = str(repo_root / "outputs" / "runs" / _text(latest.get("run_id")))
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = repo_root / path
+    return path
+
+
+def _path_record(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "present": bool(path.exists()),
+    }
+
+
+def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -> dict[str, Any]:
+    root = Path(repo_root).resolve()
+    latest_path = root / "outputs" / "latest_run.json"
+    latest = read_latest_run_pointer(str(root))
+    if not latest:
+        return {
+            "status": "NEEDS_OPERATOR",
+            "reason": "latest_run_missing",
+            "message": "outputs/latest_run.json is missing or does not identify a run.",
+            "paths": {"latest_run": _path_record(latest_path)},
+        }
+
+    run_root = _resolve_run_root(root, latest)
+    operator_summary_path = run_root / "operator_summary.json"
+    execution_payload_path = run_root / "execution_payload.json"
+    execution_results_path = run_root / "execution_results.json"
+    timeline_json_path = run_root / "execution_timeline.json"
+    timeline_md_path = run_root / "execution_timeline.md"
+    integrity_path = run_root / "audit" / "execution_integrity.json"
+
+    operator_summary, operator_error = _read_json(operator_summary_path)
+    execution_payload, payload_error = _read_json(execution_payload_path)
+    execution_results, results_error = _read_json(execution_results_path)
+    timeline, timeline_error = _read_json(timeline_json_path)
+    integrity, integrity_error = _read_json(integrity_path)
+
+    provenance = dict(timeline.get("provenance") or {})
+    if not provenance:
+        provenance = {
+            "execution_source": execution_payload.get("execution_source"),
+            "planning_price_basis": execution_payload.get("planning_price_basis"),
+            "pricing_asof": execution_payload.get("pricing_asof"),
+            "execution_price_requirement": execution_payload.get("execution_price_requirement"),
+            "price_freshness_scope": execution_payload.get("price_freshness_scope"),
+        }
+
+    finding_codes = [
+        _text(finding.get("code"))
+        for finding in _as_list(integrity.get("findings"))
+        if isinstance(finding, Mapping) and _text(finding.get("code"))
+    ]
+    warnings = []
+    if timeline_error:
+        warnings.append(f"execution_timeline_json:{timeline_error}")
+    if operator_error:
+        warnings.append(f"operator_summary:{operator_error}")
+    if payload_error:
+        warnings.append(f"execution_payload:{payload_error}")
+    if results_error:
+        warnings.append(f"execution_results:{results_error}")
+    if integrity_error:
+        warnings.append(f"execution_integrity:{integrity_error}")
+
+    status = "OK" if not timeline_error else "NEEDS_OPERATOR"
+    return {
+        "status": status,
+        "reason": "" if status == "OK" else "execution_timeline_missing_or_unreadable",
+        "run_id": _text(latest.get("run_id") or timeline.get("run_id") or execution_payload.get("run_id")),
+        "trade_date": _text(latest.get("trade_date") or timeline.get("trade_date") or execution_payload.get("trade_date")),
+        "latest_run_status": latest.get("status"),
+        "terminal_status": operator_summary.get("terminal_status"),
+        "operator_execution_status": operator_summary.get("operator_execution_status"),
+        "execution_source": provenance.get("execution_source"),
+        "planning_price_basis": provenance.get("planning_price_basis"),
+        "pricing_asof": provenance.get("pricing_asof"),
+        "execution_price_requirement": provenance.get("execution_price_requirement"),
+        "price_freshness_scope": provenance.get("price_freshness_scope"),
+        "submitted_count": _to_int(execution_results.get("submitted_count") or execution_payload.get("submitted_count") or operator_summary.get("submitted_count")),
+        "accepted_count": _to_int(execution_results.get("accepted_count") or execution_payload.get("accepted_count") or operator_summary.get("accepted_count")),
+        "rejected_count": _to_int(execution_results.get("rejected_count") or execution_payload.get("rejected_count") or operator_summary.get("rejected_count")),
+        "execution_integrity_status": integrity.get("status") or operator_summary.get("execution_integrity_status"),
+        "findings": finding_codes or list(operator_summary.get("execution_integrity_findings") or []),
+        "timeline_event_count": timeline.get("event_count"),
+        "warnings": warnings,
+        "paths": {
+            "latest_run": _path_record(latest_path),
+            "operator_summary": _path_record(operator_summary_path),
+            "execution_payload": _path_record(execution_payload_path),
+            "execution_results": _path_record(execution_results_path),
+            "execution_timeline_json": _path_record(timeline_json_path),
+            "execution_timeline_md": _path_record(timeline_md_path),
+            "execution_integrity": _path_record(integrity_path),
+        },
+    }
+
+
+def render_text(payload: Mapping[str, Any]) -> str:
+    lines = [
+        "Latest Execution Timeline Status",
+        f"status: {payload.get('status')}",
+    ]
+    if payload.get("reason"):
+        lines.append(f"reason: {payload.get('reason')}")
+    for key in (
+        "run_id",
+        "trade_date",
+        "latest_run_status",
+        "terminal_status",
+        "operator_execution_status",
+        "execution_source",
+        "planning_price_basis",
+        "pricing_asof",
+        "execution_price_requirement",
+        "price_freshness_scope",
+        "submitted_count",
+        "accepted_count",
+        "rejected_count",
+        "execution_integrity_status",
+    ):
+        lines.append(f"{key}: {payload.get(key)}")
+    findings = payload.get("findings") or []
+    lines.append(f"findings: {', '.join(str(item) for item in findings) if findings else 'none'}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append(f"warnings: {', '.join(str(item) for item in warnings)}")
+    lines.append("paths:")
+    for name, record in dict(payload.get("paths") or {}).items():
+        if isinstance(record, Mapping):
+            lines.append(f"  {name}: {record.get('path')} present={str(record.get('present')).lower()}")
+    return "\n".join(lines)
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Summarize the latest execution timeline and provenance.")
+    parser.add_argument("--repo-root", type=Path, default=_REPO_ROOT)
+    parser.add_argument("--json", action="store_true", help="Emit deterministic JSON.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    payload = build_latest_execution_timeline_status(args.repo_root)
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        print(render_text(payload))
+    return 0 if payload.get("status") == "OK" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
