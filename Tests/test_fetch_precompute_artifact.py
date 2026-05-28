@@ -438,42 +438,49 @@ class TestFetchPrecomputeArtifact:
 
 
 # ---------------------------------------------------------------------------
-# F. Workflow YAML contract checks (Workstream H)
+# F. Current VM cron contract checks (Workstream H)
 # ---------------------------------------------------------------------------
 
 class TestWorkflowYAMLContracts:
-    """Assert structural invariants of workflow YAML files."""
+    """Assert current VM cron invariants after GitHub trading workflows retired."""
 
-    def test_precompute_artifact_name_uses_report_date(self) -> None:
-        workflow = Path(".github/workflows/daily-alpaca-precompute.yml").read_text(encoding="utf-8")
-        assert "alpaca-precompute-${{ env.REPORT_DATE }}" in workflow
+    def test_retired_trading_workflows_are_absent(self) -> None:
+        assert not Path(".github/workflows/daily-alpaca-precompute.yml").exists()
+        assert not Path(".github/workflows/daily-alpaca-live.yml").exists()
 
-    def test_live_downloads_same_artifact_name(self) -> None:
-        workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
-        assert "alpaca-precompute-${{ env.REPORT_DATE }}" in workflow
+    def test_cron_precompute_writes_date_scoped_bundle_and_validation(self) -> None:
+        cron_precompute = Path("scripts/cron_precompute.sh").read_text(encoding="utf-8")
+        assert 'BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"' in cron_precompute
+        assert "precompute_bundle_validation.json" in cron_precompute
+        assert "core.precompute_bundle_validation" in cron_precompute
 
-    def test_live_validates_bundle_before_execution(self) -> None:
-        workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
-        assert "precompute_bundle_status" in workflow
-        assert "bundle_ready" in workflow
+    def test_cron_execute_validates_bundle_before_execution(self) -> None:
+        cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+        assert "execution_bundle_validation.json" in cron_execute
+        assert "core.precompute_bundle_validation" in cron_execute
+        assert "BUNDLE_STATUS=bundle_ready" in cron_execute
 
-    def test_precompute_has_bundle_integrity_check(self) -> None:
-        workflow = Path(".github/workflows/daily-alpaca-precompute.yml").read_text(encoding="utf-8")
-        assert "bundle_integrity" in workflow
-        assert "bundle_uploadable" in workflow
+    def test_cron_execute_uses_exact_planned_payload_mode(self) -> None:
+        cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+        assert "export PRECOMPUTE_EXECUTE_EXACT_PLAN=1" in cron_execute
+        assert "EXECUTION_SOURCE=planned_payload_exact" in cron_execute
+        assert "python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0" in cron_execute
 
-    def test_precompute_stale_guard_fails_job(self) -> None:
-        workflow = Path(".github/workflows/daily-alpaca-precompute.yml").read_text(encoding="utf-8")
-        # Must contain exit 1 in the stale guard block.
-        assert "Fail when precompute stale guard blocks execution" in workflow
+    def test_cron_precompute_self_heal_suppresses_noncritical_side_effects(self) -> None:
+        cron_precompute = Path("scripts/cron_precompute.sh").read_text(encoding="utf-8")
+        assert "SELF_HEAL_PRECOMPUTE_ONLY" in cron_precompute
+        assert '"noncritical_side_effects_suppressed": true' in cron_precompute
+        assert '"suppressed_side_effects": ["email", "shadow", "shadow_latest", "shadow_reconciliation"]' in cron_precompute
 
     def test_deprecated_wrapper_has_no_schedule(self) -> None:
         workflow = Path(".github/workflows/daily-alpaca-paper.yml").read_text(encoding="utf-8")
         assert "Deprecated Wrapper" in workflow
         assert "schedule:" not in workflow
+        assert "Use VM cron in scripts/crontab.txt" in workflow
 
-    def test_helper_scripts_invoked_in_module_mode(self) -> None:
-        workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
-        assert "python3 -m scripts.fetch_precompute_artifact" in workflow
-        assert "python3 -m scripts.precompute_bundle_status" in workflow
-        assert "python3 -m scripts.workflow_time_guard" in workflow
+    def test_cron_helper_scripts_use_module_invocation_where_expected(self) -> None:
+        cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+        cron_precompute = Path("scripts/cron_precompute.sh").read_text(encoding="utf-8")
+        assert "python3 -m core.precompute_bundle_validation" in cron_execute
+        assert "python3 -m scripts.run_precomputed_alpaca_execution" in cron_execute
+        assert "python3 -m core.precompute_bundle_validation" in cron_precompute

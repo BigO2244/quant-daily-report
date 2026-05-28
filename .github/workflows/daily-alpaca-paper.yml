@@ -16,5 +16,5 @@ jobs:
         shell: bash
         run: |
           echo "::error::daily-alpaca-paper.yml is deprecated."
-          echo "::error::Use Daily Alpaca Precompute for 7:30 ET planning and Daily Alpaca Live for 9:35 ET execution."
+          echo "::error::Use VM cron in scripts/crontab.txt for precompute, execution, and confirmation."
           exit 1

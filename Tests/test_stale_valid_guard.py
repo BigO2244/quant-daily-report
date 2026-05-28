@@ -71,11 +71,14 @@ class TestStaleValidPrecompute:
         assert status == "SKIPPED_AS_STALE"
 
     def test_workflow_yaml_stale_step_checks_bundle_status(self) -> None:
-        """The precompute YAML must check prior bundle status before exiting."""
-        workflow = Path(".github/workflows/daily-alpaca-precompute.yml").read_text(encoding="utf-8")
-        assert "PRIOR_BUNDLE_STATUS" in workflow
-        assert 'exit 0' in workflow
-        assert "no valid bundle exists" in workflow
+        """VM cron must validate bundle status before execution can continue."""
+        cron_precompute = Path("scripts/cron_precompute.sh").read_text(encoding="utf-8")
+        cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+
+        assert "precompute_bundle_validation.json" in cron_precompute
+        assert "execution_bundle_validation.json" in cron_execute
+        assert "core.precompute_bundle_validation" in cron_execute
+        assert "execution halted to avoid degraded bundle execution" in cron_execute
 
 
 # ---------------------------------------------------------------------------

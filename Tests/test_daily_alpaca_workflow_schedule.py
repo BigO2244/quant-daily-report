@@ -1,20 +1,16 @@
 from pathlib import Path
 
 
-def test_daily_alpaca_precompute_workflow_is_dispatch_only() -> None:
-    workflow = Path(".github/workflows/daily-alpaca-precompute.yml").read_text(encoding="utf-8")
+def test_retired_github_alpaca_precompute_workflow_is_absent() -> None:
+    """VM cron is authoritative; retired GitHub precompute workflow must not return."""
 
-    assert "workflow_dispatch:" in workflow
-    assert "schedule:" not in workflow
-    assert "cron:" not in workflow
+    assert not Path(".github/workflows/daily-alpaca-precompute.yml").exists()
 
 
-def test_daily_alpaca_live_workflow_is_dispatch_only() -> None:
-    workflow = Path(".github/workflows/daily-alpaca-live.yml").read_text(encoding="utf-8")
+def test_retired_github_alpaca_live_workflow_is_absent() -> None:
+    """VM cron owns execution; retired GitHub live workflow must not return."""
 
-    assert "workflow_dispatch:" in workflow
-    assert "schedule:" not in workflow
-    assert "cron:" not in workflow
+    assert not Path(".github/workflows/daily-alpaca-live.yml").exists()
 
 
 def test_vm_crontab_owns_daily_production_schedule() -> None:
@@ -32,7 +28,7 @@ def test_deprecated_daily_alpaca_wrapper_has_no_schedule_trigger() -> None:
     assert "Deprecated Wrapper" in workflow
     assert "workflow_dispatch:" in workflow
     assert "schedule:" not in workflow
-    assert "Use Daily Alpaca Precompute" in workflow
+    assert "VM cron" in workflow
 
 
 def test_no_github_workflow_has_a_schedule_trigger() -> None:
