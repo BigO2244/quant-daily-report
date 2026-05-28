@@ -373,6 +373,104 @@ def _check_data_freshness(root: Path, trade_date: str) -> CheckResult:
     return CheckResult("Data freshness", status, reason_codes, summary, evidence_paths)
 
 
+def _resolve_run_root(root: Path, latest_run: dict[str, Any] | None) -> Path | None:
+    if not isinstance(latest_run, dict):
+        return None
+    raw = _norm_text(latest_run.get("run_root") or latest_run.get("path"))
+    if not raw:
+        run_id = _norm_text(latest_run.get("run_id"))
+        raw = f"outputs/runs/{run_id}" if run_id else ""
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    return path
+
+
+def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckResult:
+    latest_path = root / "outputs" / "latest_run.json"
+    latest_run, latest_error = _read_json(latest_path)
+    evidence_paths = [str(latest_path)]
+    reason_codes: list[str] = []
+    if latest_error:
+        return CheckResult(
+            "Execution timeline provenance",
+            "YELLOW",
+            ["LATEST_RUN_MISSING"],
+            "Latest run pointer is missing; execution timeline availability is unknown.",
+            evidence_paths,
+        )
+
+    run_root = _resolve_run_root(root, latest_run)
+    if run_root is None:
+        return CheckResult(
+            "Execution timeline provenance",
+            "YELLOW",
+            ["LATEST_RUN_ROOT_MISSING"],
+            "Latest run pointer does not identify a run root.",
+            evidence_paths,
+        )
+
+    operator_path = run_root / "operator_summary.json"
+    payload_path = run_root / "execution_payload.json"
+    timeline_path = run_root / "execution_timeline.json"
+    integrity_path = run_root / "audit" / "execution_integrity.json"
+    evidence_paths.extend(str(path) for path in (operator_path, payload_path, timeline_path, integrity_path))
+
+    operator_summary, operator_error = _read_json(operator_path)
+    execution_payload, payload_error = _read_json(payload_path)
+    timeline, timeline_error = _read_json(timeline_path)
+    integrity, integrity_error = _read_json(integrity_path)
+    operator_summary = operator_summary or {}
+    execution_payload = execution_payload or {}
+    timeline = timeline or {}
+    integrity = integrity or {}
+
+    latest_run_date = _artifact_date(latest_run)
+    if latest_run_date and latest_run_date != trade_date:
+        reason_codes.append("LATEST_RUN_DATE_MISMATCH")
+    if operator_error:
+        reason_codes.append("OPERATOR_SUMMARY_MISSING")
+    if payload_error:
+        reason_codes.append("EXECUTION_PAYLOAD_MISSING")
+    if timeline_error:
+        reason_codes.append("EXECUTION_TIMELINE_MISSING")
+    if integrity_error:
+        reason_codes.append("EXECUTION_INTEGRITY_MISSING")
+
+    provenance = timeline.get("provenance") if isinstance(timeline.get("provenance"), dict) else {}
+    execution_source = _norm_text(provenance.get("execution_source") or execution_payload.get("execution_source"))
+    freshness_scope = _norm_text(provenance.get("price_freshness_scope") or execution_payload.get("price_freshness_scope"))
+    integrity_status = _norm_text(integrity.get("status") or operator_summary.get("execution_integrity_status"))
+    terminal_status = _norm_text(operator_summary.get("terminal_status") or latest_run.get("status"))
+
+    if not execution_source:
+        reason_codes.append("EXECUTION_SOURCE_MISSING")
+    if not freshness_scope:
+        reason_codes.append("PRICE_FRESHNESS_SCOPE_MISSING")
+
+    status = "GREEN" if not reason_codes else "YELLOW"
+    summary = (
+        "timeline_present={timeline_present}; execution_source={execution_source}; "
+        "price_freshness_scope={freshness_scope}; integrity_status={integrity_status}; "
+        "terminal_status={terminal_status}"
+    ).format(
+        timeline_present=str(timeline_error is None).lower(),
+        execution_source=execution_source or "unknown",
+        freshness_scope=freshness_scope or "unknown",
+        integrity_status=integrity_status or "unknown",
+        terminal_status=terminal_status or "unknown",
+    )
+    return CheckResult(
+        "Execution timeline provenance",
+        status,
+        sorted(set(reason_codes)),
+        summary,
+        evidence_paths,
+    )
+
+
 def build_health_check(root: Path = Path("."), trade_date: str | None = None) -> dict[str, Any]:
     root = root.resolve()
     resolved_trade_date = resolve_trade_date(root, trade_date)
@@ -383,6 +481,7 @@ def build_health_check(root: Path = Path("."), trade_date: str | None = None) ->
         _check_reconciliation(root),
         _check_strategy_identity(root, resolved_trade_date),
         _check_data_freshness(root, resolved_trade_date),
+        _check_execution_timeline_provenance(root, resolved_trade_date),
     ]
     overall_status = _status_max(checks)
     return {

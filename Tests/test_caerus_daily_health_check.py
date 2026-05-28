@@ -95,6 +95,53 @@ def _write_base_artifacts(root: Path, *, reconciliation: dict | None = None, vix
             },
         },
     )
+    run_root = root / "outputs" / "runs" / "run-health"
+    _write_json(
+        root / "outputs" / "latest_run.json",
+        {
+            "run_id": "run-health",
+            "trade_date": TRADE_DATE,
+            "mode": "PAPER",
+            "run_root": str(run_root),
+            "status": "success",
+            "workflow_stage": "execution",
+        },
+    )
+    _write_json(
+        run_root / "operator_summary.json",
+        {
+            "trade_date": TRADE_DATE,
+            "terminal_status": "success",
+            "operator_execution_status": "executed",
+            "execution_integrity_status": "OK",
+        },
+    )
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "trade_date": TRADE_DATE,
+            "execution_source": "planned_payload_exact",
+            "planning_price_basis": "PREV_CLOSE",
+            "pricing_asof": "2026-04-27",
+            "execution_price_requirement": "PRECOMPUTE_VALIDATED",
+            "price_freshness_scope": "precompute_bundle",
+        },
+    )
+    _write_json(
+        run_root / "execution_timeline.json",
+        {
+            "trade_date": TRADE_DATE,
+            "event_count": 15,
+            "provenance": {
+                "execution_source": "planned_payload_exact",
+                "planning_price_basis": "PREV_CLOSE",
+                "pricing_asof": "2026-04-27",
+                "execution_price_requirement": "PRECOMPUTE_VALIDATED",
+                "price_freshness_scope": "precompute_bundle",
+            },
+        },
+    )
+    _write_json(run_root / "audit" / "execution_integrity.json", {"status": "OK", "findings": []})
 
 
 def _status(payload: dict, name: str) -> str:
@@ -108,7 +155,21 @@ def test_green_case(tmp_path: Path) -> None:
     assert payload["recommended_action"] == "HOLD_NO_ACTION"
     assert _status(payload, "VIX/regime") == "GREEN"
     assert _status(payload, "Shadow performance report") == "GREEN"
+    assert _status(payload, "Execution timeline provenance") == "GREEN"
     assert "Caerus Daily Health Check" in render_console(payload)
+
+
+def test_execution_timeline_missing_is_yellow_operator_visibility(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    (tmp_path / "outputs" / "runs" / "run-health" / "execution_timeline.json").unlink()
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+    check = next(item for item in payload["checks"] if item["name"] == "Execution timeline provenance")
+
+    assert payload["overall_status"] == "YELLOW"
+    assert check["status"] == "YELLOW"
+    assert "EXECUTION_TIMELINE_MISSING" in check["reason_codes"]
+    assert "timeline_present=false" in check["summary"]
 
 
 def test_yellow_not_aligned_case(tmp_path: Path) -> None:
