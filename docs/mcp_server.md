@@ -1,14 +1,15 @@
-# Caerus MCP Server Phase 6A
+# Caerus MCP Server Phase 6
 
 ## Scope
 
-Caerus MCP Server Phase 6A wraps the deployed MCP-lite research registry in a
-local read-only, stdio JSON-RPC compatible tool server. It is an operator
-research interface over registry artifacts. It is not a trading, scheduling, or
-automation surface.
+Caerus MCP Server Phase 6 is the local read-only operator inspection layer over
+existing Caerus artifacts. It wraps the deployed MCP-lite research registry in a
+stdio JSON-RPC compatible tool server and adds direct artifact inspection for
+operator status checks. It is not a trading, scheduling, or automation surface.
 
-The server indexes existing artifacts into a caller-specified disposable SQLite
-registry DB. Source artifacts are read only.
+The server can index existing artifacts into a caller-specified disposable
+SQLite registry DB. Direct artifact inspection commands read `outputs/` in
+place and do not build, repair, or mutate runtime artifacts.
 
 ## Non-Goals
 
@@ -64,6 +65,8 @@ Local smoke:
 - `lineage`
 - `daily_operator_brief`
 - `artifact_status`
+- `operator_daily_summary`
+- `artifact_drilldown`
 
 Every tool returns a JSON object with `status`, `db_path`, `queried_at`,
 `warnings`, and `findings`.
@@ -74,6 +77,17 @@ summarizes the latest precompute bundle, execution run, broker/confirmation
 artifacts, shadow comparison/readiness artifacts, and research packet. Missing
 artifact roots return `NEEDS_OPERATOR` style warnings instead of triggering any
 repair workflow.
+
+`operator_daily_summary` answers the operator morning/evening questions from
+latest artifacts: did precompute run for the requested trade date, did execution
+run, are broker/reconciliation artifacts present, did the shadow lane run, is
+the research packet current, and what needs operator attention. It returns
+`NEEDS_OPERATOR` when any required current-day surface is stale or missing.
+
+`artifact_drilldown` returns compact file probes for latest artifact paths and
+required files. It reports path, existence, size, status, selected dates, and
+small status fields only. It does not dump raw JSON, markdown bodies, secrets,
+positions, broker payloads, or large artifact contents.
 
 ## Example JSON-RPC Calls
 
@@ -143,6 +157,45 @@ Inspect current artifacts without rebuilding the registry:
 .venv/bin/python3 scripts/research_registry_cli.py artifact-status --outputs-root outputs --markdown
 ```
 
+Print the daily operator summary without rebuilding the registry:
+
+```bash
+.venv/bin/python3 scripts/research_registry_cli.py daily-summary --outputs-root outputs --json
+.venv/bin/python3 scripts/research_registry_cli.py daily-summary --outputs-root outputs --markdown
+```
+
+Drill into latest artifact paths without dumping raw payloads:
+
+```bash
+.venv/bin/python3 scripts/research_registry_cli.py artifact-drilldown --outputs-root outputs --family all --markdown
+.venv/bin/python3 scripts/research_registry_cli.py artifact-drilldown --outputs-root outputs --family precompute --json
+```
+
+Expected daily-summary shape:
+
+```json
+{
+  "status": "OK",
+  "trade_date": "2026-05-28",
+  "summary": {
+    "what_happened_today": {
+      "precompute_ran": true,
+      "execution_ran": true,
+      "broker_recon_present": true,
+      "shadow_ran": true,
+      "research_packet_current": true
+    },
+    "operator_attention": []
+  },
+  "warnings": []
+}
+```
+
+When required latest artifacts are absent or stale, `status` becomes
+`NEEDS_OPERATOR` and `warnings` lists the missing or stale surface. The command
+does not invoke precompute, execution, repair, broker confirmation, shadow
+generation, or research ingestion.
+
 ## Recommended VM Usage
 
 After review, deploy by the normal deterministic source flow:
@@ -163,7 +216,7 @@ python3 scripts/research_registry_mcp_server.py smoke \
   --limit 5
 ```
 
-Do not install cron or deploy services as part of Phase 6A.
+Do not install cron or deploy services as part of Phase 6.
 
 ## Security Boundary
 
@@ -172,6 +225,21 @@ layers. It does not import broker modules, execution runners, cron wrappers, or
 dashboard publishers. It does not read or print environment secrets. The server
 rejects registry DB paths under repo `outputs/` so generated SQLite indexes do
 not contaminate runtime artifact directories.
+
+Direct artifact inspection uses compact probes and selected status metadata. It
+does not print raw artifact payloads and is designed to avoid exposing large
+broker, portfolio, or environment-derived payloads through the MCP interface.
+
+## Known Limitations
+
+- Artifact freshness is evaluated from latest persisted paths, not from broker
+  or scheduler APIs.
+- `broker_recon_present` confirms that broker/reconciliation artifacts exist; it
+  does not call Alpaca or verify live account state.
+- Missing artifacts are reported as `NEEDS_OPERATOR`; Phase 6 intentionally does
+  not self-heal or trigger workflows.
+- Direct artifact status does not require a registry DB, so its `db_path` field
+  is informational for MCP response consistency.
 
 ## Rollback
 
@@ -185,3 +253,9 @@ git revert <server-core-commit>
 
 Disposable SQLite DBs under `/tmp` or `/private/tmp` can be ignored or removed
 outside the source rollback.
+
+## Phase 6 Deployment Ledger
+
+The final Phase 6 implementation commit and validation evidence are recorded in
+the operator deployment report after local validation, GitHub push, VM
+fast-forward, and VM validation complete.

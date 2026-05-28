@@ -19,7 +19,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from research_registry.ingestion import ingest_artifact_family
-from research_registry.mcp_server.tools import artifact_status, daily_operator_brief
+from research_registry.mcp_server.tools import artifact_drilldown, artifact_status, daily_operator_brief, operator_daily_summary
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
 
@@ -473,10 +473,92 @@ def _format_artifact_status_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _format_daily_summary_markdown(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") or {}
+    happened = summary.get("what_happened_today") or {}
+    lines = [
+        "# MCP Daily Summary",
+        "",
+        f"- Status: `{payload.get('status')}`",
+        f"- Trade date: `{payload.get('trade_date')}`",
+        f"- Outputs root: `{payload.get('outputs_root')}`",
+        f"- Queried at: `{payload.get('queried_at')}`",
+        "",
+        "## What Happened Today",
+        "",
+        f"- Precompute ran: `{happened.get('precompute_ran')}`",
+        f"- Execution ran: `{happened.get('execution_ran')}`",
+        f"- Broker/recon present: `{happened.get('broker_recon_present')}`",
+        f"- Shadow lane ran: `{happened.get('shadow_ran')}`",
+        f"- Research packet current: `{happened.get('research_packet_current')}`",
+        "",
+        "## Latest Paths",
+    ]
+    for key, section in (summary.get("sections") or {}).items():
+        lines.append(f"- `{key}`: status=`{section.get('status')}` path=`{section.get('path') or section.get('paths')}`")
+    if payload.get("warnings"):
+        lines.extend(["", "## Needs Operator Attention", ""])
+        lines.extend(f"- {warning}" for warning in payload["warnings"])
+    return "\n".join(lines) + "\n"
+
+
+def _format_artifact_drilldown_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# MCP Artifact Drilldown",
+        "",
+        f"- Status: `{payload.get('status')}`",
+        f"- Outputs root: `{payload.get('outputs_root')}`",
+        f"- Family: `{payload.get('family')}`",
+        f"- Queried at: `{payload.get('queried_at')}`",
+        "",
+        "## File Probes",
+    ]
+    for family, section in (payload.get("drilldown") or {}).items():
+        lines.extend(["", f"### {family}", f"- Status: `{section.get('status')}`", f"- Path: `{section.get('path') or section.get('paths')}`"])
+        if section.get("trade_date"):
+            lines.append(f"- Trade date: `{section.get('trade_date')}`")
+        if section.get("run_id"):
+            lines.append(f"- Run ID: `{section.get('run_id')}`")
+        if section.get("missing_required"):
+            lines.append(f"- Missing required: `{', '.join(section.get('missing_required') or [])}`")
+        files = section.get("files") or {}
+        for name, probe in files.items():
+            if isinstance(probe, dict):
+                lines.append(f"- `{name}`: exists=`{probe.get('exists')}` size={probe.get('size_bytes')} path=`{probe.get('path')}`")
+        workflow_files = section.get("workflow_files") or {}
+        for name, probe in workflow_files.items():
+            if isinstance(probe, dict):
+                lines.append(f"- `workflow.{name}`: exists=`{probe.get('exists')}` size={probe.get('size_bytes')} path=`{probe.get('path')}`")
+        latest_recon = section.get("latest_reconciliation")
+        if isinstance(latest_recon, dict):
+            lines.append(
+                f"- `latest_reconciliation`: exists=`{latest_recon.get('exists')}` size={latest_recon.get('size_bytes')} path=`{latest_recon.get('path')}`"
+            )
+    return "\n".join(lines) + "\n"
+
+
 def cmd_artifact_status(args: argparse.Namespace) -> int:
     payload = artifact_status(outputs_root=args.outputs_root, limit=args.limit)
     if args.markdown:
         print(_format_artifact_status_markdown(payload))
+    else:
+        _print_json(payload)
+    return 0
+
+
+def cmd_daily_summary(args: argparse.Namespace) -> int:
+    payload = operator_daily_summary(outputs_root=args.outputs_root, trade_date=args.trade_date)
+    if args.markdown:
+        print(_format_daily_summary_markdown(payload))
+    else:
+        _print_json(payload)
+    return 0
+
+
+def cmd_artifact_drilldown(args: argparse.Namespace) -> int:
+    payload = artifact_drilldown(outputs_root=args.outputs_root, family=args.family)
+    if args.markdown:
+        print(_format_artifact_drilldown_markdown(payload))
     else:
         _print_json(payload)
     return 0
@@ -829,6 +911,30 @@ def build_parser() -> argparse.ArgumentParser:
     artifact_status_cmd.add_argument("--json", action="store_true", help="Emit JSON output (default).")
     artifact_status_cmd.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
     artifact_status_cmd.set_defaults(func=cmd_artifact_status)
+
+    daily_summary = subparsers.add_parser(
+        "daily-summary",
+        help="Summarize today's read-only operator state from latest artifacts.",
+    )
+    daily_summary.add_argument("--outputs-root", default="outputs")
+    daily_summary.add_argument("--trade-date", default=None)
+    daily_summary.add_argument("--json", action="store_true", help="Emit JSON output (default).")
+    daily_summary.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
+    daily_summary.set_defaults(func=cmd_daily_summary)
+
+    artifact_drilldown_cmd = subparsers.add_parser(
+        "artifact-drilldown",
+        help="Inspect latest artifact paths and required files without raw payload dumps.",
+    )
+    artifact_drilldown_cmd.add_argument("--outputs-root", default="outputs")
+    artifact_drilldown_cmd.add_argument(
+        "--family",
+        default="all",
+        choices=["all", "precompute", "execution", "broker_confirmation", "shadow", "research_packet"],
+    )
+    artifact_drilldown_cmd.add_argument("--json", action="store_true", help="Emit JSON output (default).")
+    artifact_drilldown_cmd.add_argument("--markdown", action="store_true", help="Emit Markdown output.")
+    artifact_drilldown_cmd.set_defaults(func=cmd_artifact_drilldown)
 
     build_caerus = subparsers.add_parser(
         "build-caerus-registry",

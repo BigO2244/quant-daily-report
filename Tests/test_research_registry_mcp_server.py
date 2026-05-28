@@ -143,6 +143,8 @@ def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
         "lineage",
         "daily_operator_brief",
         "artifact_status",
+        "operator_daily_summary",
+        "artifact_drilldown",
     }.issubset(names)
 
 
@@ -399,3 +401,62 @@ def test_artifact_status_cli_markdown_and_missing_artifacts(tmp_path: Path, caps
     assert "# MCP Artifact Status" in markdown
     assert "NEEDS_OPERATOR" in markdown
     assert "precompute: NEEDS_OPERATOR" in markdown
+
+
+def test_operator_daily_summary_ok_state_and_cli_formats(tmp_path: Path, capsys) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+
+    payload = call_tool("operator_daily_summary", {"outputs_root": str(outputs), "trade_date": "2026-05-28"})
+    assert payload["status"] == "OK"
+    assert payload["warnings"] == []
+    happened = payload["summary"]["what_happened_today"]
+    assert happened["precompute_ran"] is True
+    assert happened["execution_ran"] is True
+    assert happened["broker_recon_present"] is True
+    assert happened["shadow_ran"] is True
+    assert happened["research_packet_current"] is True
+
+    assert research_registry_cli.main(["daily-summary", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--json"]) == 0
+    json_payload = json.loads(capsys.readouterr().out)
+    assert json_payload["status"] == "OK"
+    assert json_payload["summary"]["what_happened_today"]["execution_ran"] is True
+
+    assert research_registry_cli.main(["daily-summary", "--outputs-root", str(outputs), "--trade-date", "2026-05-28", "--markdown"]) == 0
+    markdown = capsys.readouterr().out
+    assert "# MCP Daily Summary" in markdown
+    assert "Precompute ran: `True`" in markdown
+
+
+def test_operator_daily_summary_missing_artifact_needs_operator(tmp_path: Path) -> None:
+    outputs = tmp_path / "outputs"
+    (outputs / "precompute").mkdir(parents=True)
+
+    payload = call_tool("operator_daily_summary", {"outputs_root": str(outputs), "trade_date": "2026-05-28"})
+
+    assert payload["status"] == "NEEDS_OPERATOR"
+    assert "precompute: NEEDS_OPERATOR" in payload["warnings"]
+    assert "execution is not current for 2026-05-28" in payload["warnings"]
+    assert payload["summary"]["what_happened_today"]["execution_ran"] is False
+
+
+def test_artifact_drilldown_omits_raw_large_payloads_and_is_read_only(tmp_path: Path, capsys) -> None:
+    outputs = _artifact_status_fixture(tmp_path)
+    secret = "DO_NOT_DUMP_PHASE6_SECRET"
+    contract = outputs / "precompute" / "2026-05-28" / "contract.json"
+    _write_json(contract, {"trade_date": "2026-05-28", "status": "READY", "secret": secret, "large": "x" * 10000})
+    source_files = [path for path in outputs.rglob("*") if path.is_file()]
+    before = {path: path.read_bytes() for path in source_files}
+
+    payload = call_tool("artifact_drilldown", {"outputs_root": str(outputs), "family": "precompute"})
+    serialized = json.dumps(payload, sort_keys=True)
+
+    assert payload["status"] == "OK"
+    assert payload["drilldown"]["precompute"]["files"]["contract.json"]["exists"] is True
+    assert secret not in serialized
+    assert "xxxxxxxxxxxxxxxxxxxxxxxx" not in serialized
+    assert {path: path.read_bytes() for path in source_files} == before
+
+    assert research_registry_cli.main(["artifact-drilldown", "--outputs-root", str(outputs), "--family", "precompute", "--markdown"]) == 0
+    markdown = capsys.readouterr().out
+    assert "# MCP Artifact Drilldown" in markdown
+    assert secret not in markdown

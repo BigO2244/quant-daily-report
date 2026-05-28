@@ -52,6 +52,8 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "lineage": lineage,
         "daily_operator_brief": daily_operator_brief,
         "artifact_status": artifact_status,
+        "operator_daily_summary": operator_daily_summary,
+        "artifact_drilldown": artifact_drilldown,
     }
     if name not in dispatch:
         return _response("ERROR", _resolve_db_path(arguments, context), warnings=[f"unknown tool: {name}"])
@@ -401,6 +403,91 @@ def artifact_status(
         latest_broker_confirmation=latest_broker,
         latest_shadow=latest_shadow,
         latest_research_packet=latest_research_packet,
+    )
+
+
+def operator_daily_summary(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    trade_date: str | None = None,
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    target_date = trade_date or datetime.now().date().isoformat()
+    status_payload = artifact_status(context=context, outputs_root=outputs_root, limit=5)
+    sections = {
+        "precompute": status_payload["latest_precompute"],
+        "execution": status_payload["latest_execution"],
+        "broker_confirmation": status_payload["latest_broker_confirmation"],
+        "shadow": status_payload["latest_shadow"],
+        "research_packet": status_payload["latest_research_packet"],
+    }
+    attention = list(status_payload.get("warnings") or [])
+
+    summary = {
+        "what_happened_today": {
+            "trade_date": target_date,
+            "precompute_ran": _section_current(sections["precompute"], target_date),
+            "execution_ran": _section_current(sections["execution"], target_date),
+            "broker_recon_present": sections["broker_confirmation"].get("status") == "OK",
+            "shadow_ran": _section_current(sections["shadow"], target_date),
+            "research_packet_current": _section_current(sections["research_packet"], target_date),
+        },
+        "sections": sections,
+        "operator_attention": [],
+    }
+
+    if not summary["what_happened_today"]["precompute_ran"]:
+        attention.append(f"precompute is not current for {target_date}")
+    if not summary["what_happened_today"]["execution_ran"]:
+        attention.append(f"execution is not current for {target_date}")
+    if not summary["what_happened_today"]["shadow_ran"]:
+        attention.append(f"shadow lane is not current for {target_date}")
+    if not summary["what_happened_today"]["research_packet_current"]:
+        attention.append(f"research packet is not current for {target_date}")
+    if not summary["what_happened_today"]["broker_recon_present"]:
+        attention.append("broker/reconciliation artifacts are missing")
+    integrity_status = sections["execution"].get("integrity_status")
+    if integrity_status in {"WARN", "FAIL"}:
+        attention.append(f"execution integrity status is {integrity_status}")
+    attention = sorted(set(attention))
+    summary["operator_attention"] = attention
+
+    return _response(
+        "NEEDS_OPERATOR" if attention else "OK",
+        context.db_path,
+        warnings=attention,
+        outputs_root=status_payload["outputs_root"],
+        trade_date=target_date,
+        summary=summary,
+    )
+
+
+def artifact_drilldown(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    family: str | None = "all",
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    root = Path(outputs_root) if outputs_root else Path("outputs")
+    family_name = family or "all"
+    probes = {
+        "precompute": _latest_precompute_status(root),
+        "execution": _latest_execution_status(root),
+        "broker_confirmation": _latest_broker_status(root),
+        "shadow": _latest_shadow_status(root),
+        "research_packet": _latest_research_packet_status(root),
+    }
+    if family_name != "all":
+        probes = {family_name: probes.get(family_name, {"status": "NEEDS_OPERATOR", "reason": f"unknown family: {family_name}"})}
+    return _response(
+        "OK",
+        context.db_path,
+        outputs_root=str(root),
+        family=family_name,
+        drilldown=probes,
+        note="Compact file probes only; raw artifact payloads are not included.",
     )
 
 
@@ -817,3 +904,7 @@ def _latest_research_packet_status(root: Path) -> dict[str, Any]:
             "packet_html": _file_probe(latest / "packet.html"),
         },
     }
+
+
+def _section_current(section: dict[str, Any], trade_date: str) -> bool:
+    return section.get("status") == "OK" and section.get("trade_date") == trade_date

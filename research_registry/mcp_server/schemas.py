@@ -91,4 +91,26 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "name": "operator_daily_summary",
+        "description": "Summarize today's read-only operator state from latest Caerus artifacts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "trade_date": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "artifact_drilldown",
+        "description": "Return compact latest artifact paths and required-file probes without raw payload dumps.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "family": {"type": "string", "default": "all"},
+            },
+        },
+    },
 ]
