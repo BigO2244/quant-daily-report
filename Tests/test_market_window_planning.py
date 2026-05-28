@@ -478,6 +478,122 @@ def test_paper_mode_submits_orders_and_uses_broker_state(monkeypatch, tmp_path):
     assert (tmp_path / result["alpaca_orders_path"]).exists()
 
 
+def test_pre_submit_observer_cannot_mutate_broker_submission(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _mock_open_market(monkeypatch, trading_mode="paper")
+    submitted: list[dict[str, object]] = []
+
+    class _StubAlpaca:
+        paper = True
+
+        @classmethod
+        def from_env(cls):
+            return cls()
+
+        def list_orders(self, status="open", limit=500):
+            _ = (status, limit)
+            return []
+
+        def find_order_by_client_id(self, client_id):
+            _ = client_id
+            return None
+
+        def get_order(self, order_id):
+            _ = order_id
+            return {"id": "alpaca-oid-1", "status": "filled", "filled_qty": "10"}
+
+        def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
+            submitted.append(
+                {
+                    "symbol": symbol,
+                    "qty": qty,
+                    "side": side,
+                    "client_order_id": client_order_id,
+                    "tif": tif,
+                }
+            )
+            return {
+                "id": "alpaca-oid-1",
+                "status": "accepted",
+                "submitted_at": "2026-02-10T10:00:00-05:00",
+            }
+
+        def submit_limit_order(self, symbol, qty, side, limit_price, client_order_id, tif="day"):
+            _ = (symbol, qty, side, limit_price, client_order_id, tif)
+            raise AssertionError("limit orders are not expected")
+
+        def get_account(self):
+            return {"cash": "9000.0", "equity": "10050.0", "buying_power": "18000.0"}
+
+        def get_positions(self):
+            return [
+                {
+                    "symbol": "AAPL",
+                    "qty": "10",
+                    "current_price": "105.0",
+                    "market_value": "1050.0",
+                }
+            ]
+
+    def _observer(orders):
+        assert orders
+        orders[0]["quantity"] = 999
+        orders.append({"ticker": "MSFT", "side": "BUY", "quantity": 1})
+
+    monkeypatch.setattr(broker, "AlpacaBroker", _StubAlpaca)
+    monkeypatch.setattr(
+        broker,
+        "apply_trades_to_holdings",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("apply_trades_to_holdings should not be used in paper execution mode")
+        ),
+    )
+    monkeypatch.setattr(
+        broker,
+        "_capture_alpaca_posttrade_state",
+        lambda **_kwargs: {
+            "alpaca_account_snapshot": {"cash": "9000.0", "equity": "10050.0", "buying_power": "18000.0"},
+            "alpaca_positions_snapshot": [
+                {
+                    "symbol": "AAPL",
+                    "qty": "10",
+                    "current_price": "105.0",
+                    "market_value": "1050.0",
+                }
+            ],
+            "posttrade_account_snapshot_path": "account.json",
+            "posttrade_positions_snapshot_path": "positions.json",
+            "posttrade_recon_path": "recon.json",
+            "posttrade_recon_status": "PASS",
+            "posttrade_unresolved_orders": [],
+            "posttrade_repair_suggestions": [],
+            "posttrade_affected_symbols": [],
+            "posttrade_duplicate_fill_suspicions_count": 0,
+        },
+    )
+
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+        pre_submit_observer=_observer,
+    )
+
+    assert result["execution_status"] == "READY"
+    assert submitted == [
+        {
+            "symbol": "AAPL",
+            "qty": 10.0,
+            "side": "BUY",
+            "client_order_id": "2026-02-10:main:v1:AAPL:BUY",
+            "tif": "day",
+        }
+    ]
+
+
 def test_paper_mode_remote_existing_orders_are_treated_as_idempotent_replay(
     monkeypatch, tmp_path
 ):

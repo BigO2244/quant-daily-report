@@ -11,7 +11,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -2753,6 +2753,7 @@ def run_paper_day(
     constraints: Dict[str, float] | None = None,
     plan_only: bool = False,
     precomputed_trade_plan: List[Dict[str, object]] | None = None,
+    pre_submit_observer: Callable[[List[Dict[str, object]]], None] | None = None,
 ) -> Dict[str, object]:
     cfg = load_config(config_path)
 
@@ -3423,6 +3424,11 @@ def run_paper_day(
             alpaca_submission_summary["post_local_idempotent_orders"] = int(len(orders))
             submission_metadata: Dict[str, Dict[str, object]] = {}
             orders_for_execution = list(orders)
+            if pre_submit_observer is not None:
+                try:
+                    pre_submit_observer([dict(order) for order in orders_for_execution])
+                except Exception as exc:
+                    logger.warning("[EQUALITY_GATE] observe callback failed; submission unaffected: %s", exc)
 
         if paper_execution_requested and execution_enabled:
             alpaca = AlpacaBroker.from_env()

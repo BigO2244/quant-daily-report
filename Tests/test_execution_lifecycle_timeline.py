@@ -118,6 +118,50 @@ def test_execution_lifecycle_timeline_synthesizes_run_artifacts(
     assert "`planned_payload_exact`" in md_path.read_text(encoding="utf-8")
 
 
+def test_execution_lifecycle_timeline_includes_equality_gate_when_present(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_root = tmp_path / "outputs" / "runs" / "run-123"
+    trade_date = "2026-05-28"
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "run_id": "run-123",
+            "trade_date": trade_date,
+            "execution_source": "planned_payload_exact",
+            "planning_price_basis": "PREV_CLOSE",
+            "pricing_asof": "2026-05-27",
+            "execution_price_requirement": "PRECOMPUTE_VALIDATED",
+            "price_freshness_scope": "precompute_bundle",
+        },
+    )
+    _write_json(
+        run_root / "equality_gate.json",
+        {
+            "decision": "WOULD_HALT_HASH_MISMATCH",
+            "would_block": True,
+            "hashes_equal": False,
+            "pricing_asof_match": True,
+            "execution_source": "planned_payload_exact",
+            "timestamp_utc": "2026-05-28T13:34:59Z",
+        },
+    )
+
+    timeline = build_execution_lifecycle_timeline(
+        run_root=run_root,
+        trade_date=trade_date,
+        run_id="run-123",
+    )
+    checkpoints = {event["checkpoint"]: event for event in timeline["events"]}
+
+    assert timeline["event_count"] == 16
+    assert checkpoints["equality_gate_observe"]["status"] == "WARN"
+    assert checkpoints["equality_gate_observe"]["details"]["decision"] == "WOULD_HALT_HASH_MISMATCH"
+    assert checkpoints["equality_gate_observe"]["details"]["note"] == "observe-only; submission unaffected"
+
+
 def test_execution_lifecycle_timeline_is_deterministic_for_missing_artifacts(
     tmp_path: Path,
     monkeypatch,

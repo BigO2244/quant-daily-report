@@ -224,6 +224,77 @@ def test_warn_reconciliation_does_not_halt(tmp_path) -> None:
     assert live_exec._precompute_reconciliation_halt_reason({"reconciliation_decision": "WARN"}) is None
 
 
+def test_equality_gate_observer_writes_artifacts_and_operator_summary(tmp_path, monkeypatch) -> None:
+    live_exec = _load_module(tmp_path)
+    from core import operator_summary
+
+    monkeypatch.setattr(live_exec, "write_operator_summary", operator_summary.write_operator_summary)
+    run_root = tmp_path / "outputs" / "runs" / "run-eq"
+    observer = live_exec._make_equality_gate_observer(
+        run_root=run_root,
+        run_id="run-eq",
+        trade_date="2026-05-28",
+        planned_payload={
+            "trade_date": "2026-05-28",
+            "pricing_source": "PREV_CLOSE",
+            "pricing_asof": "2026-05-27",
+            "trades": [{"ticker": "AAPL", "side": "BUY", "shares": "1.0", "entry_price": 200.0}],
+        },
+        provenance={
+            "execution_source": "planned_payload_exact",
+            "planning_price_basis": "PREV_CLOSE",
+            "pricing_asof": "2026-05-27",
+        },
+    )
+
+    assert observer is not None
+    submission_orders = [{"ticker": "AAPL", "side": "BUY", "quantity": 1, "order_type": "MKT"}]
+    before = [dict(item) for item in submission_orders]
+    observer(submission_orders)
+
+    artifact = json.loads((run_root / "equality_gate.json").read_text(encoding="utf-8"))
+    summary = json.loads((run_root / "operator_summary.json").read_text(encoding="utf-8"))
+    assert submission_orders == before
+    assert artifact["decision"] == "WOULD_PROCEED"
+    assert artifact["submission_proceeded"] is True
+    assert summary["equality_gate_observe"]["decision"] == "WOULD_PROCEED"
+
+
+def test_equality_gate_observer_records_observe_error_without_raising(tmp_path, monkeypatch) -> None:
+    live_exec = _load_module(tmp_path)
+    from core import execution_equality_gate, operator_summary
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("forced observe failure")
+
+    monkeypatch.setattr(live_exec, "write_operator_summary", operator_summary.write_operator_summary)
+    monkeypatch.setattr(execution_equality_gate, "write_equality_gate_observe_artifacts", _raise)
+    run_root = tmp_path / "outputs" / "runs" / "run-eq-error"
+    observer = live_exec._make_equality_gate_observer(
+        run_root=run_root,
+        run_id="run-eq-error",
+        trade_date="2026-05-28",
+        planned_payload={
+            "trade_date": "2026-05-28",
+            "pricing_source": "PREV_CLOSE",
+            "pricing_asof": "2026-05-27",
+            "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}],
+        },
+        provenance={
+            "execution_source": "planned_payload_exact",
+            "planning_price_basis": "PREV_CLOSE",
+            "pricing_asof": "2026-05-27",
+        },
+    )
+
+    assert observer is not None
+    observer([{"ticker": "AAPL", "side": "BUY", "quantity": 1}])
+
+    artifact = json.loads((run_root / "equality_gate.json").read_text(encoding="utf-8"))
+    assert artifact["decision"] == "OBSERVE_ERROR"
+    assert artifact["observe_error"]["message"] == "forced observe failure"
+
+
 def test_pretrade_self_heal_releases_same_day_lock(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-03-26")

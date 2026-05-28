@@ -119,12 +119,14 @@ def build_execution_lifecycle_timeline(
     operator_summary_path = root / "operator_summary.json"
     execution_payload_path = root / "execution_payload.json"
     execution_results_path = root / "execution_results.json"
+    equality_gate_path = root / "equality_gate.json"
     integrity_path = root / "audit" / "execution_integrity.json"
     trading_summary_path = root / "trading_day_summary.json"
 
     operator_summary = _read_json(operator_summary_path)
     execution_payload = _read_json(execution_payload_path)
     execution_results = _read_json(execution_results_path)
+    equality_gate = _read_json(equality_gate_path)
     integrity = _read_json(integrity_path)
     trading_summary = _read_json(trading_summary_path)
 
@@ -453,6 +455,50 @@ def build_execution_lifecycle_timeline(
         ),
     ]
 
+    if equality_gate:
+        decision = _text(equality_gate.get("decision"))
+        if decision == "WOULD_PROCEED":
+            gate_status = "OK"
+        elif decision in {
+            "WOULD_HALT_HASH_MISMATCH",
+            "WOULD_HALT_SOURCE_MISMATCH",
+            "WOULD_HALT_PRICING_ASOF_MISMATCH",
+            "OBSERVE_ERROR",
+        }:
+            gate_status = "WARN"
+        else:
+            gate_status = "UNKNOWN"
+        equality_event = _event(
+            sequence=6,
+            checkpoint="equality_gate_observe",
+            status=gate_status,
+            timestamp=_first_nonempty(equality_gate.get("timestamp_utc")),
+            summary=f"Equality gate observe decision: {decision or 'unknown'}; submission unaffected",
+            source_artifacts=[_safe_relative(equality_gate_path)],
+            details={
+                "decision": equality_gate.get("decision"),
+                "would_block": equality_gate.get("would_block"),
+                "hashes_equal": equality_gate.get("hashes_equal"),
+                "pricing_asof_match": equality_gate.get("pricing_asof_match"),
+                "execution_source": equality_gate.get("execution_source"),
+                "artifact_ref": _safe_relative(equality_gate_path),
+                "note": "observe-only; submission unaffected",
+            },
+        )
+        adjusted_events: list[dict[str, Any]] = []
+        inserted = False
+        for event in events:
+            if not inserted and _to_int(event.get("sequence")) >= 6:
+                adjusted_events.append(equality_event)
+                inserted = True
+            if _to_int(event.get("sequence")) >= 6:
+                event = dict(event)
+                event["sequence"] = _to_int(event.get("sequence")) + 1
+            adjusted_events.append(event)
+        if not inserted:
+            adjusted_events.append(equality_event)
+        events = adjusted_events
+
     return {
         "schema_version": TIMELINE_SCHEMA_VERSION,
         "run_id": resolved_run_id,
@@ -469,6 +515,7 @@ def build_execution_lifecycle_timeline(
             "operator_summary": _artifact_entry(operator_summary_path),
             "execution_payload": _artifact_entry(execution_payload_path),
             "execution_results": _artifact_entry(execution_results_path),
+            "equality_gate": _artifact_entry(equality_gate_path),
             "execution_integrity": _artifact_entry(integrity_path),
             "trading_day_summary": _artifact_entry(trading_summary_path),
             "precompute_contract": _artifact_entry(precompute_contract_path),

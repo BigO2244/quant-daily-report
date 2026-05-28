@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.execution_equality_gate import classify_equality_gate_observe_status
+
 
 STATUS_ORDER = {"GREEN": 0, "YELLOW": 1, "RED": 2}
 RECOMMENDED_ACTIONS = {
@@ -388,6 +390,48 @@ def _resolve_run_root(root: Path, latest_run: dict[str, Any] | None) -> Path | N
     return path
 
 
+def _equality_gate_observe_surface(root: Path) -> dict[str, Any]:
+    latest_path = root / "outputs" / "latest_run.json"
+    latest_run, latest_error = _read_json(latest_path)
+    if latest_error:
+        return {
+            "status": "unavailable",
+            "decision": None,
+            "would_block": None,
+            "hashes_equal": None,
+            "pricing_asof_match": None,
+            "artifact_ref": None,
+        }
+
+    run_root = _resolve_run_root(root, latest_run)
+    if run_root is None:
+        return {
+            "status": "unavailable",
+            "decision": None,
+            "would_block": None,
+            "hashes_equal": None,
+            "pricing_asof_match": None,
+            "artifact_ref": None,
+        }
+
+    equality_path = run_root / "equality_gate.json"
+    equality_gate, _equality_error = _read_json(equality_path)
+    record: dict[str, Any] = equality_gate or {}
+    if not record:
+        operator_summary, _operator_error = _read_json(run_root / "operator_summary.json")
+        candidate = (operator_summary or {}).get("equality_gate_observe")
+        record = candidate if isinstance(candidate, dict) else {}
+
+    return {
+        "status": classify_equality_gate_observe_status(record),
+        "decision": record.get("decision") if record else None,
+        "would_block": record.get("would_block") if record else None,
+        "hashes_equal": record.get("hashes_equal") if record else None,
+        "pricing_asof_match": record.get("pricing_asof_match") if record else None,
+        "artifact_ref": record.get("artifact_ref") if record.get("artifact_ref") else str(equality_path),
+    }
+
+
 def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckResult:
     latest_path = root / "outputs" / "latest_run.json"
     latest_run, latest_error = _read_json(latest_path)
@@ -489,6 +533,7 @@ def build_health_check(root: Path = Path("."), trade_date: str | None = None) ->
         "generated_at": _utc_now_iso(),
         "overall_status": overall_status,
         "checks": [check.to_json() for check in checks],
+        "equality_gate_observe": _equality_gate_observe_surface(root),
         "recommended_action": RECOMMENDED_ACTIONS[overall_status],
     }
 
@@ -501,6 +546,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Generated At: {payload.get('generated_at')}",
         f"- Overall Status: {payload.get('overall_status')}",
         f"- Recommended Action: {payload.get('recommended_action')}",
+        f"- Equality Gate Observe: {(payload.get('equality_gate_observe') or {}).get('status')}",
         "",
         "## Checks",
     ]
@@ -515,6 +561,7 @@ def render_console(payload: dict[str, Any]) -> str:
         "Caerus Daily Health Check",
         f"Trade Date: {payload.get('trade_date')}",
         f"Overall Status: {payload.get('overall_status')}",
+        f"Equality Gate Observe: {(payload.get('equality_gate_observe') or {}).get('status')}",
         "",
         "Checks:",
     ]

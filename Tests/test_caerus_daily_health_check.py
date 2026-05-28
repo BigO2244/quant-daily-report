@@ -156,7 +156,28 @@ def test_green_case(tmp_path: Path) -> None:
     assert _status(payload, "VIX/regime") == "GREEN"
     assert _status(payload, "Shadow performance report") == "GREEN"
     assert _status(payload, "Execution timeline provenance") == "GREEN"
+    assert payload["equality_gate_observe"]["status"] == "unavailable"
     assert "Caerus Daily Health Check" in render_console(payload)
+
+
+def test_equality_gate_divergence_is_advisory_not_health_degrading(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path / "outputs" / "runs" / "run-health" / "equality_gate.json",
+        {
+            "decision": "WOULD_HALT_HASH_MISMATCH",
+            "would_block": True,
+            "hashes_equal": False,
+            "pricing_asof_match": True,
+            "execution_source": "planned_payload_exact",
+        },
+    )
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    assert payload["overall_status"] == "GREEN"
+    assert payload["equality_gate_observe"]["status"] == "divergence_observed"
+    assert payload["equality_gate_observe"]["decision"] == "WOULD_HALT_HASH_MISMATCH"
 
 
 def test_execution_timeline_missing_is_yellow_operator_visibility(tmp_path: Path) -> None:

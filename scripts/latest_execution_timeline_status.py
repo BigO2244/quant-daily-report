@@ -12,6 +12,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core.run_pointer import read_latest_run_pointer
+from core.execution_equality_gate import classify_equality_gate_observe_status
 
 
 def _read_json(path: Path) -> tuple[dict[str, Any], str | None]:
@@ -74,6 +75,7 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
     operator_summary_path = run_root / "operator_summary.json"
     execution_payload_path = run_root / "execution_payload.json"
     execution_results_path = run_root / "execution_results.json"
+    equality_gate_path = run_root / "equality_gate.json"
     timeline_json_path = run_root / "execution_timeline.json"
     timeline_md_path = run_root / "execution_timeline.md"
     integrity_path = run_root / "audit" / "execution_integrity.json"
@@ -81,6 +83,7 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
     operator_summary, operator_error = _read_json(operator_summary_path)
     execution_payload, payload_error = _read_json(execution_payload_path)
     execution_results, results_error = _read_json(execution_results_path)
+    equality_gate, equality_gate_error = _read_json(equality_gate_path)
     timeline, timeline_error = _read_json(timeline_json_path)
     integrity, integrity_error = _read_json(integrity_path)
 
@@ -108,8 +111,21 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
         warnings.append(f"execution_payload:{payload_error}")
     if results_error:
         warnings.append(f"execution_results:{results_error}")
+    if equality_gate_error and equality_gate_error != "MISSING_FILE":
+        warnings.append(f"equality_gate:{equality_gate_error}")
     if integrity_error:
         warnings.append(f"execution_integrity:{integrity_error}")
+
+    equality_record: Mapping[str, Any] = equality_gate
+    if not equality_record:
+        candidate = operator_summary.get("equality_gate_observe")
+        equality_record = candidate if isinstance(candidate, Mapping) else {}
+    equality_status = classify_equality_gate_observe_status(equality_record)
+    equality_artifact_ref = (
+        equality_record.get("artifact_ref")
+        if isinstance(equality_record, Mapping) and equality_record.get("artifact_ref")
+        else str(equality_gate_path)
+    )
 
     status = "OK" if not timeline_error else "NEEDS_OPERATOR"
     return {
@@ -131,12 +147,19 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
         "execution_integrity_status": integrity.get("status") or operator_summary.get("execution_integrity_status"),
         "findings": finding_codes or list(operator_summary.get("execution_integrity_findings") or []),
         "timeline_event_count": timeline.get("event_count"),
+        "equality_gate_observe_status": equality_status,
+        "equality_gate_decision": equality_record.get("decision") if isinstance(equality_record, Mapping) else None,
+        "equality_gate_would_block": equality_record.get("would_block") if isinstance(equality_record, Mapping) else None,
+        "equality_gate_hashes_equal": equality_record.get("hashes_equal") if isinstance(equality_record, Mapping) else None,
+        "equality_gate_pricing_asof_match": equality_record.get("pricing_asof_match") if isinstance(equality_record, Mapping) else None,
+        "equality_gate_artifact_ref": equality_artifact_ref,
         "warnings": warnings,
         "paths": {
             "latest_run": _path_record(latest_path),
             "operator_summary": _path_record(operator_summary_path),
             "execution_payload": _path_record(execution_payload_path),
             "execution_results": _path_record(execution_results_path),
+            "equality_gate": _path_record(equality_gate_path),
             "execution_timeline_json": _path_record(timeline_json_path),
             "execution_timeline_md": _path_record(timeline_md_path),
             "execution_integrity": _path_record(integrity_path),
@@ -166,6 +189,12 @@ def render_text(payload: Mapping[str, Any]) -> str:
         "accepted_count",
         "rejected_count",
         "execution_integrity_status",
+        "equality_gate_observe_status",
+        "equality_gate_decision",
+        "equality_gate_would_block",
+        "equality_gate_hashes_equal",
+        "equality_gate_pricing_asof_match",
+        "equality_gate_artifact_ref",
     ):
         lines.append(f"{key}: {payload.get(key)}")
     findings = payload.get("findings") or []

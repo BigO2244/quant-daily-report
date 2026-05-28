@@ -126,6 +126,29 @@ def test_valid_latest_timeline_summary(tmp_path: Path) -> None:
     assert payload["rejected_count"] == 0
     assert payload["execution_integrity_status"] == "WARN"
     assert payload["findings"] == ["cash_target_drift"]
+    assert payload["equality_gate_observe_status"] == "unavailable"
+
+
+def test_latest_timeline_surfaces_equality_gate_as_advisory(tmp_path: Path) -> None:
+    run_root = _write_valid_latest_run(tmp_path)
+    _write_json(
+        run_root / "equality_gate.json",
+        {
+            "decision": "WOULD_HALT_HASH_MISMATCH",
+            "would_block": True,
+            "hashes_equal": False,
+            "pricing_asof_match": True,
+            "execution_source": "planned_payload_exact",
+        },
+    )
+
+    payload = build_latest_execution_timeline_status(tmp_path)
+
+    assert payload["status"] == "OK"
+    assert payload["equality_gate_observe_status"] == "divergence_observed"
+    assert payload["equality_gate_decision"] == "WOULD_HALT_HASH_MISMATCH"
+    assert payload["equality_gate_would_block"] is True
+    assert payload["paths"]["equality_gate"]["present"] is True
 
 
 def test_direct_script_invocation_from_repo_root(tmp_path: Path) -> None:

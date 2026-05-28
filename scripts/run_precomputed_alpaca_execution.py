@@ -134,6 +134,135 @@ def _env_truthy(name: str) -> bool:
     return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_falsey(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in {"0", "false", "no", "n", "off"}
+
+
+def _equality_gate_observe_enabled() -> bool:
+    if _env_falsey("EQUALITY_GATE_OBSERVE_ENABLED"):
+        return False
+    if str(os.getenv("EQUALITY_GATE_OBSERVE_ENABLED", "")).strip():
+        return _env_truthy("EQUALITY_GATE_OBSERVE_ENABLED")
+    return _execution_mode_label() == "PAPER"
+
+
+def _equality_gate_artifact_refs(*, run_root: Path, trade_date: str) -> dict[str, str]:
+    return {
+        "planned_execution_payload": str(
+            Path("outputs") / "precompute" / trade_date / "planned_execution_payload.json"
+        ),
+        "precompute_contract": str(Path("outputs") / "precompute" / trade_date / "contract.json"),
+        "intended_orders": str(run_root / "broker" / f"intended_orders_{trade_date}.json"),
+        "submission_order_source": "paper.paper_broker.pre_submit_observer",
+    }
+
+
+def _write_equality_gate_operator_summary(
+    *,
+    run_root: Path,
+    artifact: dict[str, object],
+    artifact_ref: Path,
+) -> None:
+    try:
+        from core.execution_equality_gate import operator_summary_block_from_artifact
+
+        write_operator_summary(
+            run_root,
+            equality_gate_observe=operator_summary_block_from_artifact(
+                artifact,
+                artifact_ref=artifact_ref,
+            ),
+        )
+    except Exception as exc:
+        logger.warning("[EQUALITY_GATE] operator summary update skipped: %s", exc)
+
+
+def _make_equality_gate_observer(
+    *,
+    run_root: Path,
+    run_id: str,
+    trade_date: str,
+    planned_payload: dict[str, object] | None,
+    provenance: dict[str, object],
+):
+    if not _equality_gate_observe_enabled():
+        return None
+
+    planned_orders = [
+        dict(order)
+        for order in list((planned_payload or {}).get("trades") or [])
+        if isinstance(order, dict)
+    ]
+    pricing_asof_planned = (planned_payload or {}).get("pricing_asof")
+    pricing_asof_context = provenance.get("pricing_asof")
+    planning_price_basis = (
+        provenance.get("planning_price_basis")
+        or (planned_payload or {}).get("pricing_source")
+    )
+    artifact_refs = _equality_gate_artifact_refs(run_root=run_root, trade_date=trade_date)
+    observed = False
+
+    def _observer(submission_orders: list[dict[str, object]]) -> None:
+        nonlocal observed
+        if observed:
+            return
+        observed = True
+        try:
+            from core.execution_equality_gate import write_equality_gate_observe_artifacts
+
+            json_path, _md_path, artifact = write_equality_gate_observe_artifacts(
+                run_root=run_root,
+                planned_orders=planned_orders,
+                submission_orders=[dict(order) for order in list(submission_orders or [])],
+                execution_source=provenance.get("execution_source"),
+                planning_price_basis=planning_price_basis,
+                pricing_asof_planned=pricing_asof_planned,
+                pricing_asof_context=pricing_asof_context,
+                run_id=run_id,
+                trade_date=trade_date,
+                artifact_refs=artifact_refs,
+            )
+            _write_equality_gate_operator_summary(
+                run_root=run_root,
+                artifact=artifact,
+                artifact_ref=json_path,
+            )
+            logger.info(
+                "[EQUALITY_GATE] observe decision=%s would_block=%s artifact=%s",
+                artifact.get("decision"),
+                artifact.get("would_block"),
+                json_path,
+            )
+        except Exception as exc:
+            logger.warning("[EQUALITY_GATE] observe failed; recording OBSERVE_ERROR and continuing: %s", exc)
+            try:
+                from core.execution_equality_gate import write_equality_gate_observe_error_artifacts
+
+                json_path, _md_path, artifact = write_equality_gate_observe_error_artifacts(
+                    run_root=run_root,
+                    run_id=run_id,
+                    trade_date=trade_date,
+                    execution_source=provenance.get("execution_source"),
+                    planning_price_basis=planning_price_basis,
+                    pricing_asof_planned=pricing_asof_planned,
+                    pricing_asof_context=pricing_asof_context,
+                    observe_error=exc,
+                    artifact_refs=artifact_refs,
+                )
+                _write_equality_gate_operator_summary(
+                    run_root=run_root,
+                    artifact=artifact,
+                    artifact_ref=json_path,
+                )
+            except Exception as write_exc:
+                logger.warning(
+                    "[EQUALITY_GATE] OBSERVE_ERROR artifact write failed; submission unaffected: %s",
+                    write_exc,
+                )
+
+    return _observer
+
+
 def _read_last_ledger_equity(ledger_path: str) -> float | None:
     try:
         ledger = pd.read_csv(ledger_path)
@@ -1145,6 +1274,13 @@ def main(argv: list[str] | None = None) -> int:
                 for trade in planned_execution_trades
                 if str((trade or {}).get("side") or "").upper() == "BUY"
             ]
+        equality_gate_observer = _make_equality_gate_observer(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            planned_payload=planned_payload,
+            provenance=provenance,
+        )
         logger.info(
             "EXECUTION_SOURCE=%s PRICE_BASIS=%s PRICING_ASOF=%s FRESHNESS_SCOPE=%s",
             provenance["execution_source"],
@@ -1175,6 +1311,7 @@ def main(argv: list[str] | None = None) -> int:
                     "cash_target_weight": adjusted_cash_target_weight,
                 },
                 precomputed_trade_plan=planned_execution_trades,
+                pre_submit_observer=equality_gate_observer,
             )
         finally:
             if prior_run_output_root is None:
