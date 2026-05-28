@@ -3,7 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from core.precompute_contract import (
     load_precompute_contract,
@@ -32,7 +37,7 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inspect Alpaca precompute bundle status")
-    parser.add_argument("--report-date", required=True)
+    parser.add_argument("--report-date", "--trade-date", dest="report_date", required=True)
     parser.add_argument("--mode", default="ALPACA")
     parser.add_argument("--force-refresh", action="store_true")
     parser.add_argument("--require-valid", action="store_true")

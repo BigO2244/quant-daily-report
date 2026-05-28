@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from core.precompute_contract import write_precompute_bundle
 from scripts.precompute_bundle_status import describe_bundle_status
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_bundle_status_missing_requires_rebuild(tmp_path: Path, monkeypatch) -> None:
@@ -59,3 +63,26 @@ def test_bundle_status_force_refresh_marks_refresh_requested(tmp_path: Path, mon
 
     assert status["bundle_status"] == "REFRESH_REQUESTED"
     assert status["bundle_should_rebuild"] is True
+
+
+def test_direct_script_invocation_from_repo_root_supports_trade_date_alias(tmp_path: Path) -> None:
+    json_output = tmp_path / "status.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/precompute_bundle_status.py",
+            "--trade-date",
+            "2026-03-18",
+            "--json-output",
+            str(json_output),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "bundle_status=MISSING" in result.stdout
+    assert json_output.exists()
