@@ -111,7 +111,15 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
             "order_id": "run:WBD:SELL",
         },
     ]
-    planned_payload = {"trade_date": "2026-03-26", "mode": "PAPER", "trades": planned_trades}
+    planned_payload = {
+        "trade_date": "2026-03-26",
+        "mode": "PAPER",
+        "execution_status": "PLANNED",
+        "pricing_source": "PREV_CLOSE",
+        "pricing_asof": "2026-03-25",
+        "trades_count": len(planned_trades),
+        "trades": planned_trades,
+    }
     daily_snapshot = {
         "holdings": [
             {"ticker": "WBD", "shares": 14.0, "last_price": 27.27},
@@ -279,6 +287,11 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
     assert execution_payload["submitted_count"] == 3
     assert execution_payload["orders_submitted_count"] == 3
     assert execution_payload["operator_execution_status"] == "executed"
+    assert execution_payload["execution_source"] == "planned_payload_exact"
+    assert execution_payload["planning_price_basis"] == "PREV_CLOSE"
+    assert execution_payload["pricing_asof"] == "2026-03-25"
+    assert execution_payload["execution_price_requirement"] == "PRECOMPUTE_VALIDATED"
+    assert execution_payload["price_freshness_scope"] == "precompute_bundle"
     assert execution_results["submitted_count"] == 3
     assert execution_results["status"] == "EXECUTED"
 
@@ -409,3 +422,71 @@ def test_main_stale_price_exception_finalizes_pointer_and_releases_lock(tmp_path
     assert payload["execution_status"] == "HALTED"
     assert "stale_prices" in str(payload["halt_reason"])
     assert email_payload["execution_status"] == "HALTED"
+
+
+def test_exact_precompute_fails_closed_on_malformed_planned_payload(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-03-26")
+    monkeypatch.setenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "1")
+
+    run_id = "run-bad-plan"
+    run_root = tmp_path / "outputs" / "runs" / run_id
+    planned_payload = {
+        "trade_date": "2026-03-26",
+        "mode": "PAPER",
+        "execution_status": "READY",
+        "pricing_source": "PREV_CLOSE",
+        "pricing_asof": "2026-03-25",
+        "trades_count": 1,
+        "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1, "price": 100.0}],
+    }
+    daily_snapshot = {
+        "holdings": [],
+        "risk_levels": [],
+        "proposed_trades": [],
+        "signals_snapshot_path": str(tmp_path / "signals.json"),
+        "target_cash_weight": 0.05,
+        "performance_diagnostics": {"current_equity": 10000.0},
+    }
+
+    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda _trade_date, allow_existing=False: None)
+    monkeypatch.setattr(live_exec, "get_run_id", lambda: run_id)
+    monkeypatch.setattr(live_exec, "get_run_dir", lambda _run_id: run_root)
+    monkeypatch.setattr(
+        live_exec,
+        "current_et",
+        lambda: dt.datetime(2026, 3, 26, 9, 35, 15, tzinfo=ZoneInfo("America/New_York")),
+    )
+    monkeypatch.setattr(
+        live_exec,
+        "classify_timing",
+        lambda **kwargs: {
+            "timing_status": "on_time",
+            "preferred_target_et": "2026-03-26T09:35:00-04:00",
+            "degraded_auto_trade_deadline_et": "2026-03-26T09:45:00-04:00",
+            "actual_workflow_start_et": "2026-03-26T09:34:00-04:00",
+            "actual_execution_start_et": "2026-03-26T09:35:15-04:00",
+            "first_submit_et": "",
+        },
+    )
+    monkeypatch.setattr(
+        live_exec,
+        "load_precompute_inputs",
+        lambda **kwargs: (daily_snapshot, planned_payload, {"version": 1}, None),
+    )
+    monkeypatch.setattr(live_exec, "fetch_pretrade_snapshot", lambda: {"ok": True, "positions": []})
+    monkeypatch.setattr(live_exec, "write_pretrade_snapshot_artifacts", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "summarize_pretrade_broker_policy", lambda snapshot: {})
+    monkeypatch.setattr(live_exec, "ensure_sent_ledger_exists", lambda path: None)
+    monkeypatch.setattr(live_exec, "ensure_paper_state_files", lambda: (str(tmp_path / "ledger.csv"), str(tmp_path / "trades.csv")))
+    monkeypatch.setattr(live_exec, "pre_trade_reconcile_and_classify", lambda **kwargs: {"reconciliation_decision": "PASS"})
+    monkeypatch.setattr(live_exec, "run_paper_day", lambda **kwargs: (_ for _ in ()).throw(AssertionError("run_paper_day should not be called")))
+    monkeypatch.setattr(live_exec, "write_operator_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(live_exec, "write_trading_day_summary", lambda **kwargs: None)
+
+    exit_code = live_exec.main([])
+
+    payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
+    assert exit_code == 1
+    assert payload["execution_status"] == "HALTED"
+    assert "planned_execution_payload_status_not_planned" in payload["halt_reason"]

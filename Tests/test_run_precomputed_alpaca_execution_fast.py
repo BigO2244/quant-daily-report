@@ -409,7 +409,15 @@ def test_main_pending_buy_leg_does_not_report_clean_success(tmp_path, monkeypatc
         "performance_diagnostics": {"current_equity": 10000.0},
         "target_cash_weight": 0.05,
     }
-    planned_payload = {"trade_date": "2026-05-27", "mode": "PAPER", "trades": planned_trades}
+    planned_payload = {
+        "trade_date": "2026-05-27",
+        "mode": "PAPER",
+        "execution_status": "PLANNED",
+        "pricing_source": "PREV_CLOSE",
+        "pricing_asof": "2026-05-26",
+        "trades_count": len(planned_trades),
+        "trades": planned_trades,
+    }
     paper_summary = {
         "trading_mode": "PAPER",
         "market_status": "OPEN",

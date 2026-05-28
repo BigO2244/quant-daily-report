@@ -371,6 +371,91 @@ def _safe_float(value: object, default: float | None = None) -> float | None:
         return default
 
 
+def _expected_planned_trade_count(planned_payload: dict[str, object]) -> int | None:
+    for key in (
+        "trades_count",
+        "trade_count",
+        "executable_trades_count",
+        "execution_eligible_trades_count",
+    ):
+        if planned_payload.get(key) is None:
+            continue
+        return _safe_int(planned_payload.get(key), default=-1)
+    return None
+
+
+def _validate_exact_planned_payload(
+    planned_payload: dict[str, object] | None,
+    *,
+    trade_date: str,
+) -> list[dict[str, object]]:
+    if not isinstance(planned_payload, dict):
+        raise RuntimeError("planned_execution_payload_missing_or_malformed")
+
+    payload_trade_date = str(planned_payload.get("trade_date") or "").strip()
+    if payload_trade_date != str(trade_date):
+        raise RuntimeError(
+            f"planned_execution_payload_trade_date_mismatch payload_trade_date={payload_trade_date or 'missing'} trade_date={trade_date}"
+        )
+
+    payload_status = str(
+        planned_payload.get("execution_status") or planned_payload.get("status") or ""
+    ).strip().upper()
+    if payload_status != "PLANNED":
+        raise RuntimeError(
+            f"planned_execution_payload_status_not_planned status={payload_status or 'missing'}"
+        )
+
+    trades = planned_payload.get("trades")
+    if not isinstance(trades, list):
+        raise RuntimeError("planned_execution_payload_trades_missing_or_malformed")
+
+    expected_count = _expected_planned_trade_count(planned_payload)
+    if expected_count is not None and expected_count != len(trades):
+        raise RuntimeError(
+            f"planned_execution_payload_trades_count_mismatch expected={expected_count} actual={len(trades)}"
+        )
+
+    normalized: list[dict[str, object]] = []
+    for idx, trade in enumerate(trades):
+        if not isinstance(trade, dict):
+            raise RuntimeError(f"planned_execution_payload_trade_malformed index={idx}")
+        ticker = str(trade.get("ticker") or "").strip().upper()
+        side = str(trade.get("side") or "").strip().upper()
+        shares = _safe_float(trade.get("shares", trade.get("quantity")), 0.0) or 0.0
+        price = _safe_float(trade.get("price", trade.get("entry_price")), 0.0) or 0.0
+        notional = _safe_float(trade.get("notional"), 0.0) or 0.0
+        if not ticker or side not in {"BUY", "SELL", "CLOSE", "REDUCE"} or shares <= 0.0:
+            raise RuntimeError(f"planned_execution_payload_trade_invalid index={idx} ticker={ticker or 'missing'} side={side or 'missing'} shares={shares}")
+        if price <= 0.0 and notional <= 0.0:
+            raise RuntimeError(f"planned_execution_payload_trade_missing_price index={idx} ticker={ticker}")
+        normalized.append(dict(trade))
+    return normalized
+
+
+def _planned_payload_provenance(
+    *,
+    planned_payload: dict[str, object] | None,
+    exact_precomputed_execution: bool,
+) -> dict[str, object]:
+    if exact_precomputed_execution:
+        planning_price_basis = str((planned_payload or {}).get("pricing_source") or "PREV_CLOSE").strip() or "PREV_CLOSE"
+        return {
+            "execution_source": "planned_payload_exact",
+            "planning_price_basis": planning_price_basis,
+            "pricing_asof": (planned_payload or {}).get("pricing_asof"),
+            "execution_price_requirement": "PRECOMPUTE_VALIDATED",
+            "price_freshness_scope": "precompute_bundle",
+        }
+    return {
+        "execution_source": "rebuilt_from_signals",
+        "planning_price_basis": None,
+        "pricing_asof": None,
+        "execution_price_requirement": "SAME_DAY_OPEN_FRESHNESS",
+        "price_freshness_scope": "open_market_fetch",
+    }
+
+
 def _pending_buy_orders_from_summary(paper_summary: dict[str, object]) -> list[dict[str, object]]:
     pending: list[dict[str, object]] = []
     for order in list((paper_summary or {}).get("budget_skipped_orders") or []):
@@ -1027,17 +1112,31 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["ALLOW_PARTIAL_BUY_CONTINUATION"] = "1"
 
         exact_precomputed_execution = _env_truthy("PRECOMPUTE_EXECUTE_EXACT_PLAN")
-        planned_execution_trades = (
-            list((planned_payload or {}).get("trades") or [])
-            if (exact_precomputed_execution or args.continuation_mode == "buy_only")
-            else None
+        provenance = _planned_payload_provenance(
+            planned_payload=planned_payload,
+            exact_precomputed_execution=exact_precomputed_execution,
         )
+        planned_execution_trades = None
+        if exact_precomputed_execution:
+            planned_execution_trades = _validate_exact_planned_payload(
+                planned_payload,
+                trade_date=trade_date,
+            )
+        elif args.continuation_mode == "buy_only":
+            planned_execution_trades = list((planned_payload or {}).get("trades") or [])
         if args.continuation_mode == "buy_only" and planned_execution_trades is not None:
             planned_execution_trades = [
                 dict(trade)
                 for trade in planned_execution_trades
                 if str((trade or {}).get("side") or "").upper() == "BUY"
             ]
+        logger.info(
+            "EXECUTION_SOURCE=%s PRICE_BASIS=%s PRICING_ASOF=%s FRESHNESS_SCOPE=%s",
+            provenance["execution_source"],
+            provenance.get("planning_price_basis") or "SAME_DAY_OPEN",
+            provenance.get("pricing_asof") or "n/a",
+            provenance["execution_price_requirement"],
+        )
         adjusted_signals_path, adjusted_cash_target_weight = _apply_pre_execution_risk_controls(
             run_root=run_root,
             trade_date=trade_date,
@@ -1073,6 +1172,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.continuation_mode == "buy_only"
             else ("exact_payload" if exact_precomputed_execution else "rebuilt_from_signals")
         )
+        paper_summary.update(provenance)
         paper_summary["planned_payload_trade_count"] = int(len((planned_payload or {}).get("trades") or []))
         first_submit_et = _first_submit_et(paper_summary)
         timing = classify_timing(
@@ -1092,6 +1192,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_payload["run_id"] = run_id
         execution_payload.update(timing)
         execution_payload.update(_workflow_context())
+        execution_payload.update(provenance)
         execution_payload["retry_attempt_count"] = retry_attempt
 
         submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})

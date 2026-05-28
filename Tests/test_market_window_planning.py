@@ -228,6 +228,33 @@ def test_paper_market_open_not_halted(monkeypatch, tmp_path):
     assert str(result["execution_trades"][0]["side"]).upper() == "BUY"
 
 
+def test_precomputed_trade_plan_skips_same_day_open_price_fetch(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _mock_open_market(monkeypatch)
+
+    def _fail_open_fetch(*args, **kwargs):
+        raise AssertionError("same-day open price fetch should not run for exact precomputed plans")
+
+    monkeypatch.setattr(broker, "fetch_open_prices_yfinance", _fail_open_fetch)
+
+    now_et = dt.datetime(2026, 2, 10, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = broker.run_paper_day(
+        run_date="2026-02-10",
+        signals_path="signals/2026-02-10.json",
+        ledger_path="paper/ledger.csv",
+        trades_path="paper/trades.csv",
+        config_path="paper/config_paper.json",
+        now_et=now_et,
+        precomputed_trade_plan=[
+            {"ticker": "AAPL", "side": "BUY", "shares": 10, "price": 100.0, "notional": 1000.0}
+        ],
+    )
+
+    assert result["execution_status"] == "READY"
+    assert result["pricing_source"] == "PRECOMPUTED_PLAN"
+    assert result["execution_trades"][0]["ticker"] == "AAPL"
+
+
 def test_fetch_open_prices_uses_intraday_fallback_when_daily_bar_is_stale(monkeypatch):
     class _FakeYFinance:
         def set_tz_cache_location(self, _path):
@@ -505,6 +532,7 @@ def test_paper_mode_remote_existing_orders_are_treated_as_idempotent_replay(
 
 def test_paper_mode_same_day_sent_ledger_lock_blocks_submission(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ALLOW_PARTIAL_BUY_CONTINUATION", raising=False)
     _mock_open_market(monkeypatch, trading_mode="paper")
 
     sent_ledger = tmp_path / "outputs" / "orders_sent" / "orders_sent.csv"

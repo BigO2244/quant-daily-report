@@ -2958,7 +2958,25 @@ def run_paper_day(
     if not holdings_prev.empty:
         tickers = sorted(set(tickers + holdings_prev["ticker"].tolist()))
 
-    if not planning_mode:
+    plan_price_rows: List[Dict[str, object]] = []
+    if use_precomputed_trade_plan:
+        for item in precomputed_trade_plan or []:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            price = _coerce_float(item.get("price") or item.get("entry_price"), None)
+            shares = abs(_coerce_float(item.get("shares") or item.get("quantity"), 0.0) or 0.0)
+            notional = abs(_coerce_float(item.get("notional"), 0.0) or 0.0)
+            if (price is None or price <= 0.0) and shares > 0.0 and notional > 0.0:
+                price = notional / shares
+            if price is not None and price > 0.0:
+                plan_price_rows.append(
+                    {"ticker": ticker, "price": float(price), "price_date": run_date}
+                )
+
+    if not planning_mode and not use_precomputed_trade_plan:
         prices_df = fetch_open_prices_yfinance(tickers, run_date=run_date)
         stale_rows = prices_df[prices_df["price_date"].astype(str) < run_date]
         if not stale_rows.empty:
@@ -2975,23 +2993,33 @@ def run_paper_day(
         if not prev_close_df.empty
         else pd.Series(dtype=float)
     )
-    if planning_mode:
+    if use_precomputed_trade_plan:
+        pricing_source = "PRECOMPUTED_PLAN"
+        if plan_price_rows:
+            pricing_series = pd.DataFrame(plan_price_rows).set_index("ticker")["price"].astype(float)
+        else:
+            pricing_series = pd.Series(dtype=float)
+        pricing_asof = run_date
+        validation_price_proxy = pd.Series(1.0, index=tickers, dtype=float)
+    elif planning_mode:
         pricing_source = "PREV_CLOSE"
         pricing_series = prev_closes
         pricing_asof = str(prev_close_df["price_date"].max()) if not prev_close_df.empty else prev_close_asof
+        validation_price_proxy = prev_closes
     else:
         pricing_source = "OPEN"
         pricing_series = prices_open
         pricing_asof = run_date
+        validation_price_proxy = prev_closes
 
     validation_ok, validation_reasons, validation_details = validate_open_window(
         trade_date=run_date,
         signals_meta={"trade_date": snapshot_date, "asof_date": asof_date},
-        prices_open=prices_open,
-        prev_closes=prev_closes,
+        prices_open=pricing_series if use_precomputed_trade_plan else prices_open,
+        prev_closes=validation_price_proxy,
         weights=targets,
         signals_path=signals_path,
-        planning_mode=planning_mode,
+        planning_mode=planning_mode or use_precomputed_trade_plan,
     )
     blocked_tickers = {
         str(ticker): list(reasons)
@@ -3034,7 +3062,7 @@ def run_paper_day(
             )
 
     investable_weight = max(0.0, 1.0 - target_cash_weight)
-    if not blocked:
+    if not blocked and not use_precomputed_trade_plan:
         priced = set(pricing_series.index.tolist())
         targets = targets[targets["ticker"].isin(priced)].copy()
         if blocked_tickers:

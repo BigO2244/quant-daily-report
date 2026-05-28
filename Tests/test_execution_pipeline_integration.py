@@ -37,6 +37,8 @@ def test_cron_execute_self_heal_invokes_precompute_recovery_mode() -> None:
     assert "execution_self_heal.json" in text
     assert "execution halted to avoid degraded bundle execution" in text
     assert "run_precomputed_alpaca_execution" in text.split("precompute bundle validation failed after self-heal", 1)[-1]
+    assert "export PRECOMPUTE_EXECUTE_EXACT_PLAN=1" in text
+    assert "EXECUTION_SOURCE=planned_payload_exact" in text
 
 
 def test_cron_precompute_self_heal_suppresses_noncritical_side_effects() -> None:

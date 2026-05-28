@@ -132,6 +132,10 @@ export BUNDLE_SOURCE=local
 export BUNDLE_REPORT_DATE="${REPORT_DATE}"
 export EVENT_FRESHNESS_STATUS=fresh
 export EXECUTION_WINDOW_STATUS=on_time
+export PRECOMPUTE_EXECUTE_EXACT_PLAN=1
+echo "EXECUTION_SOURCE=planned_payload_exact" | tee -a "${LOG_FILE}"
+echo "PRICE_BASIS=PREV_CLOSE" | tee -a "${LOG_FILE}"
+echo "FRESHNESS_SCOPE=PRECOMPUTE_VALIDATED" | tee -a "${LOG_FILE}"
 
 # --- Execute from precompute bundle ---
 EXIT_CODE=0
