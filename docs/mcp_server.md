@@ -1,12 +1,24 @@
-# Caerus MCP Server Phase 7
+# Caerus MCP Server (Phase 7+)
+
+> **Companion docs:**
+> [`operator/research_mcp_operator_guide.md`](operator/research_mcp_operator_guide.md)
+> for the one-command question gateway;
+> [`architecture/research_mcp_current_state_2026-05-29.md`](architecture/research_mcp_current_state_2026-05-29.md)
+> for the canonical capability matrix and maturity assessment;
+> [`architecture/caerus_research_mcp_architecture.md`](architecture/caerus_research_mcp_architecture.md)
+> for the aspirational design intent. Where this server doc and the
+> aspirational architecture doc disagree, **this doc and the current-state
+> assessment are authoritative for the implemented surface**.
 
 ## Scope
 
-Caerus MCP Server Phase 7 is the local read-only operator intelligence layer
-over existing Caerus artifacts. Phase 6 answered what artifacts exist; Phase 7
-adds compact artifact-backed interpretation of operational status, strategy
-leadership, promotion readiness, and anomalies. It is not a trading,
-scheduling, or automation surface.
+The Caerus MCP Server is the local read-only operator intelligence layer
+over existing Caerus artifacts. Phase 6 answered "what artifacts exist";
+Phase 7 added compact artifact-backed interpretation of operational
+status, strategy leadership, promotion readiness, and anomalies; the
+2026-05-29 capability extension added a deterministic capability router
+plus dedicated tools for execution-timing analysis and shadow-strategy
+comparison. It is not a trading, scheduling, or automation surface.
 
 The server can index existing artifacts into a caller-specified disposable
 SQLite registry DB. Direct artifact inspection commands read `outputs/` in
@@ -57,6 +69,10 @@ Local smoke:
 
 ## Tools
 
+As of 2026-05-29 the server exposes **20 tools**. Grouped by purpose:
+
+**Registry indexing / inspection (9):**
+
 - `build_caerus_registry`
 - `latest_runs`
 - `run_health`
@@ -66,16 +82,31 @@ Local smoke:
 - `registry_summary`
 - `query_registry`
 - `lineage`
+
+**Operator intelligence (6):**
+
 - `daily_operator_brief`
 - `artifact_status`
 - `operator_daily_summary`
 - `artifact_drilldown`
 - `morning_cio_brief`
-- `promotion_readiness`
 - `anomaly_report`
 
+**Research-question tools (4):**
+
+- `promotion_readiness`
+- `execution_timing_by_vix_regime` — stratify timing-replay opportunities by VIX regime
+- `execution_timing_summary` — aggregate per-offset timing summary with retain/earlier/insufficient recommendation
+- `shadow_comparison` — per-strategy NAV / cumret / excess vs SPY / turnover panel + pairwise overlap
+
+**Capability planner (1):**
+
+- `answer_research_question` — deterministic capability-based router that classifies a natural-language question against the `CAPABILITY_REGISTRY`, checks required artifacts, and dispatches to the appropriate tool. Returns one of: `OK`, `NEEDS_DATA` (capability matched but artifacts missing), `NEEDS_CAPABILITY` (capability matched but no tool wired yet), `UNSUPPORTED_INTENT` (no capability matched; closest suggestions returned). See [`architecture/research_mcp_current_state_2026-05-29.md`](architecture/research_mcp_current_state_2026-05-29.md) for the full capability matrix.
+
 Every tool returns a JSON object with `status`, `db_path`, `queried_at`,
-`warnings`, and `findings`.
+`warnings`, and `findings`. The research-question tools and the planner
+additionally carry `intent`, `routed_to`, and tool-specific payload
+fields documented inline in `research_registry/mcp_server/schemas.py`.
 
 `artifact_status` is the direct read-only filesystem inspection surface. It
 does not build or require a registry DB. It lists artifact family roots and

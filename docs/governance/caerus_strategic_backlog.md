@@ -33,7 +33,7 @@ This backlog is additive to the FR governance system. It does not replace
 | 4 | Provenance | Every important claim should identify its truth surface, source artifacts, confidence level, and governance coverage. |
 | 5 | Regime understanding | Explain when strategies work, when they become fragile, and whether outperformance is regime-dependent. |
 | 6 | Promotion confidence | Promotion decisions should consume provenance, timing confidence, exposure risk, and observation evidence. |
-| 7 | MCP planning | Track the future research operating system now, but keep it architecture/planning only until registry semantics are stable. |
+| 7 | MCP follow-on capabilities | Phase 7 MCP shipped 2026-05-29 (20 tools, capability router). Continue adding capabilities on the deterministic, read-only contract; do not add transport, agents, or LLM calls inside the MCP. Conformance audit vs frozen semantic layer is next. |
 | 8 | Advanced modeling later | Regime switching, meta-labeling, ensembles, and optimization should wait until telemetry and interpretation are stronger. |
 
 ## Initiative Categories
@@ -69,24 +69,54 @@ Focus areas:
 
 ### C. MCP / Research Operating System
 
+> **Status update (2026-05-29):** the "planning only" framing below is
+> partially obsolete. The MCP has shipped as a Phase 7 read-only operator
+> intelligence layer with 20 tools, a capability-based question router,
+> and an operator gateway (`scripts/research_mcp_ask.py`). The full
+> matrix of what is implemented vs. planned vs. conceptual is in
+> [`../architecture/research_mcp_current_state_2026-05-29.md`](../architecture/research_mcp_current_state_2026-05-29.md).
+> This section retains the original boundary text below as historical
+> context for the planning posture that gated the build.
+
 Purpose: plan the future research operating system without prematurely building
 transport or orchestration.
 
-Current boundary:
+Current boundary (as implemented 2026-05-29):
 
-- MCP is architecture/planning only for now.
-- No production MCP implementation yet.
-- No execution-path coupling.
+- MCP is **deployed as a read-only Phase 7 operator intelligence layer**.
+  20 tools registered, 9 capabilities in the registry (6 implemented,
+  2 stubs returning `NEEDS_CAPABILITY`, 1 covered by an existing tool).
+- No execution-path coupling (constitutional contract, enforced by
+  [`MCP_IMPLEMENTATION_BOUNDARIES_v1.md`](../architecture/semantics/MCP_IMPLEMENTATION_BOUNDARIES_v1.md)).
 - No autonomous agents, orchestration, or workflow triggering.
+- No LLM call inside the MCP; classification is regex against the
+  `CAPABILITY_REGISTRY` (deterministic).
 
-Future planning areas:
+Implemented surfaces:
 
-- Artifact retrieval over semantic research objects.
-- Semantic querying by surface, confidence, governance, lineage, and time.
-- Experiment lineage and replay-safe reconstruction.
-- Agent boundaries and read-only trust model.
-- Telemetry APIs for future retrieval layers.
-- Provenance, confidence, and governance model as first-class query substrate.
+- Artifact retrieval over semantic research objects (registry index +
+  query facade, lineage edges, surface-conflict detection).
+- Semantic querying by type, surface, confidence, and governance state
+  (`query_registry` tool).
+- Operator daily-state intelligence (`morning_cio_brief`,
+  `daily_operator_brief`, `anomaly_report`, `promotion_readiness`,
+  `artifact_status`, `artifact_drilldown`).
+- Execution-timing research (`execution_timing_summary`,
+  `execution_timing_by_vix_regime`).
+- Shadow-strategy comparison (`shadow_comparison`).
+- Natural-language question routing through a deterministic capability
+  registry with OK / NEEDS_DATA / NEEDS_CAPABILITY / UNSUPPORTED_INTENT
+  terminal statuses.
+
+Planning areas still open (see Priorities §F in the current-state doc):
+
+- Conformance audit of the implementation against the frozen
+  `semantics/` layer (SEM-001..008).
+- `attribution_analysis` capability (currently a recognised stub
+  returning `NEEDS_CAPABILITY`).
+- `stable_window_evaluation` capability (same).
+- Strategy-aware promotion readiness drill-down.
+- Telemetry / observability surfaces for the planner itself.
 
 ### D. Advanced Modeling Roadmap
 
@@ -141,7 +171,11 @@ Focus areas:
 | Exposure intelligence weekly review | Research Clarity Acceleration | 17 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
 | FR-028 timing semantics candidate review | Governance / Operational Integrity | 18 | HIGH | HIGH | FR-024 through FR-027, FR-030 interpretation evidence | Week 3-4 | `BACKLOG` |
 | FR-029 promotion governance hardening | Capital Deployment Readiness | 19 | MEDIUM | HIGH | FR-028 | Week 4-6 | `BACKLOG` |
-| MCP research operating system architecture | MCP / Research Operating System | 20 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | Planning only |
+| MCP research operating system architecture | MCP / Research Operating System | 20 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | `DEPLOYED_OBSERVING` (Phase 7 ship 2026-05-29; 20 tools, 9 capabilities, 6 implemented; see [current-state doc](../architecture/research_mcp_current_state_2026-05-29.md)) |
+| MCP conformance audit vs frozen semantic layer | MCP / Research Operating System | 20a | LOW | HIGH | SEM-001..008 frozen, MCP implementation live | Week 6-7 | BACKLOG |
+| MCP `attribution_analysis` capability promotion | MCP / Research Operating System | 20b | LOW | HIGH | `outputs/attribution/` artifacts, `AttributionArtifactAdapter` family | Week 7-8 | BACKLOG |
+| MCP `stable_window_evaluation` capability promotion | MCP / Research Operating System | 20c | LOW | MEDIUM | `outputs/research/stable_window_evaluation/` + `random_windows_*.csv` | Week 7-8 | BACKLOG |
+| MCP strategy-aware promotion readiness drill-down | MCP / Research Operating System | 20d | LOW | MEDIUM | Existing `promotion_readiness` tool extension | Week 7 | BACKLOG |
 | CIO-style research packet | Research Clarity Acceleration | 21 | LOW | HIGH | Attribution, exposure, regime artifacts, FR-030 | Week 3-4 | BACKLOG |
 | Slippage and execution realism review | Capital Deployment Readiness | 22 | MEDIUM | MEDIUM | Broker/reconciliation evidence | Week 4-6 | BACKLOG |
 | Constrained capital rollout plan | Capital Deployment Readiness | 23 | HIGH | MEDIUM | FR-029, broker trust, timing confidence | Week 5-6 | BACKLOG |
@@ -252,23 +286,27 @@ Current bottleneck:
 MCP is NOT FR-028.
 
 FR-028 is the governed accounting/timing semantics candidate path for shadow
-performance interpretation. MCP is a separate future research operating system
-initiative.
+performance interpretation. MCP is a separate research operating system
+surface that consumes FR-028 artifacts read-only and does not redefine them.
 
-Current MCP posture:
+Current MCP posture (updated 2026-05-29):
 
-- Planning and architecture only.
-- No production implementation.
-- No transport layer.
-- No server.
-- No autonomous runtime.
-- No workflow execution.
-- No broker access.
-- No dashboard integration.
+- **Phase 7 shipped: read-only operator intelligence + research-question
+  layer is live.** 20 MCP tools registered, capability-based router,
+  operator gateway at `scripts/research_mcp_ask.py`.
+- Stdio JSON-RPC transport layer present (`scripts/research_registry_mcp_server.py`).
+- No autonomous runtime, no workflow execution, no broker access, no
+  dashboard integration — these constitutional boundaries hold and are
+  enforced by [`MCP_IMPLEMENTATION_BOUNDARIES_v1.md`](../architecture/semantics/MCP_IMPLEMENTATION_BOUNDARIES_v1.md).
+- No LLM call inside the MCP; classification is deterministic regex.
 
-Future MCP should consume the research registry, provenance graph, confidence
-lattice, governance metadata, and temporal reconstruction rules. It should not
-be allowed to redefine them.
+The MCP consumes the research registry, provenance graph, confidence
+lattice, governance metadata, and temporal reconstruction rules. It does
+not redefine them — that contract is unchanged from the original
+planning boundary.
+
+For what the MCP can and cannot answer today (matrix + maturity level),
+see [`../architecture/research_mcp_current_state_2026-05-29.md`](../architecture/research_mcp_current_state_2026-05-29.md).
 
 ## Guiding Principles
 
@@ -292,7 +330,7 @@ Assumptions:
 - FR-024 through FR-027 remain additive research infrastructure.
 - FR-028 remains high blast-radius and must not silently rewrite historical
   performance semantics.
-- MCP remains planning-only until local registry/query semantics are stable.
+- MCP is now `DEPLOYED_OBSERVING` (Phase 7 ship 2026-05-29); registry / query semantics are stable. Further capability additions follow the §F priority list in [`../architecture/research_mcp_current_state_2026-05-29.md`](../architecture/research_mcp_current_state_2026-05-29.md).
 
 Risks:
 

@@ -34,6 +34,11 @@ Fully deployed history and reviewed deferred items belong in
 | FR-033 dashboard/operator asset alignment | Operator Surfaces | `BACKLOG` | LOW | FR-031, dashboard architecture review | not_started | Resolve stale dashboard execution-integrity asset tests or align them to the current dashboard architecture without redesigning dashboard UI. | Revert test/asset alignment commit; preserve dashboard publishing behavior. |
 | FR-034 post-submit cash drift reconciliation review | Execution Accounting Review | `READY` | LOW | FR-031, latest paper execution artifacts | ready_for_audit | Determine whether `cash_target_drift` clears after fills/reconciliation, represents expected pending-fill drift, or indicates accounting/reconciliation mismatch. | Docs-only/audit rollback; no runtime behavior should change. |
 | FR-035 execution contract documentation hardening | Execution Documentation | `PROMOTION_READY` | LOW | 2026-05-28 recovery, FR-031 | local_validation_pending | Canonicalize execution source, price basis, freshness scope, fail-closed boundaries, and operator provenance semantics. | Revert docs commit; runtime behavior unchanged. |
+| FR-036 MCP Phase 7 — research-question capability router | Research MCP | `DEPLOYED_OBSERVING` | LOW | FR-015 / FR-017 / FR-018 / FR-024–FR-030 telemetry, registry semantics | observing | Read-only operator MCP shipped 2026-05-29: 20 tools, 9-capability registry, deterministic regex classifier + artifact pre-check + tool dispatch (OK / NEEDS_DATA / NEEDS_CAPABILITY / UNSUPPORTED_INTENT), operator gateway at `scripts/research_mcp_ask.py`. No transport beyond local stdio, no LLM, no execution-path coupling. | Revert MCP Phase 7 commits; delete `research_registry/research/`, `scripts/research_mcp_ask.{py,sh}`, and `outputs/research_mcp/`. Server reverts to 16-tool Phase 6 surface. |
+| FR-036a MCP conformance audit vs frozen semantics layer | Research MCP | `BACKLOG` | LOW | FR-036 deployed, SEM-001..008 frozen | not_started | Produce a clause-by-clause audit doc mapping each frozen SEM contract to the MCP module that implements it (or to the gap). Pure documentation work; no implementation changes. | Delete audit doc only; implementation untouched. |
+| FR-036b MCP `attribution_analysis` capability promotion | Research MCP | `BACKLOG` | LOW | FR-036 deployed, `outputs/attribution/` artifacts, existing `AttributionArtifactAdapter` ingestion family | not_started | Add a research_registry/research/attribution.py loader + `attribution_analysis` MCP tool; flip the capability from stub to implemented. | Revert attribution loader + tool commits; capability returns to NEEDS_CAPABILITY. |
+| FR-036c MCP `stable_window_evaluation` capability promotion | Research MCP | `BACKLOG` | LOW | FR-036 deployed, `outputs/research/stable_window_evaluation/` artifacts | not_started | Add a loader + tool that summarises the rolling-window Sharpe / drawdown distribution from existing alpha-lab artifacts; flip the capability from stub to implemented. | Revert window loader + tool commits; capability returns to NEEDS_CAPABILITY. |
+| FR-036d MCP strategy-aware promotion readiness drill-down | Research MCP | `BACKLOG` | LOW | FR-036 deployed, existing `promotion_readiness` tool | not_started | Accept a `strategy` argument so "Is Orion ready?" returns Orion's panel specifically rather than the generic challenger verdict. | Revert the strategy-arg patch; tool returns to generic mode. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -84,8 +89,12 @@ procedures are proven.
 4. Treat FR-030 as deployed telemetry consumption, not promotion logic.
 5. Focus the next research-operations bottleneck on post-close hydration and
    source readiness, not packet rendering.
-6. Continue to separate MCP planning from FR-028 accounting/timing work except
-   for read-only MCP consumption of Phase C research artifacts.
+6. Observe FR-036 (MCP Phase 7) for stability: deterministic routing,
+   honest NEEDS_DATA / NEEDS_CAPABILITY returns, no scope creep into
+   transport or autonomous orchestration. Keep MCP work separated from
+   FR-028 accounting/timing semantics except for read-only MCP
+   consumption of Phase C research artifacts. The four FR-036a..d
+   follow-on items are scoped backlog work, not in-flight builds.
 7. Use FR-015/017/018/023-027/030 outputs as inputs to future attribution,
    source-readiness, and governance reviews without changing execution paths.
 

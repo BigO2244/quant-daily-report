@@ -9,6 +9,16 @@ related_systems: [research, governance, attribution, regime, shadow, alpha_stack
 
 # Caerus Research MCP — Canonical Institutional Architecture
 
+> **Status banner (2026-05-29):** this document is the **aspirational
+> design intent** as drafted on 2026-05-21, before implementation. For
+> what the MCP **actually does today** (capability matrix, maturity
+> level, gaps, next investments) see
+> [`research_mcp_current_state_2026-05-29.md`](research_mcp_current_state_2026-05-29.md).
+> For the running operator interface see
+> [`../operator/research_mcp_operator_guide.md`](../operator/research_mcp_operator_guide.md).
+> Where this document and the current-state assessment disagree on
+> implemented surface, the current-state assessment wins.
+
 **Version:** 1.0
 **Date:** 2026-05-21
 **Classification:** Institutional Research Infrastructure
