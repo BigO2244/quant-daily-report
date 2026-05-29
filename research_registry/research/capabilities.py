@@ -328,8 +328,13 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
     Capability(
         name="stable_window_evaluation",
         description=(
-            "Evaluate strategy stability across rolling / random backtest windows "
-            "(distribution of Sharpe, drawdown, Sortino across N-year windows)."
+            "Evaluate strategy stability across rolling / random backtest "
+            "windows. Reads outputs/research/random_windows_*.csv for "
+            "dispersion (p10/median/p90 of CAGR, max drawdown, Sharpe, "
+            "ulcer index) and consistency (fraction of windows with "
+            "positive return); reads outputs/research/stable_window_evaluation/ "
+            "for promotion-grade window-validity counts. Flags "
+            "insufficient_sample when n_windows < 30."
         ),
         patterns=(
             r"stable\s+window",
@@ -337,22 +342,31 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
             r"window\s+evaluation",
             r"random\s+window",
             r"window\s+sweep",
+            r"start[- ]date\s+sensitivity",
+            r"backtest\s+(dispersion|stability|consistency)",
+            r"how\s+(stable|consistent|robust)\s+is\s+",
         ),
-        required_artifact_globs=(),
-        tool_name=None,
+        required_artifact_globs=(
+            "outputs/research/random_windows_*.csv",
+        ),
+        tool_name="stable_window_evaluation",
         tool_kwargs={},
-        output_fields=(),
-        limitations=("Capability not yet implemented.",),
-        suggested_next_build=(
-            "Add a stable_window_evaluation MCP tool that consumes the "
-            "alpha-lab outputs already on disk under "
-            "outputs/research/stable_window_evaluation/ and outputs/research/"
-            "random_windows_*.csv, returning the distribution of headline "
-            "metrics across the window panel with a p10/p50/p90 summary."
+        output_fields=(
+            "policy_panels",
+            "promotion_validity",
+            "confidence_caveats",
+            "narrative",
+        ),
+        limitations=(
+            "Requires random-window backtest CSVs; absent → NO_WINDOW_DATA.",
+            "Windows are in-sample to whatever policy generated them — treat as descriptive of historical sensitivity, not as out-of-sample evidence.",
+            "promotion_validity counts may show zero valid days when no live executed sessions qualify yet; the random-window panel is the primary signal.",
         ),
         example_questions=(
             "How does the strategy perform across random windows?",
             "Stable window Sharpe distribution.",
+            "How consistent is the strategy across backtest windows?",
+            "Start-date sensitivity for the 3-year backtest.",
         ),
     ),
     Capability(

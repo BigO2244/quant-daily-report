@@ -23,6 +23,12 @@ from research_registry.research.capabilities import (
     classify_question,
     closest_capabilities,
 )
+from research_registry.research.stable_window_evaluation import (
+    INSUFFICIENT_SAMPLE_THRESHOLD as STABLE_WINDOW_INSUFFICIENT_SAMPLE,
+    StableWindowAnswer,
+    evaluate_stable_windows,
+    stable_window_to_dict,
+)
 from research_registry.research.shadow_comparison import (
     KNOWN_STRATEGY_NAMES,
     ShadowComparisonAnswer,
@@ -59,6 +65,8 @@ __all__ = [
     "Capability",
     "ClassificationResult",
     "INSUFFICIENT_SAMPLE_THRESHOLD",
+    "STABLE_WINDOW_INSUFFICIENT_SAMPLE",
+    "StableWindowAnswer",
     "JoinedDay",
     "KNOWN_STRATEGY_NAMES",
     "MIN_DAYS_FOR_RECOMMENDATION",
@@ -77,6 +85,7 @@ __all__ = [
     "classify_question",
     "closest_capabilities",
     "compare_shadow_strategies",
+    "evaluate_stable_windows",
     "join_timing_to_regime",
     "load_timing_summaries",
     "load_vix_regime_history",
@@ -85,6 +94,7 @@ __all__ = [
     "select_latest_attribution_date",
     "select_timing_run",
     "shadow_comparison_to_dict",
+    "stable_window_to_dict",
     "strategy_slug",
     "summarise_timing",
     "timing_summary_to_dict",

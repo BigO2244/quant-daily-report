@@ -19,6 +19,12 @@ from research_registry.research.attribution import (
     analyse_attribution,
     attribution_summary_to_dict,
 )
+from research_registry.research.stable_window_evaluation import (
+    DEFAULT_RESEARCH_ROOT as DEFAULT_WINDOW_RESEARCH_ROOT,
+    DEFAULT_STABLE_WINDOW_ROOT,
+    evaluate_stable_windows,
+    stable_window_to_dict,
+)
 from research_registry.research.capabilities import (
     CAPABILITY_REGISTRY,
     available_intents,
@@ -96,6 +102,7 @@ def _tool_dispatch_table() -> dict[str, Any]:
         "execution_timing_summary": execution_timing_summary,
         "shadow_comparison": shadow_comparison,
         "attribution_analysis": attribution_analysis,
+        "stable_window_evaluation": stable_window_evaluation,
         "answer_research_question": answer_research_question,
     }
 
@@ -1632,6 +1639,47 @@ def attribution_analysis(
     return _jsonable(payload)
 
 
+def stable_window_evaluation(
+    *,
+    context: ToolContext | None = None,
+    research_root: str | None = None,
+    stable_window_root: str | None = None,
+    outputs_root: str | None = None,
+    question: str | None = None,
+) -> dict[str, Any]:
+    """Stable-window / random-window evaluation summariser.
+
+    Reads existing ``outputs/research/random_windows_*.csv`` files and
+    the ``outputs/research/stable_window_evaluation/`` JSON artifacts
+    and returns per-policy dispersion (p10/median/p90 of CAGR, max
+    drawdown, Sharpe, ulcer), consistency (% positive-return windows),
+    best/worst windows, start-date sensitivity, and promotion-grade
+    window-validity counts. Fails closed with ``NO_WINDOW_DATA`` when
+    no artifacts are on disk; flags ``insufficient_sample`` per policy
+    when n_windows < 30.
+    """
+    if research_root:
+        resolved_research = Path(research_root)
+    elif outputs_root:
+        resolved_research = Path(outputs_root) / "research"
+    else:
+        resolved_research = DEFAULT_WINDOW_RESEARCH_ROOT
+    if stable_window_root:
+        resolved_stable = Path(stable_window_root)
+    elif outputs_root:
+        resolved_stable = Path(outputs_root) / "research" / "stable_window_evaluation"
+    else:
+        resolved_stable = DEFAULT_STABLE_WINDOW_ROOT
+    answer = evaluate_stable_windows(
+        research_root=resolved_research,
+        stable_window_root=resolved_stable,
+    )
+    payload = stable_window_to_dict(answer)
+    payload["tool"] = "stable_window_evaluation"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
 def _route_to_tool(
     tool_name: str,
     tool_kwargs: dict[str, Any],
@@ -1684,6 +1732,8 @@ def answer_research_question(
     outputs_root: str | None = None,
     attribution_root: str | None = None,
     shadow_root: str | None = None,
+    research_root: str | None = None,
+    stable_window_root: str | None = None,
 ) -> dict[str, Any]:
     """Deterministic capability-based router over the question-answering MCP.
 
@@ -1805,6 +1855,8 @@ def answer_research_question(
             "outputs_root": outputs_root,
             "attribution_root": attribution_root,
             "shadow_root": shadow_root,
+            "research_root": research_root,
+            "stable_window_root": stable_window_root,
         },
     )
 

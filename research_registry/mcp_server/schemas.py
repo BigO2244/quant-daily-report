@@ -215,6 +215,29 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "stable_window_evaluation",
+        "description": (
+            "Stable-window / random-window evaluation summariser. Reads "
+            "outputs/research/random_windows_*.csv and "
+            "outputs/research/stable_window_evaluation/*.json and returns "
+            "per-policy dispersion (p10/median/p90 of CAGR, max drawdown, "
+            "Sharpe, ulcer), consistency (% positive-return windows), "
+            "best/worst windows, start-date sensitivity, and promotion-grade "
+            "window-validity counts. Fails closed with NO_WINDOW_DATA when "
+            "no artifacts are present; flags insufficient_sample per policy "
+            "when n_windows < 30."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "research_root": {"type": "string", "default": "outputs/research"},
+                "stable_window_root": {"type": "string", "default": "outputs/research/stable_window_evaluation"},
+                "outputs_root": {"type": "string"},
+                "question": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "attribution_analysis",
         "description": (
             "Read-only performance attribution. Reads the latest "

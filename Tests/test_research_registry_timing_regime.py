@@ -560,8 +560,11 @@ def test_answer_research_question_returns_unsupported_intent_for_off_topic(quest
 
 
 @pytest.mark.parametrize("question,expected_intent", [
-    ("How does the strategy perform across random windows?", "stable_window_evaluation"),
-    ("Stable window Sharpe distribution.",                    "stable_window_evaluation"),
+    # Phrasings that would have matched attribution / stable_window before
+    # those capabilities shipped. All implemented capabilities are now
+    # covered by NEEDS_DATA / OK paths in their own test files; nothing
+    # currently maps to NEEDS_CAPABILITY.
+    pytest.param("placeholder", "n/a", marks=pytest.mark.skip(reason="all capabilities now implemented; reinstate if a new stub is added to CAPABILITY_REGISTRY")),
 ])
 def test_answer_research_question_returns_needs_capability_for_unbuilt(question, expected_intent):
     """Questions that match a registry capability but whose tool is not yet

@@ -309,6 +309,98 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             md.append(attribution_narrative)
             md.append("```")
 
+    # OK path for stable_window_evaluation — render per-policy dispersion +
+    # promotion-validity blocks + caveats.
+    policy_panels = inner.get("policy_panels")
+    promotion_validity = inner.get("promotion_validity")
+    is_stable_window = (
+        status == "OK"
+        and isinstance(policy_panels, list)
+        and any(isinstance(p, dict) and "dispersion" in p for p in policy_panels or [])
+    )
+    if is_stable_window:
+        lines.append("")
+        md.append("")
+        md.append("## Stable-window / random-window evaluation")
+        for panel in policy_panels:
+            policy = panel.get("policy")
+            years = panel.get("years")
+            n = panel.get("n_windows")
+            dispersion = panel.get("dispersion") or {}
+            consistency = panel.get("consistency") or {}
+            sensitivity = (panel.get("start_date_sensitivity") or {}).get("interpretation")
+            insufficient = panel.get("insufficient_sample")
+            tag = " *insufficient_sample*" if insufficient else ""
+            lines.append(f"Policy {policy} ({years}-year, n={n}){tag}")
+            lines.append(
+                f"  CAGR:        p10={_fmt_signed_pct(dispersion.get('cagr', {}).get('p10'))}  "
+                f"median={_fmt_signed_pct(dispersion.get('cagr', {}).get('median'))}  "
+                f"p90={_fmt_signed_pct(dispersion.get('cagr', {}).get('p90'))}"
+            )
+            lines.append(
+                f"  Drawdown:    p10={_fmt_signed_pct(dispersion.get('max_drawdown', {}).get('p10'))}  "
+                f"median={_fmt_signed_pct(dispersion.get('max_drawdown', {}).get('median'))}  "
+                f"p90={_fmt_signed_pct(dispersion.get('max_drawdown', {}).get('p90'))}"
+            )
+            sh = dispersion.get("sharpe", {})
+            lines.append(
+                f"  Sharpe:      p10={_fmt_float(sh.get('p10'))}  "
+                f"median={_fmt_float(sh.get('median'))}  "
+                f"p90={_fmt_float(sh.get('p90'))}"
+            )
+            lines.append(
+                f"  Consistency: {_fmt_pct(consistency.get('fraction_positive_return'))} "
+                f"of {n} windows positive    Start-date sensitivity: {sensitivity}"
+            )
+            worst_dd = panel.get("worst_window_by_drawdown") or {}
+            best_cagr = panel.get("best_window_by_cagr") or {}
+            if worst_dd.get("start_date"):
+                lines.append(
+                    f"  Worst drawdown: {worst_dd.get('start_date')} → "
+                    f"{worst_dd.get('end_date', '?')}   max_dd={_fmt_signed_pct(worst_dd.get('max_drawdown'))}  "
+                    f"CAGR={_fmt_signed_pct(worst_dd.get('cagr'))}"
+                )
+            if best_cagr.get("start_date"):
+                lines.append(
+                    f"  Best CAGR:      {best_cagr.get('start_date')} → "
+                    f"{best_cagr.get('end_date', '?')}   CAGR={_fmt_signed_pct(best_cagr.get('cagr'))}  "
+                    f"max_dd={_fmt_signed_pct(best_cagr.get('max_drawdown'))}"
+                )
+            lines.append("")
+            # Markdown table for this policy
+            md.append("")
+            md.append(f"### Policy `{policy}` ({years}-year, n={n}){tag}")
+            md.append("")
+            md.append("| metric | p10 | median | p90 |")
+            md.append("| --- | ---: | ---: | ---: |")
+            for metric_name in ("cagr", "max_drawdown", "sharpe", "ulcer_index"):
+                d = dispersion.get(metric_name) or {}
+                md.append(
+                    f"| {metric_name} | {_fmt_float(d.get('p10'))} | "
+                    f"{_fmt_float(d.get('median'))} | {_fmt_float(d.get('p90'))} |"
+                )
+        if isinstance(promotion_validity, dict) and promotion_validity:
+            lines.append("Promotion validity:")
+            md.append("")
+            md.append("### Promotion validity")
+            md.append("")
+            for mode, block in promotion_validity.items():
+                if not isinstance(block, dict):
+                    continue
+                valid = block.get("valid_days_since_inception")
+                shadow_only = block.get("shadow_only_days_since_inception")
+                excluded = block.get("diagnostic_excluded_count")
+                lines.append(
+                    f"  {mode}: valid_days={valid}  shadow_only={shadow_only}  excluded={excluded}"
+                )
+                md.append(f"- `{mode}`: valid_days={valid}, shadow_only={shadow_only}, excluded={excluded}")
+        caveats = inner.get("confidence_caveats") or []
+        if caveats:
+            lines.append("")
+            lines.append(f"Confidence caveats: {caveats}")
+            md.append("")
+            md.append(f"**Confidence caveats:** `{caveats}`")
+
     # OK path for shadow_comparison — render the per-strategy panel.
     panels = inner.get("panels") or {}
     if status == "OK" and panels and (inner.get("leader_summary") or inner.get("leader_by_cumulative_return") is not None):
