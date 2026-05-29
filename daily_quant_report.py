@@ -1736,6 +1736,13 @@ def build_execution_email_payload(
         if any("signal_date_mismatch" in str(r) for r in blocked):
             status = "HALTED"
             halted_reason = "SIGNAL DATE MISMATCH"
+        if str(paper_summary.get("execution_status") or "").upper() == "HALTED":
+            status = "HALTED"
+            halted_reason = str(
+                paper_summary.get("halt_reason")
+                or paper_summary.get("execution_reason")
+                or "EXECUTION HALTED"
+            )
         execution_outcome_code = str(paper_summary.get("execution_outcome") or "").strip()
         if execution_outcome_code in {
             EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
@@ -2087,6 +2094,22 @@ def build_execution_email_payload(
         "cash_rebalance_status": (paper_summary or {}).get("cash_rebalance_status"),
         "broker_reject_status": (paper_summary or {}).get("broker_reject_status"),
         "broker_reject_message": (paper_summary or {}).get("broker_reject_message"),
+        "asset_validation_status": (paper_summary or {}).get("asset_validation_status"),
+        "invalid_symbols": list((paper_summary or {}).get("invalid_symbols") or []),
+        "non_tradable_symbols": list((paper_summary or {}).get("non_tradable_symbols") or []),
+        "asset_validation_reason": (paper_summary or {}).get("asset_validation_reason"),
+        "invalid_asset_count": int((paper_summary or {}).get("invalid_asset_count") or 0),
+        "order_lifecycle": list((paper_summary or {}).get("order_lifecycle") or []),
+        "sell_submit_started_at": (paper_summary or {}).get("sell_submit_started_at"),
+        "sell_submit_completed_at": (paper_summary or {}).get("sell_submit_completed_at"),
+        "buy_submit_started_at": (paper_summary or {}).get("buy_submit_started_at"),
+        "buy_submit_completed_at": (paper_summary or {}).get("buy_submit_completed_at"),
+        "pending_sell_count_at_buy_decision": (paper_summary or {}).get("pending_sell_count_at_buy_decision"),
+        "buying_power_at_buy_decision": (paper_summary or {}).get("buying_power_at_buy_decision"),
+        "cash_at_buy_decision": (paper_summary or {}).get("cash_at_buy_decision"),
+        "skipped_buy_count": int((paper_summary or {}).get("skipped_buy_count") or 0),
+        "blocked_buy_count": int((paper_summary or {}).get("blocked_buy_count") or 0),
+        "buy_phase_decision_reason": (paper_summary or {}).get("buy_phase_decision_reason"),
         "market_status": (paper_summary or {}).get("market_status"),
         "market_reason": (paper_summary or {}).get("market_reason"),
         "planned_for": planned_for,

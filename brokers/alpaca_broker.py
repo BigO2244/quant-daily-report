@@ -87,6 +87,12 @@ def _safe_str(value: Any) -> str:
         return ""
 
 
+def _safe_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def json_safe_primitive(value: Any) -> Any:
     """Normalize Alpaca SDK payloads into deterministic JSON-safe primitives."""
     import decimal
@@ -173,7 +179,12 @@ def classify_alpaca_broker_reject(exc: Any) -> Dict[str, Any]:
         classification = BROKER_REJECT_PDT
     elif "buying power" in normalized:
         classification = BROKER_REJECT_BUYING_POWER
-    elif "not tradable" in normalized or "asset is not tradable" in normalized:
+    elif (
+        code == 40410000
+        or "asset not found" in normalized
+        or "not tradable" in normalized
+        or "asset is not tradable" in normalized
+    ):
         classification = BROKER_REJECT_ASSET_NOT_TRADABLE
     elif "short" in normalized and (
         "not allowed" in normalized
@@ -292,6 +303,28 @@ def _normalize_order_obj(order: Any) -> Dict[str, Any]:
         "submitted_at": _safe_str(
             d.get("submitted_at") or getattr(order, "submitted_at", "")
         ),
+        "filled_qty": _safe_str(
+            d.get("filled_qty")
+            or d.get("filled_quantity")
+            or getattr(order, "filled_qty", "")
+            or getattr(order, "filled_quantity", "")
+        ),
+        "filled_at": _safe_str(d.get("filled_at") or getattr(order, "filled_at", "")),
+        "qty": _safe_str(d.get("qty") or getattr(order, "qty", "")),
+        "raw": d,
+    }
+
+
+def _normalize_asset_obj(asset: Any) -> Dict[str, Any]:
+    d = _as_dict(asset)
+    return {
+        "id": _safe_str(d.get("id") or getattr(asset, "id", "")),
+        "symbol": _safe_str(d.get("symbol") or getattr(asset, "symbol", "")).upper(),
+        "name": _safe_str(d.get("name") or getattr(asset, "name", "")),
+        "status": _safe_str(d.get("status") or getattr(asset, "status", "")),
+        "tradable": _safe_bool(d.get("tradable") if "tradable" in d else getattr(asset, "tradable", False)),
+        "asset_class": _safe_str(d.get("asset_class") or getattr(asset, "asset_class", "")),
+        "exchange": _safe_str(d.get("exchange") or getattr(asset, "exchange", "")),
         "raw": d,
     }
 
@@ -437,6 +470,24 @@ class AlpacaBroker:
     def get_positions(self) -> List[Dict[str, Any]]:
         positions = self.trading_client.get_all_positions()
         return [_normalize_position_obj(p) for p in positions]
+
+    def get_asset(self, symbol: str) -> Optional[Dict[str, Any]]:
+        symbol_norm = str(symbol or "").upper().strip()
+        if not symbol_norm:
+            return None
+        getter = getattr(self.trading_client, "get_asset", None)
+        if not callable(getter):
+            raise AttributeError("Alpaca trading client does not support asset lookup")
+        try:
+            asset = getter(symbol_norm)
+        except Exception as exc:
+            msg = _safe_str(exc).lower()
+            if "not found" in msg or "404" in msg:
+                return None
+            raise
+        if asset is None:
+            return None
+        return _normalize_asset_obj(asset)
 
     def find_order_by_client_id(self, client_id: str) -> Optional[Dict[str, Any]]:
         try:

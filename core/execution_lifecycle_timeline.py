@@ -293,7 +293,11 @@ def build_execution_lifecycle_timeline(
             timestamp=_first_submitted_at(order_events, "SELL"),
             summary=f"Submitted SELL count: {submitted_sell_count}",
             source_artifacts=[_safe_relative(broker_orders_path), _safe_relative(execution_results_path)],
-            details={"submitted_sell_count": submitted_sell_count},
+            details={
+                "submitted_sell_count": submitted_sell_count,
+                "sell_submit_started_at": execution_payload.get("sell_submit_started_at"),
+                "sell_submit_completed_at": execution_payload.get("sell_submit_completed_at"),
+            },
         ),
         _event(
             sequence=7,
@@ -307,19 +311,29 @@ def build_execution_lifecycle_timeline(
             details={
                 "sell_phase_status": execution_payload.get("sell_phase_status"),
                 "sell_phase_completion_reason": execution_payload.get("sell_phase_completion_reason"),
+                "pending_sell_count_at_buy_decision": execution_payload.get("pending_sell_count_at_buy_decision"),
             },
         ),
         _event(
             sequence=8,
             checkpoint="buy_phase_start",
             status="OBSERVED" if submitted_buy_count > 0 else "SKIPPED",
-            timestamp=_first_submitted_at(order_events, "BUY"),
+            timestamp=_first_nonempty(
+                execution_payload.get("buy_submit_started_at"),
+                _first_submitted_at(order_events, "BUY"),
+            ),
             summary=f"Submitted BUY count: {submitted_buy_count}",
             source_artifacts=[_safe_relative(broker_orders_path), _safe_relative(execution_results_path)],
             details={
                 "buy_phase_planned": execution_payload.get("buy_phase_planned"),
                 "submitted_buy_count": submitted_buy_count,
                 "buy_phase_block_reason": execution_payload.get("buy_phase_block_reason"),
+                "buy_phase_decision_reason": execution_payload.get("buy_phase_decision_reason"),
+                "buy_submit_started_at": execution_payload.get("buy_submit_started_at"),
+                "buy_submit_completed_at": execution_payload.get("buy_submit_completed_at"),
+                "pending_sell_count_at_buy_decision": execution_payload.get("pending_sell_count_at_buy_decision"),
+                "buying_power_at_buy_decision": execution_payload.get("buying_power_at_buy_decision"),
+                "cash_at_buy_decision": execution_payload.get("cash_at_buy_decision"),
             },
         ),
         _event(
@@ -331,6 +345,7 @@ def build_execution_lifecycle_timeline(
             timestamp=None,
             summary=(
                 f"Buy phase submitted {submitted_buy_count}; "
+                f"decision_reason={_text(execution_payload.get('buy_phase_decision_reason')) or 'none'}; "
                 f"block_reason={_text(execution_payload.get('buy_phase_block_reason')) or 'none'}"
             ),
             source_artifacts=[_safe_relative(execution_payload_path)],
@@ -340,6 +355,10 @@ def build_execution_lifecycle_timeline(
                 "submitted_buy_count": submitted_buy_count,
                 "pending_buy_count": execution_payload.get("pending_buy_count"),
                 "buy_phase_block_reason": execution_payload.get("buy_phase_block_reason"),
+                "buy_phase_decision_reason": execution_payload.get("buy_phase_decision_reason"),
+                "skipped_buy_count": execution_payload.get("skipped_buy_count"),
+                "blocked_buy_count": execution_payload.get("blocked_buy_count"),
+                "pending_sell_count_at_buy_decision": execution_payload.get("pending_sell_count_at_buy_decision"),
             },
         ),
         _event(

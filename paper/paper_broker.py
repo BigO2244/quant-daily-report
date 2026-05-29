@@ -57,6 +57,19 @@ CAPITAL_RESERVE_EQUITY_PCT = float(os.getenv("CAPITAL_RESERVE_EQUITY_PCT", "0.00
 CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
 ALPACA_SELL_PHASE_TIMEOUT_SECONDS = 90.0
 ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS = 3.0
+PRETRADE_ASSET_VALIDATION_FAILED = "pretrade_asset_validation_failed"
+BUY_SUBMITTED_USING_AVAILABLE_BUYING_POWER = "buy_submitted_using_available_buying_power"
+BUY_BLOCKED_INSUFFICIENT_BUYING_POWER = "buy_blocked_insufficient_buying_power"
+BUY_BLOCKED_ASSET_VALIDATION_FAILED = "buy_blocked_asset_validation_failed"
+BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH = "buy_blocked_pending_sells_required_for_cash"
+ORDER_TERMINAL_STATUSES = {
+    "FILLED",
+    "CANCELED",
+    "CANCELLED",
+    "EXPIRED",
+    "REJECTED",
+    "SUSPENDED",
+}
 
 
 def _reserve_cash_for_equity(
@@ -1317,6 +1330,198 @@ def _coerce_float(value: object, default: float | None = 0.0) -> float | None:
         return float(default)
 
 
+def _utc_now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _parse_datetime(value: object) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
+
+
+def _seconds_between(start: object, end: object) -> float | None:
+    start_dt = _parse_datetime(start)
+    end_dt = _parse_datetime(end)
+    if start_dt is None or end_dt is None:
+        return None
+    return max(0.0, float((end_dt - start_dt).total_seconds()))
+
+
+def _asset_flag_true(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _normalize_asset_status(value: object) -> str:
+    return str(value or "").strip().lower().replace("assetstatus.", "")
+
+
+def _asset_validation_default() -> Dict[str, object]:
+    return {
+        "asset_validation_status": "NOT_RUN",
+        "asset_validation_reason": "",
+        "asset_validation_reasons": [],
+        "invalid_symbols": [],
+        "non_tradable_symbols": [],
+        "inactive_symbols": [],
+        "asset_validation_errors": [],
+        "invalid_asset_count": 0,
+        "asset_validation_checked_symbols": [],
+        "asset_validation_records": [],
+        "asset_validation_artifact_path": None,
+    }
+
+
+def _validate_alpaca_assets(
+    alpaca: AlpacaBroker,
+    orders: List[Dict[str, object]],
+) -> Dict[str, object]:
+    validation = _asset_validation_default()
+    symbols = sorted(
+        {
+            str(order.get("ticker") or "").upper().strip()
+            for order in orders or []
+            if str(order.get("ticker") or "").strip()
+        }
+    )
+    validation["asset_validation_checked_symbols"] = symbols
+    if not symbols:
+        validation["asset_validation_status"] = "PASS"
+        validation["asset_validation_reason"] = "no_symbols_to_validate"
+        return validation
+
+    getter = getattr(alpaca, "get_asset", None)
+    if not callable(getter):
+        validation["asset_validation_status"] = "UNAVAILABLE"
+        validation["asset_validation_reason"] = "broker_asset_lookup_unavailable"
+        validation["asset_validation_reasons"] = ["broker_asset_lookup_unavailable"]
+        return validation
+
+    invalid_symbols: list[str] = []
+    non_tradable_symbols: list[str] = []
+    inactive_symbols: list[str] = []
+    errors: list[dict[str, object]] = []
+    records: list[dict[str, object]] = []
+
+    for symbol in symbols:
+        try:
+            asset = getter(symbol)
+        except Exception as exc:
+            invalid_symbols.append(symbol)
+            errors.append(
+                {
+                    "symbol": symbol,
+                    "error": str(exc),
+                    "reason": f"asset_validation_error:{symbol}",
+                }
+            )
+            records.append(
+                {
+                    "symbol": symbol,
+                    "exists": False,
+                    "status": None,
+                    "tradable": None,
+                    "valid": False,
+                    "reason": f"asset_validation_error:{symbol}",
+                }
+            )
+            continue
+
+        if not isinstance(asset, dict) or not asset:
+            invalid_symbols.append(symbol)
+            records.append(
+                {
+                    "symbol": symbol,
+                    "exists": False,
+                    "status": None,
+                    "tradable": None,
+                    "valid": False,
+                    "reason": f"invalid_tradable_symbol:{symbol}",
+                }
+            )
+            continue
+
+        status = _normalize_asset_status(asset.get("status"))
+        tradable = _asset_flag_true(asset.get("tradable"))
+        record = {
+            "symbol": symbol,
+            "exists": True,
+            "status": status or None,
+            "tradable": tradable,
+            "valid": bool(status == "active" and tradable),
+            "reason": None,
+        }
+        if status != "active":
+            inactive_symbols.append(symbol)
+            non_tradable_symbols.append(symbol)
+            record["reason"] = f"inactive_tradable_symbol:{symbol}"
+        elif not tradable:
+            non_tradable_symbols.append(symbol)
+            record["reason"] = f"non_tradable_symbol:{symbol}"
+        records.append(record)
+
+    invalid_symbols = sorted(set(invalid_symbols))
+    non_tradable_symbols = sorted(set(non_tradable_symbols))
+    inactive_symbols = sorted(set(inactive_symbols))
+    reasons = [f"invalid_tradable_symbol:{symbol}" for symbol in invalid_symbols]
+    reasons.extend(f"non_tradable_symbol:{symbol}" for symbol in non_tradable_symbols)
+    reasons.extend(f"asset_validation_error:{row['symbol']}" for row in errors)
+    reasons = sorted(set(reasons))
+    failed = bool(invalid_symbols or non_tradable_symbols or inactive_symbols or errors)
+
+    validation.update(
+        {
+            "asset_validation_status": "FAIL" if failed else "PASS",
+            "asset_validation_reason": (
+                ";".join([PRETRADE_ASSET_VALIDATION_FAILED, *reasons])
+                if failed
+                else "all_assets_active_tradable"
+            ),
+            "asset_validation_reasons": (
+                [PRETRADE_ASSET_VALIDATION_FAILED, *reasons] if failed else []
+            ),
+            "invalid_symbols": invalid_symbols,
+            "non_tradable_symbols": non_tradable_symbols,
+            "inactive_symbols": inactive_symbols,
+            "asset_validation_errors": errors,
+            "invalid_asset_count": int(len(set(invalid_symbols + non_tradable_symbols + inactive_symbols))),
+            "asset_validation_records": records,
+        }
+    )
+    return validation
+
+
+def _write_asset_validation_artifact(
+    run_date: str,
+    run_id: str,
+    validation: Dict[str, object],
+) -> str:
+    root = _run_output_root()
+    out_path = root / "broker" / f"asset_validation_{run_date}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "trade_date": run_date,
+        "run_id": run_id,
+        "timestamp_utc": _utc_now_iso(),
+        **dict(validation or {}),
+    }
+    safe_write_text(
+        out_path,
+        json.dumps(json_safe_primitive(payload), indent=2, sort_keys=True) + "\n",
+        allow_overwrite=True,
+    )
+    return str(out_path)
+
+
 def _persist_sent_orders(
     orders: List[Dict[str, object]],
     sent_ledger_path: str,
@@ -1472,6 +1677,12 @@ def _write_alpaca_orders(run_date: str, submissions: List[Dict[str, object]]) ->
         "quantity",
         "status",
         "submitted_at",
+        "latest_status",
+        "filled_qty",
+        "filled_at",
+        "first_seen_status",
+        "last_polled_at",
+        "seconds_to_fill",
         "mode",
     ]
     frame = pd.DataFrame(submissions or [])
@@ -1629,6 +1840,99 @@ def _order_filled_quantity(order: Dict[str, object] | None, fallback_quantity: o
     if status in {"CANCELED", "CANCELLED", "EXPIRED", "REJECTED", "PENDING_NEW", "ACCEPTED", "NEW", "HELD"}:
         return 0.0
     return None
+
+
+def _order_filled_at(order: Dict[str, object] | None) -> str | None:
+    if not order:
+        return None
+    for key in ("filled_at", "filled_time"):
+        text = str(order.get(key) or "").strip()
+        if text:
+            return text
+    raw = order.get("raw")
+    if isinstance(raw, dict):
+        for key in ("filled_at", "filled_time"):
+            text = str(raw.get(key) or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _submission_lifecycle_fields(
+    *,
+    submitted_order: Dict[str, object],
+    current_order: Dict[str, object] | None,
+    fallback_quantity: object,
+    prior_first_seen_status: object = None,
+    prior_submitted_at: object = None,
+) -> Dict[str, object]:
+    current = current_order if isinstance(current_order, dict) and current_order else submitted_order
+    submitted_at = (
+        str(prior_submitted_at or "").strip()
+        or str(submitted_order.get("submitted_at") or "").strip()
+        or str(current.get("submitted_at") or "").strip()
+    )
+    first_seen_status = (
+        str(prior_first_seen_status or "").strip()
+        or str(submitted_order.get("status") or submitted_order.get("latest_status") or "").strip()
+    )
+    latest_status = str(current.get("status") or first_seen_status or "UNKNOWN").strip()
+    filled_qty = _order_filled_quantity(current, fallback_quantity=fallback_quantity)
+    filled_at = _order_filled_at(current)
+    seconds_to_fill = _seconds_between(submitted_at, filled_at) if filled_at else None
+    return {
+        "submitted_at": submitted_at,
+        "first_seen_status": first_seen_status,
+        "latest_status": latest_status,
+        "status": latest_status,
+        "filled_qty": "" if filled_qty is None else str(filled_qty).rstrip("0").rstrip("."),
+        "filled_at": filled_at,
+        "last_polled_at": _utc_now_iso() if current_order else None,
+        "seconds_to_fill": seconds_to_fill,
+    }
+
+
+def _update_submission_lifecycle(
+    *,
+    alpaca: AlpacaBroker,
+    internal_order_id: str,
+    fallback_order: Dict[str, object],
+    fallback_quantity: object,
+    submission_metadata: Dict[str, Dict[str, object]],
+    alpaca_submissions: List[Dict[str, object]],
+) -> Dict[str, object] | None:
+    meta = submission_metadata.get(internal_order_id) or {}
+    alpaca_order_id = str(meta.get("alpaca_order_id") or "").strip()
+    current_order = None
+    if alpaca_order_id:
+        try:
+            current_order = alpaca.get_order(alpaca_order_id)
+        except Exception as exc:
+            logger.warning(
+                "[ALPACA][ORDER_POLL] order_id=%s alpaca_order_id=%s refresh_failed=%s",
+                internal_order_id,
+                alpaca_order_id,
+                exc,
+            )
+    lifecycle = _submission_lifecycle_fields(
+        submitted_order=fallback_order,
+        current_order=current_order,
+        fallback_quantity=fallback_quantity,
+        prior_first_seen_status=meta.get("first_seen_status"),
+        prior_submitted_at=meta.get("submitted_at"),
+    )
+    if alpaca_order_id:
+        lifecycle["alpaca_order_id"] = alpaca_order_id
+    meta.update(lifecycle)
+    submission_metadata[internal_order_id] = meta
+    for row in reversed(alpaca_submissions):
+        if str(row.get("order_id") or "") != str(internal_order_id):
+            continue
+        row.update(lifecycle)
+        if alpaca_order_id:
+            row["alpaca_order_id"] = alpaca_order_id
+        break
+    return current_order
 
 
 def _filled_quantity_from_position_delta(
@@ -1833,9 +2137,15 @@ def _wait_for_alpaca_sell_phase_completion(
     alpaca: AlpacaBroker,
     sell_orders: List[Dict[str, object]],
     submission_metadata: Dict[str, Dict[str, object]],
+    alpaca_submissions: List[Dict[str, object]],
     starting_positions: Dict[str, float],
+    timeout_seconds_override: float | None = None,
 ) -> Dict[str, object]:
-    timeout_seconds = _sell_phase_timeout_seconds()
+    timeout_seconds = (
+        _sell_phase_timeout_seconds()
+        if timeout_seconds_override is None
+        else max(0.0, float(timeout_seconds_override))
+    )
     poll_interval_seconds = _sell_phase_poll_interval_seconds()
     tracked_symbols = sorted(
         {
@@ -1852,16 +2162,19 @@ def _wait_for_alpaca_sell_phase_completion(
         observed_statuses: Dict[str, str] = {}
         for order in sell_orders or []:
             internal_order_id = str(order.get("order_id") or "")
-            client_order_id = str(
-                ((submission_metadata.get(internal_order_id) or {}).get("client_order_id")) or ""
-            ).strip()
             status = str(
                 ((submission_metadata.get(internal_order_id) or {}).get("status")) or "UNKNOWN"
             ).upper()
-            if client_order_id:
-                current = alpaca.find_order_by_client_id(client_order_id) or {}
-                if current:
-                    status = str(current.get("status") or status or "UNKNOWN").upper()
+            current = _update_submission_lifecycle(
+                alpaca=alpaca,
+                internal_order_id=internal_order_id,
+                fallback_order=submission_metadata.get(internal_order_id) or {},
+                fallback_quantity=order.get("quantity"),
+                submission_metadata=submission_metadata,
+                alpaca_submissions=alpaca_submissions,
+            )
+            if current:
+                status = str(current.get("status") or status or "UNKNOWN").upper()
             if internal_order_id:
                 observed_statuses[internal_order_id] = status
         return account, positions, observed_statuses
@@ -2141,6 +2454,9 @@ def _compute_buy_budget(account: Dict[str, object], cfg: PaperConfig) -> float:
 def _apply_buy_budget(
     buy_orders: List[Dict[str, object]],
     buy_budget: float,
+    *,
+    pending_sell_count: int = 0,
+    pending_sell_notional: float = 0.0,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
     kept: List[Dict[str, object]] = []
     skipped: List[Dict[str, object]] = []
@@ -2151,7 +2467,15 @@ def _apply_buy_budget(
             kept.append(order)
             spent += notional
         else:
-            skipped.append(order)
+            blocked = dict(order)
+            if (
+                int(pending_sell_count or 0) > 0
+                and spent + notional <= float(buy_budget) + float(pending_sell_notional or 0.0) + 1e-9
+            ):
+                blocked["block_reason"] = BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH
+            else:
+                blocked["block_reason"] = BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
+            skipped.append(blocked)
     return kept, skipped
 
 
@@ -2328,6 +2652,9 @@ def _submit_alpaca_orders(
                 "client_order_id": client_order_id,
                 "alpaca_order_id": str(existing_remote.get("id") or ""),
                 "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                "first_seen_status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                "latest_status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                "submitted_at": str(existing_remote.get("submitted_at") or ""),
             }
             alpaca_submissions.append(
                 {
@@ -2335,10 +2662,17 @@ def _submit_alpaca_orders(
                     "order_id": internal_order_id,
                     "client_order_id": client_order_id,
                     "alpaca_order_id": str(existing_remote.get("id") or ""),
+                    "symbol": ticker,
                     "ticker": ticker,
                     "side": side,
                     "quantity": float(quantity),
                     "status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                    "latest_status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                    "first_seen_status": str(existing_remote.get("status") or "EXISTING_REMOTE"),
+                    "filled_qty": str(existing_remote.get("filled_qty") or ""),
+                    "filled_at": str(existing_remote.get("filled_at") or ""),
+                    "last_polled_at": None,
+                    "seconds_to_fill": None,
                     "submitted_at": str(existing_remote.get("submitted_at") or ""),
                     "mode": "alpaca",
                 }
@@ -2364,6 +2698,9 @@ def _submit_alpaca_orders(
                 "client_order_id": client_order_id,
                 "alpaca_order_id": str(open_dup.get("id") or ""),
                 "status": "OPEN_DUPLICATE_BLOCKED",
+                "first_seen_status": "OPEN_DUPLICATE_BLOCKED",
+                "latest_status": "OPEN_DUPLICATE_BLOCKED",
+                "submitted_at": str(open_dup.get("submitted_at") or ""),
             }
             alpaca_submissions.append(
                 {
@@ -2371,10 +2708,17 @@ def _submit_alpaca_orders(
                     "order_id": internal_order_id,
                     "client_order_id": client_order_id,
                     "alpaca_order_id": str(open_dup.get("id") or ""),
+                    "symbol": ticker,
                     "ticker": ticker,
                     "side": side,
                     "quantity": float(quantity),
                     "status": "OPEN_DUPLICATE_BLOCKED",
+                    "latest_status": "OPEN_DUPLICATE_BLOCKED",
+                    "first_seen_status": "OPEN_DUPLICATE_BLOCKED",
+                    "filled_qty": str(open_dup.get("filled_qty") or ""),
+                    "filled_at": str(open_dup.get("filled_at") or ""),
+                    "last_polled_at": None,
+                    "seconds_to_fill": None,
                     "submitted_at": str(open_dup.get("submitted_at") or ""),
                     "mode": "alpaca",
                 }
@@ -2433,6 +2777,9 @@ def _submit_alpaca_orders(
             "client_order_id": client_order_id,
             "alpaca_order_id": alpaca_order_id,
             "status": status,
+            "first_seen_status": status,
+            "latest_status": status,
+            "submitted_at": submitted_at,
         }
         alpaca_submissions.append(
             {
@@ -2440,13 +2787,28 @@ def _submit_alpaca_orders(
                 "order_id": internal_order_id,
                 "client_order_id": client_order_id,
                 "alpaca_order_id": alpaca_order_id,
+                "symbol": ticker,
                 "ticker": ticker,
                 "side": side,
                 "quantity": float(quantity),
                 "status": status,
+                "latest_status": status,
+                "first_seen_status": status,
+                "filled_qty": str(submitted.get("filled_qty") or ""),
+                "filled_at": str(submitted.get("filled_at") or ""),
+                "last_polled_at": None,
+                "seconds_to_fill": None,
                 "submitted_at": submitted_at,
                 "mode": "alpaca",
             }
+        )
+        _update_submission_lifecycle(
+            alpaca=alpaca,
+            internal_order_id=internal_order_id,
+            fallback_order=submitted,
+            fallback_quantity=float(quantity),
+            submission_metadata=submission_metadata,
+            alpaca_submissions=alpaca_submissions,
         )
         submitted_orders.append(order)
         logger.info(
@@ -3342,6 +3704,17 @@ def run_paper_day(
     artifact_failure_message: str | None = None
     halt_remaining_buys = False
     execution_submitted_symbols: List[str] = []
+    asset_validation: Dict[str, object] = _asset_validation_default()
+    sell_submit_started_at: str | None = None
+    sell_submit_completed_at: str | None = None
+    buy_submit_started_at: str | None = None
+    buy_submit_completed_at: str | None = None
+    pending_sell_count_at_buy_decision = 0
+    buying_power_at_buy_decision: float | None = None
+    cash_at_buy_decision: float | None = None
+    skipped_buy_count = 0
+    blocked_buy_count = 0
+    buy_phase_decision_reason: str | None = None
     execution_enabled = bool(
         paper_execution_requested and mkt.is_open_now and not plan_only and not blocked and not is_weekend
     )
@@ -3373,6 +3746,7 @@ def run_paper_day(
     except Exception as _art_exc:
         logger.warning("[INTENDED_ORDERS] Failed to write artifact: %s", _art_exc)
 
+    alpaca: AlpacaBroker | None = None
     if execution_enabled:
         initial_orders = _build_shadow_orders(execution_trades, run_id)
         alpaca_submission_summary["initial_intended_orders"] = int(len(initial_orders))
@@ -3424,27 +3798,85 @@ def run_paper_day(
             alpaca_submission_summary["post_local_idempotent_orders"] = int(len(orders))
             submission_metadata: Dict[str, Dict[str, object]] = {}
             orders_for_execution = list(orders)
+            if paper_execution_requested:
+                alpaca = AlpacaBroker.from_env()
+                broker_cls = alpaca.__class__
+                logger.info(
+                    "[BROKER] selected=%s.%s mode=%s env_mode=%s env_trading_mode=%s",
+                    broker_cls.__module__,
+                    broker_cls.__name__,
+                    mode,
+                    env_mode or "n/a",
+                    env_trading_mode or "n/a",
+                )
+                if not isinstance(alpaca, AlpacaBroker):
+                    raise RuntimeError(
+                        f"[INVARIANT] Expected AlpacaBroker in paper mode, got {broker_cls.__module__}.{broker_cls.__name__}"
+                    )
+                asset_validation = _validate_alpaca_assets(alpaca, orders_for_execution)
+                asset_validation["asset_validation_artifact_path"] = _write_asset_validation_artifact(
+                    run_date,
+                    run_id,
+                    asset_validation,
+                )
+                alpaca_submission_summary.update(
+                    {
+                        "asset_validation_status": asset_validation.get("asset_validation_status"),
+                        "asset_validation_reason": asset_validation.get("asset_validation_reason"),
+                        "invalid_symbols": list(asset_validation.get("invalid_symbols") or []),
+                        "non_tradable_symbols": list(asset_validation.get("non_tradable_symbols") or []),
+                        "invalid_asset_count": int(asset_validation.get("invalid_asset_count") or 0),
+                        "asset_validation_artifact_path": asset_validation.get("asset_validation_artifact_path"),
+                    }
+                )
+                if str(asset_validation.get("asset_validation_status") or "").upper() == "FAIL":
+                    blocked = True
+                    execution_enabled = False
+                    execution_reason = PRETRADE_ASSET_VALIDATION_FAILED
+                    execution_halt_reason = str(
+                        asset_validation.get("asset_validation_reason")
+                        or PRETRADE_ASSET_VALIDATION_FAILED
+                    )
+                    buy_phase_decision_reason = BUY_BLOCKED_ASSET_VALIDATION_FAILED
+                    sell_orders_failed, buy_orders_failed = _split_orders_for_execution(orders_for_execution)
+                    del sell_orders_failed
+                    budget_skipped_orders = [
+                        {**dict(order), "block_reason": BUY_BLOCKED_ASSET_VALIDATION_FAILED}
+                        for order in buy_orders_failed
+                    ]
+                    skipped_buy_count = int(len(budget_skipped_orders))
+                    blocked_buy_count = int(len(budget_skipped_orders))
+                    halt_remaining_buys = bool(budget_skipped_orders)
+                    alpaca_submission_summary["buy_phase_decision_reason"] = buy_phase_decision_reason
+                    alpaca_submission_summary["buy_phase_block_reason"] = buy_phase_decision_reason
+                    alpaca_submission_summary["budget_skipped_orders"] = int(len(budget_skipped_orders))
+                    alpaca_submission_summary["buy_phase_planned"] = 0
+                    alpaca_submission_summary["buy_phase_submitted"] = 0
+                    alpaca_submission_summary["halt_remaining_buys"] = halt_remaining_buys
+                    alpaca_submission_summary["execution_reason"] = execution_reason
+                    blocked_reasons.extend(
+                        str(reason)
+                        for reason in list(asset_validation.get("asset_validation_reasons") or [])
+                        if str(reason).strip()
+                    )
+                    orders_for_execution = []
+                    orders = []
+                    logger.error(
+                        "[ALPACA][ASSET_PREFLIGHT] blocked reason=%s invalid=%s non_tradable=%s",
+                        execution_halt_reason,
+                        ",".join(list(asset_validation.get("invalid_symbols") or [])) or "none",
+                        ",".join(list(asset_validation.get("non_tradable_symbols") or [])) or "none",
+                    )
             if pre_submit_observer is not None:
-                try:
-                    pre_submit_observer([dict(order) for order in orders_for_execution])
-                except Exception as exc:
-                    logger.warning("[EQUALITY_GATE] observe callback failed; submission unaffected: %s", exc)
+                if execution_enabled:
+                    try:
+                        pre_submit_observer([dict(order) for order in orders_for_execution])
+                    except Exception as exc:
+                        logger.warning("[EQUALITY_GATE] observe callback failed; submission unaffected: %s", exc)
 
         if paper_execution_requested and execution_enabled:
-            alpaca = AlpacaBroker.from_env()
-            broker_cls = alpaca.__class__
-            logger.info(
-                "[BROKER] selected=%s.%s mode=%s env_mode=%s env_trading_mode=%s",
-                broker_cls.__module__,
-                broker_cls.__name__,
-                mode,
-                env_mode or "n/a",
-                env_trading_mode or "n/a",
-            )
-            if paper_execution_requested and not isinstance(alpaca, AlpacaBroker):
-                raise RuntimeError(
-                    f"[INVARIANT] Expected AlpacaBroker in paper mode, got {broker_cls.__module__}.{broker_cls.__name__}"
-                )
+            if alpaca is None:
+                alpaca = AlpacaBroker.from_env()
             submitted_orders: List[Dict[str, object]] = []
             remote_existing_orders: List[Dict[str, object]] = []
             sell_orders, buy_orders = _split_orders_for_execution(orders)
@@ -3459,6 +3891,7 @@ def run_paper_day(
                 len(buy_orders),
             )
             try:
+                sell_submit_started_at = _utc_now_iso()
                 phase_submitted, phase_existing, phase_attempts, phase_success, phase_failed = _submit_alpaca_orders(
                     alpaca=alpaca,
                     orders=sell_orders,
@@ -3475,11 +3908,14 @@ def run_paper_day(
                 submit_success += phase_success
                 submit_failed += phase_failed
                 alpaca_submission_summary["sell_phase_submitted"] = int(len(phase_submitted))
+                sell_submit_completed_at = _utc_now_iso()
                 sell_phase_result = _wait_for_alpaca_sell_phase_completion(
                     alpaca=alpaca,
                     sell_orders=sell_orders,
                     submission_metadata=submission_metadata,
+                    alpaca_submissions=alpaca_submissions,
                     starting_positions=_holdings_to_quantity_map(holdings_prev),
+                    timeout_seconds_override=0.0,
                 )
                 sell_phase_status = str(sell_phase_result.get("status") or "UNKNOWN")
                 sell_phase_completion_reason = str(
@@ -3497,9 +3933,24 @@ def run_paper_day(
                     sell_phase_observed_statuses
                 )
 
+                pending_sell_order_ids = [
+                    order_id
+                    for order_id, status in sell_phase_observed_statuses.items()
+                    if str(status or "").upper().replace("ORDERSTATUS.", "")
+                    not in ORDER_TERMINAL_STATUSES
+                ]
+                pending_sell_count_at_buy_decision = int(len(pending_sell_order_ids))
+                pending_sell_notional = float(
+                    sum(
+                        _order_notional(orders_by_id.get(order_id, {}))
+                        for order_id in pending_sell_order_ids
+                    )
+                )
                 postsell_account_snapshot = dict(
                     json_safe_primitive(sell_phase_result.get("account") or {})
                 )
+                if not postsell_account_snapshot:
+                    postsell_account_snapshot = dict(json_safe_primitive(alpaca.get_account() or {}))
                 if postsell_account_snapshot:
                     postsell_cash_confirmed = _coerce_float(
                         postsell_account_snapshot.get("cash"),
@@ -3516,16 +3967,22 @@ def run_paper_day(
                             postsell_account_snapshot,
                         )
                         buy_budget_computed = _compute_buy_budget(postsell_account_snapshot, cfg)
+                        cash_at_buy_decision = postsell_cash_confirmed
+                        buying_power_at_buy_decision = postsell_buying_power_confirmed
                         alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                         alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
+                        alpaca_submission_summary["cash_at_buy_decision"] = cash_at_buy_decision
+                        alpaca_submission_summary["buying_power_at_buy_decision"] = buying_power_at_buy_decision
+                        alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
                         logger.info(
-                            "[ALPACA][POSTSELL] status=%s reason=%s snapshot=%s cash=%s buying_power=%s buy_budget=%.2f",
+                            "[ALPACA][BUY_DECISION] sell_status=%s reason=%s snapshot=%s cash=%s buying_power=%s buy_budget=%.2f pending_sells=%d",
                             sell_phase_status,
                             sell_phase_completion_reason,
                             postsell_account_snapshot_path,
                             postsell_cash_confirmed,
                             postsell_buying_power_confirmed,
                             float(buy_budget_computed or 0.0),
+                            int(pending_sell_count_at_buy_decision),
                         )
                     except Exception as exc:
                         execution_outcome = EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE
@@ -3543,6 +4000,7 @@ def run_paper_day(
                         buy_budget_computed = 0.0
                         alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                         alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
+                        alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
                         alpaca_submission_summary["artifact_failure_stage"] = artifact_failure_stage
                         alpaca_submission_summary["artifact_failure_message"] = artifact_failure_message
                         alpaca_submission_summary["execution_outcome"] = execution_outcome
@@ -3563,71 +4021,92 @@ def run_paper_day(
                     buy_budget_computed = 0.0
                     alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                     alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
+                    alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
 
-                buy_phase_allowed = bool(
-                    execution_outcome is None and sell_phase_status in {"COMPLETED", "NO_SELLS"}
-                )
                 buy_phase_block_reason = execution_reason if execution_outcome else None
                 if execution_outcome == EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE:
                     budget_skipped_orders = list(buy_orders)
-                    logger.warning(
-                        "[ALPACA][BUY_PHASE] blocked reason=%s planned_orders=%d",
-                        buy_phase_block_reason,
-                        len(buy_orders),
-                    )
-                elif not buy_phase_allowed:
-                    buy_phase_block_reason = f"sell_phase_{str(sell_phase_status).lower()}"
-                    budget_skipped_orders = list(buy_orders)
+                    buy_phase_decision_reason = str(buy_phase_block_reason or execution_reason)
                     logger.warning(
                         "[ALPACA][BUY_PHASE] blocked reason=%s planned_orders=%d",
                         buy_phase_block_reason,
                         len(buy_orders),
                     )
                 else:
-                    if use_precomputed_trade_plan:
-                        buy_orders_budgeted = list(buy_orders)
-                        budget_skipped_orders = []
-                        alpaca_submission_summary["exact_plan_buy_budget_bypassed"] = True
+                    buy_orders_budgeted, budget_skipped_orders = _apply_buy_budget(
+                        buy_orders,
+                        float(buy_budget_computed or 0.0),
+                        pending_sell_count=pending_sell_count_at_buy_decision,
+                        pending_sell_notional=pending_sell_notional,
+                    )
+                    skipped_buy_count = int(len(budget_skipped_orders))
+                    blocked_buy_count = int(len(budget_skipped_orders))
+                    if buy_orders_budgeted:
+                        buy_phase_decision_reason = BUY_SUBMITTED_USING_AVAILABLE_BUYING_POWER
                         logger.info(
-                            "[PRECOMPUTE_EXECUTION] exact plan preserving planned buy orders=%d despite refreshed_cash=%s computed_buy_budget=%.2f",
-                            len(buy_orders_budgeted),
+                            "[ALPACA][BUY_PHASE] allowed reason=%s refreshed_cash=%s buy_budget=%.2f planned_orders=%d submitted_candidates=%d pending_sells=%d",
+                            buy_phase_decision_reason,
                             postsell_cash_confirmed,
                             float(buy_budget_computed or 0.0),
+                            len(buy_orders),
+                            len(buy_orders_budgeted),
+                            int(pending_sell_count_at_buy_decision),
+                        )
+                    elif buy_orders:
+                        first_block = (
+                            str((budget_skipped_orders[0] or {}).get("block_reason") or "")
+                            if budget_skipped_orders
+                            else BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
+                        )
+                        buy_phase_block_reason = first_block or BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
+                        buy_phase_decision_reason = buy_phase_block_reason
+                        logger.warning(
+                            "[ALPACA][BUY_PHASE] blocked reason=%s refreshed_cash=%s buy_budget=%.2f planned_orders=%d pending_sells=%d",
+                            buy_phase_block_reason,
+                            postsell_cash_confirmed,
+                            float(buy_budget_computed or 0.0),
+                            len(buy_orders),
+                            int(pending_sell_count_at_buy_decision),
                         )
                     else:
-                        buy_orders_budgeted, budget_skipped_orders = _apply_buy_budget(
-                            buy_orders,
-                            float(buy_budget_computed or 0.0),
+                        buy_phase_decision_reason = "no_buy_orders"
+                    if budget_skipped_orders and not buy_phase_block_reason:
+                        buy_phase_block_reason = str(
+                            (budget_skipped_orders[0] or {}).get("block_reason")
+                            or BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
                         )
-                        if buy_orders and not buy_orders_budgeted:
-                            buy_phase_block_reason = "post_sell_cash_below_reserve"
-                        if budget_skipped_orders:
-                            logger.info(
-                                "[ALPACA][BUY_BUDGET] skipped_orders=%d buy_budget=%.2f",
-                                len(budget_skipped_orders),
-                                float(buy_budget_computed or 0.0),
-                            )
-                        if buy_phase_block_reason:
-                            logger.warning(
-                                "[ALPACA][BUY_PHASE] blocked reason=%s refreshed_cash=%s planned_orders=%d",
-                                buy_phase_block_reason,
-                                postsell_cash_confirmed,
-                                len(buy_orders),
-                            )
-                        else:
-                            logger.info(
-                                "[ALPACA][BUY_PHASE] allowed refreshed_cash=%s buy_budget=%.2f planned_orders=%d",
-                                postsell_cash_confirmed,
-                                float(buy_budget_computed or 0.0),
-                                len(buy_orders_budgeted),
-                            )
-                if not buy_phase_allowed:
+                    if budget_skipped_orders:
+                        logger.info(
+                            "[ALPACA][BUY_BUDGET] skipped_orders=%d buy_budget=%.2f reason=%s",
+                            len(budget_skipped_orders),
+                            float(buy_budget_computed or 0.0),
+                            buy_phase_block_reason,
+                        )
+                    if submitted_orders and budget_skipped_orders:
+                        execution_outcome = EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT
+                        execution_reason = str(buy_phase_block_reason or BUY_BLOCKED_INSUFFICIENT_BUYING_POWER)
+                        cash_rebalance_status = CASH_REBALANCE_INCOMPLETE
+                        execution_halt_reason = (
+                            f"{execution_outcome}:{execution_reason}:{CASH_REBALANCE_INCOMPLETE}"
+                        )
+                        halt_remaining_buys = True
+                        blocked_reasons.append(execution_halt_reason)
+                        alpaca_submission_summary["execution_outcome"] = execution_outcome
+                        alpaca_submission_summary["execution_reason"] = execution_reason
+                        alpaca_submission_summary["cash_rebalance_status"] = cash_rebalance_status
+                        alpaca_submission_summary["halt_remaining_buys"] = halt_remaining_buys
+                if execution_outcome == EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE:
                     buy_orders_budgeted = []
                 alpaca_submission_summary["budget_skipped_orders"] = int(len(budget_skipped_orders))
                 alpaca_submission_summary["buy_phase_planned"] = int(len(buy_orders_budgeted))
+                alpaca_submission_summary["skipped_buy_count"] = int(skipped_buy_count)
+                alpaca_submission_summary["blocked_buy_count"] = int(blocked_buy_count)
+                alpaca_submission_summary["buy_phase_decision_reason"] = buy_phase_decision_reason
                 if buy_phase_block_reason:
                     alpaca_submission_summary["buy_phase_block_reason"] = str(buy_phase_block_reason)
 
+                if buy_orders_budgeted:
+                    buy_submit_started_at = _utc_now_iso()
                 phase_submitted, phase_existing, phase_attempts, phase_success, phase_failed = _submit_alpaca_orders(
                     alpaca=alpaca,
                     orders=buy_orders_budgeted,
@@ -3638,12 +4117,18 @@ def run_paper_day(
                     idempotent_drop_reasons=idempotent_drop_reasons,
                     alpaca_submission_summary=alpaca_submission_summary,
                 )
+                if buy_orders_budgeted:
+                    buy_submit_completed_at = _utc_now_iso()
                 submitted_orders.extend(phase_submitted)
                 remote_existing_orders.extend(phase_existing)
                 submit_attempts += phase_attempts
                 submit_success += phase_success
                 submit_failed += phase_failed
                 alpaca_submission_summary["buy_phase_submitted"] = int(len(phase_submitted))
+                alpaca_submission_summary["sell_submit_started_at"] = sell_submit_started_at
+                alpaca_submission_summary["sell_submit_completed_at"] = sell_submit_completed_at
+                alpaca_submission_summary["buy_submit_started_at"] = buy_submit_started_at
+                alpaca_submission_summary["buy_submit_completed_at"] = buy_submit_completed_at
             except AlpacaSubmissionRejectError as exc:
                 submit_attempts += int(getattr(exc, "attempted_submissions", 0) or 0)
                 submit_success += int(getattr(exc, "successful_submissions", 0) or 0)
@@ -4090,6 +4575,42 @@ def run_paper_day(
         "alpaca_submissions": alpaca_submissions,
         "alpaca_orders_path": alpaca_orders_path,
         "alpaca_submission_summary": alpaca_submission_summary,
+        "order_lifecycle": [
+            {
+                "symbol": str(item.get("symbol") or item.get("ticker") or ""),
+                "ticker": str(item.get("ticker") or item.get("symbol") or ""),
+                "side": str(item.get("side") or ""),
+                "qty": item.get("quantity"),
+                "client_order_id": item.get("client_order_id"),
+                "alpaca_order_id": item.get("alpaca_order_id"),
+                "submitted_at": item.get("submitted_at"),
+                "latest_status": item.get("latest_status") or item.get("status"),
+                "filled_qty": item.get("filled_qty"),
+                "filled_at": item.get("filled_at"),
+                "first_seen_status": item.get("first_seen_status"),
+                "last_polled_at": item.get("last_polled_at"),
+                "seconds_to_fill": item.get("seconds_to_fill"),
+            }
+            for item in alpaca_submissions
+            if isinstance(item, dict)
+        ],
+        "sell_submit_started_at": sell_submit_started_at,
+        "sell_submit_completed_at": sell_submit_completed_at,
+        "buy_submit_started_at": buy_submit_started_at,
+        "buy_submit_completed_at": buy_submit_completed_at,
+        "pending_sell_count_at_buy_decision": int(pending_sell_count_at_buy_decision),
+        "buying_power_at_buy_decision": buying_power_at_buy_decision,
+        "cash_at_buy_decision": cash_at_buy_decision,
+        "skipped_buy_count": int(skipped_buy_count),
+        "blocked_buy_count": int(blocked_buy_count),
+        "buy_phase_decision_reason": buy_phase_decision_reason,
+        "asset_validation_status": asset_validation.get("asset_validation_status"),
+        "invalid_symbols": list(asset_validation.get("invalid_symbols") or []),
+        "non_tradable_symbols": list(asset_validation.get("non_tradable_symbols") or []),
+        "asset_validation_reason": asset_validation.get("asset_validation_reason"),
+        "asset_validation_reasons": list(asset_validation.get("asset_validation_reasons") or []),
+        "asset_validation_artifact_path": asset_validation.get("asset_validation_artifact_path"),
+        "invalid_asset_count": int(asset_validation.get("invalid_asset_count") or 0),
         "execution_submitted_symbols": execution_submitted_symbols,
         "alpaca_account_snapshot": alpaca_account_snapshot,
         "alpaca_positions_snapshot": alpaca_positions_snapshot,

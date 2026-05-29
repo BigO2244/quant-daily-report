@@ -649,6 +649,9 @@ def _pending_buy_leg_state(paper_summary: dict[str, object]) -> dict[str, object
     pending_buy_orders = _pending_buy_orders_from_summary(paper_summary)
     submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
     buy_phase_submitted = _safe_int(submission_summary.get("buy_phase_submitted"))
+    submitted_count = _safe_int(submission_summary.get("submit_success")) or len(
+        list((paper_summary or {}).get("alpaca_submissions") or [])
+    )
     capital_allows = _capital_allows_pending_buys(paper_summary, pending_buy_orders)
     reason = _pending_buy_block_reason(paper_summary)
     reason_lower = reason.lower()
@@ -660,6 +663,7 @@ def _pending_buy_leg_state(paper_summary: dict[str, object]) -> dict[str, object
     )
     requires_partial = bool(
         pending_buy_orders
+        and submitted_count > 0
         and buy_phase_submitted == 0
         and capital_allows
         and not has_broker_reject
@@ -670,6 +674,7 @@ def _pending_buy_leg_state(paper_summary: dict[str, object]) -> dict[str, object
         "buy_phase_submitted": buy_phase_submitted,
         "buy_phase_planned": _safe_int(submission_summary.get("buy_phase_planned")),
         "buy_phase_block_reason": reason,
+        "submitted_count": int(submitted_count),
         "capital_allows_pending_buys": bool(capital_allows),
         "has_broker_reject": bool(has_broker_reject),
         "requires_partial": bool(requires_partial),
@@ -844,6 +849,22 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "cash_rebalance_status": payload.get("cash_rebalance_status"),
         "broker_reject_status": payload.get("broker_reject_status"),
         "broker_reject_message": payload.get("broker_reject_message"),
+        "asset_validation_status": payload.get("asset_validation_status"),
+        "invalid_symbols": list(payload.get("invalid_symbols") or []),
+        "non_tradable_symbols": list(payload.get("non_tradable_symbols") or []),
+        "asset_validation_reason": payload.get("asset_validation_reason"),
+        "invalid_asset_count": int(payload.get("invalid_asset_count") or 0),
+        "order_lifecycle": list(payload.get("order_lifecycle") or []),
+        "sell_submit_started_at": payload.get("sell_submit_started_at"),
+        "sell_submit_completed_at": payload.get("sell_submit_completed_at"),
+        "buy_submit_started_at": payload.get("buy_submit_started_at"),
+        "buy_submit_completed_at": payload.get("buy_submit_completed_at"),
+        "pending_sell_count_at_buy_decision": payload.get("pending_sell_count_at_buy_decision"),
+        "buying_power_at_buy_decision": payload.get("buying_power_at_buy_decision"),
+        "cash_at_buy_decision": payload.get("cash_at_buy_decision"),
+        "skipped_buy_count": int(payload.get("skipped_buy_count") or 0),
+        "blocked_buy_count": int(payload.get("blocked_buy_count") or 0),
+        "buy_phase_decision_reason": payload.get("buy_phase_decision_reason"),
         "timing_status": payload.get("timing_status"),
         "operator_execution_status": payload.get("operator_execution_status"),
     }
@@ -1384,6 +1405,28 @@ def main(argv: list[str] | None = None) -> int:
         execution_payload["sell_phase_completion_reason"] = (paper_summary or {}).get("sell_phase_completion_reason")
         execution_payload["submitted_buy_count"] = int(submitted_side_counts.get("BUY") or 0)
         execution_payload["submitted_sell_count"] = int(submitted_side_counts.get("SELL") or 0)
+        for key in (
+            "asset_validation_status",
+            "invalid_symbols",
+            "non_tradable_symbols",
+            "asset_validation_reason",
+            "asset_validation_reasons",
+            "asset_validation_artifact_path",
+            "invalid_asset_count",
+            "order_lifecycle",
+            "sell_submit_started_at",
+            "sell_submit_completed_at",
+            "buy_submit_started_at",
+            "buy_submit_completed_at",
+            "pending_sell_count_at_buy_decision",
+            "buying_power_at_buy_decision",
+            "cash_at_buy_decision",
+            "skipped_buy_count",
+            "blocked_buy_count",
+            "buy_phase_decision_reason",
+        ):
+            if key in (paper_summary or {}):
+                execution_payload[key] = (paper_summary or {}).get(key)
         execution_payload["capital_allows_pending_buys"] = bool(
             pending_buy_state.get("capital_allows_pending_buys")
         )
@@ -1536,8 +1579,23 @@ def main(argv: list[str] | None = None) -> int:
             buy_phase_planned=int(execution_payload.get("buy_phase_planned") or 0),
             buy_phase_submitted=int(execution_payload.get("buy_phase_submitted") or 0),
             buy_phase_block_reason=execution_payload.get("buy_phase_block_reason"),
+            buy_phase_decision_reason=execution_payload.get("buy_phase_decision_reason"),
             sell_phase_status=execution_payload.get("sell_phase_status"),
             sell_phase_completion_reason=execution_payload.get("sell_phase_completion_reason"),
+            sell_submit_started_at=execution_payload.get("sell_submit_started_at"),
+            sell_submit_completed_at=execution_payload.get("sell_submit_completed_at"),
+            buy_submit_started_at=execution_payload.get("buy_submit_started_at"),
+            buy_submit_completed_at=execution_payload.get("buy_submit_completed_at"),
+            pending_sell_count_at_buy_decision=execution_payload.get("pending_sell_count_at_buy_decision"),
+            buying_power_at_buy_decision=execution_payload.get("buying_power_at_buy_decision"),
+            cash_at_buy_decision=execution_payload.get("cash_at_buy_decision"),
+            skipped_buy_count=int(execution_payload.get("skipped_buy_count") or 0),
+            blocked_buy_count=int(execution_payload.get("blocked_buy_count") or 0),
+            asset_validation_status=execution_payload.get("asset_validation_status"),
+            invalid_symbols=list(execution_payload.get("invalid_symbols") or []),
+            non_tradable_symbols=list(execution_payload.get("non_tradable_symbols") or []),
+            asset_validation_reason=execution_payload.get("asset_validation_reason"),
+            invalid_asset_count=int(execution_payload.get("invalid_asset_count") or 0),
             submitted_buy_count=int(execution_payload.get("submitted_buy_count") or 0),
             submitted_sell_count=int(execution_payload.get("submitted_sell_count") or 0),
             capital_allows_pending_buys=bool(execution_payload.get("capital_allows_pending_buys")),

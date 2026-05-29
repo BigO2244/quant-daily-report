@@ -7,6 +7,7 @@ from pathlib import Path
 from brokers.alpaca_broker import (
     AlpacaSubmissionRejectError,
     BROKER_REJECT_BUYING_POWER,
+    BROKER_REJECT_ASSET_NOT_TRADABLE,
     BROKER_REJECT_PDT,
     BROKER_REJECT_SHORT_NOT_ALLOWED,
     CASH_REBALANCE_INCOMPLETE,
@@ -32,8 +33,10 @@ def test_classify_pdt_reject_from_alpaca_json_message() -> None:
 def test_classify_other_known_rejects() -> None:
     bp = classify_alpaca_broker_reject("insufficient buying power to complete order")
     short = classify_alpaca_broker_reject("trade denied because short selling is not allowed")
+    asset = classify_alpaca_broker_reject('{"code":40410000,"message":"asset not found for BK"}')
     assert bp["classification"] == BROKER_REJECT_BUYING_POWER
     assert short["classification"] == BROKER_REJECT_SHORT_NOT_ALLOWED
+    assert asset["classification"] == BROKER_REJECT_ASSET_NOT_TRADABLE
 
 
 def test_policy_outcome_marks_partial_abort_when_submissions_already_succeeded() -> None:

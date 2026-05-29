@@ -488,23 +488,30 @@ def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckRe
     freshness_scope = _norm_text(provenance.get("price_freshness_scope") or execution_payload.get("price_freshness_scope"))
     integrity_status = _norm_text(integrity.get("status") or operator_summary.get("execution_integrity_status"))
     terminal_status = _norm_text(operator_summary.get("terminal_status") or latest_run.get("status"))
+    asset_validation_status = _norm_text(
+        execution_payload.get("asset_validation_status")
+        or operator_summary.get("asset_validation_status")
+    ).upper()
 
     if not execution_source:
         reason_codes.append("EXECUTION_SOURCE_MISSING")
     if not freshness_scope:
         reason_codes.append("PRICE_FRESHNESS_SCOPE_MISSING")
+    if asset_validation_status == "FAIL":
+        reason_codes.append("PRETRADE_ASSET_VALIDATION_FAILED")
 
-    status = "GREEN" if not reason_codes else "YELLOW"
+    status = "RED" if asset_validation_status == "FAIL" else ("GREEN" if not reason_codes else "YELLOW")
     summary = (
         "timeline_present={timeline_present}; execution_source={execution_source}; "
         "price_freshness_scope={freshness_scope}; integrity_status={integrity_status}; "
-        "terminal_status={terminal_status}"
+        "terminal_status={terminal_status}; asset_validation_status={asset_validation_status}"
     ).format(
         timeline_present=str(timeline_error is None).lower(),
         execution_source=execution_source or "unknown",
         freshness_scope=freshness_scope or "unknown",
         integrity_status=integrity_status or "unknown",
         terminal_status=terminal_status or "unknown",
+        asset_validation_status=asset_validation_status or "unknown",
     )
     return CheckResult(
         "Execution timeline provenance",

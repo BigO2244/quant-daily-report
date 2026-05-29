@@ -407,6 +407,35 @@ def test_pending_buy_leg_with_broker_reject_is_not_continuable(tmp_path) -> None
     ) is False
 
 
+def test_pretrade_asset_validation_halt_is_not_marked_partial(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    paper_summary = {
+        "alpaca_submissions": [],
+        "alpaca_submission_summary": {
+            "submit_success": 0,
+            "buy_phase_submitted": 0,
+            "buy_phase_block_reason": "buy_blocked_asset_validation_failed",
+        },
+        "asset_validation_status": "FAIL",
+        "invalid_symbols": ["BK"],
+        "budget_skipped_orders": [
+            {"ticker": "BK", "side": "BUY", "quantity": 1, "notional": 50.0, "order_id": "run:BK:BUY"},
+        ],
+        "capital_budget": {
+            "requested_buy_notional": 50.0,
+            "allowed_buy_notional": 50.0,
+            "capital_constraint_triggered": False,
+            "clipped_or_deferred_buys_count": 0,
+        },
+    }
+
+    state = live_exec._apply_pending_buy_leg_guard(paper_summary)
+
+    assert state["pending_buy_count"] == 1
+    assert state["requires_partial"] is False
+    assert "execution_outcome" not in paper_summary
+
+
 def test_pending_buy_leg_with_cash_shortfall_is_partial_but_not_continuable(tmp_path) -> None:
     live_exec = _load_module(tmp_path)
     paper_summary = {

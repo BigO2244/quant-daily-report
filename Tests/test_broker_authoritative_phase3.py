@@ -101,6 +101,28 @@ class _SequencedAlpaca:
         self.find_calls.append(client_id)
         return None
 
+    def get_order(self, order_id):
+        text = str(order_id)
+        if not text.startswith("alpaca-"):
+            return None
+        try:
+            idx = int(text.rsplit("-", 1)[-1]) - 1
+        except Exception:
+            return None
+        if idx < 0 or idx >= len(self.submitted):
+            return None
+        side, symbol, qty, client_order_id = self.submitted[idx]
+        return {
+            "id": text,
+            "client_order_id": client_order_id,
+            "symbol": symbol,
+            "side": side,
+            "status": "filled",
+            "submitted_at": "2026-03-11T10:00:00-05:00",
+            "filled_at": "2026-03-11T10:00:02-05:00",
+            "filled_qty": str(qty),
+        }
+
     def submit_market_order(self, symbol, qty, side, client_order_id, tif="day"):
         self.submitted.append((side, symbol, float(qty), client_order_id))
         return {
@@ -218,7 +240,7 @@ def test_phase3_buy_budget_reduces_buys_when_confirmed_cash_is_lower(tmp_path, m
     assert [o["ticker"] for o in result["budget_skipped_orders"]] == ["CCC"]
 
 
-def test_phase3_exact_precomputed_plan_bypasses_buy_budget_clipping(tmp_path, monkeypatch):
+def test_phase3_exact_precomputed_plan_uses_available_buying_power(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-exact"))
     trades = pd.DataFrame(
@@ -283,7 +305,7 @@ def test_phase3_exact_precomputed_plan_bypasses_buy_budget_clipping(tmp_path, mo
     submitted_symbols = [symbol for _, symbol, _, _ in fake.submitted]
     assert submitted_symbols == ["AAA", "BBB", "CCC"]
     assert result["precomputed_trade_plan_used"] is True
-    assert result["alpaca_submission_summary"]["exact_plan_buy_budget_bypassed"] is True
+    assert result["buy_phase_decision_reason"] == "buy_submitted_using_available_buying_power"
     assert int(result["alpaca_submission_summary"]["budget_skipped_orders"]) == 0
     assert result["budget_skipped_orders"] == []
     assert int(result["alpaca_submission_summary"]["buy_phase_planned"]) == 2
@@ -341,7 +363,7 @@ def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
     assert int(result["alpaca_submission_summary"]["remote_existing_orders"]) == 1
 
 
-def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
+def test_phase3_sell_timeout_does_not_block_affordable_buy(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-timeout"))
     monkeypatch.setenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS", "0")
@@ -364,12 +386,15 @@ def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
             super().__init__(account_sequence=account_sequence, positions_sequence=positions_sequence)
             self._client_lookup_calls = 0
 
-        def find_order_by_client_id(self, client_id):
-            self.find_calls.append(client_id)
-            self._client_lookup_calls += 1
-            if self._client_lookup_calls == 1:
-                return None
-            return {"id": "pending-sell", "status": "partially_filled", "submitted_at": "2026-03-11T10:00:00-05:00"}
+        def get_order(self, order_id):
+            if str(order_id) == "alpaca-1":
+                return {
+                    "id": "alpaca-1",
+                    "status": "accepted",
+                    "submitted_at": "2026-03-11T10:00:00-05:00",
+                    "filled_qty": "0",
+                }
+            return super().get_order(order_id)
 
     fake = _PendingSellAlpaca(
         account_sequence=[
@@ -395,13 +420,12 @@ def test_phase3_blocks_buys_when_sell_phase_times_out(tmp_path, monkeypatch):
         now_et=dt.datetime(2026, 3, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
     )
 
-    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL", "BUY"]
     assert result["sell_phase_status"] == "TIMEOUT"
-    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "sell_phase_timeout"
-    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 0
-    assert [order["ticker"] for order in result["budget_skipped_orders"]] == ["BBB"]
-    assert result["posttrade_recon_status"] == "NOT_COMPARABLE"
-    assert result["posttrade_unresolved_orders"][0]["ticker"] == "AAA"
+    assert result["buy_phase_decision_reason"] == "buy_submitted_using_available_buying_power"
+    assert result["pending_sell_count_at_buy_decision"] == 1
+    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 1
+    assert result["budget_skipped_orders"] == []
 
 
 def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypatch):
@@ -445,5 +469,5 @@ def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypat
     assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
     assert result["sell_phase_status"] == "COMPLETED"
     assert float(result["buy_budget_computed"]) == pytest.approx(0.0)
-    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "post_sell_cash_below_reserve"
+    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "buy_blocked_insufficient_buying_power"
     assert [order["ticker"] for order in result["budget_skipped_orders"]] == ["BBB"]
