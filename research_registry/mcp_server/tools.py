@@ -14,6 +14,11 @@ from research_registry.ingestion import ingest_artifact_family
 from research_registry.mcp_server.schemas import TOOL_DEFINITIONS
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
+from research_registry.research.attribution import (
+    DEFAULT_ATTRIBUTION_ROOT,
+    analyse_attribution,
+    attribution_summary_to_dict,
+)
 from research_registry.research.capabilities import (
     CAPABILITY_REGISTRY,
     available_intents,
@@ -62,10 +67,15 @@ def list_tools() -> list[dict[str, Any]]:
     return [dict(tool) for tool in TOOL_DEFINITIONS]
 
 
-def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolContext | None = None) -> dict[str, Any]:
-    arguments = dict(arguments or {})
-    context = context or ToolContext()
-    dispatch = {
+def _tool_dispatch_table() -> dict[str, Any]:
+    """Return the {tool_name: function} dispatch table.
+
+    Built on demand (not at import time) because the tool functions are
+    defined later in this module. Used by both ``call_tool`` and the
+    planner's ``_route_to_tool`` (the latter needs it for signature
+    introspection to filter pass-through kwargs).
+    """
+    return {
         "build_caerus_registry": build_caerus_registry,
         "latest_runs": latest_runs,
         "run_health": run_health,
@@ -85,8 +95,15 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "execution_timing_by_vix_regime": execution_timing_by_vix_regime,
         "execution_timing_summary": execution_timing_summary,
         "shadow_comparison": shadow_comparison,
+        "attribution_analysis": attribution_analysis,
         "answer_research_question": answer_research_question,
     }
+
+
+def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolContext | None = None) -> dict[str, Any]:
+    arguments = dict(arguments or {})
+    context = context or ToolContext()
+    dispatch = _tool_dispatch_table()
     if name not in dispatch:
         return _response("ERROR", _resolve_db_path(arguments, context), warnings=[f"unknown tool: {name}"])
     return dispatch[name](context=context, **arguments)
@@ -1576,6 +1593,45 @@ def shadow_comparison(
     return _jsonable(payload)
 
 
+def attribution_analysis(
+    *,
+    context: ToolContext | None = None,
+    attribution_root: str | None = None,
+    outputs_root: str | None = None,
+    question: str | None = None,
+    strategies: list[str] | None = None,
+) -> dict[str, Any]:
+    """Read-only performance attribution analysis.
+
+    Reads the latest ``outputs/attribution/<DATE>/`` directory and emits
+    per-strategy top contributors / detractors, top drawdown
+    contributors, factor exposures (market beta, momentum, vol, sector
+    concentration), regime-stratified performance, and a deterministic
+    template-driven narrative. Strategy names parsed from the question
+    are restricted to ``polaris|orion|lyra|leda``; unknown names →
+    NEEDS_DATA. The tool never invents metrics — null / UNAVAILABLE
+    fields are surfaced verbatim in per-strategy ``unavailable_metrics``.
+    """
+    if attribution_root:
+        resolved_root = Path(attribution_root)
+    elif outputs_root:
+        resolved_root = Path(outputs_root) / "attribution"
+    else:
+        resolved_root = DEFAULT_ATTRIBUTION_ROOT
+    resolved_strategies: list[str] | None = None
+    if strategies is not None:
+        resolved_strategies = list(strategies)
+    answer = analyse_attribution(
+        attribution_root=resolved_root,
+        question=question,
+        strategies=resolved_strategies,
+    )
+    payload = attribution_summary_to_dict(answer)
+    payload["tool"] = "attribution_analysis"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
 def _route_to_tool(
     tool_name: str,
     tool_kwargs: dict[str, Any],
@@ -1587,20 +1643,33 @@ def _route_to_tool(
     """Invoke an existing MCP tool through the standard dispatch path.
 
     ``pass_through`` carries the optional caller-level overrides
-    (``timing_root``, ``regime_history``, etc.) the gateway forwards per
-    question. ``pass_question`` is set when the routed tool accepts a
-    raw NL ``question`` argument (used by ``execution_timing_summary``
-    and ``shadow_comparison`` to extract offsets / strategy names).
+    (``timing_root``, ``regime_history``, ``attribution_root``, etc.)
+    the gateway forwards per question. We **filter** ``pass_through``
+    against the routed tool's signature so a planner-level kwarg like
+    ``attribution_root`` is never forwarded to a tool that doesn't
+    accept it (which would TypeError). ``pass_question`` is set when
+    the routed tool accepts a raw NL ``question`` argument (used by
+    ``execution_timing_summary``, ``shadow_comparison``, and
+    ``attribution_analysis`` to extract offsets / strategy names).
     """
+    import inspect
+
     if tool_name == "answer_research_question":
         # Defensive — avoid infinite recursion via the planner's own tool.
         raise RuntimeError("planner attempted to route to itself")
+    target = _tool_dispatch_table().get(tool_name)
+    if target is None:
+        raise RuntimeError(f"unknown tool: {tool_name}")
+    accepted = set(inspect.signature(target).parameters.keys())
+
     arguments = dict(tool_kwargs)
     for key, value in pass_through.items():
         if value is None:
             continue
+        if key not in accepted:
+            continue
         arguments.setdefault(key, value)
-    if pass_question is not None:
+    if pass_question is not None and "question" in accepted:
         arguments.setdefault("question", pass_question)
     return call_tool(tool_name, arguments, context=context)
 
@@ -1613,6 +1682,8 @@ def answer_research_question(
     regime_history: str | None = None,
     insufficient_sample_threshold: int | None = None,
     outputs_root: str | None = None,
+    attribution_root: str | None = None,
+    shadow_root: str | None = None,
 ) -> dict[str, Any]:
     """Deterministic capability-based router over the question-answering MCP.
 
@@ -1717,7 +1788,11 @@ def answer_research_question(
         )
 
     # Tools that take an NL question for offset / strategy extraction.
-    tools_accepting_question = {"execution_timing_summary", "shadow_comparison"}
+    tools_accepting_question = {
+        "execution_timing_summary",
+        "shadow_comparison",
+        "attribution_analysis",
+    }
     underlying = _route_to_tool(
         matched.tool_name,
         matched.tool_kwargs,
@@ -1728,6 +1803,8 @@ def answer_research_question(
             "regime_history": regime_history,
             "insufficient_sample_threshold": insufficient_sample_threshold,
             "outputs_root": outputs_root,
+            "attribution_root": attribution_root,
+            "shadow_root": shadow_root,
         },
     )
 

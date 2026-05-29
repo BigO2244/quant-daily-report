@@ -6,6 +6,12 @@ the system (timing replay outputs, VIX regime history) and return structured
 joins for the MCP tool layer to surface.
 """
 
+from research_registry.research.attribution import (
+    AttributionAnswer,
+    analyse_attribution,
+    attribution_summary_to_dict,
+    select_latest_attribution_date,
+)
 from research_registry.research.capabilities import (
     CAPABILITY_REGISTRY,
     ArtifactStatus,
@@ -48,6 +54,7 @@ from research_registry.research.timing_summary import (
 
 __all__ = [
     "ArtifactStatus",
+    "AttributionAnswer",
     "CAPABILITY_REGISTRY",
     "Capability",
     "ClassificationResult",
@@ -61,7 +68,9 @@ __all__ = [
     "TimingDay",
     "TimingSummaryAnswer",
     "aggregate_by_regime",
+    "analyse_attribution",
     "answer_timing_by_regime_question",
+    "attribution_summary_to_dict",
     "available_intents",
     "capability_summary",
     "check_artifacts",
@@ -73,6 +82,7 @@ __all__ = [
     "load_vix_regime_history",
     "parse_offset_highlights",
     "parse_strategy_names",
+    "select_latest_attribution_date",
     "select_timing_run",
     "shadow_comparison_to_dict",
     "strategy_slug",

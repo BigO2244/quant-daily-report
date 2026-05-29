@@ -274,30 +274,55 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
     ),
     Capability(
         name="attribution_analysis",
-        description="Performance attribution and alpha contribution analysis.",
+        description=(
+            "Per-strategy performance attribution. Reads "
+            "outputs/attribution/<DATE>/{attribution_summary,contribution_report,"
+            "factor_exposure,regime_performance_breakdown}.json. Returns top "
+            "contributors / detractors, top drawdown contributors, factor "
+            "exposures (market beta, momentum, vol, sector concentration), "
+            "regime-stratified performance, and a deterministic narrative. "
+            "Two strategy names in the question add a comparison block."
+        ),
         patterns=(
             r"attribut(ion|e)",
             r"alpha\s+(contribution|attribut|breakdown)",
             r"performance\s+(attribut|driver|breakdown)",
             r"learning\s+loop",
             r"what\s+drove\b.*?(return|alpha|loss|gain|performance)",
+            r"what\s+drove\s+returns",
             r"factor\s+(decomposition|attribution)",
+            r"what\s+factors?\s+(drove|driven|contribut)",
+            r"what\s+(contributed|hurt|helped)\s+(most\s+)?to?\s*performance",
+            r"(top|biggest|largest)\s+(contributors?|detractors?)",
+            r"what\s+hurt\s+(performance|returns?)",
+            r"why\s+did\s+(polaris|orion|lyra|leda)\s+(outperform|underperform|beat|lose)",
         ),
-        required_artifact_globs=(),
-        tool_name=None,
+        required_artifact_globs=(
+            "outputs/attribution/*/attribution_summary.json",
+        ),
+        tool_name="attribution_analysis",
         tool_kwargs={},
-        output_fields=(),
-        limitations=("Capability not yet implemented.",),
-        suggested_next_build=(
-            "Add an attribution_analysis MCP tool that ingests "
-            "outputs/attribution/attribution_summary.json + factor_exposure.json "
-            "into the registry (a new attribution_run ingestion family) and "
-            "exposes per-factor / per-strategy decomposition over a date range. "
-            "Bind to the existing AttributionArtifactAdapter family for hydration."
+        output_fields=(
+            "panels",
+            "comparison",
+            "leader_by_return",
+            "narrative",
+            "available_strategies",
+            "requested_strategies",
+            "missing_strategies",
+        ),
+        limitations=(
+            "Attribution is current-book trailing exposure (~21 days), not historical realised positions.",
+            "Selection alpha vs factors is partial; growth/value and quality/profitability tilts often UNAVAILABLE in source.",
+            "Strategy slugs restricted to caerus_{polaris,orion,lyra,leda}; unknown names → NEEDS_DATA.",
+            "Never invents missing metrics — null fields are surfaced via per-strategy unavailable_metrics.",
         ),
         example_questions=(
-            "What drove last quarter's alpha?",
-            "Show me performance attribution by factor.",
+            "What drove returns?",
+            "Why did Orion outperform Polaris?",
+            "What contributed most to performance?",
+            "What hurt performance?",
+            "What factors drove returns?",
         ),
     ),
     Capability(

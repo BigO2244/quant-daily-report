@@ -215,6 +215,34 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "attribution_analysis",
+        "description": (
+            "Read-only performance attribution. Reads the latest "
+            "outputs/attribution/<DATE>/{attribution_summary,contribution_report,"
+            "factor_exposure,regime_performance_breakdown}.json and returns per-"
+            "strategy headline 21d return, top contributors / detractors, top "
+            "drawdown contributors, factor exposures (market beta, momentum, "
+            "volatility, sector concentration), regime-stratified performance, "
+            "and a deterministic narrative. When two strategies are named, a "
+            "comparison block names the outperformer and the headline delta. "
+            "Strategy names restricted to polaris|orion|lyra|leda; unknown → "
+            "NEEDS_DATA. Never invents missing metrics."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "attribution_root": {"type": "string", "default": "outputs/attribution"},
+                "outputs_root": {"type": "string"},
+                "question": {"type": "string"},
+                "strategies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional explicit strategy names (e.g. ['polaris','orion']); supersedes question parsing.",
+                },
+            },
+        },
+    },
+    {
         "name": "answer_research_question",
         "description": (
             "Deterministic NL wrapper. Matches the question against a regex whitelist "

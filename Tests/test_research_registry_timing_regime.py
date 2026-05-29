@@ -560,9 +560,8 @@ def test_answer_research_question_returns_unsupported_intent_for_off_topic(quest
 
 
 @pytest.mark.parametrize("question,expected_intent", [
-    ("What drove last quarter's alpha?",         "attribution_analysis"),
-    ("show me the alpha attribution",            "attribution_analysis"),
     ("How does the strategy perform across random windows?", "stable_window_evaluation"),
+    ("Stable window Sharpe distribution.",                    "stable_window_evaluation"),
 ])
 def test_answer_research_question_returns_needs_capability_for_unbuilt(question, expected_intent):
     """Questions that match a registry capability but whose tool is not yet
