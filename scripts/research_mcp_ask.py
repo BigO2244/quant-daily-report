@@ -113,6 +113,25 @@ def _offset_sort_key(label: str) -> int:
         return 1_000_000
 
 
+def _fmt_pct(value: Any) -> str:
+    """Format a fractional value as a percent (e.g. 0.293 → '29.30%')."""
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_signed_pct(value: Any) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value) * 100:+.2f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _inner_answer(payload: dict[str, Any]) -> dict[str, Any]:
     """Return the underlying tool payload.
 
@@ -174,6 +193,121 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             md.append(f"**Baseline:** `{baseline}`  ")
         if cache_version:
             md.append(f"**Cache:** `{cache_version}`  ")
+
+    # OK path for attribution_analysis — render per-strategy panels + narrative.
+    # Detect via fields that are unique to the attribution payload (panels with
+    # `top_contributor` keys; a `narrative` string; a `leader_by_return` field).
+    attribution_panels = inner.get("panels") or {}
+    attribution_narrative = inner.get("narrative")
+    is_attribution = (
+        status == "OK"
+        and isinstance(attribution_narrative, str)
+        and attribution_panels
+        and any(
+            isinstance(p, dict) and "top_contributor" in p
+            for p in attribution_panels.values()
+        )
+    )
+    if is_attribution:
+        trade_date = inner.get("trade_date")
+        leader = inner.get("leader_by_return")
+        lines.append("")
+        if trade_date:
+            lines.append(f"Trade date: {trade_date}   Leader by 21d return: {leader or 'n/a'}")
+        lines.append("")
+        header = ["strategy", "21d_return", "top_contributor", "top_detractor", "β", "max_sector"]
+        col_widths = [max(len(h), 18) for h in header]
+        lines.append(_render_row(header, col_widths))
+        lines.append(_render_row(["-" * w for w in col_widths], col_widths))
+        md.append("")
+        md.append(f"## Attribution panels — trade date `{trade_date or '?'}`")
+        if leader:
+            md.append("")
+            md.append(f"**Leader by 21d return:** `{leader}`")
+        md.append("")
+        md.append("| strategy | 21d_return | top_contributor | top_detractor | β | max_sector |")
+        md.append("| --- | ---: | --- | --- | ---: | --- |")
+        for slug, panel in sorted(attribution_panels.items()):
+            ret = panel.get("portfolio_return_21d")
+            top = panel.get("top_contributor") or {}
+            bot = panel.get("top_detractor") or {}
+            beta = panel.get("market_beta")
+            max_sector_block = (panel.get("sector_exposure") or {})
+            max_sector_weight = max_sector_block.get("max_sector_weight")
+            # Identify the sector with the max weight for a more useful label.
+            sector_weights = max_sector_block.get("weights") or {}
+            top_sector = next(iter(sector_weights), None) if isinstance(sector_weights, dict) else None
+            sector_cell = (
+                f"{top_sector} {_fmt_pct(max_sector_weight)}"
+                if top_sector and max_sector_weight is not None
+                else (_fmt_pct(max_sector_weight) if max_sector_weight is not None else "—")
+            )
+            top_cell = (
+                f"{top.get('ticker', '?')} {_fmt_signed_pct(top.get('contribution'))}"
+                if top.get("ticker") else "—"
+            )
+            bot_cell = (
+                f"{bot.get('ticker', '?')} {_fmt_signed_pct(bot.get('contribution'))}"
+                if bot.get("ticker") else "—"
+            )
+            row = [
+                slug,
+                _fmt_signed_pct(ret),
+                top_cell,
+                bot_cell,
+                f"{beta:.2f}" if isinstance(beta, (int, float)) else "—",
+                sector_cell,
+            ]
+            lines.append(_render_row(row, col_widths))
+            md.append("| " + " | ".join(row) + " |")
+
+        # Per-strategy hidden factor flags + top drawdown contributors.
+        for slug in sorted(attribution_panels.keys()):
+            panel = attribution_panels[slug]
+            flags = panel.get("hidden_factor_flags") or []
+            drawdowns = panel.get("top_drawdown_contributors") or []
+            if flags or drawdowns:
+                lines.append("")
+                lines.append(f"  {slug}:")
+                if flags:
+                    lines.append(f"    hidden_factor_flags: {list(flags)}")
+                if drawdowns:
+                    dd_text = ", ".join(
+                        f"{r.get('ticker', '?')} ({_fmt_signed_pct(r.get('contribution_to_drawdown'))})"
+                        for r in drawdowns[:3]
+                    )
+                    lines.append(f"    top drawdown contributors: {dd_text}")
+
+        comparison = inner.get("comparison")
+        if isinstance(comparison, dict):
+            outperformer = comparison.get("outperformer")
+            underperformer = comparison.get("underperformer")
+            gap = comparison.get("outperformance")
+            if outperformer and underperformer:
+                lines.append("")
+                lines.append(
+                    f"Comparison: {outperformer} outperformed {underperformer} "
+                    f"by {_fmt_signed_pct(gap)}"
+                    + (" (explicitly requested)" if comparison.get("explicitly_requested") else "")
+                )
+                md.append("")
+                md.append(
+                    f"**Comparison:** `{outperformer}` outperformed `{underperformer}` "
+                    f"by {_fmt_signed_pct(gap)}"
+                    + (" (explicitly requested)" if comparison.get("explicitly_requested") else "")
+                )
+
+        if attribution_narrative:
+            lines.append("")
+            lines.append("Narrative:")
+            for narrative_line in attribution_narrative.splitlines():
+                lines.append(f"  {narrative_line}")
+            md.append("")
+            md.append("### Narrative")
+            md.append("")
+            md.append("```")
+            md.append(attribution_narrative)
+            md.append("```")
 
     # OK path for shadow_comparison — render the per-strategy panel.
     panels = inner.get("panels") or {}

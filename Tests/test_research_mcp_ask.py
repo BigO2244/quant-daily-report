@@ -204,6 +204,139 @@ def test_render_needs_capability_shows_suggested_next_build():
     assert "Suggested next build" in md
 
 
+def _attribution_payload() -> dict:
+    """Synthesized attribution payload mirroring real shape."""
+    return {
+        "status": "OK",
+        "tool": "answer_research_question",
+        "question": "Why did Orion outperform Polaris?",
+        "intent": "attribution_analysis",
+        "routed_to": "attribution_analysis",
+        "warnings": [],
+        "answer": {
+            "status": "OK",
+            "trade_date": "2026-04-30",
+            "leader_by_return": "caerus_orion",
+            "panels": {
+                "caerus_orion": {
+                    "strategy_name": "Orion",
+                    "portfolio_return_21d": 0.41,
+                    "market_beta": 2.04,
+                    "hidden_factor_flags": ["high_market_beta", "sector_concentration"],
+                    "top_contributor": {
+                        "ticker": "STX", "sector": "Information Technology",
+                        "contribution": 0.144, "weight": 0.20,
+                    },
+                    "top_detractor": {
+                        "ticker": "WBD", "sector": "Communication Services",
+                        "contribution": -0.003, "weight": 0.10,
+                    },
+                    "top_drawdown_contributors": [
+                        {"ticker": "MU", "sector": "IT", "contribution_to_drawdown": -0.026},
+                        {"ticker": "LRCX", "sector": "IT", "contribution_to_drawdown": -0.020},
+                    ],
+                    "sector_exposure": {
+                        "weights": {"Information Technology": 0.8, "Industrials": 0.2},
+                        "max_sector_weight": 0.8, "sector_hhi": 0.68,
+                    },
+                    "factor_exposures": {"weighted_12_1_momentum": 2.5, "weighted_20d_ann_vol": 0.48},
+                    "regime_performance": {},
+                    "unavailable_metrics": [],
+                },
+                "caerus_polaris": {
+                    "strategy_name": "Polaris",
+                    "portfolio_return_21d": 0.293,
+                    "market_beta": 1.83,
+                    "hidden_factor_flags": ["high_market_beta", "sector_concentration"],
+                    "top_contributor": {
+                        "ticker": "STX", "sector": "Information Technology",
+                        "contribution": 0.072, "weight": 0.10,
+                    },
+                    "top_detractor": {
+                        "ticker": "WBD", "sector": "Communication Services",
+                        "contribution": -0.0015, "weight": 0.10,
+                    },
+                    "top_drawdown_contributors": [
+                        {"ticker": "MU", "sector": "IT", "contribution_to_drawdown": -0.026},
+                    ],
+                    "sector_exposure": {
+                        "weights": {"Information Technology": 0.6, "Industrials": 0.2},
+                        "max_sector_weight": 0.6, "sector_hhi": 0.42,
+                    },
+                    "factor_exposures": {"weighted_12_1_momentum": 2.52, "weighted_20d_ann_vol": 0.48},
+                    "regime_performance": {},
+                    "unavailable_metrics": [],
+                },
+            },
+            "comparison": {
+                "outperformer": "caerus_orion",
+                "underperformer": "caerus_polaris",
+                "outperformance": 0.117,
+                "explicitly_requested": True,
+            },
+            "narrative": (
+                "Performance attribution for trade date 2026-04-30.\n"
+                "  • Orion: 21d return +41.00%. Top contributor: STX.\n"
+                "  • Polaris: 21d return +29.30%. Top contributor: STX."
+            ),
+        },
+    }
+
+
+def test_render_attribution_ok_shows_per_strategy_panel():
+    human, md = rma.render_human_and_markdown("Why did Orion outperform Polaris?", _attribution_payload())
+    # Table header + per-strategy rows.
+    assert "strategy" in human and "21d_return" in human
+    assert "caerus_orion" in human
+    assert "caerus_polaris" in human
+    # Signed-percent formatting.
+    assert "+41.00%" in human
+    assert "+29.30%" in human
+    # Top contributor / detractor rendered as "TICKER ±X%".
+    assert "STX" in human
+    assert "WBD" in human
+    # Beta shown.
+    assert "2.04" in human
+    assert "1.83" in human
+    # Sector concentration line includes the dominant sector name.
+    assert "Information Technology" in human
+    # Markdown variant includes the trade date heading and the table.
+    assert "Attribution panels — trade date `2026-04-30`" in md
+    assert "| caerus_orion |" in md
+
+
+def test_render_attribution_ok_shows_hidden_factor_flags():
+    human, _ = rma.render_human_and_markdown("What drove returns?", _attribution_payload())
+    assert "hidden_factor_flags" in human
+    assert "high_market_beta" in human
+    assert "sector_concentration" in human
+
+
+def test_render_attribution_ok_shows_top_drawdown_contributors():
+    human, _ = rma.render_human_and_markdown("What drove returns?", _attribution_payload())
+    assert "top drawdown contributors" in human
+    # First two drawdown rows for orion appear in the human view.
+    assert "MU" in human
+    assert "LRCX" in human
+
+
+def test_render_attribution_ok_shows_comparison_block():
+    human, md = rma.render_human_and_markdown("Why did Orion outperform Polaris?", _attribution_payload())
+    assert "Comparison:" in human
+    assert "caerus_orion outperformed caerus_polaris" in human
+    assert "+11.70%" in human  # the outperformance gap
+    assert "(explicitly requested)" in human
+    assert "**Comparison:**" in md
+
+
+def test_render_attribution_ok_shows_narrative():
+    human, md = rma.render_human_and_markdown("Why did Orion outperform Polaris?", _attribution_payload())
+    assert "Narrative:" in human
+    assert "Performance attribution for trade date 2026-04-30" in human
+    # Markdown wraps the narrative in a fenced code block.
+    assert "```" in md
+
+
 def test_render_unsupported_includes_closest_capabilities():
     payload = {
         "status": "UNSUPPORTED_INTENT",
