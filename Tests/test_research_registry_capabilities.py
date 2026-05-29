@@ -84,11 +84,13 @@ def test_available_intents_preserves_legacy_shape():
 
 @pytest.mark.parametrize("question,expected", [
     ("Does timing matter more in high VIX regimes?", "timing_by_vix_regime"),
-    ("Is 9:35 better than 9:30?",                     "execution_timing_baseline"),
+    ("Is 9:35 better than 9:30?",                     "execution_timing_summary"),
+    ("What is the best execution time?",              "execution_timing_summary"),
     ("Is Orion ready for promotion?",                 "promotion_readiness"),
     ("What are today's anomalies?",                   "anomaly_report"),
     ("What ran today?",                               "morning_brief"),
     ("How is Polaris doing versus Orion?",            "shadow_comparison"),
+    ("Which strategy is performing best?",            "shadow_comparison"),
 ])
 def test_classifier_matches_each_question_family(question, expected):
     """The six question families called out in the task spec each map to a
@@ -195,15 +197,15 @@ def _no_outputs_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
-def test_e2e_timing_baseline_returns_needs_data_when_artifacts_absent(tmp_path, monkeypatch):
+def test_e2e_timing_summary_returns_needs_data_when_artifacts_absent(tmp_path, monkeypatch):
     _no_outputs_dir(tmp_path, monkeypatch)
     result = call_tool("answer_research_question", {"question": "Is 9:35 better than 9:30?"})
-    assert result["intent"] == "execution_timing_baseline"
-    assert result["routed_to"] == "execution_timing_by_vix_regime"
+    assert result["intent"] == "execution_timing_summary"
+    assert result["routed_to"] == "execution_timing_summary"
     assert result["status"] == "NEEDS_DATA"
     assert "outputs/research/execution_timing/*/timing_summary.json" in result["missing_artifacts"]
     # Available-intents discovery surface preserved.
-    assert any(i["intent"] == "execution_timing_baseline" for i in result["available_intents"])
+    assert any(i["intent"] == "execution_timing_summary" for i in result["available_intents"])
 
 
 def test_e2e_timing_by_vix_regime_returns_needs_data_when_artifacts_absent(tmp_path, monkeypatch):
@@ -248,20 +250,20 @@ def test_e2e_morning_brief_routes_through_tool(tmp_path, monkeypatch):
     assert "answer" in result
 
 
-def test_e2e_shadow_comparison_returns_needs_capability(tmp_path, monkeypatch):
+def test_e2e_shadow_comparison_routes_through_tool_when_data_absent(tmp_path, monkeypatch):
+    """Shadow comparison is now implemented. With no shadow_candidates/ on
+    disk (clean tmp_path) the tool itself returns NO_SHADOW_DATA — that's
+    propagated by the planner. The intent/route fields are populated."""
     _no_outputs_dir(tmp_path, monkeypatch)
     result = call_tool(
         "answer_research_question",
         {"question": "How is Polaris doing versus Orion?"},
     )
     assert result["intent"] == "shadow_comparison"
-    assert result["status"] == "NEEDS_CAPABILITY"
-    assert result["routed_to"] is None
-    assert result["suggested_next_build"]
-    # The suggested_next_build paragraph should reference shadow_candidates
-    # so the next implementer knows the data source.
-    assert "shadow_candidates" in result["suggested_next_build"].lower() or \
-           "shadow" in result["suggested_next_build"].lower()
+    assert result["routed_to"] == "shadow_comparison"
+    # No shadow data on a fresh tmp_path → underlying tool returns NO_SHADOW_DATA.
+    assert result["status"] == "NO_SHADOW_DATA"
+    assert "answer" in result
 
 
 # ---------------------------------------------------------------------------

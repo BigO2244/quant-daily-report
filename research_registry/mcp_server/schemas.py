@@ -167,6 +167,54 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "execution_timing_summary",
+        "description": (
+            "Aggregate (non-regime-stratified) summary of the latest execution-"
+            "timing replay run. Returns per-offset mean/median opportunity in "
+            "USD and bps vs the 9:35 baseline, the best non-baseline offset, "
+            "the operator-facing offsets highlighted in the question, and a "
+            "conservative recommendation: retain_9_35_baseline, "
+            "earlier_timing_appears_better, or insufficient_evidence."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "timing_root": {"type": "string", "default": "outputs/research/execution_timing"},
+                "question": {"type": "string"},
+                "highlighted_offsets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional explicit offset labels (e.g. ['T+0m','T+5m']); supersedes question parsing.",
+                },
+            },
+        },
+    },
+    {
+        "name": "shadow_comparison",
+        "description": (
+            "Side-by-side comparison of shadow-portfolio strategies from "
+            "outputs/shadow_candidates/<DATE>/shadow_evaluation.json + "
+            "comparison.json. Strategy names are restricted to the closed "
+            "list polaris|orion|lyra|leda. Returns per-strategy NAV / "
+            "cumulative return / excess vs SPY / turnover / drawdown panel, "
+            "pairwise overlap (when two strategies are named), and a leader "
+            "summary. Unknown strategy names → NEEDS_DATA."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "shadow_root": {"type": "string", "default": "outputs/shadow_candidates"},
+                "outputs_root": {"type": "string"},
+                "question": {"type": "string"},
+                "strategies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional explicit strategy names (e.g. ['polaris','orion']); supersedes question parsing.",
+                },
+            },
+        },
+    },
+    {
         "name": "answer_research_question",
         "description": (
             "Deterministic NL wrapper. Matches the question against a regex whitelist "

@@ -113,11 +113,12 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
         ),
     ),
     Capability(
-        name="execution_timing_baseline",
+        name="execution_timing_summary",
         description=(
-            "Reports execution-timing opportunities at each offset (T+0..T+10m) "
-            "vs the 9:35 baseline. Same underlying replay as the regime tool; "
-            "useful for the simpler 'is X minute better than Y minute' question."
+            "Aggregate (non-regime-stratified) summary of execution-timing "
+            "replay opportunities at each offset T+0..T+10m vs the 9:35 "
+            "baseline, with a conservative retain / earlier-is-better / "
+            "insufficient_evidence recommendation."
         ),
         patterns=(
             r"9:?30",
@@ -126,22 +127,36 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
             r"\bbar open\b",
             r"\bnear[- ]?open\b",
             r"T\+\d+m",
-            r"execution\s+(timing|minute|offset)",
+            r"execution\s+(timing|minute|offset|time)",
             r"is\s+\d:?\d{2}\s+better",
+            r"best\s+execution\s+time",
+            r"best\s+(timing|offset)",
+            r"compare\s+9:?\d{2}\s+(and|vs|with|to)\s+9:?\d{2}",
         ),
         required_artifact_globs=(
             "outputs/research/execution_timing/*/timing_summary.json",
         ),
-        tool_name="execution_timing_by_vix_regime",
+        tool_name="execution_timing_summary",
         tool_kwargs={},
-        output_fields=("regime_aggregates", "coverage", "baseline_offset"),
+        output_fields=(
+            "by_offset",
+            "best_offset",
+            "highlighted_offsets",
+            "recommendation",
+            "recommendation_reason",
+            "days_replayed",
+            "baseline_offset",
+        ),
         limitations=(
-            "Returns the per-regime breakdown; for a single across-regime number, "
-            "aggregate the regime buckets manually or build a dedicated tool.",
+            "Aggregates across all regimes; for a regime-stratified view use "
+            "timing_by_vix_regime instead.",
+            "Recommendation requires >= 5 replayed days; below that returns "
+            "insufficient_evidence regardless of point estimates.",
         ),
         example_questions=(
             "Is 9:35 better than 9:30?",
-            "What's the timing penalty at 9:30 vs 9:35?",
+            "What is the best execution time?",
+            "Compare 9:30 and 9:35 execution timing.",
         ),
     ),
     Capability(
@@ -214,8 +229,12 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
     Capability(
         name="shadow_comparison",
         description=(
-            "Pairwise comparison of two named strategies on shadow performance "
-            "(NAV, drawdown, turnover, regime fit)."
+            "Pairwise / multi-strategy shadow-portfolio comparison from "
+            "outputs/shadow_candidates/<DATE>/shadow_evaluation.json. "
+            "Per-strategy NAV, cumulative return, excess vs SPY, turnover, "
+            "concentration, max drawdown when available; pairwise overlap "
+            "when two strategies are named. Strategy name parse restricted "
+            "to polaris|orion|lyra|leda."
         ),
         patterns=(
             r"(polaris|orion|lyra|leda)\s+(vs|versus|against|compared)",
@@ -223,24 +242,34 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
             r"shadow\s+(vs|versus|comparison)",
             r"how\s+is\s+(polaris|orion|lyra|leda)\s+(doing|performing)",
             r"(live|shadow)\s+vs\s+(live|shadow)",
+            r"which\s+strateg\w+\s+(is\s+)?(performing|best|leading|ahead)",
+            r"best\s+(performing\s+)?strateg",
+            r"strateg\w+\s+leader",
         ),
         required_artifact_globs=(),
-        tool_name=None,
+        tool_name="shadow_comparison",
         tool_kwargs={},
-        output_fields=(),
-        limitations=("Capability not yet implemented.",),
-        suggested_next_build=(
-            "Add a shadow_comparison MCP tool that reads outputs/shadow_candidates/ "
-            "and outputs/portfolio_history/ for two named strategies, then returns "
-            "per-strategy NAV / drawdown / turnover / regime-stratified Sharpe. "
-            "Constrain the strategy name parse to a fixed list "
-            "(polaris|orion|lyra|leda) so the tool refuses unknown names "
-            "deterministically. Add an ingestion family for shadow_candidates so "
-            "the registry can describe what's available."
+        output_fields=(
+            "panels",
+            "pairwise_overlap",
+            "leader_by_cumulative_return",
+            "leader_by_excess_vs_spy",
+            "leader_summary",
+            "available_strategies",
+            "requested_strategies",
+            "missing_strategies",
+        ),
+        limitations=(
+            "Reports the metrics that the shadow_evaluation.json file actually "
+            "populates; never invents values. Null fields are reported as null "
+            "and surfaced in per-strategy unavailable_metrics.",
+            "Strategy slugs are restricted to caerus_{polaris,orion,lyra,leda}; "
+            "unknown names → NEEDS_DATA with missing_strategies populated.",
         ),
         example_questions=(
             "How is Polaris doing versus Orion?",
             "Compare Polaris and Orion.",
+            "Which strategy is performing best?",
         ),
     ),
     Capability(

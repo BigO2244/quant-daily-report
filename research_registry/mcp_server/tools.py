@@ -21,11 +21,23 @@ from research_registry.research.capabilities import (
     check_artifacts,
     classify_question,
 )
+from research_registry.research.shadow_comparison import (
+    DEFAULT_SHADOW_ROOT,
+    compare_shadow_strategies,
+    parse_strategy_names,
+    shadow_comparison_to_dict,
+)
 from research_registry.research.timing_regime import (
     DEFAULT_REGIME_HISTORY,
     DEFAULT_TIMING_ROOT,
     INSUFFICIENT_SAMPLE_THRESHOLD,
     answer_timing_by_regime_question,
+)
+from research_registry.research.timing_summary import (
+    DEFAULT_TIMING_ROOT as DEFAULT_SUMMARY_TIMING_ROOT,
+    parse_offset_highlights,
+    summarise_timing,
+    timing_summary_to_dict,
 )
 
 
@@ -71,6 +83,8 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "promotion_readiness": promotion_readiness,
         "anomaly_report": anomaly_report,
         "execution_timing_by_vix_regime": execution_timing_by_vix_regime,
+        "execution_timing_summary": execution_timing_summary,
+        "shadow_comparison": shadow_comparison,
         "answer_research_question": answer_research_question,
     }
     if name not in dispatch:
@@ -1488,6 +1502,80 @@ def execution_timing_by_vix_regime(
     return _jsonable(answer)
 
 
+def execution_timing_summary(
+    *,
+    context: ToolContext | None = None,
+    timing_root: str | None = None,
+    question: str | None = None,
+    highlighted_offsets: list[str] | None = None,
+) -> dict[str, Any]:
+    """Aggregate (non-regime-stratified) execution-timing summary.
+
+    Reads the latest ``outputs/research/execution_timing/<RUN_DATE>/
+    timing_summary.json`` and returns a compact panel of per-offset
+    mean/median opportunity USD + bps, plus a conservative recommendation
+    (``retain_9_35_baseline`` / ``earlier_timing_appears_better`` /
+    ``insufficient_evidence``). If a question is provided, clock-time
+    offsets (e.g. ``9:30``, ``9:35``) are extracted and surfaced under
+    ``highlighted_offsets`` so the renderer can flag them.
+    """
+    timing_path = Path(timing_root) if timing_root else DEFAULT_SUMMARY_TIMING_ROOT
+    resolved_highlights: list[str] | None = None
+    if highlighted_offsets is not None:
+        resolved_highlights = list(highlighted_offsets)
+    elif question:
+        resolved_highlights = list(parse_offset_highlights(question))
+    answer = summarise_timing(
+        timing_root=timing_path,
+        question=question,
+        highlighted_offsets=resolved_highlights,
+    )
+    payload = timing_summary_to_dict(answer)
+    payload["tool"] = "execution_timing_summary"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
+def shadow_comparison(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    shadow_root: str | None = None,
+    question: str | None = None,
+    strategies: list[str] | None = None,
+) -> dict[str, Any]:
+    """Side-by-side shadow-portfolio comparison.
+
+    Reads the latest ``outputs/shadow_candidates/<DATE>/shadow_evaluation.json``
+    + ``comparison.json`` and returns per-strategy NAV / cumulative
+    return / excess vs SPY / turnover / drawdown panel plus pairwise
+    overlap when two strategies are named. Strategy names parsed from
+    the question are restricted to the closed list
+    ``polaris|orion|lyra|leda``; unknown names → NEEDS_DATA.
+    """
+    if shadow_root:
+        resolved_root = Path(shadow_root)
+    elif outputs_root:
+        resolved_root = Path(outputs_root) / "shadow_candidates"
+    else:
+        resolved_root = DEFAULT_SHADOW_ROOT
+    resolved_strategies: list[str] | None = None
+    if strategies is not None:
+        resolved_strategies = list(strategies)
+    elif question:
+        names = parse_strategy_names(question)
+        resolved_strategies = names or None
+    answer = compare_shadow_strategies(
+        shadow_root=resolved_root,
+        question=question,
+        strategies=resolved_strategies,
+    )
+    payload = shadow_comparison_to_dict(answer)
+    payload["tool"] = "shadow_comparison"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
 def _route_to_tool(
     tool_name: str,
     tool_kwargs: dict[str, Any],
@@ -1499,18 +1587,21 @@ def _route_to_tool(
     """Invoke an existing MCP tool through the standard dispatch path.
 
     ``pass_through`` carries the optional caller-level overrides
-    (``timing_root``, ``regime_history``, etc.) that the gateway forwards
-    on per-question. We only pass keys the tool actually accepts; unknown
-    kwargs would raise a ``TypeError`` from the tool's signature.
+    (``timing_root``, ``regime_history``, etc.) the gateway forwards per
+    question. ``pass_question`` is set when the routed tool accepts a
+    raw NL ``question`` argument (used by ``execution_timing_summary``
+    and ``shadow_comparison`` to extract offsets / strategy names).
     """
+    if tool_name == "answer_research_question":
+        # Defensive — avoid infinite recursion via the planner's own tool.
+        raise RuntimeError("planner attempted to route to itself")
     arguments = dict(tool_kwargs)
     for key, value in pass_through.items():
         if value is None:
             continue
         arguments.setdefault(key, value)
-    if pass_question is not None and tool_name == "answer_research_question":
-        # Defensive — avoid infinite recursion via the planner's own tool.
-        raise RuntimeError("planner attempted to route to itself")
+    if pass_question is not None:
+        arguments.setdefault("question", pass_question)
     return call_tool(tool_name, arguments, context=context)
 
 
@@ -1625,11 +1716,13 @@ def answer_research_question(
             }
         )
 
+    # Tools that take an NL question for offset / strategy extraction.
+    tools_accepting_question = {"execution_timing_summary", "shadow_comparison"}
     underlying = _route_to_tool(
         matched.tool_name,
         matched.tool_kwargs,
         context=context,
-        pass_question=None,
+        pass_question=question if matched.tool_name in tools_accepting_question else None,
         pass_through={
             "timing_root": timing_root,
             "regime_history": regime_history,

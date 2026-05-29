@@ -96,6 +96,23 @@ def _fmt_bps(value: Any) -> str:
         return "—"
 
 
+def _fmt_float(value: Any) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):,.4f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _offset_sort_key(label: str) -> int:
+    """Sort `T+5m`-style labels numerically. Non-matching labels go last."""
+    try:
+        return int(label.replace("T+", "").rstrip("mM"))
+    except (ValueError, AttributeError):
+        return 1_000_000
+
+
 def _inner_answer(payload: dict[str, Any]) -> dict[str, Any]:
     """Return the underlying tool payload.
 
@@ -157,6 +174,100 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             md.append(f"**Baseline:** `{baseline}`  ")
         if cache_version:
             md.append(f"**Cache:** `{cache_version}`  ")
+
+    # OK path for shadow_comparison — render the per-strategy panel.
+    panels = inner.get("panels") or {}
+    if status == "OK" and panels and (inner.get("leader_summary") or inner.get("leader_by_cumulative_return") is not None):
+        lines.append("")
+        if inner.get("trade_date"):
+            lines.append(f"Trade date: {inner['trade_date']}  (benchmark: {inner.get('benchmark_symbol', 'SPY')})")
+        if inner.get("leader_summary"):
+            lines.append(f"Leader: {inner['leader_summary']}")
+        lines.append("")
+        header = ["strategy", "nav", "cum_return", "excess_vs_spy", "avg_turnover", "max_drawdown"]
+        col_widths = [max(len(h), 14) for h in header]
+        lines.append(_render_row(header, col_widths))
+        lines.append(_render_row(["-" * w for w in col_widths], col_widths))
+        md.append("")
+        md.append(f"## Shadow comparison — trade date `{inner.get('trade_date', '?')}`")
+        if inner.get("leader_summary"):
+            md.append("")
+            md.append(f"**Leader:** {inner['leader_summary']}")
+        md.append("")
+        md.append("| " + " | ".join(header) + " |")
+        md.append("| " + " | ".join(["---"] * len(header)) + " |")
+        for slug, panel in panels.items():
+            row = [
+                slug,
+                _fmt_float(panel.get("nav")),
+                _fmt_float(panel.get("cumulative_return")),
+                _fmt_float(panel.get("excess_return_vs_spy")),
+                _fmt_float(panel.get("avg_turnover")),
+                _fmt_float(panel.get("max_drawdown")),
+            ]
+            lines.append(_render_row(row, col_widths))
+            md.append("| " + " | ".join(row) + " |")
+        pairwise = inner.get("pairwise_overlap") or []
+        if pairwise:
+            lines.append("")
+            lines.append("Pairwise overlap:")
+            md.append("")
+            md.append("### Pairwise overlap")
+            md.append("")
+            for entry in pairwise:
+                line = (
+                    f"  {entry.get('left_slug', '?')} ↔ {entry.get('right_slug', '?')}: "
+                    f"overlap_weight={_fmt_float(entry.get('overlap_weight_pct'))}, "
+                    f"shared={entry.get('shared_names') or []}"
+                )
+                lines.append(line)
+                md.append(f"- `{entry.get('left_slug', '?')}` ↔ `{entry.get('right_slug', '?')}` — overlap "
+                          f"{_fmt_float(entry.get('overlap_weight_pct'))}; shared: {entry.get('shared_names') or []}")
+
+    # OK path for execution_timing_summary — render the per-offset table + recommendation.
+    by_offset = inner.get("by_offset") or {}
+    recommendation = inner.get("recommendation")
+    if status == "OK" and by_offset and recommendation:
+        baseline = inner.get("baseline_offset")
+        highlighted = set(inner.get("highlighted_offsets") or [])
+        lines.append("")
+        lines.append(f"Days replayed: {inner.get('days_replayed')}  |  Baseline: {baseline}")
+        lines.append(f"Best non-baseline offset: {inner.get('best_offset')}")
+        lines.append(f"Recommendation: {recommendation}")
+        if inner.get("recommendation_reason"):
+            lines.append(f"  Reason: {inner['recommendation_reason']}")
+        lines.append("")
+        header = ["offset", "mean_usd", "median_usd", "mean_bps", "n_days"]
+        col_widths = [max(len(h), 12) for h in header]
+        lines.append(_render_row(header, col_widths))
+        lines.append(_render_row(["-" * w for w in col_widths], col_widths))
+        md.append("")
+        md.append(f"## Timing summary — `{inner.get('run_date', '?')}` (baseline `{baseline}`)")
+        md.append("")
+        md.append(f"**Days replayed:** {inner.get('days_replayed')}  ")
+        md.append(f"**Best non-baseline offset:** `{inner.get('best_offset')}`  ")
+        md.append(f"**Recommendation:** `{recommendation}` — {inner.get('recommendation_reason', '')}")
+        md.append("")
+        md.append("| " + " | ".join(header) + " |")
+        md.append("| " + " | ".join(["---"] * len(header)) + " |")
+        for label, metrics in sorted(by_offset.items(), key=lambda kv: _offset_sort_key(kv[0])):
+            decoration = ""
+            if label == baseline:
+                decoration = " (baseline)"
+            elif label in highlighted:
+                decoration = " *"
+            row = [
+                label + decoration,
+                _fmt_money(metrics.get("mean_opportunity_usd")),
+                _fmt_money(metrics.get("median_opportunity_usd")),
+                _fmt_bps(metrics.get("mean_opportunity_bps")),
+                str(metrics.get("n_days_with_opportunity") or 0),
+            ]
+            lines.append(_render_row(row, col_widths))
+            md.append("| " + " | ".join(row) + " |")
+        if highlighted:
+            lines.append("")
+            lines.append("  * = offset highlighted from the question text")
 
     # OK path — render the regime aggregates table when present.
     aggregates = inner.get("regime_aggregates") or []

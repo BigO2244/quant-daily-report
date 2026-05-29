@@ -560,8 +560,6 @@ def test_answer_research_question_returns_unsupported_intent_for_off_topic(quest
 
 
 @pytest.mark.parametrize("question,expected_intent", [
-    ("compare strategies",                       "shadow_comparison"),
-    ("How is Polaris doing versus Orion?",       "shadow_comparison"),
     ("What drove last quarter's alpha?",         "attribution_analysis"),
     ("show me the alpha attribution",            "attribution_analysis"),
     ("How does the strategy perform across random windows?", "stable_window_evaluation"),
