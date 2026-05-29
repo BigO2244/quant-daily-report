@@ -802,7 +802,13 @@ class VixRegimeHistoryAdapter(ArtifactFamilyAdapter):
                 ]
             )
         latest_row = rows[-1] if rows else {}
-        latest_as_of = (latest_row.get("as_of") or "").strip()
+        # Accept any of the three date column aliases the loader supports.
+        latest_as_of = ""
+        for column in ("date", "as_of", "execution_date"):
+            value = latest_row.get(column)
+            if value is not None and str(value).strip():
+                latest_as_of = str(value).strip()
+                break
         trade_date = latest_as_of[:10] if latest_as_of else None
         observed_regimes = sorted({(r.get("regime") or "").strip() for r in rows if (r.get("regime") or "").strip()})
         as_of = _normalize_as_of(latest_as_of)

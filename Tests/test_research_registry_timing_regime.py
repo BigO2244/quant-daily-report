@@ -127,6 +127,21 @@ def _write_regime_history(regime_csv: Path, rows: list[tuple[str, str, float]]) 
     regime_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_regime_history_vm_schema(regime_csv: Path, rows: list[tuple[str, str, float]]) -> None:
+    """Write a regime CSV using the *VM* column layout:
+    ``date,vix,regime,position_scale,max_positions,source,fallback_used``.
+
+    This is the actual schema in production today; the older fixture writer
+    above uses the historical ``as_of`` layout. Tests using this writer
+    exercise the patched-in `date` column path.
+    """
+    regime_csv.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["date,vix,regime,position_scale,max_positions,source,fallback_used"]
+    for date, regime, vix in rows:
+        lines.append(f"{date},{vix},{regime},0.75,7,fred,False")
+    regime_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Pure-loader tests
 # ---------------------------------------------------------------------------
@@ -263,6 +278,171 @@ def test_aggregator_flags_insufficient_sample(tmp_path):
     assert insufficient_warning is not None
     assert "ELEVATED" in insufficient_warning
     assert "NORMAL" in insufficient_warning
+
+
+# ---------------------------------------------------------------------------
+# VM schema compatibility — date column, extra bookkeeping columns,
+# deterministic dedup, bad-schema fail mode.
+# ---------------------------------------------------------------------------
+
+
+def test_loader_accepts_vm_schema_with_date_column(tmp_path):
+    """Real VM CSV header is `date,vix,regime,position_scale,max_positions,
+    source,fallback_used`. The loader must accept `date` and ignore the
+    extra columns — this was the exact bug that produced NO_REGIME_DATA."""
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    _write_regime_history_vm_schema(regime_csv, [
+        ("2026-04-15", "NORMAL", 14.0),
+        ("2026-04-16", "ELEVATED", 26.0),
+    ])
+    out = tr.load_vix_regime_history(regime_csv)
+    assert out == {
+        "2026-04-15": {"regime": "NORMAL", "vix": 14.0},
+        "2026-04-16": {"regime": "ELEVATED", "vix": 26.0},
+    }
+
+
+def test_loader_accepts_historical_as_of_schema(tmp_path):
+    """Older local fixtures used `as_of`; back-compat must continue."""
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    _write_regime_history(regime_csv, [
+        ("2026-04-15", "NORMAL", 14.0),
+        ("2026-04-16", "ELEVATED", 26.0),
+    ])
+    out = tr.load_vix_regime_history(regime_csv)
+    assert "2026-04-15" in out and "2026-04-16" in out
+
+
+def test_loader_deduplicates_repeated_dates_keeping_last_in_file(tmp_path):
+    """Stable sort by date with file-order tiebreak → the LAST row in the
+    CSV for a given date wins. The classifier writes intra-day snapshots,
+    so the later row is the more authoritative observation."""
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    _write_regime_history_vm_schema(regime_csv, [
+        ("2026-04-15", "NORMAL", 14.0),
+        ("2026-04-15", "NORMAL", 15.0),   # later observation, same regime
+        ("2026-04-15", "ELEVATED", 22.0), # final observation of the day — must win
+        ("2026-04-16", "ELEVATED", 26.0),
+    ])
+    out = tr.load_vix_regime_history(regime_csv)
+    assert out["2026-04-15"] == {"regime": "ELEVATED", "vix": 22.0}
+    assert out["2026-04-16"] == {"regime": "ELEVATED", "vix": 26.0}
+
+
+def test_loader_raises_bad_schema_when_required_columns_missing(tmp_path):
+    """File exists with rows but no recognisable date column → distinct
+    error path (BAD_REGIME_SCHEMA), NOT NO_REGIME_DATA."""
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    regime_csv.parent.mkdir(parents=True, exist_ok=True)
+    regime_csv.write_text(
+        "wrong_col,regime,vix\nfoo,ELEVATED,25.0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(tr.RegimeHistoryFormatError) as exc_info:
+        tr.load_vix_regime_history(regime_csv)
+    # Error message names the specific missing column(s).
+    assert "date|as_of|execution_date" in exc_info.value.missing_columns
+
+
+def test_loader_raises_bad_schema_when_regime_or_vix_missing(tmp_path):
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    regime_csv.parent.mkdir(parents=True, exist_ok=True)
+    regime_csv.write_text("date,position_scale\n2026-04-15,0.75\n", encoding="utf-8")
+    with pytest.raises(tr.RegimeHistoryFormatError) as exc_info:
+        tr.load_vix_regime_history(regime_csv)
+    assert "regime" in exc_info.value.missing_columns
+    assert "vix" in exc_info.value.missing_columns
+
+
+def test_loader_returns_empty_dict_when_file_empty_but_well_formed(tmp_path):
+    """File present, only the header — no rows. Treated as NO_REGIME_DATA
+    (empty dict), not BAD_REGIME_SCHEMA."""
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    regime_csv.parent.mkdir(parents=True, exist_ok=True)
+    regime_csv.write_text(
+        "date,vix,regime,position_scale,max_positions,source,fallback_used\n",
+        encoding="utf-8",
+    )
+    assert tr.load_vix_regime_history(regime_csv) == {}
+
+
+def test_orchestrator_surfaces_bad_regime_schema_distinctly(tmp_path):
+    """End-to-end: when timing exists but the regime CSV is bad-schema, the
+    answer should be BAD_REGIME_SCHEMA, not NO_REGIME_DATA."""
+    timing_root = tmp_path / "outputs" / "research" / "execution_timing"
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    _write_timing_run(timing_root, "2026-05-29", [
+        _per_trade_day(plan_date="2026-04-16", execution_date="2026-04-16",
+                       trades=[_rallying_buy({label: 100.0 for label in _OFFSETS})])
+    ])
+    regime_csv.parent.mkdir(parents=True, exist_ok=True)
+    regime_csv.write_text("wrong_col,regime,vix\nfoo,ELEVATED,25.0\n", encoding="utf-8")
+
+    answer = tr.answer_timing_by_regime_question(
+        timing_root=timing_root,
+        regime_history=regime_csv,
+    )
+    assert answer["status"] == "BAD_REGIME_SCHEMA"
+    assert "date|as_of|execution_date" in answer["missing_columns"]
+    assert answer["regime_aggregates"] == []
+
+
+def test_orchestrator_distinguishes_missing_file_from_empty_file(tmp_path):
+    """NO_REGIME_DATA should carry different reason text for missing vs empty."""
+    timing_root = tmp_path / "outputs" / "research" / "execution_timing"
+    _write_timing_run(timing_root, "2026-05-29", [
+        _per_trade_day(plan_date="2026-04-16", execution_date="2026-04-16",
+                       trades=[_rallying_buy({label: 100.0 for label in _OFFSETS})])
+    ])
+
+    # Missing file.
+    missing = tr.answer_timing_by_regime_question(
+        timing_root=timing_root,
+        regime_history=tmp_path / "nope.csv",
+    )
+    assert missing["status"] == "NO_REGIME_DATA"
+    assert "does not exist" in missing["reason"]
+
+    # Empty file (header only).
+    empty_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    empty_csv.parent.mkdir(parents=True, exist_ok=True)
+    empty_csv.write_text(
+        "date,vix,regime,position_scale,max_positions,source,fallback_used\n",
+        encoding="utf-8",
+    )
+    empty = tr.answer_timing_by_regime_question(
+        timing_root=timing_root,
+        regime_history=empty_csv,
+    )
+    assert empty["status"] == "NO_REGIME_DATA"
+    assert "empty" in empty["reason"]
+
+
+def test_join_works_end_to_end_on_vm_schema(tmp_path):
+    """The whole pipeline — load timing, load VM-schema regime CSV, join,
+    aggregate — produces a populated regime bucket. This is the exact path
+    that was broken on the VM."""
+    timing_root = tmp_path / "outputs" / "research" / "execution_timing"
+    regime_csv = tmp_path / "outputs" / "vix_regime" / "regime_history.csv"
+    _write_timing_run(timing_root, "2026-05-29", [
+        _per_trade_day(plan_date="2026-04-16", execution_date="2026-04-16",
+                       trades=[_rallying_buy({"T+0m": 100.0, "T+1m": 101.0,
+                                              "T+2m": 102.0, "T+3m": 103.0,
+                                              "T+4m": 104.0, "T+5m": 105.0,
+                                              "T+10m": 110.0})])
+    ])
+    _write_regime_history_vm_schema(regime_csv, [
+        ("2026-04-16", "ELEVATED", 26.0),
+    ])
+    answer = tr.answer_timing_by_regime_question(
+        timing_root=timing_root,
+        regime_history=regime_csv,
+        threshold=1,
+    )
+    assert answer["status"] == "OK"
+    elevated = next(a for a in answer["regime_aggregates"] if a["regime"] == "ELEVATED")
+    # +$5 BUY rally savings at T+0 vs baseline T+5.
+    assert elevated["by_offset"]["T+0m"]["mean_opportunity_usd"] == pytest.approx(5.0)
 
 
 # ---------------------------------------------------------------------------

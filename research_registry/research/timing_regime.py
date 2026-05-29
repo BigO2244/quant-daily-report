@@ -230,29 +230,117 @@ def _per_day_opportunity_from_costs(
     return out
 
 
-def load_vix_regime_history(regime_csv: Path = DEFAULT_REGIME_HISTORY) -> dict[str, dict[str, Any]]:
-    """Load ``outputs/vix_regime/regime_history.csv`` as ``date → record``.
+class RegimeHistoryFormatError(ValueError):
+    """The regime CSV exists with rows but is missing required columns.
 
-    The CSV may contain multiple rows per ``as_of`` (the classifier writes
-    intra-day observations); the **last** row encountered for each date wins,
-    matching the convention used by the morning-brief tool.
+    Distinct from "missing or empty" because the operator's remediation is
+    different: a missing file means run the classifier; a bad-schema file
+    means upstream changed columns and the loader needs an update (this
+    is the path we landed on when the VM CSV started using ``date`` instead
+    of ``as_of``).
+    """
+
+    def __init__(self, *, missing_columns: list[str], regime_csv: Path) -> None:
+        super().__init__(
+            f"vix_regime_history bad schema: {regime_csv} is missing required "
+            f"column(s) {missing_columns}; one of {{date, as_of, execution_date}} "
+            "must be present together with `regime` and `vix`."
+        )
+        self.missing_columns = missing_columns
+        self.regime_csv = regime_csv
+
+
+_REGIME_DATE_COLUMN_CANDIDATES: tuple[str, ...] = ("date", "as_of", "execution_date")
+"""Column names the loader will accept as the row's date. The VM ships
+``date``; older local fixtures use ``as_of``; ``execution_date`` is here for
+future-proofing if upstream renames it. The first non-empty value found in
+the row wins. Adding a new alias is the gate for accepting new schemas."""
+
+
+def _extract_regime_date(row: dict[str, Any]) -> str:
+    for column in _REGIME_DATE_COLUMN_CANDIDATES:
+        value = row.get(column)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text[:10]
+    return ""
+
+
+def _detect_missing_regime_columns(fieldnames: list[str] | None) -> list[str]:
+    """Identify which required columns are absent from the CSV header.
+
+    The header must include at least one of the date aliases AND ``regime``
+    AND ``vix``. Order is preserved so the error message reads naturally.
+    """
+    columns = {(name or "").strip().lower() for name in (fieldnames or [])}
+    missing: list[str] = []
+    if not (columns & {col.lower() for col in _REGIME_DATE_COLUMN_CANDIDATES}):
+        missing.append("date|as_of|execution_date")
+    if "regime" not in columns:
+        missing.append("regime")
+    if "vix" not in columns:
+        missing.append("vix")
+    return missing
+
+
+def load_vix_regime_history(regime_csv: Path = DEFAULT_REGIME_HISTORY) -> dict[str, dict[str, Any]]:
+    """Load the regime CSV as ``execution_date → record``.
+
+    Accepted schemas
+    ----------------
+    The CSV may use any of ``date``, ``as_of``, or ``execution_date`` as the
+    per-row date column. ``regime`` and ``vix`` are always required. Any
+    other columns (``position_scale``, ``max_positions``, ``source``,
+    ``fallback_used``, …) are tolerated and ignored — the loader is forward
+    compatible with new bookkeeping fields.
+
+    Deterministic dedup
+    -------------------
+    Rows are stable-sorted by date before insertion, so when the same
+    execution_date appears more than once (the classifier writes intra-day
+    snapshots), the **last row in file order** wins for that date. This is
+    consistent with the morning-brief convention.
+
+    Errors
+    ------
+    * ``regime_csv`` missing → returns ``{}`` (caller treats as ``NO_REGIME_DATA``).
+    * File exists but has no rows → returns ``{}``.
+    * File exists with rows but header is missing required columns → raises
+      :class:`RegimeHistoryFormatError`.
     """
     if not regime_csv.exists():
         return {}
-    out: dict[str, dict[str, Any]] = {}
     with regime_csv.open(encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            as_of = (row.get("as_of") or "").strip()
-            if not as_of:
-                continue
-            try:
-                vix = float(row.get("vix") or "nan")
-            except (TypeError, ValueError):
-                vix = float("nan")
-            out[as_of[:10]] = {
-                "regime": (row.get("regime") or "").strip() or "UNKNOWN",
-                "vix": None if math.isnan(vix) else vix,
-            }
+        reader = csv.DictReader(fh)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    if not rows:
+        return {}
+
+    missing_cols = _detect_missing_regime_columns(fieldnames)
+    if missing_cols:
+        raise RegimeHistoryFormatError(missing_columns=missing_cols, regime_csv=regime_csv)
+
+    # Stable sort by extracted date; ties preserve original file order so the
+    # last row in the CSV for a given date is the one that wins below.
+    indexed_rows = list(enumerate(rows))
+    indexed_rows.sort(key=lambda item: (_extract_regime_date(item[1]), item[0]))
+
+    out: dict[str, dict[str, Any]] = {}
+    for _, row in indexed_rows:
+        execution_date = _extract_regime_date(row)
+        if not execution_date:
+            continue
+        try:
+            vix = float(row.get("vix") or "nan")
+        except (TypeError, ValueError):
+            vix = float("nan")
+        out[execution_date] = {
+            "regime": (row.get("regime") or "").strip() or "UNKNOWN",
+            "vix": None if math.isnan(vix) else vix,
+        }
     return out
 
 
@@ -383,17 +471,44 @@ def answer_timing_by_regime_question(
         }
 
     summary, per_day = load_timing_summaries(timing_run_dir)
-    regime_map = load_vix_regime_history(regime_history)
-    if not regime_map:
+    try:
+        regime_map = load_vix_regime_history(regime_history)
+    except RegimeHistoryFormatError as exc:
         return {
-            "status": "NO_REGIME_DATA",
-            "reason": f"regime_history missing or empty: {regime_history}",
+            "status": "BAD_REGIME_SCHEMA",
+            "reason": str(exc),
+            "missing_columns": exc.missing_columns,
             "timing_root": str(timing_root),
             "regime_history": str(regime_history),
             "regime_aggregates": [],
             "baseline_offset": summary.get("baseline_offset"),
             "run_date": summary.get("run_date") or timing_run_dir.name,
-            "warnings": ["regime CSV missing; cannot stratify timing by regime"],
+            "warnings": [
+                "regime CSV is present but has an unrecognised schema; "
+                f"missing columns: {exc.missing_columns}. The loader accepts "
+                "`date`, `as_of`, or `execution_date` for the date column; "
+                "`regime` and `vix` are always required."
+            ],
+        }
+    if not regime_map:
+        # File missing OR file present-but-empty (after header). Distinguish
+        # so the operator knows whether to run the classifier or look at why
+        # it wrote a zero-row file.
+        if Path(regime_history).exists():
+            reason = f"regime_history file is empty (no rows after header): {regime_history}"
+            warning = "regime CSV exists but contains no rows; classifier may have failed to write data"
+        else:
+            reason = f"regime_history file does not exist: {regime_history}"
+            warning = "regime CSV missing; cannot stratify timing by regime"
+        return {
+            "status": "NO_REGIME_DATA",
+            "reason": reason,
+            "timing_root": str(timing_root),
+            "regime_history": str(regime_history),
+            "regime_aggregates": [],
+            "baseline_offset": summary.get("baseline_offset"),
+            "run_date": summary.get("run_date") or timing_run_dir.name,
+            "warnings": [warning],
         }
 
     joined = join_timing_to_regime(per_day, regime_map)
