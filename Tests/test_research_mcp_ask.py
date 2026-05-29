@@ -153,8 +153,73 @@ def test_status_to_exit_code_mapping():
     assert rma.status_to_exit_code("NO_TIMING_DATA") == 2
     assert rma.status_to_exit_code("NO_REGIME_DATA") == 2
     assert rma.status_to_exit_code("BAD_REGIME_SCHEMA") == 2
+    assert rma.status_to_exit_code("NEEDS_DATA") == 2
     assert rma.status_to_exit_code("UNSUPPORTED_INTENT") == 3
+    assert rma.status_to_exit_code("NEEDS_CAPABILITY") == 3
     assert rma.status_to_exit_code("WEIRD_FUTURE_STATUS") == 0  # clean default
+
+
+def test_render_needs_data_lists_missing_artifacts():
+    payload = {
+        "status": "NEEDS_DATA",
+        "tool": "answer_research_question",
+        "intent": "timing_by_vix_regime",
+        "routed_to": "execution_timing_by_vix_regime",
+        "matched_capability": {"name": "timing_by_vix_regime", "description": "Stratify timing by VIX regime."},
+        "missing_artifacts": [
+            "outputs/research/execution_timing/*/timing_summary.json",
+            "outputs/vix_regime/regime_history.csv",
+        ],
+        "warnings": ["missing artifact: outputs/research/execution_timing/*/timing_summary.json"],
+    }
+    human, md = rma.render_human_and_markdown("Q", payload)
+    assert "Capability matched: timing_by_vix_regime" in human
+    assert "outputs/research/execution_timing/*/timing_summary.json" in human
+    assert "outputs/vix_regime/regime_history.csv" in human
+    assert "Required artifacts missing for `timing_by_vix_regime`" in md
+
+
+def test_render_needs_capability_shows_suggested_next_build():
+    payload = {
+        "status": "NEEDS_CAPABILITY",
+        "tool": "answer_research_question",
+        "intent": "shadow_comparison",
+        "routed_to": None,
+        "matched_capability": {
+            "name": "shadow_comparison",
+            "description": "Pairwise strategy comparison on shadow performance.",
+        },
+        "suggested_next_build": (
+            "Add a shadow_comparison MCP tool that reads outputs/shadow_candidates/ "
+            "and computes pairwise deltas."
+        ),
+        "warnings": [],
+    }
+    human, md = rma.render_human_and_markdown("Polaris vs Orion?", payload)
+    assert "Capability matched: shadow_comparison" in human
+    assert "Pairwise strategy comparison" in human
+    assert "Suggested next build:" in human
+    assert "shadow_candidates" in human
+    assert "Capability `shadow_comparison`" in md
+    assert "Suggested next build" in md
+
+
+def test_render_unsupported_includes_closest_capabilities():
+    payload = {
+        "status": "UNSUPPORTED_INTENT",
+        "intent": None,
+        "warnings": [],
+        "closest_capabilities": [
+            {"name": "morning_brief", "description": "Daily operator brief.", "example_questions": ["What ran today?"]},
+        ],
+        "available_intents": [
+            {"intent": "morning_brief", "matches": ["What ran today?"], "example_question": "What ran today?"},
+        ],
+    }
+    human, md = rma.render_human_and_markdown("totally off topic", payload)
+    assert "Closest capabilities (by token overlap):" in human
+    assert "morning_brief" in human
+    assert "Closest capabilities" in md
 
 
 def test_now_stamp_is_filesystem_safe():

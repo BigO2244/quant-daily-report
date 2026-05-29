@@ -508,38 +508,76 @@ def test_execution_timing_tool_fails_closed_on_missing_inputs(tmp_path):
     "Is there a regime effect on execution timing?",
     "timing vs vix",
 ])
-def test_answer_research_question_routes_timing_regime_intents(tmp_path, question):
+def test_answer_research_question_routes_timing_regime_intents(tmp_path, monkeypatch, question):
+    """Each of these phrasings matches the timing_by_vix_regime capability.
+
+    Under the new capability router, the artifact check runs *before* the
+    tool call. Because ``timing_root`` and ``regime_history`` are pointed at
+    paths that don't exist, the planner returns ``NEEDS_DATA`` with the
+    missing globs named — that's the new and more useful behavior, replacing
+    the prior NO_TIMING_DATA bubble-up. The intent and routed_to fields are
+    preserved so the gateway and existing assertions still work.
+    """
+    # The planner's artifact check uses repo-root-relative globs by default
+    # (`outputs/research/execution_timing/*/timing_summary.json`). Run from
+    # a clean tmp_path so the real repo's outputs/ never satisfies the check.
+    monkeypatch.chdir(tmp_path)
     result = call_tool(
         "answer_research_question",
         {
             "question": question,
-            "timing_root": str(tmp_path / "missing"),  # forces NO_TIMING_DATA underneath
+            "timing_root": str(tmp_path / "missing"),
             "regime_history": str(tmp_path / "regime.csv"),
         },
     )
-    # Intent is matched; underlying answer reports the fail-closed status.
     assert result["intent"] == "timing_by_vix_regime"
     assert result["routed_to"] == "execution_timing_by_vix_regime"
-    assert result["status"] == "NO_TIMING_DATA"
+    assert result["status"] == "NEEDS_DATA"
+    assert "outputs/research/execution_timing/*/timing_summary.json" in result["missing_artifacts"]
 
 
 @pytest.mark.parametrize("question", [
-    "What was the alpha last quarter?",
     "show me the largest drawdown",
-    "compare strategies",
-    "",  # empty input
-    "VIX",  # too underspecified — doesn't mention timing
-    "execution",  # too underspecified — doesn't mention regime
+    "",                       # empty input
+    "VIX",                    # bare keyword — too underspecified
+    "execution",              # bare keyword — too underspecified
+    "hello world",            # genuinely off-topic
 ])
-def test_answer_research_question_returns_unsupported_intent_otherwise(question):
+def test_answer_research_question_returns_unsupported_intent_for_off_topic(question):
+    """Truly off-topic queries route to UNSUPPORTED_INTENT. The response now
+    carries ``closest_capabilities`` (token-overlap suggestions) and the
+    full ``available_intents`` list so the operator can self-serve."""
     result = call_tool("answer_research_question", {"question": question})
     assert result["status"] == "UNSUPPORTED_INTENT"
     assert result["intent"] is None
-    # The available_intents block is the discoverability surface.
+    assert result["routed_to"] is None
+    assert "closest_capabilities" in result
+    # available_intents is the discoverability surface for the gateway.
     assert any(
         intent["intent"] == "timing_by_vix_regime"
         for intent in result["available_intents"]
     )
+
+
+@pytest.mark.parametrize("question,expected_intent", [
+    ("compare strategies",                       "shadow_comparison"),
+    ("How is Polaris doing versus Orion?",       "shadow_comparison"),
+    ("What drove last quarter's alpha?",         "attribution_analysis"),
+    ("show me the alpha attribution",            "attribution_analysis"),
+    ("How does the strategy perform across random windows?", "stable_window_evaluation"),
+])
+def test_answer_research_question_returns_needs_capability_for_unbuilt(question, expected_intent):
+    """Questions that match a registry capability but whose tool is not yet
+    wired return ``NEEDS_CAPABILITY`` — distinct from UNSUPPORTED_INTENT.
+    The response carries the matched capability and a suggested_next_build
+    paragraph so a future implementer has a concrete scope."""
+    result = call_tool("answer_research_question", {"question": question})
+    assert result["status"] == "NEEDS_CAPABILITY"
+    assert result["intent"] == expected_intent
+    assert result["routed_to"] is None
+    assert result["matched_capability"]["name"] == expected_intent
+    assert result["suggested_next_build"]
+    assert "tool" in result["suggested_next_build"].lower()
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,13 @@ from research_registry.ingestion import ingest_artifact_family
 from research_registry.mcp_server.schemas import TOOL_DEFINITIONS
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
+from research_registry.research.capabilities import (
+    CAPABILITY_REGISTRY,
+    available_intents,
+    capability_summary,
+    check_artifacts,
+    classify_question,
+)
 from research_registry.research.timing_regime import (
     DEFAULT_REGIME_HISTORY,
     DEFAULT_TIMING_ROOT,
@@ -1481,42 +1488,30 @@ def execution_timing_by_vix_regime(
     return _jsonable(answer)
 
 
-# Whitelist of phrases that route to a supported research question. Order
-# matters only for transparency; all matches are checked independently. The
-# matcher is intentionally regex-based and English-only — no semantic
-# parsing, no LLM call. Adding a new pattern is the gate for adding a new
-# answerable question.
-_TIMING_REGIME_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"timing.*(vix|regime)", re.IGNORECASE),
-    re.compile(r"(vix|regime).*timing", re.IGNORECASE),
-    re.compile(r"high\s*vix.*timing", re.IGNORECASE),
-    re.compile(r"timing.*high\s*vix", re.IGNORECASE),
-    re.compile(r"execution[-_\s]*timing.*(vix|regime)", re.IGNORECASE),
-)
+def _route_to_tool(
+    tool_name: str,
+    tool_kwargs: dict[str, Any],
+    *,
+    context: ToolContext | None,
+    pass_question: str | None,
+    pass_through: dict[str, Any],
+) -> dict[str, Any]:
+    """Invoke an existing MCP tool through the standard dispatch path.
 
-_AVAILABLE_INTENTS: tuple[dict[str, Any], ...] = (
-    {
-        "intent": "timing_by_vix_regime",
-        "matches": [
-            "timing + VIX",
-            "timing + regime",
-            "high VIX + timing",
-            "execution timing + regime",
-        ],
-        "routed_tool": "execution_timing_by_vix_regime",
-        "example_question": "Does execution timing matter more in high-VIX regimes?",
-    },
-)
-
-
-def _classify_intent(question: str) -> str | None:
-    text = (question or "").strip()
-    if not text:
-        return None
-    for pattern in _TIMING_REGIME_PATTERNS:
-        if pattern.search(text):
-            return "timing_by_vix_regime"
-    return None
+    ``pass_through`` carries the optional caller-level overrides
+    (``timing_root``, ``regime_history``, etc.) that the gateway forwards
+    on per-question. We only pass keys the tool actually accepts; unknown
+    kwargs would raise a ``TypeError`` from the tool's signature.
+    """
+    arguments = dict(tool_kwargs)
+    for key, value in pass_through.items():
+        if value is None:
+            continue
+        arguments.setdefault(key, value)
+    if pass_question is not None and tool_name == "answer_research_question":
+        # Defensive — avoid infinite recursion via the planner's own tool.
+        raise RuntimeError("planner attempted to route to itself")
+    return call_tool(tool_name, arguments, context=context)
 
 
 def answer_research_question(
@@ -1526,63 +1521,134 @@ def answer_research_question(
     timing_root: str | None = None,
     regime_history: str | None = None,
     insufficient_sample_threshold: int | None = None,
+    outputs_root: str | None = None,
 ) -> dict[str, Any]:
-    """Deterministic NL wrapper over the whitelist of supported intents.
+    """Deterministic capability-based router over the question-answering MCP.
 
-    The matcher is regex-only — no LLM call, no semantic parsing, no
-    external service. Unsupported questions return
-    ``status="UNSUPPORTED_INTENT"`` along with the list of phrases the
-    matcher would have routed, so the caller can iterate on phrasing.
+    Pipeline:
+
+    1. :func:`classify_question` matches the question against
+       :data:`CAPABILITY_REGISTRY` (regex-only, deterministic). Ties
+       broken by registry order.
+    2. If no capability matches → ``UNSUPPORTED_INTENT``; the response
+       carries up to three ``closest_capabilities`` ranked by token
+       overlap plus a generic ``missing_capability_description``.
+    3. If the matched capability has no ``tool_name`` →
+       ``NEEDS_CAPABILITY``; the response carries the registry entry
+       and the ``suggested_next_build`` paragraph describing exactly
+       what would have to be built.
+    4. If the capability is implemented but its
+       ``required_artifact_globs`` are not satisfied on disk →
+       ``NEEDS_DATA``; the response names the missing paths.
+    5. Otherwise the planner invokes the underlying MCP tool via
+       :func:`call_tool` and propagates its inner status (so e.g.
+       ``NO_TIMING_DATA`` from the tool still bubbles up cleanly).
     """
-    intent = _classify_intent(question or "")
-    if intent is None:
+    queried_at = _now_utc()
+    classification = classify_question(question or "")
+    matched = classification.capability
+
+    if matched is None:
+        closest = [capability_summary(cap) for cap in classification.closest]
         return _jsonable(
             {
                 "status": "UNSUPPORTED_INTENT",
                 "tool": "answer_research_question",
-                "queried_at": _now_utc(),
+                "queried_at": queried_at,
                 "question": question,
                 "intent": None,
+                "routed_to": None,
                 "reason": (
-                    "No supported intent matched. This MCP tool is deliberately "
-                    "regex-driven (no LLM); the supported phrases are listed in "
-                    "`available_intents`."
+                    "No capability matched the question. This MCP is deterministic "
+                    "and regex-driven; see `closest_capabilities` for the nearest "
+                    "registry entries by token overlap and `available_intents` for "
+                    "the full registry. Add a new entry to "
+                    "research_registry.research.capabilities.CAPABILITY_REGISTRY "
+                    "to extend coverage."
                 ),
-                "available_intents": list(_AVAILABLE_INTENTS),
+                "closest_capabilities": closest,
+                "missing_capability_description": (
+                    "No registry capability matched this question's keywords. "
+                    "Either rephrase using one of the example_questions in the "
+                    "closest capabilities, or file a new capability entry."
+                ),
+                "available_intents": available_intents(),
                 "warnings": [],
             }
         )
 
-    if intent == "timing_by_vix_regime":
-        underlying = execution_timing_by_vix_regime(
-            context=context,
-            timing_root=timing_root,
-            regime_history=regime_history,
-            insufficient_sample_threshold=insufficient_sample_threshold,
-        )
+    if not matched.is_implemented():
         return _jsonable(
             {
-                "status": underlying.get("status", "OK"),
+                "status": "NEEDS_CAPABILITY",
                 "tool": "answer_research_question",
-                "queried_at": _now_utc(),
+                "queried_at": queried_at,
                 "question": question,
-                "intent": intent,
-                "routed_to": "execution_timing_by_vix_regime",
-                "answer": underlying,
-                "warnings": underlying.get("warnings") or [],
+                "intent": matched.name,
+                "routed_to": None,
+                "matched_capability": capability_summary(matched),
+                "suggested_next_build": matched.suggested_next_build,
+                "reason": (
+                    f"Capability {matched.name!r} matched the question, but no "
+                    "MCP tool is wired to answer it yet. See "
+                    "`suggested_next_build` for the concrete next step."
+                ),
+                "available_intents": available_intents(),
+                "warnings": [
+                    f"capability {matched.name!r} is recognised but not yet implemented"
+                ],
             }
         )
 
-    # Defensive: should be unreachable because _classify_intent is whitelisted.
+    artifact_status = check_artifacts(matched.required_artifact_globs)
+    if not artifact_status.ready:
+        return _jsonable(
+            {
+                "status": "NEEDS_DATA",
+                "tool": "answer_research_question",
+                "queried_at": queried_at,
+                "question": question,
+                "intent": matched.name,
+                "routed_to": matched.tool_name,
+                "matched_capability": capability_summary(matched),
+                "missing_artifacts": list(artifact_status.missing),
+                "matched_artifacts": list(artifact_status.matched),
+                "reason": (
+                    f"Capability {matched.name!r} is implemented but at least one "
+                    "required artifact is missing on disk. See `missing_artifacts` "
+                    "for the exact paths to produce before re-running."
+                ),
+                "available_intents": available_intents(),
+                "warnings": [
+                    f"missing artifact: {pattern}" for pattern in artifact_status.missing
+                ],
+            }
+        )
+
+    underlying = _route_to_tool(
+        matched.tool_name,
+        matched.tool_kwargs,
+        context=context,
+        pass_question=None,
+        pass_through={
+            "timing_root": timing_root,
+            "regime_history": regime_history,
+            "insufficient_sample_threshold": insufficient_sample_threshold,
+            "outputs_root": outputs_root,
+        },
+    )
+
     return _jsonable(
         {
-            "status": "UNSUPPORTED_INTENT",
+            "status": underlying.get("status", "OK"),
             "tool": "answer_research_question",
-            "queried_at": _now_utc(),
+            "queried_at": queried_at,
             "question": question,
-            "intent": intent,
-            "reason": f"intent {intent!r} is matched but not yet wired to a tool",
-            "available_intents": list(_AVAILABLE_INTENTS),
-            "warnings": [],
+            "intent": matched.name,
+            "routed_to": matched.tool_name,
+            "matched_capability": capability_summary(matched),
+            "answer": underlying,
+            "available_intents": available_intents(),
+            "warnings": underlying.get("warnings") or [],
         }
     )

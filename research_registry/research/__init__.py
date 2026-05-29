@@ -6,6 +6,17 @@ the system (timing replay outputs, VIX regime history) and return structured
 joins for the MCP tool layer to surface.
 """
 
+from research_registry.research.capabilities import (
+    CAPABILITY_REGISTRY,
+    ArtifactStatus,
+    Capability,
+    ClassificationResult,
+    available_intents,
+    capability_summary,
+    check_artifacts,
+    classify_question,
+    closest_capabilities,
+)
 from research_registry.research.timing_regime import (
     INSUFFICIENT_SAMPLE_THRESHOLD,
     JoinedDay,
@@ -21,6 +32,10 @@ from research_registry.research.timing_regime import (
 )
 
 __all__ = [
+    "ArtifactStatus",
+    "CAPABILITY_REGISTRY",
+    "Capability",
+    "ClassificationResult",
     "INSUFFICIENT_SAMPLE_THRESHOLD",
     "JoinedDay",
     "RegimeAggregate",
@@ -28,6 +43,11 @@ __all__ = [
     "TimingDay",
     "aggregate_by_regime",
     "answer_timing_by_regime_question",
+    "available_intents",
+    "capability_summary",
+    "check_artifacts",
+    "classify_question",
+    "closest_capabilities",
     "join_timing_to_regime",
     "load_timing_summaries",
     "load_vix_regime_history",

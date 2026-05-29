@@ -244,10 +244,67 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
         md.append("")
         md.append(f"Missing columns: `{missing_cols}`")
 
+    if status == "NEEDS_DATA":
+        missing = payload.get("missing_artifacts") or []
+        matched_cap = payload.get("matched_capability") or {}
+        lines.append("")
+        lines.append(f"Capability matched: {matched_cap.get('name', '?')}")
+        lines.append("Required artifacts missing:")
+        for path in missing:
+            lines.append(f"  - {path}")
+        lines.append("")
+        lines.append("Next: produce the missing artifact(s), then re-ask the same question.")
+        md.append("")
+        md.append(f"## Required artifacts missing for `{matched_cap.get('name', '?')}`")
+        md.append("")
+        for path in missing:
+            md.append(f"- `{path}`")
+
+    if status == "NEEDS_CAPABILITY":
+        matched_cap = payload.get("matched_capability") or {}
+        suggested = payload.get("suggested_next_build")
+        lines.append("")
+        lines.append(
+            f"Capability matched: {matched_cap.get('name', '?')} "
+            "(recognised but not yet implemented)"
+        )
+        if matched_cap.get("description"):
+            lines.append("")
+            lines.append(f"  {matched_cap['description']}")
+        if suggested:
+            lines.append("")
+            lines.append("Suggested next build:")
+            lines.append(f"  {suggested}")
+        md.append("")
+        md.append(f"## Capability `{matched_cap.get('name', '?')}` — not yet implemented")
+        md.append("")
+        if matched_cap.get("description"):
+            md.append(matched_cap["description"])
+            md.append("")
+        if suggested:
+            md.append("### Suggested next build")
+            md.append("")
+            md.append(suggested)
+
     if status == "UNSUPPORTED_INTENT":
+        closest = payload.get("closest_capabilities") or []
         lines.append("")
         lines.append("This gateway is deliberately regex-driven (no LLM).")
+        if closest:
+            lines.append("")
+            lines.append("Closest capabilities (by token overlap):")
+            for entry in closest:
+                lines.append(
+                    f"  - {entry.get('name', '?')}: "
+                    f"{entry.get('description', '')[:80]}"
+                )
+        lines.append("")
         lines.append("Supported phrasings:")
+        md.append("")
+        md.append("## Closest capabilities")
+        md.append("")
+        for entry in closest:
+            md.append(f"- **{entry.get('name', '?')}** — {entry.get('description', '')}")
         md.append("")
         md.append("## Supported phrasings")
         md.append("")
@@ -286,9 +343,14 @@ def _render_row(cells: list[str], widths: list[int]) -> str:
 def status_to_exit_code(status: str) -> int:
     if status == "OK":
         return 0
-    if status in {"NO_TIMING_DATA", "NO_REGIME_DATA", "BAD_REGIME_SCHEMA"}:
+    if status in {
+        "NO_TIMING_DATA",
+        "NO_REGIME_DATA",
+        "BAD_REGIME_SCHEMA",
+        "NEEDS_DATA",
+    }:
         return 2
-    if status == "UNSUPPORTED_INTENT":
+    if status in {"UNSUPPORTED_INTENT", "NEEDS_CAPABILITY"}:
         return 3
     # Unknown statuses still exit clean — the answer was returned cleanly,
     # the operator just needs to interpret it.
