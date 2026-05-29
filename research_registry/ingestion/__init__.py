@@ -3,6 +3,7 @@ from research_registry.ingestion.families import (
     ArtifactFamilyAdapter,
     AttributionArtifactAdapter,
     AuditArtifactAdapter,
+    ExecutionTimingArtifactAdapter,
     ExposureIntelligenceArtifactAdapter,
     GovernanceArtifactAdapter,
     HydrationFinding,
@@ -11,6 +12,7 @@ from research_registry.ingestion.families import (
     RegimeIntelligenceArtifactAdapter,
     ShadowEvaluationArtifactAdapter,
     ValidationArtifactAdapter,
+    VixRegimeHistoryAdapter,
     ingest_artifact_family,
 )
 
@@ -21,6 +23,7 @@ __all__ = [
     "AttributionArtifactAdapter",
     "AuditArtifactAdapter",
     "EnvelopeJsonAdapter",
+    "ExecutionTimingArtifactAdapter",
     "ExposureIntelligenceArtifactAdapter",
     "GovernanceArtifactAdapter",
     "GrandfatheredArtifactAdapter",
@@ -30,5 +33,6 @@ __all__ = [
     "RegimeIntelligenceArtifactAdapter",
     "ShadowEvaluationArtifactAdapter",
     "ValidationArtifactAdapter",
+    "VixRegimeHistoryAdapter",
     "ingest_artifact_family",
 ]

@@ -147,4 +147,42 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "name": "execution_timing_by_vix_regime",
+        "description": (
+            "Stratify the latest execution-timing replay opportunities by VIX regime. "
+            "Joins outputs/research/execution_timing/<RUN_DATE>/per_trade_timing.json "
+            "to outputs/vix_regime/regime_history.csv on execution_date and returns "
+            "per-regime, per-offset mean/median opportunity in USD and bps. Fails "
+            "closed (NO_TIMING_DATA / NO_REGIME_DATA) when artifacts are missing; "
+            "tags regimes with fewer than `insufficient_sample_threshold` days."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "timing_root": {"type": "string", "default": "outputs/research/execution_timing"},
+                "regime_history": {"type": "string", "default": "outputs/vix_regime/regime_history.csv"},
+                "insufficient_sample_threshold": {"type": "integer", "default": 5, "minimum": 1},
+            },
+        },
+    },
+    {
+        "name": "answer_research_question",
+        "description": (
+            "Deterministic NL wrapper. Matches the question against a regex whitelist "
+            "(no LLM call, no external service) and routes to the appropriate "
+            "structured tool. Currently supports the timing + VIX regime intent only; "
+            "returns UNSUPPORTED_INTENT with the available phrases for any other input."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "timing_root": {"type": "string"},
+                "regime_history": {"type": "string"},
+                "insufficient_sample_threshold": {"type": "integer", "minimum": 1},
+            },
+            "required": ["question"],
+        },
+    },
 ]

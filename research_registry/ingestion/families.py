@@ -696,6 +696,144 @@ class GovernanceDocArtifactAdapter(ArtifactFamilyAdapter):
         return HydrationResult(envelopes=envelopes)
 
 
+class ExecutionTimingArtifactAdapter(ArtifactFamilyAdapter):
+    """Hydrate one ``outputs/research/execution_timing/<RUN_DATE>/`` directory.
+
+    Indexes the timing_summary + per_trade_timing pair as a single research
+    artifact so it shows up in ``registry_summary`` / ``query_registry`` and
+    so downstream lineage edges can reference it. Confidence stays at LOW
+    (grandfathered) because the timing replay engine does not yet emit a
+    SEM-001 production envelope.
+    """
+
+    family = "execution_timing"
+
+    def hydrate_path(self, path: str | Path) -> HydrationResult:
+        run_dir = Path(path)
+        if run_dir.is_file():
+            run_dir = run_dir.parent
+        summary_path = run_dir / "timing_summary.json"
+        per_trade_path = run_dir / "per_trade_timing.json"
+        source_paths = _existing_files([summary_path, per_trade_path])
+        if not source_paths:
+            return HydrationResult(
+                findings=[
+                    HydrationFinding(
+                        "EXECUTION_TIMING_ARTIFACT_MISSING",
+                        "HIGH",
+                        f"no execution_timing artifacts under {run_dir}",
+                        str(path),
+                    )
+                ]
+            )
+        summary = _safe_json(summary_path) or {}
+        run_date = (
+            str(summary.get("run_date"))
+            if isinstance(summary, dict) and summary.get("run_date")
+            else run_dir.name
+        )
+        trade_date = None
+        execution_dates = summary.get("execution_dates") if isinstance(summary, dict) else None
+        if isinstance(execution_dates, list) and execution_dates:
+            trade_date = str(execution_dates[-1])[:10]
+        coverage_summary = (
+            summary.get("coverage_summary") if isinstance(summary, dict) else None
+        ) or {}
+        as_of = _normalize_as_of(summary.get("generated_at") if isinstance(summary, dict) else None)
+        envelope = _artifact_envelope(
+            path=run_dir,
+            source_paths=source_paths,
+            family=self.family,
+            summary=f"Execution timing replay run {run_date} ({coverage_summary.get('days_replayed', 0)} days).",
+            trade_date=trade_date,
+            as_of=as_of,
+            data={
+                "run_date": run_date,
+                "baseline_offset": summary.get("baseline_offset"),
+                "cache_key_version": summary.get("cache_key_version"),
+                "offsets": summary.get("offsets") or [],
+                "execution_dates": summary.get("execution_dates") or [],
+                "plan_dates": summary.get("plan_dates") or [],
+                "coverage_summary": coverage_summary,
+                "artifact_role": "execution_timing_replay",
+            },
+        )
+        return HydrationResult(envelopes=[envelope])
+
+
+class VixRegimeHistoryAdapter(ArtifactFamilyAdapter):
+    """Hydrate ``outputs/vix_regime/regime_history.csv``.
+
+    Stores the row count and the latest observed regime as registry data so
+    the new ``execution_timing_by_vix_regime`` tool's data source is visible
+    in ``registry_summary``.
+    """
+
+    family = "vix_regime_history"
+
+    def hydrate_path(self, path: str | Path) -> HydrationResult:
+        artifact_path = Path(path)
+        if artifact_path.is_dir():
+            artifact_path = artifact_path / "regime_history.csv"
+        if not artifact_path.exists():
+            return HydrationResult(
+                findings=[
+                    HydrationFinding(
+                        "VIX_REGIME_HISTORY_MISSING",
+                        "HIGH",
+                        f"vix_regime_history missing: {artifact_path}",
+                        str(path),
+                    )
+                ]
+            )
+        rows: list[dict[str, Any]] = []
+        try:
+            text = artifact_path.read_text(encoding="utf-8")
+            rows = list(csv.DictReader(text.splitlines()))
+        except Exception as exc:
+            return HydrationResult(
+                findings=[
+                    HydrationFinding(
+                        "VIX_REGIME_HISTORY_MALFORMED",
+                        "HIGH",
+                        str(exc),
+                        str(artifact_path),
+                    )
+                ]
+            )
+        latest_row = rows[-1] if rows else {}
+        latest_as_of = (latest_row.get("as_of") or "").strip()
+        trade_date = latest_as_of[:10] if latest_as_of else None
+        observed_regimes = sorted({(r.get("regime") or "").strip() for r in rows if (r.get("regime") or "").strip()})
+        as_of = _normalize_as_of(latest_as_of)
+        envelope = _artifact_envelope(
+            path=artifact_path,
+            source_paths=[artifact_path],
+            family=self.family,
+            summary=f"VIX regime history ({len(rows)} rows; regimes observed: {observed_regimes}).",
+            trade_date=trade_date,
+            as_of=as_of,
+            data={
+                "row_count": len(rows),
+                "latest_as_of": trade_date,
+                "latest_regime": (latest_row.get("regime") or "").strip() or None,
+                "latest_vix": _safe_float(latest_row.get("vix")),
+                "observed_regimes": observed_regimes,
+                "artifact_role": "vix_regime_history",
+            },
+        )
+        return HydrationResult(envelopes=[envelope])
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 FAMILY_ADAPTERS = {
     "generic": ArtifactFamilyAdapter,
     "grandfathered": ArtifactFamilyAdapter,
@@ -711,6 +849,8 @@ FAMILY_ADAPTERS = {
     "execution_integrity": ExecutionIntegrityArtifactAdapter,
     "research_packet": ResearchPacketArtifactAdapter,
     "governance_doc": GovernanceDocArtifactAdapter,
+    "execution_timing": ExecutionTimingArtifactAdapter,
+    "vix_regime_history": VixRegimeHistoryAdapter,
 }
 
 

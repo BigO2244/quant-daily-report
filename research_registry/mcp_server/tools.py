@@ -14,6 +14,12 @@ from research_registry.ingestion import ingest_artifact_family
 from research_registry.mcp_server.schemas import TOOL_DEFINITIONS
 from research_registry.query import RegistryQuery
 from research_registry.registry import SQLiteResearchRegistry
+from research_registry.research.timing_regime import (
+    DEFAULT_REGIME_HISTORY,
+    DEFAULT_TIMING_ROOT,
+    INSUFFICIENT_SAMPLE_THRESHOLD,
+    answer_timing_by_regime_question,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +63,8 @@ def call_tool(name: str, arguments: dict[str, Any] | None = None, context: ToolC
         "morning_cio_brief": morning_cio_brief,
         "promotion_readiness": promotion_readiness,
         "anomaly_report": anomaly_report,
+        "execution_timing_by_vix_regime": execution_timing_by_vix_regime,
+        "answer_research_question": answer_research_question,
     }
     if name not in dispatch:
         return _response("ERROR", _resolve_db_path(arguments, context), warnings=[f"unknown tool: {name}"])
@@ -1429,3 +1437,152 @@ def _nested_get(payload: dict[str, Any], path: list[str]) -> Any:
             return None
         current = current.get(key)
     return current
+
+
+# ---------------------------------------------------------------------------
+# Phase-7 research-question tools (timing × VIX regime).
+#
+# Deliberately read-only and deterministic: no DB writes, no network, no LLM,
+# and every "missing data" branch returns a structured status the caller can
+# render verbatim (NO_TIMING_DATA / NO_REGIME_DATA / UNSUPPORTED_INTENT).
+# ---------------------------------------------------------------------------
+
+
+def execution_timing_by_vix_regime(
+    *,
+    context: ToolContext | None = None,
+    timing_root: str | None = None,
+    regime_history: str | None = None,
+    insufficient_sample_threshold: int | None = None,
+) -> dict[str, Any]:
+    """Stratify timing-replay opportunities by VIX regime.
+
+    Joins the most recent ``outputs/research/execution_timing/<RUN_DATE>``
+    replay output to ``outputs/vix_regime/regime_history.csv`` on
+    ``execution_date`` and returns per-regime, per-offset opportunity
+    statistics (mean/median in USD and bps).
+
+    Fail-closed: ``status == "NO_TIMING_DATA"`` if no replay has been run;
+    ``status == "NO_REGIME_DATA"`` if regime history is missing. Buckets
+    with fewer than the configured threshold of days are tagged
+    ``insufficient_sample`` and excluded from any significance claim.
+    """
+    timing_path = Path(timing_root) if timing_root else DEFAULT_TIMING_ROOT
+    regime_path = Path(regime_history) if regime_history else DEFAULT_REGIME_HISTORY
+    threshold = int(insufficient_sample_threshold) if insufficient_sample_threshold is not None else INSUFFICIENT_SAMPLE_THRESHOLD
+
+    answer = answer_timing_by_regime_question(
+        timing_root=timing_path,
+        regime_history=regime_path,
+        threshold=threshold,
+    )
+    answer["tool"] = "execution_timing_by_vix_regime"
+    answer["queried_at"] = _now_utc()
+    return _jsonable(answer)
+
+
+# Whitelist of phrases that route to a supported research question. Order
+# matters only for transparency; all matches are checked independently. The
+# matcher is intentionally regex-based and English-only — no semantic
+# parsing, no LLM call. Adding a new pattern is the gate for adding a new
+# answerable question.
+_TIMING_REGIME_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"timing.*(vix|regime)", re.IGNORECASE),
+    re.compile(r"(vix|regime).*timing", re.IGNORECASE),
+    re.compile(r"high\s*vix.*timing", re.IGNORECASE),
+    re.compile(r"timing.*high\s*vix", re.IGNORECASE),
+    re.compile(r"execution[-_\s]*timing.*(vix|regime)", re.IGNORECASE),
+)
+
+_AVAILABLE_INTENTS: tuple[dict[str, Any], ...] = (
+    {
+        "intent": "timing_by_vix_regime",
+        "matches": [
+            "timing + VIX",
+            "timing + regime",
+            "high VIX + timing",
+            "execution timing + regime",
+        ],
+        "routed_tool": "execution_timing_by_vix_regime",
+        "example_question": "Does execution timing matter more in high-VIX regimes?",
+    },
+)
+
+
+def _classify_intent(question: str) -> str | None:
+    text = (question or "").strip()
+    if not text:
+        return None
+    for pattern in _TIMING_REGIME_PATTERNS:
+        if pattern.search(text):
+            return "timing_by_vix_regime"
+    return None
+
+
+def answer_research_question(
+    *,
+    context: ToolContext | None = None,
+    question: str | None = None,
+    timing_root: str | None = None,
+    regime_history: str | None = None,
+    insufficient_sample_threshold: int | None = None,
+) -> dict[str, Any]:
+    """Deterministic NL wrapper over the whitelist of supported intents.
+
+    The matcher is regex-only — no LLM call, no semantic parsing, no
+    external service. Unsupported questions return
+    ``status="UNSUPPORTED_INTENT"`` along with the list of phrases the
+    matcher would have routed, so the caller can iterate on phrasing.
+    """
+    intent = _classify_intent(question or "")
+    if intent is None:
+        return _jsonable(
+            {
+                "status": "UNSUPPORTED_INTENT",
+                "tool": "answer_research_question",
+                "queried_at": _now_utc(),
+                "question": question,
+                "intent": None,
+                "reason": (
+                    "No supported intent matched. This MCP tool is deliberately "
+                    "regex-driven (no LLM); the supported phrases are listed in "
+                    "`available_intents`."
+                ),
+                "available_intents": list(_AVAILABLE_INTENTS),
+                "warnings": [],
+            }
+        )
+
+    if intent == "timing_by_vix_regime":
+        underlying = execution_timing_by_vix_regime(
+            context=context,
+            timing_root=timing_root,
+            regime_history=regime_history,
+            insufficient_sample_threshold=insufficient_sample_threshold,
+        )
+        return _jsonable(
+            {
+                "status": underlying.get("status", "OK"),
+                "tool": "answer_research_question",
+                "queried_at": _now_utc(),
+                "question": question,
+                "intent": intent,
+                "routed_to": "execution_timing_by_vix_regime",
+                "answer": underlying,
+                "warnings": underlying.get("warnings") or [],
+            }
+        )
+
+    # Defensive: should be unreachable because _classify_intent is whitelisted.
+    return _jsonable(
+        {
+            "status": "UNSUPPORTED_INTENT",
+            "tool": "answer_research_question",
+            "queried_at": _now_utc(),
+            "question": question,
+            "intent": intent,
+            "reason": f"intent {intent!r} is matched but not yet wired to a tool",
+            "available_intents": list(_AVAILABLE_INTENTS),
+            "warnings": [],
+        }
+    )
