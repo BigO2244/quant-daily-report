@@ -78,6 +78,7 @@ weekly_quant_research/*.md
 data/fundamental/
 data/macro/
 data/cache/
+data/research_cache/
 *.csv
 *.parquet
 # Loose root-level scripts and artifacts
