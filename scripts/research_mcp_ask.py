@@ -309,6 +309,85 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             md.append(attribution_narrative)
             md.append("```")
 
+    # OK path for promotion_readiness (strategy-aware) — render per-strategy
+    # panel + recommendation + blockers + explanation. Detect via the
+    # combination of `strategy_panels` (also used by shadow / attribution)
+    # PLUS a `recommendation` field at the strategy-panel level, which is
+    # unique to promotion_readiness.
+    promo_panels = inner.get("strategy_panels") if isinstance(inner.get("strategy_panels"), dict) else None
+    is_promotion_readiness = (
+        status == "OK"
+        and promo_panels
+        and any(
+            isinstance(p, dict) and "recommendation" in p and "blockers" in p
+            for p in promo_panels.values()
+        )
+    )
+    if is_promotion_readiness:
+        trade_date = inner.get("strategy_trade_date") or inner.get("trade_date")
+        closest = inner.get("closest_to_promotion")
+        has_phase_c = inner.get("has_phase_c_sidecar")
+        lines.append("")
+        if trade_date:
+            lines.append(f"Trade date: {trade_date}   Closest to promotion: {closest or 'n/a'}")
+        if has_phase_c is False:
+            lines.append("Phase C sidecar: missing (recommendation derived from shadow_evaluation + stability_analysis only)")
+        elif has_phase_c is True:
+            lines.append("Phase C sidecar: present (authoritative readiness_state used where available)")
+        lines.append("")
+        header = ["strategy", "recommendation", "conf", "excess_vs_spy", "max_dd", "vol", "valid_obs"]
+        col_widths = [max(len(h), 18) for h in header]
+        lines.append(_render_row(header, col_widths))
+        lines.append(_render_row(["-" * w for w in col_widths], col_widths))
+        md.append("")
+        md.append(f"## Promotion readiness — trade date `{trade_date or '?'}`")
+        md.append("")
+        if closest:
+            md.append(f"**Closest to promotion:** `{closest}`  ")
+        md.append(f"**Phase C sidecar:** `{'present' if has_phase_c else 'missing'}`  ")
+        md.append("")
+        md.append("| strategy | recommendation | confidence | excess_vs_spy | max_drawdown | realized_vol | valid_obs_windows |")
+        md.append("| --- | --- | --- | ---: | ---: | ---: | ---: |")
+        ranked = inner.get("ranking_by_recommendation") or sorted(promo_panels.keys())
+        for slug in ranked:
+            panel = promo_panels.get(slug) or {}
+            metrics = panel.get("metrics") or {}
+            row = [
+                slug,
+                str(panel.get("recommendation") or "?"),
+                str(panel.get("confidence") or "?"),
+                _fmt_signed_pct(metrics.get("excess_return_vs_spy")),
+                _fmt_signed_pct(metrics.get("max_drawdown")),
+                _fmt_float(metrics.get("realized_volatility_ann")),
+                str(panel.get("valid_observation_windows") or 0),
+            ]
+            lines.append(_render_row(row, col_widths))
+            md.append("| " + " | ".join(row) + " |")
+        # Per-strategy blockers + explanation.
+        for slug in ranked:
+            panel = promo_panels.get(slug) or {}
+            blockers = panel.get("blockers") or []
+            explanation = panel.get("explanation") or ""
+            if blockers or explanation:
+                lines.append("")
+                lines.append(f"  {slug}:")
+                if blockers:
+                    lines.append(f"    blockers: {list(blockers)}")
+                if explanation:
+                    lines.append(f"    explanation: {explanation}")
+        # Strategy-level warnings (separate from the top-level warnings list).
+        strat_warnings = inner.get("strategy_warnings") or []
+        if strat_warnings:
+            lines.append("")
+            lines.append("Strategy warnings:")
+            for warning in strat_warnings:
+                lines.append(f"  - {warning}")
+            md.append("")
+            md.append("### Strategy warnings")
+            md.append("")
+            for warning in strat_warnings:
+                md.append(f"- {warning}")
+
     # OK path for stable_window_evaluation — render per-policy dispersion +
     # promotion-validity blocks + caveats.
     policy_panels = inner.get("policy_panels")

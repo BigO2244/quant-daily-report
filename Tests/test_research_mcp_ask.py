@@ -337,6 +337,142 @@ def test_render_attribution_ok_shows_narrative():
     assert "```" in md
 
 
+def _promotion_readiness_payload() -> dict:
+    """Synthesized strategy-aware promotion-readiness payload."""
+    return {
+        "status": "OK",
+        "tool": "answer_research_question",
+        "question": "Compare Polaris and Orion promotion readiness.",
+        "intent": "promotion_readiness",
+        "routed_to": "promotion_readiness",
+        "warnings": [],
+        "answer": {
+            "status": "OK",
+            "strategy_trade_date": "2026-04-30",
+            "closest_to_promotion": "caerus_polaris",
+            "has_phase_c_sidecar": False,
+            "ranking_by_recommendation": ["caerus_polaris", "caerus_orion"],
+            "strategy_panels": {
+                "caerus_polaris": {
+                    "strategy_slug": "caerus_polaris",
+                    "strategy_name": "Caerus Polaris",
+                    "readiness_state": None,
+                    "phase_c_confidence": None,
+                    "recommendation": "hold",
+                    "confidence": "LOW",
+                    "reason_codes": [],
+                    "blockers": [
+                        "metric_unavailable:realized_volatility_ann",
+                        "metric_unavailable:max_drawdown",
+                        "insufficient_observation_window:0/20",
+                    ],
+                    "metrics": {
+                        "data_status": "OK",
+                        "excess_return_vs_spy": 0.0297,
+                        "max_drawdown": None,
+                        "realized_volatility_ann": None,
+                        "avg_turnover": 0.10,
+                    },
+                    "valid_observation_windows": 0,
+                    "explanation": "Excess return vs SPY is +0.0297. Hold pending: ...",
+                    "unavailable_metrics": ["max_drawdown", "realized_volatility_ann"],
+                },
+                "caerus_orion": {
+                    "strategy_slug": "caerus_orion",
+                    "strategy_name": "Caerus Orion",
+                    "readiness_state": None,
+                    "phase_c_confidence": None,
+                    "recommendation": "hold",
+                    "confidence": "LOW",
+                    "reason_codes": [],
+                    "blockers": [
+                        "metric_unavailable:realized_volatility_ann",
+                        "metric_unavailable:max_drawdown",
+                    ],
+                    "metrics": {
+                        "data_status": "OK",
+                        "excess_return_vs_spy": 0.0168,
+                        "max_drawdown": None,
+                        "realized_volatility_ann": None,
+                        "avg_turnover": 0.10,
+                    },
+                    "valid_observation_windows": 0,
+                    "explanation": "Excess return vs SPY is +0.0168. Hold pending: ...",
+                    "unavailable_metrics": ["max_drawdown", "realized_volatility_ann"],
+                },
+            },
+            "strategy_warnings": [
+                "no_promotion_readiness_sidecar: recommendation derived from shadow_evaluation metrics + per-strategy stability_analysis only",
+            ],
+        },
+    }
+
+
+def test_render_promotion_readiness_shows_per_strategy_table():
+    human, md = rma.render_human_and_markdown(
+        "Compare Polaris and Orion promotion readiness.",
+        _promotion_readiness_payload(),
+    )
+    # Table header + per-strategy rows.
+    assert "strategy" in human and "recommendation" in human
+    assert "caerus_polaris" in human
+    assert "caerus_orion" in human
+    # Recommendation tier rendered.
+    assert "hold" in human
+    # Excess vs SPY in signed-percent format.
+    assert "+2.97%" in human
+    assert "+1.68%" in human
+    # Trade date + closest-to-promotion header.
+    assert "Trade date: 2026-04-30" in human
+    assert "Closest to promotion: caerus_polaris" in human
+    # Markdown variant has a panel section.
+    assert "Promotion readiness — trade date `2026-04-30`" in md
+    assert "| caerus_polaris |" in md
+
+
+def test_render_promotion_readiness_shows_phase_c_missing_note():
+    human, _ = rma.render_human_and_markdown(
+        "Which strategy is closest to promotion?",
+        _promotion_readiness_payload(),
+    )
+    assert "Phase C sidecar: missing" in human
+    assert "shadow_evaluation + stability_analysis only" in human
+
+
+def test_render_promotion_readiness_shows_blockers_and_explanation():
+    human, _ = rma.render_human_and_markdown(
+        "Why is Polaris not promotion-ready?",
+        _promotion_readiness_payload(),
+    )
+    # Per-strategy block.
+    assert "caerus_polaris:" in human
+    assert "blockers:" in human
+    assert "metric_unavailable:realized_volatility_ann" in human
+    assert "explanation:" in human
+
+
+def test_render_promotion_readiness_shows_strategy_warnings():
+    human, md = rma.render_human_and_markdown(
+        "Compare strategies.",
+        _promotion_readiness_payload(),
+    )
+    assert "Strategy warnings:" in human
+    assert "no_promotion_readiness_sidecar" in human
+    assert "Strategy warnings" in md
+
+
+def test_render_promotion_readiness_with_phase_c_present():
+    payload = _promotion_readiness_payload()
+    payload["answer"]["has_phase_c_sidecar"] = True
+    payload["answer"]["strategy_panels"]["caerus_polaris"]["readiness_state"] = "CANDIDATE_FOR_CAPITAL"
+    payload["answer"]["strategy_panels"]["caerus_polaris"]["recommendation"] = "promote"
+    payload["answer"]["strategy_panels"]["caerus_polaris"]["confidence"] = "HIGH"
+    human, _ = rma.render_human_and_markdown("Compare strategies.", payload)
+    assert "Phase C sidecar: present" in human
+    assert "promote" in human
+    assert "HIGH" in human
+
+
 def test_render_unsupported_includes_closest_capabilities():
     payload = {
         "status": "UNSUPPORTED_INTENT",
