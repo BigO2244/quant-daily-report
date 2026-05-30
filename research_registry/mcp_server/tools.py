@@ -19,6 +19,10 @@ from research_registry.research.attribution import (
     analyse_attribution,
     attribution_summary_to_dict,
 )
+from research_registry.research.promotion_readiness import (
+    assess_strategy_readiness,
+    strategy_promotion_readiness_to_dict,
+)
 from research_registry.research.stable_window_evaluation import (
     DEFAULT_RESEARCH_ROOT as DEFAULT_WINDOW_RESEARCH_ROOT,
     DEFAULT_STABLE_WINDOW_ROOT,
@@ -592,7 +596,30 @@ def promotion_readiness(
     context: ToolContext | None = None,
     outputs_root: str | None = None,
     lookback_days: int | None = 5,
+    question: str | None = None,
+    strategies: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Promotion-readiness assessment.
+
+    Backward compatible: all prior fields (``current_leader``,
+    ``valid_observation_window_count``, ``cumulative_excess_vs_spy``,
+    ``confidence_level``, ``recommendation``, ``phase_c_readiness``,
+    ``evidence``, ``guardrail``) remain present. The new strategy-
+    aware fields are *additive*:
+
+    * ``strategy_panels`` — per-strategy readiness panel keyed by
+      caerus_<name> slug.
+    * ``closest_to_promotion`` — best slug under the recommendation
+      ranking (``promote`` > ``hold`` > ``research_only`` >
+      ``insufficient_evidence``), tie-broken by excess vs SPY.
+    * ``ranking_by_recommendation`` — ordered slug list.
+    * ``has_phase_c_sidecar`` — whether ``promotion_readiness.json``
+      was present.
+    * ``requested_strategies`` / ``missing_strategies`` — for question-
+      filtered calls.
+    * ``strategy_warnings`` — per-strategy caveats (kept separate from
+      the existing top-level ``warnings`` field for clarity).
+    """
     context = context or ToolContext()
     root = Path(outputs_root) if outputs_root else Path("outputs")
     lookback = max(1, int(lookback_days or 5))
@@ -622,6 +649,19 @@ def promotion_readiness(
     else:
         confidence = "LOW"
         recommendation = "NOT_READY"
+
+    # ---- New strategy-aware block (additive; never demotes the legacy
+    # top-level status). The strategy-level status is exposed as a
+    # sub-field so existing consumers see the same OK envelope they
+    # always did.
+    strategy_answer = assess_strategy_readiness(
+        outputs_root=root,
+        question=question,
+        strategies=strategies,
+    )
+    strategy_dict = strategy_promotion_readiness_to_dict(strategy_answer)
+    # ---------------------------------------------------------------------
+
     return _response(
         "OK",
         context.db_path,
@@ -638,6 +678,18 @@ def promotion_readiness(
         phase_c_readiness=phase_c_states,
         evidence=history,
         guardrail="capital deployment is never recommended without a sufficient artifact-backed observation window",
+        # New strategy-aware fields (all additive):
+        strategy_status=strategy_dict["status"],
+        strategy_panels=strategy_dict["strategy_panels"],
+        closest_to_promotion=strategy_dict["closest_to_promotion"],
+        ranking_by_recommendation=strategy_dict["ranking_by_recommendation"],
+        has_phase_c_sidecar=strategy_dict["has_phase_c_sidecar"],
+        requested_strategies=strategy_dict["requested_strategies"],
+        available_strategies=strategy_dict["available_strategies"],
+        missing_strategies=strategy_dict["missing_strategies"],
+        strategy_warnings=strategy_dict["warnings"],
+        strategy_source_paths=strategy_dict["source_paths"],
+        strategy_trade_date=strategy_dict["trade_date"],
     )
 
 
@@ -1842,6 +1894,7 @@ def answer_research_question(
         "execution_timing_summary",
         "shadow_comparison",
         "attribution_analysis",
+        "promotion_readiness",
     }
     underlying = _route_to_tool(
         matched.tool_name,

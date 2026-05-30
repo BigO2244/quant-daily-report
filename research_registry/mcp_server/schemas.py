@@ -126,12 +126,30 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "promotion_readiness",
-        "description": "Assess challenger readiness from shadow artifacts only.",
+        "description": (
+            "Per-strategy promotion-readiness assessment from shadow artifacts. "
+            "Reads outputs/shadow_candidates/<DATE>/shadow_evaluation.json + the "
+            "FR-028 Phase C sidecar (promotion_readiness.json) when present + "
+            "the per-strategy stability_analysis.json. Returns per-strategy "
+            "panels with recommendation tier (promote / hold / research_only / "
+            "insufficient_evidence), confidence, blockers, reason codes, "
+            "gating metrics, and an explanation grounded in artifacts. The "
+            "generic top-level fields (current_leader, recommendation, "
+            "confidence_level, evidence) are preserved for backward "
+            "compatibility. Strategy names parsed from the question are "
+            "restricted to polaris|orion|lyra|leda; unknown → NEEDS_DATA."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "outputs_root": {"type": "string", "default": "outputs"},
                 "lookback_days": {"type": "integer", "default": 5, "minimum": 1},
+                "question": {"type": "string"},
+                "strategies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional explicit strategy names; supersedes question parsing.",
+                },
             },
         },
     },

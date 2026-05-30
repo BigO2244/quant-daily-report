@@ -23,6 +23,12 @@ from research_registry.research.capabilities import (
     classify_question,
     closest_capabilities,
 )
+from research_registry.research.promotion_readiness import (
+    MIN_VALID_OBSERVATION_WINDOWS,
+    StrategyPromotionReadinessAnswer,
+    assess_strategy_readiness,
+    strategy_promotion_readiness_to_dict,
+)
 from research_registry.research.stable_window_evaluation import (
     INSUFFICIENT_SAMPLE_THRESHOLD as STABLE_WINDOW_INSUFFICIENT_SAMPLE,
     StableWindowAnswer,
@@ -65,8 +71,10 @@ __all__ = [
     "Capability",
     "ClassificationResult",
     "INSUFFICIENT_SAMPLE_THRESHOLD",
+    "MIN_VALID_OBSERVATION_WINDOWS",
     "STABLE_WINDOW_INSUFFICIENT_SAMPLE",
     "StableWindowAnswer",
+    "StrategyPromotionReadinessAnswer",
     "JoinedDay",
     "KNOWN_STRATEGY_NAMES",
     "MIN_DAYS_FOR_RECOMMENDATION",
@@ -78,6 +86,7 @@ __all__ = [
     "aggregate_by_regime",
     "analyse_attribution",
     "answer_timing_by_regime_question",
+    "assess_strategy_readiness",
     "attribution_summary_to_dict",
     "available_intents",
     "capability_summary",
@@ -95,6 +104,7 @@ __all__ = [
     "select_timing_run",
     "shadow_comparison_to_dict",
     "stable_window_to_dict",
+    "strategy_promotion_readiness_to_dict",
     "strategy_slug",
     "summarise_timing",
     "timing_summary_to_dict",

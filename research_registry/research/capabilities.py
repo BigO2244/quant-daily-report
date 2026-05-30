@@ -162,27 +162,59 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
     Capability(
         name="promotion_readiness",
         description=(
-            "Assess challenger strategy readiness for promotion from shadow to "
-            "live based on persisted shadow artifacts."
+            "Per-strategy promotion-readiness assessment. Reads "
+            "outputs/shadow_candidates/<DATE>/shadow_evaluation.json plus the "
+            "FR-028 Phase C sidecar (promotion_readiness.json) when present, "
+            "and the per-strategy stability_analysis.json for valid-day flags. "
+            "Returns per-strategy panels with readiness_state, confidence, "
+            "blockers, gating metrics, recommendation tier "
+            "(promote/hold/research_only/insufficient_evidence), and an "
+            "explanation grounded in artifacts. Generic top-level fields "
+            "(current_leader, recommendation, evidence) preserved for "
+            "backward compatibility."
         ),
         patterns=(
-            r"ready\s+for\s+(promotion|promote|live|production)",
+            r"ready\s+for\s+(promotion|promote|live|production|capital)",
             r"(can|should|when)\s+(we\s+)?promote",
             r"promotion\s+ready",
             r"(orion|polaris|lyra|leda)\s+ready",
             r"is\s+(orion|polaris|lyra|leda)\s+ready",
+            r"compare\s+\w+\s+and\s+\w+\s+promotion",
+            r"\w+\s+vs\s+\w+\s+promotion",
+            r"which\s+strateg\w+\s+(is\s+)?closest\s+to\s+promotion",
+            r"closest\s+to\s+promotion",
+            r"why\s+(is|are)\s+(orion|polaris|lyra|leda)\s+not\s+(promotion[- ]?)?ready",
+            r"why\s+(can'?t|cannot)\s+(we\s+)?promote",
         ),
         required_artifact_globs=(),
         tool_name="promotion_readiness",
         tool_kwargs={},
-        output_fields=("current_leader", "observation_count", "recommendation"),
+        output_fields=(
+            "current_leader",
+            "recommendation",
+            "confidence_level",
+            "strategy_panels",
+            "closest_to_promotion",
+            "ranking_by_recommendation",
+            "has_phase_c_sidecar",
+            "requested_strategies",
+            "missing_strategies",
+        ),
         limitations=(
-            "Assesses challenger generically; per-strategy filtering by name is "
-            "not yet supported — the strategy name in the question is informational.",
+            "Per-strategy gating relies on shadow_evaluation.json fields; "
+            "max_drawdown and realized_volatility_ann are frequently null in "
+            "the source and become explicit blockers in the panel.",
+            "When the FR-028 Phase C sidecar (promotion_readiness.json) is "
+            "absent, the recommendation is derived from metrics + stability "
+            "flags only and confidence is capped at LOW.",
+            "Strategy slugs are restricted to caerus_{polaris,orion,lyra,leda}; "
+            "unknown names → NEEDS_DATA with missing_strategies populated.",
         ),
         example_questions=(
             "Is Orion ready for promotion?",
-            "Can we promote the shadow strategy?",
+            "Compare Polaris and Orion promotion readiness.",
+            "Which strategy is closest to promotion?",
+            "Why is Lyra not promotion-ready?",
         ),
     ),
     Capability(
