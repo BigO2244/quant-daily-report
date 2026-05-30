@@ -305,6 +305,68 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
         ),
     ),
     Capability(
+        name="strategy_differentiation",
+        description=(
+            "Read-only synthesis of shadow + attribution artifacts that "
+            "answers whether the challenger strategies (polaris, orion, "
+            "lyra, leda) are genuinely different bets or mostly the same "
+            "factor / sector / holding exposure. Returns per-pair "
+            "(holdings overlap %, sector overlap, factor proximity, shared "
+            "top contributor/detractor, shared drawdown contributors, "
+            "similarity score, verdict) plus an all-strategies rollup "
+            "(most-similar pair, most-differentiated pair, common factor "
+            "flags, diversification verdict)."
+        ),
+        patterns=(
+            r"(actually|really|truly)\s+different",
+            r"how\s+different\s+(are|is)",
+            r"(most|least)\s+similar\s+strateg",
+            r"strateg\w+\s+(are\s+)?(most|least|all)\s+similar",
+            r"same\s+(factor|bet|trade|theme)",
+            r"common\s+factor",
+            r"(strategy|strategies)\s+overlap",
+            r"factor\s+concentration",
+            r"diversif\w+\s+across\s+strateg",
+            r"(do\s+we\s+have|is\s+there)\s+diversif",
+            r"are\s+the\s+strateg\w+\s+(really\s+)?different",
+            r"are\s+(polaris|orion|lyra|leda)\s+and\s+(polaris|orion|lyra|leda)\s+(actually|really)?\s*different",
+            r"how\s+different\s+are\s+(polaris|orion|lyra|leda)",
+            r"strategy\s+(differentiation|similarity)",
+        ),
+        required_artifact_globs=(
+            "outputs/shadow_candidates/*/shadow_evaluation.json",
+        ),
+        tool_name="strategy_differentiation",
+        tool_kwargs={},
+        output_fields=(
+            "pairwise_differentiation",
+            "most_similar_pair",
+            "most_differentiated_pair",
+            "common_factor_flags",
+            "diversification_verdict",
+            "diversification_rationale",
+            "narrative",
+        ),
+        limitations=(
+            "Similarity score is a composite of holdings overlap, factor "
+            "proximity, and sector overlap; treat as descriptive, not as "
+            "a formal alpha test.",
+            "Factor proximity requires outputs/attribution/<DATE>/"
+            "factor_exposure.json; absent → that signal is skipped and the "
+            "pair caveat 'no_factor_proximity_data' is surfaced.",
+            "Strategy slugs restricted to caerus_{polaris,orion,lyra,leda}; "
+            "unknown names → NEEDS_DATA.",
+        ),
+        example_questions=(
+            "Are Polaris and Orion actually different?",
+            "How different are Lyra and Orion?",
+            "Which strategies are most similar?",
+            "Are the strategies mostly the same factor bet?",
+            "Compare strategy overlap and factor concentration.",
+            "Do we have diversification across strategies?",
+        ),
+    ),
+    Capability(
         name="attribution_analysis",
         description=(
             "Per-strategy performance attribution. Reads "

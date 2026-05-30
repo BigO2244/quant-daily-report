@@ -23,6 +23,13 @@ from research_registry.research.promotion_readiness import (
     assess_strategy_readiness,
     strategy_promotion_readiness_to_dict,
 )
+from research_registry.research.strategy_differentiation import (
+    DEFAULT_ATTRIBUTION_ROOT as DIFF_DEFAULT_ATTRIBUTION_ROOT,
+    DEFAULT_OUTPUTS_ROOT as DIFF_DEFAULT_OUTPUTS_ROOT,
+    DEFAULT_SHADOW_ROOT as DIFF_DEFAULT_SHADOW_ROOT,
+    analyse_strategy_differentiation,
+    differentiation_to_dict,
+)
 from research_registry.research.stable_window_evaluation import (
     DEFAULT_RESEARCH_ROOT as DEFAULT_WINDOW_RESEARCH_ROOT,
     DEFAULT_STABLE_WINDOW_ROOT,
@@ -107,6 +114,7 @@ def _tool_dispatch_table() -> dict[str, Any]:
         "shadow_comparison": shadow_comparison,
         "attribution_analysis": attribution_analysis,
         "stable_window_evaluation": stable_window_evaluation,
+        "strategy_differentiation": strategy_differentiation,
         "answer_research_question": answer_research_question,
     }
 
@@ -1691,6 +1699,52 @@ def attribution_analysis(
     return _jsonable(payload)
 
 
+def strategy_differentiation(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    shadow_root: str | None = None,
+    attribution_root: str | None = None,
+    question: str | None = None,
+    strategies: list[str] | None = None,
+) -> dict[str, Any]:
+    """Strategy differentiation / common factor analysis.
+
+    Read-only synthesis over the existing shadow + attribution
+    artifacts. Returns per-pair (holdings overlap %, sector overlap,
+    factor proximity, shared contributors / detractors / drawdown
+    contributors, similarity score, verdict) plus all-strategies
+    rollup (most-similar, most-differentiated, common factor flags,
+    diversification verdict). Strategy names restricted to the closed
+    set ``polaris | orion | lyra | leda``. Fails closed with
+    NO_SHADOW_DATA / NEEDS_DATA when inputs are absent.
+    """
+    if outputs_root:
+        resolved_outputs = Path(outputs_root)
+    else:
+        resolved_outputs = DIFF_DEFAULT_OUTPUTS_ROOT
+    resolved_shadow = Path(shadow_root) if shadow_root else (
+        resolved_outputs / "shadow_candidates"
+        if outputs_root else DIFF_DEFAULT_SHADOW_ROOT
+    )
+    resolved_attribution = Path(attribution_root) if attribution_root else (
+        resolved_outputs / "attribution"
+        if outputs_root else DIFF_DEFAULT_ATTRIBUTION_ROOT
+    )
+
+    answer = analyse_strategy_differentiation(
+        outputs_root=resolved_outputs,
+        shadow_root=resolved_shadow,
+        attribution_root=resolved_attribution,
+        question=question,
+        strategies=strategies,
+    )
+    payload = differentiation_to_dict(answer)
+    payload["tool"] = "strategy_differentiation"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
 def stable_window_evaluation(
     *,
     context: ToolContext | None = None,
@@ -1895,6 +1949,7 @@ def answer_research_question(
         "shadow_comparison",
         "attribution_analysis",
         "promotion_readiness",
+        "strategy_differentiation",
     }
     underlying = _route_to_tool(
         matched.tool_name,

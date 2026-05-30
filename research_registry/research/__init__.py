@@ -29,6 +29,11 @@ from research_registry.research.promotion_readiness import (
     assess_strategy_readiness,
     strategy_promotion_readiness_to_dict,
 )
+from research_registry.research.strategy_differentiation import (
+    StrategyDifferentiationAnswer,
+    analyse_strategy_differentiation,
+    differentiation_to_dict,
+)
 from research_registry.research.stable_window_evaluation import (
     INSUFFICIENT_SAMPLE_THRESHOLD as STABLE_WINDOW_INSUFFICIENT_SAMPLE,
     StableWindowAnswer,
@@ -74,6 +79,7 @@ __all__ = [
     "MIN_VALID_OBSERVATION_WINDOWS",
     "STABLE_WINDOW_INSUFFICIENT_SAMPLE",
     "StableWindowAnswer",
+    "StrategyDifferentiationAnswer",
     "StrategyPromotionReadinessAnswer",
     "JoinedDay",
     "KNOWN_STRATEGY_NAMES",
@@ -85,9 +91,11 @@ __all__ = [
     "TimingSummaryAnswer",
     "aggregate_by_regime",
     "analyse_attribution",
+    "analyse_strategy_differentiation",
     "answer_timing_by_regime_question",
     "assess_strategy_readiness",
     "attribution_summary_to_dict",
+    "differentiation_to_dict",
     "available_intents",
     "capability_summary",
     "check_artifacts",

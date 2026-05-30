@@ -284,6 +284,36 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "strategy_differentiation",
+        "description": (
+            "Read-only synthesis of shadow + attribution artifacts that "
+            "answers whether the challenger strategies are genuinely "
+            "different bets or mostly the same factor / sector / holding "
+            "exposure. Returns per-pair (holdings overlap %, sector overlap, "
+            "factor proximity, shared top contributor/detractor, shared "
+            "drawdown contributors, similarity score, verdict) plus an all-"
+            "strategies rollup (most-similar pair, most-differentiated pair, "
+            "common factor flags, diversification verdict). Strategy names "
+            "are restricted to polaris|orion|lyra|leda; unknown → NEEDS_DATA. "
+            "Fails closed with NO_SHADOW_DATA when shadow_candidates is "
+            "absent. Never invents metrics."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "shadow_root": {"type": "string", "default": "outputs/shadow_candidates"},
+                "attribution_root": {"type": "string", "default": "outputs/attribution"},
+                "question": {"type": "string"},
+                "strategies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional explicit strategy names; supersedes question parsing.",
+                },
+            },
+        },
+    },
+    {
         "name": "answer_research_question",
         "description": (
             "Deterministic NL wrapper. Matches the question against a regex whitelist "
