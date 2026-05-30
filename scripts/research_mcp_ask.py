@@ -309,6 +309,90 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             md.append(attribution_narrative)
             md.append("```")
 
+    # OK path for strategy_differentiation — pairwise verdict table +
+    # common factor flags + diversification verdict + narrative.
+    # Detected via the unique `pairwise_differentiation` field name (the
+    # sibling `shadow_comparison` tool uses `pairwise_overlap`).
+    diff_pairs = inner.get("pairwise_differentiation")
+    if status == "OK" and isinstance(diff_pairs, list) and diff_pairs:
+        trade_date = inner.get("trade_date")
+        div_verdict = inner.get("diversification_verdict")
+        div_rationale = inner.get("diversification_rationale")
+        common_flags = inner.get("common_factor_flags") or []
+        most_similar = inner.get("most_similar_pair") or {}
+        most_diff = inner.get("most_differentiated_pair") or {}
+        lines.append("")
+        if trade_date:
+            lines.append(f"Trade date: {trade_date}   Diversification: {div_verdict}")
+        if div_rationale:
+            lines.append(f"  ({div_rationale})")
+        if common_flags:
+            lines.append(f"Common factor flags across all strategies: {common_flags}")
+        if most_similar.get("left_slug"):
+            lines.append(
+                f"Most similar: {most_similar['left_slug']} ↔ {most_similar['right_slug']} "
+                f"(similarity={_fmt_float(most_similar.get('similarity_score'))})"
+            )
+        if most_diff.get("left_slug") and most_diff is not most_similar:
+            lines.append(
+                f"Most differentiated: {most_diff['left_slug']} ↔ {most_diff['right_slug']} "
+                f"(similarity={_fmt_float(most_diff.get('similarity_score'))})"
+            )
+        lines.append("")
+        header = ["pair", "verdict", "similarity", "holdings_overlap", "sector_overlap", "factor_prox", "shared_top"]
+        col_widths = [max(len(h), 20) for h in header]
+        lines.append(_render_row(header, col_widths))
+        lines.append(_render_row(["-" * w for w in col_widths], col_widths))
+        md.append("")
+        md.append(f"## Strategy differentiation — trade date `{trade_date or '?'}`")
+        md.append("")
+        if div_verdict:
+            md.append(f"**Diversification verdict:** `{div_verdict}` — {div_rationale or ''}")
+        if common_flags:
+            md.append(f"**Common factor flags (all strategies):** `{common_flags}`")
+        md.append("")
+        md.append("| pair | verdict | similarity | holdings_overlap | sector_overlap | factor_proximity | shared_top_contributor |")
+        md.append("| --- | --- | ---: | ---: | ---: | ---: | --- |")
+        for pair in diff_pairs:
+            pair_label = f"{pair.get('left_slug', '?')}↔{pair.get('right_slug', '?')}"
+            row = [
+                pair_label,
+                str(pair.get("verdict") or "?"),
+                _fmt_float(pair.get("similarity_score")),
+                _fmt_pct(pair.get("holdings_overlap_pct")),
+                _fmt_float(pair.get("sector_overlap_score")),
+                _fmt_float(pair.get("factor_proximity_score")),
+                str(pair.get("shared_top_contributor") or "—"),
+            ]
+            lines.append(_render_row(row, col_widths))
+            md.append("| " + " | ".join(row) + " |")
+        # Per-pair extras: shared drawdown contributors + caveats.
+        for pair in diff_pairs:
+            extras: list[str] = []
+            shared_dd = pair.get("shared_drawdown_contributors") or []
+            if shared_dd:
+                extras.append(f"shared drawdown contributors: {shared_dd[:3]}")
+            caveats = pair.get("caveats") or []
+            if caveats:
+                extras.append(f"caveats: {caveats}")
+            if extras:
+                lines.append("")
+                lines.append(f"  {pair.get('left_slug', '?')}↔{pair.get('right_slug', '?')}:")
+                for extra in extras:
+                    lines.append(f"    {extra}")
+        narrative_text = inner.get("narrative")
+        if narrative_text:
+            lines.append("")
+            lines.append("Narrative:")
+            for narrative_line in narrative_text.splitlines():
+                lines.append(f"  {narrative_line}")
+            md.append("")
+            md.append("### Narrative")
+            md.append("")
+            md.append("```")
+            md.append(narrative_text)
+            md.append("```")
+
     # OK path for promotion_readiness (strategy-aware) — render per-strategy
     # panel + recommendation + blockers + explanation. Detect via the
     # combination of `strategy_panels` (also used by shadow / attribution)

@@ -337,6 +337,109 @@ def test_render_attribution_ok_shows_narrative():
     assert "```" in md
 
 
+def _strategy_differentiation_payload() -> dict:
+    return {
+        "status": "OK",
+        "tool": "answer_research_question",
+        "question": "Which strategies are most similar?",
+        "intent": "strategy_differentiation",
+        "routed_to": "strategy_differentiation",
+        "warnings": [],
+        "answer": {
+            "status": "OK",
+            "trade_date": "2026-04-30",
+            "diversification_verdict": "moderate_diversification",
+            "diversification_rationale": "1 highly_overlapping; 2 partially_differentiated across 3 pairs.",
+            "common_factor_flags": ["high_market_beta", "sector_concentration"],
+            "most_similar_pair": {
+                "left_slug": "caerus_orion",
+                "right_slug": "caerus_lyra",
+                "similarity_score": 0.907,
+            },
+            "most_differentiated_pair": {
+                "left_slug": "caerus_polaris",
+                "right_slug": "caerus_orion",
+                "similarity_score": 0.633,
+            },
+            "pairwise_differentiation": [
+                {
+                    "left_slug": "caerus_orion", "right_slug": "caerus_lyra",
+                    "holdings_overlap_pct": 0.8,
+                    "shared_top_sector": "Information Technology",
+                    "shared_top_contributor": "STX",
+                    "shared_drawdown_contributors": ["MU", "STX"],
+                    "factor_proximity_score": 0.95,
+                    "sector_overlap_score": 0.91,
+                    "similarity_score": 0.907,
+                    "verdict": "highly_overlapping",
+                    "caveats": [],
+                },
+                {
+                    "left_slug": "caerus_polaris", "right_slug": "caerus_orion",
+                    "holdings_overlap_pct": 0.5,
+                    "shared_top_sector": "Information Technology",
+                    "shared_top_contributor": "STX",
+                    "shared_drawdown_contributors": ["MU"],
+                    "factor_proximity_score": 0.85,
+                    "sector_overlap_score": 0.94,
+                    "similarity_score": 0.633,
+                    "verdict": "partially_differentiated",
+                    "caveats": [],
+                },
+            ],
+            "narrative": (
+                "Strategy differentiation for trade date 2026-04-30 (2 pairs).\n"
+                "  • caerus_orion ↔ caerus_lyra: verdict=highly_overlapping, similarity=0.907, …\n"
+                "Diversification: moderate_diversification."
+            ),
+        },
+    }
+
+
+def test_render_strategy_differentiation_shows_pairwise_table():
+    human, md = rma.render_human_and_markdown(
+        "Which strategies are most similar?",
+        _strategy_differentiation_payload(),
+    )
+    assert "pair" in human and "verdict" in human and "similarity" in human
+    assert "caerus_orion↔caerus_lyra" in human
+    assert "highly_overlapping" in human
+    assert "partially_differentiated" in human
+    assert "Information Technology" not in human  # not in row (column truncated names elsewhere) — sector shows in shared_top
+    assert "STX" in human
+    assert "## Strategy differentiation — trade date `2026-04-30`" in md
+    assert "| caerus_orion↔caerus_lyra |" in md
+
+
+def test_render_strategy_differentiation_shows_common_flags_and_verdict():
+    human, _ = rma.render_human_and_markdown(
+        "Are the strategies the same factor bet?",
+        _strategy_differentiation_payload(),
+    )
+    assert "Diversification: moderate_diversification" in human
+    assert "Common factor flags across all strategies:" in human
+    assert "high_market_beta" in human
+
+
+def test_render_strategy_differentiation_shows_most_similar_and_most_differentiated():
+    human, _ = rma.render_human_and_markdown(
+        "Compare strategy overlap.",
+        _strategy_differentiation_payload(),
+    )
+    assert "Most similar: caerus_orion ↔ caerus_lyra" in human
+    assert "Most differentiated: caerus_polaris ↔ caerus_orion" in human
+
+
+def test_render_strategy_differentiation_includes_narrative():
+    human, md = rma.render_human_and_markdown(
+        "Do we have diversification across strategies?",
+        _strategy_differentiation_payload(),
+    )
+    assert "Narrative:" in human
+    assert "Strategy differentiation for trade date 2026-04-30" in human
+    assert "```" in md
+
+
 def _promotion_readiness_payload() -> dict:
     """Synthesized strategy-aware promotion-readiness payload."""
     return {
