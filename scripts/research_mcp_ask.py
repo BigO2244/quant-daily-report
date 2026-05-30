@@ -309,6 +309,165 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             md.append(attribution_narrative)
             md.append("```")
 
+    # OK / NO_RETURN_STREAM path for strategy_behavior_differentiation.
+    # Detect via the unique `behavior_pairs` key (sibling tools use
+    # `pairwise_overlap` / `pairwise_differentiation`).
+    behavior_pairs = inner.get("behavior_pairs")
+    is_behavior = isinstance(behavior_pairs, list) and (
+        bool(behavior_pairs) or status == "NO_RETURN_STREAM"
+    ) and (
+        bool(behavior_pairs)
+        or any(k in inner for k in ("nav_series_path", "candidate_artifact_inventory"))
+    )
+    if is_behavior and behavior_pairs:
+        date_start = inner.get("date_range_start")
+        date_end = inner.get("date_range_end")
+        div_verdict = inner.get("behavioral_diversification_verdict")
+        div_rationale = inner.get("behavioral_diversification_rationale")
+        avg_corr = inner.get("average_pairwise_correlation")
+        common_neg = inner.get("common_negative_days_count")
+        most_similar = inner.get("most_behaviorally_similar_pair") or {}
+        most_diff = inner.get("most_behaviorally_differentiated_pair") or {}
+
+        lines.append("")
+        if date_start and date_end:
+            lines.append(
+                f"NAV window: {date_start} → {date_end}   "
+                f"Diversification: {div_verdict}"
+            )
+        if div_rationale:
+            lines.append(f"  ({div_rationale})")
+        if avg_corr is not None:
+            lines.append(f"Average pairwise correlation: {_fmt_float(avg_corr)}")
+        if common_neg:
+            lines.append(f"Days where ALL selected strategies were negative: {common_neg}")
+        if most_similar.get("left_slug"):
+            lines.append(
+                f"Most behaviorally similar:        {most_similar['left_slug']} ↔ "
+                f"{most_similar['right_slug']}  corr={_fmt_float(most_similar.get('return_correlation'))}"
+            )
+        if most_diff.get("left_slug") and most_diff is not most_similar:
+            lines.append(
+                f"Most behaviorally differentiated: {most_diff['left_slug']} ↔ "
+                f"{most_diff['right_slug']}  corr={_fmt_float(most_diff.get('return_correlation'))}"
+            )
+        lines.append("")
+        header = ["pair", "tier", "corr", "downside_corr", "shared_neg_days", "n_obs"]
+        col_widths = [max(len(h), 22) for h in header]
+        lines.append(_render_row(header, col_widths))
+        lines.append(_render_row(["-" * w for w in col_widths], col_widths))
+
+        md.append("")
+        md.append(f"## Behavioral differentiation — NAV window `{date_start} → {date_end}`")
+        if div_verdict:
+            md.append("")
+            md.append(f"**Diversification verdict:** `{div_verdict}` — {div_rationale or ''}")
+        if avg_corr is not None:
+            md.append(f"**Average pairwise correlation:** `{_fmt_float(avg_corr)}`")
+        md.append("")
+        md.append("| pair | tier | correlation | downside_corr | shared_neg_days | n_obs |")
+        md.append("| --- | --- | ---: | ---: | ---: | ---: |")
+        for pair in behavior_pairs:
+            pair_label = f"{pair.get('left_slug', '?')}↔{pair.get('right_slug', '?')}"
+            shared_pct = pair.get("shared_negative_pct")
+            shared_text = f"{pair.get('shared_negative_days', 0)} ({_fmt_pct(shared_pct)})"
+            row = [
+                pair_label,
+                str(pair.get("behavioral_similarity_tier") or "?"),
+                _fmt_float(pair.get("return_correlation")),
+                _fmt_float(pair.get("downside_correlation")),
+                shared_text,
+                str(pair.get("n_observations") or 0),
+            ]
+            lines.append(_render_row(row, col_widths))
+            md.append("| " + " | ".join(row) + " |")
+        # Per-pair worst shared drawdown + stability + caveats.
+        for pair in behavior_pairs:
+            extras: list[str] = []
+            worst = pair.get("worst_shared_drawdown") or {}
+            if worst.get("date"):
+                extras.append(
+                    f"worst shared drawdown day: {worst.get('date')} "
+                    f"(left={_fmt_pct(worst.get('drawdown_left'))}, "
+                    f"right={_fmt_pct(worst.get('drawdown_right'))}, "
+                    f"{worst.get('shared_drawdown_days')} total shared-DD days)"
+                )
+            stab = pair.get("correlation_stability_iqr")
+            if stab is not None:
+                rolling_20 = pair.get("rolling_20d_correlation") or {}
+                extras.append(
+                    f"rolling 20D corr: mean={_fmt_float(rolling_20.get('mean'))}, "
+                    f"p10={_fmt_float(rolling_20.get('p10'))}, "
+                    f"p90={_fmt_float(rolling_20.get('p90'))}, IQR={_fmt_float(stab)}"
+                )
+            caveats = pair.get("caveats") or []
+            if caveats:
+                extras.append(f"caveats: {caveats}")
+            if extras:
+                lines.append("")
+                lines.append(f"  {pair.get('left_slug', '?')}↔{pair.get('right_slug', '?')}:")
+                for extra in extras:
+                    lines.append(f"    {extra}")
+        narrative_text = inner.get("narrative")
+        if narrative_text:
+            lines.append("")
+            lines.append("Narrative:")
+            for narrative_line in narrative_text.splitlines():
+                lines.append(f"  {narrative_line}")
+            md.append("")
+            md.append("### Narrative")
+            md.append("")
+            md.append("```")
+            md.append(narrative_text)
+            md.append("```")
+
+    elif status == "NO_RETURN_STREAM" and (
+        inner.get("nav_series_path") or inner.get("candidate_artifact_inventory")
+    ):
+        lines.append("")
+        lines.append("Required artifact missing:")
+        lines.append(f"  {inner.get('nav_series_path', 'outputs/shadow_candidates/performance/shadow_nav_series.csv')}")
+        inventory = inner.get("candidate_artifact_inventory") or {}
+        found = inventory.get("candidates_found") or []
+        missing_paths = inventory.get("candidates_missing") or []
+        if found:
+            lines.append("")
+            lines.append("Candidate artifacts found:")
+            for entry in found:
+                if entry.get("dir"):
+                    lines.append(f"  - {entry['path']} (dir, {entry.get('child_count', '?')} children)")
+                else:
+                    header_str = (
+                        f" header={entry['header']}"
+                        if entry.get("header") else ""
+                    )
+                    lines.append(
+                        f"  - {entry['path']} ({entry.get('size_bytes', '?')} bytes,"
+                        f" rows={entry.get('row_count_estimate', '?')}{header_str})"
+                    )
+        if missing_paths:
+            lines.append("")
+            lines.append("Candidate artifacts missing:")
+            for path in missing_paths:
+                lines.append(f"  - {path}")
+        contract = inner.get("proposed_artifact_contract")
+        if contract:
+            lines.append("")
+            lines.append("Proposed artifact contract:")
+            for c_line in contract.splitlines():
+                lines.append(f"  {c_line}")
+        md.append("")
+        md.append("## Behavioral differentiation — `NO_RETURN_STREAM`")
+        md.append("")
+        md.append(f"**Missing NAV series:** `{inner.get('nav_series_path', '?')}`")
+        if contract:
+            md.append("")
+            md.append("### Proposed artifact contract")
+            md.append("")
+            md.append("```")
+            md.append(contract)
+            md.append("```")
+
     # OK path for strategy_differentiation — pairwise verdict table +
     # common factor flags + diversification verdict + narrative.
     # Detected via the unique `pairwise_differentiation` field name (the
