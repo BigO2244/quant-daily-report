@@ -101,15 +101,36 @@ named. Strategy names are restricted to the closed set
 `polaris | orion | lyra | leda` — anything else fails closed as
 `NEEDS_DATA` with the unknown slug listed.
 
-### Promotion readiness
+### Promotion readiness (strategy-aware)
 
 ```bash
 python -m scripts.research_mcp_ask "Is Orion ready for promotion?"
+python -m scripts.research_mcp_ask "Compare Polaris and Orion promotion readiness."
+python -m scripts.research_mcp_ask "Which strategy is closest to promotion?"
+python -m scripts.research_mcp_ask "Why is Lyra not promotion-ready?"
 ```
 
-Expected: the existing `promotion_readiness` tool output, which assesses
-the challenger generically (the strategy name in the question is
-informational).
+Expected: trade-date header, `closest_to_promotion` summary, Phase C
+sidecar present/missing note, then a per-strategy table with
+recommendation tier (one of `promote` / `hold` / `research_only` /
+`insufficient_evidence`), confidence, `excess_vs_spy`, `max_drawdown`,
+`realized_volatility_ann`, and `valid_observation_windows`. Each
+strategy gets a `blockers` list (e.g. `metric_unavailable:max_drawdown`,
+`insufficient_observation_window:0/20`, `phase_c_state:CONTINUE_SHADOW`)
+plus a one-line explanation grounded in artifacts.
+
+Strategy names parsed from the question are restricted to the closed
+set `polaris | orion | lyra | leda`. Unknown names fail closed with
+`NEEDS_DATA` and `missing_strategies` populated. When the FR-028
+Phase C sidecar (`promotion_readiness.json`) is on disk its
+`readiness_state` / `confidence` / `reason_codes` are used
+authoritatively per strategy; otherwise the recommendation is derived
+from `shadow_evaluation.json` metrics + per-strategy
+`stability_analysis.json` flags, and confidence is capped at LOW.
+
+The legacy top-level fields (`current_leader`, `recommendation`,
+`confidence_level`, `valid_observation_window_count`, `evidence`,
+`guardrail`) are preserved on the response for backward compatibility.
 
 ### Operational intelligence (what ran today / anomalies)
 
