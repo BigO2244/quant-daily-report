@@ -367,6 +367,65 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
         ),
     ),
     Capability(
+        name="strategy_behavior_differentiation",
+        description=(
+            "Return-stream behavioral differentiation. Reads the per-"
+            "strategy daily NAV series at outputs/shadow_candidates/"
+            "performance/shadow_nav_series.csv and computes pairwise "
+            "return correlation, rolling 20D/60D correlation stability, "
+            "shared-negative-day counts, downside correlation, worst "
+            "shared drawdown, and an all-strategies diversification "
+            "verdict. Distinct from static strategy_differentiation: "
+            "this captures whether strategies BEHAVE differently through "
+            "time, not whether they hold different names."
+        ),
+        patterns=(
+            r"behave\s+differently",
+            r"behavior\w*\s+(differentiat|divers)",
+            r"return\s+correlation",
+            r"correlated",
+            r"draw\s*down\s+at\s+the\s+same\s+time",
+            r"co[- ]?drawdown",
+            r"same\s+return\s+stream",
+            r"behavioral\s+(diversif|differentiat)",
+            r"(highest|lowest)\s+(return\s+)?correlation",
+            r"do\s+(the\s+)?strateg\w+\s+move\s+together",
+            r"are\s+(polaris|orion|lyra|leda)\s+and\s+(polaris|orion|lyra|leda)\s+correlated",
+        ),
+        required_artifact_globs=(
+            "outputs/shadow_candidates/performance/shadow_nav_series.csv",
+        ),
+        tool_name="strategy_behavior_differentiation",
+        tool_kwargs={},
+        output_fields=(
+            "behavior_pairs",
+            "most_behaviorally_similar_pair",
+            "most_behaviorally_differentiated_pair",
+            "average_pairwise_correlation",
+            "common_negative_days_count",
+            "behavioral_diversification_verdict",
+            "narrative",
+        ),
+        limitations=(
+            "Correlation is descriptive of historical co-movement; not a "
+            "forward-looking guarantee of future independence.",
+            "Tier thresholds (0.85 / 0.50) are deterministic constants; "
+            "tune in the module if governance requires different bands.",
+            "Requires the NAV CSV at "
+            "outputs/shadow_candidates/performance/shadow_nav_series.csv; "
+            "absent → NO_RETURN_STREAM with candidate inventory and the "
+            "proposed artifact contract.",
+        ),
+        example_questions=(
+            "Do Orion and Lyra behave differently over time?",
+            "Are the strategies correlated?",
+            "Which strategies have the highest return correlation?",
+            "Do the strategies draw down at the same time?",
+            "Do we have behavioral diversification?",
+            "Are Polaris, Orion, and Lyra just the same return stream?",
+        ),
+    ),
+    Capability(
         name="attribution_analysis",
         description=(
             "Per-strategy performance attribution. Reads "

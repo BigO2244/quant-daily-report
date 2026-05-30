@@ -23,6 +23,11 @@ from research_registry.research.promotion_readiness import (
     assess_strategy_readiness,
     strategy_promotion_readiness_to_dict,
 )
+from research_registry.research.strategy_behavior_differentiation import (
+    DEFAULT_NAV_SERIES_PATH as BEHAVIOR_DEFAULT_NAV_PATH,
+    analyse_behavior_differentiation,
+    behavior_differentiation_to_dict,
+)
 from research_registry.research.strategy_differentiation import (
     DEFAULT_ATTRIBUTION_ROOT as DIFF_DEFAULT_ATTRIBUTION_ROOT,
     DEFAULT_OUTPUTS_ROOT as DIFF_DEFAULT_OUTPUTS_ROOT,
@@ -115,6 +120,7 @@ def _tool_dispatch_table() -> dict[str, Any]:
         "attribution_analysis": attribution_analysis,
         "stable_window_evaluation": stable_window_evaluation,
         "strategy_differentiation": strategy_differentiation,
+        "strategy_behavior_differentiation": strategy_behavior_differentiation,
         "answer_research_question": answer_research_question,
     }
 
@@ -1699,6 +1705,39 @@ def attribution_analysis(
     return _jsonable(payload)
 
 
+def strategy_behavior_differentiation(
+    *,
+    context: ToolContext | None = None,
+    nav_series_path: str | None = None,
+    question: str | None = None,
+    strategies: list[str] | None = None,
+) -> dict[str, Any]:
+    """Behavioral differentiation from realized NAV time series.
+
+    Reads ``outputs/shadow_candidates/performance/shadow_nav_series.csv``
+    (or an override path) and returns per-pair daily return correlation,
+    rolling 20D/60D correlation stability, shared-negative-day counts,
+    downside correlation, worst shared drawdown, behavioral similarity
+    tier, plus an all-strategies rollup (most-similar, most-
+    differentiated, average pairwise correlation, common negative days,
+    diversification verdict). Strategy names restricted to
+    polaris|orion|lyra|leda. Fails closed with NO_RETURN_STREAM when
+    the NAV series is missing, surfacing a candidate-artifact inventory
+    and the artifact contract a future producer would need to satisfy.
+    """
+    resolved_path = Path(nav_series_path) if nav_series_path else BEHAVIOR_DEFAULT_NAV_PATH
+    answer = analyse_behavior_differentiation(
+        nav_series_path=resolved_path,
+        question=question,
+        strategies=strategies,
+        repo_root=Path("."),
+    )
+    payload = behavior_differentiation_to_dict(answer)
+    payload["tool"] = "strategy_behavior_differentiation"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
 def strategy_differentiation(
     *,
     context: ToolContext | None = None,
@@ -1840,6 +1879,7 @@ def answer_research_question(
     shadow_root: str | None = None,
     research_root: str | None = None,
     stable_window_root: str | None = None,
+    nav_series_path: str | None = None,
 ) -> dict[str, Any]:
     """Deterministic capability-based router over the question-answering MCP.
 
@@ -1950,6 +1990,7 @@ def answer_research_question(
         "attribution_analysis",
         "promotion_readiness",
         "strategy_differentiation",
+        "strategy_behavior_differentiation",
     }
     underlying = _route_to_tool(
         matched.tool_name,
@@ -1965,6 +2006,7 @@ def answer_research_question(
             "shadow_root": shadow_root,
             "research_root": research_root,
             "stable_window_root": stable_window_root,
+            "nav_series_path": nav_series_path,
         },
     )
 

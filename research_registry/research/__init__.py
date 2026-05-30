@@ -29,6 +29,11 @@ from research_registry.research.promotion_readiness import (
     assess_strategy_readiness,
     strategy_promotion_readiness_to_dict,
 )
+from research_registry.research.strategy_behavior_differentiation import (
+    BehaviorDifferentiationAnswer,
+    analyse_behavior_differentiation,
+    behavior_differentiation_to_dict,
+)
 from research_registry.research.strategy_differentiation import (
     StrategyDifferentiationAnswer,
     analyse_strategy_differentiation,
@@ -78,6 +83,7 @@ __all__ = [
     "INSUFFICIENT_SAMPLE_THRESHOLD",
     "MIN_VALID_OBSERVATION_WINDOWS",
     "STABLE_WINDOW_INSUFFICIENT_SAMPLE",
+    "BehaviorDifferentiationAnswer",
     "StableWindowAnswer",
     "StrategyDifferentiationAnswer",
     "StrategyPromotionReadinessAnswer",
@@ -91,10 +97,12 @@ __all__ = [
     "TimingSummaryAnswer",
     "aggregate_by_regime",
     "analyse_attribution",
+    "analyse_behavior_differentiation",
     "analyse_strategy_differentiation",
     "answer_timing_by_regime_question",
     "assess_strategy_readiness",
     "attribution_summary_to_dict",
+    "behavior_differentiation_to_dict",
     "differentiation_to_dict",
     "available_intents",
     "capability_summary",

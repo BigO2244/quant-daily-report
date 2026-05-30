@@ -284,6 +284,41 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "strategy_behavior_differentiation",
+        "description": (
+            "Return-stream behavioral differentiation across challenger "
+            "strategies. Reads the per-strategy daily NAV series at "
+            "outputs/shadow_candidates/performance/shadow_nav_series.csv "
+            "and returns per-pair daily-return correlation, rolling "
+            "20D/60D correlation stability (mean, p10, p90, IQR), "
+            "shared-negative-day counts, downside correlation, worst "
+            "shared drawdown day, behavioral similarity tier "
+            "(highly_similar_behavior / partially_similar_behavior / "
+            "behaviorally_differentiated / insufficient_evidence), and "
+            "an all-strategies rollup (most-similar pair, most-"
+            "differentiated pair, average pairwise correlation, common "
+            "negative days, diversification verdict). Strategy names "
+            "restricted to polaris|orion|lyra|leda. Fails closed with "
+            "NO_RETURN_STREAM (and a candidate_artifact_inventory + "
+            "proposed_artifact_contract) when the NAV series is absent."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "nav_series_path": {
+                    "type": "string",
+                    "default": "outputs/shadow_candidates/performance/shadow_nav_series.csv",
+                },
+                "question": {"type": "string"},
+                "strategies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional explicit strategy names; supersedes question parsing.",
+                },
+            },
+        },
+    },
+    {
         "name": "strategy_differentiation",
         "description": (
             "Read-only synthesis of shadow + attribution artifacts that "
