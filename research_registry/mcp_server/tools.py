@@ -698,6 +698,7 @@ def promotion_readiness(
         closest_to_promotion=strategy_dict["closest_to_promotion"],
         ranking_by_recommendation=strategy_dict["ranking_by_recommendation"],
         has_phase_c_sidecar=strategy_dict["has_phase_c_sidecar"],
+        observation_evidence=strategy_dict.get("observation_evidence"),
         requested_strategies=strategy_dict["requested_strategies"],
         available_strategies=strategy_dict["available_strategies"],
         missing_strategies=strategy_dict["missing_strategies"],

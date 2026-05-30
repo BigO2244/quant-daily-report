@@ -466,6 +466,80 @@ def test_assess_explanation_grounded_in_artifacts(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_observation_evidence_block_is_additive_and_governance_unchanged(tmp_path):
+    """Patch contract: three distinct evidence counts exist additively
+    (valid_shadow_observation_days, valid_live_execution_days,
+    promotion_evidence_days), the legacy valid_observation_windows stays
+    at 0 when Phase C sidecar is absent, and the recommendation tier
+    remains 'hold' (capital governance preserved)."""
+    shadow_root = _three_strategy_fixture(tmp_path)
+    # Write a small NAV series so shadow-day counts are non-zero.
+    import datetime as _dt
+    perf_dir = shadow_root / "performance"
+    perf_dir.mkdir(parents=True, exist_ok=True)
+    nav_path = perf_dir / "shadow_nav_series.csv"
+    start = _dt.date(2020, 1, 1)
+    rows = ["date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark"]
+    polaris = orion = lyra = spy = 1.0
+    for i in range(50):
+        d = (start + _dt.timedelta(days=i)).isoformat()
+        if i >= 10:  # inception at row 10 so NAV != 1.0 from there on
+            polaris += 0.001 * (i - 9)
+            orion += 0.002 * (i - 9)
+            lyra += 0.0015 * (i - 9)
+            spy += 0.0005 * (i - 9)
+        rows.append(f"{d},{polaris},{orion},{lyra},{spy}")
+    nav_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    result = call_tool("promotion_readiness", {
+        "outputs_root": str(shadow_root.parent),
+    })
+    # New top-level block present.
+    evidence = result.get("observation_evidence")
+    assert isinstance(evidence, dict)
+    assert "valid_shadow_observation_days" in evidence
+    assert "valid_live_execution_days" in evidence
+    assert "promotion_evidence_days" in evidence
+    assert "explanation" in evidence
+    # Shadow NAV count is > 0 (~40 active days after the 10-day pre-inception block).
+    shadow_days = evidence["valid_shadow_observation_days"]
+    assert shadow_days.get("caerus_polaris", 0) > 0
+    # Live execution count = 1 (one dated dir with OK data_status in the fixture).
+    live_days = evidence["valid_live_execution_days"]
+    assert live_days.get("caerus_polaris", 0) >= 1
+    # Strict Phase C count is 0 (no stable_window_evaluation artifact in fixture).
+    strict = evidence["promotion_evidence_days"]["strict"]
+    assert strict["valid_days_since_inception"] == 0
+
+    # Governance unchanged: per-panel valid_observation_windows is still 0
+    # and recommendation is 'hold' (not promoted to 'promote' by the new evidence).
+    panel = next(iter(result["strategy_panels"].values()))
+    assert panel["valid_observation_windows"] == 0
+    assert panel["recommendation"] == "hold"
+    # Per-panel additive fields surface alongside the legacy field.
+    assert panel["valid_shadow_observation_days"] > 0
+    assert "valid_live_execution_days" in panel
+    # The legacy blocker text still appears.
+    blockers = panel.get("blockers") or []
+    assert any("insufficient_observation_window" in b for b in blockers)
+
+
+def test_observation_evidence_handles_missing_nav_and_stable_window_artifacts(tmp_path):
+    """If neither NAV CSV nor stable_window_evaluation/*.json exist,
+    the new fields gracefully report 0 / source_path_missing=True without
+    crashing or affecting the legacy recommendation."""
+    shadow_root = _three_strategy_fixture(tmp_path)
+    result = call_tool("promotion_readiness", {
+        "outputs_root": str(shadow_root.parent),
+    })
+    evidence = result["observation_evidence"]
+    # No NAV CSV in the fixture → all shadow_observation counts are 0.
+    assert all(n == 0 for n in evidence["valid_shadow_observation_days"].values())
+    # latest_loose.json / latest_strict.json absent → source_path_missing flag set.
+    assert evidence["promotion_evidence_days"]["loose"]["source_path_missing"] is True
+    assert evidence["promotion_evidence_days"]["strict"]["source_path_missing"] is True
+
+
 def test_call_tool_promotion_readiness_remains_backward_compatible(tmp_path):
     """Calling promotion_readiness with NO strategy/question kwargs should
     still produce the legacy top-level OK status + recommendation field."""

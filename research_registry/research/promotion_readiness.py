@@ -52,6 +52,8 @@ from research_registry.research.shadow_comparison import (
 
 DEFAULT_OUTPUTS_ROOT = Path("outputs")
 DEFAULT_SHADOW_ROOT = Path("outputs/shadow_candidates")
+DEFAULT_NAV_SERIES_PATH = Path("outputs/shadow_candidates/performance/shadow_nav_series.csv")
+DEFAULT_STABLE_WINDOW_ROOT = Path("outputs/research/stable_window_evaluation")
 
 # Minimum valid observation windows required before we will recommend
 # "promote" off the metric-derived path (i.e. when no Phase C sidecar
@@ -293,6 +295,213 @@ def _derive_recommendation(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Observation evidence counting (distinct from Phase C strict count)
+# ---------------------------------------------------------------------------
+#
+# The legacy `valid_observation_windows` field counts ONLY the FR-028
+# Phase C strict observation windows (execution_status=EXECUTED AND
+# reconciliation_status=OK_RECONCILED AND data_status=OK across all
+# strategies). That count remains the bar for capital promotion. But
+# operators routinely ask "do we have any observation evidence?" and
+# the legacy field's 0 reads as "no evidence at all" when in fact we
+# typically have hundreds or thousands of backtest NAV days.
+#
+# The three counts below are additive — they expose distinct evidence
+# tiers without weakening the capital-promotion governance threshold.
+#
+#   valid_shadow_observation_days  per-strategy count of backtest NAV
+#                                  days the strategy was actually trading
+#                                  (non-zero daily return). Supports
+#                                  behavioral analysis. NOT a substitute
+#                                  for live execution evidence.
+#
+#   valid_live_execution_days      count of dated <DATE>/ shadow_candidates
+#                                  dirs whose shadow_evaluation.json
+#                                  shows data_status == OK for the
+#                                  strategy. Supports operational
+#                                  observation but not strict Phase C
+#                                  promotion.
+#
+#   promotion_evidence_days        the strict Phase C count from
+#                                  outputs/research/stable_window_evaluation/
+#                                  latest_{loose,strict}.json — same
+#                                  values surfaced by the
+#                                  stable_window_evaluation tool. THIS
+#                                  is the bar for capital allocation.
+# ---------------------------------------------------------------------------
+
+
+def _count_shadow_nav_days(
+    nav_path: Path,
+    strategy_slugs: Iterable[str],
+) -> tuple[dict[str, int], Optional[tuple[str, str]]]:
+    """Per-strategy count of NAV-series days with non-zero return.
+
+    Returns ``({slug: count}, (date_start, date_end))`` or ``({}, None)``
+    when the NAV CSV is absent or unreadable.
+    """
+    out: dict[str, int] = {slug: 0 for slug in strategy_slugs}
+    if not nav_path.exists():
+        return out, None
+    try:
+        # Parse minimally to avoid forcing a pandas dependency on this
+        # helper (the rest of the module is stdlib + json).
+        import csv as _csv
+        with nav_path.open(encoding="utf-8") as fh:
+            reader = _csv.DictReader(fh)
+            if not reader.fieldnames or "date" not in reader.fieldnames:
+                return out, None
+            tracked = [s for s in strategy_slugs if s in reader.fieldnames]
+            prev: dict[str, float] = {s: float("nan") for s in tracked}
+            first_date: Optional[str] = None
+            last_date: Optional[str] = None
+            for row in reader:
+                d = (row.get("date") or "").strip()
+                if not d:
+                    continue
+                first_date = first_date or d
+                last_date = d
+                for slug in tracked:
+                    raw = row.get(slug)
+                    if raw in (None, "", "nan"):
+                        continue
+                    try:
+                        nav = float(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    prior = prev[slug]
+                    if not math.isnan(prior) and nav != prior:
+                        out[slug] = out.get(slug, 0) + 1
+                    prev[slug] = nav
+        date_range = (first_date, last_date) if first_date and last_date else None
+        return out, date_range
+    except (OSError, UnicodeError):
+        return out, None
+
+
+def _count_live_execution_days(
+    shadow_root: Path,
+    strategy_slugs: Iterable[str],
+) -> dict[str, int]:
+    """Per-strategy count of dated <DATE>/ shadow_candidates dirs whose
+    shadow_evaluation.json reports data_status == OK for that strategy.
+    Distinct from Phase C: doesn't require execution OR reconciliation.
+    """
+    out: dict[str, int] = {slug: 0 for slug in strategy_slugs}
+    if not shadow_root.exists() or not shadow_root.is_dir():
+        return out
+    for child in shadow_root.iterdir():
+        if not child.is_dir():
+            continue
+        if not (len(child.name) == 10 and child.name[4] == "-" and child.name[7] == "-"):
+            continue
+        payload = _safe_json(child / "shadow_evaluation.json")
+        if not isinstance(payload, Mapping):
+            continue
+        strategies = payload.get("strategies") or {}
+        for slug in strategy_slugs:
+            entry = strategies.get(slug) or {}
+            if entry.get("data_status") == "OK":
+                out[slug] = out.get(slug, 0) + 1
+    return out
+
+
+def _read_phase_c_evidence_counts(
+    stable_window_root: Path,
+) -> dict[str, Any]:
+    """Read the strict Phase C counts from latest_{loose,strict}.json.
+
+    Returns a dict with per-mode counts and the source paths. Missing
+    files map to count=0 with `source_path_missing=True` so the
+    operator sees exactly why the strict count is zero.
+    """
+    out: dict[str, Any] = {}
+    for mode in ("loose", "strict"):
+        path = stable_window_root / f"latest_{mode}.json"
+        payload = _safe_json(path)
+        if not isinstance(payload, Mapping):
+            out[mode] = {
+                "valid_days_since_inception": 0,
+                "valid_days_stable_window": 0,
+                "shadow_only_days_since_inception": 0,
+                "diagnostic_excluded_count": 0,
+                "source_path": str(path),
+                "source_path_missing": True,
+            }
+            continue
+        out[mode] = {
+            "valid_days_since_inception": len(payload.get("valid_days_since_inception") or []),
+            "valid_days_stable_window": len(payload.get("valid_days_stable_window") or []),
+            "shadow_only_days_since_inception": len(payload.get("shadow_only_days_since_inception") or []),
+            "diagnostic_excluded_count": len(payload.get("diagnostic_excluded_since") or []),
+            "source_path": str(path),
+            "source_path_missing": False,
+        }
+    return out
+
+
+_EVIDENCE_EXPLANATION = {
+    "valid_shadow_observation_days": (
+        "Per-strategy count of backtest NAV-series days where the strategy "
+        "was actually trading (non-zero daily return). Supports behavioral "
+        "analysis (correlation, drawdown co-movement). NOT a substitute "
+        "for live execution evidence — does NOT count toward capital-"
+        "promotion governance."
+    ),
+    "valid_live_execution_days": (
+        "Count of dated outputs/shadow_candidates/<DATE>/ directories "
+        "whose shadow_evaluation.json reports data_status == OK for the "
+        "strategy. Supports operational shadow observation. Does NOT "
+        "require execution-was-executed or reconciliation-passed; "
+        "therefore does NOT meet the strict Phase C capital bar."
+    ),
+    "promotion_evidence_days": (
+        "Strict FR-028 Phase C count from outputs/research/"
+        "stable_window_evaluation/latest_{loose,strict}.json. Each "
+        "qualifying day must satisfy: execution_status=EXECUTED AND "
+        "(in strict mode) reconciliation_status=OK_RECONCILED AND "
+        "data_status=OK across all strategies. THIS is the bar for "
+        "capital allocation. Below MIN_VALID_OBSERVATION_WINDOWS (20) "
+        "the recommendation tier is capped at 'hold'."
+    ),
+}
+
+
+def _compute_observation_evidence(
+    *,
+    outputs_root: Path,
+    shadow_root: Path,
+    available_strategies: Iterable[str],
+    nav_path: Path = DEFAULT_NAV_SERIES_PATH,
+    stable_window_root: Path = DEFAULT_STABLE_WINDOW_ROOT,
+) -> dict[str, Any]:
+    """Build the three-tier evidence breakdown.
+
+    The returned block is purely informational — it does not influence
+    the recommendation tier. Capital governance still depends on the
+    strict Phase C ``valid_observation_windows`` field carried by each
+    panel.
+    """
+    strategy_list = list(available_strategies)
+    shadow_days, date_range = _count_shadow_nav_days(nav_path, strategy_list)
+    live_days = _count_live_execution_days(shadow_root, strategy_list)
+    phase_c = _read_phase_c_evidence_counts(stable_window_root)
+
+    return {
+        "valid_shadow_observation_days": shadow_days,
+        "valid_live_execution_days": live_days,
+        "promotion_evidence_days": phase_c,
+        "nav_series_path": str(nav_path),
+        "nav_series_date_range": (
+            {"start": date_range[0], "end": date_range[1]} if date_range else None
+        ),
+        "shadow_root": str(shadow_root),
+        "stable_window_root": str(stable_window_root),
+        "explanation": _EVIDENCE_EXPLANATION,
+    }
+
+
 def _strategy_panel(
     *,
     slug: str,
@@ -356,6 +565,7 @@ class StrategyPromotionReadinessAnswer:
     closest_to_promotion: Optional[str]
     ranking_by_recommendation: list[str]
     has_phase_c_sidecar: bool
+    observation_evidence: Optional[dict[str, Any]] = None
     missing_strategies: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     source_paths: list[str] = field(default_factory=list)
@@ -375,6 +585,7 @@ def strategy_promotion_readiness_to_dict(
         "closest_to_promotion": answer.closest_to_promotion,
         "ranking_by_recommendation": list(answer.ranking_by_recommendation),
         "has_phase_c_sidecar": answer.has_phase_c_sidecar,
+        "observation_evidence": answer.observation_evidence,
         "missing_strategies": list(answer.missing_strategies),
         "warnings": list(answer.warnings),
         "source_paths": list(answer.source_paths),
@@ -461,17 +672,44 @@ def assess_strategy_readiness(
     phase_c_strategies = phase_c_payload.get("strategies") or {}
     has_phase_c = bool(phase_c_strategies)
 
+    # Compute the three-tier observation-evidence block. This is purely
+    # informational — it does NOT alter the recommendation tier. The
+    # strict Phase C `valid_observation_windows` count carried by each
+    # panel remains the bar for capital allocation. We derive the NAV
+    # and stable_window paths from the resolved shadow_root /
+    # outputs_root so tests with custom fixtures don't accidentally
+    # read the repo-relative real artifacts.
+    derived_nav_path = resolved_shadow_root / "performance" / "shadow_nav_series.csv"
+    derived_stable_window_root = outputs_root / "research" / "stable_window_evaluation"
+    observation_evidence = _compute_observation_evidence(
+        outputs_root=outputs_root,
+        shadow_root=resolved_shadow_root,
+        available_strategies=available,
+        nav_path=derived_nav_path,
+        stable_window_root=derived_stable_window_root,
+    )
+
     panels: dict[str, dict[str, Any]] = {}
     for slug in selected:
         eval_raw = raw_strategies.get(slug) or {}
         phase_c_entry = phase_c_strategies.get(slug)
         stability_raw = _load_per_strategy_stability(latest, slug)
-        panels[slug] = _strategy_panel(
+        panel = _strategy_panel(
             slug=slug,
             eval_raw=eval_raw,
             phase_c_entry=phase_c_entry,
             stability_raw=stability_raw,
         )
+        # Decorate the panel with the additive evidence counts. Capital
+        # governance still keys on `valid_observation_windows`; these
+        # new fields are for operator transparency.
+        panel["valid_shadow_observation_days"] = int(
+            observation_evidence["valid_shadow_observation_days"].get(slug, 0)
+        )
+        panel["valid_live_execution_days"] = int(
+            observation_evidence["valid_live_execution_days"].get(slug, 0)
+        )
+        panels[slug] = panel
 
     # Rank: by recommendation tier, then by excess vs SPY (descending),
     # then by slug (alphabetical for determinism).
@@ -524,6 +762,7 @@ def assess_strategy_readiness(
         closest_to_promotion=closest,
         ranking_by_recommendation=ranked,
         has_phase_c_sidecar=has_phase_c,
+        observation_evidence=observation_evidence,
         missing_strategies=missing,
         warnings=warnings,
         source_paths=source_paths,

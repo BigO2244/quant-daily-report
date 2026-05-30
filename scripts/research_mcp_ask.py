@@ -577,6 +577,52 @@ def render_human_and_markdown(question: str, payload: dict[str, Any]) -> tuple[s
             lines.append("Phase C sidecar: missing (recommendation derived from shadow_evaluation + stability_analysis only)")
         elif has_phase_c is True:
             lines.append("Phase C sidecar: present (authoritative readiness_state used where available)")
+
+        # Observation-evidence block — three distinct counts so the operator
+        # sees we have substantial backtest evidence even when the strict
+        # Phase C count is zero.
+        obs_evidence = inner.get("observation_evidence")
+        if isinstance(obs_evidence, dict):
+            shadow_days = obs_evidence.get("valid_shadow_observation_days") or {}
+            live_days = obs_evidence.get("valid_live_execution_days") or {}
+            phase_c_days = obs_evidence.get("promotion_evidence_days") or {}
+            loose = (phase_c_days.get("loose") or {}).get("valid_days_since_inception")
+            strict = (phase_c_days.get("strict") or {}).get("valid_days_since_inception")
+            nav_range = obs_evidence.get("nav_series_date_range") or {}
+            lines.append("")
+            lines.append("Observation evidence:")
+            if nav_range.get("start") and nav_range.get("end"):
+                lines.append(
+                    f"  NAV-series window: {nav_range['start']} → {nav_range['end']}"
+                )
+            if shadow_days:
+                lines.append(
+                    f"  valid_shadow_observation_days (backtest, behavioral analysis): "
+                    + ", ".join(f"{k}={v}" for k, v in sorted(shadow_days.items()))
+                )
+            if live_days:
+                lines.append(
+                    f"  valid_live_execution_days   (operational shadow, data_status=OK): "
+                    + ", ".join(f"{k}={v}" for k, v in sorted(live_days.items()))
+                )
+            lines.append(
+                f"  promotion_evidence_days     (strict Phase C, capital gate): "
+                f"loose={loose if loose is not None else 'n/a'}, "
+                f"strict={strict if strict is not None else 'n/a'}"
+            )
+            md.append("")
+            md.append("### Observation evidence")
+            md.append("")
+            md.append(f"- **NAV-series window:** `{nav_range.get('start', '?')}` → `{nav_range.get('end', '?')}`")
+            if shadow_days:
+                md.append("- **valid_shadow_observation_days** (backtest, behavioral analysis):")
+                for slug, n in sorted(shadow_days.items()):
+                    md.append(f"    - `{slug}`: {n}")
+            if live_days:
+                md.append("- **valid_live_execution_days** (operational shadow):")
+                for slug, n in sorted(live_days.items()):
+                    md.append(f"    - `{slug}`: {n}")
+            md.append(f"- **promotion_evidence_days** (strict Phase C, capital gate): loose={loose}, strict={strict}")
         lines.append("")
         header = ["strategy", "recommendation", "conf", "excess_vs_spy", "max_dd", "vol", "valid_obs"]
         col_widths = [max(len(h), 18) for h in header]
