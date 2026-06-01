@@ -500,6 +500,58 @@ def _extract_text_field(text: str, label: str) -> str | None:
 
 
 def _build_risk_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    canonical_path = repo / "outputs" / "risk_summary" / trade_date / "risk_summary.json"
+    canonical = _read_json(canonical_path)
+    if canonical is not None:
+        reasons = list(canonical.get("reason_codes") or ["ok"])
+        confidence = str(canonical.get("confidence") or "LOW")
+        strategies_payload = canonical.get("strategies") if isinstance(canonical.get("strategies"), dict) else {}
+        section = {
+            "available": True,
+            "strategies": {
+                str(strategy): {
+                    "holdings_count": row.get("position_count"),
+                    "position_count": row.get("position_count"),
+                    "max_weight": row.get("max_position_weight"),
+                    "max_position_weight": row.get("max_position_weight"),
+                    "top3_weight": row.get("top3_concentration"),
+                    "top3_concentration": row.get("top3_concentration"),
+                    "top5_concentration": row.get("top5_concentration"),
+                    "sector_exposure": row.get("sector_exposure") or {},
+                    "missing_sector_coverage_count": row.get("missing_sector_coverage_count"),
+                    "max_sector_weight": row.get("max_sector_weight"),
+                    "market_beta": row.get("market_beta"),
+                    "concentration_risk_level": row.get("concentration_risk_level"),
+                    "exposure_risk_level": row.get("exposure_risk_level"),
+                    "confidence": row.get("confidence"),
+                    "reason_codes": list(row.get("reason_codes") or []),
+                }
+                for strategy, row in sorted(strategies_payload.items())
+                if isinstance(row, dict)
+            },
+            "top_holdings": canonical.get("top_holdings") or {},
+            "position_count": canonical.get("position_count"),
+            "max_position_weight": canonical.get("max_position_weight"),
+            "top3_concentration": canonical.get("top3_concentration"),
+            "top5_concentration": canonical.get("top5_concentration"),
+            "concentration_risk_level": canonical.get("concentration_risk_level"),
+            "exposure_risk_level": canonical.get("exposure_risk_level"),
+            "missing_sector_coverage_count": canonical.get("missing_sector_coverage_count"),
+            "confidence": confidence,
+            "reason_codes": sorted(set(str(code) for code in reasons)) if reasons else ["ok"],
+            "source_artifacts": sorted(set(list(canonical.get("source_artifacts") or []) + [str(canonical_path)])),
+        }
+        source = _status(
+            artifact_name="risk",
+            path=canonical_path,
+            date=str(canonical.get("date") or trade_date),
+            exists=True,
+            confidence=confidence,
+            reason_codes=section["reason_codes"],
+            status="PRESENT" if section["reason_codes"] == ["ok"] else "PARTIAL",
+        )
+        return section, source
+
     concentration_path = repo / "outputs" / "attribution" / trade_date / "concentration_analysis.json"
     exposure_path = repo / "outputs" / "attribution" / trade_date / "exposure_summary.json"
     holdings_path = repo / "outputs" / "portfolio_history" / trade_date / "holdings_snapshot.json"

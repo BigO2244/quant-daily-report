@@ -63,7 +63,9 @@ Primary sources:
 - `research/model_review_YYYY-MM-DD.md` or `outputs/model_review/YYYY-MM-DD/`
 - execution health artifacts under `outputs/health/`, `outputs/daily/`, or
   `outputs/latest_execution_summary.txt`
-- risk and concentration artifacts under `outputs/attribution/YYYY-MM-DD/`
+- canonical risk and concentration artifacts under
+  `outputs/risk_summary/YYYY-MM-DD/`
+- legacy risk fallback artifacts under `outputs/attribution/YYYY-MM-DD/`
 - regime artifacts under `outputs/attribution/YYYY-MM-DD/` and
   `outputs/vix_regime/regime_current.json`
 
