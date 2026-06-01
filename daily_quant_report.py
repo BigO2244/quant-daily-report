@@ -82,6 +82,7 @@ from core.trading_mode import (
     canonical_trading_mode_label,
     legacy_shadow_mode_requested,
 )
+from core.security_master import resolve_trade_plan_symbols
 from paper.nav2 import update_nav
 try:
     from paper.perf_artifact_producers import (
@@ -1931,6 +1932,11 @@ def build_execution_email_payload(
         trades = [
             t for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"}
         ]
+    symbol_resolution = resolve_trade_plan_symbols(trades, today=trade_date)
+    trades = symbol_resolution.trades
+    if symbol_resolution.status == "FAIL":
+        status = "HALTED"
+        halted_reason = f"security_master_symbol_resolution_failed:{symbol_resolution.reason}"
     trades = sorted(trades, key=lambda x: (x.get("ticker") or "", x.get("side") or ""))
     buy_count = sum(1 for t in trades if str(t.get("side", "")).upper() == "BUY")
     sell_count = sum(1 for t in trades if str(t.get("side", "")).upper() in {"SELL", "CLOSE", "REDUCE"})
@@ -2099,6 +2105,7 @@ def build_execution_email_payload(
         "non_tradable_symbols": list((paper_summary or {}).get("non_tradable_symbols") or []),
         "asset_validation_reason": (paper_summary or {}).get("asset_validation_reason"),
         "invalid_asset_count": int((paper_summary or {}).get("invalid_asset_count") or 0),
+        **symbol_resolution.to_payload(),
         "order_lifecycle": list((paper_summary or {}).get("order_lifecycle") or []),
         "sell_submit_started_at": (paper_summary or {}).get("sell_submit_started_at"),
         "sell_submit_completed_at": (paper_summary or {}).get("sell_submit_completed_at"),

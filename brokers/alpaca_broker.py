@@ -489,6 +489,53 @@ class AlpacaBroker:
             return None
         return _normalize_asset_obj(asset)
 
+    def list_assets(
+        self,
+        *,
+        status: str | None = "active",
+        asset_class: str | None = "us_equity",
+    ) -> List[Dict[str, Any]]:
+        getter = getattr(self.trading_client, "get_all_assets", None)
+        if not callable(getter):
+            raise AttributeError("Alpaca trading client does not support asset listing")
+        try:
+            from alpaca.trading.enums import AssetClass, AssetStatus
+            from alpaca.trading.requests import GetAssetsRequest
+
+            status_norm = str(status or "").strip().lower()
+            class_norm = str(asset_class or "").strip().lower()
+            req_kwargs: Dict[str, Any] = {}
+            if status_norm:
+                req_kwargs["status"] = (
+                    AssetStatus.ACTIVE if status_norm == "active" else status_norm
+                )
+            if class_norm:
+                req_kwargs["asset_class"] = (
+                    AssetClass.US_EQUITY if class_norm in {"us_equity", "equity"} else class_norm
+                )
+            assets = getter(GetAssetsRequest(**req_kwargs))
+        except TypeError:
+            assets = getter()
+        except Exception:
+            raise
+        records = [_normalize_asset_obj(asset) for asset in assets or []]
+        if status:
+            status_norm = str(status).strip().lower().replace("assetstatus.", "")
+            records = [
+                record
+                for record in records
+                if str(record.get("status") or "").strip().lower().replace("assetstatus.", "") == status_norm
+            ]
+        if asset_class:
+            class_norm = str(asset_class).strip().lower().replace("assetclass.", "")
+            records = [
+                record
+                for record in records
+                if str(record.get("asset_class") or "").strip().lower().replace("assetclass.", "")
+                in {class_norm, class_norm.replace("_", "")}
+            ]
+        return sorted(records, key=lambda row: str(row.get("symbol") or ""))
+
     def find_order_by_client_id(self, client_id: str) -> Optional[Dict[str, Any]]:
         try:
             order = self.trading_client.get_order_by_client_id(client_id)

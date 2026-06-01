@@ -37,6 +37,7 @@ from paper.reporting_consistency import compute_exposure
 from core.trading_mode import canonical_trading_mode, legacy_shadow_mode_requested
 from core.strategy_identity import strategy_identity_metadata
 from core.universe_v4 import is_allowed_etf_symbol
+from core.security_master import resolve_trade_plan_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -1213,6 +1214,24 @@ def _normalize_precomputed_trade_plan(
     if not rows:
         return pd.DataFrame(columns=cols)
     return pd.DataFrame(rows).reindex(columns=cols)
+
+
+def _apply_security_master_resolution_to_frame(
+    trades: pd.DataFrame,
+    *,
+    run_date: str,
+) -> tuple[pd.DataFrame, Dict[str, object]]:
+    if trades is None or trades.empty:
+        result = resolve_trade_plan_symbols([], today=run_date)
+        return trades, result.to_payload()
+    records = trades.to_dict("records")
+    result = resolve_trade_plan_symbols(records, today=run_date)
+    resolved = pd.DataFrame(result.trades)
+    for col in trades.columns:
+        if col not in resolved.columns:
+            resolved[col] = trades[col].values if len(trades) == len(resolved) else None
+    resolved = resolved.reindex(columns=list(dict.fromkeys([*trades.columns, *resolved.columns])))
+    return resolved, result.to_payload()
 
 
 def _normalize_and_filter_executable_trades(
@@ -3620,6 +3639,30 @@ def run_paper_day(
     if int(execution_filter_stats.get("dropped_min_notional", 0)) > 0:
         filter_drop_reasons["min_notional"] = int(execution_filter_stats.get("dropped_min_notional", 0))
 
+    execution_trades, symbol_resolution_metadata = _apply_security_master_resolution_to_frame(
+        execution_trades,
+        run_date=run_date,
+    )
+    trade_plan_trades = execution_trades.copy()
+    symbol_resolution_status = str(
+        symbol_resolution_metadata.get("security_master_resolution_status") or ""
+    ).upper()
+    if symbol_resolution_metadata.get("symbol_aliases_applied"):
+        logger.warning(
+            "[SECURITY_MASTER] aliases_applied=%s reason=%s",
+            symbol_resolution_metadata.get("symbol_aliases_applied"),
+            symbol_resolution_metadata.get("security_master_resolution_reason"),
+        )
+    if symbol_resolution_status == "FAIL":
+        blocked = True
+        execution_enabled = False
+        reason = str(
+            symbol_resolution_metadata.get("security_master_resolution_reason")
+            or "security_master_symbol_resolution_failed"
+        )
+        blocked_reasons.append(f"security_master_symbol_resolution_failed:{reason}")
+        logger.error("[SECURITY_MASTER] blocked execution reason=%s", reason)
+
     # ── Risk controls preflight ────────────────────────────────────
     # Runs circuit-breaker and per-position cap checks before any
     # order is submitted.  Non-blocking on error (warnings only).
@@ -3666,6 +3709,7 @@ def run_paper_day(
         "post_local_idempotent_orders": 0,
         "submitted_orders": 0,
         "remote_existing_orders": 0,
+        **dict(symbol_resolution_metadata or {}),
     }
     idempotent_drop_reasons: Counter[str] = Counter()
     submit_attempts = 0
@@ -4611,6 +4655,7 @@ def run_paper_day(
         "asset_validation_reasons": list(asset_validation.get("asset_validation_reasons") or []),
         "asset_validation_artifact_path": asset_validation.get("asset_validation_artifact_path"),
         "invalid_asset_count": int(asset_validation.get("invalid_asset_count") or 0),
+        **dict(symbol_resolution_metadata or {}),
         "execution_submitted_symbols": execution_submitted_symbols,
         "alpaca_account_snapshot": alpaca_account_snapshot,
         "alpaca_positions_snapshot": alpaca_positions_snapshot,

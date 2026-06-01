@@ -52,6 +52,7 @@ from core.operator_summary import (
 )
 from core.precompute_contract import load_precompute_inputs
 from core.run_pointer import write_latest_run_pointer, write_trade_stage_pointer
+from core.security_master import resolve_trade_plan_symbols
 from core.timing_policy import classify_timing, current_et
 from core.trading_day_summary import write_trading_day_summary
 from core.trading_mode import canonical_trading_mode_label
@@ -560,7 +561,12 @@ def _validate_exact_planned_payload(
         if price <= 0.0 and notional <= 0.0:
             raise RuntimeError(f"planned_execution_payload_trade_missing_price index={idx} ticker={ticker}")
         normalized.append(dict(trade))
-    return normalized
+    resolution = resolve_trade_plan_symbols(normalized, today=trade_date)
+    if resolution.status == "FAIL":
+        raise RuntimeError(
+            f"planned_execution_payload_security_master_resolution_failed:{resolution.reason}"
+        )
+    return resolution.trades
 
 
 def _planned_payload_provenance(
@@ -1424,6 +1430,16 @@ def main(argv: list[str] | None = None) -> int:
             "skipped_buy_count",
             "blocked_buy_count",
             "buy_phase_decision_reason",
+            "security_master_resolution_status",
+            "security_master_resolution_reason",
+            "symbol_aliases_applied",
+            "security_master_unknown_symbols",
+            "security_master_inactive_symbols",
+            "security_master_non_tradable_symbols",
+            "security_master_stale_universe",
+            "security_master_asof_date",
+            "security_master_path",
+            "security_master_warnings",
         ):
             if key in (paper_summary or {}):
                 execution_payload[key] = (paper_summary or {}).get(key)

@@ -20,6 +20,9 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Phase 0b: Claude Research Agent (before precompute — 6:30 AM ET)
 30 6 * * 1-5 $HOME/quant-daily-report/scripts/cron_research.sh >> $HOME/quant-daily-report/logs/cron_research.log 2>&1
 
+# Security master refresh (artifact-only; before precompute final plan)
+45 6 * * 1-5 $HOME/quant-daily-report/scripts/cron_security_master.sh >> $HOME/quant-daily-report/logs/cron_security_master.log 2>&1
+
 # Phase 1: Precompute (consumes overnight signals + research digest)
 0 7 * * 1-5 $HOME/quant-daily-report/scripts/cron_precompute.sh >> $HOME/quant-daily-report/logs/cron_precompute.log 2>&1
 

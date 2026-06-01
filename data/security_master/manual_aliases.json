@@ -1,0 +1,8 @@
+{
+  "aliases": {
+    "BK": "BNY"
+  },
+  "notes": {
+    "BK": "Bank of New York Mellon changed ticker to BNY; keep as manual execution alias until security-master snapshots confirm all upstream model universes have migrated."
+  }
+}

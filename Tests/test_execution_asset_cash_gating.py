@@ -179,7 +179,7 @@ def _asset(symbol: str) -> dict[str, object]:
 def test_invalid_buy_symbol_blocks_before_sells(monkeypatch, tmp_path):
     fake = _CashGateAlpaca(
         account={"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0"},
-        assets={"ABNB": _asset("ABNB"), "BK": None},
+        assets={"ABNB": _asset("ABNB"), "ZZZZ": None},
     )
     _patch_open_precomputed_run(
         monkeypatch,
@@ -197,17 +197,54 @@ def test_invalid_buy_symbol_blocks_before_sells(monkeypatch, tmp_path):
         now_et=dt.datetime(2026, 5, 29, 9, 35, tzinfo=ZoneInfo("America/New_York")),
         precomputed_trade_plan=[
             {"ticker": "ABNB", "side": "SELL", "shares": 1, "price": 100.0, "notional": 100.0},
-            {"ticker": "BK", "side": "BUY", "shares": 1, "price": 50.0, "notional": 50.0},
+            {"ticker": "ZZZZ", "side": "BUY", "shares": 1, "price": 50.0, "notional": 50.0},
         ],
     )
 
     assert fake.submitted == []
     assert result["execution_status"] == "HALTED"
     assert result["asset_validation_status"] == "FAIL"
-    assert result["invalid_symbols"] == ["BK"]
+    assert result["invalid_symbols"] == ["ZZZZ"]
     assert "pretrade_asset_validation_failed" in result["halt_reason"]
-    assert "invalid_tradable_symbol:BK" in result["asset_validation_reason"]
+    assert "invalid_tradable_symbol:ZZZZ" in result["asset_validation_reason"]
     assert result["alpaca_submission_summary"]["submit_attempts"] == 0
+
+
+def test_bk_alias_resolves_to_bny_before_alpaca_validation(monkeypatch, tmp_path):
+    (tmp_path / "data" / "security_master").mkdir(parents=True)
+    (tmp_path / "data" / "security_master" / "manual_aliases.json").write_text(
+        '{"aliases":{"BK":"BNY"},"notes":{}}\n',
+        encoding="utf-8",
+    )
+    fake = _CashGateAlpaca(
+        account={"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0"},
+        assets={"BNY": _asset("BNY")},
+    )
+    _patch_open_precomputed_run(
+        monkeypatch,
+        tmp_path,
+        fake_alpaca=fake,
+        holdings=pd.DataFrame(),
+    )
+
+    result = broker.run_paper_day(
+        run_date="2026-05-29",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 5, 29, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        precomputed_trade_plan=[
+            {"ticker": "BK", "side": "BUY", "shares": 1, "price": 50.0, "notional": 50.0},
+        ],
+    )
+
+    assert [row["symbol"] for row in fake.submitted] == ["BNY"]
+    assert result["asset_validation_status"] == "PASS"
+    assert result["invalid_symbols"] == []
+    assert result["symbol_aliases_applied"] == {"BK": "BNY"}
+    assert {row["ticker"] for row in result["trade_plan"]} == {"BNY"}
+    assert "BK" not in {row["ticker"] for row in result["trade_plan"]}
 
 
 def test_pending_sell_does_not_block_affordable_buy(monkeypatch, tmp_path):
