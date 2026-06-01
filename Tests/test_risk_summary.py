@@ -75,6 +75,63 @@ def _write_exposure(root: Path, trade_date: str) -> None:
     )
 
 
+def _write_shadow_candidates(root: Path, trade_date: str) -> None:
+    base = root / "outputs" / "shadow_candidates" / trade_date
+    payloads = {
+        "caerus_lyra": [("AAA", 0.2), ("BBB", 0.2), ("CCC", 0.2), ("DDD", 0.2), ("EEE", 0.2)],
+        "caerus_orion": [("AAA", 0.2), ("BBB", 0.2), ("CCC", 0.2), ("DDD", 0.2), ("EEE", 0.2)],
+        "caerus_polaris": [
+            ("AAA", 0.1),
+            ("BBB", 0.1),
+            ("CCC", 0.1),
+            ("DDD", 0.1),
+            ("EEE", 0.1),
+            ("FFF", 0.1),
+            ("GGG", 0.1),
+            ("HHH", 0.1),
+            ("III", 0.1),
+            ("JJJ", 0.1),
+        ],
+    }
+    for strategy, holdings in payloads.items():
+        _write_json(
+            base / f"{strategy}.json",
+            {
+                "trade_date": trade_date,
+                "strategy_slug": strategy,
+                "holdings": [
+                    {"ticker": symbol, "target_weight": weight}
+                    for symbol, weight in holdings
+                ],
+            },
+        )
+
+
+def _write_position_attribution(root: Path, trade_date: str) -> None:
+    positions = []
+    for strategy, weights in {
+        "caerus_lyra": [("AAA", 0.2), ("BBB", 0.2)],
+        "caerus_orion": [("CCC", 0.5), ("DDD", 0.5)],
+        "caerus_polaris": [("EEE", 1.0)],
+    }.items():
+        for symbol, weight in weights:
+            positions.append(
+                {
+                    "date": trade_date,
+                    "strategy": strategy,
+                    "symbol": symbol,
+                    "weight": weight,
+                    "return_pct": 0.01,
+                    "pnl_contribution_pct": weight * 0.01,
+                    "reason_codes": ["ok"],
+                }
+            )
+    _write_json(
+        root / "outputs" / "attribution" / trade_date / "position_attribution.json",
+        {"date": trade_date, "positions": positions, "schema_version": "position_pnl_attribution_phase_a_v1"},
+    )
+
+
 def _write_packet_core(root: Path, trade_date: str) -> None:
     _write_json(
         root / "outputs" / "attribution" / trade_date / "attribution_summary.json",
@@ -168,6 +225,42 @@ def test_missing_source_data_emits_reason_codes(tmp_path):
     assert result["risk_summary"]["strategies_covered"] == []
     assert result["risk_summary"]["confidence"] == "LOW"
     assert "holdings_source_missing" in result["risk_summary"]["reason_codes"]
+
+
+def test_shadow_candidate_fallback_without_portfolio_history(tmp_path):
+    trade_date = "2026-05-29"
+    _write_universe(tmp_path)
+    _write_shadow_candidates(tmp_path, trade_date)
+
+    result = build_risk_summary(trade_date=trade_date, repo_root=tmp_path)
+    summary = result["risk_summary"]
+
+    assert summary["strategies_covered"] == ["caerus_lyra", "caerus_orion", "caerus_polaris"]
+    assert summary["position_count"] == 20
+    assert summary["strategies"]["caerus_lyra"]["position_count"] == 5
+    assert summary["strategies"]["caerus_orion"]["position_count"] == 5
+    assert summary["strategies"]["caerus_polaris"]["position_count"] == 10
+    assert summary["strategies"]["caerus_orion"]["top3_concentration"] == 0.6
+    assert "holdings_source_missing" not in summary["reason_codes"]
+
+
+def test_position_attribution_fallback_when_holding_sources_missing(tmp_path):
+    trade_date = "2026-06-01"
+    _write_universe(tmp_path)
+    _write_position_attribution(tmp_path, trade_date)
+
+    result = build_risk_summary(trade_date=trade_date, repo_root=tmp_path)
+    summary = result["risk_summary"]
+
+    assert summary["strategies_covered"] == ["caerus_lyra", "caerus_orion", "caerus_polaris"]
+    assert summary["position_count"] == 5
+    assert summary["strategies"]["caerus_orion"]["max_position_weight"] == 0.5
+    assert summary["strategies"]["caerus_polaris"]["top5_concentration"] == 1.0
+    assert "holdings_source_missing" not in summary["reason_codes"]
+    assert any(
+        str(path).endswith("outputs/attribution/2026-06-01/position_attribution.json")
+        for path in summary["source_artifacts"]
+    )
 
 
 def test_missing_sector_coverage_is_partial_not_crash(tmp_path):

@@ -20,10 +20,11 @@ outputs/risk_summary/YYYY-MM-DD/
 
 The builder reads existing dated artifacts only. It prefers
 `outputs/portfolio_history/YYYY-MM-DD/holdings_snapshot.json` for strategy
-holdings, falls back to `outputs/shadow_candidates/YYYY-MM-DD/*.json`, enriches
-sectors from holding rows or `data/universe.csv`, and carries optional exposure
-metadata from `outputs/attribution/YYYY-MM-DD/exposure_summary.json` when
-present.
+holdings, falls back to `outputs/shadow_candidates/YYYY-MM-DD/*.json`, then
+falls back to Attribution Phase A
+`outputs/attribution/YYYY-MM-DD/position_attribution.json`. It enriches sectors
+from holding rows or `data/universe.csv`, and carries optional exposure metadata
+from `outputs/attribution/YYYY-MM-DD/exposure_summary.json` when present.
 
 Each artifact includes:
 

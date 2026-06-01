@@ -161,6 +161,45 @@ def _normalize_holdings(
     return holdings
 
 
+def _load_position_attribution_holdings(
+    *,
+    repo_root: Path,
+    trade_date: str,
+    sector_lookup: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    path = repo_root / "outputs" / "attribution" / trade_date / "position_attribution.json"
+    payload = _read_json(path)
+    if payload is None:
+        return [], [], []
+    positions = payload.get("positions") or []
+    if not isinstance(positions, list):
+        return [], [str(path)], ["attribution_positions_invalid"]
+
+    rows: list[dict[str, Any]] = []
+    for row in positions:
+        if not isinstance(row, dict):
+            continue
+        strategy = str(row.get("strategy") or row.get("strategy_id") or row.get("strategy_slug") or "").strip()
+        symbol = _symbol(row.get("symbol") or row.get("ticker"))
+        if not strategy or not symbol or symbol == "CASH":
+            continue
+        sector = str(row.get("sector") or sector_lookup.get(symbol) or "").strip() or None
+        source_artifacts = sorted(set(list(row.get("source_artifacts") or []) + [str(path)]))
+        rows.append(
+            {
+                "strategy": strategy,
+                "symbol": symbol,
+                "weight": _weight(row),
+                "sector": sector,
+                "source_artifacts": source_artifacts,
+            }
+        )
+
+    if not rows:
+        return [], [str(path)], ["attribution_positions_empty"]
+    return rows, [str(path)], []
+
+
 def load_strategy_holdings(repo_root: Path, trade_date: str) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     sector_lookup, sector_sources = _load_universe_sectors(repo_root)
     rows: list[dict[str, Any]] = []
@@ -208,6 +247,16 @@ def load_strategy_holdings(repo_root: Path, trade_date: str) -> tuple[list[dict[
             )
             seen.add(strategy)
             sources.append(str(path))
+
+    if not rows:
+        attribution_rows, attribution_sources, attribution_reasons = _load_position_attribution_holdings(
+            repo_root=repo_root,
+            trade_date=trade_date,
+            sector_lookup=sector_lookup,
+        )
+        rows.extend(attribution_rows)
+        sources.extend(attribution_sources)
+        reasons.extend(attribution_reasons)
 
     if not sources:
         reasons.append("holdings_source_missing")
