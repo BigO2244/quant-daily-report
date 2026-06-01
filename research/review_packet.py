@@ -506,29 +506,38 @@ def _build_risk_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], di
         reasons = list(canonical.get("reason_codes") or ["ok"])
         confidence = str(canonical.get("confidence") or "LOW")
         strategies_payload = canonical.get("strategies") if isinstance(canonical.get("strategies"), dict) else {}
+        strategy_rows = {
+            str(strategy): {
+                "holdings_count": row.get("position_count"),
+                "position_count": row.get("position_count"),
+                "max_weight": row.get("max_position_weight"),
+                "max_position_weight": row.get("max_position_weight"),
+                "top3_weight": row.get("top3_concentration"),
+                "top3_concentration": row.get("top3_concentration"),
+                "top5_concentration": row.get("top5_concentration"),
+                "sector_exposure": row.get("sector_exposure") or {},
+                "missing_sector_coverage_count": row.get("missing_sector_coverage_count"),
+                "max_sector_weight": row.get("max_sector_weight"),
+                "market_beta": row.get("market_beta"),
+                "concentration_risk_level": row.get("concentration_risk_level"),
+                "exposure_risk_level": row.get("exposure_risk_level"),
+                "confidence": row.get("confidence"),
+                "reason_codes": list(row.get("reason_codes") or []),
+            }
+            for strategy, row in sorted(strategies_payload.items())
+            if isinstance(row, dict)
+        }
+        position_count = int(_safe_float(canonical.get("position_count")) or 0)
+        usable = position_count > 0 and bool(strategy_rows)
+        if not usable and "empty_risk_summary" not in reasons:
+            reasons.append("empty_risk_summary")
+        if not usable and "missing_risk_summary" not in reasons:
+            reasons.append("missing_risk_summary")
+        if not usable:
+            confidence = "LOW"
         section = {
-            "available": True,
-            "strategies": {
-                str(strategy): {
-                    "holdings_count": row.get("position_count"),
-                    "position_count": row.get("position_count"),
-                    "max_weight": row.get("max_position_weight"),
-                    "max_position_weight": row.get("max_position_weight"),
-                    "top3_weight": row.get("top3_concentration"),
-                    "top3_concentration": row.get("top3_concentration"),
-                    "top5_concentration": row.get("top5_concentration"),
-                    "sector_exposure": row.get("sector_exposure") or {},
-                    "missing_sector_coverage_count": row.get("missing_sector_coverage_count"),
-                    "max_sector_weight": row.get("max_sector_weight"),
-                    "market_beta": row.get("market_beta"),
-                    "concentration_risk_level": row.get("concentration_risk_level"),
-                    "exposure_risk_level": row.get("exposure_risk_level"),
-                    "confidence": row.get("confidence"),
-                    "reason_codes": list(row.get("reason_codes") or []),
-                }
-                for strategy, row in sorted(strategies_payload.items())
-                if isinstance(row, dict)
-            },
+            "available": usable,
+            "strategies": strategy_rows,
             "top_holdings": canonical.get("top_holdings") or {},
             "position_count": canonical.get("position_count"),
             "max_position_weight": canonical.get("max_position_weight"),
@@ -548,7 +557,7 @@ def _build_risk_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], di
             exists=True,
             confidence=confidence,
             reason_codes=section["reason_codes"],
-            status="PRESENT" if section["reason_codes"] == ["ok"] else "PARTIAL",
+            status="MISSING" if not usable else "PRESENT" if section["reason_codes"] == ["ok"] else "PARTIAL",
         )
         return section, source
 
@@ -742,7 +751,7 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
     if not sections["execution_quality"].get("available"):
         actions.append("Build a canonical execution telemetry summary so review packets can report order lifecycle health.")
     if not sections["risk_concentration"].get("available"):
-        actions.append("Regenerate research clarity or attribution exposure artifacts to populate concentration and sector risk.")
+        actions.append("Regenerate/build canonical risk/concentration summary artifacts to populate concentration and sector risk.")
     if not sections["regime_context"].get("available"):
         actions.append("Regenerate regime attribution/context artifacts to populate regime behavior.")
     if signal.get("early_evidence"):

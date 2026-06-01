@@ -176,6 +176,22 @@ def _write_packet_core(root: Path, trade_date: str) -> None:
     )
 
 
+def _write_empty_canonical_risk_summary(root: Path, trade_date: str) -> None:
+    _write_json(
+        root / "outputs" / "risk_summary" / trade_date / "risk_summary.json",
+        {
+            "date": trade_date,
+            "position_count": 0,
+            "strategies_covered": [],
+            "strategies": [],
+            "top_holdings": {},
+            "confidence": "LOW",
+            "reason_codes": ["attribution_positions_empty", "no_holdings"],
+            "source_artifacts": ["outputs/attribution/2026-06-01/position_attribution.json"],
+        },
+    )
+
+
 def test_risk_summary_builds_canonical_artifacts(tmp_path):
     trade_date = "2026-06-01"
     _write_universe(tmp_path)
@@ -314,3 +330,24 @@ def test_research_review_packet_consumes_canonical_risk_summary(tmp_path):
     assert packet["sections"]["risk_concentration"]["available"] is True
     assert "missing_risk" not in packet["overall"]["reason_codes"]
     assert "missing_risk_summary" not in packet["sections"]["data_freshness"]["reason_codes"]
+
+
+def test_empty_canonical_risk_summary_does_not_clear_missing_risk(tmp_path):
+    trade_date = "2026-06-01"
+    _write_packet_core(tmp_path, trade_date)
+    _write_empty_canonical_risk_summary(tmp_path, trade_date)
+
+    packet = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+    risk = packet["sections"]["risk_concentration"]
+
+    assert risk["available"] is False
+    assert packet["sources"]["risk"]["status"] == "MISSING"
+    assert packet["sources"]["risk"]["path"].endswith("outputs/risk_summary/2026-06-01/risk_summary.json")
+    assert "attribution_positions_empty" in risk["reason_codes"]
+    assert "no_holdings" in risk["reason_codes"]
+    assert "empty_risk_summary" in risk["reason_codes"]
+    assert "missing_risk_summary" in risk["reason_codes"]
+    assert "missing_risk" in packet["overall"]["reason_codes"]
+    assert "missing_risk_summary" in packet["sections"]["data_freshness"]["reason_codes"]
+    action_text = " ".join(packet["sections"]["recommended_next_actions"]).lower()
+    assert "risk/concentration" in action_text
