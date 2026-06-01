@@ -79,6 +79,8 @@ data/fundamental/
 data/macro/
 data/cache/
 data/research_cache/
+data/security_master/*
+!data/security_master/manual_aliases.json
 *.csv
 *.parquet
 # Loose root-level scripts and artifacts
