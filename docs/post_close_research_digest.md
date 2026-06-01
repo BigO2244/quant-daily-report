@@ -50,12 +50,23 @@ The digest uses `core.quant_report.send_email`, which resolves credentials via
 Subject:
 
 ```text
-[Alpha Stack] Post-Close Research Digest — YYYY-MM-DD
+[Alpha Stack] CIO Research Briefing — YYYY-MM-DD
 ```
 
-The body includes research readiness, confidence, attribution status, positions
-analyzed, decisions analyzed, top contributors, top detractors, signal notes,
-data freshness warnings, recommended next actions, and generated packet paths.
+The email starts with the CIO Briefing from the Research Review Packet:
+
+- CIO takeaway.
+- 30-second read.
+- Strategy leaderboard.
+- Key attribution notes.
+- Signal evidence.
+- Risks/blockers.
+- Recommended action.
+
+The artifact-style fields remain below that under `Technical Appendix`,
+including readiness, confidence, attribution status, positions analyzed,
+decisions analyzed, top contributors, top detractors, data freshness warnings,
+recommended next actions, and generated packet paths.
 
 ## Suggested Cron
 

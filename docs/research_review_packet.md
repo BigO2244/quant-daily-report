@@ -19,6 +19,7 @@ Outputs:
 
 ```text
 outputs/research_review/YYYY-MM-DD/
+  cio_briefing.json
   research_review.json
   research_review.md
   research_review.html
@@ -29,6 +30,28 @@ outputs/research_review/YYYY-MM-DD/
 The builder does not fetch data, call brokers, submit orders, change signals,
 or alter portfolio construction. Missing optional artifacts are reported as
 diagnostics, not treated as runtime failures.
+
+## CIO Briefing
+
+Each packet includes a deterministic CIO briefing in `cio_briefing.json`,
+`research_review.json`, `research_review_summary.json`, and as the lead section
+of the Markdown/HTML reports. The briefing is rule-based and uses existing
+packet artifacts only.
+
+The CIO briefing includes:
+
+- CIO takeaway narrative.
+- What changed since the prior available review packet.
+- 30-second read.
+- Strategy leaderboard.
+- Attribution interpretation.
+- Signal evidence assessment.
+- Risk/blocker assessment.
+- Primary and secondary CIO recommendations.
+
+Prior-review comparison searches `outputs/research_review/YYYY-MM-DD/` for the
+latest packet date before the current packet date. If none exists, it emits
+`prior_review_missing` and keeps the packet build successful.
 
 ## Source Contract
 

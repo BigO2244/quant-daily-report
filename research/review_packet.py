@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from research.cio_briefing import build_cio_briefing
+
 
 SCHEMA_VERSION = "caerus_research_review_packet_v1"
 SCORECARD_DIMENSIONS = (
@@ -800,6 +802,9 @@ def build_research_review_packet(
         "sources": sources,
         "sections": sections,
     }
+    cio_briefing = build_cio_briefing(payload, repo)
+    payload["cio_briefing"] = cio_briefing
+    sections["cio_briefing"] = cio_briefing
     out_root = Path(output_root) if output_root is not None else repo / "outputs" / "research_review"
     out_dir = out_root / selected_date
     markdown = render_markdown(payload)
@@ -809,10 +814,17 @@ def build_research_review_packet(
         "date": selected_date,
         "generated_at": payload["generated_at"],
         "overall": overall,
+        "sections": {
+            "position_attribution": position_section,
+            "decision_attribution": decision_section,
+            "signal_quality": signal_section,
+        },
+        "cio_briefing": cio_briefing,
         "output_paths": {
             "research_review_json": str(out_dir / "research_review.json"),
             "research_review_md": str(out_dir / "research_review.md"),
             "research_review_html": str(out_dir / "research_review.html"),
+            "cio_briefing": str(out_dir / "cio_briefing.json"),
         },
     }
     _write_json(out_dir / "research_review.json", payload)
@@ -820,7 +832,9 @@ def build_research_review_packet(
     _write_text(out_dir / "research_review.html", html_text)
     _write_json(out_dir / "research_review_sources.json", sources)
     _write_json(out_dir / "research_review_summary.json", summary)
+    _write_json(out_dir / "cio_briefing.json", cio_briefing)
     payload["artifact_paths"] = summary["output_paths"] | {
+        "cio_briefing": str(out_dir / "cio_briefing.json"),
         "research_review_sources": str(out_dir / "research_review_sources.json"),
         "research_review_summary": str(out_dir / "research_review_summary.json"),
     }
@@ -837,6 +851,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"**Date:** {date}",
         f"**Generated at:** {payload['generated_at']}",
         "",
+    ]
+    lines.extend(_render_cio_md(payload.get("cio_briefing") or sections.get("cio_briefing") or {}))
+    lines += [
         "## Executive Summary",
         "",
         f"- **Overall research readiness:** {overall['readiness']}",
@@ -858,6 +875,71 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_actions_md(sections["recommended_next_actions"]))
     lines.extend(_render_sources_md(payload["sources"]))
     return "\n".join(lines)
+
+
+def _render_cio_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## CIO Briefing",
+        "",
+        "### CIO Takeaway",
+        "",
+        _md(section.get("cio_takeaway")),
+        "",
+        "### What Changed Since Prior Review",
+        "",
+        _md((section.get("what_changed_since_prior_review") or {}).get("narrative")),
+        "",
+        "### 30-Second Read",
+        "",
+    ]
+    thirty = section.get("thirty_second_read") or {}
+    for label, key in (
+        ("Readiness", "readiness"),
+        ("Confidence", "confidence"),
+        ("Leading strategy", "leading_strategy"),
+        ("Main contributor", "main_contributor"),
+        ("Main detractor", "main_detractor"),
+        ("Biggest blocker", "biggest_blocker"),
+        ("Recommended action", "recommended_action"),
+    ):
+        lines.append(f"- **{label}:** {_md(thirty.get(key))}")
+    lines += [
+        "",
+        "### Strategy Leaderboard",
+        "",
+        "| Rank | Strategy | Decisions | Hit Rate | Avg Return | Avg PnL Contribution | Confidence |",
+        "|---:|---|---:|---:|---:|---:|---|",
+    ]
+    for row in section.get("strategy_leaderboard") or []:
+        lines.append(
+            f"| {_md(row.get('rank'))} | {_md(row.get('strategy'))} | {_md(row.get('decisions_analyzed'))} | {_md(row.get('hit_rate'))} | {_md(row.get('average_realized_return'))} | {_md(row.get('average_pnl_contribution'))} | {_md(row.get('confidence'))} |"
+        )
+    attr = section.get("attribution_interpretation") or {}
+    signal = section.get("signal_evidence_assessment") or {}
+    risk = section.get("risk_blocker_assessment") or {}
+    rec = section.get("cio_recommendation") or {}
+    lines += [
+        "",
+        "### Key Attribution Notes",
+        "",
+        _md(attr.get("narrative")),
+        "",
+        "### Signal Evidence",
+        "",
+        _md(signal.get("conclusion")),
+        "",
+        "### Risks / Blockers",
+        "",
+        _md(risk.get("narrative")),
+        "",
+        "### Recommended Action",
+        "",
+        f"- **Primary:** {_md(rec.get('primary'))}",
+    ]
+    for item in rec.get("secondary") or []:
+        lines.append(f"- {item}")
+    lines.append("")
+    return lines
 
 
 def _render_model_review_md(section: dict[str, Any]) -> list[str]:
@@ -1093,6 +1175,11 @@ def _html_section_from_markdown(markdown: str) -> str:
                 out.append("</tbody></table>")
                 in_table = False
             out.append(f"<h2>{html.escape(line[3:])}</h2>")
+        elif line.startswith("### "):
+            if in_table:
+                out.append("</tbody></table>")
+                in_table = False
+            out.append(f"<h3>{html.escape(line[4:])}</h3>")
         elif line.startswith("- "):
             out.append(f"<p>{html.escape(line[2:])}</p>")
         elif line.startswith("|") and "---" not in line:

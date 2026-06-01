@@ -17,6 +17,34 @@ def _write_review(root: Path, trade_date: str) -> None:
         base / "research_review.json",
         {
             "date": trade_date,
+            "cio_briefing": {
+                "cio_takeaway": "Research readiness is MEDIUM and attribution is operational.",
+                "thirty_second_read": {
+                    "readiness": "MEDIUM",
+                    "confidence": "LOW",
+                    "leading_strategy": "caerus_polaris",
+                    "main_contributor": "AAA",
+                    "main_detractor": "BBB",
+                    "biggest_blocker": "missing model review",
+                    "recommended_action": "Run scripts/weekly_model_review.py.",
+                },
+                "strategy_leaderboard": [
+                    {
+                        "rank": 1,
+                        "strategy": "caerus_polaris",
+                        "hit_rate": 0.5,
+                        "average_realized_return": 0.02,
+                        "average_pnl_contribution": 0.01,
+                    }
+                ],
+                "attribution_interpretation": {"narrative": "AAA led while BBB detracted."},
+                "signal_evidence_assessment": {
+                    "conclusion": "Signal evidence is not yet differentiated; sample size remains too small to identify a durable signal edge.",
+                    "confidence": "LOW",
+                },
+                "risk_blocker_assessment": {"narrative": "The primary blocker is missing model review."},
+                "cio_recommendation": {"primary": "Run scripts/weekly_model_review.py.", "secondary": []},
+            },
             "overall": {
                 "readiness": "MEDIUM",
                 "confidence": "LOW",
@@ -78,14 +106,17 @@ def test_build_digest_email_extracts_summary_fields(tmp_path):
 
     digest = build_digest_email(tmp_path, trade_date)
 
-    assert digest["subject"] == "[Alpha Stack] Post-Close Research Digest — 2026-04-30"
+    assert digest["subject"] == "[Alpha Stack] CIO Research Briefing — 2026-04-30"
+    assert digest["body_text"].startswith("CIO Briefing")
+    assert "30-Second Read" in digest["body_text"]
+    assert digest["body_text"].index("CIO Briefing") < digest["body_text"].index("Technical Appendix")
     assert "Research readiness: MEDIUM" in digest["body_text"]
     assert "Positions analyzed: 2" in digest["body_text"]
     assert "Decisions analyzed: 2" in digest["body_text"]
     assert "caerus_polaris: AAA ret=0.1 pnl=0.05" in digest["body_text"]
     assert "missing_model_review" in digest["body_text"]
     assert "outputs/research_review/2026-04-30/research_review.html" in digest["body_text"]
-    assert "Post-Close Research Digest" in digest["body_html"]
+    assert "CIO Research Briefing" in digest["body_html"]
 
 
 def test_select_target_date_prefers_successful_price_hydration(tmp_path):

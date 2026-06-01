@@ -16,6 +16,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core.quant_report import send_email  # noqa: E402
+from research.cio_briefing import build_cio_briefing  # noqa: E402
 
 
 ET = ZoneInfo("America/New_York")
@@ -63,6 +64,14 @@ def _fmt(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value) if value else "none"
     return str(value)
+
+
+def _fmt_pct(value: Any) -> str:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    return f"{numeric * 100:+.1f}%"
 
 
 def _date_dirs(root: Path, required_file: str | None = None) -> set[str]:
@@ -145,12 +154,16 @@ def _load_review(repo_root: Path, trade_date: str) -> tuple[dict[str, Any], Path
 def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]:
     repo = Path(repo_root)
     review, review_path, summary_path = _load_review(repo, trade_date)
+    summary = _read_json(summary_path) if summary_path else None
+    if summary and isinstance(summary.get("sections"), dict):
+        review = _merge_summary_sections(review, summary)
     sections = review.get("sections") if isinstance(review.get("sections"), dict) else {}
     overall = review.get("overall") if isinstance(review.get("overall"), dict) else {}
     position = sections.get("position_attribution") if isinstance(sections.get("position_attribution"), dict) else {}
     decision = sections.get("decision_attribution") if isinstance(sections.get("decision_attribution"), dict) else {}
     signal = sections.get("signal_quality") if isinstance(sections.get("signal_quality"), dict) else {}
     freshness = sections.get("data_freshness") if isinstance(sections.get("data_freshness"), dict) else {}
+    cio = build_cio_briefing(review, repo)
     actions = list(sections.get("recommended_next_actions") or [])
 
     contributors = position.get("top_contributor_per_strategy") if isinstance(position.get("top_contributor_per_strategy"), dict) else {}
@@ -165,9 +178,55 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         "json": f"outputs/research_review/{trade_date}/research_review.json",
     }
 
-    subject = f"[Alpha Stack] Post-Close Research Digest — {trade_date}"
+    subject = f"[Alpha Stack] CIO Research Briefing — {trade_date}"
+    thirty = cio.get("thirty_second_read") if isinstance(cio.get("thirty_second_read"), dict) else {}
+    leaderboard = list(cio.get("strategy_leaderboard") or [])
+    attribution_interpretation = cio.get("attribution_interpretation") if isinstance(cio.get("attribution_interpretation"), dict) else {}
+    signal_assessment = cio.get("signal_evidence_assessment") if isinstance(cio.get("signal_evidence_assessment"), dict) else {}
+    risk_assessment = cio.get("risk_blocker_assessment") if isinstance(cio.get("risk_blocker_assessment"), dict) else {}
+    recommendation = cio.get("cio_recommendation") if isinstance(cio.get("cio_recommendation"), dict) else {}
+    primary_recommendation = str(recommendation.get("primary") or (actions[0] if actions else "No action generated."))
+    secondary_recommendations = list(recommendation.get("secondary") or [])
+    leaderboard_lines = [
+        (
+            f"{row.get('rank')}. {row.get('strategy')} - hit rate {_fmt_pct(row.get('hit_rate'))}, "
+            f"avg return {_fmt_pct(row.get('average_realized_return'))}, "
+            f"avg contribution {_fmt_pct(row.get('average_pnl_contribution'))}"
+        )
+        for row in leaderboard
+        if isinstance(row, dict)
+    ]
     text_lines = [
-        f"Post-Close Research Digest — {trade_date}",
+        "CIO Briefing",
+        "",
+        str(cio.get("cio_takeaway") or "No CIO briefing narrative is available."),
+        "",
+        "30-Second Read",
+        f"- Readiness: {_fmt(thirty.get('readiness') or overall.get('readiness'))}",
+        f"- Confidence: {_fmt(thirty.get('confidence') or overall.get('confidence'))}",
+        f"- Leading strategy: {_fmt(thirty.get('leading_strategy'))}",
+        f"- Main contributor: {_fmt(thirty.get('main_contributor'))}",
+        f"- Main detractor: {_fmt(thirty.get('main_detractor'))}",
+        f"- Biggest blocker: {_fmt(thirty.get('biggest_blocker'))}",
+        f"- Recommended action: {_fmt(thirty.get('recommended_action') or primary_recommendation)}",
+        "",
+        "Strategy Leaderboard",
+        *(leaderboard_lines or ["No strategy leaderboard available."]),
+        "",
+        "Key Attribution Notes",
+        str(attribution_interpretation.get("narrative") or "Attribution interpretation is not available."),
+        "",
+        "Signal Evidence",
+        str(signal_assessment.get("conclusion") or "Signal evidence is not available."),
+        "",
+        "Risks / Blockers",
+        str(risk_assessment.get("narrative") or "Risk and blocker assessment is not available."),
+        "",
+        "Recommended Action",
+        primary_recommendation,
+        *(f"- {item}" for item in secondary_recommendations[:3]),
+        "",
+        "Technical Appendix",
         "",
         f"Research readiness: {_fmt(overall.get('readiness'))}",
         f"Confidence: {_fmt(overall.get('confidence'))}",
@@ -183,16 +242,11 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         *(f"- {line}" for line in bottom_lines),
         "",
         "Signal notes:",
-        f"- Strongest observed signal: {_fmt((signal.get('strongest_observed_signal') or {}).get('signal_name'))}",
-        f"- Weakest observed signal: {_fmt((signal.get('weakest_observed_signal') or {}).get('signal_name'))}",
-        f"- Signal confidence: {_fmt(signal.get('confidence'))}",
-        f"- Signal reason codes: {_fmt(signal.get('reason_codes'))}",
+        f"- Conclusion: {_fmt(signal_assessment.get('conclusion') or signal.get('reason_codes'))}",
+        f"- Signal confidence: {_fmt(signal_assessment.get('confidence') or signal.get('confidence'))}",
         "",
         "Data freshness / missing artifact warnings:",
         *(f"- {code}" for code in (missing_warnings or ["none"])),
-        "",
-        "Recommended next actions:",
-        *(f"- {action}" for action in (actions or ["No action generated."])),
         "",
         "Generated files:",
         f"- HTML: {paths['html']}",
@@ -210,6 +264,7 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         position=position,
         decision=decision,
         signal=signal,
+        cio=cio,
         warnings=missing_warnings,
         actions=actions,
         top_lines=top_lines,
@@ -228,6 +283,52 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
     }
 
 
+def _merge_summary_sections(review: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(review)
+    merged_sections = dict(review.get("sections") if isinstance(review.get("sections"), dict) else {})
+    summary_sections = summary.get("sections") if isinstance(summary.get("sections"), dict) else {}
+    for name, section in summary_sections.items():
+        if not isinstance(section, dict):
+            continue
+        current = merged_sections.get(name)
+        if not isinstance(current, dict) or _section_content_score(section) > _section_content_score(current):
+            merged_sections[name] = section
+    if merged_sections:
+        merged["sections"] = merged_sections
+    if isinstance(summary.get("overall"), dict) and not isinstance(merged.get("overall"), dict):
+        merged["overall"] = summary["overall"]
+    return merged
+
+
+def _section_content_score(section: dict[str, Any]) -> int:
+    score = 0
+    for key in (
+        "total_positions_analyzed",
+        "positions_analyzed",
+        "decisions_analyzed",
+        "total_decisions_analyzed",
+    ):
+        try:
+            score += int(section.get(key) or 0)
+        except (TypeError, ValueError):
+            pass
+    for key in (
+        "strategies",
+        "signals",
+        "top_contributor_per_strategy",
+        "top_detractor_per_strategy",
+        "top_contributors",
+        "top_detractors",
+    ):
+        value = section.get(key)
+        if isinstance(value, dict):
+            nested = value.get("positions") or value.get("strategies") or value.get("signals")
+            score += len(nested) if isinstance(nested, list) else len(value)
+        elif isinstance(value, list):
+            score += len(value)
+    return score
+
+
 def _build_digest_html(
     *,
     trade_date: str,
@@ -235,6 +336,7 @@ def _build_digest_html(
     position: dict[str, Any],
     decision: dict[str, Any],
     signal: dict[str, Any],
+    cio: dict[str, Any],
     warnings: list[str],
     actions: list[str],
     top_lines: list[str],
@@ -244,10 +346,48 @@ def _build_digest_html(
     def items(rows: list[str]) -> str:
         return "".join(f"<li>{html.escape(row)}</li>" for row in rows) or "<li>none</li>"
 
+    thirty = cio.get("thirty_second_read") if isinstance(cio.get("thirty_second_read"), dict) else {}
+    leaderboard = [
+        (
+            f"{row.get('rank')}. {row.get('strategy')} - hit rate {_fmt_pct(row.get('hit_rate'))}, "
+            f"avg return {_fmt_pct(row.get('average_realized_return'))}, "
+            f"avg contribution {_fmt_pct(row.get('average_pnl_contribution'))}"
+        )
+        for row in list(cio.get("strategy_leaderboard") or [])
+        if isinstance(row, dict)
+    ]
+    attribution = cio.get("attribution_interpretation") if isinstance(cio.get("attribution_interpretation"), dict) else {}
+    signal_assessment = cio.get("signal_evidence_assessment") if isinstance(cio.get("signal_evidence_assessment"), dict) else {}
+    risk = cio.get("risk_blocker_assessment") if isinstance(cio.get("risk_blocker_assessment"), dict) else {}
+    recommendation = cio.get("cio_recommendation") if isinstance(cio.get("cio_recommendation"), dict) else {}
     return f"""<!doctype html>
 <html>
 <body style="font-family:Arial,sans-serif;color:#1f2933">
-  <h2>Post-Close Research Digest — {html.escape(trade_date)}</h2>
+  <h2>CIO Research Briefing — {html.escape(trade_date)}</h2>
+  <h3>CIO Briefing</h3>
+  <p>{html.escape(str(cio.get("cio_takeaway") or "No CIO briefing narrative is available."))}</p>
+  <h3>30-Second Read</h3>
+  <ul>
+    <li>Readiness: {html.escape(_fmt(thirty.get("readiness") or overall.get("readiness")))}</li>
+    <li>Confidence: {html.escape(_fmt(thirty.get("confidence") or overall.get("confidence")))}</li>
+    <li>Leading strategy: {html.escape(_fmt(thirty.get("leading_strategy")))}</li>
+    <li>Main contributor: {html.escape(_fmt(thirty.get("main_contributor")))}</li>
+    <li>Main detractor: {html.escape(_fmt(thirty.get("main_detractor")))}</li>
+    <li>Biggest blocker: {html.escape(_fmt(thirty.get("biggest_blocker")))}</li>
+    <li>Recommended action: {html.escape(_fmt(thirty.get("recommended_action") or recommendation.get("primary")))}</li>
+  </ul>
+  <h3>Strategy Leaderboard</h3>
+  <ul>{items(leaderboard or ["No strategy leaderboard available."])}</ul>
+  <h3>Key Attribution Notes</h3>
+  <p>{html.escape(str(attribution.get("narrative") or "Attribution interpretation is not available."))}</p>
+  <h3>Signal Evidence</h3>
+  <p>{html.escape(str(signal_assessment.get("conclusion") or "Signal evidence is not available."))}</p>
+  <h3>Risks / Blockers</h3>
+  <p>{html.escape(str(risk.get("narrative") or "Risk and blocker assessment is not available."))}</p>
+  <h3>Recommended Action</h3>
+  <p>{html.escape(str(recommendation.get("primary") or (actions[0] if actions else "No action generated.")))}</p>
+
+  <h3>Technical Appendix</h3>
   <p><strong>Research readiness:</strong> {html.escape(_fmt(overall.get("readiness")))}<br>
   <strong>Confidence:</strong> {html.escape(_fmt(overall.get("confidence")))}<br>
   <strong>Attribution status:</strong> {html.escape("available" if position.get("available") else "missing")}<br>
@@ -261,10 +401,8 @@ def _build_digest_html(
   <ul>{items(bottom_lines)}</ul>
   <h3>Signal Notes</h3>
   <ul>
-    <li>Strongest observed signal: {html.escape(_fmt((signal.get("strongest_observed_signal") or {}).get("signal_name")))}</li>
-    <li>Weakest observed signal: {html.escape(_fmt((signal.get("weakest_observed_signal") or {}).get("signal_name")))}</li>
-    <li>Signal confidence: {html.escape(_fmt(signal.get("confidence")))}</li>
-    <li>Reason codes: {html.escape(_fmt(signal.get("reason_codes")))}</li>
+    <li>Conclusion: {html.escape(_fmt(signal_assessment.get("conclusion") or signal.get("reason_codes")))}</li>
+    <li>Signal confidence: {html.escape(_fmt(signal_assessment.get("confidence") or signal.get("confidence")))}</li>
   </ul>
   <h3>Data Freshness / Missing Artifact Warnings</h3>
   <ul>{items(warnings or ["none"])}</ul>
