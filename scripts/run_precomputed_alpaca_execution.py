@@ -1433,6 +1433,7 @@ def main(argv: list[str] | None = None) -> int:
             "security_master_resolution_status",
             "security_master_resolution_reason",
             "symbol_aliases_applied",
+            "alias_resolutions",
             "security_master_unknown_symbols",
             "security_master_inactive_symbols",
             "security_master_non_tradable_symbols",

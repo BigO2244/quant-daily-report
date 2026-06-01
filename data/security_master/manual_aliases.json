@@ -1,8 +1,12 @@
 {
   "aliases": {
-    "BK": "BNY"
+    "BK": "BNY",
+    "FB": "META",
+    "SQ": "XYZ"
   },
   "notes": {
-    "BK": "Bank of New York Mellon changed ticker to BNY; keep as manual execution alias until security-master snapshots confirm all upstream model universes have migrated."
+    "BK": "Bank of New York Mellon changed ticker to BNY; keep as manual execution alias until upstream model universes have migrated.",
+    "FB": "Meta Platforms historical ticker changed to META.",
+    "SQ": "Block historical ticker changed to XYZ."
   }
 }

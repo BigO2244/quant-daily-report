@@ -26,6 +26,7 @@ class SymbolResolutionResult:
     status: str
     reason: str
     symbol_aliases_applied: dict[str, str]
+    alias_resolutions: list[dict[str, str]]
     unknown_symbols: list[str]
     inactive_symbols: list[str]
     non_tradable_symbols: list[str]
@@ -39,6 +40,7 @@ class SymbolResolutionResult:
             "security_master_resolution_status": self.status,
             "security_master_resolution_reason": self.reason,
             "symbol_aliases_applied": dict(sorted(self.symbol_aliases_applied.items())),
+            "alias_resolutions": [dict(item) for item in self.alias_resolutions],
             "security_master_unknown_symbols": list(self.unknown_symbols),
             "security_master_inactive_symbols": list(self.inactive_symbols),
             "security_master_non_tradable_symbols": list(self.non_tradable_symbols),
@@ -180,6 +182,7 @@ def resolve_trade_plan_symbols(
 
     resolved_trades: list[dict[str, Any]] = []
     applied: dict[str, str] = {}
+    alias_resolutions: dict[str, dict[str, str]] = {}
     unknown: set[str] = set()
     inactive: set[str] = set()
     non_tradable: set[str] = set()
@@ -190,8 +193,16 @@ def resolve_trade_plan_symbols(
         resolved = aliases.get(original, original)
         if original and resolved and resolved != original:
             applied[original] = resolved
+            reason = f"manual_alias:{original}->{resolved}"
+            alias_resolutions[original] = {
+                "original_symbol": original,
+                "resolved_symbol": resolved,
+                "source": str(alias_path),
+                "reason": reason,
+            }
             row["original_ticker"] = original
-            row["symbol_resolution_reason"] = f"manual_alias:{original}->{resolved}"
+            row["symbol_resolution_source"] = str(alias_path)
+            row["symbol_resolution_reason"] = reason
         if resolved:
             row["ticker"] = resolved
         if symbols and resolved:
@@ -232,6 +243,10 @@ def resolve_trade_plan_symbols(
         status=status,
         reason=";".join(reasons),
         symbol_aliases_applied=applied,
+        alias_resolutions=[
+            alias_resolutions[symbol]
+            for symbol in sorted(alias_resolutions)
+        ],
         unknown_symbols=sorted(unknown),
         inactive_symbols=sorted(inactive),
         non_tradable_symbols=sorted(non_tradable),
