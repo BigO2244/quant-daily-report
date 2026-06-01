@@ -38,3 +38,41 @@ Price freshness contract:
 Confidence is `HIGH` only when every analyzed position has weight, start price,
 and end price from a fresh source. Partial price coverage reports `MEDIUM`;
 missing sources or empty holdings report `LOW` with reason codes.
+
+## Attribution Phase B
+
+Attribution Phase B is a read-only decision attribution layer. It reconstructs
+selected-position decision snapshots from existing dated shadow candidate files
+and portfolio history holdings, then joins those decisions to Phase A position
+attribution outputs.
+
+Run manually:
+
+```bash
+python3 scripts/build_decision_attribution.py --date YYYY-MM-DD
+```
+
+Outputs are written under:
+
+```text
+outputs/decision_attribution/YYYY-MM-DD/
+  decision_attribution.json
+  signal_outcome_summary.json
+  strategy_decision_summary.json
+```
+
+Decision source contract:
+
+- Preferred decision source:
+  `outputs/shadow_candidates/YYYY-MM-DD/{caerus_polaris,caerus_orion,caerus_lyra}.json`.
+- Fallback decision source:
+  `outputs/portfolio_history/YYYY-MM-DD/holdings_snapshot.json`.
+- Realized outcomes come from:
+  `outputs/attribution/YYYY-MM-DD/position_attribution.json`.
+- The builder does not regenerate signals, fetch data, call brokers, or change
+  execution behavior.
+
+If signal snapshots or Phase A attribution are unavailable, the builder still
+writes deterministic artifacts with `LOW` confidence and explicit reason codes
+such as `signal_snapshot_missing`, `attribution_source_missing`, and
+`missing_realized_outcome`.
