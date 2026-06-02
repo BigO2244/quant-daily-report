@@ -112,6 +112,24 @@ run_step "building promotion governance" \
 run_step "building dynamic strategy allocation" \
     python3 scripts/build_dynamic_strategy_allocation.py --date "${TARGET_DATE}"
 
+run_step "building governance blocker audit" \
+    python3 scripts/build_governance_blocker_audit.py --date "${TARGET_DATE}"
+
+run_step "building security master reconciliation" \
+    python3 scripts/build_security_master_reconciliation.py --date "${TARGET_DATE}"
+
+run_step "building execution payload audit" \
+    python3 scripts/build_execution_payload_audit.py --date "${TARGET_DATE}"
+
+run_step "building differentiation diagnostic" \
+    python3 scripts/build_differentiation_diagnostic.py --date "${TARGET_DATE}"
+
+run_step "building concentration diagnostic" \
+    python3 scripts/build_concentration_diagnostic.py --date "${TARGET_DATE}"
+
+run_step "building governance maturity" \
+    python3 scripts/build_governance_maturity.py --date "${TARGET_DATE}"
+
 run_step "building research review packet" \
     python3 scripts/build_research_review_packet.py --date "${TARGET_DATE}"
 

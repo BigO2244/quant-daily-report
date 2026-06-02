@@ -104,6 +104,24 @@ run_best_effort "building promotion governance" \
 run_best_effort "building dynamic strategy allocation" \
     python3 scripts/build_dynamic_strategy_allocation.py --date "${TRADE_DATE}"
 
+run_best_effort "building governance blocker audit" \
+    python3 scripts/build_governance_blocker_audit.py --date "${TRADE_DATE}"
+
+run_best_effort "building security master reconciliation" \
+    python3 scripts/build_security_master_reconciliation.py --date "${TRADE_DATE}"
+
+run_best_effort "building execution payload audit" \
+    python3 scripts/build_execution_payload_audit.py --date "${TRADE_DATE}"
+
+run_best_effort "building differentiation diagnostic" \
+    python3 scripts/build_differentiation_diagnostic.py --date "${TRADE_DATE}"
+
+run_best_effort "building concentration diagnostic" \
+    python3 scripts/build_concentration_diagnostic.py --date "${TRADE_DATE}"
+
+run_best_effort "building governance maturity" \
+    python3 scripts/build_governance_maturity.py --date "${TRADE_DATE}"
+
 echo "[RESEARCH_REVIEW] building packet"
 python3 scripts/build_research_review_packet.py --date "${TRADE_DATE}" >> "${STEP_LOG}" 2>&1 || {
     rc=$?
