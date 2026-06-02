@@ -11,7 +11,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -2455,19 +2455,104 @@ def _apply_capital_budget_to_trades(
     return frame, out
 
 
-def _compute_buy_budget(account: Dict[str, object], cfg: PaperConfig) -> float:
-    del cfg
+def _buy_budget_truthy_flag(value: object) -> bool | None:
+    """Local truthy-flag coercion. Returns ``None`` when the source value
+    is absent/unknown (so the caller can distinguish "no info" from "explicitly
+    false"). Mirrors brokers/alpaca_snapshot.py::_coerce_bool semantics
+    without taking a cross-module dependency from a hot execution path.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off", ""}:
+        return False
+    return None
+
+
+def _account_is_clean_for_buying_power(account: Mapping[str, object]) -> bool:
+    """Return True only when the account is ACTIVE and none of the
+    restriction flags (trading_blocked / account_blocked / transfers_blocked)
+    are explicitly true. Restriction flags may appear at the top level or
+    nested under ``raw`` (the Alpaca SDK passes through both shapes).
+    """
+    raw = account.get("raw") if isinstance(account.get("raw"), Mapping) else {}
+
+    def _flag(name: str) -> object:
+        if name in account:
+            return account.get(name)
+        if raw and name in raw:
+            return raw.get(name)
+        return None
+
+    status = str(_flag("status") or "").upper()
+    # An empty status string from a paper/in-process broker is treated as
+    # OK (no signal to the contrary). ACTIVE is the canonical good state.
+    if status and status != "ACTIVE":
+        return False
+    for restriction in ("trading_blocked", "account_blocked", "transfers_blocked"):
+        if _buy_budget_truthy_flag(_flag(restriction)) is True:
+            return False
+    return True
+
+
+def _compute_buy_budget(
+    account: Dict[str, object],
+    cfg: PaperConfig,
+    *,
+    capital_constraint_clear: bool = True,
+) -> Tuple[float, str]:
+    """Compute the post-sell buy budget and the basis used to size it.
+
+    Returns ``(buy_budget, basis)`` where ``basis`` is one of:
+
+    * ``"broker_buying_power"`` — sized from ``buying_power - reserve``
+      when all of these hold:
+        - cfg.trading_mode is "paper"
+        - the upstream caller indicates ``capital_constraint_clear``
+          (broker preflight + capital-budget check passed)
+        - account status is ACTIVE (or absent for in-process brokers)
+        - trading_blocked / account_blocked / transfers_blocked are
+          not explicitly true
+        - account.buying_power is a positive number
+    * ``"cash"`` — sized from ``cash - reserve`` in every other case.
+      This is the fail-closed path: missing buying_power, non-positive
+      buying_power, account restricted, capital preflight not clear,
+      or trading_mode != paper all fall back to cash.
+
+    Both branches subtract the same equity-scaled reserve
+    (``_reserve_cash_for_equity`` with the post-sell min-cash floor).
+    """
     cash_value = _coerce_float(account.get("cash"), 0.0) or 0.0
     equity_value = _coerce_float(account.get("equity") or account.get("portfolio_value"), None)
-    buying_power_value = _coerce_float(account.get("buying_power"), cash_value)
+    buying_power_value = _coerce_float(account.get("buying_power"), None)
     reserve_cash = _reserve_cash_for_equity(
         equity_value,
         min_cash=CAPITAL_POSTSELL_RESERVE_MIN_CASH,
     )
-    available_cash = max(0.0, float(cash_value) - float(reserve_cash))
-    if buying_power_value is not None:
-        available_cash = min(available_cash, max(0.0, float(buying_power_value)))
-    return float(available_cash)
+    cash_basis_budget = max(0.0, float(cash_value) - float(reserve_cash))
+
+    trading_mode = str(getattr(cfg, "trading_mode", "") or "").strip().lower()
+    is_paper = trading_mode == "paper"
+    has_positive_buying_power = (
+        buying_power_value is not None and float(buying_power_value) > 0.0
+    )
+
+    if (
+        is_paper
+        and bool(capital_constraint_clear)
+        and has_positive_buying_power
+        and _account_is_clean_for_buying_power(account)
+    ):
+        buying_power_budget = max(0.0, float(buying_power_value) - float(reserve_cash))
+        return float(buying_power_budget), "broker_buying_power"
+
+    return float(cash_basis_budget), "cash"
 
 
 def _apply_buy_budget(
@@ -2476,10 +2561,24 @@ def _apply_buy_budget(
     *,
     pending_sell_count: int = 0,
     pending_sell_notional: float = 0.0,
+    buy_budget_basis: str = "cash",
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    """Greedily fit ``buy_orders`` within ``buy_budget``.
+
+    The ``buy_budget_basis`` argument controls which block_reason gets
+    attached to skipped orders. When the budget is already sized from
+    broker buying_power, "pending sells required for cash" is a
+    misleading label — those buys are blocked by buying-power capacity,
+    not by uncollected sell proceeds. We use
+    ``BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH`` only when the
+    budget basis is ``"cash"`` AND the would-have-fit-with-pending-
+    sells condition holds; otherwise we attribute the block to
+    insufficient buying power, which is the accurate label.
+    """
     kept: List[Dict[str, object]] = []
     skipped: List[Dict[str, object]] = []
     spent = 0.0
+    basis = str(buy_budget_basis or "cash").lower()
     for order in buy_orders or []:
         notional = _order_notional(order)
         if spent + notional <= float(buy_budget) + 1e-9:
@@ -2487,10 +2586,11 @@ def _apply_buy_budget(
             spent += notional
         else:
             blocked = dict(order)
-            if (
+            pending_sells_could_close_gap = (
                 int(pending_sell_count or 0) > 0
                 and spent + notional <= float(buy_budget) + float(pending_sell_notional or 0.0) + 1e-9
-            ):
+            )
+            if pending_sells_could_close_gap and basis == "cash":
                 blocked["block_reason"] = BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH
             else:
                 blocked["block_reason"] = BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
@@ -3729,6 +3829,7 @@ def run_paper_day(
     sell_phase_observed_statuses: Dict[str, str] = {}
     sell_phase_polls: int = 0
     buy_budget_computed: float | None = None
+    buy_budget_basis: str = "cash"
     budget_skipped_orders: List[Dict[str, object]] = []
     posttrade_account_snapshot_path: str | None = None
     posttrade_positions_snapshot_path: str | None = None
@@ -4010,22 +4111,31 @@ def run_paper_day(
                             run_date,
                             postsell_account_snapshot,
                         )
-                        buy_budget_computed = _compute_buy_budget(postsell_account_snapshot, cfg)
+                        capital_constraint_clear = not bool(
+                            (capital_budget_meta or {}).get("capital_constraint_triggered")
+                        )
+                        buy_budget_computed, buy_budget_basis = _compute_buy_budget(
+                            postsell_account_snapshot,
+                            cfg,
+                            capital_constraint_clear=capital_constraint_clear,
+                        )
                         cash_at_buy_decision = postsell_cash_confirmed
                         buying_power_at_buy_decision = postsell_buying_power_confirmed
                         alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                         alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
+                        alpaca_submission_summary["buy_budget_basis"] = buy_budget_basis
                         alpaca_submission_summary["cash_at_buy_decision"] = cash_at_buy_decision
                         alpaca_submission_summary["buying_power_at_buy_decision"] = buying_power_at_buy_decision
                         alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
                         logger.info(
-                            "[ALPACA][BUY_DECISION] sell_status=%s reason=%s snapshot=%s cash=%s buying_power=%s buy_budget=%.2f pending_sells=%d",
+                            "[ALPACA][BUY_DECISION] sell_status=%s reason=%s snapshot=%s cash=%s buying_power=%s buy_budget=%.2f buy_budget_basis=%s pending_sells=%d",
                             sell_phase_status,
                             sell_phase_completion_reason,
                             postsell_account_snapshot_path,
                             postsell_cash_confirmed,
                             postsell_buying_power_confirmed,
                             float(buy_budget_computed or 0.0),
+                            buy_budget_basis,
                             int(pending_sell_count_at_buy_decision),
                         )
                     except Exception as exc:
@@ -4082,6 +4192,7 @@ def run_paper_day(
                         float(buy_budget_computed or 0.0),
                         pending_sell_count=pending_sell_count_at_buy_decision,
                         pending_sell_notional=pending_sell_notional,
+                        buy_budget_basis=buy_budget_basis,
                     )
                     skipped_buy_count = int(len(budget_skipped_orders))
                     blocked_buy_count = int(len(budget_skipped_orders))
@@ -4668,6 +4779,7 @@ def run_paper_day(
         "sell_phase_observed_statuses": sell_phase_observed_statuses,
         "sell_phase_polls": sell_phase_polls,
         "buy_budget_computed": buy_budget_computed,
+        "buy_budget_basis": buy_budget_basis,
         "budget_skipped_orders": budget_skipped_orders,
         "posttrade_account_snapshot_path": posttrade_account_snapshot_path,
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,

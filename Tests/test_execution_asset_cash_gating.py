@@ -308,8 +308,154 @@ def test_pending_sell_blocks_only_unaffordable_buy(monkeypatch, tmp_path):
     assert result["blocked_buy_count"] == 1
     assert result["pending_sell_count_at_buy_decision"] == 1
     assert result["budget_skipped_orders"][0]["ticker"] == "BIG"
-    assert result["budget_skipped_orders"][0]["block_reason"] == "buy_blocked_pending_sells_required_for_cash"
-    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "buy_blocked_pending_sells_required_for_cash"
+    # In PAPER mode with positive buying_power and a clean account, the
+    # buy budget is now sized from buying_power - reserve. BIG ($950) still
+    # exceeds the resulting $900 capacity, so the accurate label is
+    # "insufficient buying power" — not the legacy
+    # "pending_sells_required_for_cash" (which only fires when the basis
+    # is cash AND pending sells would close the gap).
+    assert result["budget_skipped_orders"][0]["block_reason"] == "buy_blocked_insufficient_buying_power"
+    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "buy_blocked_insufficient_buying_power"
+    assert result["alpaca_submission_summary"]["buy_budget_basis"] == "broker_buying_power"
+
+
+def test_postsell_buy_budget_uses_buying_power_when_paper_and_clean(monkeypatch, tmp_path):
+    """Regression for the 2026-06-02 paper incident: cash=2188.30, buying_power=12877.75,
+    planned buys ~4891.79. In PAPER mode with a clean account and positive buying_power,
+    all planned buys should be eligible/submitted using buying_power, not cash."""
+    fake = _CashGateAlpaca(
+        account={
+            "status": "ACTIVE",
+            "cash": "2188.30",
+            "equity": "15000.0",
+            "buying_power": "12877.75",
+        },
+        assets={
+            "SOLD": _asset("SOLD"),
+            "B1": _asset("B1"),
+            "B2": _asset("B2"),
+            "B3": _asset("B3"),
+        },
+    )
+    _patch_open_precomputed_run(
+        monkeypatch,
+        tmp_path,
+        fake_alpaca=fake,
+        holdings=pd.DataFrame([{"ticker": "SOLD", "sleeve": "core", "shares": 5.0}]),
+    )
+
+    result = broker.run_paper_day(
+        run_date="2026-05-29",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 5, 29, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        precomputed_trade_plan=[
+            {"ticker": "SOLD", "side": "SELL", "shares": 5, "price": 100.0, "notional": 500.0},
+            {"ticker": "B1", "side": "BUY", "shares": 1, "price": 1500.0, "notional": 1500.0},
+            {"ticker": "B2", "side": "BUY", "shares": 1, "price": 1800.0, "notional": 1800.0},
+            {"ticker": "B3", "side": "BUY", "shares": 1, "price": 1591.79, "notional": 1591.79},
+        ],
+    )
+
+    submitted_buys = [row for row in fake.submitted if row["side"] == "BUY"]
+    assert {row["symbol"] for row in submitted_buys} == {"B1", "B2", "B3"}
+    summary = result["alpaca_submission_summary"]
+    assert summary["buy_budget_basis"] == "broker_buying_power"
+    assert summary["buy_budget_computed"] >= 4891.79
+    assert summary["cash_at_buy_decision"] == pytest.approx(2188.30)
+    assert summary["buying_power_at_buy_decision"] == pytest.approx(12877.75)
+    assert result["blocked_buy_count"] == 0
+    block_reasons = {
+        str(o.get("block_reason", "")) for o in result.get("budget_skipped_orders", [])
+    }
+    assert "buy_blocked_pending_sells_required_for_cash" not in block_reasons
+
+
+def test_postsell_buy_budget_falls_back_to_cash_when_buying_power_zero(monkeypatch, tmp_path):
+    """Fallback: when broker buying_power is 0, the basis stays cash and the
+    legacy pending-sells-required-for-cash reason code is emitted when a buy
+    exceeds cash - reserve but would fit once pending sells settle."""
+    fake = _CashGateAlpaca(
+        account={
+            "status": "ACTIVE",
+            "cash": "1000.0",
+            "equity": "10000.0",
+            "buying_power": "0.0",
+        },
+        assets={"AAA": _asset("AAA"), "BIG": _asset("BIG")},
+    )
+    _patch_open_precomputed_run(
+        monkeypatch,
+        tmp_path,
+        fake_alpaca=fake,
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+    )
+
+    result = broker.run_paper_day(
+        run_date="2026-05-29",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 5, 29, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        precomputed_trade_plan=[
+            {"ticker": "AAA", "side": "SELL", "shares": 1, "price": 100.0, "notional": 100.0},
+            {"ticker": "BIG", "side": "BUY", "shares": 1, "price": 950.0, "notional": 950.0},
+        ],
+    )
+
+    summary = result["alpaca_submission_summary"]
+    assert summary["buy_budget_basis"] == "cash"
+    assert result["budget_skipped_orders"][0]["ticker"] == "BIG"
+    assert (
+        result["budget_skipped_orders"][0]["block_reason"]
+        == "buy_blocked_pending_sells_required_for_cash"
+    )
+
+
+def test_buying_power_covers_planned_buys_no_pending_sells_reason(monkeypatch, tmp_path):
+    """Reason-code: when broker buying_power covers planned buys (even when cash
+    alone would not), the system must NOT emit
+    buy_blocked_pending_sells_required_for_cash."""
+    fake = _CashGateAlpaca(
+        account={
+            "status": "ACTIVE",
+            "cash": "200.0",
+            "equity": "10000.0",
+            "buying_power": "8000.0",
+        },
+        assets={"AAA": _asset("AAA"), "BUY1": _asset("BUY1")},
+    )
+    _patch_open_precomputed_run(
+        monkeypatch,
+        tmp_path,
+        fake_alpaca=fake,
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+    )
+
+    result = broker.run_paper_day(
+        run_date="2026-05-29",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 5, 29, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        precomputed_trade_plan=[
+            {"ticker": "AAA", "side": "SELL", "shares": 1, "price": 100.0, "notional": 100.0},
+            {"ticker": "BUY1", "side": "BUY", "shares": 1, "price": 2000.0, "notional": 2000.0},
+        ],
+    )
+
+    assert any(row["symbol"] == "BUY1" and row["side"] == "BUY" for row in fake.submitted)
+    summary = result["alpaca_submission_summary"]
+    assert summary["buy_budget_basis"] == "broker_buying_power"
+    block_reasons = {
+        str(o.get("block_reason", "")) for o in result.get("budget_skipped_orders", [])
+    }
+    assert "buy_blocked_pending_sells_required_for_cash" not in block_reasons
+    assert result["blocked_buy_count"] == 0
 
 
 def test_order_polling_updates_lifecycle_status():

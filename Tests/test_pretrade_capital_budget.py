@@ -124,7 +124,7 @@ def test_positive_cash_with_reserve_allows_normal_buy_plan() -> None:
 
 
 def test_postsell_buy_budget_targets_less_than_five_percent_cash() -> None:
-    budget = _compute_buy_budget(
+    budget, basis = _compute_buy_budget(
         {"cash": "2388.18", "equity": "9713.40", "buying_power": "2388.18"},
         _cfg(),
     )
@@ -132,6 +132,9 @@ def test_postsell_buy_budget_targets_less_than_five_percent_cash() -> None:
     remaining_cash = 2388.18 - budget
     assert remaining_cash == 100.0
     assert remaining_cash / 9713.40 < 0.05
+    # In paper mode with positive buying_power and a clean account, the
+    # budget is sized from buying_power (which here equals cash exactly).
+    assert basis == "broker_buying_power"
 
 
 def test_reserve_policy_uses_max_of_minimum_and_equity_percent() -> None:
