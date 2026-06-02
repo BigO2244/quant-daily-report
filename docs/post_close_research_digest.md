@@ -1,8 +1,9 @@
 # Post-Close Research Digest
 
 The post-close research digest is a VM-safe, read-only automation wrapper that
-hydrates the canonical price cache, rebuilds attribution artifacts, builds the
-Research Review Packet, and emails Brett a compact operating summary.
+hydrates the canonical price cache, rebuilds attribution and Tier 1
+research-control artifacts, builds the Research Review Packet, and emails Brett
+a compact operating summary.
 
 Run manually:
 
@@ -19,8 +20,9 @@ scripts/run_post_close_research_digest.sh --date YYYY-MM-DD --no-email
 ## Date Selection
 
 When `--date YYYY-MM-DD` is supplied, that date is used for hydration,
-attribution, decision attribution, packet generation, and email. Future dates
-are rejected by the email helper.
+attribution, decision attribution, risk summary, execution timing,
+promotion-readiness windows, strategy differentiation, packet generation, and
+email. Future dates are rejected by the email helper.
 
 When no date is supplied:
 
@@ -67,6 +69,11 @@ The artifact-style fields remain below that under `Technical Appendix`,
 including readiness, confidence, attribution status, positions analyzed,
 decisions analyzed, top contributors, top detractors, data freshness warnings,
 recommended next actions, and generated packet paths.
+
+The packet appendix also includes Tier 1 research-control status: execution
+timing study coverage, promotion-readiness windows, strategy differentiation,
+and the conservative promotion recommendation. These are reporting artifacts
+only and do not alter strategy selection, routing, or execution timing.
 
 ## Suggested Cron
 

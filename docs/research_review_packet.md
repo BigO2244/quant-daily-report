@@ -2,8 +2,9 @@
 
 The Research Review Packet is a read-only operating report for Caerus model
 oversight. It consolidates attribution, decision attribution, signal outcome,
-execution, risk, regime, model review, and data-freshness artifacts into one
-deterministic JSON, Markdown, and HTML packet.
+execution, risk, regime, model review, Tier 1 research-control, and
+data-freshness artifacts into one deterministic JSON, Markdown, and HTML
+packet.
 
 Run manually:
 
@@ -68,11 +69,15 @@ Primary sources:
 - legacy risk fallback artifacts under `outputs/attribution/YYYY-MM-DD/`
 - regime artifacts under `outputs/attribution/YYYY-MM-DD/` and
   `outputs/vix_regime/regime_current.json`
+- Tier 1 research-control artifacts under `outputs/research/execution_timing/`,
+  `outputs/research/promotion_readiness/`, and
+  `outputs/research/strategy_differentiation/`
 
 The report is useful with partial sources. Missing artifacts emit reason codes
 such as `missing_attribution`, `missing_decision_attribution`,
 `missing_model_review`, `missing_execution_summary`, `missing_risk_summary`,
-and `missing_regime_summary`.
+`missing_regime_summary`, `missing_execution_timing_study`,
+`missing_promotion_readiness_windows`, and `missing_strategy_differentiation`.
 
 ## VM Wrapper
 
@@ -90,8 +95,12 @@ The wrapper:
    stale price source.
 4. Rebuilds position attribution after hydration when hydration was attempted.
 5. Builds decision attribution.
-6. Builds the research review packet.
-7. Prints the output paths.
+6. Builds canonical risk summary.
+7. Builds execution timing counterfactuals.
+8. Builds 20/40/60-day promotion readiness windows.
+9. Builds strategy differentiation analytics.
+10. Builds the research review packet.
+11. Prints the output paths.
 
 Hydration is best-effort in the wrapper. A hydration or optional artifact gap is
 reported in the packet instead of hiding the issue.

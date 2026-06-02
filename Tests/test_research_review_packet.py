@@ -175,6 +175,71 @@ def _write_optional_sources(root: Path, trade_date: str) -> None:
     )
 
 
+def _write_tier1_sources(root: Path, trade_date: str) -> None:
+    _write_json(
+        root / "outputs" / "research" / "execution_timing" / trade_date / "execution_timing_summary.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "baseline_offset": "T+5m",
+            "baseline_time_et": "09:35",
+            "coverage_ratio": 1.0,
+            "symbols_evaluated": 2,
+            "symbols_missing_bars": [],
+            "best_offset_vs_baseline": {"offset_label": "T+1m", "execution_time_et": "09:31", "total_estimated_bps_impact_vs_baseline": -4.0},
+            "worst_offset_vs_baseline": {"offset_label": "T+10m", "execution_time_et": "09:40", "total_estimated_bps_impact_vs_baseline": 8.0},
+            "reason_codes": ["ok"],
+            "source_artifacts": ["planned_execution_payload.json"],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "promotion_readiness" / trade_date / "promotion_readiness_windows.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "LOW",
+            "promotion_recommendation": "NO_PROMOTION_RECOMMENDED",
+            "blockers": ["caerus_lyra:insufficient_observations"],
+            "windows": ["20", "40", "60"],
+            "strategies": {
+                "caerus_lyra": {
+                    "windows": {
+                        "20": {"readiness_state": "NOT_READY", "observation_count": 5},
+                        "40": {"readiness_state": "NOT_READY", "observation_count": 5},
+                        "60": {"readiness_state": "NOT_READY", "observation_count": 5},
+                    }
+                }
+            },
+            "reason_codes": ["caerus_lyra:insufficient_observations"],
+            "source_artifacts": ["shadow_nav_series.csv"],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "strategy_differentiation" / trade_date / "strategy_differentiation.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "blockers": ["caerus_lyra_vs_caerus_orion:weak_differentiation"],
+            "pairs": [
+                {
+                    "left_strategy": "caerus_lyra",
+                    "right_strategy": "caerus_orion",
+                    "holdings_overlap_percentage": 0.8,
+                    "daily_return_correlation": 0.95,
+                    "average_active_share_proxy": 0.2,
+                    "behavioral_differentiation_score": 0.15,
+                    "differentiation_readiness_flag": "WEAK",
+                    "reason_codes": ["high_overlap_high_correlation"],
+                }
+            ],
+            "reason_codes": ["caerus_lyra_vs_caerus_orion:weak_differentiation"],
+            "source_artifacts": ["comparison.json"],
+        },
+    )
+
+
 def test_all_core_artifacts_present_generates_packet(tmp_path):
     trade_date = "2026-06-01"
     _write_attribution(tmp_path, trade_date)
@@ -274,3 +339,38 @@ def test_markdown_and_html_smoke(tmp_path):
     assert "Attribution" in html
     assert "Decision Attribution" in html
     assert "Recommended Next Actions" in html
+
+
+def test_tier1_sections_populate_when_artifacts_exist(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    assert result["sections"]["execution_timing_study"]["available"] is True
+    assert result["sections"]["execution_timing_study"]["best_offset_vs_baseline"]["execution_time_et"] == "09:31"
+    assert result["sections"]["promotion_readiness_windows"]["promotion_recommendation"] == "NO_PROMOTION_RECOMMENDED"
+    assert result["sections"]["strategy_differentiation"]["pairs"][0]["differentiation_readiness_flag"] == "WEAK"
+    assert result["sections"]["tier1_research_controls"]["recommendation"] == "No promotion recommended"
+    markdown = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text()
+    assert "Execution Timing Study" in markdown
+    assert "Promotion Readiness Windows" in markdown
+    assert "Strategy Differentiation" in markdown
+
+
+def test_tier1_missing_degrades_gracefully_and_recommends_no_promotion(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    assert result["sections"]["execution_timing_study"]["available"] is False
+    assert "missing_execution_timing_study" in result["sections"]["execution_timing_study"]["reason_codes"]
+    assert result["sections"]["tier1_research_controls"]["recommendation"] == "No promotion recommended"
+    action_text = " ".join(result["sections"]["recommended_next_actions"])
+    assert "build_execution_timing_counterfactual.py" in action_text
+    assert "build_promotion_readiness_windows.py" in action_text
+    assert "build_strategy_differentiation.py" in action_text

@@ -707,6 +707,179 @@ def _build_regime_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], 
     return section, source
 
 
+def _build_execution_timing_study_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "execution_timing" / trade_date / "execution_timing_summary.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="execution_timing_study",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_execution_timing_study"],
+        )
+        return {
+            "available": False,
+            "best_offset_vs_baseline": None,
+            "worst_offset_vs_baseline": None,
+            "baseline_offset": "T+5m",
+            "baseline_time_et": "09:35",
+            "coverage_ratio": None,
+            "confidence": "LOW",
+            "reason_codes": ["missing_execution_timing_study"],
+            "source_artifacts": [],
+        }, source
+    reasons = list(payload.get("reason_codes") or ["ok"])
+    available = bool(payload.get("available"))
+    if not available and "timing_study_unavailable" not in reasons:
+        reasons.append("timing_study_unavailable")
+    section = {
+        "available": available,
+        "best_offset_vs_baseline": payload.get("best_offset_vs_baseline"),
+        "worst_offset_vs_baseline": payload.get("worst_offset_vs_baseline"),
+        "baseline_offset": payload.get("baseline_offset"),
+        "baseline_time_et": payload.get("baseline_time_et"),
+        "coverage_ratio": payload.get("coverage_ratio"),
+        "symbols_evaluated": payload.get("symbols_evaluated"),
+        "symbols_missing_bars": payload.get("symbols_missing_bars") or [],
+        "confidence": payload.get("confidence") or ("MEDIUM" if available else "LOW"),
+        "reason_codes": sorted(set(reasons)),
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="execution_timing_study",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=section["reason_codes"],
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_promotion_windows_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "promotion_readiness" / trade_date / "promotion_readiness_windows.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="promotion_readiness_windows",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_promotion_readiness_windows"],
+        )
+        return {
+            "available": False,
+            "promotion_recommendation": "NO_PROMOTION_RECOMMENDED",
+            "strategies": {},
+            "blockers": ["missing_promotion_readiness_windows"],
+            "confidence": "LOW",
+            "reason_codes": ["missing_promotion_readiness_windows"],
+            "source_artifacts": [],
+        }, source
+    reasons = list(payload.get("reason_codes") or ["ok"])
+    available = bool(payload.get("available"))
+    if not available and "promotion_windows_unavailable" not in reasons:
+        reasons.append("promotion_windows_unavailable")
+    section = {
+        "available": available,
+        "promotion_recommendation": payload.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED",
+        "strategies": payload.get("strategies") or {},
+        "windows": payload.get("windows") or [],
+        "blockers": payload.get("blockers") or [],
+        "confidence": payload.get("confidence") or "LOW",
+        "reason_codes": sorted(set(reasons)),
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="promotion_readiness_windows",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=section["reason_codes"],
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_strategy_differentiation_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "strategy_differentiation" / trade_date / "strategy_differentiation.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="strategy_differentiation",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_strategy_differentiation"],
+        )
+        return {
+            "available": False,
+            "pairs": [],
+            "blockers": ["missing_strategy_differentiation"],
+            "confidence": "LOW",
+            "reason_codes": ["missing_strategy_differentiation"],
+            "source_artifacts": [],
+        }, source
+    reasons = list(payload.get("reason_codes") or ["ok"])
+    available = bool(payload.get("available"))
+    if not available and "strategy_differentiation_unavailable" not in reasons:
+        reasons.append("strategy_differentiation_unavailable")
+    section = {
+        "available": available,
+        "pairs": payload.get("pairs") or [],
+        "blockers": payload.get("blockers") or [],
+        "confidence": payload.get("confidence") or "LOW",
+        "reason_codes": sorted(set(reasons)),
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="strategy_differentiation",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=section["reason_codes"],
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str, Any]:
+    timing = sections["execution_timing_study"]
+    promotion = sections["promotion_readiness_windows"]
+    differentiation = sections["strategy_differentiation"]
+    blockers: list[str] = []
+    if not timing.get("available"):
+        blockers.append("missing_timing_coverage")
+    blockers.extend(str(code) for code in promotion.get("blockers") or [])
+    blockers.extend(str(code) for code in differentiation.get("blockers") or [])
+    if any(str(code).endswith("weak_differentiation") for code in blockers):
+        blockers.append("weak_differentiation")
+    if not blockers:
+        blockers = ["no_tier1_blockers_detected"]
+    promotion_recommendation = str(promotion.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED")
+    if promotion_recommendation.startswith("PROMOTION_REVIEW_READY") and differentiation.get("available") and "weak_differentiation" not in blockers:
+        recommendation = promotion_recommendation
+    else:
+        recommendation = "No promotion recommended"
+    return {
+        "available": any(section.get("available") for section in (timing, promotion, differentiation)),
+        "execution_timing_status": "available" if timing.get("available") else "missing_or_unavailable",
+        "promotion_readiness_status": "available" if promotion.get("available") else "missing_or_unavailable",
+        "strategy_differentiation_status": "available" if differentiation.get("available") else "missing_or_unavailable",
+        "recommendation": recommendation,
+        "blockers": sorted(set(blockers)),
+        "reason_codes": sorted(set(
+            list(timing.get("reason_codes") or [])
+            + list(promotion.get("reason_codes") or [])
+            + list(differentiation.get("reason_codes") or [])
+        )) or ["ok"],
+    }
+
+
 def _build_data_freshness_section(sources: dict[str, dict[str, Any]], position_section: dict[str, Any]) -> dict[str, Any]:
     rows = [dict(sources[key]) for key in sorted(sources)]
     price_reasons = list(position_section.get("freshness_reason_codes") or [])
@@ -754,6 +927,12 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Regenerate/build canonical risk/concentration summary artifacts to populate concentration and sector risk.")
     if not sections["regime_context"].get("available"):
         actions.append("Regenerate regime attribution/context artifacts to populate regime behavior.")
+    if not sections["execution_timing_study"].get("available"):
+        actions.append("Run .venv/bin/python scripts/build_execution_timing_counterfactual.py --date YYYY-MM-DD to populate opening-window timing evidence.")
+    if not sections["promotion_readiness_windows"].get("available"):
+        actions.append("Run .venv/bin/python scripts/build_promotion_readiness_windows.py --date YYYY-MM-DD to populate 20/40/60-day promotion readiness.")
+    if not sections["strategy_differentiation"].get("available"):
+        actions.append("Run .venv/bin/python scripts/build_strategy_differentiation.py --date YYYY-MM-DD to populate strategy differentiation evidence.")
     if signal.get("early_evidence"):
         actions.append("Accumulate more decision attribution observations before treating signal hit rates as durable.")
     if (
@@ -829,6 +1008,9 @@ def build_research_review_packet(
     execution_section, execution_source = _build_execution_quality_section(repo, selected_date)
     risk_section, risk_source = _build_risk_section(repo, selected_date)
     regime_section, regime_source = _build_regime_section(repo, selected_date)
+    timing_study_section, timing_study_source = _build_execution_timing_study_section(repo, selected_date)
+    promotion_windows_section, promotion_windows_source = _build_promotion_windows_section(repo, selected_date)
+    differentiation_section, differentiation_source = _build_strategy_differentiation_section(repo, selected_date)
     sources = {
         "model_review": model_source,
         "attribution": attribution_source,
@@ -836,6 +1018,9 @@ def build_research_review_packet(
         "execution": execution_source,
         "risk": risk_source,
         "regime": regime_source,
+        "execution_timing_study": timing_study_source,
+        "promotion_readiness_windows": promotion_windows_source,
+        "strategy_differentiation": differentiation_source,
     }
     data_freshness = _build_data_freshness_section(sources, position_section)
     sections = {
@@ -846,8 +1031,12 @@ def build_research_review_packet(
         "execution_quality": execution_section,
         "risk_concentration": risk_section,
         "regime_context": regime_section,
+        "execution_timing_study": timing_study_section,
+        "promotion_readiness_windows": promotion_windows_section,
+        "strategy_differentiation": differentiation_section,
         "data_freshness": data_freshness,
     }
+    sections["tier1_research_controls"] = _build_tier1_research_controls_section(sections)
     actions = _recommended_actions(sections, sources)
     sections["recommended_next_actions"] = actions
     overall = _overall(sections=sections, sources=sources, actions=actions)
@@ -879,6 +1068,10 @@ def build_research_review_packet(
             "position_attribution": position_section,
             "decision_attribution": decision_section,
             "signal_quality": signal_section,
+            "execution_timing_study": timing_study_section,
+            "promotion_readiness_windows": promotion_windows_section,
+            "strategy_differentiation": differentiation_section,
+            "tier1_research_controls": sections["tier1_research_controls"],
         },
         "cio_briefing": cio_briefing,
         "output_paths": {
@@ -932,6 +1125,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_execution_md(sections["execution_quality"]))
     lines.extend(_render_risk_md(sections["risk_concentration"]))
     lines.extend(_render_regime_md(sections["regime_context"]))
+    lines.extend(_render_tier1_md(sections["tier1_research_controls"]))
+    lines.extend(_render_execution_timing_study_md(sections["execution_timing_study"]))
+    lines.extend(_render_promotion_windows_md(sections["promotion_readiness_windows"]))
+    lines.extend(_render_strategy_differentiation_md(sections["strategy_differentiation"]))
     lines.extend(_render_freshness_md(sections["data_freshness"]))
     lines.extend(_render_actions_md(sections["recommended_next_actions"]))
     lines.extend(_render_sources_md(payload["sources"]))
@@ -1146,6 +1343,84 @@ def _render_regime_md(section: dict[str, Any]) -> list[str]:
         hit_rates = ", ".join(f"{name}={_fmt(value)}" for name, value in sorted((row.get("risk_regime_hit_rates") or {}).items()))
         lines.append(f"| {strategy} | {_md(row.get('best_risk_regime'))} | {_md(row.get('worst_risk_regime'))} | {_md(hit_rates)} |")
     lines += ["", f"Confidence: {_md(section.get('confidence'))}", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_tier1_md(section: dict[str, Any]) -> list[str]:
+    return [
+        "## Tier 1 Research Controls",
+        "",
+        f"Execution timing study: {_md(section.get('execution_timing_status'))}",
+        f"Promotion readiness windows: {_md(section.get('promotion_readiness_status'))}",
+        f"Strategy differentiation: {_md(section.get('strategy_differentiation_status'))}",
+        f"Recommendation: {_md(section.get('recommendation'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+    ]
+
+
+def _render_execution_timing_study_md(section: dict[str, Any]) -> list[str]:
+    best = section.get("best_offset_vs_baseline") or {}
+    worst = section.get("worst_offset_vs_baseline") or {}
+    return [
+        "## Execution Timing Study",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Baseline: {_md(section.get('baseline_time_et'))} ({_md(section.get('baseline_offset'))})",
+        f"Coverage ratio: {_md(section.get('coverage_ratio'))}",
+        f"Symbols evaluated: {_md(section.get('symbols_evaluated'))}",
+        f"Missing bars: {_md(section.get('symbols_missing_bars'))}",
+        f"Best offset vs baseline: {_md(best.get('execution_time_et'))} ({_md(best.get('total_estimated_bps_impact_vs_baseline'))} bps)",
+        f"Worst offset vs baseline: {_md(worst.get('execution_time_et'))} ({_md(worst.get('total_estimated_bps_impact_vs_baseline'))} bps)",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+    ]
+
+
+def _render_promotion_windows_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Promotion Readiness Windows",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Recommendation: {_md(section.get('promotion_recommendation'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+        "| Strategy | 20d | 40d | 60d |",
+        "|---|---|---|---|",
+    ]
+    for strategy, payload in sorted((section.get("strategies") or {}).items()):
+        windows = payload.get("windows") or {}
+        cells = []
+        for window in ("20", "40", "60"):
+            row = windows.get(window) or {}
+            cells.append(f"{row.get('readiness_state', 'n/a')} ({row.get('observation_count', 'n/a')} obs)")
+        lines.append(f"| {strategy} | {cells[0]} | {cells[1]} | {cells[2]} |")
+    lines.append("")
+    return lines
+
+
+def _render_strategy_differentiation_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Strategy Differentiation",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+        "| Pair | Holdings Overlap | Return Corr | Active Share | Score | Flag |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for row in section.get("pairs") or []:
+        pair = f"{row.get('left_strategy')} vs {row.get('right_strategy')}"
+        lines.append(
+            f"| {pair} | {_md(row.get('holdings_overlap_percentage'))} | {_md(row.get('daily_return_correlation'))} | {_md(row.get('average_active_share_proxy'))} | {_md(row.get('behavioral_differentiation_score'))} | {_md(row.get('differentiation_readiness_flag'))} |"
+        )
+    lines.append("")
     return lines
 
 

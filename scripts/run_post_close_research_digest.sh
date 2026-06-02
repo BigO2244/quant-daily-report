@@ -82,6 +82,15 @@ run_step "building decision attribution" \
 run_step "building risk summary" \
     python3 scripts/build_risk_summary.py --date "${TARGET_DATE}"
 
+run_step "building execution timing counterfactual" \
+    python3 scripts/build_execution_timing_counterfactual.py --date "${TARGET_DATE}"
+
+run_step "building promotion readiness windows" \
+    python3 scripts/build_promotion_readiness_windows.py --date "${TARGET_DATE}"
+
+run_step "building strategy differentiation" \
+    python3 scripts/build_strategy_differentiation.py --date "${TARGET_DATE}"
+
 run_step "building research review packet" \
     python3 scripts/build_research_review_packet.py --date "${TARGET_DATE}"
 
