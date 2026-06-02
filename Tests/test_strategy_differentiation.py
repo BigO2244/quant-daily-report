@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from research.strategy_differentiation import build_strategy_differentiation
+from research.strategy_differentiation import build_strategy_differentiation_deep
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -32,6 +33,31 @@ def _write_comparison(root: Path, trade_date: str, *, overlap: bool) -> None:
             },
         },
     )
+
+
+def _write_rolling_comparisons(root: Path, *, overlap: bool, periods: int = 25) -> str:
+    last_date = ""
+    for i, day in enumerate(pd.date_range("2026-03-02", periods=periods, freq="B")):
+        trade_date = day.date().isoformat()
+        last_date = trade_date
+        if overlap:
+            lyra = orion = [{"ticker": f"A{j}", "target_weight": 0.2} for j in range(5)]
+            polaris = [{"ticker": f"A{j}", "target_weight": 0.2} for j in range(5)]
+        else:
+            lyra = [{"ticker": f"L{j}", "target_weight": 0.2} for j in range(5)]
+            orion = [{"ticker": f"O{j}", "target_weight": 0.2} for j in range(5)]
+            polaris = [{"ticker": f"P{j}", "target_weight": 0.2} for j in range(5)]
+        _write_json(
+            root / "outputs" / "shadow_candidates" / trade_date / "comparison.json",
+            {
+                "strategies": {
+                    "caerus_lyra": {"holdings": lyra},
+                    "caerus_orion": {"holdings": orion},
+                    "caerus_polaris": {"holdings": polaris},
+                }
+            },
+        )
+    return last_date
 
 
 def _write_nav(root: Path, *, correlated: bool) -> None:
@@ -231,3 +257,52 @@ def test_empty_strategy_inputs_fail_closed(tmp_path):
 
     assert payload["available"] is False
     assert "shadow_comparison_missing" in payload["reason_codes"]
+
+
+def test_deep_strategy_differentiation_high_overlap_high_corr_is_weak(tmp_path):
+    trade_date = _write_rolling_comparisons(tmp_path, overlap=True, periods=25)
+    _write_nav(tmp_path, correlated=True)
+    _write_factor_and_contrib(tmp_path, trade_date, shared_contributors=True)
+
+    payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
+
+    assert payload["aggregate_verdict"] == "WEAK_DIFFERENTIATION"
+    assert payload["pairs"][0]["windows"]["20"]["holdings_overlap"] == 1.0
+    assert "high_overlap_high_correlation" in payload["pairs"][0]["reason_codes"]
+
+
+def test_deep_strategy_differentiation_low_overlap_low_corr_can_be_strong(tmp_path):
+    trade_date = _write_rolling_comparisons(tmp_path, overlap=False, periods=25)
+    _write_nav(tmp_path, correlated=False)
+    _write_factor_and_contrib(tmp_path, trade_date)
+
+    payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
+
+    assert [f"{row['left_strategy']}:{row['right_strategy']}" for row in payload["pairs"]] == [
+        "caerus_lyra:caerus_orion",
+        "caerus_lyra:caerus_polaris",
+        "caerus_orion:caerus_polaris",
+    ]
+    assert payload["pairs"][0]["active_share_proxy"] == 1.0
+    assert payload["pairs"][0]["verdict"] in {"STRONG_DIFFERENTIATION", "MODERATE_DIFFERENTIATION"}
+
+
+def test_deep_strategy_differentiation_insufficient_observations_blocks_strong(tmp_path):
+    trade_date = _write_rolling_comparisons(tmp_path, overlap=False, periods=3)
+    _write_nav(tmp_path, correlated=False)
+    _write_factor_and_contrib(tmp_path, trade_date)
+
+    payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
+
+    assert payload["pairs"][0]["verdict"] != "STRONG_DIFFERENTIATION"
+    assert "insufficient_observations_block_strong_verdict" in payload["pairs"][0]["reason_codes"]
+
+
+def test_deep_strategy_differentiation_missing_factor_lowers_confidence(tmp_path):
+    trade_date = _write_rolling_comparisons(tmp_path, overlap=False, periods=25)
+    _write_nav(tmp_path, correlated=False)
+
+    payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
+
+    assert payload["confidence"] == "LOW"
+    assert "factor_exposure_missing" in payload["reason_codes"]

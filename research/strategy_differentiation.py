@@ -422,6 +422,205 @@ def _classify(holdings_overlap: float | None, return_corr: float | None, factor_
     return score, "WEAK", sorted(set(reasons + ["weak_behavioral_differentiation"]))
 
 
+def _verdict_from_flag(flag: str) -> str:
+    if flag == "READY":
+        return "STRONG_DIFFERENTIATION"
+    if flag == "WATCH":
+        return "MODERATE_DIFFERENTIATION"
+    return "WEAK_DIFFERENTIATION"
+
+
+def _load_shadow_holdings_by_date(repo: Path, trade_date: str) -> tuple[dict[str, dict[str, dict[str, float]]], list[str], list[str]]:
+    root = repo / "outputs" / "shadow_candidates"
+    if not root.exists():
+        return {}, [], ["shadow_comparison_missing"]
+    by_date: dict[str, dict[str, dict[str, float]]] = {}
+    sources: list[str] = []
+    for child in sorted(root.iterdir(), key=lambda path: path.name):
+        if not child.is_dir():
+            continue
+        try:
+            pd.Timestamp(child.name)
+        except Exception:
+            continue
+        if child.name > trade_date:
+            continue
+        path = child / "comparison.json"
+        payload = _read_json(path)
+        if payload is None or not isinstance(payload.get("strategies"), dict):
+            continue
+        date_rows: dict[str, dict[str, float]] = {}
+        for strategy, row in sorted(payload["strategies"].items()):
+            if not isinstance(row, dict):
+                continue
+            holdings = row.get("holdings") if isinstance(row.get("holdings"), list) else []
+            weights: dict[str, float] = {}
+            for holding in holdings:
+                if not isinstance(holding, dict):
+                    continue
+                symbol = str(holding.get("ticker") or holding.get("symbol") or "").upper()
+                weight = _round(holding.get("target_weight") or holding.get("weight"))
+                if symbol and weight is not None:
+                    weights[symbol] = weight
+            if weights:
+                date_rows[strategy] = weights
+        if date_rows:
+            by_date[child.name] = date_rows
+            sources.append(str(path))
+    return by_date, sources, [] if by_date else ["shadow_comparison_missing"]
+
+
+def _corr_for_window(returns: pd.DataFrame | None, left: str, right: str, window: int) -> tuple[float | None, int]:
+    if returns is None or left not in returns.columns or right not in returns.columns:
+        return None, 0
+    aligned = returns[[left, right]].dropna().tail(window)
+    if aligned.shape[0] < 2:
+        return None, int(aligned.shape[0])
+    return _round(aligned[left].corr(aligned[right])), int(aligned.shape[0])
+
+
+def _window_score(overlap: float | None, corr: float | None, active_share: float | None, factor_similarity: float | None, contribution_corr: float | None) -> float | None:
+    components: list[float] = []
+    if active_share is not None:
+        components.append(active_share)
+    if overlap is not None:
+        components.append(1.0 - min(max(overlap, 0.0), 1.0))
+    if corr is not None:
+        components.append(1.0 - min(max(corr, -1.0), 1.0))
+    if factor_similarity is not None:
+        components.append(1.0 - min(max(factor_similarity, 0.0), 1.0))
+    if contribution_corr is not None:
+        components.append(1.0 - min(max(contribution_corr, -1.0), 1.0))
+    return _round(sum(components) / len(components)) if components else None
+
+
+def build_strategy_differentiation_deep(
+    *,
+    trade_date: str,
+    repo_root: Path | str = Path("."),
+    output_root: Path | str | None = None,
+) -> dict[str, Any]:
+    repo = Path(repo_root)
+    out_dir = Path(output_root) if output_root is not None else repo / "outputs" / "research" / "strategy_differentiation" / trade_date
+    holdings_by_date, holding_sources, holding_reasons = _load_shadow_holdings_by_date(repo, trade_date)
+    returns, return_reasons = _load_nav_returns(repo, trade_date, lookback=60)
+    factors, factor_sources, factor_reasons = _load_factor_exposure(repo, trade_date)
+    contributions, contribution_sources, contribution_reasons = _load_contributions(repo, trade_date)
+    dates = sorted(holdings_by_date)
+    pair_rows: list[dict[str, Any]] = []
+    for left, right in PAIRS:
+        left_c = contributions.get(left, {})
+        right_c = contributions.get(right, {})
+        contribution_corr = _corr_from_vectors(left_c, right_c)
+        factor_similarity = _factor_similarity(factors.get(left, {}), factors.get(right, {}))
+        sector_overlap = _sector_overlap(factors.get(left, {}), factors.get(right, {}))
+        window_rows: dict[str, Any] = {}
+        scores: list[float] = []
+        pair_reasons: list[str] = []
+        for window in (20, 40, 60):
+            window_dates = dates[-window:]
+            overlaps: list[float] = []
+            active_shares: list[float] = []
+            for source_date in window_dates:
+                left_h = holdings_by_date.get(source_date, {}).get(left, {})
+                right_h = holdings_by_date.get(source_date, {}).get(right, {})
+                overlap = _weighted_overlap(left_h, right_h)
+                active = _active_share(left_h, right_h)
+                if overlap is not None:
+                    overlaps.append(overlap)
+                if active is not None:
+                    active_shares.append(active)
+            avg_overlap = _round(sum(overlaps) / len(overlaps)) if overlaps else None
+            avg_active = _round(sum(active_shares) / len(active_shares)) if active_shares else None
+            return_corr, return_obs = _corr_for_window(returns, left, right, window)
+            score = _window_score(avg_overlap, return_corr, avg_active, factor_similarity, contribution_corr)
+            reasons: list[str] = []
+            if len(window_dates) < min(window, 20):
+                reasons.append(f"insufficient_observations_{window}d")
+            if avg_overlap is None:
+                reasons.append("holdings_overlap_missing")
+            if return_corr is None:
+                reasons.append("return_correlation_missing")
+            if contribution_corr is None:
+                reasons.append("contribution_correlation_missing")
+            if factor_similarity is None:
+                reasons.append("factor_similarity_missing")
+            if avg_overlap is not None and return_corr is not None and avg_overlap >= 0.8 and return_corr >= 0.9:
+                reasons.append("high_overlap_high_correlation")
+            if score is not None:
+                scores.append(score)
+            pair_reasons.extend(reasons)
+            window_rows[str(window)] = {
+                "window_days": window,
+                "observation_count": len(window_dates),
+                "return_observation_count": return_obs,
+                "holdings_overlap": avg_overlap,
+                "return_correlation": return_corr,
+                "contribution_correlation": contribution_corr,
+                "active_share_proxy": avg_active,
+                "sector_overlap": sector_overlap,
+                "factor_similarity": factor_similarity,
+                "behavioral_differentiation_score": score,
+                "reason_codes": sorted(set(reasons)) or ["ok"],
+            }
+        overall_score = _round(sum(scores) / len(scores)) if scores else None
+        max_obs = max((row.get("observation_count") or 0 for row in window_rows.values()), default=0)
+        if any("high_overlap_high_correlation" in reason for reason in pair_reasons) or overall_score is None or overall_score < 0.35:
+            verdict = "WEAK_DIFFERENTIATION"
+        elif max_obs < 20 or any("insufficient_observations" in reason for reason in pair_reasons):
+            verdict = "MODERATE_DIFFERENTIATION"
+            pair_reasons.append("insufficient_observations_block_strong_verdict")
+        elif overall_score >= 0.55:
+            verdict = "STRONG_DIFFERENTIATION"
+        else:
+            verdict = "MODERATE_DIFFERENTIATION"
+        pair_rows.append(
+            {
+                "left_strategy": left,
+                "right_strategy": right,
+                "windows": window_rows,
+                "active_share_proxy": window_rows.get("60", {}).get("active_share_proxy") or window_rows.get("40", {}).get("active_share_proxy") or window_rows.get("20", {}).get("active_share_proxy"),
+                "shared_top_contributors": _top_common(left_c, right_c, True),
+                "shared_top_detractors": _top_common(left_c, right_c, False),
+                "sector_overlap": sector_overlap,
+                "factor_similarity": factor_similarity,
+                "concentration_similarity": _round(1.0 - abs((window_rows.get("60", {}).get("active_share_proxy") or 0.0) - (window_rows.get("20", {}).get("active_share_proxy") or 0.0))),
+                "behavioral_differentiation_score": overall_score,
+                "verdict": verdict,
+                "reason_codes": sorted(set(pair_reasons + holding_reasons + return_reasons + factor_reasons + contribution_reasons)) or ["ok"],
+            }
+        )
+    verdict_rank = {"STRONG_DIFFERENTIATION": 2, "MODERATE_DIFFERENTIATION": 1, "WEAK_DIFFERENTIATION": 0}
+    aggregate_verdict = min((str(row.get("verdict")) for row in pair_rows), default="WEAK_DIFFERENTIATION", key=lambda item: verdict_rank.get(item, 0))
+    blockers = sorted(
+        f"{row['left_strategy']}_vs_{row['right_strategy']}:{str(row.get('verdict')).lower()}"
+        for row in pair_rows
+        if row.get("verdict") != "STRONG_DIFFERENTIATION"
+    )
+    reason_codes = sorted(
+        {
+            str(code)
+            for row in pair_rows
+            for code in list(row.get("reason_codes") or [])
+            if code != "ok"
+        }
+    ) or ["ok"]
+    payload = {
+        "schema_version": "caerus_strategy_differentiation_deep_v1",
+        "date": trade_date,
+        "available": bool(pair_rows) and bool(holdings_by_date),
+        "confidence": "LOW" if any("missing" in code or "insufficient" in code for code in reason_codes) else "MEDIUM",
+        "aggregate_verdict": aggregate_verdict,
+        "pairs": pair_rows,
+        "blockers": blockers,
+        "reason_codes": reason_codes,
+        "source_artifacts": sorted(set(holding_sources + factor_sources + contribution_sources + [str(repo / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv")])),
+    }
+    _write_json(out_dir / "strategy_differentiation_deep.json", payload)
+    _write_text(out_dir / "strategy_differentiation_deep.md", render_deep_markdown(payload))
+    return payload
+
+
 def _coverage_reason_present(reasons: list[str]) -> bool:
     return any(
         token in str(reason)
@@ -501,6 +700,11 @@ def build_strategy_differentiation(
     }
     _write_json(out_dir / "strategy_differentiation.json", payload)
     _write_text(out_dir / "strategy_differentiation.md", render_markdown(payload))
+    build_strategy_differentiation_deep(
+        trade_date=trade_date,
+        repo_root=repo,
+        output_root=out_dir,
+    )
     return payload
 
 
@@ -519,6 +723,30 @@ def render_markdown(payload: dict[str, Any]) -> str:
         pair = f"{row.get('left_strategy')} vs {row.get('right_strategy')}"
         lines.append(
             f"| {pair} | {row.get('holdings_overlap_percentage')} | {row.get('daily_return_correlation')} | {row.get('contribution_correlation')} | {row.get('average_active_share_proxy')} | {row.get('behavioral_differentiation_score')} | {row.get('differentiation_readiness_flag')} | {', '.join(row.get('reason_codes') or [])} |"
+        )
+    return "\n".join(lines)
+
+
+def render_deep_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        f"# Deep Strategy Differentiation - {payload.get('date')}",
+        "",
+        f"- Available: {payload.get('available')}",
+        f"- Confidence: {payload.get('confidence')}",
+        f"- Aggregate verdict: {payload.get('aggregate_verdict')}",
+        f"- Reason codes: {', '.join(payload.get('reason_codes') or [])}",
+        "",
+        "| Pair | Verdict | Score | 20d overlap | 20d corr | 40d overlap | 40d corr | 60d overlap | 60d corr | Reasons |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for row in payload.get("pairs") or []:
+        pair = f"{row.get('left_strategy')} vs {row.get('right_strategy')}"
+        windows = row.get("windows") or {}
+        w20 = windows.get("20") or {}
+        w40 = windows.get("40") or {}
+        w60 = windows.get("60") or {}
+        lines.append(
+            f"| {pair} | {row.get('verdict')} | {row.get('behavioral_differentiation_score')} | {w20.get('holdings_overlap')} | {w20.get('return_correlation')} | {w40.get('holdings_overlap')} | {w40.get('return_correlation')} | {w60.get('holdings_overlap')} | {w60.get('return_correlation')} | {', '.join(row.get('reason_codes') or [])} |"
         )
     return "\n".join(lines)
 

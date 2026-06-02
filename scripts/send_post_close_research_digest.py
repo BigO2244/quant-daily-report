@@ -163,6 +163,11 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
     decision = sections.get("decision_attribution") if isinstance(sections.get("decision_attribution"), dict) else {}
     signal = sections.get("signal_quality") if isinstance(sections.get("signal_quality"), dict) else {}
     freshness = sections.get("data_freshness") if isinstance(sections.get("data_freshness"), dict) else {}
+    risk_coverage = sections.get("risk_coverage") if isinstance(sections.get("risk_coverage"), dict) else {}
+    deep_diff = sections.get("strategy_differentiation_deep") if isinstance(sections.get("strategy_differentiation_deep"), dict) else {}
+    sizing = sections.get("position_sizing_research") if isinstance(sections.get("position_sizing_research"), dict) else {}
+    universe = sections.get("universe_governance") if isinstance(sections.get("universe_governance"), dict) else {}
+    tier2 = sections.get("tier2_research_controls") if isinstance(sections.get("tier2_research_controls"), dict) else {}
     cio = build_cio_briefing(review, repo)
     actions = list(sections.get("recommended_next_actions") or [])
 
@@ -234,6 +239,11 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         f"Positions analyzed: {_fmt(position.get('total_positions_analyzed'))}",
         f"Decisions analyzed: {_fmt(decision.get('decisions_analyzed'))}",
         f"Price freshness: {_fmt(position.get('is_price_source_fresh'))} (max date: {_fmt(position.get('price_source_max_date'))})",
+        f"Tier 2 risk coverage: {_fmt('available' if risk_coverage.get('available') else 'missing')} ({_fmt(risk_coverage.get('risk_level'))})",
+        f"Deep differentiation verdict: {_fmt(deep_diff.get('aggregate_verdict'))}",
+        f"Position sizing research: {_fmt('available' if sizing.get('available') else 'missing')}",
+        f"Universe governance: {_fmt('available' if universe.get('available') else 'missing')}",
+        f"Tier 2 recommendation: {_fmt(tier2.get('recommendation'))}",
         "",
         "Top contributors:",
         *(f"- {line}" for line in top_lines),
@@ -270,6 +280,11 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         top_lines=top_lines,
         bottom_lines=bottom_lines,
         paths=paths,
+        risk_coverage=risk_coverage,
+        deep_diff=deep_diff,
+        sizing=sizing,
+        universe=universe,
+        tier2=tier2,
     )
     return {
         "subject": subject,
@@ -342,6 +357,11 @@ def _build_digest_html(
     top_lines: list[str],
     bottom_lines: list[str],
     paths: dict[str, str],
+    risk_coverage: dict[str, Any],
+    deep_diff: dict[str, Any],
+    sizing: dict[str, Any],
+    universe: dict[str, Any],
+    tier2: dict[str, Any],
 ) -> str:
     def items(rows: list[str]) -> str:
         return "".join(f"<li>{html.escape(row)}</li>" for row in rows) or "<li>none</li>"
@@ -393,7 +413,12 @@ def _build_digest_html(
   <strong>Attribution status:</strong> {html.escape("available" if position.get("available") else "missing")}<br>
   <strong>Positions analyzed:</strong> {html.escape(_fmt(position.get("total_positions_analyzed")))}<br>
   <strong>Decisions analyzed:</strong> {html.escape(_fmt(decision.get("decisions_analyzed")))}<br>
-  <strong>Price freshness:</strong> {html.escape(_fmt(position.get("is_price_source_fresh")))} ({html.escape(_fmt(position.get("price_source_max_date")))})</p>
+  <strong>Price freshness:</strong> {html.escape(_fmt(position.get("is_price_source_fresh")))} ({html.escape(_fmt(position.get("price_source_max_date")))})<br>
+  <strong>Tier 2 risk coverage:</strong> {html.escape(_fmt("available" if risk_coverage.get("available") else "missing"))} ({html.escape(_fmt(risk_coverage.get("risk_level")))})<br>
+  <strong>Deep differentiation verdict:</strong> {html.escape(_fmt(deep_diff.get("aggregate_verdict")))}<br>
+  <strong>Position sizing research:</strong> {html.escape(_fmt("available" if sizing.get("available") else "missing"))}<br>
+  <strong>Universe governance:</strong> {html.escape(_fmt("available" if universe.get("available") else "missing"))}<br>
+  <strong>Tier 2 recommendation:</strong> {html.escape(_fmt(tier2.get("recommendation")))}</p>
 
   <h3>Top Contributors</h3>
   <ul>{items(top_lines)}</ul>

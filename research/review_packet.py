@@ -499,6 +499,70 @@ def _extract_text_field(text: str, label: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _risk_section_from_risk_coverage(payload: dict[str, Any], path: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    if not bool(payload.get("available")):
+        return None
+    strategies_payload = payload.get("strategies") if isinstance(payload.get("strategies"), dict) else {}
+    strategy_rows = {
+        str(strategy): {
+            "holdings_count": row.get("position_count"),
+            "position_count": row.get("position_count"),
+            "max_weight": row.get("max_single_name_weight"),
+            "max_position_weight": row.get("max_single_name_weight"),
+            "top3_weight": row.get("top3_concentration"),
+            "top3_concentration": row.get("top3_concentration"),
+            "top5_concentration": row.get("top5_concentration"),
+            "top10_concentration": row.get("top10_concentration"),
+            "gross_exposure": row.get("gross_exposure"),
+            "net_exposure": row.get("net_exposure"),
+            "cash_unallocated": row.get("cash_unallocated"),
+            "sector_exposure": row.get("sector_exposure") or {},
+            "missing_sector_coverage_count": row.get("missing_sector_coverage_count"),
+            "max_sector_weight": row.get("sector_concentration"),
+            "concentration_risk_level": row.get("risk_level"),
+            "exposure_risk_level": row.get("risk_level"),
+            "confidence": row.get("confidence"),
+            "reason_codes": list(row.get("reason_codes") or []),
+        }
+        for strategy, row in sorted(strategies_payload.items())
+        if isinstance(row, dict)
+    }
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or []) if code != "ok")) or ["ok"]
+    confidence = str(payload.get("confidence") or "LOW")
+    section = {
+        "available": True,
+        "strategies": strategy_rows,
+        "top_holdings": {
+            strategy: list(row.get("top_holdings") or [])
+            for strategy, row in sorted(strategies_payload.items())
+            if isinstance(row, dict)
+        },
+        "position_count": payload.get("position_count"),
+        "max_position_weight": payload.get("max_single_name_weight"),
+        "top3_concentration": payload.get("top3_concentration"),
+        "top5_concentration": payload.get("top5_concentration"),
+        "top10_concentration": payload.get("top10_concentration"),
+        "gross_exposure": payload.get("gross_exposure"),
+        "net_exposure": payload.get("net_exposure"),
+        "concentration_risk_level": payload.get("risk_level"),
+        "exposure_risk_level": payload.get("risk_level"),
+        "missing_sector_coverage_count": sum(int((row or {}).get("missing_sector_coverage_count") or 0) for row in strategy_rows.values()),
+        "confidence": confidence,
+        "reason_codes": reasons,
+        "source_artifacts": sorted(set(list(payload.get("source_artifacts") or []) + [str(path)])),
+    }
+    source = _status(
+        artifact_name="risk",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=confidence,
+        reason_codes=reasons,
+        status="PRESENT" if reasons == ["ok"] else "PARTIAL",
+    )
+    return section, source
+
+
 def _build_risk_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
     canonical_path = repo / "outputs" / "risk_summary" / trade_date / "risk_summary.json"
     canonical = _read_json(canonical_path)
@@ -535,6 +599,12 @@ def _build_risk_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], di
             reasons.append("missing_risk_summary")
         if not usable:
             confidence = "LOW"
+            risk_coverage_path = repo / "outputs" / "research" / "risk_coverage" / trade_date / "risk_coverage.json"
+            risk_coverage = _read_json(risk_coverage_path)
+            if risk_coverage is not None:
+                fallback = _risk_section_from_risk_coverage(risk_coverage, risk_coverage_path, trade_date)
+                if fallback is not None:
+                    return fallback
         section = {
             "available": usable,
             "strategies": strategy_rows,
@@ -560,6 +630,13 @@ def _build_risk_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], di
             status="MISSING" if not usable else "PRESENT" if section["reason_codes"] == ["ok"] else "PARTIAL",
         )
         return section, source
+
+    risk_coverage_path = repo / "outputs" / "research" / "risk_coverage" / trade_date / "risk_coverage.json"
+    risk_coverage = _read_json(risk_coverage_path)
+    if risk_coverage is not None:
+        fallback = _risk_section_from_risk_coverage(risk_coverage, risk_coverage_path, trade_date)
+        if fallback is not None:
+            return fallback
 
     concentration_path = repo / "outputs" / "attribution" / trade_date / "concentration_analysis.json"
     exposure_path = repo / "outputs" / "attribution" / trade_date / "exposure_summary.json"
@@ -853,6 +930,186 @@ def _build_strategy_differentiation_section(repo: Path, trade_date: str) -> tupl
     return section, source
 
 
+def _build_risk_coverage_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "risk_coverage" / trade_date / "risk_coverage.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="risk_coverage",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_risk_coverage"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "risk_level": "UNKNOWN",
+            "strategies": {},
+            "reason_codes": ["missing_risk_coverage"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    if not available and "risk_coverage_unavailable" not in reasons:
+        reasons.append("risk_coverage_unavailable")
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "risk_level": payload.get("risk_level") or "UNKNOWN",
+        "holdings_source_date": payload.get("holdings_source_date"),
+        "position_count": payload.get("position_count"),
+        "gross_exposure": payload.get("gross_exposure"),
+        "net_exposure": payload.get("net_exposure"),
+        "top3_concentration": payload.get("top3_concentration"),
+        "top5_concentration": payload.get("top5_concentration"),
+        "top10_concentration": payload.get("top10_concentration"),
+        "max_single_name_weight": payload.get("max_single_name_weight"),
+        "strategies": payload.get("strategies") or {},
+        "reason_codes": sorted(set(reasons)),
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="risk_coverage",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=section["reason_codes"],
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_strategy_differentiation_deep_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "strategy_differentiation" / trade_date / "strategy_differentiation_deep.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="strategy_differentiation_deep",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_strategy_differentiation_deep"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "aggregate_verdict": "WEAK_DIFFERENTIATION",
+            "pairs": [],
+            "blockers": ["missing_strategy_differentiation_deep"],
+            "reason_codes": ["missing_strategy_differentiation_deep"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "aggregate_verdict": payload.get("aggregate_verdict") or "WEAK_DIFFERENTIATION",
+        "pairs": payload.get("pairs") or [],
+        "blockers": payload.get("blockers") or [],
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="strategy_differentiation_deep",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_position_sizing_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "position_sizing" / trade_date / "position_sizing_research.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="position_sizing_research",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_position_sizing_research"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "strategies": {},
+            "reason_codes": ["missing_position_sizing_research"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "holdings_source_date": payload.get("holdings_source_date"),
+        "returns_source_date": payload.get("returns_source_date"),
+        "strategies": payload.get("strategies") or {},
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="position_sizing_research",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_universe_governance_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "universe_governance" / trade_date / "universe_governance.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="universe_governance",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_universe_governance"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "blockers": ["missing_universe_governance"],
+            "reason_codes": ["missing_universe_governance"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "security_master_asof_date": payload.get("security_master_asof_date"),
+        "stale_universe": bool(payload.get("stale_universe")),
+        "planned_symbols": payload.get("planned_symbols") or [],
+        "holdings_symbols": payload.get("holdings_symbols") or [],
+        "alias_resolutions": payload.get("alias_resolutions") or [],
+        "blockers": payload.get("blockers") or [],
+        "coverage_summary": payload.get("coverage_summary") or {},
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="universe_governance",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
 def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str, Any]:
     timing = sections["execution_timing_study"]
     promotion = sections["promotion_readiness_windows"]
@@ -918,6 +1175,65 @@ def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str
     }
 
 
+def _build_tier2_research_controls_section(sections: dict[str, Any]) -> dict[str, Any]:
+    risk = sections["risk_coverage"]
+    deep = sections["strategy_differentiation_deep"]
+    sizing = sections["position_sizing_research"]
+    universe = sections["universe_governance"]
+    promotion = sections["promotion_readiness_windows"]
+    blockers: list[str] = []
+    if not risk.get("available"):
+        blockers.append("risk_coverage_incomplete")
+    if str(deep.get("aggregate_verdict") or "WEAK_DIFFERENTIATION") != "STRONG_DIFFERENTIATION":
+        blockers.append("weak_or_incomplete_deep_differentiation")
+    if not universe.get("available"):
+        blockers.extend(str(code) for code in universe.get("blockers") or ["universe_governance_incomplete"])
+    if not sizing.get("available"):
+        blockers.append("position_sizing_research_incomplete")
+    if any("insufficient_observations" in str(code) for code in list(promotion.get("reason_codes") or []) + list(promotion.get("blockers") or [])):
+        blockers.append("immature_observation_window")
+    blocker_categories: set[str] = set()
+    if any("risk" in blocker for blocker in blockers):
+        blocker_categories.add("RISK_COVERAGE")
+    if any("differentiation" in blocker for blocker in blockers):
+        blocker_categories.add("MODEL_DIFFERENTIATION")
+    if any("universe" in blocker or "symbol" in blocker or "security_master" in blocker for blocker in blockers):
+        blocker_categories.add("UNIVERSE_GOVERNANCE")
+    if any("observation" in blocker for blocker in blockers):
+        blocker_categories.add("OBSERVATION_WINDOW")
+    if any("sizing" in blocker for blocker in blockers):
+        blocker_categories.add("SIZING_RESEARCH")
+    if not blocker_categories:
+        blocker_categories.add("NONE")
+    promotion_recommendation = str(promotion.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED")
+    if not blockers and promotion_recommendation.startswith("PROMOTION_REVIEW_READY"):
+        recommendation = promotion_recommendation
+    else:
+        recommendation = "No promotion recommended"
+    reason_codes = sorted(
+        {
+            str(code)
+            for code in list(risk.get("reason_codes") or [])
+            + list(deep.get("reason_codes") or [])
+            + list(sizing.get("reason_codes") or [])
+            + list(universe.get("reason_codes") or [])
+            + blockers
+            if code != "ok"
+        }
+    ) or ["ok"]
+    return {
+        "available": any(section.get("available") for section in (risk, deep, sizing, universe)),
+        "risk_coverage_status": "available" if risk.get("available") else "missing_or_unavailable",
+        "deep_differentiation_verdict": deep.get("aggregate_verdict") or "WEAK_DIFFERENTIATION",
+        "position_sizing_status": "available" if sizing.get("available") else "missing_or_unavailable",
+        "universe_governance_status": "available" if universe.get("available") else "missing_or_unavailable",
+        "recommendation": recommendation,
+        "blocker_categories": sorted(blocker_categories),
+        "blockers": sorted(set(blockers)) or ["no_tier2_blockers_detected"],
+        "reason_codes": reason_codes,
+    }
+
+
 def _build_data_freshness_section(sources: dict[str, dict[str, Any]], position_section: dict[str, Any]) -> dict[str, Any]:
     rows = [dict(sources[key]) for key in sorted(sources)]
     price_reasons = list(position_section.get("freshness_reason_codes") or [])
@@ -975,6 +1291,14 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Generate or refresh canonical factor exposure artifacts, then rebuild strategy differentiation evidence.")
     if sections["strategy_differentiation"].get("available") and not sections["strategy_differentiation"].get("position_contributions_available"):
         actions.append("Run .venv/bin/python scripts/build_position_attribution.py --date YYYY-MM-DD, then rebuild strategy differentiation evidence.")
+    if not sections.get("risk_coverage", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_risk_coverage.py --date YYYY-MM-DD to populate Tier 2 risk coverage.")
+    if not sections.get("strategy_differentiation_deep", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_strategy_differentiation.py --date YYYY-MM-DD to populate deep differentiation evidence.")
+    if not sections.get("position_sizing_research", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_position_sizing_research.py --date YYYY-MM-DD to populate research-only sizing alternatives.")
+    if not sections.get("universe_governance", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_universe_governance.py --date YYYY-MM-DD to populate universe governance checks.")
     if signal.get("early_evidence"):
         actions.append("Accumulate more decision attribution observations before treating signal hit rates as durable.")
     if (
@@ -1053,6 +1377,10 @@ def build_research_review_packet(
     timing_study_section, timing_study_source = _build_execution_timing_study_section(repo, selected_date)
     promotion_windows_section, promotion_windows_source = _build_promotion_windows_section(repo, selected_date)
     differentiation_section, differentiation_source = _build_strategy_differentiation_section(repo, selected_date)
+    risk_coverage_section, risk_coverage_source = _build_risk_coverage_section(repo, selected_date)
+    differentiation_deep_section, differentiation_deep_source = _build_strategy_differentiation_deep_section(repo, selected_date)
+    position_sizing_section, position_sizing_source = _build_position_sizing_section(repo, selected_date)
+    universe_governance_section, universe_governance_source = _build_universe_governance_section(repo, selected_date)
     sources = {
         "model_review": model_source,
         "attribution": attribution_source,
@@ -1063,6 +1391,10 @@ def build_research_review_packet(
         "execution_timing_study": timing_study_source,
         "promotion_readiness_windows": promotion_windows_source,
         "strategy_differentiation": differentiation_source,
+        "risk_coverage": risk_coverage_source,
+        "strategy_differentiation_deep": differentiation_deep_source,
+        "position_sizing_research": position_sizing_source,
+        "universe_governance": universe_governance_source,
     }
     data_freshness = _build_data_freshness_section(sources, position_section)
     sections = {
@@ -1076,9 +1408,14 @@ def build_research_review_packet(
         "execution_timing_study": timing_study_section,
         "promotion_readiness_windows": promotion_windows_section,
         "strategy_differentiation": differentiation_section,
+        "risk_coverage": risk_coverage_section,
+        "strategy_differentiation_deep": differentiation_deep_section,
+        "position_sizing_research": position_sizing_section,
+        "universe_governance": universe_governance_section,
         "data_freshness": data_freshness,
     }
     sections["tier1_research_controls"] = _build_tier1_research_controls_section(sections)
+    sections["tier2_research_controls"] = _build_tier2_research_controls_section(sections)
     actions = _recommended_actions(sections, sources)
     sections["recommended_next_actions"] = actions
     overall = _overall(sections=sections, sources=sources, actions=actions)
@@ -1113,7 +1450,12 @@ def build_research_review_packet(
             "execution_timing_study": timing_study_section,
             "promotion_readiness_windows": promotion_windows_section,
             "strategy_differentiation": differentiation_section,
+            "risk_coverage": risk_coverage_section,
+            "strategy_differentiation_deep": differentiation_deep_section,
+            "position_sizing_research": position_sizing_section,
+            "universe_governance": universe_governance_section,
             "tier1_research_controls": sections["tier1_research_controls"],
+            "tier2_research_controls": sections["tier2_research_controls"],
         },
         "cio_briefing": cio_briefing,
         "output_paths": {
@@ -1171,6 +1513,11 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_execution_timing_study_md(sections["execution_timing_study"]))
     lines.extend(_render_promotion_windows_md(sections["promotion_readiness_windows"]))
     lines.extend(_render_strategy_differentiation_md(sections["strategy_differentiation"]))
+    lines.extend(_render_tier2_md(sections["tier2_research_controls"]))
+    lines.extend(_render_risk_coverage_md(sections["risk_coverage"]))
+    lines.extend(_render_strategy_differentiation_deep_md(sections["strategy_differentiation_deep"]))
+    lines.extend(_render_position_sizing_md(sections["position_sizing_research"]))
+    lines.extend(_render_universe_governance_md(sections["universe_governance"]))
     lines.extend(_render_freshness_md(sections["data_freshness"]))
     lines.extend(_render_actions_md(sections["recommended_next_actions"]))
     lines.extend(_render_sources_md(payload["sources"]))
@@ -1469,6 +1816,100 @@ def _render_strategy_differentiation_md(section: dict[str, Any]) -> list[str]:
             f"| {pair} | {_md(row.get('holdings_overlap_percentage'))} | {_md(row.get('daily_return_correlation'))} | {_md(row.get('average_active_share_proxy'))} | {_md(row.get('behavioral_differentiation_score'))} | {_md(row.get('differentiation_readiness_flag'))} |"
         )
     lines.append("")
+    return lines
+
+
+def _render_tier2_md(section: dict[str, Any]) -> list[str]:
+    return [
+        "## Tier 2 Research Controls",
+        "",
+        f"Risk coverage: {_md(section.get('risk_coverage_status'))}",
+        f"Deep differentiation verdict: {_md(section.get('deep_differentiation_verdict'))}",
+        f"Position sizing research: {_md(section.get('position_sizing_status'))}",
+        f"Universe governance: {_md(section.get('universe_governance_status'))}",
+        f"Recommendation: {_md(section.get('recommendation'))}",
+        f"Blocker categories: {_md(section.get('blocker_categories'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+    ]
+
+
+def _render_risk_coverage_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Tier 2 Risk Coverage",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Risk level: {_md(section.get('risk_level'))}",
+        f"Holdings source date: {_md(section.get('holdings_source_date'))}",
+        f"Gross exposure: {_md(section.get('gross_exposure'))}",
+        f"Net exposure: {_md(section.get('net_exposure'))}",
+        f"Top 3 / Top 5 / Top 10: {_md(section.get('top3_concentration'))} / {_md(section.get('top5_concentration'))} / {_md(section.get('top10_concentration'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+        "| Strategy | Positions | Gross | Net | Top 3 | Top 5 | Top 10 | Max Name | Risk |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for strategy, row in sorted((section.get("strategies") or {}).items()):
+        lines.append(f"| {strategy} | {_md(row.get('position_count'))} | {_md(row.get('gross_exposure'))} | {_md(row.get('net_exposure'))} | {_md(row.get('top3_concentration'))} | {_md(row.get('top5_concentration'))} | {_md(row.get('top10_concentration'))} | {_md(row.get('max_single_name_weight'))} | {_md(row.get('risk_level'))} |")
+    lines.append("")
+    return lines
+
+
+def _render_strategy_differentiation_deep_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Deep Strategy Differentiation",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Aggregate verdict: {_md(section.get('aggregate_verdict'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+        "| Pair | Verdict | Score | Shared Contributors | Shared Detractors |",
+        "|---|---|---:|---|---|",
+    ]
+    for row in section.get("pairs") or []:
+        pair = f"{row.get('left_strategy')} vs {row.get('right_strategy')}"
+        lines.append(f"| {pair} | {_md(row.get('verdict'))} | {_md(row.get('behavioral_differentiation_score'))} | {_md(row.get('shared_top_contributors'))} | {_md(row.get('shared_top_detractors'))} |")
+    lines.append("")
+    return lines
+
+
+def _render_position_sizing_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Position Sizing Research",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Holdings source date: {_md(section.get('holdings_source_date'))}",
+        f"Returns source date: {_md(section.get('returns_source_date'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+        "| Strategy | Best Research Alternative | Confidence | Reasons |",
+        "|---|---|---|---|",
+    ]
+    for strategy, row in sorted((section.get("strategies") or {}).items()):
+        lines.append(f"| {strategy} | {_md(row.get('best_research_alternative'))} | {_md(row.get('confidence'))} | {_md(row.get('reason_codes'))} |")
+    lines.append("")
+    return lines
+
+
+def _render_universe_governance_md(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Universe Governance",
+        "",
+        f"Available: {_md(section.get('available'))}",
+        f"Security master as-of: {_md(section.get('security_master_asof_date'))}",
+        f"Stale universe: {_md(section.get('stale_universe'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+        f"Aliases resolved: {_md(section.get('alias_resolutions'))}",
+        "",
+    ]
     return lines
 
 

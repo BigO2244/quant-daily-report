@@ -244,6 +244,93 @@ def _write_tier1_sources(root: Path, trade_date: str) -> None:
     )
 
 
+def _write_tier2_sources(root: Path, trade_date: str, *, universe_available: bool = True, deep_verdict: str = "WEAK_DIFFERENTIATION") -> None:
+    _write_json(
+        root / "outputs" / "research" / "risk_coverage" / trade_date / "risk_coverage.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "risk_level": "MEDIUM",
+            "holdings_source_date": trade_date,
+            "position_count": 5,
+            "gross_exposure": 1.0,
+            "net_exposure": 1.0,
+            "top3_concentration": 0.6,
+            "top5_concentration": 1.0,
+            "top10_concentration": 1.0,
+            "max_single_name_weight": 0.2,
+            "strategies": {
+                "caerus_lyra": {
+                    "position_count": 5,
+                    "gross_exposure": 1.0,
+                    "net_exposure": 1.0,
+                    "top3_concentration": 0.6,
+                    "top5_concentration": 1.0,
+                    "top10_concentration": 1.0,
+                    "max_single_name_weight": 0.2,
+                    "risk_level": "MEDIUM",
+                    "confidence": "MEDIUM",
+                    "reason_codes": ["ok"],
+                }
+            },
+            "reason_codes": ["ok"],
+            "source_artifacts": ["comparison.json"],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "strategy_differentiation" / trade_date / "strategy_differentiation_deep.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "aggregate_verdict": deep_verdict,
+            "blockers": [] if deep_verdict == "STRONG_DIFFERENTIATION" else ["caerus_lyra_vs_caerus_orion:weak_differentiation"],
+            "pairs": [
+                {
+                    "left_strategy": "caerus_lyra",
+                    "right_strategy": "caerus_orion",
+                    "verdict": deep_verdict,
+                    "behavioral_differentiation_score": 0.2 if deep_verdict == "WEAK_DIFFERENTIATION" else 0.7,
+                    "shared_top_contributors": ["AAA"],
+                    "shared_top_detractors": ["BBB"],
+                    "reason_codes": ["weak_behavioral_differentiation"] if deep_verdict == "WEAK_DIFFERENTIATION" else ["ok"],
+                }
+            ],
+            "reason_codes": ["weak_behavioral_differentiation"] if deep_verdict == "WEAK_DIFFERENTIATION" else ["ok"],
+            "source_artifacts": ["comparison.json"],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "position_sizing" / trade_date / "position_sizing_research.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "holdings_source_date": trade_date,
+            "returns_source_date": trade_date,
+            "strategies": {"caerus_lyra": {"best_research_alternative": "equal_weight", "confidence": "MEDIUM", "reason_codes": ["ok"]}},
+            "reason_codes": ["ok"],
+            "source_artifacts": ["position_attribution.json"],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "universe_governance" / trade_date / "universe_governance.json",
+        {
+            "date": trade_date,
+            "available": universe_available,
+            "confidence": "HIGH" if universe_available else "LOW",
+            "security_master_asof_date": trade_date,
+            "stale_universe": False,
+            "blockers": [] if universe_available else ["planned:unknown_symbol:NOPE"],
+            "alias_resolutions": [],
+            "coverage_summary": {"planned_symbol_count": 1},
+            "reason_codes": ["ok"] if universe_available else ["planned:unknown_symbol:NOPE"],
+            "source_artifacts": ["ticker_universe_latest.json"],
+        },
+    )
+
+
 def test_all_core_artifacts_present_generates_packet(tmp_path):
     trade_date = "2026-06-01"
     _write_attribution(tmp_path, trade_date)
@@ -458,3 +545,39 @@ def test_tier1_missing_factor_and_contribution_inputs_are_data_coverage_blockers
     action_text = " ".join(result["sections"]["recommended_next_actions"])
     assert "factor exposure" in action_text
     assert "build_position_attribution.py" in action_text
+
+
+def test_tier2_sections_populate_and_keep_promotion_blocked_on_weak_differentiation(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, deep_verdict="WEAK_DIFFERENTIATION")
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    assert result["sections"]["risk_coverage"]["available"] is True
+    assert result["sections"]["strategy_differentiation_deep"]["aggregate_verdict"] == "WEAK_DIFFERENTIATION"
+    assert result["sections"]["position_sizing_research"]["available"] is True
+    assert result["sections"]["universe_governance"]["available"] is True
+    tier2 = result["sections"]["tier2_research_controls"]
+    assert tier2["recommendation"] == "No promotion recommended"
+    assert "MODEL_DIFFERENTIATION" in tier2["blocker_categories"]
+    markdown = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text()
+    assert "Tier 2 Risk Coverage" in markdown
+    assert "Deep Strategy Differentiation" in markdown
+    assert "Universe Governance" in markdown
+
+
+def test_tier2_universe_blocker_prevents_promotion(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, universe_available=False, deep_verdict="STRONG_DIFFERENTIATION")
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    tier2 = result["sections"]["tier2_research_controls"]
+    assert tier2["recommendation"] == "No promotion recommended"
+    assert "UNIVERSE_GOVERNANCE" in tier2["blocker_categories"]

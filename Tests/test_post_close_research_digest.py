@@ -84,6 +84,11 @@ def _write_review(root: Path, trade_date: str) -> None:
                 "data_freshness": {
                     "reason_codes": ["missing_model_review", "detected_regime_date_differs_from_packet_date"],
                 },
+                "risk_coverage": {"available": True, "risk_level": "MEDIUM"},
+                "strategy_differentiation_deep": {"available": True, "aggregate_verdict": "WEAK_DIFFERENTIATION"},
+                "position_sizing_research": {"available": True},
+                "universe_governance": {"available": False},
+                "tier2_research_controls": {"recommendation": "No promotion recommended"},
                 "recommended_next_actions": [
                     "Run scripts/weekly_model_review.py.",
                     "Accumulate more decision attribution observations.",
@@ -113,6 +118,9 @@ def test_build_digest_email_extracts_summary_fields(tmp_path):
     assert "Research readiness: MEDIUM" in digest["body_text"]
     assert "Positions analyzed: 2" in digest["body_text"]
     assert "Decisions analyzed: 2" in digest["body_text"]
+    assert "Tier 2 risk coverage: available (MEDIUM)" in digest["body_text"]
+    assert "Deep differentiation verdict: WEAK_DIFFERENTIATION" in digest["body_text"]
+    assert "Tier 2 recommendation: No promotion recommended" in digest["body_text"]
     assert "caerus_polaris: AAA ret=0.1 pnl=0.05" in digest["body_text"]
     assert "missing_model_review" in digest["body_text"]
     assert "outputs/research_review/2026-04-30/research_review.html" in digest["body_text"]

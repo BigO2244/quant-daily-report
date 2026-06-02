@@ -74,6 +74,9 @@ run_best_effort "building decision attribution" \
 run_best_effort "building risk summary" \
     python3 scripts/build_risk_summary.py --date "${TRADE_DATE}"
 
+run_best_effort "building risk coverage" \
+    python3 scripts/build_risk_coverage.py --date "${TRADE_DATE}"
+
 run_best_effort "hydrating execution timing minute bars" \
     python3 scripts/build_execution_timing_cache.py --date "${TRADE_DATE}"
 
@@ -85,6 +88,12 @@ run_best_effort "building promotion readiness windows" \
 
 run_best_effort "building strategy differentiation" \
     python3 scripts/build_strategy_differentiation.py --date "${TRADE_DATE}"
+
+run_best_effort "building position sizing research" \
+    python3 scripts/build_position_sizing_research.py --date "${TRADE_DATE}"
+
+run_best_effort "building universe governance" \
+    python3 scripts/build_universe_governance.py --date "${TRADE_DATE}"
 
 echo "[RESEARCH_REVIEW] building packet"
 python3 scripts/build_research_review_packet.py --date "${TRADE_DATE}" >> "${STEP_LOG}" 2>&1 || {
