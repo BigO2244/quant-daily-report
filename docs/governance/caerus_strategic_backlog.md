@@ -1,5 +1,5 @@
 ---
-last_reviewed: 2026-05-26
+last_reviewed: 2026-06-02
 owner: governance
 category: strategic_backlog
 criticality: high
@@ -32,7 +32,7 @@ This backlog is additive to the FR governance system. It does not replace
 | 3 | Attribution speed | Convert performance reporting from "what happened" to "what drove it" with daily contribution and exposure evidence. |
 | 4 | Provenance | Every important claim should identify its truth surface, source artifacts, confidence level, and governance coverage. |
 | 5 | Regime understanding | Explain when strategies work, when they become fragile, and whether outperformance is regime-dependent. |
-| 6 | Promotion confidence | Promotion decisions should consume provenance, timing confidence, exposure risk, and observation evidence. |
+| 6 | Promotion confidence | Promotion decisions should consume provenance, timing confidence, exposure risk, and observation evidence. **Advanced 2026-06-02 via FR-037 (Tier 3 promotion governance surfaces) and FR-038 (blocker audit + diagnostic surfaces). Final control summary now distinguishes data-quality from real strategy issues and reports a deterministic governance maturity tier. FR-029 is `IN_PROGRESS` tracked via the two `DEPLOYED_OBSERVING` children.** |
 | 7 | MCP follow-on capabilities | Phase 7 MCP shipped 2026-05-29 (20 tools, capability router). Continue adding capabilities on the deterministic, read-only contract; do not add transport, agents, or LLM calls inside the MCP. Conformance audit vs frozen semantic layer is next. |
 | 8 | Advanced modeling later | Regime switching, meta-labeling, ensembles, and optimization should wait until telemetry and interpretation are stronger. |
 
@@ -170,7 +170,15 @@ Focus areas:
 | Regime diagnostics packet | Research Clarity Acceleration | 16 | LOW | HIGH | FR-027, FR-030 | Week 2-3 | BACKLOG |
 | Exposure intelligence weekly review | Research Clarity Acceleration | 17 | LOW | HIGH | FR-026, FR-030 | Week 2-3 | BACKLOG |
 | FR-028 timing semantics candidate review | Governance / Operational Integrity | 18 | HIGH | HIGH | FR-024 through FR-027, FR-030 interpretation evidence | Week 3-4 | `BACKLOG` |
-| FR-029 promotion governance hardening | Capital Deployment Readiness | 19 | MEDIUM | HIGH | FR-028 | Week 4-6 | `BACKLOG` |
+| FR-029 promotion governance hardening | Capital Deployment Readiness | 19 | MEDIUM | HIGH | FR-028, FR-037, FR-038 | Week 4-6 | `IN_PROGRESS` (FR-037 + FR-038 `DEPLOYED_OBSERVING` 2026-06-02) |
+| FR-037 Tier 3 promotion governance surfaces (six-gate evaluation, regime attribution, research-only allocation) | Capital Deployment Readiness | 19a | LOW | HIGH | FR-028 Phase C, FR-024..027, FR-030 | Week 4-6 | `DEPLOYED_OBSERVING` 2026-06-02 |
+| FR-038 governance blocker audit + diagnostic surfaces (blocker classification, security master reconciliation, payload audit, differentiation diagnostic, concentration diagnostic, governance maturity score) | Capital Deployment Readiness | 19b | LOW | HIGH | FR-037 | Week 4-6 | `DEPLOYED_OBSERVING` 2026-06-02 |
+| FR-039 security master refresh job | Governance / Operational Integrity | 19c | MEDIUM | HIGH | FR-038 audit findings | Week 5-6 | BACKLOG |
+| FR-040 governance threshold calibration (N-aware concentration caps, per-strategy thresholds) | Capital Deployment Readiness | 19d | LOW | MEDIUM | FR-037, FR-038 | Week 5-6 | BACKLOG |
+| FR-041 governance trajectory (day-over-day blocker / maturity tier tracking) | Research Clarity Acceleration | 19e | LOW | MEDIUM | FR-038 outputs | Week 5-6 | BACKLOG |
+| FR-042 CIO briefing audit integration (wire `blockers_eliminated` / `governance_maturity_tier` into the CIO narrative) | Research Clarity Acceleration | 19f | LOW | MEDIUM | FR-038 outputs | Week 5-6 | BACKLOG |
+| FR-043 differentiation remediation playbook | Research Clarity Acceleration | 19g | LOW | MEDIUM | FR-038 differentiation diagnostic | Week 6-7 | BACKLOG |
+| FR-044 audit conformance review vs frozen semantics layer (SEM-001..008) | Governance / Operational Integrity | 19h | LOW | MEDIUM | FR-036a pattern, FR-037, FR-038 | Week 6-7 | BACKLOG |
 | MCP research operating system architecture | MCP / Research Operating System | 20 | LOW | MEDIUM | Registry/query semantics and FR-030 packet artifacts | Week 3-6 | `DEPLOYED_OBSERVING` (Phase 7 ship 2026-05-29; 20 tools, 9 capabilities, 6 implemented; see [current-state doc](../architecture/research_mcp_current_state_2026-05-29.md)) |
 | MCP conformance audit vs frozen semantic layer | MCP / Research Operating System | 20a | LOW | HIGH | SEM-001..008 frozen, MCP implementation live | Week 6-7 | BACKLOG |
 | MCP `attribution_analysis` capability promotion | MCP / Research Operating System | 20b | LOW | HIGH | `outputs/attribution/` artifacts, `AttributionArtifactAdapter` family | Week 7-8 | BACKLOG |
@@ -348,13 +356,41 @@ Risks:
 
 - A weekly CIO research packet generated from additive artifacts.
 - A promotion confidence scorecard that consumes provenance, exposure, timing,
-  and regime evidence.
+  and regime evidence. (Realized 2026-06-02 via FR-037 + FR-038. Future work:
+  FR-039..044 follow-on items below.)
 - A read-only research registry query layer for operator review.
 - MCP retrieval tools after registry semantics are stable.
 - Scenario-specific capital rollout plans once execution trust and promotion
   gates are stronger.
 - Advanced modeling experiments after telemetry density supports reliable
   interpretation.
+
+### Follow-on items unlocked by FR-037 / FR-038
+
+- **FR-039 security master refresh job** — eliminate the data-quality
+  cascade that FR-038's blocker audit flagged on local environments.
+  OPS category; docs-first then runtime.
+- **FR-040 governance threshold calibration** — decide whether the
+  concentration cap should be N-aware (so a 5-position equal-weight
+  strategy is not reported as a `CONFIGURATION` violation by construction)
+  or whether the strategy should hold more names. Decision belongs in
+  governance docs before any code changes.
+- **FR-041 governance trajectory** — turn the static governance
+  maturity tier and blocker classification mix into a day-over-day
+  trajectory artifact so operators can see progress without comparing
+  packets manually.
+- **FR-042 CIO briefing audit integration** — wire
+  `blockers_eliminated`, `blockers_remaining`, and
+  `governance_maturity_tier` into the CIO narrative so the operator
+  story reflects the audit findings, not just the raw governance verdict.
+- **FR-043 differentiation remediation playbook** — the differentiation
+  diagnostic confirmed `TRUE_WEAK_DIFFERENTIATION` against 60+ day
+  history. Document the remediation menu (selection-logic change vs.
+  correlation cap calibration) so the strategy team has a clear path.
+- **FR-044 audit conformance review** — mirror FR-036a's MCP conformance
+  audit by mapping each FR-038 classification taxonomy element against
+  the frozen `docs/architecture/semantics/` SEM-001..008 contracts and
+  flagging any semantic drift. Pure docs deliverable.
 
 ## Validation Notes
 

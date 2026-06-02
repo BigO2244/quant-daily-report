@@ -178,3 +178,69 @@ Non-blocking follow-up:
 Continue observing post-submit cash drift in the execution integrity artifact.
 If drift persists after broker fills and reconciliation, promote it as a small
 accounting/reconciliation FR; do not weaken the current warning globally.
+
+
+## 2026-06-02 — Governance Blocker Audit Classification (FR-037 / FR-038)
+
+## Status: DEPLOYED_OBSERVING
+
+Issue:
+Tier 3 promotion governance surfaced eight "blockers" against 2026-06-02
+research inputs (security_master_missing, planned_execution_payload_missing,
+no_planned_orders, missing_timing_coverage, universe_governance_incomplete,
+weak_differentiation, hit_rate_deteriorated, concentration_above_caps). All
+eight were treated equivalently by the conservative final control summary,
+which made operator triage harder than it needed to be: a missing
+`data/security_master/latest.json` looked superficially like the same kind
+of finding as a measured `hit_rate_deteriorated` even though one is a data
+hygiene gap and the other is a strategy signal.
+
+Pattern:
+FR-038 introduces a four-class taxonomy for every governance blocker:
+
+| Classification | Meaning |
+|---|---|
+| `REAL` | The blocker reflects an actual finding about the strategy or its evidence (e.g. measured weak differentiation, measured hit-rate deterioration). |
+| `DATA_QUALITY` | The blocker exists only because an upstream artifact is missing or stale (e.g. security master not bootstrapped, planned execution payload missing for the target date). Once the artifact is refreshed the blocker disappears without any strategy change. |
+| `CONFIGURATION` | The strategy is operating as designed but the governance gate threshold conflicts with the design (e.g. a 5-position equal-weight strategy mathematically forces `max_single_name_weight=0.20`, above the 0.10 cap). Resolved by gate-threshold review, not strategy change. |
+| `OBSERVATION_WINDOW` | The blocker would resolve with more observation history; nothing is wrong with the strategy or the data, the evidence window is just too short to trust the verdict. |
+
+Each classification carries a `root_cause`, `confidence`, `severity`, and
+`remediation` so the operator can act without re-deriving the audit.
+
+Result:
+On 2026-06-02 the audit split the eight blockers into 5 `DATA_QUALITY`
+(local) / 0 on VM (artifacts present), 1 `CONFIGURATION`, and 2 `REAL`.
+The final control summary now exposes `blockers_eliminated`,
+`blockers_remaining`, `data_quality_issues`, and `actual_strategy_issues`
+as distinct fields, plus a deterministic seven-component
+`governance_maturity_tier` (`IMMATURE` / `EMERGING` / `DEVELOPING` /
+`MATURE` / `PROMOTION_READY`) that replaces the prior subjective evidence
+maturity assessment.
+
+Lesson:
+A blocker count is not the same as a promotion risk count. Without a
+classification layer between raw governance gates and the operator-facing
+summary, data hygiene noise is indistinguishable from real strategy
+signals. Audits should classify before they aggregate, and the rollup
+surface should preserve the split so operators can triage data quality
+work and strategy work on the right timelines.
+
+Operational implications:
+- Eliminating a `DATA_QUALITY` blocker is a hygiene task (e.g. bootstrap
+  the security master, run the precompute pipeline for the target date)
+  and does not change the strategy verdict.
+- A `CONFIGURATION` blocker requires an explicit governance decision
+  (raise the cap, change the strategy design, or accept the mismatch);
+  it should never be silently elided.
+- A `REAL` blocker is a strategy concern that warrants research action,
+  not docs or pipeline work.
+- An `OBSERVATION_WINDOW` blocker is a waiting state, not a failure;
+  governance should track it but not escalate it.
+
+Non-blocking follow-up:
+Track day-over-day movement of `governance_maturity_tier` and the
+classification mix (`REAL` / `DATA_QUALITY` / `CONFIGURATION` /
+`OBSERVATION_WINDOW`) so promotion-readiness trends become operator
+visible rather than implicit. Trajectory tooling is scoped as FR-041
+in the strategic backlog.
