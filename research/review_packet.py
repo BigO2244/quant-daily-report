@@ -895,6 +895,14 @@ def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str
         recommendation = promotion_recommendation
     else:
         recommendation = "No promotion recommended"
+    reason_codes = sorted(set(
+        list(timing.get("reason_codes") or [])
+        + list(promotion.get("reason_codes") or [])
+        + list(differentiation.get("reason_codes") or [])
+        + list(risk.get("reason_codes") or [])
+    ))
+    if len(reason_codes) > 1:
+        reason_codes = [code for code in reason_codes if code != "ok"]
     return {
         "available": any(section.get("available") for section in (timing, promotion, differentiation)),
         "execution_timing_status": "available" if timing.get("available") else "missing_or_unavailable",
@@ -906,12 +914,7 @@ def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str
         "blocker_categories": sorted(blocker_categories),
         "recommendation": recommendation,
         "blockers": sorted(set(blockers)),
-        "reason_codes": sorted(set(
-            list(timing.get("reason_codes") or [])
-            + list(promotion.get("reason_codes") or [])
-            + list(differentiation.get("reason_codes") or [])
-            + list(risk.get("reason_codes") or [])
-        )) or ["ok"],
+        "reason_codes": reason_codes or ["ok"],
     }
 
 
