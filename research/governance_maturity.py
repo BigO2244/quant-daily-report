@@ -177,6 +177,38 @@ def _score_observation_window(promotion: dict[str, Any] | None) -> tuple[float, 
     return _clamp(max_obs / 60.0), "ok"
 
 
+def _summarize_blockers(audit: dict[str, Any] | None) -> dict[str, int]:
+    counts = {"REAL": 0, "DATA_QUALITY": 0, "CONFIGURATION": 0, "OBSERVATION_WINDOW": 0}
+    if not isinstance(audit, dict):
+        return counts
+    for row in audit.get("classifications") or []:
+        cls = str((row or {}).get("classification") or "").upper()
+        if cls in counts:
+            # A blocker is only "live" if its root_cause does not say
+            # blocker_should_clear.
+            if "blocker_should_clear" in str((row or {}).get("root_cause") or ""):
+                continue
+            counts[cls] += 1
+    return counts
+
+
+def _score_blocker_quality(audit: dict[str, Any] | None) -> tuple[float, str, dict[str, int]]:
+    """Blocker quality score rewards low blocker counts overall and is
+    especially sensitive to REAL and DATA_QUALITY blockers. CONFIGURATION
+    blockers are weighted lighter because they reflect governance/threshold
+    decisions rather than strategy or hygiene problems.
+
+    Returns ``(score, reason, breakdown_counts)``."""
+    counts = _summarize_blockers(audit)
+    if not isinstance(audit, dict):
+        return 0.5, "governance_blocker_audit_artifact_missing", counts
+    weights = {"REAL": 1.0, "DATA_QUALITY": 0.7, "OBSERVATION_WINDOW": 0.5, "CONFIGURATION": 0.3}
+    total_weighted = sum(weights[k] * counts.get(k, 0) for k in weights)
+    # Max plausible weighted load: 8 blockers × max-weight (1.0) = 8.
+    score = _clamp(1.0 - total_weighted / 8.0)
+    return score, "ok", counts
+
+
 def _tier_for_score(score: float) -> str:
     if score >= 0.90:
         return TIER_PROMOTION_READY
@@ -201,6 +233,9 @@ def build_governance_maturity(
     universe = _read_json(repo / "outputs" / "research" / "universe_governance" / trade_date / "universe_governance.json")
     differentiation = _read_json(repo / "outputs" / "research" / "strategy_differentiation" / trade_date / "strategy_differentiation.json")
     promotion = _read_json(repo / "outputs" / "research" / "promotion_readiness" / trade_date / "promotion_readiness_windows.json")
+    blocker_audit = _read_json(repo / "outputs" / "research" / "governance_blocker_audit" / trade_date / "governance_blocker_audit.json")
+
+    blocker_quality_score, blocker_quality_reason, blocker_counts = _score_blocker_quality(blocker_audit)
 
     components = [
         ("execution_coverage", _score_execution_coverage(timing)),
@@ -210,6 +245,7 @@ def build_governance_maturity(
         ("timing_coverage", _score_timing_coverage(timing)),
         ("differentiation_confidence", _score_differentiation_confidence(differentiation)),
         ("observation_window_maturity", _score_observation_window(promotion)),
+        ("blocker_quality", (blocker_quality_score, blocker_quality_reason)),
     ]
     component_rows = [
         {"component": name, "score": _round(score), "reason": reason}
@@ -228,6 +264,10 @@ def build_governance_maturity(
         "total_score": _round(total),
         "tier": tier,
         "components": component_rows,
+        "blockers_real": int(blocker_counts.get("REAL", 0)),
+        "blockers_configuration": int(blocker_counts.get("CONFIGURATION", 0)),
+        "blockers_data_quality": int(blocker_counts.get("DATA_QUALITY", 0)),
+        "blockers_observation_window": int(blocker_counts.get("OBSERVATION_WINDOW", 0)),
         "reason_codes": reason_codes,
         "source_artifacts": sorted(
             p for p, present in [
@@ -236,6 +276,7 @@ def build_governance_maturity(
                 (f"outputs/research/universe_governance/{trade_date}/universe_governance.json", universe is not None),
                 (f"outputs/research/strategy_differentiation/{trade_date}/strategy_differentiation.json", differentiation is not None),
                 (f"outputs/research/promotion_readiness/{trade_date}/promotion_readiness_windows.json", promotion is not None),
+                (f"outputs/research/governance_blocker_audit/{trade_date}/governance_blocker_audit.json", blocker_audit is not None),
             ] if present
         ),
     }

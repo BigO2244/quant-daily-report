@@ -359,14 +359,19 @@ def test_missing_risk_coverage_blocks_promote(tmp_path):
 
 
 def test_risk_concentration_blocks_promote(tmp_path):
+    """With FR-040 calibrated thresholds, blocking-on-concentration
+    requires the measured concentration to exceed the design-aware cap.
+    Lyra with position_count=10 is CONCENTRATED (max_name cap 0.15,
+    top3 cap 0.60); push max_name and top3 above those new caps so the
+    block still fires under calibrated semantics."""
     trade_date = "2026-06-02"
     _write_clean_inputs(tmp_path, trade_date)
-    _write_risk_coverage(tmp_path, trade_date, lyra_max_name=0.25, lyra_top3=0.55)
+    _write_risk_coverage(tmp_path, trade_date, lyra_max_name=0.25, lyra_top3=0.70)
     payload = build_promotion_governance(trade_date=trade_date, repo_root=tmp_path)
     assert payload["strategies"]["caerus_lyra"]["decision"] != DECISION_PROMOTE
     reasons = payload["strategies"]["caerus_lyra"]["reason_codes"]
-    assert any("single_name_concentration_above_cap" in code for code in reasons)
-    assert any("top3_concentration_above_cap" in code for code in reasons)
+    assert any("single_name_concentration_above_calibrated_cap" in code for code in reasons)
+    assert any("top3_concentration_above_calibrated_cap" in code for code in reasons)
 
 
 def test_universe_blocker_blocks_promote(tmp_path):

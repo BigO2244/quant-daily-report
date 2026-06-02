@@ -36,10 +36,14 @@ WINDOW_MIN_WATCH = 20
 WINDOW_MIN_CANDIDATE = 40
 WINDOW_MIN_PROMOTE = 60
 
-# Risk thresholds (research-only; mirror MAX_POSITION_PCT=0.10 stance).
-MAX_SINGLE_NAME_WEIGHT = 0.10
-MAX_TOP3_CONCENTRATION = 0.40
-MAX_TOP5_CONCENTRATION = 0.60
+# Risk thresholds. As of FR-040 the single-name / top-3 / top-5 caps
+# are design-aware and come from research/governance_calibration.py so
+# a 5-name equal-weight portfolio is not blocked by a 10% cap built for
+# diversified portfolios. The legacy fixed constants below are kept
+# only as the historical baseline used by the reclassification artifact.
+MAX_SINGLE_NAME_WEIGHT = 0.10  # legacy; see calibrated_thresholds_for()
+MAX_TOP3_CONCENTRATION = 0.40  # legacy
+MAX_TOP5_CONCENTRATION = 0.60  # legacy
 MAX_SECTOR_CONCENTRATION = 0.50
 
 # Differentiation thresholds.
@@ -364,6 +368,17 @@ def _evaluate_risk_gate(
     strategy: str,
     risk_coverage: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    # Imported here so research.governance_calibration can sit on top
+    # of research.promotion_governance for the reclassification artifact
+    # without a circular import at module load time.
+    from research.governance_calibration import (
+        CALIBRATION_STATUS_CLEAN,
+        DESIGN_DIVERSIFIED,
+        DESIGN_UNKNOWN,
+        calibrated_thresholds_for,
+        classify_design,
+    )
+
     if risk_coverage is None or not bool(risk_coverage.get("available")):
         return {
             "gate": "risk",
@@ -373,6 +388,9 @@ def _evaluate_risk_gate(
             "top3_concentration": None,
             "top5_concentration": None,
             "sector_concentration": None,
+            "design_class": DESIGN_UNKNOWN,
+            "calibrated_thresholds": dict(calibrated_thresholds_for(None)),
+            "calibration_status": CALIBRATION_STATUS_CLEAN,
             "reason_codes": ["missing_or_unavailable_risk_coverage"],
         }
     strategies = risk_coverage.get("strategies") or {}
@@ -386,6 +404,9 @@ def _evaluate_risk_gate(
             "top3_concentration": None,
             "top5_concentration": None,
             "sector_concentration": None,
+            "design_class": DESIGN_UNKNOWN,
+            "calibrated_thresholds": dict(calibrated_thresholds_for(None)),
+            "calibration_status": CALIBRATION_STATUS_CLEAN,
             "reason_codes": ["no_risk_row_for_strategy"],
         }
     reasons: list[str] = []
@@ -393,16 +414,24 @@ def _evaluate_risk_gate(
     top3 = _safe_float(row.get("top3_concentration"))
     top5 = _safe_float(row.get("top5_concentration"))
     sector = _safe_float(row.get("sector_concentration"))
-    if max_name is not None and max_name > MAX_SINGLE_NAME_WEIGHT:
-        reasons.append("single_name_concentration_above_cap")
-    if top3 is not None and top3 > MAX_TOP3_CONCENTRATION:
-        reasons.append("top3_concentration_above_cap")
-    if top5 is not None and top5 > MAX_TOP5_CONCENTRATION:
-        reasons.append("top5_concentration_above_cap")
+    position_count = int(_safe_float(row.get("position_count")) or 0)
+    design_class = classify_design(position_count if position_count > 0 else None)
+    thresholds = calibrated_thresholds_for(position_count if position_count > 0 else None)
+    if max_name is not None and max_name > thresholds["max_single_name_allowed"] + 1e-9:
+        reasons.append("single_name_concentration_above_calibrated_cap")
+    if top3 is not None and top3 > thresholds["top3_allowed"] + 1e-9:
+        reasons.append("top3_concentration_above_calibrated_cap")
+    if top5 is not None and top5 > thresholds["top5_allowed"] + 1e-9:
+        reasons.append("top5_concentration_above_calibrated_cap")
     if sector is not None and sector > MAX_SECTOR_CONCENTRATION:
         reasons.append("sector_concentration_above_cap")
     risk_level = str(row.get("risk_level") or "UNKNOWN").upper()
     status = GATE_BLOCKED if reasons else GATE_PASS
+    calibration_status = (
+        "TRUE_CONCENTRATION_RISK"
+        if any(r.endswith("_above_calibrated_cap") for r in reasons)
+        else CALIBRATION_STATUS_CLEAN
+    )
     return {
         "gate": "risk",
         "status": status,
@@ -411,6 +440,10 @@ def _evaluate_risk_gate(
         "top3_concentration": _round(top3),
         "top5_concentration": _round(top5),
         "sector_concentration": _round(sector),
+        "position_count": position_count if position_count > 0 else None,
+        "design_class": design_class,
+        "calibrated_thresholds": {k: _round(v) for k, v in thresholds.items()},
+        "calibration_status": calibration_status,
         "reason_codes": sorted(set(reasons)) or ["ok"],
     }
 

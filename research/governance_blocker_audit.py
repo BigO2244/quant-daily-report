@@ -461,6 +461,19 @@ def _classify_hit_rate_deteriorated(promotion_windows_payload: dict[str, Any] | 
 
 
 def _classify_concentration_above_caps(risk_payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Audit the concentration blocker. As of FR-040 the audit checks
+    measured concentration against the *calibrated* (design-aware)
+    thresholds, not the legacy 0.10/0.40/0.60 fixed caps. A breach of
+    the calibrated cap is a REAL strategy concern; matching the
+    equal-weight floor (designed N) is CONFIGURATION; everything else
+    means the blocker should clear once promotion governance is rerun.
+    """
+    # Local import to avoid a circular dependency.
+    from research.governance_calibration import (
+        calibrated_thresholds_for,
+        classify_design,
+    )
+
     if risk_payload is None:
         return {
             "blocker": "concentration_above_caps",
@@ -473,50 +486,67 @@ def _classify_concentration_above_caps(risk_payload: dict[str, Any] | None) -> d
         }
     strategies = risk_payload.get("strategies") or {}
     findings: list[dict[str, Any]] = []
-    any_real = False
+    any_real_calibrated_breach = False
     any_configuration = False
     for strategy_name, row in strategies.items():
         if not isinstance(row, dict) or not row.get("available"):
             continue
         max_name = _safe_float(row.get("max_single_name_weight"))
         top3 = _safe_float(row.get("top3_concentration"))
+        top5 = _safe_float(row.get("top5_concentration"))
         position_count = int(_safe_float(row.get("position_count")) or 0)
-        # Equal-weight floor when n positions are held equal.
+        design_class = classify_design(position_count if position_count > 0 else None)
+        thresholds = calibrated_thresholds_for(position_count if position_count > 0 else None)
+        # Equal-weight floor when n positions are held equal — still
+        # the marker for "this is by design, not a strategy choice".
         equal_weight_max_name = 1.0 / position_count if position_count > 0 else None
         equal_weight_top3 = 3.0 / position_count if position_count >= 3 else None
-        violations: list[str] = []
+        calibrated_breaches: list[str] = []
         designed: list[str] = []
-        if max_name is not None and max_name > 0.10:
-            if (
-                equal_weight_max_name is not None
-                and abs(max_name - equal_weight_max_name) <= DESIGN_TOLERANCE
-            ):
-                designed.append("max_single_name_weight_matches_equal_weight_floor")
-            else:
-                violations.append(f"max_single_name_weight={max_name}_above_0.10")
-        if top3 is not None and top3 > 0.40:
-            if (
-                equal_weight_top3 is not None
-                and abs(top3 - equal_weight_top3) <= DESIGN_TOLERANCE
-            ):
-                designed.append("top3_concentration_matches_equal_weight_floor")
-            else:
-                violations.append(f"top3_concentration={top3}_above_0.40")
+        if max_name is not None and max_name > thresholds["max_single_name_allowed"] + 1e-9:
+            calibrated_breaches.append(
+                f"max_single_name_weight={max_name}_above_calibrated_cap_{thresholds['max_single_name_allowed']}"
+            )
+        elif (
+            max_name is not None
+            and equal_weight_max_name is not None
+            and abs(max_name - equal_weight_max_name) <= DESIGN_TOLERANCE
+            and max_name > 0.10  # only call out as designed when it would have tripped the legacy cap
+        ):
+            designed.append("max_single_name_weight_matches_equal_weight_floor")
+        if top3 is not None and top3 > thresholds["top3_allowed"] + 1e-9:
+            calibrated_breaches.append(
+                f"top3_concentration={top3}_above_calibrated_cap_{thresholds['top3_allowed']}"
+            )
+        elif (
+            top3 is not None
+            and equal_weight_top3 is not None
+            and abs(top3 - equal_weight_top3) <= DESIGN_TOLERANCE
+            and top3 > 0.40
+        ):
+            designed.append("top3_concentration_matches_equal_weight_floor")
+        if top5 is not None and top5 > thresholds["top5_allowed"] + 1e-9:
+            calibrated_breaches.append(
+                f"top5_concentration={top5}_above_calibrated_cap_{thresholds['top5_allowed']}"
+            )
         findings.append(
             {
                 "strategy": strategy_name,
                 "position_count": position_count,
+                "design_class": design_class,
                 "max_single_name_weight": max_name,
                 "top3_concentration": top3,
+                "top5_concentration": top5,
                 "equal_weight_max_name_floor": equal_weight_max_name,
                 "equal_weight_top3_floor": equal_weight_top3,
-                "true_violations": violations,
+                "calibrated_thresholds": thresholds,
+                "calibrated_breaches": calibrated_breaches,
                 "designed_by_construction": designed,
             }
         )
-        if violations:
-            any_real = True
-        if designed and not violations:
+        if calibrated_breaches:
+            any_real_calibrated_breach = True
+        if designed and not calibrated_breaches:
             any_configuration = True
     if not findings:
         return {
@@ -528,13 +558,13 @@ def _classify_concentration_above_caps(risk_payload: dict[str, Any] | None) -> d
             "severity": SEVERITY_HIGH,
             "supporting_facts": {},
         }
-    if any_real:
+    if any_real_calibrated_breach:
         return {
             "blocker": "concentration_above_caps",
             "classification": CLASSIFY_REAL,
-            "root_cause": "at_least_one_strategy_exceeds_cap_beyond_equal_weight_floor",
+            "root_cause": "at_least_one_strategy_exceeds_design_aware_calibrated_cap",
             "confidence": "HIGH",
-            "remediation": "Either raise position count or rebalance away from the violating name.",
+            "remediation": "Either raise position count, rebalance away from the violating name, or document why the strategy should be exempt from its design-class calibration.",
             "severity": SEVERITY_HIGH,
             "supporting_facts": {"strategies": findings},
         }
@@ -542,16 +572,16 @@ def _classify_concentration_above_caps(risk_payload: dict[str, Any] | None) -> d
         return {
             "blocker": "concentration_above_caps",
             "classification": CLASSIFY_CONFIGURATION,
-            "root_cause": "concentration_matches_equal_weight_floor_for_designed_position_count",
+            "root_cause": "concentration_matches_equal_weight_floor_for_designed_position_count_blocker_should_clear_under_calibration",
             "confidence": "HIGH",
-            "remediation": "Either raise the strategy's position count or relax the governance concentration cap to reflect the designed N.",
-            "severity": SEVERITY_MEDIUM,
+            "remediation": "Already addressed by FR-040 calibration: promotion_governance now treats this as DESIGN_CONSISTENT_CONCENTRATION. Re-run promotion_governance to clear the legacy blocker label.",
+            "severity": SEVERITY_LOW,
             "supporting_facts": {"strategies": findings},
         }
     return {
         "blocker": "concentration_above_caps",
         "classification": CLASSIFY_REAL,
-        "root_cause": "no_strategy_exceeds_cap_so_blocker_should_clear",
+        "root_cause": "no_strategy_exceeds_calibrated_cap_so_blocker_should_clear",
         "confidence": "HIGH",
         "remediation": "Re-run promotion_governance.",
         "severity": SEVERITY_LOW,

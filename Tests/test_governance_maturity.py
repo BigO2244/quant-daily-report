@@ -74,7 +74,11 @@ def test_artifacts_and_schema(tmp_path):
     p = build_governance_maturity(trade_date="2026-06-02", repo_root=tmp_path)
     assert p["schema_version"] == SCHEMA_VERSION
     assert (tmp_path / "outputs" / "research" / "governance_maturity" / "2026-06-02" / "governance_maturity.json").exists()
-    assert len(p["components"]) == 7
+    # FR-040 adds an 8th component, blocker_quality, sourced from the
+    # governance_blocker_audit artifact when present.
+    assert len(p["components"]) == 8
+    component_names = {c["component"] for c in p["components"]}
+    assert "blocker_quality" in component_names
 
 
 def test_deterministic(tmp_path):

@@ -130,6 +130,9 @@ run_step "building concentration diagnostic" \
 run_step "building governance maturity" \
     python3 scripts/build_governance_maturity.py --date "${TARGET_DATE}"
 
+run_step "building governance calibration" \
+    python3 scripts/build_governance_calibration.py --date "${TARGET_DATE}"
+
 run_step "building research review packet" \
     python3 scripts/build_research_review_packet.py --date "${TARGET_DATE}"
 

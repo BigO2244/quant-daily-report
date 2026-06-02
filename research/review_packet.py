@@ -1255,10 +1255,63 @@ def _build_governance_maturity_section(repo: Path, trade_date: str) -> tuple[dic
             "total_score": 0.0,
             "tier": "IMMATURE",
             "components": [],
+            "blockers_real": 0,
+            "blockers_configuration": 0,
+            "blockers_data_quality": 0,
+            "blockers_observation_window": 0,
             "reason_codes": ["missing_governance_maturity"],
             "source_artifacts": [],
         },
-        extra_keys=("total_score", "tier", "components"),
+        extra_keys=(
+            "total_score",
+            "tier",
+            "components",
+            "blockers_real",
+            "blockers_configuration",
+            "blockers_data_quality",
+            "blockers_observation_window",
+        ),
+    )
+
+
+def _build_governance_calibration_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    return _generic_section_loader(
+        artifact_name="governance_calibration",
+        path=repo / "outputs" / "research" / "governance_calibration" / trade_date / "governance_calibration.json",
+        trade_date=trade_date,
+        default_section={
+            "available": False,
+            "confidence": "LOW",
+            "design_aware_thresholds": {},
+            "legacy_fixed_thresholds": {},
+            "strategies": [],
+            "calibration_status_counts": {},
+            "reason_codes": ["missing_governance_calibration"],
+            "source_artifacts": [],
+        },
+        extra_keys=(
+            "design_aware_thresholds",
+            "legacy_fixed_thresholds",
+            "strategies",
+            "calibration_status_counts",
+        ),
+    )
+
+
+def _build_governance_reclassification_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    return _generic_section_loader(
+        artifact_name="governance_reclassification",
+        path=repo / "outputs" / "research" / "governance_calibration" / trade_date / "governance_reclassification.json",
+        trade_date=trade_date,
+        default_section={
+            "available": False,
+            "confidence": "LOW",
+            "comparisons": [],
+            "change_counts": {},
+            "reason_codes": ["missing_governance_reclassification"],
+            "source_artifacts": [],
+        },
+        extra_keys=("comparisons", "change_counts"),
     )
 
 
@@ -1711,6 +1764,26 @@ def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, 
     else:
         allocation_summary = "no_allocation_change_recommended"
 
+    # Calibration-aware blocker accounting (FR-040): split the
+    # remaining blockers by what kind of finding they represent so the
+    # final summary clearly distinguishes true risks from configuration
+    # mismatches and from eliminated false positives.
+    true_blockers: list[str] = []
+    configuration_blockers: list[str] = []
+    for row in audit_classifications:
+        name = str((row or {}).get("blocker") or "")
+        cls = str((row or {}).get("classification") or "")
+        if not name:
+            continue
+        if "blocker_should_clear" in str((row or {}).get("root_cause") or ""):
+            continue
+        if cls == "REAL":
+            true_blockers.append(name)
+        elif cls == "CONFIGURATION":
+            configuration_blockers.append(name)
+    current_blockers = sorted(set(blockers_remaining))
+    eliminated_blockers = sorted(set(blockers_eliminated))
+
     return {
         "current_recommendation": current_recommendation,
         "promotion_status": promotion_rec,
@@ -1721,10 +1794,14 @@ def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, 
         "polaris_status": polaris_status,
         "top_blockers": top_blockers or ["no_blockers"],
         "evidence_maturity": evidence_maturity,
-        "blockers_eliminated": sorted(set(blockers_eliminated)),
-        "blockers_remaining": sorted(set(blockers_remaining)),
+        "blockers_eliminated": eliminated_blockers,
+        "blockers_remaining": current_blockers,
         "data_quality_issues": sorted(set(data_quality_issues)),
         "actual_strategy_issues": sorted(set(actual_strategy_issues)),
+        "current_blockers": current_blockers,
+        "true_blockers": sorted(set(true_blockers)),
+        "configuration_blockers": sorted(set(configuration_blockers)),
+        "eliminated_blockers": eliminated_blockers,
         "governance_maturity_tier": str(maturity.get("tier") or "IMMATURE"),
         "governance_maturity_score": maturity.get("total_score"),
         "tier1_recommendation": tier1_rec,
@@ -1822,6 +1899,8 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Run .venv/bin/python scripts/build_concentration_diagnostic.py --date YYYY-MM-DD to classify concentration blockers as actual vs configuration vs artifact.")
     if not sections.get("governance_maturity", {}).get("available"):
         actions.append("Run .venv/bin/python scripts/build_governance_maturity.py --date YYYY-MM-DD to score governance maturity deterministically.")
+    if not sections.get("governance_calibration", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_governance_calibration.py --date YYYY-MM-DD to evaluate concentration against design-aware (FR-040) thresholds and produce the OLD vs NEW reclassification artifact.")
     if signal.get("early_evidence"):
         actions.append("Accumulate more decision attribution observations before treating signal hit rates as durable.")
     if (
@@ -1907,6 +1986,8 @@ def build_research_review_packet(
     promotion_governance_section, promotion_governance_source = _build_promotion_governance_section(repo, selected_date)
     regime_attribution_section, regime_attribution_source = _build_regime_attribution_section(repo, selected_date)
     dynamic_allocation_section, dynamic_allocation_source = _build_dynamic_allocation_section(repo, selected_date)
+    calibration_section, calibration_source = _build_governance_calibration_section(repo, selected_date)
+    reclassification_section, reclassification_source = _build_governance_reclassification_section(repo, selected_date)
     blocker_audit_section, blocker_audit_source = _build_governance_blocker_audit_section(repo, selected_date)
     sm_reconciliation_section, sm_reconciliation_source = _build_security_master_reconciliation_section(repo, selected_date)
     payload_audit_section, payload_audit_source = _build_execution_payload_audit_section(repo, selected_date)
@@ -1936,6 +2017,8 @@ def build_research_review_packet(
         "differentiation_diagnostic": diff_diagnostic_source,
         "concentration_diagnostic": conc_diagnostic_source,
         "governance_maturity": maturity_source,
+        "governance_calibration": calibration_source,
+        "governance_reclassification": reclassification_source,
     }
     data_freshness = _build_data_freshness_section(sources, position_section)
     sections = {
@@ -1962,6 +2045,8 @@ def build_research_review_packet(
         "differentiation_diagnostic": diff_diagnostic_section,
         "concentration_diagnostic": conc_diagnostic_section,
         "governance_maturity": maturity_section,
+        "governance_calibration": calibration_section,
+        "governance_reclassification": reclassification_section,
         "data_freshness": data_freshness,
     }
     sections["tier1_research_controls"] = _build_tier1_research_controls_section(sections)
@@ -2015,6 +2100,8 @@ def build_research_review_packet(
             "differentiation_diagnostic": diff_diagnostic_section,
             "concentration_diagnostic": conc_diagnostic_section,
             "governance_maturity": maturity_section,
+            "governance_calibration": calibration_section,
+            "governance_reclassification": reclassification_section,
             "tier1_research_controls": sections["tier1_research_controls"],
             "tier2_research_controls": sections["tier2_research_controls"],
             "tier3_research_controls": sections["tier3_research_controls"],
@@ -2091,6 +2178,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_differentiation_diagnostic_md(sections["differentiation_diagnostic"]))
     lines.extend(_render_concentration_diagnostic_md(sections["concentration_diagnostic"]))
     lines.extend(_render_governance_maturity_md(sections["governance_maturity"]))
+    lines.extend(_render_governance_calibration_md(sections["governance_calibration"]))
+    lines.extend(_render_governance_reclassification_md(sections["governance_reclassification"]))
     lines.extend(_render_final_control_summary_md(sections["final_control_summary"]))
     lines.extend(_render_freshness_md(sections["data_freshness"]))
     lines.extend(_render_actions_md(sections["recommended_next_actions"]))
@@ -2581,6 +2670,10 @@ def _render_final_control_summary_md(section: dict[str, Any]) -> list[str]:
         f"- **Orion status:** {_md(section.get('orion_status'))}",
         f"- **Lyra status:** {_md(section.get('lyra_status'))}",
         f"- **Top blockers:** {_md(section.get('top_blockers'))}",
+        f"- **Current blockers:** {_md(section.get('current_blockers'))}",
+        f"- **True blockers:** {_md(section.get('true_blockers'))}",
+        f"- **Configuration blockers:** {_md(section.get('configuration_blockers'))}",
+        f"- **Eliminated blockers:** {_md(section.get('eliminated_blockers'))}",
         f"- **Blockers eliminated:** {_md(section.get('blockers_eliminated'))}",
         f"- **Blockers remaining:** {_md(section.get('blockers_remaining'))}",
         f"- **Data quality issues:** {_md(section.get('data_quality_issues'))}",
@@ -2699,6 +2792,64 @@ def _render_governance_maturity_md(section: dict[str, Any]) -> list[str]:
     ]
     for row in section.get("components") or []:
         lines.append(f"| {_md(row.get('component'))} | {_md(row.get('score'))} | {_md(row.get('reason'))} |")
+    lines += [
+        "",
+        f"Blockers (live): real={_md(section.get('blockers_real'))} configuration={_md(section.get('blockers_configuration'))} data_quality={_md(section.get('blockers_data_quality'))} observation_window={_md(section.get('blockers_observation_window'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+    ]
+    return lines
+
+
+def _render_governance_calibration_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Governance Calibration (FR-040)", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    lines += [
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Calibration status counts: {_md(section.get('calibration_status_counts'))}",
+        "",
+        "| Design class | Max Single Name | Top 3 | Top 5 |",
+        "|---|---:|---:|---:|",
+    ]
+    for cls, row in (section.get("design_aware_thresholds") or {}).items():
+        lines.append(
+            f"| {cls} | {_md(row.get('max_single_name_allowed'))} | {_md(row.get('top3_allowed'))} | {_md(row.get('top5_allowed'))} |"
+        )
+    lines += [
+        "",
+        "| Strategy | Positions | Design | Expected EW | Actual Max | Top3 | Top5 | Calibrated Cap | Status |",
+        "|---|---:|---|---:|---:|---:|---:|---:|---|",
+    ]
+    for row in section.get("strategies") or []:
+        thresholds = row.get("calibrated_thresholds") or {}
+        actual = row.get("actual_concentration_profile") or {}
+        lines.append(
+            f"| {_md(row.get('strategy'))} | {_md(row.get('position_count'))} | {_md(row.get('design_class'))} | "
+            f"{_md(row.get('expected_equal_weight'))} | {_md(actual.get('max_single_name_weight'))} | "
+            f"{_md(actual.get('top3_concentration'))} | {_md(actual.get('top5_concentration'))} | "
+            f"{_md(thresholds.get('max_single_name_allowed'))} | {_md(row.get('calibration_status'))} |"
+        )
+    lines += ["", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_governance_reclassification_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Governance Reclassification (OLD fixed vs NEW calibrated)", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    lines += [
+        f"Change counts: {_md(section.get('change_counts'))}",
+        "",
+        "| Strategy | OLD Decision | NEW Decision | Changed | OLD Risk Reasons | NEW Risk Reasons |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in section.get("comparisons") or []:
+        lines.append(
+            f"| {_md(row.get('strategy'))} | {_md(row.get('old_decision'))} | {_md(row.get('new_decision'))} | "
+            f"{_md(row.get('decision_changed'))} | {_md(row.get('old_risk_reasons'))} | "
+            f"{_md(row.get('new_risk_reasons'))} |"
+        )
     lines += ["", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
     return lines
 
