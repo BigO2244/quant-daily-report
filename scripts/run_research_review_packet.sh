@@ -71,6 +71,9 @@ fi
 run_best_effort "building decision attribution" \
     python3 scripts/build_decision_attribution.py --date "${TRADE_DATE}"
 
+run_best_effort "building risk summary" \
+    python3 scripts/build_risk_summary.py --date "${TRADE_DATE}"
+
 echo "[RESEARCH_REVIEW] building packet"
 python3 scripts/build_research_review_packet.py --date "${TRADE_DATE}" >> "${STEP_LOG}" 2>&1 || {
     rc=$?

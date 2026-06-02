@@ -79,6 +79,9 @@ run_step "building position attribution" \
 run_step "building decision attribution" \
     python3 scripts/build_decision_attribution.py --date "${TARGET_DATE}"
 
+run_step "building risk summary" \
+    python3 scripts/build_risk_summary.py --date "${TARGET_DATE}"
+
 run_step "building research review packet" \
     python3 scripts/build_research_review_packet.py --date "${TARGET_DATE}"
 
