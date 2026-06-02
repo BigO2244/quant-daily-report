@@ -1680,7 +1680,9 @@ def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, 
         else:
             blockers_remaining.append(name)
     # A blocker is "eliminated" only when the audit explicitly judges it
-    # cleared (root_cause includes "blocker_should_clear").
+    # cleared (root_cause includes "blocker_should_clear"). Pull the
+    # name out of any "remaining" / "data quality" / "actual strategy"
+    # buckets it was filed into above.
     for row in audit_classifications:
         if "blocker_should_clear" in str((row or {}).get("root_cause") or ""):
             name = str((row or {}).get("blocker") or "")
@@ -1688,6 +1690,10 @@ def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, 
                 blockers_eliminated.append(name)
                 if name in blockers_remaining:
                     blockers_remaining.remove(name)
+                if name in data_quality_issues:
+                    data_quality_issues.remove(name)
+                if name in actual_strategy_issues:
+                    actual_strategy_issues.remove(name)
 
     allocation_rec = str(tier3.get("allocation_recommendation") or "no_allocation_change_recommended")
     # An allocation change requires ALL THREE tiers clear AND the
