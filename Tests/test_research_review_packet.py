@@ -581,3 +581,196 @@ def test_tier2_universe_blocker_prevents_promotion(tmp_path):
     tier2 = result["sections"]["tier2_research_controls"]
     assert tier2["recommendation"] == "No promotion recommended"
     assert "UNIVERSE_GOVERNANCE" in tier2["blocker_categories"]
+
+
+def _write_tier3_sources(
+    root: Path,
+    trade_date: str,
+    *,
+    governance_available: bool = True,
+    promotion_recommendation: str = "NO_PROMOTION_RECOMMENDED",
+    regime_available: bool = True,
+    allocation_available: bool = True,
+    allocation_recommendation: str = "no_allocation_change_recommended",
+    promotion_governance_allows_change: bool = False,
+) -> None:
+    _write_json(
+        root / "outputs" / "research" / "promotion_governance" / trade_date / "promotion_governance.json",
+        {
+            "schema_version": "caerus_promotion_governance_v1",
+            "date": trade_date,
+            "available": governance_available,
+            "confidence": "MEDIUM" if governance_available else "LOW",
+            "current_control_strategy": "caerus_polaris",
+            "promotion_recommendation": promotion_recommendation,
+            "demotion_recommendation": "NO_DEMOTION_RECOMMENDED",
+            "challenger_rankings": [
+                {"rank": 1, "strategy": "caerus_lyra", "decision": "HOLD", "rank_score": 3, "max_observation_count": 60, "evidence_strength": "MEDIUM"},
+                {"rank": 2, "strategy": "caerus_orion", "decision": "HOLD", "rank_score": 3, "max_observation_count": 60, "evidence_strength": "MEDIUM"},
+            ],
+            "strategies": {
+                "caerus_polaris": {"strategy": "caerus_polaris", "decision": "HOLD", "evidence_strength": "MEDIUM", "reason_codes": ["ok"], "gates": {}},
+                "caerus_orion": {"strategy": "caerus_orion", "decision": "HOLD", "evidence_strength": "LOW", "reason_codes": ["differentiation:weak_differentiation"], "gates": {}},
+                "caerus_lyra": {"strategy": "caerus_lyra", "decision": "HOLD", "evidence_strength": "LOW", "reason_codes": ["differentiation:weak_differentiation"], "gates": {}},
+            },
+            "blocker_categories": ["DIFFERENTIATION"] if governance_available else ["NONE"],
+            "evidence_strength": "MEDIUM" if governance_available else "LOW",
+            "reason_codes": ["ok"] if governance_available else ["missing_inputs"],
+            "source_artifacts": [],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "regime_attribution" / trade_date / "regime_attribution.json",
+        {
+            "schema_version": "caerus_regime_attribution_v1",
+            "date": trade_date,
+            "available": regime_available,
+            "confidence": "HIGH" if regime_available else "LOW",
+            "regime_labels": ["bull_trend", "bear_trend", "high_vol", "low_vol", "panic", "recovery", "neutral"],
+            "regime_distribution": {"bull_trend": 100, "bear_trend": 30, "neutral": 50, "low_vol": 20, "high_vol": 5, "panic": 5, "recovery": 5} if regime_available else {},
+            "history_window": {"first_date": "2024-01-02", "last_date": trade_date, "total_days": 250, "classified_days": 215},
+            "strategies": {},
+            "reason_codes": ["ok"] if regime_available else ["missing_shadow_nav_series"],
+            "source_artifacts": [],
+        },
+    )
+    _write_json(
+        root / "outputs" / "research" / "dynamic_strategy_allocation" / trade_date / "dynamic_strategy_allocation.json",
+        {
+            "schema_version": "caerus_dynamic_strategy_allocation_v1",
+            "date": trade_date,
+            "is_research_only": True,
+            "production_weights_modified": False,
+            "available": allocation_available,
+            "confidence": "HIGH" if allocation_available else "LOW",
+            "policies": [
+                {
+                    "policy": "static_equal_weight",
+                    "is_research_only": True,
+                    "available": allocation_available,
+                    "observation_count": 215,
+                    "total_return": 0.10,
+                    "excess_return_vs_polaris": 0.02,
+                    "realized_volatility": 0.20,
+                    "max_drawdown": -0.10,
+                    "hit_rate": 0.55,
+                    "turnover_proxy": 0.0,
+                    "concentration_proxy": 0.4,
+                    "risk_adjusted_score": 0.10,
+                    "reason_codes": ["ok"] if allocation_available else ["insufficient_history"],
+                },
+            ],
+            "ranking": (
+                [{"rank": 1, "policy": "static_equal_weight", "risk_adjusted_score": 0.10, "excess_return_vs_polaris": 0.02, "realized_volatility": 0.20, "max_drawdown": -0.10, "confidence": "HIGH"}]
+                if allocation_available else []
+            ),
+            "promotion_governance_allows_change": promotion_governance_allows_change,
+            "allocation_recommendation": allocation_recommendation,
+            "reason_codes": ["ok"] if allocation_available else ["insufficient_history"],
+            "source_artifacts": [],
+        },
+    )
+
+
+def test_tier3_sections_populate_when_artifacts_exist(tmp_path):
+    trade_date = "2026-06-02"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, deep_verdict="STRONG_DIFFERENTIATION")
+    _write_tier3_sources(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+    assert result["sections"]["promotion_governance"]["available"] is True
+    assert result["sections"]["regime_attribution"]["available"] is True
+    assert result["sections"]["dynamic_strategy_allocation"]["available"] is True
+    tier3 = result["sections"]["tier3_research_controls"]
+    assert tier3["promotion_governance_status"] == "available"
+    assert tier3["regime_attribution_status"] == "available"
+    assert tier3["dynamic_strategy_allocation_status"] == "available"
+    final = result["sections"]["final_control_summary"]
+    assert final["current_recommendation"] == "No promotion recommended"
+    assert final["polaris_status"] == "BENCHMARK_CONTROL"
+    markdown = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text()
+    assert "Promotion Governance (Tier 3)" in markdown
+    assert "Regime Attribution (Tier 3)" in markdown
+    assert "Dynamic Strategy Allocation (Tier 3, Research Only)" in markdown
+    assert "Final Control Summary" in markdown
+
+
+def test_tier3_missing_artifacts_degrade_gracefully(tmp_path):
+    trade_date = "2026-06-02"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+    assert result["sections"]["promotion_governance"]["available"] is False
+    assert result["sections"]["regime_attribution"]["available"] is False
+    assert result["sections"]["dynamic_strategy_allocation"]["available"] is False
+    tier3 = result["sections"]["tier3_research_controls"]
+    assert tier3["recommendation"] == "No promotion recommended"
+    assert "promotion_governance_incomplete" in tier3["blockers"]
+    final = result["sections"]["final_control_summary"]
+    assert final["current_recommendation"] == "No promotion recommended"
+    actions = " ".join(result["sections"]["recommended_next_actions"])
+    assert "build_promotion_governance.py" in actions
+    assert "build_regime_attribution.py" in actions
+    assert "build_dynamic_strategy_allocation.py" in actions
+
+
+def test_tier3_no_promotion_under_blockers(tmp_path):
+    """Even if promotion_governance names a candidate, the final
+    recommendation stays conservative when Tier 1 or Tier 2 carry
+    blockers."""
+    trade_date = "2026-06-02"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, deep_verdict="WEAK_DIFFERENTIATION")
+    _write_tier3_sources(
+        tmp_path,
+        trade_date,
+        promotion_recommendation="caerus_lyra",
+        promotion_governance_allows_change=True,
+        allocation_recommendation="benchmark_heavy",
+    )
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+    final = result["sections"]["final_control_summary"]
+    # Tier 2 still says no promotion because of weak deep differentiation,
+    # so the final rollup must stay conservative.
+    assert final["current_recommendation"] == "No promotion recommended"
+    assert final["allocation_status"] == "no_allocation_change_recommended"
+    assert final["polaris_status"] == "BENCHMARK_CONTROL"
+
+
+def test_tier3_surfaces_regime_findings(tmp_path):
+    trade_date = "2026-06-02"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, deep_verdict="STRONG_DIFFERENTIATION")
+    _write_tier3_sources(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+    regime = result["sections"]["regime_attribution"]
+    assert regime["available"] is True
+    assert sum(regime["regime_distribution"].values()) > 0
+    assert regime["history_window"]["classified_days"] >= 200
+
+
+def test_tier3_surfaces_dynamic_allocation_findings(tmp_path):
+    trade_date = "2026-06-02"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, deep_verdict="STRONG_DIFFERENTIATION")
+    _write_tier3_sources(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+    alloc = result["sections"]["dynamic_strategy_allocation"]
+    assert alloc["is_research_only"] is True
+    assert alloc["production_weights_modified"] is False
+    assert len(alloc["ranking"]) >= 1

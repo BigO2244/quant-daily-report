@@ -95,6 +95,15 @@ run_best_effort "building position sizing research" \
 run_best_effort "building universe governance" \
     python3 scripts/build_universe_governance.py --date "${TRADE_DATE}"
 
+run_best_effort "building regime attribution" \
+    python3 scripts/build_regime_attribution.py --date "${TRADE_DATE}"
+
+run_best_effort "building promotion governance" \
+    python3 scripts/build_promotion_governance.py --date "${TRADE_DATE}"
+
+run_best_effort "building dynamic strategy allocation" \
+    python3 scripts/build_dynamic_strategy_allocation.py --date "${TRADE_DATE}"
+
 echo "[RESEARCH_REVIEW] building packet"
 python3 scripts/build_research_review_packet.py --date "${TRADE_DATE}" >> "${STEP_LOG}" 2>&1 || {
     rc=$?

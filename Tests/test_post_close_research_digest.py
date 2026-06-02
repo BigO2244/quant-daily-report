@@ -89,6 +89,30 @@ def _write_review(root: Path, trade_date: str) -> None:
                 "position_sizing_research": {"available": True},
                 "universe_governance": {"available": False},
                 "tier2_research_controls": {"recommendation": "No promotion recommended"},
+                "promotion_governance": {
+                    "available": True,
+                    "promotion_recommendation": "NO_PROMOTION_RECOMMENDED",
+                    "demotion_recommendation": "NO_DEMOTION_RECOMMENDED",
+                    "confidence": "MEDIUM",
+                },
+                "regime_attribution": {
+                    "available": True,
+                    "confidence": "HIGH",
+                    "regime_distribution": {"bull_trend": 100, "bear_trend": 30, "neutral": 50},
+                },
+                "dynamic_strategy_allocation": {
+                    "available": True,
+                    "is_research_only": True,
+                    "production_weights_modified": False,
+                    "allocation_recommendation": "no_allocation_change_recommended",
+                },
+                "tier3_research_controls": {"recommendation": "No promotion recommended"},
+                "final_control_summary": {
+                    "current_recommendation": "No promotion recommended",
+                    "polaris_status": "BENCHMARK_CONTROL",
+                    "orion_status": "BLOCKED",
+                    "lyra_status": "BLOCKED",
+                },
                 "recommended_next_actions": [
                     "Run scripts/weekly_model_review.py.",
                     "Accumulate more decision attribution observations.",
@@ -121,6 +145,13 @@ def test_build_digest_email_extracts_summary_fields(tmp_path):
     assert "Tier 2 risk coverage: available (MEDIUM)" in digest["body_text"]
     assert "Deep differentiation verdict: WEAK_DIFFERENTIATION" in digest["body_text"]
     assert "Tier 2 recommendation: No promotion recommended" in digest["body_text"]
+    assert "Tier 3 promotion governance: available" in digest["body_text"]
+    assert "Tier 3 regime attribution: available" in digest["body_text"]
+    assert "Tier 3 dynamic allocation: available (research only)" in digest["body_text"]
+    assert "Tier 3 recommendation: No promotion recommended" in digest["body_text"]
+    assert "Final control recommendation: No promotion recommended" in digest["body_text"]
+    assert "Polaris status: BENCHMARK_CONTROL" in digest["body_text"]
+    assert "Lyra status: BLOCKED" in digest["body_text"]
     assert "caerus_polaris: AAA ret=0.1 pnl=0.05" in digest["body_text"]
     assert "missing_model_review" in digest["body_text"]
     assert "outputs/research_review/2026-04-30/research_review.html" in digest["body_text"]

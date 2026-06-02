@@ -103,6 +103,15 @@ run_step "building position sizing research" \
 run_step "building universe governance" \
     python3 scripts/build_universe_governance.py --date "${TARGET_DATE}"
 
+run_step "building regime attribution" \
+    python3 scripts/build_regime_attribution.py --date "${TARGET_DATE}"
+
+run_step "building promotion governance" \
+    python3 scripts/build_promotion_governance.py --date "${TARGET_DATE}"
+
+run_step "building dynamic strategy allocation" \
+    python3 scripts/build_dynamic_strategy_allocation.py --date "${TARGET_DATE}"
+
 run_step "building research review packet" \
     python3 scripts/build_research_review_packet.py --date "${TARGET_DATE}"
 

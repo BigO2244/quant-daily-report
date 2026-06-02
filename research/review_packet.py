@@ -1110,6 +1110,151 @@ def _build_universe_governance_section(repo: Path, trade_date: str) -> tuple[dic
     return section, source
 
 
+def _build_promotion_governance_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "promotion_governance" / trade_date / "promotion_governance.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="promotion_governance",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_promotion_governance"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "current_control_strategy": "caerus_polaris",
+            "promotion_recommendation": "NO_PROMOTION_RECOMMENDED",
+            "demotion_recommendation": "NO_DEMOTION_RECOMMENDED",
+            "challenger_rankings": [],
+            "strategies": {},
+            "blocker_categories": ["NONE"],
+            "evidence_strength": "LOW",
+            "reason_codes": ["missing_promotion_governance"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "current_control_strategy": payload.get("current_control_strategy") or "caerus_polaris",
+        "promotion_recommendation": payload.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED",
+        "demotion_recommendation": payload.get("demotion_recommendation") or "NO_DEMOTION_RECOMMENDED",
+        "challenger_rankings": payload.get("challenger_rankings") or [],
+        "strategies": payload.get("strategies") or {},
+        "blocker_categories": payload.get("blocker_categories") or ["NONE"],
+        "evidence_strength": payload.get("evidence_strength") or "LOW",
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="promotion_governance",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_regime_attribution_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "regime_attribution" / trade_date / "regime_attribution.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="regime_attribution",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_regime_attribution"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "regime_labels": [],
+            "regime_distribution": {},
+            "history_window": {},
+            "strategies": {},
+            "reason_codes": ["missing_regime_attribution"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "regime_labels": payload.get("regime_labels") or [],
+        "regime_distribution": payload.get("regime_distribution") or {},
+        "history_window": payload.get("history_window") or {},
+        "strategies": payload.get("strategies") or {},
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="regime_attribution",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
+def _build_dynamic_allocation_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = repo / "outputs" / "research" / "dynamic_strategy_allocation" / trade_date / "dynamic_strategy_allocation.json"
+    payload = _read_json(path)
+    if payload is None:
+        source = _status(
+            artifact_name="dynamic_strategy_allocation",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_dynamic_strategy_allocation"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "is_research_only": True,
+            "production_weights_modified": False,
+            "allocation_recommendation": "no_allocation_change_recommended",
+            "promotion_governance_allows_change": False,
+            "policies": [],
+            "ranking": [],
+            "reason_codes": ["missing_dynamic_strategy_allocation"],
+            "source_artifacts": [],
+        }, source
+    reasons = sorted(set(str(code) for code in list(payload.get("reason_codes") or ["ok"])))
+    available = bool(payload.get("available"))
+    section = {
+        "available": available,
+        "confidence": payload.get("confidence") or "LOW",
+        "is_research_only": bool(payload.get("is_research_only", True)),
+        "production_weights_modified": bool(payload.get("production_weights_modified", False)),
+        "allocation_recommendation": payload.get("allocation_recommendation") or "no_allocation_change_recommended",
+        "promotion_governance_allows_change": bool(payload.get("promotion_governance_allows_change", False)),
+        "policies": payload.get("policies") or [],
+        "ranking": payload.get("ranking") or [],
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
+    }
+    source = _status(
+        artifact_name="dynamic_strategy_allocation",
+        path=path,
+        date=str(payload.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if available else "PARTIAL",
+    )
+    return section, source
+
+
 def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str, Any]:
     timing = sections["execution_timing_study"]
     promotion = sections["promotion_readiness_windows"]
@@ -1234,6 +1379,160 @@ def _build_tier2_research_controls_section(sections: dict[str, Any]) -> dict[str
     }
 
 
+def _build_tier3_research_controls_section(sections: dict[str, Any]) -> dict[str, Any]:
+    governance = sections["promotion_governance"]
+    regime = sections["regime_attribution"]
+    allocation = sections["dynamic_strategy_allocation"]
+    blockers: list[str] = []
+    if not governance.get("available"):
+        blockers.append("promotion_governance_incomplete")
+    if not regime.get("available"):
+        blockers.append("regime_attribution_incomplete")
+    if not allocation.get("available"):
+        blockers.append("dynamic_strategy_allocation_incomplete")
+    governance_blockers = list(governance.get("blocker_categories") or [])
+    for cat in governance_blockers:
+        if cat and cat != "NONE":
+            blockers.append(f"governance_blocker:{cat}")
+    promotion_rec = str(governance.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED")
+    # Conservative: only recommend a strategy promotion when promotion
+    # governance explicitly names a single strategy. Strings like
+    # "NO_PROMOTION_RECOMMENDED" or "MULTIPLE_PROMOTE_CANDIDATES" are
+    # treated as no-promotion.
+    if promotion_rec.startswith("caerus_") and not blockers:
+        recommendation = f"Promote {promotion_rec}"
+    else:
+        recommendation = "No promotion recommended"
+    # Allocation recommendation only surfaces when governance permits.
+    if (
+        allocation.get("available")
+        and promotion_rec.startswith("caerus_")
+        and bool(allocation.get("promotion_governance_allows_change"))
+        and str(allocation.get("allocation_recommendation") or "") != "no_allocation_change_recommended"
+    ):
+        allocation_recommendation = allocation.get("allocation_recommendation")
+    else:
+        allocation_recommendation = "no_allocation_change_recommended"
+    reason_codes = sorted(
+        {
+            str(code)
+            for code in list(governance.get("reason_codes") or [])
+            + list(regime.get("reason_codes") or [])
+            + list(allocation.get("reason_codes") or [])
+            + blockers
+            if code != "ok"
+        }
+    ) or ["ok"]
+    return {
+        "available": any(section.get("available") for section in (governance, regime, allocation)),
+        "promotion_governance_status": "available" if governance.get("available") else "missing_or_unavailable",
+        "regime_attribution_status": "available" if regime.get("available") else "missing_or_unavailable",
+        "dynamic_strategy_allocation_status": "available" if allocation.get("available") else "missing_or_unavailable",
+        "promotion_recommendation": promotion_rec,
+        "demotion_recommendation": governance.get("demotion_recommendation") or "NO_DEMOTION_RECOMMENDED",
+        "allocation_recommendation": allocation_recommendation,
+        "recommendation": recommendation,
+        "evidence_strength": governance.get("evidence_strength") or "LOW",
+        "blockers": sorted(set(blockers)) or ["no_tier3_blockers_detected"],
+        "reason_codes": reason_codes,
+    }
+
+
+def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, Any]:
+    """All-tier rollup so consumers can read a single object for the
+    final control status. Conservative by construction: no promotion or
+    allocation change unless every tier agrees.
+    """
+    tier1 = sections.get("tier1_research_controls") or {}
+    tier2 = sections.get("tier2_research_controls") or {}
+    tier3 = sections.get("tier3_research_controls") or {}
+    governance = sections.get("promotion_governance") or {}
+    allocation = sections.get("dynamic_strategy_allocation") or {}
+
+    tier1_rec = str(tier1.get("recommendation") or "No promotion recommended")
+    tier2_rec = str(tier2.get("recommendation") or "No promotion recommended")
+    tier3_rec = str(tier3.get("recommendation") or "No promotion recommended")
+    promotion_rec = str(tier3.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED")
+
+    # Final recommendation requires all three tiers to be non-defaulted
+    # AND tier 3 to name a specific strategy.
+    all_tiers_clear = all(rec != "No promotion recommended" for rec in (tier1_rec, tier2_rec, tier3_rec))
+    if all_tiers_clear and promotion_rec.startswith("caerus_"):
+        current_recommendation = f"Promote {promotion_rec}"
+    else:
+        current_recommendation = "No promotion recommended"
+
+    # Per-strategy status snapshots.
+    strategies = governance.get("strategies") or {}
+    lyra_decision = str((strategies.get("caerus_lyra") or {}).get("decision") or "BLOCKED").upper()
+    orion_decision = str((strategies.get("caerus_orion") or {}).get("decision") or "BLOCKED").upper()
+    polaris_decision = str((strategies.get("caerus_polaris") or {}).get("decision") or "HOLD").upper()
+
+    lyra_status = "BLOCKED" if lyra_decision in {"BLOCKED", "DEMOTE", "HOLD"} else lyra_decision
+    orion_status = (
+        "BLOCKED" if orion_decision == "BLOCKED"
+        else "DEMOTED" if orion_decision == "DEMOTE"
+        else orion_decision  # WATCH, HOLD, PROMOTION_CANDIDATE, PROMOTE
+    )
+    polaris_status = "BENCHMARK_CONTROL" if polaris_decision in {"HOLD", "BLOCKED"} else polaris_decision
+
+    # Top blockers: union of all-tier blocker categories.
+    top_blockers: list[str] = []
+    for tier_section in (tier1, tier2, tier3):
+        for blocker in tier_section.get("blockers") or []:
+            code = str(blocker)
+            if code in {"no_tier1_blockers_detected", "no_tier2_blockers_detected", "no_tier3_blockers_detected"}:
+                continue
+            if code not in top_blockers:
+                top_blockers.append(code)
+
+    # Evidence maturity rolls up confidences.
+    confidences = [
+        str((sections.get("promotion_governance") or {}).get("confidence") or "LOW"),
+        str((sections.get("regime_attribution") or {}).get("confidence") or "LOW"),
+        str((sections.get("dynamic_strategy_allocation") or {}).get("confidence") or "LOW"),
+    ]
+    rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+    min_rank = min(rank.get(c, 0) for c in confidences)
+    evidence_maturity = ["LOW", "MEDIUM", "HIGH"][min_rank]
+
+    allocation_rec = str(tier3.get("allocation_recommendation") or "no_allocation_change_recommended")
+    # An allocation change requires ALL THREE tiers clear AND the
+    # underlying allocation artifact to be available. Tier 3 alone is
+    # not sufficient — Tier 1 (timing / promotion windows / dif) and
+    # Tier 2 (risk coverage / deep dif / sizing / universe) must also
+    # produce non-default recommendations.
+    if (
+        allocation_rec != "no_allocation_change_recommended"
+        and bool(allocation.get("available"))
+        and all_tiers_clear
+        and promotion_rec.startswith("caerus_")
+    ):
+        allocation_summary = allocation_rec
+    else:
+        allocation_summary = "no_allocation_change_recommended"
+
+    return {
+        "current_recommendation": current_recommendation,
+        "promotion_status": promotion_rec,
+        "demotion_status": str(tier3.get("demotion_recommendation") or "NO_DEMOTION_RECOMMENDED"),
+        "allocation_status": allocation_summary,
+        "lyra_status": lyra_status,
+        "orion_status": orion_status,
+        "polaris_status": polaris_status,
+        "top_blockers": top_blockers or ["no_blockers"],
+        "evidence_maturity": evidence_maturity,
+        "tier1_recommendation": tier1_rec,
+        "tier2_recommendation": tier2_rec,
+        "tier3_recommendation": tier3_rec,
+        "reason_codes": sorted(set(
+            list(tier1.get("reason_codes") or [])
+            + list(tier2.get("reason_codes") or [])
+            + list(tier3.get("reason_codes") or [])
+        )) or ["ok"],
+    }
+
+
 def _build_data_freshness_section(sources: dict[str, dict[str, Any]], position_section: dict[str, Any]) -> dict[str, Any]:
     rows = [dict(sources[key]) for key in sorted(sources)]
     price_reasons = list(position_section.get("freshness_reason_codes") or [])
@@ -1299,6 +1598,12 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Run .venv/bin/python scripts/build_position_sizing_research.py --date YYYY-MM-DD to populate research-only sizing alternatives.")
     if not sections.get("universe_governance", {}).get("available"):
         actions.append("Run .venv/bin/python scripts/build_universe_governance.py --date YYYY-MM-DD to populate universe governance checks.")
+    if not sections.get("promotion_governance", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_promotion_governance.py --date YYYY-MM-DD to populate Tier 3 promotion governance.")
+    if not sections.get("regime_attribution", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_regime_attribution.py --date YYYY-MM-DD to populate Tier 3 regime attribution.")
+    if not sections.get("dynamic_strategy_allocation", {}).get("available"):
+        actions.append("Run .venv/bin/python scripts/build_dynamic_strategy_allocation.py --date YYYY-MM-DD to populate Tier 3 research-only dynamic allocation evidence.")
     if signal.get("early_evidence"):
         actions.append("Accumulate more decision attribution observations before treating signal hit rates as durable.")
     if (
@@ -1381,6 +1686,9 @@ def build_research_review_packet(
     differentiation_deep_section, differentiation_deep_source = _build_strategy_differentiation_deep_section(repo, selected_date)
     position_sizing_section, position_sizing_source = _build_position_sizing_section(repo, selected_date)
     universe_governance_section, universe_governance_source = _build_universe_governance_section(repo, selected_date)
+    promotion_governance_section, promotion_governance_source = _build_promotion_governance_section(repo, selected_date)
+    regime_attribution_section, regime_attribution_source = _build_regime_attribution_section(repo, selected_date)
+    dynamic_allocation_section, dynamic_allocation_source = _build_dynamic_allocation_section(repo, selected_date)
     sources = {
         "model_review": model_source,
         "attribution": attribution_source,
@@ -1395,6 +1703,9 @@ def build_research_review_packet(
         "strategy_differentiation_deep": differentiation_deep_source,
         "position_sizing_research": position_sizing_source,
         "universe_governance": universe_governance_source,
+        "promotion_governance": promotion_governance_source,
+        "regime_attribution": regime_attribution_source,
+        "dynamic_strategy_allocation": dynamic_allocation_source,
     }
     data_freshness = _build_data_freshness_section(sources, position_section)
     sections = {
@@ -1412,10 +1723,15 @@ def build_research_review_packet(
         "strategy_differentiation_deep": differentiation_deep_section,
         "position_sizing_research": position_sizing_section,
         "universe_governance": universe_governance_section,
+        "promotion_governance": promotion_governance_section,
+        "regime_attribution": regime_attribution_section,
+        "dynamic_strategy_allocation": dynamic_allocation_section,
         "data_freshness": data_freshness,
     }
     sections["tier1_research_controls"] = _build_tier1_research_controls_section(sections)
     sections["tier2_research_controls"] = _build_tier2_research_controls_section(sections)
+    sections["tier3_research_controls"] = _build_tier3_research_controls_section(sections)
+    sections["final_control_summary"] = _build_final_control_summary_section(sections)
     actions = _recommended_actions(sections, sources)
     sections["recommended_next_actions"] = actions
     overall = _overall(sections=sections, sources=sources, actions=actions)
@@ -1454,8 +1770,13 @@ def build_research_review_packet(
             "strategy_differentiation_deep": differentiation_deep_section,
             "position_sizing_research": position_sizing_section,
             "universe_governance": universe_governance_section,
+            "promotion_governance": promotion_governance_section,
+            "regime_attribution": regime_attribution_section,
+            "dynamic_strategy_allocation": dynamic_allocation_section,
             "tier1_research_controls": sections["tier1_research_controls"],
             "tier2_research_controls": sections["tier2_research_controls"],
+            "tier3_research_controls": sections["tier3_research_controls"],
+            "final_control_summary": sections["final_control_summary"],
         },
         "cio_briefing": cio_briefing,
         "output_paths": {
@@ -1518,6 +1839,11 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_strategy_differentiation_deep_md(sections["strategy_differentiation_deep"]))
     lines.extend(_render_position_sizing_md(sections["position_sizing_research"]))
     lines.extend(_render_universe_governance_md(sections["universe_governance"]))
+    lines.extend(_render_promotion_governance_md(sections["promotion_governance"]))
+    lines.extend(_render_regime_attribution_md(sections["regime_attribution"]))
+    lines.extend(_render_dynamic_allocation_md(sections["dynamic_strategy_allocation"]))
+    lines.extend(_render_tier3_md(sections["tier3_research_controls"]))
+    lines.extend(_render_final_control_summary_md(sections["final_control_summary"]))
     lines.extend(_render_freshness_md(sections["data_freshness"]))
     lines.extend(_render_actions_md(sections["recommended_next_actions"]))
     lines.extend(_render_sources_md(payload["sources"]))
@@ -1911,6 +2237,109 @@ def _render_universe_governance_md(section: dict[str, Any]) -> list[str]:
         "",
     ]
     return lines
+
+
+def _render_promotion_governance_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Promotion Governance (Tier 3)", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    lines += [
+        f"Current control: {_md(section.get('current_control_strategy'))}",
+        f"Promotion recommendation: {_md(section.get('promotion_recommendation'))}",
+        f"Demotion recommendation: {_md(section.get('demotion_recommendation'))}",
+        f"Evidence strength: {_md(section.get('evidence_strength'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        f"Blocker categories: {_md(section.get('blocker_categories'))}",
+        "",
+        "| Rank | Strategy | Decision | Evidence | Max Obs |",
+        "|---:|---|---|---|---:|",
+    ]
+    for row in section.get("challenger_rankings") or []:
+        lines.append(
+            f"| {_md(row.get('rank'))} | {_md(row.get('strategy'))} | {_md(row.get('decision'))} | {_md(row.get('evidence_strength'))} | {_md(row.get('max_observation_count'))} |"
+        )
+    lines += ["", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_regime_attribution_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Regime Attribution (Tier 3)", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    history = section.get("history_window") or {}
+    lines += [
+        f"History: {_md(history.get('first_date'))} → {_md(history.get('last_date'))}",
+        f"Classified days: {_md(history.get('classified_days'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        "",
+        "| Regime | Days |",
+        "|---|---:|",
+    ]
+    for regime, count in sorted((section.get("regime_distribution") or {}).items()):
+        lines.append(f"| {regime} | {count} |")
+    lines += ["", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_dynamic_allocation_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Dynamic Strategy Allocation (Tier 3, Research Only)", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    lines += [
+        f"Is research only: {_md(section.get('is_research_only'))}",
+        f"Production weights modified: {_md(section.get('production_weights_modified'))}",
+        f"Allocation recommendation: {_md(section.get('allocation_recommendation'))}",
+        f"Promotion governance allows change: {_md(section.get('promotion_governance_allows_change'))}",
+        f"Confidence: {_md(section.get('confidence'))}",
+        "",
+        "| Rank | Policy | Excess vs Polaris | Vol | MaxDD | Score |",
+        "|---:|---|---:|---:|---:|---:|",
+    ]
+    for row in section.get("ranking") or []:
+        lines.append(
+            f"| {_md(row.get('rank'))} | {_md(row.get('policy'))} | {_md(row.get('excess_return_vs_polaris'))} | {_md(row.get('realized_volatility'))} | {_md(row.get('max_drawdown'))} | {_md(row.get('risk_adjusted_score'))} |"
+        )
+    lines += ["", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_tier3_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Tier 3 Research Controls", ""]
+    lines += [
+        f"Promotion governance status: {_md(section.get('promotion_governance_status'))}",
+        f"Regime attribution status: {_md(section.get('regime_attribution_status'))}",
+        f"Dynamic allocation status: {_md(section.get('dynamic_strategy_allocation_status'))}",
+        f"Promotion recommendation: {_md(section.get('promotion_recommendation'))}",
+        f"Demotion recommendation: {_md(section.get('demotion_recommendation'))}",
+        f"Allocation recommendation: {_md(section.get('allocation_recommendation'))}",
+        f"Recommendation: {_md(section.get('recommendation'))}",
+        f"Evidence strength: {_md(section.get('evidence_strength'))}",
+        f"Blockers: {_md(section.get('blockers'))}",
+        f"Reason codes: {_md(section.get('reason_codes'))}",
+        "",
+    ]
+    return lines
+
+
+def _render_final_control_summary_md(section: dict[str, Any]) -> list[str]:
+    return [
+        "## Final Control Summary",
+        "",
+        f"- **Current recommendation:** {_md(section.get('current_recommendation'))}",
+        f"- **Promotion status:** {_md(section.get('promotion_status'))}",
+        f"- **Demotion status:** {_md(section.get('demotion_status'))}",
+        f"- **Allocation status:** {_md(section.get('allocation_status'))}",
+        f"- **Polaris status:** {_md(section.get('polaris_status'))}",
+        f"- **Orion status:** {_md(section.get('orion_status'))}",
+        f"- **Lyra status:** {_md(section.get('lyra_status'))}",
+        f"- **Top blockers:** {_md(section.get('top_blockers'))}",
+        f"- **Evidence maturity:** {_md(section.get('evidence_maturity'))}",
+        f"- **Tier 1 recommendation:** {_md(section.get('tier1_recommendation'))}",
+        f"- **Tier 2 recommendation:** {_md(section.get('tier2_recommendation'))}",
+        f"- **Tier 3 recommendation:** {_md(section.get('tier3_recommendation'))}",
+        f"- **Reason codes:** {_md(section.get('reason_codes'))}",
+        "",
+    ]
 
 
 def _render_freshness_md(section: dict[str, Any]) -> list[str]:

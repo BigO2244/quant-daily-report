@@ -168,6 +168,11 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
     sizing = sections.get("position_sizing_research") if isinstance(sections.get("position_sizing_research"), dict) else {}
     universe = sections.get("universe_governance") if isinstance(sections.get("universe_governance"), dict) else {}
     tier2 = sections.get("tier2_research_controls") if isinstance(sections.get("tier2_research_controls"), dict) else {}
+    promotion_governance = sections.get("promotion_governance") if isinstance(sections.get("promotion_governance"), dict) else {}
+    regime_attribution = sections.get("regime_attribution") if isinstance(sections.get("regime_attribution"), dict) else {}
+    dynamic_allocation = sections.get("dynamic_strategy_allocation") if isinstance(sections.get("dynamic_strategy_allocation"), dict) else {}
+    tier3 = sections.get("tier3_research_controls") if isinstance(sections.get("tier3_research_controls"), dict) else {}
+    final_summary = sections.get("final_control_summary") if isinstance(sections.get("final_control_summary"), dict) else {}
     cio = build_cio_briefing(review, repo)
     actions = list(sections.get("recommended_next_actions") or [])
 
@@ -244,6 +249,14 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         f"Position sizing research: {_fmt('available' if sizing.get('available') else 'missing')}",
         f"Universe governance: {_fmt('available' if universe.get('available') else 'missing')}",
         f"Tier 2 recommendation: {_fmt(tier2.get('recommendation'))}",
+        f"Tier 3 promotion governance: {_fmt('available' if promotion_governance.get('available') else 'missing')}",
+        f"Tier 3 regime attribution: {_fmt('available' if regime_attribution.get('available') else 'missing')}",
+        f"Tier 3 dynamic allocation: {_fmt('available' if dynamic_allocation.get('available') else 'missing')} (research only)",
+        f"Tier 3 recommendation: {_fmt(tier3.get('recommendation'))}",
+        f"Final control recommendation: {_fmt(final_summary.get('current_recommendation'))}",
+        f"Polaris status: {_fmt(final_summary.get('polaris_status'))}",
+        f"Orion status: {_fmt(final_summary.get('orion_status'))}",
+        f"Lyra status: {_fmt(final_summary.get('lyra_status'))}",
         "",
         "Top contributors:",
         *(f"- {line}" for line in top_lines),
@@ -285,6 +298,11 @@ def build_digest_email(repo_root: Path | str, trade_date: str) -> dict[str, Any]
         sizing=sizing,
         universe=universe,
         tier2=tier2,
+        promotion_governance=promotion_governance,
+        regime_attribution=regime_attribution,
+        dynamic_allocation=dynamic_allocation,
+        tier3=tier3,
+        final_summary=final_summary,
     )
     return {
         "subject": subject,
@@ -362,7 +380,17 @@ def _build_digest_html(
     sizing: dict[str, Any],
     universe: dict[str, Any],
     tier2: dict[str, Any],
+    promotion_governance: dict[str, Any] | None = None,
+    regime_attribution: dict[str, Any] | None = None,
+    dynamic_allocation: dict[str, Any] | None = None,
+    tier3: dict[str, Any] | None = None,
+    final_summary: dict[str, Any] | None = None,
 ) -> str:
+    promotion_governance = promotion_governance or {}
+    regime_attribution = regime_attribution or {}
+    dynamic_allocation = dynamic_allocation or {}
+    tier3 = tier3 or {}
+    final_summary = final_summary or {}
     def items(rows: list[str]) -> str:
         return "".join(f"<li>{html.escape(row)}</li>" for row in rows) or "<li>none</li>"
 
@@ -418,7 +446,15 @@ def _build_digest_html(
   <strong>Deep differentiation verdict:</strong> {html.escape(_fmt(deep_diff.get("aggregate_verdict")))}<br>
   <strong>Position sizing research:</strong> {html.escape(_fmt("available" if sizing.get("available") else "missing"))}<br>
   <strong>Universe governance:</strong> {html.escape(_fmt("available" if universe.get("available") else "missing"))}<br>
-  <strong>Tier 2 recommendation:</strong> {html.escape(_fmt(tier2.get("recommendation")))}</p>
+  <strong>Tier 2 recommendation:</strong> {html.escape(_fmt(tier2.get("recommendation")))}<br>
+  <strong>Tier 3 promotion governance:</strong> {html.escape(_fmt("available" if promotion_governance.get("available") else "missing"))}<br>
+  <strong>Tier 3 regime attribution:</strong> {html.escape(_fmt("available" if regime_attribution.get("available") else "missing"))}<br>
+  <strong>Tier 3 dynamic allocation (research only):</strong> {html.escape(_fmt("available" if dynamic_allocation.get("available") else "missing"))}<br>
+  <strong>Tier 3 recommendation:</strong> {html.escape(_fmt(tier3.get("recommendation")))}<br>
+  <strong>Final control recommendation:</strong> {html.escape(_fmt(final_summary.get("current_recommendation")))}<br>
+  <strong>Polaris status:</strong> {html.escape(_fmt(final_summary.get("polaris_status")))}<br>
+  <strong>Orion status:</strong> {html.escape(_fmt(final_summary.get("orion_status")))}<br>
+  <strong>Lyra status:</strong> {html.escape(_fmt(final_summary.get("lyra_status")))}</p>
 
   <h3>Top Contributors</h3>
   <ul>{items(top_lines)}</ul>
