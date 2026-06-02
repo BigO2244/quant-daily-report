@@ -819,6 +819,8 @@ def _build_strategy_differentiation_section(repo: Path, trade_date: str) -> tupl
             "available": False,
             "pairs": [],
             "blockers": ["missing_strategy_differentiation"],
+            "factor_exposure_available": False,
+            "position_contributions_available": False,
             "confidence": "LOW",
             "reason_codes": ["missing_strategy_differentiation"],
             "source_artifacts": [],
@@ -831,6 +833,10 @@ def _build_strategy_differentiation_section(repo: Path, trade_date: str) -> tupl
         "available": available,
         "pairs": payload.get("pairs") or [],
         "blockers": payload.get("blockers") or [],
+        "factor_exposure_available": bool(payload.get("factor_exposure_available")),
+        "position_contributions_available": bool(payload.get("position_contributions_available")),
+        "factor_exposure_source_artifacts": payload.get("factor_exposure_source_artifacts") or [],
+        "position_contribution_source_artifacts": payload.get("position_contribution_source_artifacts") or [],
         "confidence": payload.get("confidence") or "LOW",
         "reason_codes": sorted(set(reasons)),
         "source_artifacts": [str(path)] + list(payload.get("source_artifacts") or []),
@@ -851,17 +857,41 @@ def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str
     timing = sections["execution_timing_study"]
     promotion = sections["promotion_readiness_windows"]
     differentiation = sections["strategy_differentiation"]
+    risk = sections.get("risk_concentration") or {}
     blockers: list[str] = []
     if not timing.get("available"):
         blockers.append("missing_timing_coverage")
+    if not differentiation.get("factor_exposure_available"):
+        blockers.append("factor_exposure_missing")
+    if not differentiation.get("position_contributions_available"):
+        blockers.append("position_contributions_missing")
+    if not risk.get("available"):
+        blockers.append("missing_risk_summary")
     blockers.extend(str(code) for code in promotion.get("blockers") or [])
     blockers.extend(str(code) for code in differentiation.get("blockers") or [])
     if any(str(code).endswith("weak_differentiation") for code in blockers):
         blockers.append("weak_differentiation")
     if not blockers:
         blockers = ["no_tier1_blockers_detected"]
+    blocker_categories: set[str] = set()
+    data_reason_tokens = ("missing", "unavailable", "coverage", "bad_schema", "parser_error", "empty", "date_differs_from_target")
+    reason_pool = list(timing.get("reason_codes") or []) + list(differentiation.get("reason_codes") or []) + blockers
+    if any(any(token in str(reason) for token in data_reason_tokens) for reason in reason_pool):
+        blocker_categories.add("DATA_COVERAGE")
+    if "missing_risk_summary" in blockers:
+        blocker_categories.add("RISK_COVERAGE")
+    if any("insufficient_observations" in str(reason) for reason in list(promotion.get("reason_codes") or []) + list(promotion.get("blockers") or [])):
+        blocker_categories.add("OBSERVATION_WINDOW")
+    if any("weak_differentiation" in str(reason) for reason in reason_pool):
+        blocker_categories.add("MODEL_DIFFERENTIATION")
+    if not blocker_categories:
+        blocker_categories.add("NONE")
     promotion_recommendation = str(promotion.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED")
-    if promotion_recommendation.startswith("PROMOTION_REVIEW_READY") and differentiation.get("available") and "weak_differentiation" not in blockers:
+    promotion_blocked = any(
+        blocker != "no_tier1_blockers_detected"
+        for blocker in blockers
+    )
+    if promotion_recommendation.startswith("PROMOTION_REVIEW_READY") and differentiation.get("available") and timing.get("available") and not promotion_blocked:
         recommendation = promotion_recommendation
     else:
         recommendation = "No promotion recommended"
@@ -870,12 +900,17 @@ def _build_tier1_research_controls_section(sections: dict[str, Any]) -> dict[str
         "execution_timing_status": "available" if timing.get("available") else "missing_or_unavailable",
         "promotion_readiness_status": "available" if promotion.get("available") else "missing_or_unavailable",
         "strategy_differentiation_status": "available" if differentiation.get("available") else "missing_or_unavailable",
+        "factor_exposure_status": "available" if differentiation.get("factor_exposure_available") else "missing_or_unavailable",
+        "position_contribution_status": "available" if differentiation.get("position_contributions_available") else "missing_or_unavailable",
+        "differentiation_confidence": differentiation.get("confidence") or "LOW",
+        "blocker_categories": sorted(blocker_categories),
         "recommendation": recommendation,
         "blockers": sorted(set(blockers)),
         "reason_codes": sorted(set(
             list(timing.get("reason_codes") or [])
             + list(promotion.get("reason_codes") or [])
             + list(differentiation.get("reason_codes") or [])
+            + list(risk.get("reason_codes") or [])
         )) or ["ok"],
     }
 
@@ -933,6 +968,10 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Run .venv/bin/python scripts/build_promotion_readiness_windows.py --date YYYY-MM-DD to populate 20/40/60-day promotion readiness.")
     if not sections["strategy_differentiation"].get("available"):
         actions.append("Run .venv/bin/python scripts/build_strategy_differentiation.py --date YYYY-MM-DD to populate strategy differentiation evidence.")
+    if sections["strategy_differentiation"].get("available") and not sections["strategy_differentiation"].get("factor_exposure_available"):
+        actions.append("Generate or refresh canonical factor exposure artifacts, then rebuild strategy differentiation evidence.")
+    if sections["strategy_differentiation"].get("available") and not sections["strategy_differentiation"].get("position_contributions_available"):
+        actions.append("Run .venv/bin/python scripts/build_position_attribution.py --date YYYY-MM-DD, then rebuild strategy differentiation evidence.")
     if signal.get("early_evidence"):
         actions.append("Accumulate more decision attribution observations before treating signal hit rates as durable.")
     if (
@@ -1353,6 +1392,10 @@ def _render_tier1_md(section: dict[str, Any]) -> list[str]:
         f"Execution timing study: {_md(section.get('execution_timing_status'))}",
         f"Promotion readiness windows: {_md(section.get('promotion_readiness_status'))}",
         f"Strategy differentiation: {_md(section.get('strategy_differentiation_status'))}",
+        f"Factor exposure inputs: {_md(section.get('factor_exposure_status'))}",
+        f"Position contribution inputs: {_md(section.get('position_contribution_status'))}",
+        f"Differentiation confidence: {_md(section.get('differentiation_confidence'))}",
+        f"Blocker categories: {_md(section.get('blocker_categories'))}",
         f"Recommendation: {_md(section.get('recommendation'))}",
         f"Blockers: {_md(section.get('blockers'))}",
         f"Reason codes: {_md(section.get('reason_codes'))}",
@@ -1408,6 +1451,8 @@ def _render_strategy_differentiation_md(section: dict[str, Any]) -> list[str]:
         "## Strategy Differentiation",
         "",
         f"Available: {_md(section.get('available'))}",
+        f"Factor exposure inputs: {_md('available' if section.get('factor_exposure_available') else 'missing_or_unavailable')}",
+        f"Position contribution inputs: {_md('available' if section.get('position_contributions_available') else 'missing_or_unavailable')}",
         f"Blockers: {_md(section.get('blockers'))}",
         f"Confidence: {_md(section.get('confidence'))}",
         f"Reason codes: {_md(section.get('reason_codes'))}",

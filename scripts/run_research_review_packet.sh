@@ -74,6 +74,9 @@ run_best_effort "building decision attribution" \
 run_best_effort "building risk summary" \
     python3 scripts/build_risk_summary.py --date "${TRADE_DATE}"
 
+run_best_effort "hydrating execution timing minute bars" \
+    python3 scripts/build_execution_timing_cache.py --date "${TRADE_DATE}"
+
 run_best_effort "building execution timing counterfactual" \
     python3 scripts/build_execution_timing_counterfactual.py --date "${TRADE_DATE}"
 

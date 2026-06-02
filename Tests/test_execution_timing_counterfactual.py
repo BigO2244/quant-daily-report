@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from research.execution_timing_counterfactual import build_execution_timing_counterfactual
+from research.execution_timing_cache import build_execution_timing_cache, resolve_execution_timing_cache_request
 from scripts.research.intraday_research_cache import cache_path_for
 
 
@@ -112,3 +113,42 @@ def test_execution_timing_empty_payload(tmp_path):
 
     assert payload["available"] is False
     assert "empty_planned_payload" in payload["reason_codes"]
+
+
+def test_execution_timing_cache_resolves_execution_date_from_planned_for(tmp_path):
+    plan_date = "2026-06-01"
+    _write_json(
+        tmp_path / "outputs" / "precompute" / plan_date / "planned_execution_payload.json",
+        {
+            "trade_date": plan_date,
+            "planned_for": "2026-06-02T09:35:00-04:00",
+            "trades": [{"ticker": "AAA", "side": "BUY", "shares": 10}],
+        },
+    )
+
+    request = resolve_execution_timing_cache_request(plan_date=plan_date, plan_root=tmp_path / "outputs" / "precompute")
+
+    assert request.execution_date == "2026-06-02"
+    assert "execution_date_derived_from_planned_for" in request.reason_codes
+
+
+def test_execution_timing_cache_dry_run_writes_deterministic_status_without_fetch(tmp_path):
+    plan_date = "2026-06-01"
+    _write_plan(tmp_path, plan_date, [{"ticker": "AAA", "side": "BUY", "shares": 10}])
+
+    payload = build_execution_timing_cache(plan_date=plan_date, repo_root=tmp_path, dry_run=True)
+
+    assert payload["overall_status"] == "DRY_RUN"
+    assert payload["execution_date"] == plan_date
+    status_path = tmp_path / "outputs" / "research" / "execution_timing" / plan_date / "cache_status.json"
+    assert status_path.exists()
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["dry_run"] is True
+    assert status["reason_codes"] == ["ok"]
+
+
+def test_execution_timing_cache_missing_plan_skips_with_reason(tmp_path):
+    payload = build_execution_timing_cache(plan_date="2026-06-01", repo_root=tmp_path)
+
+    assert payload["overall_status"] == "SKIPPED"
+    assert "plan_payload_missing" in payload["reason_codes"]

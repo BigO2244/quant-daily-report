@@ -35,6 +35,18 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _read_json_with_reason(path: Path, prefix: str) -> tuple[dict[str, Any] | None, list[str]]:
+    if not path.exists():
+        return None, []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, [f"{prefix}_parser_error"]
+    if not isinstance(payload, dict):
+        return None, [f"{prefix}_bad_schema"]
+    return payload, []
+
+
 def _round(value: Any, digits: int = 10) -> float | None:
     if value is None:
         return None
@@ -45,6 +57,66 @@ def _round(value: Any, digits: int = 10) -> float | None:
     if math.isnan(f) or math.isinf(f):
         return None
     return round(f, digits)
+
+
+def _date_from_path(path: Path) -> str | None:
+    for part in reversed(path.parts):
+        try:
+            pd.Timestamp(part)
+        except Exception:
+            continue
+        return part
+    return None
+
+
+def _payload_date(payload: dict[str, Any], path: Path) -> str | None:
+    for key in ("date", "trade_date", "as_of_date", "data_through_date"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            try:
+                return pd.Timestamp(value).date().isoformat()
+            except Exception:
+                continue
+    return _date_from_path(path)
+
+
+def _is_on_or_before(left: str | None, right: str) -> bool:
+    if not left:
+        return True
+    try:
+        return pd.Timestamp(left) <= pd.Timestamp(right)
+    except Exception:
+        return False
+
+
+def _dated_artifact_candidates(base: Path, filename: str, trade_date: str) -> list[Path]:
+    candidates: list[Path] = []
+    exact = base / trade_date / filename
+    if exact.exists():
+        candidates.append(exact)
+    if base.exists():
+        dated = []
+        for child in base.iterdir():
+            if not child.is_dir() or child.name == trade_date:
+                continue
+            try:
+                pd.Timestamp(child.name)
+            except Exception:
+                continue
+            if child.name <= trade_date and (child / filename).exists():
+                dated.append(child / filename)
+        candidates.extend(sorted(dated, key=lambda path: path.parent.name, reverse=True))
+        latest = base / "latest" / filename
+        if latest.exists():
+            candidates.append(latest)
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
 
 
 def _latest_shadow_date(repo: Path, trade_date: str) -> str | None:
@@ -108,25 +180,43 @@ def _load_nav_returns(repo: Path, trade_date: str, lookback: int = 60) -> tuple[
 
 
 def _load_factor_exposure(repo: Path, trade_date: str) -> tuple[dict[str, Any], list[str], list[str]]:
-    path = repo / "outputs" / "attribution" / trade_date / "factor_exposure.json"
-    payload = _read_json(path)
-    if payload and isinstance(payload.get("strategies"), dict):
-        return payload["strategies"], [str(path)], []
-    risk_path = repo / "outputs" / "risk_summary" / trade_date / "risk_summary.json"
-    risk = _read_json(risk_path)
-    if risk and isinstance(risk.get("strategies"), dict):
-        return risk["strategies"], [str(risk_path)], ["factor_exposure_missing"]
-    return {}, [], ["factor_exposure_missing"]
+    reasons: list[str] = []
+    candidates = _dated_artifact_candidates(repo / "outputs" / "attribution", "factor_exposure.json", trade_date)
+    candidates.extend(_dated_artifact_candidates(repo / "outputs" / "research" / "factor_exposure", "factor_exposure.json", trade_date))
+    candidates.extend(_dated_artifact_candidates(repo / "outputs" / "risk_summary", "risk_summary.json", trade_date))
+    for path in candidates:
+        payload, parse_reasons = _read_json_with_reason(path, "factor_exposure")
+        reasons.extend(parse_reasons)
+        if not payload:
+            continue
+        artifact_date = _payload_date(payload, path)
+        if "latest" in path.parts and not artifact_date:
+            reasons.append("factor_exposure_latest_artifact_date_missing")
+            continue
+        if not _is_on_or_before(artifact_date, trade_date):
+            reasons.append("factor_exposure_future_artifact_ignored")
+            continue
+        strategies = payload.get("strategies")
+        if not isinstance(strategies, dict):
+            reasons.append("factor_exposure_bad_schema")
+            continue
+        usable = {str(strategy): value for strategy, value in sorted(strategies.items()) if isinstance(value, dict) and value}
+        if not usable:
+            reasons.append("empty_factor_exposure")
+            continue
+        selected_reasons = [reason for reason in sorted(set(reasons)) if reason not in {"empty_factor_exposure"}]
+        if artifact_date and artifact_date != trade_date:
+            selected_reasons.append("factor_exposure_date_differs_from_target")
+        if "risk_summary" in path.parts:
+            selected_reasons.append("factor_exposure_source_risk_summary")
+        return usable, [str(path)], sorted(set(selected_reasons))
+    return {}, [], sorted(set(reasons + ["factor_exposure_missing"]))
 
 
-def _load_contributions(repo: Path, trade_date: str) -> tuple[dict[str, dict[str, float]], list[str], list[str]]:
-    path = repo / "outputs" / "attribution" / trade_date / "position_attribution.json"
-    payload = _read_json(path)
-    if not payload:
-        return {}, [], ["position_attribution_missing"]
+def _parse_position_attribution(payload: dict[str, Any]) -> tuple[dict[str, dict[str, float]], list[str]]:
     rows = payload.get("positions") or payload.get("position_attribution") or []
     if not isinstance(rows, list):
-        return {}, [str(path)], ["position_attribution_bad_schema"]
+        return {}, ["position_attribution_bad_schema"]
     out: dict[str, dict[str, float]] = {}
     for row in rows:
         if not isinstance(row, dict):
@@ -136,10 +226,98 @@ def _load_contributions(repo: Path, trade_date: str) -> tuple[dict[str, dict[str
         contribution = row.get("pnl_contribution_pct")
         if contribution is None:
             contribution = row.get("pnl_contribution")
+        if contribution is None:
+            contribution = row.get("contribution")
         value = _round(contribution)
         if strategy and symbol and value is not None:
             out.setdefault(strategy, {})[symbol] = value
-    return out, [str(path)], [] if out else ["position_contributions_missing"]
+    return out, [] if out else ["position_contributions_empty"]
+
+
+def _ordered_windows(windows: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    def _key(item: tuple[str, Any]) -> tuple[int, str]:
+        name, _payload = item
+        digits = "".join(ch for ch in str(name) if ch.isdigit())
+        return (int(digits) if digits else 9999, str(name))
+
+    return [
+        (str(name), payload)
+        for name, payload in sorted(windows.items(), key=_key)
+        if isinstance(payload, dict)
+    ]
+
+
+def _parse_contribution_report(payload: dict[str, Any]) -> tuple[dict[str, dict[str, float]], list[str]]:
+    strategies = payload.get("strategies")
+    if not isinstance(strategies, dict):
+        return {}, ["contribution_report_bad_schema"]
+    out: dict[str, dict[str, float]] = {}
+    for strategy, row in sorted(strategies.items()):
+        if not isinstance(row, dict):
+            continue
+        windows = row.get("windows")
+        if not isinstance(windows, dict):
+            continue
+        for _window_name, window_payload in _ordered_windows(windows):
+            positions = window_payload.get("positions")
+            if not isinstance(positions, list):
+                continue
+            values: dict[str, float] = {}
+            for position in positions:
+                if not isinstance(position, dict):
+                    continue
+                symbol = str(position.get("symbol") or position.get("ticker") or "").upper()
+                contribution = position.get("pnl_contribution_pct")
+                if contribution is None:
+                    contribution = position.get("contribution")
+                if contribution is None:
+                    contribution = position.get("pnl_contribution")
+                value = _round(contribution)
+                if symbol and value is not None:
+                    values[symbol] = value
+            if values:
+                out[str(strategy)] = values
+                break
+    return out, [] if out else ["position_contributions_empty"]
+
+
+def _load_contributions(repo: Path, trade_date: str) -> tuple[dict[str, dict[str, float]], list[str], list[str]]:
+    reasons: list[str] = []
+    attribution_root = repo / "outputs" / "attribution"
+    candidates = [
+        (path, "position_attribution")
+        for path in _dated_artifact_candidates(attribution_root, "position_attribution.json", trade_date)
+    ]
+    candidates.extend(
+        (path, "contribution_report")
+        for path in _dated_artifact_candidates(attribution_root, "contribution_report.json", trade_date)
+    )
+    for path, kind in candidates:
+        payload, parse_reasons = _read_json_with_reason(path, "position_contribution")
+        reasons.extend(parse_reasons)
+        if not payload:
+            continue
+        artifact_date = _payload_date(payload, path)
+        if "latest" in path.parts and not artifact_date:
+            reasons.append("position_contribution_latest_artifact_date_missing")
+            continue
+        if not _is_on_or_before(artifact_date, trade_date):
+            reasons.append("position_contribution_future_artifact_ignored")
+            continue
+        if kind == "position_attribution":
+            out, parse_reasons = _parse_position_attribution(payload)
+        else:
+            out, parse_reasons = _parse_contribution_report(payload)
+        reasons.extend(parse_reasons)
+        if not out:
+            continue
+        selected_reasons = [reason for reason in sorted(set(reasons)) if reason not in {"position_contributions_empty"}]
+        if artifact_date and artifact_date != trade_date:
+            selected_reasons.append("position_contribution_date_differs_from_target")
+        if kind == "contribution_report":
+            selected_reasons.append("position_contribution_source_contribution_report")
+        return out, [str(path)], sorted(set(selected_reasons))
+    return {}, [], sorted(set(reasons + ["position_contributions_missing"]))
 
 
 def _weighted_overlap(left: dict[str, float], right: dict[str, float]) -> float | None:
@@ -244,6 +422,14 @@ def _classify(holdings_overlap: float | None, return_corr: float | None, factor_
     return score, "WEAK", sorted(set(reasons + ["weak_behavioral_differentiation"]))
 
 
+def _coverage_reason_present(reasons: list[str]) -> bool:
+    return any(
+        token in str(reason)
+        for reason in reasons
+        for token in ("missing", "bad_schema", "parser_error", "empty", "date_differs_from_target")
+    )
+
+
 def build_strategy_differentiation(
     *,
     trade_date: str,
@@ -298,11 +484,16 @@ def build_strategy_differentiation(
         for row in pair_rows
         if row.get("differentiation_readiness_flag") == "WEAK"
     })
+    input_reasons = sorted(set(factor_reasons + contribution_reasons))
     payload = {
         "schema_version": SCHEMA_VERSION,
         "date": trade_date,
         "available": bool(holdings) and returns is not None,
-        "confidence": "LOW" if any(row["differentiation_readiness_flag"] == "UNKNOWN" for row in pair_rows) or factor_reasons else "MEDIUM",
+        "factor_exposure_available": bool(factors),
+        "position_contributions_available": bool(contributions),
+        "factor_exposure_source_artifacts": sorted(set(factor_sources)),
+        "position_contribution_source_artifacts": sorted(set(contribution_sources)),
+        "confidence": "LOW" if any(row["differentiation_readiness_flag"] == "UNKNOWN" for row in pair_rows) or _coverage_reason_present(input_reasons) else "MEDIUM",
         "pairs": pair_rows,
         "blockers": blockers,
         "reason_codes": sorted(set(holding_reasons + return_reasons + factor_reasons + contribution_reasons + blockers)) or ["ok"],

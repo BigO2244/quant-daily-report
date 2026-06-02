@@ -221,6 +221,10 @@ def _write_tier1_sources(root: Path, trade_date: str) -> None:
             "date": trade_date,
             "available": True,
             "confidence": "MEDIUM",
+            "factor_exposure_available": True,
+            "position_contributions_available": True,
+            "factor_exposure_source_artifacts": ["factor_exposure.json"],
+            "position_contribution_source_artifacts": ["position_attribution.json"],
             "blockers": ["caerus_lyra_vs_caerus_orion:weak_differentiation"],
             "pairs": [
                 {
@@ -374,3 +378,83 @@ def test_tier1_missing_degrades_gracefully_and_recommends_no_promotion(tmp_path)
     assert "build_execution_timing_counterfactual.py" in action_text
     assert "build_promotion_readiness_windows.py" in action_text
     assert "build_strategy_differentiation.py" in action_text
+
+
+def test_tier1_distinguishes_data_coverage_from_model_differentiation(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_optional_sources(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    tier1 = result["sections"]["tier1_research_controls"]
+    assert "MODEL_DIFFERENTIATION" in tier1["blocker_categories"]
+    assert "OBSERVATION_WINDOW" in tier1["blocker_categories"]
+    assert "DATA_COVERAGE" not in tier1["blocker_categories"]
+
+
+def test_tier1_missing_factor_and_contribution_inputs_are_data_coverage_blockers(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_optional_sources(tmp_path, trade_date)
+    _write_json(
+        tmp_path / "outputs" / "research" / "execution_timing" / trade_date / "execution_timing_summary.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "baseline_offset": "T+5m",
+            "baseline_time_et": "09:35",
+            "coverage_ratio": 1.0,
+            "symbols_evaluated": 2,
+            "symbols_missing_bars": [],
+            "reason_codes": ["ok"],
+        },
+    )
+    _write_json(
+        tmp_path / "outputs" / "research" / "promotion_readiness" / trade_date / "promotion_readiness_windows.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "MEDIUM",
+            "promotion_recommendation": "PROMOTION_REVIEW_READY:caerus_lyra",
+            "blockers": [],
+            "strategies": {},
+            "reason_codes": ["ok"],
+        },
+    )
+    _write_json(
+        tmp_path / "outputs" / "research" / "strategy_differentiation" / trade_date / "strategy_differentiation.json",
+        {
+            "date": trade_date,
+            "available": True,
+            "confidence": "LOW",
+            "factor_exposure_available": False,
+            "position_contributions_available": False,
+            "blockers": [],
+            "pairs": [
+                {
+                    "left_strategy": "caerus_lyra",
+                    "right_strategy": "caerus_orion",
+                    "differentiation_readiness_flag": "READY",
+                    "reason_codes": ["ok"],
+                }
+            ],
+            "reason_codes": ["factor_exposure_missing", "position_contributions_missing"],
+        },
+    )
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    tier1 = result["sections"]["tier1_research_controls"]
+    assert tier1["recommendation"] == "No promotion recommended"
+    assert tier1["factor_exposure_status"] == "missing_or_unavailable"
+    assert tier1["position_contribution_status"] == "missing_or_unavailable"
+    assert "DATA_COVERAGE" in tier1["blocker_categories"]
+    assert "MODEL_DIFFERENTIATION" not in tier1["blocker_categories"]
+    action_text = " ".join(result["sections"]["recommended_next_actions"])
+    assert "factor exposure" in action_text
+    assert "build_position_attribution.py" in action_text
