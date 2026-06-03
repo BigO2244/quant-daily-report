@@ -95,6 +95,12 @@ def compute_trade_count_contract(
     elif execution_results.get("orders_filled") is not None:
         orders_filled = _to_int(execution_results.get("orders_filled"))
         filled_source = "execution_results.orders_filled"
+    elif paper_summary.get("orders_filled_count") is not None:
+        # Final observed fills from the post-trade re-poll (re-polls broker order
+        # status after submission), not the submit-time broker_responses snapshot
+        # which is captured while orders are still ACCEPTED/pending.
+        orders_filled = _to_int(paper_summary.get("orders_filled_count"))
+        filled_source = "paper_summary.orders_filled_count"
     else:
         responses = _as_list(execution_results.get("broker_responses"))
         orders_filled = sum(

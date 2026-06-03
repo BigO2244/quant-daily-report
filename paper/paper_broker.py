@@ -3000,9 +3000,20 @@ def _capture_alpaca_posttrade_state(
         posttrade_recon,
         unresolved_orders,
     )
+    # Final observed fill count from the post-trade re-poll (orders_for_recon
+    # only contains orders whose broker status resolved to a positive filled
+    # quantity). This is authoritative over the submit-time broker_responses
+    # snapshot, which is captured while orders are still ACCEPTED/pending.
+    posttrade_filled_orders_count = sum(
+        1
+        for resolved in orders_for_recon
+        if str(resolved.get("resolved_order_status") or "").upper() == "FILLED"
+    )
     return {
         "alpaca_account_snapshot": alpaca_account_snapshot,
         "alpaca_positions_snapshot": alpaca_positions_snapshot,
+        "posttrade_filled_orders_count": int(posttrade_filled_orders_count),
+        "posttrade_resolved_orders_count": int(len(orders_for_recon)),
         "posttrade_account_snapshot_path": posttrade_account_snapshot_path,
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
         "posttrade_recon_path": str(posttrade_recon.get("report_path") or ""),
@@ -3839,6 +3850,7 @@ def run_paper_day(
     posttrade_repair_suggestions: List[str] = []
     posttrade_affected_symbols: List[str] = []
     posttrade_duplicate_fill_suspicions_count: int = 0
+    posttrade_filled_orders_count: int | None = None
     execution_outcome: str | None = None
     execution_reason: str | None = None
     execution_halt_reason: str | None = None
@@ -4397,6 +4409,10 @@ def run_paper_day(
                 posttrade_duplicate_fill_suspicions_count = int(
                     posttrade_state.get("posttrade_duplicate_fill_suspicions_count") or 0
                 )
+                if posttrade_state.get("posttrade_filled_orders_count") is not None:
+                    posttrade_filled_orders_count = int(
+                        posttrade_state.get("posttrade_filled_orders_count") or 0
+                    )
 
             if (
                 execution_outcome in {
@@ -4787,6 +4803,8 @@ def run_paper_day(
         "posttrade_recon_status": posttrade_recon_status,
         "posttrade_unresolved_orders": posttrade_unresolved_orders,
         "posttrade_unresolved_orders_count": int(len(posttrade_unresolved_orders)),
+        "posttrade_filled_orders_count": posttrade_filled_orders_count,
+        "orders_filled_count": posttrade_filled_orders_count,
         "posttrade_repair_suggestions": posttrade_repair_suggestions,
         "posttrade_affected_symbols": posttrade_affected_symbols,
         "posttrade_duplicate_fill_suspicions_count": posttrade_duplicate_fill_suspicions_count,

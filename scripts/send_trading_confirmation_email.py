@@ -457,11 +457,21 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     )
     halt_reason = results.get("halt_reason")
     operator_execution_status = str(results.get("operator_execution_status") or "").strip().lower()
+    reconciled_to_target_state = bool(results.get("reconciled_to_target_state"))
+    raw_execution_status = str(results.get("raw_execution_status") or "").strip()
+    raw_execution_reason = str(results.get("raw_execution_reason") or "").strip()
+    final_execution_reason = str(results.get("final_execution_reason") or "").strip()
 
     # Determine status display
     if status == STATUS_SKIPPED_DUPLICATE or (submitted > 0 and halt_reason and "duplicate" in halt_reason.lower()):
         status_display = "SKIPPED_DUPLICATE"
         status_emoji = "⏭️"
+    elif reconciled_to_target_state or operator_execution_status == "reconciled_success":
+        # Raw broker-abort PARTIAL that post-trade reconciliation confirmed
+        # reached the expected post-execution state. Surface the final status;
+        # the raw status/reason are preserved in the diagnostic section below.
+        status_display = "RECONCILED_SUCCESS"
+        status_emoji = "✅"
     elif operator_execution_status == "partial":
         status_display = "PARTIAL"
         status_emoji = "⚠️"
@@ -480,10 +490,33 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     # Build reason line
     if status_display == "SKIPPED_DUPLICATE":
         reason_line = f"Skip reason: Duplicate execution detected for run_id {run_id}"
+    elif status_display == "RECONCILED_SUCCESS":
+        reason_line = f"Final reason: {final_execution_reason or 'raw_partial_reconciled_to_target_state'}"
     elif halt_reason:
         reason_line = f"Halt reason: {halt_reason}"
     else:
         reason_line = "Halt reason: none"
+
+    # When the final status was upgraded by post-trade reconciliation, preserve a
+    # plainly-labelled diagnostic record of the raw (pre-reconciliation) status.
+    raw_diag_text = ""
+    raw_diag_html = ""
+    if reconciled_to_target_state and raw_execution_status:
+        raw_diag_text = (
+            "--- Raw Execution (pre-reconciliation) ---\n"
+            f"Raw status: {raw_execution_status}\n"
+            f"Raw reason: {raw_execution_reason or 'none'}\n"
+            "Note: final status upgraded after post-trade reconciliation confirmed "
+            "broker positions match the expected post-execution state.\n"
+        )
+        raw_diag_html = (
+            "<h3>🔎 Raw Execution (pre-reconciliation)</h3>"
+            f"<p><b>Raw status:</b> {html_escape(raw_execution_status)}</p>"
+            f"<p><b>Raw reason:</b> {html_escape(raw_execution_reason or 'none')}</p>"
+            "<p style='font-size: 0.9em; color: #666;'>Final status upgraded after "
+            "post-trade reconciliation confirmed broker positions match the expected "
+            "post-execution state.</p>"
+        )
 
     artifact_ref = f"Results artifact: {results_path}"
     execution_text = (
@@ -593,6 +626,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
 
     body_text = (
         f"{execution_text}\n"
+        f"{raw_diag_text}{chr(10) if raw_diag_text else ''}"
         f"{recon_text}\n"
         f"{perf_text}"
         f"{shadow_text}"
@@ -602,6 +636,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         "<html><body>"
         f"<h2>Trading Confirmation {html_escape(trade_date)} [{html_escape(status_display)}]</h2>"
         f"{execution_html}"
+        f"{('<hr>' + raw_diag_html) if raw_diag_html else ''}"
         f"<hr>"
         f"{recon_html}"
         f"<hr>"

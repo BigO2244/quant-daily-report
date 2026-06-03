@@ -15,6 +15,114 @@ STATUS_EXECUTED = "EXECUTED"
 STATUS_SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE"
 STATUS_IDEMPOTENT_REPLAY = "IDEMPOTENT_REPLAY"
 
+# Final-state reconciliation override (post-trade). When an execution is raised
+# as a broker-abort PARTIAL purely because broker fills were not yet observable
+# at the buy-decision point, but post-trade reconciliation later confirms the
+# broker matches the expected post-execution state, the *raw* status is preserved
+# as diagnostic metadata and a *final* status of RECONCILED_SUCCESS is surfaced.
+STATUS_RECONCILED_SUCCESS = "RECONCILED_SUCCESS"
+RECONCILED_SUCCESS_OPERATOR_STATUS = "reconciled_success"
+RECONCILED_TO_TARGET_REASON = "raw_partial_reconciled_to_target_state"
+
+# Only genuine broker-abort partials are eligible for the override. A HALTED that
+# originates from pretrade reconciliation failure, market-closed, stale prices,
+# signal-date mismatch, etc. must NEVER be upgraded.
+_RECONCILABLE_EXECUTION_OUTCOMES = {
+    "partial_execution_broker_abort",
+    "post_submit_artifact_failure",
+}
+_OK_RECONCILIATION_STATUSES = {"OK_RECONCILED", "OK"}
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def compute_final_execution_status(
+    *,
+    raw_execution_status: str | None,
+    raw_operator_execution_status: str | None,
+    execution_outcome: str | None = None,
+    raw_execution_reason: str | None = None,
+    posttrade_recon_status: str | None = None,
+    posttrade_unresolved_orders_count: object = 0,
+    skipped_buy_count: object = 0,
+    blocked_buy_count: object = 0,
+    pending_buy_count: object = 0,
+    rejected_count: object = 0,
+    broker_reject_status: str | None = None,
+    submitted_count: object = 0,
+) -> dict:
+    """Derive a final, reconciliation-aware execution status.
+
+    The raw execution status / reason are always preserved verbatim in the
+    returned mapping. ``final_execution_status`` is only upgraded to
+    :data:`STATUS_RECONCILED_SUCCESS` when ALL of the following hold:
+
+    1. The raw outcome is a broker-abort PARTIAL (not a pretrade/market halt).
+    2. Post-trade reconciliation is OK_RECONCILED (broker matches expected
+       post-execution state).
+    3. No planned orders were skipped/deferred (``skipped``/``blocked``/
+       ``pending`` buy counts are all zero) — otherwise a green reconciliation
+       only proves the *submitted* subset matched, and upgrading would mask a
+       genuinely partial execution.
+    4. No orders were rejected by the broker.
+    5. At least one order was submitted and every submitted order resolved to a
+       terminal/acceptable state (no unresolved orders).
+
+    When any condition fails, ``final_*`` mirrors ``raw_*`` unchanged.
+    """
+    raw_status = str(raw_execution_status or "").strip().upper()
+    raw_operator = str(raw_operator_execution_status or "").strip().lower()
+    outcome = str(execution_outcome or "").strip()
+    recon_status = str(posttrade_recon_status or "").strip().upper()
+
+    result = {
+        "raw_execution_status": raw_status or None,
+        "raw_operator_execution_status": raw_operator or None,
+        "raw_execution_reason": (str(raw_execution_reason).strip() or None)
+        if raw_execution_reason is not None
+        else None,
+        "final_execution_status": raw_status or None,
+        "final_operator_execution_status": raw_operator or None,
+        "final_execution_reason": (str(raw_execution_reason).strip() or None)
+        if raw_execution_reason is not None
+        else None,
+        "reconciled_to_target_state": False,
+        "reconciliation_override_applied": False,
+    }
+
+    # Condition 1 — candidate must be a broker-abort partial.
+    if raw_operator != "partial" or outcome not in _RECONCILABLE_EXECUTION_OUTCOMES:
+        return result
+
+    recon_ok = recon_status in _OK_RECONCILIATION_STATUSES  # conditions 2
+    no_unresolved = _safe_int(posttrade_unresolved_orders_count) == 0  # condition 5
+    no_skipped = (
+        _safe_int(skipped_buy_count) == 0
+        and _safe_int(blocked_buy_count) == 0
+        and _safe_int(pending_buy_count) == 0
+    )  # condition 3
+    no_rejects = (
+        _safe_int(rejected_count) == 0 and not str(broker_reject_status or "").strip()
+    )  # condition 4
+    has_submissions = _safe_int(submitted_count) > 0  # condition 5
+
+    if recon_ok and no_unresolved and no_skipped and no_rejects and has_submissions:
+        result.update(
+            {
+                "final_execution_status": STATUS_RECONCILED_SUCCESS,
+                "final_operator_execution_status": RECONCILED_SUCCESS_OPERATOR_STATUS,
+                "final_execution_reason": RECONCILED_TO_TARGET_REASON,
+                "reconciled_to_target_state": True,
+                "reconciliation_override_applied": True,
+            }
+        )
+    return result
+
 
 def normalize_status(
     execution_status: str | None = None,

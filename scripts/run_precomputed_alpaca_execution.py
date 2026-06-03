@@ -41,7 +41,11 @@ from brokers.alpaca_snapshot import (
 from core.execution_audit import write_executor_audit, write_planner_audit
 from core.execution_integrity import write_execution_integrity_audit
 from core.execution_lifecycle_timeline import write_execution_lifecycle_timeline
-from core.execution_payload import normalize_status, write_canonical_execution_payload
+from core.execution_payload import (
+    compute_final_execution_status,
+    normalize_status,
+    write_canonical_execution_payload,
+)
 from core.execution_summary import write_execution_artifacts
 from core.live_retry_policy import evaluate_live_retry
 from core.operator_summary import (
@@ -831,7 +835,9 @@ def _write_execution_email_payload(trade_date: str, payload: dict[str, object]) 
 def _write_execution_results(run_root: Path, payload: dict[str, object], paper_summary: dict[str, object]) -> Path:
     submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
     operator_status = str(payload.get("operator_execution_status") or "").strip().lower()
-    if operator_status == "partial":
+    if operator_status == "reconciled_success":
+        results_status = "RECONCILED_SUCCESS"
+    elif operator_status == "partial":
         results_status = "PARTIAL"
     elif operator_status == "failed":
         results_status = "HALTED"
@@ -848,6 +854,7 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "submitted_count": int(payload.get("submitted_count") or 0),
         "accepted_count": int(payload.get("accepted_count") or 0),
         "rejected_count": int(payload.get("rejected_count") or 0),
+        "orders_filled_count": int(payload.get("orders_filled_count") or 0),
         "duplicate_count": int(submission_summary.get("remote_existing_orders") or 0),
         "broker_responses": list((paper_summary or {}).get("alpaca_submissions") or []),
         "execution_outcome": payload.get("execution_outcome"),
@@ -873,6 +880,14 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "buy_phase_decision_reason": payload.get("buy_phase_decision_reason"),
         "timing_status": payload.get("timing_status"),
         "operator_execution_status": payload.get("operator_execution_status"),
+        "raw_execution_status": payload.get("raw_execution_status"),
+        "raw_operator_execution_status": payload.get("raw_operator_execution_status"),
+        "raw_execution_reason": payload.get("raw_execution_reason"),
+        "final_execution_status": payload.get("final_execution_status"),
+        "final_operator_execution_status": payload.get("final_operator_execution_status"),
+        "final_execution_reason": payload.get("final_execution_reason"),
+        "reconciled_to_target_state": bool(payload.get("reconciled_to_target_state")),
+        "reconciliation_override_applied": bool(payload.get("reconciliation_override_applied")),
     }
     out_path = run_root / "execution_results.json"
     safe_write_text(out_path, json.dumps(results, indent=2, default=str) + "\n", allow_overwrite=True)
@@ -1455,6 +1470,47 @@ def main(argv: list[str] | None = None) -> int:
         if args.continuation_mode != "none":
             execution_payload["continuation_mode"] = str(args.continuation_mode)
         execution_payload["operator_execution_status"] = _operator_execution_status(execution_payload)
+
+        # Final-state reconciliation override. A broker-abort PARTIAL is raised at
+        # the buy-decision point before broker fills are observable; if post-trade
+        # reconciliation later confirms the broker matches the expected
+        # post-execution state AND nothing was skipped/deferred/rejected, surface a
+        # final RECONCILED_SUCCESS while preserving the raw status/reason verbatim.
+        final_status_meta = compute_final_execution_status(
+            raw_execution_status=execution_payload.get("execution_status"),
+            raw_operator_execution_status=execution_payload.get("operator_execution_status"),
+            execution_outcome=execution_payload.get("execution_outcome"),
+            raw_execution_reason=execution_payload.get("halt_reason")
+            or execution_payload.get("execution_reason"),
+            posttrade_recon_status=(paper_summary or {}).get("posttrade_recon_status"),
+            posttrade_unresolved_orders_count=(paper_summary or {}).get(
+                "posttrade_unresolved_orders_count"
+            )
+            or 0,
+            skipped_buy_count=execution_payload.get("skipped_buy_count") or 0,
+            blocked_buy_count=execution_payload.get("blocked_buy_count") or 0,
+            pending_buy_count=execution_payload.get("pending_buy_count") or 0,
+            rejected_count=execution_payload.get("rejected_count") or 0,
+            broker_reject_status=execution_payload.get("broker_reject_status"),
+            submitted_count=execution_payload.get("submitted_count") or 0,
+        )
+        execution_payload.update(final_status_meta)
+        if final_status_meta["reconciled_to_target_state"]:
+            # Promote the active status; raw_* fields retain the diagnostic record.
+            execution_payload["execution_status"] = final_status_meta["final_execution_status"]
+            execution_payload["operator_execution_status"] = final_status_meta[
+                "final_operator_execution_status"
+            ]
+            execution_payload["halt_reason"] = None
+            logger.info(
+                "[LIVE_EXECUTION] reconciliation override applied raw_status=%s raw_reason=%s "
+                "-> final_status=%s final_reason=%s recon=%s",
+                final_status_meta["raw_execution_status"],
+                final_status_meta["raw_execution_reason"],
+                final_status_meta["final_execution_status"],
+                final_status_meta["final_execution_reason"],
+                (paper_summary or {}).get("posttrade_recon_status"),
+            )
 
         # Extract capital budget metadata for operator summary and retry decisions.
         _capital_budget = dict((paper_summary or {}).get("capital_budget") or {})

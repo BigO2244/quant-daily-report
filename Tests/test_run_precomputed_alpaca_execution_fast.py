@@ -114,10 +114,62 @@ def _load_module(tmp_path: Path):
         "core.execution_lifecycle_timeline",
         write_execution_lifecycle_timeline=lambda **_kwargs: None,
     )
+    def _compute_final_execution_status(**kwargs):
+        # Faithful, dependency-free mirror of
+        # core.execution_payload.compute_final_execution_status. Note the stubbed
+        # EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT value is "partial_broker_abort".
+        raw_status = str(kwargs.get("raw_execution_status") or "").strip().upper()
+        raw_operator = str(kwargs.get("raw_operator_execution_status") or "").strip().lower()
+        outcome = str(kwargs.get("execution_outcome") or "").strip()
+        recon = str(kwargs.get("posttrade_recon_status") or "").strip().upper()
+        raw_reason = kwargs.get("raw_execution_reason") or None
+
+        def _i(value):
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        result = {
+            "raw_execution_status": raw_status or None,
+            "raw_operator_execution_status": raw_operator or None,
+            "raw_execution_reason": raw_reason,
+            "final_execution_status": raw_status or None,
+            "final_operator_execution_status": raw_operator or None,
+            "final_execution_reason": raw_reason,
+            "reconciled_to_target_state": False,
+            "reconciliation_override_applied": False,
+        }
+        if raw_operator == "partial" and outcome in {
+            "partial_broker_abort",
+            "post_submit_artifact_failure",
+        }:
+            if (
+                recon in {"OK_RECONCILED", "OK"}
+                and _i(kwargs.get("posttrade_unresolved_orders_count")) == 0
+                and _i(kwargs.get("skipped_buy_count")) == 0
+                and _i(kwargs.get("blocked_buy_count")) == 0
+                and _i(kwargs.get("pending_buy_count")) == 0
+                and _i(kwargs.get("rejected_count")) == 0
+                and not str(kwargs.get("broker_reject_status") or "").strip()
+                and _i(kwargs.get("submitted_count")) > 0
+            ):
+                result.update(
+                    {
+                        "final_execution_status": "RECONCILED_SUCCESS",
+                        "final_operator_execution_status": "reconciled_success",
+                        "final_execution_reason": "raw_partial_reconciled_to_target_state",
+                        "reconciled_to_target_state": True,
+                        "reconciliation_override_applied": True,
+                    }
+                )
+        return result
+
     sys.modules["core.execution_payload"] = _module(
         "core.execution_payload",
         normalize_status=lambda **_kwargs: "HALTED",
         write_canonical_execution_payload=_write_canonical_execution_payload,
+        compute_final_execution_status=_compute_final_execution_status,
     )
     sys.modules["core.execution_summary"] = _module(
         "core.execution_summary",
