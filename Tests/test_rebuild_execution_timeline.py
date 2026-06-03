@@ -58,6 +58,73 @@ def test_successful_write_for_minimal_fixture(tmp_path: Path, monkeypatch) -> No
     assert timeline["provenance"]["execution_source"] == "planned_payload_exact"
 
 
+def test_timeline_surfaces_cash_gate_diagnostics(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_root = _write_minimal_run(tmp_path, "run-cash-gate")
+    diagnostics = {
+        "schema_version": "cash_gate_diagnostics.v1",
+        "buying_power_before_sells": 0.0,
+        "estimated_sell_proceeds_submitted": 100.0,
+        "buying_power_after_sell_submission": 0.0,
+        "buying_power_after_posttrade_repoll": 950.0,
+        "buy_notional_submitted_immediate": 0.0,
+        "buy_notional_skipped_or_deferred_due_to_cash": 900.0,
+        "raw_cash_gate_triggered": True,
+        "raw_cash_gate_reason": "buy_blocked_pending_sells_required_for_cash",
+        "temporary_cash_shortfall_later_resolved": True,
+        "raw_cash_gate_despite_final_reconciled_success": True,
+        "sell_phase_poll_observations": [
+            {
+                "poll": 1,
+                "account_buying_power": 0.0,
+                "orders": [{"order_id": "run:AAA:SELL", "status": "ACCEPTED"}],
+            }
+        ],
+        "posttrade_sell_fill_observations": [
+            {
+                "order_id": "run:AAA:SELL",
+                "status": "FILLED",
+                "seconds_to_fill": 4.0,
+            }
+        ],
+    }
+    payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "submitted_sell_count": 1,
+            "submitted_buy_count": 0,
+            "sell_phase_status": "TIMEOUT",
+            "buy_phase_block_reason": "buy_blocked_pending_sells_required_for_cash",
+            "cash_gate_diagnostics": diagnostics,
+        }
+    )
+    _write_json(run_root / "execution_payload.json", payload)
+
+    result = rebuild_execution_timeline(repo_root=tmp_path, run_id="run-cash-gate")
+
+    assert result["status"] == "OK"
+    timeline = json.loads((run_root / "execution_timeline.json").read_text(encoding="utf-8"))
+    assert timeline["cash_gate_diagnostics"]["raw_cash_gate_triggered"] is True
+    buy_completion = next(
+        event for event in timeline["events"] if event["checkpoint"] == "buy_phase_completion"
+    )
+    assert (
+        buy_completion["details"]["cash_gate_diagnostics"][
+            "buy_notional_skipped_or_deferred_due_to_cash"
+        ]
+        == 900.0
+    )
+    reconciliation = next(
+        event for event in timeline["events"] if event["checkpoint"] == "reconciliation_state"
+    )
+    assert (
+        reconciliation["details"]["cash_gate_diagnostics"][
+            "temporary_cash_shortfall_later_resolved"
+        ]
+        is True
+    )
+
+
 def test_latest_resolution_from_latest_run_json(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     run_root = _write_minimal_run(tmp_path, "run-latest")

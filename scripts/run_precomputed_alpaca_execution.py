@@ -888,10 +888,46 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "final_execution_reason": payload.get("final_execution_reason"),
         "reconciled_to_target_state": bool(payload.get("reconciled_to_target_state")),
         "reconciliation_override_applied": bool(payload.get("reconciliation_override_applied")),
+        "cash_gate_diagnostics": payload.get("cash_gate_diagnostics"),
     }
     out_path = run_root / "execution_results.json"
     safe_write_text(out_path, json.dumps(results, indent=2, default=str) + "\n", allow_overwrite=True)
     return out_path
+
+
+def _finalize_cash_gate_diagnostics(
+    diagnostics: object,
+    final_status_meta: dict[str, object],
+) -> dict[str, object] | object:
+    if not isinstance(diagnostics, dict):
+        return diagnostics
+    payload = dict(diagnostics)
+    raw_reason = str(final_status_meta.get("raw_execution_reason") or "")
+    raw_cash_gate_triggered = bool(payload.get("raw_cash_gate_triggered")) or (
+        "cash_rebalance_incomplete" in raw_reason
+    )
+    reconciled_to_target = bool(final_status_meta.get("reconciled_to_target_state"))
+    payload["raw_cash_gate_triggered"] = raw_cash_gate_triggered
+    payload["raw_execution_status"] = final_status_meta.get("raw_execution_status")
+    payload["raw_operator_execution_status"] = final_status_meta.get(
+        "raw_operator_execution_status"
+    )
+    payload["raw_execution_reason"] = final_status_meta.get("raw_execution_reason")
+    payload["final_execution_status"] = final_status_meta.get("final_execution_status")
+    payload["final_operator_execution_status"] = final_status_meta.get(
+        "final_operator_execution_status"
+    )
+    payload["final_execution_reason"] = final_status_meta.get("final_execution_reason")
+    payload["reconciled_to_target_state"] = reconciled_to_target
+    payload["reconciliation_override_applied"] = bool(
+        final_status_meta.get("reconciliation_override_applied")
+    )
+    payload["raw_cash_gate_despite_final_reconciled_success"] = bool(
+        raw_cash_gate_triggered and reconciled_to_target
+    )
+    if raw_cash_gate_triggered and reconciled_to_target:
+        payload["temporary_cash_shortfall_later_resolved"] = True
+    return payload
 
 
 def _write_execution_timeline_artifacts(*, run_root: Path, trade_date: str, run_id: str) -> None:
@@ -1456,6 +1492,7 @@ def main(argv: list[str] | None = None) -> int:
             "security_master_asof_date",
             "security_master_path",
             "security_master_warnings",
+            "cash_gate_diagnostics",
         ):
             if key in (paper_summary or {}):
                 execution_payload[key] = (paper_summary or {}).get(key)
@@ -1495,6 +1532,10 @@ def main(argv: list[str] | None = None) -> int:
             submitted_count=execution_payload.get("submitted_count") or 0,
         )
         execution_payload.update(final_status_meta)
+        execution_payload["cash_gate_diagnostics"] = _finalize_cash_gate_diagnostics(
+            execution_payload.get("cash_gate_diagnostics"),
+            final_status_meta,
+        )
         if final_status_meta["reconciled_to_target_state"]:
             # Promote the active status; raw_* fields retain the diagnostic record.
             execution_payload["execution_status"] = final_status_meta["final_execution_status"]
@@ -1672,6 +1713,7 @@ def main(argv: list[str] | None = None) -> int:
             submitted_buy_count=int(execution_payload.get("submitted_buy_count") or 0),
             submitted_sell_count=int(execution_payload.get("submitted_sell_count") or 0),
             capital_allows_pending_buys=bool(execution_payload.get("capital_allows_pending_buys")),
+            cash_gate_diagnostics=execution_payload.get("cash_gate_diagnostics"),
             continuation_intended_orders_path=execution_payload.get("continuation_intended_orders_path"),
             continuation_source=execution_payload.get("continuation_source"),
             continuation_mode=execution_payload.get("continuation_mode"),

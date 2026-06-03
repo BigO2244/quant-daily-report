@@ -286,6 +286,36 @@ def test_warn_reconciliation_does_not_halt(tmp_path) -> None:
     assert live_exec._precompute_reconciliation_halt_reason({"reconciliation_decision": "WARN"}) is None
 
 
+def test_cash_gate_diagnostics_mark_raw_gate_reconciled_success(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+
+    diagnostics = live_exec._finalize_cash_gate_diagnostics(
+        {
+            "schema_version": "cash_gate_diagnostics.v1",
+            "raw_cash_gate_triggered": True,
+            "temporary_cash_shortfall_later_resolved": False,
+        },
+        {
+            "raw_execution_status": "HALTED",
+            "raw_operator_execution_status": "partial",
+            "raw_execution_reason": (
+                "partial_execution_broker_abort:"
+                "buy_blocked_pending_sells_required_for_cash:"
+                "cash_rebalance_incomplete"
+            ),
+            "final_execution_status": "RECONCILED_SUCCESS",
+            "final_operator_execution_status": "reconciled_success",
+            "final_execution_reason": "raw_partial_reconciled_to_target_state",
+            "reconciled_to_target_state": True,
+            "reconciliation_override_applied": True,
+        },
+    )
+
+    assert diagnostics["raw_cash_gate_despite_final_reconciled_success"] is True
+    assert diagnostics["temporary_cash_shortfall_later_resolved"] is True
+    assert diagnostics["raw_execution_reason"].endswith("cash_rebalance_incomplete")
+
+
 def test_equality_gate_observer_writes_artifacts_and_operator_summary(tmp_path, monkeypatch) -> None:
     live_exec = _load_module(tmp_path)
     from core import operator_summary

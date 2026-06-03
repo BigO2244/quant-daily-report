@@ -1795,6 +1795,31 @@ def _order_notional(order: Dict[str, object]) -> float:
     return float(qty * price)
 
 
+def _orders_notional(
+    orders: List[Dict[str, object]],
+    *,
+    side: str | None = None,
+    block_reasons: set[str] | None = None,
+) -> float:
+    expected_side = str(side or "").upper().strip()
+    sell_sides = {"SELL", "CLOSE", "REDUCE"}
+    total = 0.0
+    for order in orders or []:
+        actual_side = str(order.get("side") or "").upper()
+        if expected_side:
+            if expected_side == "SELL":
+                if actual_side not in sell_sides:
+                    continue
+            elif actual_side != expected_side:
+                continue
+        if block_reasons is not None:
+            reason = str(order.get("block_reason") or "").strip()
+            if reason not in block_reasons:
+                continue
+        total += _order_notional(order)
+    return float(total)
+
+
 def _positions_to_quantity_map(positions: List[Dict[str, object]]) -> Dict[str, float]:
     normalized: Dict[str, float] = {}
     for pos in positions or []:
@@ -1875,6 +1900,221 @@ def _order_filled_at(order: Dict[str, object] | None) -> str | None:
             if text:
                 return text
     return None
+
+
+def _sell_order_observation_from_meta(
+    *,
+    order: Dict[str, object],
+    submission_metadata: Dict[str, Dict[str, object]],
+) -> Dict[str, object]:
+    order_id = str(order.get("order_id") or "").strip()
+    meta = submission_metadata.get(order_id) or {}
+    return {
+        "order_id": order_id,
+        "ticker": str(order.get("ticker") or order.get("symbol") or "").upper().strip(),
+        "side": str(order.get("side") or "").upper().strip(),
+        "estimated_notional": _order_notional(order),
+        "submitted_at": str(meta.get("submitted_at") or order.get("submitted_at") or "").strip(),
+        "status": str(meta.get("status") or meta.get("latest_status") or "UNKNOWN").strip(),
+        "latest_status": str(meta.get("latest_status") or meta.get("status") or "UNKNOWN").strip(),
+        "filled_qty": meta.get("filled_qty"),
+        "filled_at": str(meta.get("filled_at") or "").strip() or None,
+        "last_polled_at": meta.get("last_polled_at"),
+        "seconds_to_fill": meta.get("seconds_to_fill"),
+        "alpaca_order_id": meta.get("alpaca_order_id"),
+    }
+
+
+def _sell_phase_poll_observation(
+    *,
+    poll: int,
+    account: Dict[str, object] | None,
+    observed_statuses: Dict[str, str],
+    sell_orders: List[Dict[str, object]],
+    submission_metadata: Dict[str, Dict[str, object]],
+) -> Dict[str, object]:
+    return {
+        "poll": int(poll),
+        "observed_at_utc": _utc_now_iso(),
+        "account_cash": _coerce_float((account or {}).get("cash"), None),
+        "account_buying_power": _coerce_float((account or {}).get("buying_power"), None),
+        "observed_statuses": dict(observed_statuses or {}),
+        "orders": [
+            _sell_order_observation_from_meta(
+                order=order,
+                submission_metadata=submission_metadata,
+            )
+            for order in sell_orders or []
+        ],
+    }
+
+
+def _posttrade_sell_fill_observations(
+    resolved_orders: List[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    observations: List[Dict[str, object]] = []
+    for order in resolved_orders or []:
+        side = str(order.get("side") or "").upper()
+        if side not in {"SELL", "CLOSE", "REDUCE"}:
+            continue
+        filled_at = str(order.get("filled_at") or "").strip() or None
+        observations.append(
+            {
+                "order_id": str(order.get("order_id") or "").strip(),
+                "ticker": str(order.get("ticker") or order.get("symbol") or "").upper().strip(),
+                "side": side,
+                "status": str(order.get("resolved_order_status") or "").upper().strip(),
+                "filled_quantity": _coerce_float(order.get("filled_quantity"), None),
+                "filled_at": filled_at,
+                "submitted_at": str(order.get("submitted_at") or "").strip() or None,
+                "seconds_to_fill": order.get("seconds_to_fill"),
+                "fill_observation_source": "posttrade_order_repoll",
+            }
+        )
+    return observations
+
+
+def _enrich_submitted_orders_with_lifecycle(
+    submitted_orders: List[Dict[str, object]],
+    alpaca_submissions: List[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    lifecycle_by_order_id = {
+        str(row.get("order_id") or ""): dict(row)
+        for row in alpaca_submissions or []
+        if str(row.get("order_id") or "").strip()
+    }
+    enriched: List[Dict[str, object]] = []
+    for order in submitted_orders or []:
+        row = dict(order)
+        lifecycle = lifecycle_by_order_id.get(str(row.get("order_id") or "")) or {}
+        for key in (
+            "alpaca_order_id",
+            "submitted_at",
+            "filled_at",
+            "filled_qty",
+            "latest_status",
+            "status",
+            "first_seen_status",
+            "last_polled_at",
+            "seconds_to_fill",
+        ):
+            if lifecycle.get(key) not in (None, ""):
+                row[key] = lifecycle.get(key)
+        enriched.append(row)
+    return enriched
+
+
+def _first_fill_latency_seconds(observations: List[Dict[str, object]]) -> float | None:
+    latencies = [
+        _coerce_float(item.get("seconds_to_fill"), None)
+        for item in observations or []
+        if _coerce_float(item.get("seconds_to_fill"), None) is not None
+    ]
+    if not latencies:
+        return None
+    return float(min(latencies))
+
+
+def _build_cash_gate_diagnostics(
+    *,
+    planning_account_snapshot: Dict[str, object] | None,
+    sell_orders: List[Dict[str, object]],
+    submitted_orders: List[Dict[str, object]],
+    budget_skipped_orders: List[Dict[str, object]],
+    buy_budget_computed: float | None,
+    buy_budget_basis: str,
+    postsell_account_snapshot: Dict[str, object] | None,
+    alpaca_account_snapshot: Dict[str, object] | None,
+    sell_phase_status: str | None,
+    sell_phase_completion_reason: str | None,
+    sell_phase_observed_statuses: Dict[str, str],
+    sell_phase_polls: int,
+    sell_phase_poll_observations: List[Dict[str, object]],
+    sell_submit_started_at: str | None,
+    sell_submit_completed_at: str | None,
+    buy_submit_started_at: str | None,
+    buy_submit_completed_at: str | None,
+    pending_sell_count_at_buy_decision: int,
+    buy_phase_decision_reason: str | None,
+    execution_outcome: str | None,
+    execution_reason: str | None,
+    cash_rebalance_status: str | None,
+    posttrade_recon_status: str | None,
+    posttrade_resolved_orders: List[Dict[str, object]],
+) -> Dict[str, object]:
+    cash_block_reasons = {
+        BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH,
+        BUY_BLOCKED_INSUFFICIENT_BUYING_POWER,
+    }
+    posttrade_sell_fills = _posttrade_sell_fill_observations(posttrade_resolved_orders)
+    raw_cash_gate_triggered = bool(
+        str(cash_rebalance_status or "") == CASH_REBALANCE_INCOMPLETE
+        or any(
+            str(order.get("block_reason") or "") in cash_block_reasons
+            for order in budget_skipped_orders or []
+        )
+    )
+    clean_posttrade_recon = str(posttrade_recon_status or "").upper() in {
+        "OK",
+        "OK_RECONCILED",
+        "PASS",
+    }
+    return {
+        "schema_version": "cash_gate_diagnostics.v1",
+        "cash_before_sells": _coerce_float((planning_account_snapshot or {}).get("cash"), None),
+        "equity_before_sells": _coerce_float(
+            (planning_account_snapshot or {}).get("equity")
+            or (planning_account_snapshot or {}).get("portfolio_value"),
+            None,
+        ),
+        "buying_power_before_sells": _coerce_float(
+            (planning_account_snapshot or {}).get("buying_power"),
+            None,
+        ),
+        "estimated_sell_proceeds_planned": _orders_notional(sell_orders),
+        "estimated_sell_proceeds_submitted": _orders_notional(submitted_orders, side="SELL"),
+        "sell_submit_started_at": sell_submit_started_at,
+        "sell_submit_completed_at": sell_submit_completed_at,
+        "sell_phase_status": sell_phase_status,
+        "sell_phase_completion_reason": sell_phase_completion_reason,
+        "sell_phase_polls": int(sell_phase_polls or 0),
+        "sell_phase_observed_statuses_at_buy_decision": dict(sell_phase_observed_statuses or {}),
+        "sell_phase_poll_observations": list(sell_phase_poll_observations or []),
+        "pending_sell_count_at_buy_decision": int(pending_sell_count_at_buy_decision or 0),
+        "cash_after_sell_submission": _coerce_float((postsell_account_snapshot or {}).get("cash"), None),
+        "buying_power_after_sell_submission": _coerce_float(
+            (postsell_account_snapshot or {}).get("buying_power"),
+            None,
+        ),
+        "buy_budget_at_decision": buy_budget_computed,
+        "buy_budget_basis": buy_budget_basis,
+        "buy_phase_decision_reason": buy_phase_decision_reason,
+        "buy_submit_started_at": buy_submit_started_at,
+        "buy_submit_completed_at": buy_submit_completed_at,
+        "buy_notional_submitted_immediate": _orders_notional(submitted_orders, side="BUY"),
+        "buy_notional_skipped_or_deferred": _orders_notional(budget_skipped_orders, side="BUY"),
+        "buy_notional_skipped_or_deferred_due_to_cash": _orders_notional(
+            budget_skipped_orders,
+            side="BUY",
+            block_reasons=cash_block_reasons,
+        ),
+        "cash_rebalance_status": cash_rebalance_status,
+        "raw_cash_gate_triggered": raw_cash_gate_triggered,
+        "raw_cash_gate_reason": execution_reason if raw_cash_gate_triggered else None,
+        "raw_execution_outcome": execution_outcome,
+        "posttrade_cash": _coerce_float((alpaca_account_snapshot or {}).get("cash"), None),
+        "buying_power_after_posttrade_repoll": _coerce_float(
+            (alpaca_account_snapshot or {}).get("buying_power"),
+            None,
+        ),
+        "posttrade_recon_status": posttrade_recon_status,
+        "posttrade_sell_fill_observations": posttrade_sell_fills,
+        "first_sell_fill_latency_seconds": _first_fill_latency_seconds(posttrade_sell_fills),
+        "temporary_cash_shortfall_later_resolved": bool(
+            raw_cash_gate_triggered and clean_posttrade_recon
+        ),
+        "raw_cash_gate_despite_final_reconciled_success": False,
+    }
 
 
 def _submission_lifecycle_fields(
@@ -2054,11 +2294,14 @@ def _resolve_filled_orders_for_recon(
                 pending_count += 1
             continue
 
+        filled_at = _order_filled_at(current_order)
         resolved = dict(order)
         resolved["quantity"] = float(filled_qty)
         resolved["filled_quantity"] = float(filled_qty)
         resolved["filled_quantity_source"] = filled_quantity_source
         resolved["resolved_order_status"] = status
+        resolved["filled_at"] = filled_at
+        resolved["seconds_to_fill"] = _seconds_between(order.get("submitted_at"), filled_at)
         orders_for_recon.append(resolved)
         if filled_qty + 1e-12 < submitted_qty:
             partial_count += 1
@@ -2175,7 +2418,12 @@ def _wait_for_alpaca_sell_phase_completion(
     )
     expected_positions = _expected_positions_after_orders(starting_positions, sell_orders)
 
-    def _snapshot_state() -> tuple[Dict[str, object], List[Dict[str, object]], Dict[str, str]]:
+    def _snapshot_state() -> tuple[
+        Dict[str, object],
+        List[Dict[str, object]],
+        Dict[str, str],
+        List[Dict[str, object]],
+    ]:
         account = alpaca.get_account()
         positions = alpaca.get_positions()
         observed_statuses: Dict[str, str] = {}
@@ -2196,10 +2444,17 @@ def _wait_for_alpaca_sell_phase_completion(
                 status = str(current.get("status") or status or "UNKNOWN").upper()
             if internal_order_id:
                 observed_statuses[internal_order_id] = status
-        return account, positions, observed_statuses
+        observed_orders = [
+            _sell_order_observation_from_meta(
+                order=order,
+                submission_metadata=submission_metadata,
+            )
+            for order in sell_orders or []
+        ]
+        return account, positions, observed_statuses, observed_orders
 
     if not sell_orders:
-        account, positions, observed_statuses = _snapshot_state()
+        account, positions, observed_statuses, observed_orders = _snapshot_state()
         return {
             "status": "NO_SELLS",
             "completion_reason": "no_sell_orders",
@@ -2207,6 +2462,16 @@ def _wait_for_alpaca_sell_phase_completion(
             "account": account,
             "positions": positions,
             "observed_statuses": observed_statuses,
+            "observed_orders": observed_orders,
+            "poll_observations": [
+                _sell_phase_poll_observation(
+                    poll=1,
+                    account=account,
+                    observed_statuses=observed_statuses,
+                    sell_orders=sell_orders,
+                    submission_metadata=submission_metadata,
+                )
+            ],
         }
 
     logger.info(
@@ -2223,11 +2488,13 @@ def _wait_for_alpaca_sell_phase_completion(
     last_account: Dict[str, object] | None = None
     last_positions: List[Dict[str, object]] = []
     last_observed_statuses: Dict[str, str] = {}
+    last_observed_orders: List[Dict[str, object]] = []
+    poll_observations: List[Dict[str, object]] = []
 
     while True:
         polls += 1
         try:
-            account, positions, observed_statuses = _snapshot_state()
+            account, positions, observed_statuses, observed_orders = _snapshot_state()
         except Exception as exc:
             logger.warning("[ALPACA][SELL_PHASE] refresh_failed polls=%d error=%s", polls, exc)
             return {
@@ -2237,11 +2504,23 @@ def _wait_for_alpaca_sell_phase_completion(
                 "account": last_account,
                 "positions": last_positions,
                 "observed_statuses": last_observed_statuses,
+                "observed_orders": last_observed_orders,
+                "poll_observations": poll_observations,
             }
 
         last_account = account
         last_positions = positions
         last_observed_statuses = observed_statuses
+        last_observed_orders = observed_orders
+        poll_observations.append(
+            _sell_phase_poll_observation(
+                poll=polls,
+                account=account,
+                observed_statuses=observed_statuses,
+                sell_orders=sell_orders,
+                submission_metadata=submission_metadata,
+            )
+        )
         actual_positions = _positions_to_quantity_map(positions)
         positions_confirmed = _positions_match_expected_after_sells(
             actual_positions,
@@ -2274,6 +2553,8 @@ def _wait_for_alpaca_sell_phase_completion(
                 "account": account,
                 "positions": positions,
                 "observed_statuses": observed_statuses,
+                "observed_orders": observed_orders,
+                "poll_observations": poll_observations,
             }
 
         if terminal_failures:
@@ -2291,6 +2572,8 @@ def _wait_for_alpaca_sell_phase_completion(
                 "account": account,
                 "positions": positions,
                 "observed_statuses": observed_statuses,
+                "observed_orders": observed_orders,
+                "poll_observations": poll_observations,
             }
 
         remaining_seconds = deadline - time.monotonic()
@@ -2308,6 +2591,8 @@ def _wait_for_alpaca_sell_phase_completion(
                 "account": account,
                 "positions": positions,
                 "observed_statuses": observed_statuses,
+                "observed_orders": observed_orders,
+                "poll_observations": poll_observations,
             }
 
         logger.info(
@@ -3014,6 +3299,7 @@ def _capture_alpaca_posttrade_state(
         "alpaca_positions_snapshot": alpaca_positions_snapshot,
         "posttrade_filled_orders_count": int(posttrade_filled_orders_count),
         "posttrade_resolved_orders_count": int(len(orders_for_recon)),
+        "posttrade_resolved_orders": list(orders_for_recon),
         "posttrade_account_snapshot_path": posttrade_account_snapshot_path,
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
         "posttrade_recon_path": str(posttrade_recon.get("report_path") or ""),
@@ -3828,6 +4114,9 @@ def run_paper_day(
     submit_failed = 0
     idempotent_skips: List[str] = []
     orders: List[Dict[str, object]] = []
+    submitted_orders: List[Dict[str, object]] = []
+    sell_orders: List[Dict[str, object]] = []
+    buy_orders: List[Dict[str, object]] = []
     sent_ledger_path: str = cfg.sent_ledger_path
     alpaca_account_snapshot: Dict[str, object] | None = None
     alpaca_positions_snapshot: List[Dict[str, object]] = []
@@ -3839,6 +4128,7 @@ def run_paper_day(
     sell_phase_completion_reason: str | None = None
     sell_phase_observed_statuses: Dict[str, str] = {}
     sell_phase_polls: int = 0
+    sell_phase_poll_observations: List[Dict[str, object]] = []
     buy_budget_computed: float | None = None
     buy_budget_basis: str = "cash"
     budget_skipped_orders: List[Dict[str, object]] = []
@@ -3851,6 +4141,7 @@ def run_paper_day(
     posttrade_affected_symbols: List[str] = []
     posttrade_duplicate_fill_suspicions_count: int = 0
     posttrade_filled_orders_count: int | None = None
+    posttrade_resolved_orders: List[Dict[str, object]] = []
     execution_outcome: str | None = None
     execution_reason: str | None = None
     execution_halt_reason: str | None = None
@@ -4034,7 +4325,6 @@ def run_paper_day(
         if paper_execution_requested and execution_enabled:
             if alpaca is None:
                 alpaca = AlpacaBroker.from_env()
-            submitted_orders: List[Dict[str, object]] = []
             remote_existing_orders: List[Dict[str, object]] = []
             sell_orders, buy_orders = _split_orders_for_execution(orders)
             orders_by_id = {
@@ -4083,11 +4373,17 @@ def run_paper_day(
                     for k, v in dict(sell_phase_result.get("observed_statuses") or {}).items()
                 }
                 sell_phase_polls = int(sell_phase_result.get("polls") or 0)
+                sell_phase_poll_observations = list(
+                    sell_phase_result.get("poll_observations") or []
+                )
                 alpaca_submission_summary["sell_phase_status"] = sell_phase_status
                 alpaca_submission_summary["sell_phase_completion_reason"] = sell_phase_completion_reason
                 alpaca_submission_summary["sell_phase_polls"] = sell_phase_polls
                 alpaca_submission_summary["sell_phase_observed_statuses"] = dict(
                     sell_phase_observed_statuses
+                )
+                alpaca_submission_summary["sell_phase_poll_observations"] = list(
+                    sell_phase_poll_observations
                 )
 
                 pending_sell_order_ids = [
@@ -4356,7 +4652,10 @@ def run_paper_day(
                     alpaca=alpaca,
                     run_date=run_date,
                     holdings_prev=holdings_prev,
-                    submitted_orders=submitted_orders,
+                    submitted_orders=_enrich_submitted_orders_with_lifecycle(
+                        submitted_orders,
+                        alpaca_submissions,
+                    ),
                     cfg=cfg,
                     raise_on_failure=execution_outcome is None,
                 )
@@ -4413,6 +4712,9 @@ def run_paper_day(
                     posttrade_filled_orders_count = int(
                         posttrade_state.get("posttrade_filled_orders_count") or 0
                     )
+                posttrade_resolved_orders = list(
+                    posttrade_state.get("posttrade_resolved_orders") or []
+                )
 
             if (
                 execution_outcome in {
@@ -4673,6 +4975,33 @@ def run_paper_day(
         recon["status"],
     )
 
+    cash_gate_diagnostics = _build_cash_gate_diagnostics(
+        planning_account_snapshot=planning_account_snapshot,
+        sell_orders=sell_orders,
+        submitted_orders=submitted_orders,
+        budget_skipped_orders=budget_skipped_orders,
+        buy_budget_computed=buy_budget_computed,
+        buy_budget_basis=buy_budget_basis,
+        postsell_account_snapshot=postsell_account_snapshot,
+        alpaca_account_snapshot=alpaca_account_snapshot,
+        sell_phase_status=sell_phase_status,
+        sell_phase_completion_reason=sell_phase_completion_reason,
+        sell_phase_observed_statuses=sell_phase_observed_statuses,
+        sell_phase_polls=sell_phase_polls,
+        sell_phase_poll_observations=sell_phase_poll_observations,
+        sell_submit_started_at=sell_submit_started_at,
+        sell_submit_completed_at=sell_submit_completed_at,
+        buy_submit_started_at=buy_submit_started_at,
+        buy_submit_completed_at=buy_submit_completed_at,
+        pending_sell_count_at_buy_decision=pending_sell_count_at_buy_decision,
+        buy_phase_decision_reason=buy_phase_decision_reason,
+        execution_outcome=execution_outcome,
+        execution_reason=execution_reason,
+        cash_rebalance_status=cash_rebalance_status,
+        posttrade_recon_status=posttrade_recon_status,
+        posttrade_resolved_orders=posttrade_resolved_orders,
+    )
+
     return {
         "date": run_date,
         "trading_mode": mode,
@@ -4746,6 +5075,7 @@ def run_paper_day(
         "alpaca_submissions": alpaca_submissions,
         "alpaca_orders_path": alpaca_orders_path,
         "alpaca_submission_summary": alpaca_submission_summary,
+        "cash_gate_diagnostics": cash_gate_diagnostics,
         "order_lifecycle": [
             {
                 "symbol": str(item.get("symbol") or item.get("ticker") or ""),
@@ -4793,6 +5123,7 @@ def run_paper_day(
         "sell_phase_status": sell_phase_status,
         "sell_phase_completion_reason": sell_phase_completion_reason,
         "sell_phase_observed_statuses": sell_phase_observed_statuses,
+        "sell_phase_poll_observations": sell_phase_poll_observations,
         "sell_phase_polls": sell_phase_polls,
         "buy_budget_computed": buy_budget_computed,
         "buy_budget_basis": buy_budget_basis,
@@ -4804,6 +5135,7 @@ def run_paper_day(
         "posttrade_unresolved_orders": posttrade_unresolved_orders,
         "posttrade_unresolved_orders_count": int(len(posttrade_unresolved_orders)),
         "posttrade_filled_orders_count": posttrade_filled_orders_count,
+        "posttrade_resolved_orders": posttrade_resolved_orders,
         "orders_filled_count": posttrade_filled_orders_count,
         "posttrade_repair_suggestions": posttrade_repair_suggestions,
         "posttrade_affected_symbols": posttrade_affected_symbols,

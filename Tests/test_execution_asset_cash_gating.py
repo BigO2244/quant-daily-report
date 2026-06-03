@@ -413,6 +413,17 @@ def test_postsell_buy_budget_falls_back_to_cash_when_buying_power_zero(monkeypat
         result["budget_skipped_orders"][0]["block_reason"]
         == "buy_blocked_pending_sells_required_for_cash"
     )
+    diagnostics = result["cash_gate_diagnostics"]
+    assert diagnostics["buying_power_before_sells"] == pytest.approx(0.0)
+    assert diagnostics["estimated_sell_proceeds_submitted"] == pytest.approx(100.0)
+    assert diagnostics["buying_power_after_sell_submission"] == pytest.approx(0.0)
+    assert diagnostics["buying_power_after_posttrade_repoll"] == pytest.approx(800.0)
+    assert diagnostics["buy_notional_submitted_immediate"] == pytest.approx(0.0)
+    assert diagnostics["buy_notional_skipped_or_deferred_due_to_cash"] == pytest.approx(950.0)
+    assert diagnostics["raw_cash_gate_triggered"] is True
+    assert diagnostics["raw_cash_gate_reason"] == "buy_blocked_pending_sells_required_for_cash"
+    assert diagnostics["sell_phase_poll_observations"][0]["account_buying_power"] == pytest.approx(0.0)
+    assert diagnostics["sell_phase_poll_observations"][0]["orders"][0]["status"].lower() == "accepted"
 
 
 def test_buying_power_covers_planned_buys_no_pending_sells_reason(monkeypatch, tmp_path):
@@ -504,3 +515,20 @@ def test_order_polling_updates_lifecycle_status():
     assert submissions[0]["filled_qty"] == "1"
     assert submissions[0]["filled_at"] == "2026-05-29T09:35:05-04:00"
     assert submissions[0]["seconds_to_fill"] == pytest.approx(5.0)
+
+
+def test_posttrade_resolver_rows_keep_submit_timestamp_for_latency():
+    enriched = broker._enrich_submitted_orders_with_lifecycle(
+        [{"order_id": "run:AAA:SELL", "ticker": "AAA", "side": "SELL", "quantity": 1}],
+        [
+            {
+                "order_id": "run:AAA:SELL",
+                "alpaca_order_id": "alpaca-sell-1",
+                "submitted_at": "2026-05-29T09:35:00-04:00",
+                "latest_status": "accepted",
+            }
+        ],
+    )
+
+    assert enriched[0]["submitted_at"] == "2026-05-29T09:35:00-04:00"
+    assert enriched[0]["alpaca_order_id"] == "alpaca-sell-1"

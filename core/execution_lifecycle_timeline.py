@@ -35,6 +35,10 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
 def _to_int(value: Any) -> int:
     try:
         return int(value or 0)
@@ -172,6 +176,11 @@ def build_execution_lifecycle_timeline(
         for response in _as_list(execution_results.get("broker_responses"))
         if isinstance(response, Mapping)
     ]
+    cash_gate_diagnostics = (
+        _as_mapping(execution_payload.get("cash_gate_diagnostics"))
+        or _as_mapping(execution_results.get("cash_gate_diagnostics"))
+        or _as_mapping(operator_summary.get("cash_gate_diagnostics"))
+    )
     order_events: list[Mapping[str, Any]] = broker_responses or broker_orders
 
     submitted_count = _to_int(
@@ -312,6 +321,17 @@ def build_execution_lifecycle_timeline(
                 "sell_phase_status": execution_payload.get("sell_phase_status"),
                 "sell_phase_completion_reason": execution_payload.get("sell_phase_completion_reason"),
                 "pending_sell_count_at_buy_decision": execution_payload.get("pending_sell_count_at_buy_decision"),
+                "cash_gate_diagnostics": {
+                    "estimated_sell_proceeds_submitted": cash_gate_diagnostics.get(
+                        "estimated_sell_proceeds_submitted"
+                    ),
+                    "sell_phase_poll_observations": cash_gate_diagnostics.get(
+                        "sell_phase_poll_observations"
+                    ),
+                    "first_sell_fill_latency_seconds": cash_gate_diagnostics.get(
+                        "first_sell_fill_latency_seconds"
+                    ),
+                },
             },
         ),
         _event(
@@ -334,6 +354,18 @@ def build_execution_lifecycle_timeline(
                 "pending_sell_count_at_buy_decision": execution_payload.get("pending_sell_count_at_buy_decision"),
                 "buying_power_at_buy_decision": execution_payload.get("buying_power_at_buy_decision"),
                 "cash_at_buy_decision": execution_payload.get("cash_at_buy_decision"),
+                "cash_gate_diagnostics": {
+                    "buying_power_before_sells": cash_gate_diagnostics.get(
+                        "buying_power_before_sells"
+                    ),
+                    "buying_power_after_sell_submission": cash_gate_diagnostics.get(
+                        "buying_power_after_sell_submission"
+                    ),
+                    "buy_budget_at_decision": cash_gate_diagnostics.get(
+                        "buy_budget_at_decision"
+                    ),
+                    "buy_budget_basis": cash_gate_diagnostics.get("buy_budget_basis"),
+                },
             },
         ),
         _event(
@@ -359,6 +391,23 @@ def build_execution_lifecycle_timeline(
                 "skipped_buy_count": execution_payload.get("skipped_buy_count"),
                 "blocked_buy_count": execution_payload.get("blocked_buy_count"),
                 "pending_sell_count_at_buy_decision": execution_payload.get("pending_sell_count_at_buy_decision"),
+                "cash_gate_diagnostics": {
+                    "buy_notional_submitted_immediate": cash_gate_diagnostics.get(
+                        "buy_notional_submitted_immediate"
+                    ),
+                    "buy_notional_skipped_or_deferred": cash_gate_diagnostics.get(
+                        "buy_notional_skipped_or_deferred"
+                    ),
+                    "buy_notional_skipped_or_deferred_due_to_cash": cash_gate_diagnostics.get(
+                        "buy_notional_skipped_or_deferred_due_to_cash"
+                    ),
+                    "raw_cash_gate_triggered": cash_gate_diagnostics.get(
+                        "raw_cash_gate_triggered"
+                    ),
+                    "raw_cash_gate_reason": cash_gate_diagnostics.get(
+                        "raw_cash_gate_reason"
+                    ),
+                },
             },
         ),
         _event(
@@ -396,6 +445,20 @@ def build_execution_lifecycle_timeline(
                 "rejected_count": _to_int(execution_results.get("rejected_count") or operator_summary.get("rejected_count")),
                 "execution_outcome": execution_results.get("execution_outcome") or operator_summary.get("execution_outcome"),
                 "execution_reason": execution_results.get("execution_reason") or operator_summary.get("execution_reason"),
+                "cash_gate_diagnostics": {
+                    "raw_cash_gate_triggered": cash_gate_diagnostics.get(
+                        "raw_cash_gate_triggered"
+                    ),
+                    "raw_cash_gate_despite_final_reconciled_success": cash_gate_diagnostics.get(
+                        "raw_cash_gate_despite_final_reconciled_success"
+                    ),
+                    "raw_execution_reason": cash_gate_diagnostics.get(
+                        "raw_execution_reason"
+                    ),
+                    "final_execution_status": cash_gate_diagnostics.get(
+                        "final_execution_status"
+                    ),
+                },
             },
         ),
         _event(
@@ -417,6 +480,20 @@ def build_execution_lifecycle_timeline(
                 "verdict": recon.get("verdict"),
                 "affected_symbols": recon.get("affected_symbols"),
                 "repair_suggestions": recon.get("repair_suggestions"),
+                "cash_gate_diagnostics": {
+                    "buying_power_after_posttrade_repoll": cash_gate_diagnostics.get(
+                        "buying_power_after_posttrade_repoll"
+                    ),
+                    "posttrade_recon_status": cash_gate_diagnostics.get(
+                        "posttrade_recon_status"
+                    ),
+                    "temporary_cash_shortfall_later_resolved": cash_gate_diagnostics.get(
+                        "temporary_cash_shortfall_later_resolved"
+                    ),
+                    "posttrade_sell_fill_observations": cash_gate_diagnostics.get(
+                        "posttrade_sell_fill_observations"
+                    ),
+                },
             },
         ),
         _event(
@@ -530,6 +607,7 @@ def build_execution_lifecycle_timeline(
             "execution_price_requirement": execution_payload.get("execution_price_requirement"),
             "price_freshness_scope": execution_payload.get("price_freshness_scope"),
         },
+        "cash_gate_diagnostics": cash_gate_diagnostics,
         "source_artifacts": {
             "operator_summary": _artifact_entry(operator_summary_path),
             "execution_payload": _artifact_entry(execution_payload_path),
