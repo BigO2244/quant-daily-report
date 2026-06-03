@@ -32,6 +32,7 @@ def _load_module(tmp_path: Path):
         "core.operator_summary",
         "core.precompute_contract",
         "core.run_pointer",
+        "core.security_master",
         "core.timing_policy",
         "core.trading_mode",
         "core.trading_day_summary",
@@ -90,7 +91,7 @@ def _load_module(tmp_path: Path):
         },
         write_pretrade_snapshot_artifacts=lambda **_kwargs: None,
     )
-    sys.modules["core"] = _module("core")
+    sys.modules["core"] = _module("core", __path__=[])
     sys.modules["core.execution_audit"] = _module(
         "core.execution_audit",
         write_executor_audit=lambda **_kwargs: None,
@@ -202,6 +203,15 @@ def _load_module(tmp_path: Path):
         "core.run_pointer",
         write_latest_run_pointer=lambda **_kwargs: None,
         write_trade_stage_pointer=lambda **_kwargs: None,
+    )
+    sys.modules["core.security_master"] = _module(
+        "core.security_master",
+        resolve_trade_plan_symbols=lambda trades, **_kwargs: _module(
+            "SymbolResolutionResult",
+            trades=[dict(trade) for trade in trades],
+            status="PASS",
+            reason="all_symbols_resolved",
+        ),
     )
     sys.modules["core.timing_policy"] = _module(
         "core.timing_policy",
