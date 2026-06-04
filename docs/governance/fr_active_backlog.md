@@ -43,6 +43,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-038 governance blocker audit + diagnostic surfaces | Promotion Governance | `DEPLOYED_OBSERVING` | LOW | FR-037 outputs, Tier 1/2 research artifacts | observing | Six additive research-only diagnostic surfaces deployed 2026-06-02: `research/governance_blocker_audit.py` classifies every governance blocker as `REAL` / `DATA_QUALITY` / `CONFIGURATION` / `OBSERVATION_WINDOW`; `research/security_master_reconciliation.py` reconciles holdings/planned/attribution/timing symbols vs the security master; `research/execution_payload_audit.py` diagnoses `planned_execution_payload` state across five hypotheses; `research/differentiation_diagnostic.py` per-pair breakdown with verdicts `TRUE_WEAK_DIFFERENTIATION` / `POSSIBLE_DATA_LIMITATION` / `INSUFFICIENT_HISTORY`; `research/concentration_diagnostic.py` distinguishes actual violations from equal-weight design floors; `research/governance_maturity.py` produces a deterministic 7-component score → `IMMATURE` / `EMERGING` / `DEVELOPING` / `MATURE` / `PROMOTION_READY`. Wired into `research/review_packet.py` final control summary as `blockers_eliminated` / `blockers_remaining` / `data_quality_issues` / `actual_strategy_issues` / `governance_maturity_tier`. Implementing commits: `436cbdf` and `fbd4f6a`. | Revert commits `436cbdf` and `fbd4f6a`; delete `outputs/research/{governance_blocker_audit,security_master_reconciliation,execution_payload_audit,differentiation_diagnostic,concentration_diagnostic,governance_maturity}/`; final control summary falls back to Tier 3-only roll-up (FR-037). No production allocations or execution behavior change either way. |
 | FR-055 Intended Portfolio NAV & Operational Drag Attribution | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | 2026-06-04 operational drag audit, existing planned portfolio/execution artifacts, broker/reconciliation/performance artifacts | implementation_started | Add read-only intended/counterfactual NAV, normalized actual NAV, SPY benchmark alignment, operational drag attribution, stable-window analysis, CLI generation, and research-packet consumption. | Revert FR-055 implementation commit; ignore/delete generated `outputs/operational_drag/<date>/` artifacts. No broker, execution, cron, strategy selection, allocation, or order-routing behavior changes are in scope. |
 | FR-056 Operational Drag Source Discovery Patch | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, canonical VM price/NAV/broker/reconciliation/SPY artifacts | implementation_started | Patch FR-055 source discovery/readers so operational drag locates canonical VM price, holdings, reconciliation, NAV, and SPY sources with explicit source-selection diagnostics. | Revert FR-056 reader patch; FR-055 artifacts remain read-only and degraded with missing-data reason codes. No execution, broker, cron, strategy, allocation, or promotion behavior changes are in scope. |
+| FR-057 Current Price Hydration for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, existing price hydration/export infrastructure | implementation_started | Hydrate or expose current trade-date price data for intended/actual holdings and SPY so operational drag can mark holdings without stale price gaps. | Revert FR-057 hydration/read-order patch; ignore/delete date-scoped `outputs/operational_drag/<date>/price_hydration.*` artifacts. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -128,6 +129,10 @@ procedures are proven.
 11. Patch FR-056 as a source-discovery-only correction for FR-055: improve
     canonical VM artifact readers and diagnostics without changing execution,
     broker, cron, strategy selection, allocation, or promotion behavior.
+12. Implement FR-057 as a read-only price hydration/export path for operational
+    drag so requested trade-date holdings and SPY prices are available when the
+    canonical historical matrices are stale. Missing current prices must remain
+    explicit reason codes.
 
 ## FR-055 Intended Portfolio NAV & Operational Drag Attribution
 
@@ -190,6 +195,39 @@ procedures are proven.
 - **Risks / assumptions:** Canonical artifacts may vary by VM date or storage
   family. Readers must report candidate paths tried and selected paths rather
   than silently falling back or hiding true missing data.
+
+## FR-057 Current Price Hydration for Operational Drag
+
+- **FR number:** FR-057
+- **Title:** Current Price Hydration for Operational Drag
+- **Date started:** 2026-06-04
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** FR-055/FR-056 operational drag telemetry can now find
+  NAV, broker, reconciliation, and stale price sources, but it still lacks
+  requested trade-date prices for many intended/actual symbols and SPY. This
+  prevents decision-grade intended-vs-actual-vs-SPY attribution for the
+  requested date.
+- **Scope:** Reuse existing price hydration/export infrastructure where
+  possible to hydrate or expose current trade-date prices for intended
+  holdings, actual holdings, planned trades, and SPY; emit deterministic
+  date-scoped hydration metadata and let operational drag prefer fresh
+  date-scoped prices before stale historical fallbacks.
+- **Non-goals:** No execution behavior changes, broker submission changes,
+  strategy allocation changes, promotion/demotion logic changes, fabricated
+  prices, current-day forward-fill, look-ahead price use, or live trading calls.
+- **Planned artifacts:**
+  `outputs/operational_drag/<trade_date>/price_hydration.json` and
+  `outputs/operational_drag/<trade_date>/price_hydration.md`, plus unchanged
+  FR-055 operational drag artifacts consuming the hydrated source when present.
+- **Validation plan:** Inspect existing hydration/export code, add fixture tests
+  for hydration metadata, date-scoped price priority, SPY inclusion, explicit
+  missing symbols, and no forward-fill; run targeted operational-drag pytest,
+  affected research packet/MCP tests, py_compile, `git diff --check`, and VM
+  generation for 2026-06-04 after hydration.
+- **Risks / assumptions:** Current trade-date prices may be unavailable until
+  post-close data is hydrated. The hydration source must report coverage and
+  missing symbols honestly; stale canonical matrices must remain available as a
+  lower-priority fallback without masking freshness gaps.
 
 ## Roadmap Boundaries
 

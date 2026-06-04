@@ -76,6 +76,7 @@ class PriceStore:
     def __init__(self) -> None:
         self.prices: dict[str, dict[str, float]] = {}
         self.source_by_symbol_date: dict[str, dict[str, str]] = {}
+        self.source_dates_by_path: dict[str, set[str]] = {}
         self.source_paths: list[str] = []
         self.reason_codes: list[str] = []
         self.candidate_paths: list[str] = []
@@ -88,6 +89,7 @@ class PriceStore:
         self.prices.setdefault(symbol, {})[date] = close
         source_text = str(source)
         self.source_by_symbol_date.setdefault(symbol, {})[date] = source_text
+        self.source_dates_by_path.setdefault(source_text, set()).add(date)
         if source_text not in self.source_paths:
             self.source_paths.append(source_text)
 
@@ -119,12 +121,19 @@ class PriceStore:
 
     def diagnostics(self) -> dict[str, Any]:
         date_count = len({date for by_date in self.prices.values() for date in by_date})
+        source_max_dates = {
+            source: max(dates)
+            for source, dates in sorted(self.source_dates_by_path.items())
+            if dates
+        }
         return {
             "candidate_paths": list(self.candidate_paths),
             "selected_paths": list(self.source_paths),
             "failed_paths": list(self.failed_paths),
             "loaded_symbol_count": len(self.prices),
             "loaded_date_count": date_count,
+            "max_available_date": max(source_max_dates.values()) if source_max_dates else None,
+            "source_max_dates": source_max_dates,
         }
 
 
@@ -293,7 +302,7 @@ def _suppress_stderr_fd():
         os.close(devnull)
 
 
-def load_price_store(repo_root: Path | str = Path(".")) -> PriceStore:
+def load_price_store(repo_root: Path | str = Path("."), *, trade_date: str | None = None) -> PriceStore:
     repo = Path(repo_root)
     store = PriceStore()
     for rel in PRICE_CSV_CANDIDATES:
@@ -311,9 +320,51 @@ def load_price_store(repo_root: Path | str = Path(".")) -> PriceStore:
         if loaded <= 0:
             store.record_failure(path, "no_valid_price_rows")
     _load_parquet_price_panel(repo, store)
+    _load_operational_drag_price_hydration(repo, store, trade_date=trade_date)
     if not store.source_paths:
         store.reason_codes.append("price_history_missing")
     return store
+
+
+def _load_operational_drag_price_hydration(repo: Path, store: PriceStore, *, trade_date: str | None) -> None:
+    if not trade_date:
+        return
+    path = repo / "outputs" / "operational_drag" / trade_date / "price_hydration.json"
+    store.record_candidate(path)
+    payload = _read_json(path)
+    if payload is None:
+        store.record_failure(path, "missing_or_unreadable")
+        return
+    payload_date = _date_text(payload.get("date") or payload.get("trade_date"))
+    if payload_date and payload_date != trade_date:
+        store.record_failure(path, f"stale_trade_date:{payload_date}")
+        return
+    prices = payload.get("prices")
+    if not isinstance(prices, list) or not prices:
+        store.record_failure(path, "no_price_rows")
+        _append_reason(store.reason_codes, "price_hydration_empty")
+        return
+    loaded = 0
+    skipped_future = 0
+    for row in prices:
+        if not isinstance(row, dict):
+            continue
+        date = _date_text(row.get("date"))
+        if not date:
+            continue
+        if date > trade_date:
+            skipped_future += 1
+            continue
+        symbol = str(row.get("symbol") or row.get("ticker") or "").upper().strip()
+        close = _safe_float(row.get("close") or row.get("price") or row.get("spy_price"))
+        if symbol and close is not None:
+            store.add(symbol, date, close, path)
+            loaded += 1
+    if loaded <= 0:
+        store.record_failure(path, "no_valid_price_rows")
+        _append_reason(store.reason_codes, "price_hydration_no_valid_prices")
+    if skipped_future:
+        _append_reason(store.reason_codes, "price_hydration_future_rows_ignored")
 
 
 def _load_price_csv_rows(rows: list[dict[str, str]], path: Path, store: PriceStore) -> int:
@@ -417,10 +468,18 @@ def _load_price_dataframe(df: Any, path: Path, store: PriceStore) -> None:
             if not store.source_paths:
                 store.reason_codes.append("price_panel_missing_close_column")
             return
-        for _, row in df.iterrows():
-            date = _date_text(row[date_col])
-            symbol = str(row[symbol_col]).upper().strip()
-            close = _safe_float(row[close_col])
+        frame = df[[date_col, symbol_col, close_col]].copy()
+        try:
+            import pandas as pd  # type: ignore
+
+            frame[date_col] = pd.to_datetime(frame[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+        frame = frame.dropna(subset=[date_col, symbol_col, close_col])
+        for raw_date, raw_symbol, raw_close in frame.itertuples(index=False, name=None):
+            date = _date_text(raw_date)
+            symbol = str(raw_symbol).upper().strip()
+            close = _safe_float(raw_close)
             if date and symbol and close is not None:
                 store.add(symbol, date, close, path)
         return
@@ -653,7 +712,7 @@ def build_intended_nav(
     date_axis: list[str] | None = None,
 ) -> dict[str, Any]:
     repo = Path(repo_root)
-    prices = price_store or load_price_store(repo)
+    prices = price_store or load_price_store(repo, trade_date=trade_date)
     snapshots = discover_plan_snapshots(repo, trade_date)
     source_artifacts = [str(snapshot.source_path) for snapshot in snapshots]
     if not snapshots:
@@ -1221,7 +1280,7 @@ def build_benchmark_nav(
     price_store: PriceStore | None = None,
 ) -> dict[str, Any]:
     repo = Path(repo_root)
-    prices = price_store or load_price_store(repo)
+    prices = price_store or load_price_store(repo, trade_date=trade_date)
     rows, source_paths, diagnostics = _benchmark_rows(repo, trade_date, prices)
     reasons: list[str] = []
     if aligned_dates is not None:
@@ -1773,7 +1832,7 @@ def build_operational_drag_analysis(
     if not _is_date(trade_date):
         raise ValueError(f"trade_date must be YYYY-MM-DD, got {trade_date!r}")
     repo = Path(repo_root)
-    price_store = load_price_store(repo)
+    price_store = load_price_store(repo, trade_date=trade_date)
     actual = build_actual_nav(trade_date=trade_date, repo_root=repo)
     actual_dates = [row["date"] for row in actual.get("timeseries") or []]
     benchmark_seed = build_benchmark_nav(trade_date=trade_date, repo_root=repo, price_store=price_store)
