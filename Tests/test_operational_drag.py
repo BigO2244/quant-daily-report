@@ -473,3 +473,112 @@ def test_actual_nav_missing_reason_when_no_source(tmp_path: Path) -> None:
     assert "actual_nav_missing" in actual["reason_codes"]
     assert "actual_nav" in actual["source_diagnostics"]
     assert actual["source_diagnostics"]["actual_nav"]["max_available_date"] is None
+
+
+# ---------------------------------------------------------------------------
+# FR-060 — Intended NAV true mark-to-market
+# ---------------------------------------------------------------------------
+
+def _daily_snapshot(equity: float, orders: list[dict]) -> dict:
+    return {"asof": "00:00:00", "equity": equity, "target_cash_weight": 0.10, "orders": orders}
+
+
+def _mtm_repo(tmp_path: Path, *, prices: list[dict], snapshots: dict[str, list[dict]]) -> Path:
+    root = tmp_path / "repo"
+    for date, orders in snapshots.items():
+        _write_json(root / "outputs" / "precompute" / date / "daily_snapshot.json", _daily_snapshot(10000.0, orders))
+    _write_csv(root / "outputs" / "prices" / "close_history.csv", prices)
+    return root
+
+
+def test_intended_return_nonzero_when_prices_move_between_rebalances(tmp_path: Path) -> None:
+    # Daily plan snapshots (every day is a rebalance) + prices that move overnight.
+    orders = [
+        {"ticker": "AAA", "target_weight": 0.50, "execution_price": 100.0},
+        {"ticker": "BBB", "target_weight": 0.40, "execution_price": 50.0},
+    ]
+    root = _mtm_repo(
+        tmp_path,
+        prices=[
+            {"date": "2026-06-01", "symbol": "AAA", "close": 100.0},
+            {"date": "2026-06-01", "symbol": "BBB", "close": 50.0},
+            {"date": "2026-06-02", "symbol": "AAA", "close": 110.0},
+            {"date": "2026-06-02", "symbol": "BBB", "close": 45.0},
+        ],
+        snapshots={"2026-06-01": orders, "2026-06-02": orders},
+    )
+
+    intended = build_intended_nav(trade_date="2026-06-02", repo_root=root, date_axis=["2026-06-01", "2026-06-02"])
+
+    last = intended["timeseries"][-1]
+    assert last["date"] == "2026-06-02"
+    # 50*110 + 80*45 + 1000 cash = 10100 -> +1.0% overnight on the carried target.
+    assert last["intended_equity_value"] == 10100.0
+    assert last["intended_return_daily"] == 0.01
+    assert "intended_rebalance_marked_to_market" in intended["reason_codes"]
+    assert "intended_nav_marked_to_market" in intended["reason_codes"]
+
+
+def test_intended_rebalance_uses_marked_to_market_basis(tmp_path: Path) -> None:
+    orders = [{"ticker": "AAA", "target_weight": 0.90, "execution_price": 100.0}]
+    root = _mtm_repo(
+        tmp_path,
+        prices=[
+            {"date": "2026-06-01", "symbol": "AAA", "close": 100.0},
+            {"date": "2026-06-02", "symbol": "AAA", "close": 120.0},
+        ],
+        snapshots={"2026-06-01": orders, "2026-06-02": orders},
+    )
+
+    intended = build_intended_nav(trade_date="2026-06-02", repo_root=root, date_axis=["2026-06-01", "2026-06-02"])
+
+    last = intended["timeseries"][-1]
+    # day0: 90 shares @100 = 9000 + 1000 cash = 10000. day1 carry MtM: 90*120=10800 +1000 = 11800.
+    assert last["intended_equity_value"] == 11800.0
+    assert last["intended_return_daily"] == 0.18
+    assert "intended_rebalance_marked_to_market" in last["reason_codes"]
+
+
+def test_intended_missing_carry_price_is_labeled_fallback_not_fabricated(tmp_path: Path) -> None:
+    orders = [
+        {"ticker": "AAA", "target_weight": 0.50, "execution_price": 110.0},
+        {"ticker": "BBB", "target_weight": 0.40, "execution_price": 45.0},
+    ]
+    # No AAA price on 2026-06-02 -> carried holdings cannot be marked to market.
+    root = _mtm_repo(
+        tmp_path,
+        prices=[
+            {"date": "2026-06-01", "symbol": "AAA", "close": 100.0},
+            {"date": "2026-06-01", "symbol": "BBB", "close": 50.0},
+            {"date": "2026-06-02", "symbol": "BBB", "close": 45.0},
+        ],
+        snapshots={"2026-06-01": orders, "2026-06-02": orders},
+    )
+
+    intended = build_intended_nav(trade_date="2026-06-02", repo_root=root, date_axis=["2026-06-01", "2026-06-02"])
+
+    assert "intended_rebalance_carry_unpriced_fallback" in intended["reason_codes"]
+    # Fallback is labeled, not fabricated: it did not silently mark to market.
+    assert "intended_rebalance_marked_to_market" not in intended["timeseries"][-1]["reason_codes"]
+
+
+def test_intended_nav_has_no_look_ahead(tmp_path: Path) -> None:
+    orders = [{"ticker": "AAA", "target_weight": 0.90, "execution_price": 100.0}]
+    # A wild future (2026-06-03) price must never influence the 2026-06-02 result.
+    root = _mtm_repo(
+        tmp_path,
+        prices=[
+            {"date": "2026-06-01", "symbol": "AAA", "close": 100.0},
+            {"date": "2026-06-02", "symbol": "AAA", "close": 120.0},
+            {"date": "2026-06-03", "symbol": "AAA", "close": 9999.0},
+        ],
+        snapshots={"2026-06-01": orders, "2026-06-02": orders},
+    )
+
+    intended = build_intended_nav(trade_date="2026-06-02", repo_root=root, date_axis=["2026-06-01", "2026-06-02"])
+
+    last = intended["timeseries"][-1]
+    assert last["date"] == "2026-06-02"
+    # Uses 2026-06-02 price (120), not the future 9999.
+    assert last["intended_equity_value"] == 11800.0
+    assert last["intended_return_daily"] == 0.18

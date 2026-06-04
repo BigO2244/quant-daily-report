@@ -46,6 +46,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-057 Current Price Hydration for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, existing price hydration/export infrastructure | implementation_started | Hydrate or expose current trade-date price data for intended/actual holdings and SPY so operational drag can mark holdings without stale price gaps. | Revert FR-057 hydration/read-order patch; ignore/delete date-scoped `outputs/operational_drag/<date>/price_hydration.*` artifacts. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
 | FR-058 Actual NAV Refresh for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, FR-057, broker-authoritative live-overlay NAV producer, run-scoped NAV snapshots | implementation_started | Harden operational-drag actual-NAV discovery to select the freshest, highest-confidence broker NAV source (not first-file-found), add `source_diagnostics.actual_nav` with `max_available_date`, and emit explicit `actual_nav_from_*` / `actual_nav_stale` / `actual_nav_missing` reason codes so actual-vs-intended-vs-SPY drag can extend through the requested trade date when fresh broker NAV exists. | Revert FR-058 discovery patch; actual-NAV discovery falls back to FR-055 fixed-order readers. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
 | FR-059 Broker Telemetry Failure Detection | Operational Telemetry / Service Health | `IN_PROGRESS` | LOW | FR-058A audit (Alpaca 401 silent freeze 2026-05-20→2026-06-04), `scripts/refresh_quant_dashboard.py`, `deploy/caerus-dashboard-refresh.service` | implementation_started | Make Alpaca live-broker telemetry/auth failures loud and alertable: classify failures into reason codes (`alpaca_auth_failed`, `live_broker_required_failed`), add deterministic stale-artifact checks (`nav_artifact_stale`, `broker_snapshot_stale`, `recon_artifact_stale`), surface a structured `live_status` in the refresh output, and enable `--require-live-broker` in the systemd service so bad credentials exit non-zero instead of exit-0 with a swallowed warning. | Revert FR-059 patch + remove `--require-live-broker` from the service unit (sudo cp + daemon-reload); refresh reverts to warn-and-continue. No order execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
+| FR-060 Intended NAV True Mark-to-Market | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-058, daily precompute plan snapshots, hydrated/historical price store | implementation_started | Fix intended-NAV so `intended_return_daily` is not mechanically 0.0: mark the carried intended holdings to market at each day's prices to derive the rebalance basis, so price moves since the last rebalance flow into the intended return instead of being erased by a same-day target reconstruction. Carry holdings forward between rebalances; no look-ahead; no fabricated prices; keep the same-day reconstruction as a clearly-labeled fallback when carried holdings cannot be priced. | Revert FR-060 patch; intended NAV reverts to same-day reconstruction (drag = 0 − actual). No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -346,6 +347,49 @@ procedures are proven.
   Alpaca outage marks the unit failed and skips that cycle's dashboard rebuild —
   this is the intended alertable behavior. Staleness tolerance must accommodate
   weekends/holidays (calendar-day tolerance, default 4) to avoid false positives.
+
+## FR-060 Intended NAV True Mark-to-Market
+
+- **FR number:** FR-060
+- **Title:** Intended NAV True Mark-to-Market
+- **Date started:** 2026-06-04
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** The system writes a daily plan snapshot
+  (`outputs/precompute/<date>/`), so `build_intended_nav` treats every day as a
+  rebalance and rebuilds the intended portfolio from same-day target weights ×
+  the prior equity, marked at the same day's prices. That reconstruction returns
+  exactly the prior equity, so `intended_return_daily` is mechanically 0.0 (VM:
+  `intended_equity_value` is identical 10855.03 across 2026-06-01..06-04; 0/75
+  rows non-zero). Operational drag therefore compares actual return against a
+  flat 0.0 intended return instead of a true counterfactual.
+- **Scope:** In `research/operational_drag.py`, build intended NAV as a
+  day-over-day counterfactual: on each rebalance day, first mark the carried
+  (prior) intended holdings to market at the current day's prices and use that
+  marked equity as the rebalance basis; carry holdings forward between
+  rebalances and mark daily. This makes `intended_return_daily` reflect price
+  moves on the held intended portfolio. No look-ahead (only prices ≤ date), no
+  fabricated prices, missing-price reason codes preserved.
+- **Non-goals:** No execution, broker, allocation, strategy-selection, or
+  promotion changes. No change to plan-snapshot discovery or to actual/benchmark
+  NAV. Does not start FR-061.
+- **Planned artifacts:** No new files. Same `intended_nav.json` /
+  `intended_nav_timeseries.csv` with corrected day-over-day returns and new
+  reason codes (`intended_rebalance_marked_to_market`,
+  `intended_rebalance_carry_unpriced_fallback`, `intended_nav_marked_to_market`,
+  plus existing `intended_base_equity_inferred_from_plan_notional` /
+  `missing_price:*`).
+- **Validation plan:** Tests proving non-zero intended returns when prices move
+  between days; rebalance-day behavior; missing-price degradation (labeled
+  fallback, no fabrication); no look-ahead (future prices never used). Targeted
+  + broader pytest, `py_compile`, `git diff --check`. VM: hydrate + run
+  operational_drag for 2026-06-04, confirm all four timeseries reach 2026-06-04
+  and `intended_return_daily` is no longer mechanically zero.
+- **Risks / assumptions:** When carried holdings cannot be fully priced on a
+  rebalance day, the basis falls back to the prior equity (same-day
+  reconstruction, daily return 0 for that day) — preserved as a clearly-labeled
+  fallback rather than fabricating a mark. The reported latest-row holdings are
+  the current day's intended target (post-rebalance), valued at the
+  marked-to-market equity.
 
 ## Roadmap Boundaries
 

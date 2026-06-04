@@ -808,6 +808,7 @@ def build_intended_nav(
     base_equity: float | None = None
     rows: list[dict[str, Any]] = []
 
+    marked_to_market = False
     for date in ordered_dates:
         latest_plan = _latest_plan_for_date(snapshots, date)
         row_reasons: list[str] = []
@@ -815,11 +816,39 @@ def build_intended_nav(
             rows.append(_missing_intended_row(date, ["missing_plan_for_date"]))
             continue
         if active_plan is None or latest_plan.date != active_plan.date:
+            # FR-060: before adopting the new target, mark the carried (prior)
+            # intended holdings to market at TODAY's prices. Using that
+            # marked-to-market value as the rebalance basis lets price moves since
+            # the last rebalance flow into the intended return, instead of being
+            # erased by a same-day reconstruction (which returns the prior equity
+            # exactly -> intended_return_daily == 0.0). No look-ahead: only
+            # prices on or before `date` are ever read.
+            carry_equity: float | None = None
+            if active_shares:
+                carry_row = _mark_intended_row(
+                    date=date,
+                    plan=active_plan,
+                    shares=active_shares,
+                    weights=active_weights,
+                    cash=intended_cash,
+                    prices=prices,
+                    row_reasons=[],
+                )
+                carry_equity = _safe_float(carry_row.get("intended_equity_value"))
             active_plan = latest_plan
-            rebalance_equity = previous_equity or latest_plan.equity
-            if rebalance_equity is None:
-                rebalance_equity = _notional_from_plan(latest_plan)
-                row_reasons.append("intended_base_equity_inferred_from_plan_notional")
+            if carry_equity is not None:
+                rebalance_equity = carry_equity
+                row_reasons.append("intended_rebalance_marked_to_market")
+                marked_to_market = True
+            else:
+                rebalance_equity = previous_equity or latest_plan.equity
+                if rebalance_equity is None:
+                    rebalance_equity = _notional_from_plan(latest_plan)
+                    row_reasons.append("intended_base_equity_inferred_from_plan_notional")
+                elif active_shares:
+                    # Carried holdings could not be fully priced today; fall back to
+                    # the prior equity (labeled, no fabricated mark).
+                    row_reasons.append("intended_rebalance_carry_unpriced_fallback")
             active_shares, active_weights, intended_cash, rebalance_reasons = _rebalance_intended_positions(
                 latest_plan,
                 date=date,
@@ -854,8 +883,17 @@ def build_intended_nav(
     available_rows = [row for row in rows if row.get("intended_equity_value") is not None]
     latest = available_rows[-1] if available_rows else rows[-1]
     missing_symbols = sorted({symbol for row in rows for symbol in row.get("missing_symbols", [])})
+    # FR-060: signal whether intended NAV is a true day-over-day mark-to-market
+    # series (>=2 priced days carried across a date boundary) vs a single-day
+    # snapshot that cannot express day-over-day return.
+    mtm_reasons: list[str] = []
+    if marked_to_market or len(available_rows) > 1:
+        mtm_reasons.append("intended_nav_marked_to_market")
+    elif available_rows:
+        mtm_reasons.append("intended_nav_single_day_no_mtm")
     reasons = _dedupe_reasons(
         [reason for row in rows for reason in row.get("reason_codes", []) if reason != "ok"]
+        + mtm_reasons
         + list(prices.reason_codes)
     )
     available = bool(available_rows)
