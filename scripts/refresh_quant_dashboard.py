@@ -331,6 +331,88 @@ def refresh_live_performance_artifacts(
     }
 
 
+def _classify_broker_failure(exc: Exception) -> str:
+    """FR-059: map a live-broker exception to a telemetry reason code (no secrets)."""
+    text = str(exc).lower()
+    if any(token in text for token in ("unauthorized", "401", "forbidden", "403")):
+        return "alpaca_auth_failed"
+    return "live_broker_refresh_failed"
+
+
+def _latest_date_in_csv(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    latest: str | None = None
+    try:
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                parsed = _parse_date(row.get("date") or row.get("as_of_date"))
+                if parsed is None:
+                    continue
+                iso = parsed.isoformat()
+                if latest is None or iso > latest:
+                    latest = iso
+    except Exception:
+        return None
+    return latest
+
+
+def _latest_dated_artifact(directory: Path, prefix: str, suffix: str) -> str | None:
+    if not directory.exists():
+        return None
+    latest: str | None = None
+    for path in directory.glob(f"{prefix}*{suffix}"):
+        stem = path.name[len(prefix):]
+        if suffix:
+            stem = stem[: -len(suffix)]
+        parsed = _parse_date(stem)
+        if parsed is None:
+            continue
+        iso = parsed.isoformat()
+        if latest is None or iso > latest:
+            latest = iso
+    return latest
+
+
+def _is_stale(latest_date: str | None, report_date: str, max_age_days: int) -> bool:
+    if latest_date is None:
+        return True
+    latest = _parse_date(latest_date)
+    report = _parse_date(report_date)
+    if latest is None or report is None:
+        return True
+    return (report - latest).days > max_age_days
+
+
+def evaluate_live_telemetry_staleness(
+    *, repo_root: Path, report_date: str, max_age_days: int = 4
+) -> dict[str, Any]:
+    """FR-059: deterministic freshness check of live broker telemetry artifacts.
+
+    Emits nav_artifact_stale / broker_snapshot_stale / recon_artifact_stale when
+    the latest artifact date trails the report date beyond the calendar
+    tolerance (or the artifact is missing). Pure telemetry; never fabricates.
+    """
+    nav_date = _latest_date_in_csv(repo_root / "outputs" / "perf" / "live_overlay_nav_series.csv")
+    snapshot_date = _latest_dated_artifact(repo_root / "outputs" / "broker_snapshot", "broker_snapshot_", ".json")
+    recon_date = _latest_dated_artifact(repo_root / "outputs" / "broker", "recon_posttrade_", ".json")
+    reason_codes: list[str] = []
+    if _is_stale(nav_date, report_date, max_age_days):
+        reason_codes.append("nav_artifact_stale")
+    if _is_stale(snapshot_date, report_date, max_age_days):
+        reason_codes.append("broker_snapshot_stale")
+    if _is_stale(recon_date, report_date, max_age_days):
+        reason_codes.append("recon_artifact_stale")
+    return {
+        "report_date": report_date,
+        "max_age_days": max_age_days,
+        "nav_latest_date": nav_date,
+        "broker_snapshot_latest_date": snapshot_date,
+        "recon_latest_date": recon_date,
+        "reason_codes": reason_codes,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh live Alpaca artifacts and rebuild the monitor dashboard.")
     parser.add_argument("--repo-root", default=".")
@@ -412,9 +494,17 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     repo_root = Path(args.repo_root).resolve()
+    report_date = _resolve_report_date(args.trade_date)
     result: dict[str, object] = {
         "live_refresh": None,
         "dashboard": None,
+    }
+    # FR-059: broker telemetry failures must be visible and actionable rather
+    # than silently swallowed. live_status carries an explicit status + reason
+    # codes; under --require-live-broker a failure exits non-zero (alertable).
+    live_status: dict[str, Any] = {
+        "status": "skipped" if args.skip_live_broker else "pending",
+        "reason_codes": [],
     }
 
     if not args.skip_live_broker:
@@ -426,10 +516,32 @@ def main() -> int:
                 env_file=args.env_file,
                 history_days=max(5, int(args.history_days)),
             )
+            live_status["status"] = "ok"
         except Exception as exc:
+            code = _classify_broker_failure(exc)
+            live_status["status"] = "failed"
+            live_status["reason_codes"].append(code)
+            live_status["error"] = str(exc)
+            logger.error("[DASHBOARD_REFRESH] live broker refresh failed (%s): %s", code, exc)
             if args.require_live_broker:
-                raise
+                live_status["reason_codes"].append("live_broker_required_failed")
+                staleness = evaluate_live_telemetry_staleness(repo_root=repo_root, report_date=report_date)
+                for reason in staleness["reason_codes"]:
+                    if reason not in live_status["reason_codes"]:
+                        live_status["reason_codes"].append(reason)
+                result["live_status"] = live_status
+                result["live_telemetry_staleness"] = staleness
+                logger.error("[DASHBOARD_REFRESH] live_broker_required_failed; exiting non-zero")
+                print(json.dumps(result, indent=2, sort_keys=True))
+                return 1
             logger.warning("[DASHBOARD_REFRESH] live broker refresh skipped: %s", exc)
+
+    staleness = evaluate_live_telemetry_staleness(repo_root=repo_root, report_date=report_date)
+    for reason in staleness["reason_codes"]:
+        if reason not in live_status["reason_codes"]:
+            live_status["reason_codes"].append(reason)
+    result["live_status"] = live_status
+    result["live_telemetry_staleness"] = staleness
 
     result["dashboard"] = rebuild_dashboard(
         repo_root=repo_root,

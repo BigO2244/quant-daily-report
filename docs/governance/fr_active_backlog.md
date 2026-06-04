@@ -45,6 +45,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-056 Operational Drag Source Discovery Patch | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, canonical VM price/NAV/broker/reconciliation/SPY artifacts | implementation_started | Patch FR-055 source discovery/readers so operational drag locates canonical VM price, holdings, reconciliation, NAV, and SPY sources with explicit source-selection diagnostics. | Revert FR-056 reader patch; FR-055 artifacts remain read-only and degraded with missing-data reason codes. No execution, broker, cron, strategy, allocation, or promotion behavior changes are in scope. |
 | FR-057 Current Price Hydration for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, existing price hydration/export infrastructure | implementation_started | Hydrate or expose current trade-date price data for intended/actual holdings and SPY so operational drag can mark holdings without stale price gaps. | Revert FR-057 hydration/read-order patch; ignore/delete date-scoped `outputs/operational_drag/<date>/price_hydration.*` artifacts. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
 | FR-058 Actual NAV Refresh for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, FR-057, broker-authoritative live-overlay NAV producer, run-scoped NAV snapshots | implementation_started | Harden operational-drag actual-NAV discovery to select the freshest, highest-confidence broker NAV source (not first-file-found), add `source_diagnostics.actual_nav` with `max_available_date`, and emit explicit `actual_nav_from_*` / `actual_nav_stale` / `actual_nav_missing` reason codes so actual-vs-intended-vs-SPY drag can extend through the requested trade date when fresh broker NAV exists. | Revert FR-058 discovery patch; actual-NAV discovery falls back to FR-055 fixed-order readers. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
+| FR-059 Broker Telemetry Failure Detection | Operational Telemetry / Service Health | `IN_PROGRESS` | LOW | FR-058A audit (Alpaca 401 silent freeze 2026-05-20→2026-06-04), `scripts/refresh_quant_dashboard.py`, `deploy/caerus-dashboard-refresh.service` | implementation_started | Make Alpaca live-broker telemetry/auth failures loud and alertable: classify failures into reason codes (`alpaca_auth_failed`, `live_broker_required_failed`), add deterministic stale-artifact checks (`nav_artifact_stale`, `broker_snapshot_stale`, `recon_artifact_stale`), surface a structured `live_status` in the refresh output, and enable `--require-live-broker` in the systemd service so bad credentials exit non-zero instead of exit-0 with a swallowed warning. | Revert FR-059 patch + remove `--require-live-broker` from the service unit (sudo cp + daemon-reload); refresh reverts to warn-and-continue. No order execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -299,6 +300,52 @@ procedures are proven.
   systemd timer). Confidence ranking must not let a stale source override a
   fresher authoritative value on overlapping dates; the union must not drop the
   freshest dates.
+
+## FR-059 Broker Telemetry Failure Detection
+
+- **FR number:** FR-059
+- **Title:** Broker Telemetry Failure Detection
+- **Date started:** 2026-06-04
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** `scripts/refresh_quant_dashboard.py` runs the live Alpaca
+  broker refresh inside a try/except and, unless `--require-live-broker` is set,
+  logs a warning and exits 0 on failure. The systemd service
+  (`deploy/caerus-dashboard-refresh.service`) does not pass that flag, so when
+  the Alpaca paper credentials began returning HTTP 401 on 2026-05-20 the NAV,
+  benchmark, broker-snapshot, and posttrade-recon artifacts froze for ~2 weeks
+  while systemd reported `Result=success` every 5 minutes (FR-058A audit:
+  4,181 consecutive `unauthorized` failures, all silent).
+- **Scope:** (1) Classify live-broker failures into explicit reason codes
+  (`alpaca_auth_failed` for 401/403/unauthorized, else `live_broker_refresh_failed`;
+  `live_broker_required_failed` when `--require-live-broker` is set and the step
+  fails). (2) Add deterministic stale-artifact telemetry comparing the latest
+  date in `live_overlay_nav_series.csv`, latest `broker_snapshot_*.json`, and
+  latest `recon_posttrade_*.json` against the report date with a calendar
+  tolerance, emitting `nav_artifact_stale` / `broker_snapshot_stale` /
+  `recon_artifact_stale`. (3) Surface a structured `live_status` +
+  `live_telemetry_staleness` block in the refresh JSON output and make the
+  `--require-live-broker` path exit non-zero with the reason codes instead of a
+  bare traceback. (4) Enable `--require-live-broker` in the systemd service unit
+  (safe: VM credentials are currently valid and NAV is fresh through 2026-06-04).
+- **Non-goals:** No order execution, broker order submission, allocation,
+  strategy selection, or promotion changes. No change to how artifacts are
+  fetched/written beyond failure visibility. No secret values logged.
+- **Planned artifacts:** No new output files. Added `live_status` and
+  `live_telemetry_staleness` keys in the existing `refresh_quant_dashboard`
+  stdout result; `--require-live-broker` added to
+  `deploy/caerus-dashboard-refresh.service` (requires `sudo cp` +
+  `systemctl daemon-reload` on the VM to install).
+- **Validation plan:** Unit tests for failure classification and stale-artifact
+  evaluation; a `main()`-level test that a failing live-broker step under
+  `--require-live-broker` returns non-zero and emits `live_broker_required_failed`,
+  while the default path returns 0 with a `failed` `live_status`. `py_compile`,
+  `git diff --check`. VM: confirm the service still succeeds with current valid
+  credentials and `live_overlay_nav_series.csv` tail stays current; install the
+  updated unit and `daemon-reload`.
+- **Risks / assumptions:** Enabling `--require-live-broker` means a genuine
+  Alpaca outage marks the unit failed and skips that cycle's dashboard rebuild —
+  this is the intended alertable behavior. Staleness tolerance must accommodate
+  weekends/holidays (calendar-day tolerance, default 4) to avoid false positives.
 
 ## Roadmap Boundaries
 

@@ -8,4 +8,4 @@ Type=oneshot
 User=brettolson
 Group=brettolson
 WorkingDirectory=/home/brettolson/quant-daily-report
-ExecStart=/home/brettolson/.venvs/quant-daily-report/bin/python3 scripts/refresh_quant_dashboard.py --repo-root /home/brettolson/quant-daily-report --output-dir /var/www/caerus-dashboard --mirror-output-dir /var/www/caerus-dashboard-dev --env-file /home/brettolson/.caerus/alpaca.env
+ExecStart=/home/brettolson/.venvs/quant-daily-report/bin/python3 scripts/refresh_quant_dashboard.py --repo-root /home/brettolson/quant-daily-report --output-dir /var/www/caerus-dashboard --mirror-output-dir /var/www/caerus-dashboard-dev --env-file /home/brettolson/.caerus/alpaca.env --require-live-broker
