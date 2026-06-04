@@ -42,6 +42,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-037 Tier 3 promotion governance surfaces | Promotion Governance | `DEPLOYED_OBSERVING` | LOW | FR-028 Phase C, FR-024..027, FR-030, planned consumer FR-038 | observing | Three additive research-only surfaces deployed 2026-06-02: `research/promotion_governance.py` evaluates six gates (observation window / performance / differentiation / risk / universe / execution timing) → `PROMOTE` / `WATCH` / `HOLD` / `DEMOTE` / `BLOCKED`; `research/regime_attribution.py` classifies seven SPY-derived regimes with no look-ahead; `research/dynamic_strategy_allocation.py` evaluates five candidate policies as research-only, never writing production weights. Wired into `research/review_packet.py` with a conservative final control summary (`No promotion recommended` unless every tier agrees and governance explicitly names a candidate). Implementing commits: `c52ae6c` and `fbd4f6a`. | Revert commits `c52ae6c` and `fbd4f6a`; delete `outputs/research/{promotion_governance,regime_attribution,dynamic_strategy_allocation}/`; final control summary falls back to Tier 2 controls. No production allocations or execution behavior change either way. |
 | FR-038 governance blocker audit + diagnostic surfaces | Promotion Governance | `DEPLOYED_OBSERVING` | LOW | FR-037 outputs, Tier 1/2 research artifacts | observing | Six additive research-only diagnostic surfaces deployed 2026-06-02: `research/governance_blocker_audit.py` classifies every governance blocker as `REAL` / `DATA_QUALITY` / `CONFIGURATION` / `OBSERVATION_WINDOW`; `research/security_master_reconciliation.py` reconciles holdings/planned/attribution/timing symbols vs the security master; `research/execution_payload_audit.py` diagnoses `planned_execution_payload` state across five hypotheses; `research/differentiation_diagnostic.py` per-pair breakdown with verdicts `TRUE_WEAK_DIFFERENTIATION` / `POSSIBLE_DATA_LIMITATION` / `INSUFFICIENT_HISTORY`; `research/concentration_diagnostic.py` distinguishes actual violations from equal-weight design floors; `research/governance_maturity.py` produces a deterministic 7-component score → `IMMATURE` / `EMERGING` / `DEVELOPING` / `MATURE` / `PROMOTION_READY`. Wired into `research/review_packet.py` final control summary as `blockers_eliminated` / `blockers_remaining` / `data_quality_issues` / `actual_strategy_issues` / `governance_maturity_tier`. Implementing commits: `436cbdf` and `fbd4f6a`. | Revert commits `436cbdf` and `fbd4f6a`; delete `outputs/research/{governance_blocker_audit,security_master_reconciliation,execution_payload_audit,differentiation_diagnostic,concentration_diagnostic,governance_maturity}/`; final control summary falls back to Tier 3-only roll-up (FR-037). No production allocations or execution behavior change either way. |
 | FR-055 Intended Portfolio NAV & Operational Drag Attribution | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | 2026-06-04 operational drag audit, existing planned portfolio/execution artifacts, broker/reconciliation/performance artifacts | implementation_started | Add read-only intended/counterfactual NAV, normalized actual NAV, SPY benchmark alignment, operational drag attribution, stable-window analysis, CLI generation, and research-packet consumption. | Revert FR-055 implementation commit; ignore/delete generated `outputs/operational_drag/<date>/` artifacts. No broker, execution, cron, strategy selection, allocation, or order-routing behavior changes are in scope. |
+| FR-056 Operational Drag Source Discovery Patch | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, canonical VM price/NAV/broker/reconciliation/SPY artifacts | implementation_started | Patch FR-055 source discovery/readers so operational drag locates canonical VM price, holdings, reconciliation, NAV, and SPY sources with explicit source-selection diagnostics. | Revert FR-056 reader patch; FR-055 artifacts remain read-only and degraded with missing-data reason codes. No execution, broker, cron, strategy, allocation, or promotion behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -124,6 +125,9 @@ procedures are proven.
     `reports/trading_audit/operational_drag_audit_2026-06-04.md`. It must emit
     deterministic artifacts and explicit missing-data reason codes before it is
     considered promotion-ready.
+11. Patch FR-056 as a source-discovery-only correction for FR-055: improve
+    canonical VM artifact readers and diagnostics without changing execution,
+    broker, cron, strategy selection, allocation, or promotion behavior.
 
 ## FR-055 Intended Portfolio NAV & Operational Drag Attribution
 
@@ -159,6 +163,33 @@ procedures are proven.
   with incomplete price coverage; outputs must expose these gaps instead of
   imputing values. MCP integration may be deferred if the existing research MCP
   surface would require a larger change than the artifact generator.
+
+## FR-056 Operational Drag Source Discovery Patch
+
+- **FR number:** FR-056
+- **Title:** Operational Drag Source Discovery Patch
+- **Date started:** 2026-06-04
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** FR-055 operational drag runs and writes the expected
+  artifact family, but it cannot locate canonical VM price, holdings,
+  reconciliation, NAV, and SPY artifacts reliably, producing `LOW` confidence
+  and avoidable missing-data reason codes.
+- **Scope:** Source discovery and artifact readers only in
+  `research/operational_drag.py`, plus fixture coverage in
+  `Tests/test_operational_drag.py`.
+- **Non-goals:** No execution changes, strategy changes, broker/API calls,
+  cron changes, allocation changes, fabricated data, SPY imputation, or
+  promotion-rule changes.
+- **Planned artifacts:** Improved `source_diagnostics` fields in FR-055
+  outputs, selected-source paths for price/NAV/SPY/broker/reconciliation
+  readers, and unchanged `outputs/operational_drag/<date>/` artifact family.
+- **Validation plan:** Run the FR-055 operational-drag test suite, affected
+  research packet/MCP tests, py_compile on changed Python files, and
+  `git diff --check`; then run `python3 -m research.operational_drag --date
+  2026-06-04` against VM artifacts.
+- **Risks / assumptions:** Canonical artifacts may vary by VM date or storage
+  family. Readers must report candidate paths tried and selected paths rather
+  than silently falling back or hiding true missing data.
 
 ## Roadmap Boundaries
 

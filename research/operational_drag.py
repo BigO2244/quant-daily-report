@@ -29,6 +29,25 @@ PRICE_CSV_CANDIDATES = (
     "outputs/perf/price_history.csv",
     "outputs/price_history.csv",
     "data/price_history.csv",
+    "alpha_stack_cache/csv_export/prices_matrix.csv",
+    "data/alpha_stack_cache/csv_export/prices_matrix.csv",
+)
+
+PRICE_PARQUET_CANDIDATES = (
+    "alpha_stack_cache/prices/_matrix_prices_2007_2026.parquet",
+    "outputs/research/flow_detection_v1/price_panel.parquet",
+    "outputs/research/ma_vol_hypothesis/price_panel.parquet",
+)
+
+ACTUAL_NAV_CSV_CANDIDATES = (
+    "outputs/portfolio_history/nav.csv",
+    "outputs/perf/live_overlay_nav_series.csv",
+    "outputs/perf/nav_timeseries.csv",
+)
+
+BENCHMARK_CSV_CANDIDATES = (
+    "outputs/perf/live_overlay_benchmark_close_history.csv",
+    "outputs/perf/benchmark_close_history.csv",
 )
 
 
@@ -56,8 +75,11 @@ class PlanSnapshot:
 class PriceStore:
     def __init__(self) -> None:
         self.prices: dict[str, dict[str, float]] = {}
+        self.source_by_symbol_date: dict[str, dict[str, str]] = {}
         self.source_paths: list[str] = []
         self.reason_codes: list[str] = []
+        self.candidate_paths: list[str] = []
+        self.failed_paths: list[dict[str, str]] = []
 
     def add(self, symbol: str, date: str, close: float, source: Path) -> None:
         symbol = symbol.upper().strip()
@@ -65,17 +87,45 @@ class PriceStore:
             return
         self.prices.setdefault(symbol, {})[date] = close
         source_text = str(source)
+        self.source_by_symbol_date.setdefault(symbol, {})[date] = source_text
         if source_text not in self.source_paths:
             self.source_paths.append(source_text)
 
+    def record_candidate(self, path: Path | str) -> None:
+        _diag_add_candidate(self.diagnostics_payload, path)
+
+    @property
+    def diagnostics_payload(self) -> dict[str, Any]:
+        return {
+            "candidate_paths": self.candidate_paths,
+            "selected_paths": self.source_paths,
+            "failed_paths": self.failed_paths,
+        }
+
+    def record_failure(self, path: Path | str, reason: str) -> None:
+        _diag_add_failure(self.diagnostics_payload, path, reason)
+
     def get(self, symbol: str, date: str) -> float | None:
         return self.prices.get(symbol.upper().strip(), {}).get(date)
+
+    def source_for(self, symbol: str, date: str) -> str | None:
+        return self.source_by_symbol_date.get(symbol.upper().strip(), {}).get(date)
 
     def dates_for_symbols(self, symbols: set[str]) -> set[str]:
         out: set[str] = set()
         for symbol in symbols:
             out.update(self.prices.get(symbol.upper().strip(), {}).keys())
         return out
+
+    def diagnostics(self) -> dict[str, Any]:
+        date_count = len({date for by_date in self.prices.values() for date in by_date})
+        return {
+            "candidate_paths": list(self.candidate_paths),
+            "selected_paths": list(self.source_paths),
+            "failed_paths": list(self.failed_paths),
+            "loaded_symbol_count": len(self.prices),
+            "loaded_date_count": date_count,
+        }
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -159,6 +209,23 @@ def _append_reason(reasons: list[str], reason: str) -> None:
         reasons.append(reason)
 
 
+def _is_material_data_reason(reason: str) -> bool:
+    text = str(reason).lower()
+    material_tokens = (
+        "missing",
+        "unavailable",
+        "unreadable",
+        "failed",
+        "stale_trade_date",
+        "no_aligned",
+        "fewer_than_two",
+        "reconciliation_not_clean",
+        "price_history_missing",
+        "price_panel",
+    )
+    return any(token in text for token in material_tokens)
+
+
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
@@ -167,6 +234,46 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
             return [dict(row) for row in csv.DictReader(handle)]
     except Exception:
         return []
+
+
+def _new_diagnostics() -> dict[str, Any]:
+    return {"candidate_paths": [], "selected_paths": [], "failed_paths": []}
+
+
+def _diag_add_candidate(diagnostics: dict[str, Any], path: Path | str) -> None:
+    text = str(path)
+    candidates = diagnostics.setdefault("candidate_paths", [])
+    if text not in candidates:
+        candidates.append(text)
+
+
+def _diag_add_selected(diagnostics: dict[str, Any], path: Path | str) -> None:
+    _diag_add_candidate(diagnostics, path)
+    text = str(path)
+    selected = diagnostics.setdefault("selected_paths", [])
+    if text not in selected:
+        selected.append(text)
+
+
+def _diag_add_failure(diagnostics: dict[str, Any], path: Path | str, reason: str) -> None:
+    _diag_add_candidate(diagnostics, path)
+    failures = diagnostics.setdefault("failed_paths", [])
+    entry = {"path": str(path), "reason": str(reason)}
+    if entry not in failures:
+        failures.append(entry)
+
+
+def _merge_diagnostics(*items: dict[str, Any]) -> dict[str, Any]:
+    merged = _new_diagnostics()
+    for diagnostics in items:
+        for path in diagnostics.get("candidate_paths", []):
+            _diag_add_candidate(merged, path)
+        for path in diagnostics.get("selected_paths", []):
+            _diag_add_selected(merged, path)
+        for failure in diagnostics.get("failed_paths", []):
+            if isinstance(failure, dict):
+                _diag_add_failure(merged, failure.get("path", ""), failure.get("reason", "unknown"))
+    return merged
 
 
 @contextmanager
@@ -191,68 +298,167 @@ def load_price_store(repo_root: Path | str = Path(".")) -> PriceStore:
     store = PriceStore()
     for rel in PRICE_CSV_CANDIDATES:
         path = repo / rel
-        for row in _read_csv_rows(path):
-            date = _date_text(row.get("date") or row.get("as_of") or row.get("timestamp"))
-            symbol = str(row.get("symbol") or row.get("ticker") or row.get("asset") or "").upper().strip()
-            close = _safe_float(
-                row.get("close")
-                or row.get("adj_close")
-                or row.get("price")
-                or row.get("last")
-                or row.get("execution_price")
-            )
-            if date and symbol and close is not None:
-                store.add(symbol, date, close, path)
+        store.record_candidate(path)
+        if not path.exists():
+            store.record_failure(path, "missing")
+            continue
+        loaded = 0
+        rows = _read_csv_rows(path)
+        if not rows:
+            store.record_failure(path, "empty_or_unreadable")
+            continue
+        loaded = _load_price_csv_rows(rows, path, store)
+        if loaded <= 0:
+            store.record_failure(path, "no_valid_price_rows")
     _load_parquet_price_panel(repo, store)
     if not store.source_paths:
         store.reason_codes.append("price_history_missing")
     return store
 
 
-def _load_parquet_price_panel(repo: Path, store: PriceStore) -> None:
-    path = repo / "outputs" / "research" / "flow_detection_v1" / "price_panel.parquet"
-    if not path.exists():
-        return
-    try:
-        os.environ.setdefault("ARROW_USER_SIMD_LEVEL", "NONE")
-        with _suppress_stderr_fd():
-            import pandas as pd  # type: ignore
+def _load_price_csv_rows(rows: list[dict[str, str]], path: Path, store: PriceStore) -> int:
+    if not rows:
+        return 0
+    columns = {str(col).lower(): col for col in rows[0].keys()}
+    date_col = columns.get("date") or columns.get("as_of") or columns.get("timestamp")
+    symbol_col = columns.get("symbol") or columns.get("ticker") or columns.get("asset")
+    close_col = (
+        columns.get("close")
+        or columns.get("adj_close")
+        or columns.get("price")
+        or columns.get("last")
+        or columns.get("execution_price")
+    )
+    loaded = 0
+    if date_col is not None and symbol_col is not None and close_col is not None:
+        for row in rows:
+            date = _date_text(row.get(date_col))
+            symbol = str(row.get(symbol_col) or "").upper().strip()
+            close = _safe_float(row.get(close_col))
+            if date and symbol and close is not None:
+                store.add(symbol, date, close, path)
+                loaded += 1
+        return loaded
+    if date_col is None:
+        return 0
+    metadata = {
+        "date",
+        "as_of",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "sector",
+        "ticker",
+        "symbol",
+        "asset",
+    }
+    for row in rows:
+        date = _date_text(row.get(date_col))
+        if not date:
+            continue
+        for col, value in row.items():
+            if str(col).lower() in metadata:
+                continue
+            close = _safe_float(value)
+            symbol = str(col).upper().strip()
+            if symbol and close is not None:
+                store.add(symbol, date, close, path)
+                loaded += 1
+    return loaded
 
-            df = pd.read_parquet(path)
-    except Exception:
+
+def _load_parquet_price_panel(repo: Path, store: PriceStore) -> None:
+    unreadable_existing = False
+    parse_failed_existing = False
+    for rel in PRICE_PARQUET_CANDIDATES:
+        path = repo / rel
+        store.record_candidate(path)
+        if not path.exists():
+            store.record_failure(path, "missing")
+            continue
+        loaded_before = sum(len(by_date) for by_date in store.prices.values())
+        try:
+            os.environ.setdefault("ARROW_USER_SIMD_LEVEL", "NONE")
+            with _suppress_stderr_fd():
+                import pandas as pd  # type: ignore
+
+                df = pd.read_parquet(path)
+        except Exception as exc:
+            unreadable_existing = True
+            store.record_failure(path, f"unreadable:{type(exc).__name__}")
+            continue
+        try:
+            _load_price_dataframe(df, path, store)
+        except Exception as exc:
+            parse_failed_existing = True
+            store.record_failure(path, f"parse_failed:{type(exc).__name__}")
+            continue
+        loaded_after = sum(len(by_date) for by_date in store.prices.values())
+        if loaded_after == loaded_before:
+            store.record_failure(path, "no_supported_price_rows")
+    if unreadable_existing and not store.source_paths:
         store.reason_codes.append("price_panel_parquet_unreadable")
-        return
-    try:
-        columns = {str(col).lower(): col for col in df.columns}
-        if {"date", "symbol"}.issubset(columns):
-            close_col = (
-                columns.get("close")
-                or columns.get("adj_close")
-                or columns.get("price")
-                or columns.get("last")
-            )
-            if close_col is None:
-                store.reason_codes.append("price_panel_missing_close_column")
-                return
-            for _, row in df.iterrows():
-                date = _date_text(row[columns["date"]])
-                symbol = str(row[columns["symbol"]]).upper().strip()
-                close = _safe_float(row[close_col])
-                if date and symbol and close is not None:
-                    store.add(symbol, date, close, path)
-            return
-        if getattr(df.index, "name", None) or len(df.index):
-            for idx, row in df.iterrows():
-                date = _date_text(idx)
-                if not date:
-                    continue
-                for col, value in row.items():
-                    close = _safe_float(value)
-                    symbol = str(col).upper().strip()
-                    if symbol and close is not None:
-                        store.add(symbol, date, close, path)
-    except Exception:
+    if parse_failed_existing and not store.source_paths:
         store.reason_codes.append("price_panel_parse_failed")
+
+
+def _load_price_dataframe(df: Any, path: Path, store: PriceStore) -> None:
+    columns = {str(col).lower(): col for col in df.columns}
+    date_col = columns.get("date") or columns.get("as_of") or columns.get("timestamp")
+    symbol_col = columns.get("symbol") or columns.get("ticker") or columns.get("asset")
+    close_col = columns.get("close") or columns.get("adj_close") or columns.get("price") or columns.get("last")
+    if date_col is not None and symbol_col is not None:
+        if close_col is None:
+            store.record_failure(path, "missing_close_column")
+            if not store.source_paths:
+                store.reason_codes.append("price_panel_missing_close_column")
+            return
+        for _, row in df.iterrows():
+            date = _date_text(row[date_col])
+            symbol = str(row[symbol_col]).upper().strip()
+            close = _safe_float(row[close_col])
+            if date and symbol and close is not None:
+                store.add(symbol, date, close, path)
+        return
+    if date_col is not None:
+        skip_columns = {date_col}
+        metadata = {
+            "open",
+            "high",
+            "low",
+            "close",
+            "adj_close",
+            "volume",
+            "sector",
+            "ticker",
+            "symbol",
+            "asset",
+        }
+        for _, row in df.iterrows():
+            date = _date_text(row[date_col])
+            if not date:
+                continue
+            for col, value in row.items():
+                if col in skip_columns or str(col).lower() in metadata:
+                    continue
+                close = _safe_float(value)
+                symbol = str(col).upper().strip()
+                if symbol and close is not None:
+                    store.add(symbol, date, close, path)
+        return
+    for idx, row in df.iterrows():
+        date = _date_text(idx)
+        if not date:
+            continue
+        for col, value in row.items():
+            close = _safe_float(value)
+            symbol = str(col).upper().strip()
+            if symbol and close is not None:
+                store.add(symbol, date, close, path)
 
 
 def discover_plan_snapshots(repo_root: Path | str, trade_date: str) -> list[PlanSnapshot]:
@@ -462,6 +668,14 @@ def build_intended_nav(
             "missing_symbols": [],
             "reason_codes": _dedupe_reasons(["missing_plan_artifacts"] + prices.reason_codes),
             "source_artifacts": [],
+            "source_diagnostics": {
+                "price": prices.diagnostics(),
+                "plan": {
+                    "candidate_paths": [],
+                    "selected_paths": [],
+                    "failed_paths": [{"path": str(repo / "outputs" / "precompute"), "reason": "missing_plan_artifacts"}],
+                },
+            },
         }
 
     all_symbols = {pos.symbol for snapshot in snapshots for pos in snapshot.positions}
@@ -551,6 +765,14 @@ def build_intended_nav(
         "reason_codes": reasons,
         "timeseries": rows,
         "source_artifacts": source_artifacts + prices.source_paths,
+        "source_diagnostics": {
+            "price": prices.diagnostics(),
+            "plan": {
+                "candidate_paths": source_artifacts,
+                "selected_paths": source_artifacts,
+                "failed_paths": [],
+            },
+        },
     }
 
 
@@ -682,10 +904,11 @@ def _mark_intended_row(
 
 def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> dict[str, Any]:
     repo = Path(repo_root)
-    rows = _actual_rows_from_nav_series(repo, trade_date)
+    rows, nav_diagnostics = _actual_rows_from_nav_series(repo, trade_date)
+    snapshot_diagnostics = _new_diagnostics()
     reasons: list[str] = []
     if not rows:
-        snapshot_row = _actual_row_from_snapshot(repo, trade_date)
+        snapshot_row, snapshot_diagnostics = _actual_row_from_snapshot(repo, trade_date)
         if snapshot_row:
             rows = [snapshot_row]
             reasons.append("actual_nav_series_missing_using_broker_snapshot")
@@ -699,10 +922,15 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
                 "timeseries": [],
                 "reason_codes": ["missing_actual_nav"],
                 "source_artifacts": [],
+                "source_diagnostics": {
+                    "nav": nav_diagnostics,
+                    "snapshot": snapshot_diagnostics,
+                    "positions": _new_diagnostics(),
+                },
             }
     rows = _compute_return_fields(rows, value_key="actual_equity_value", daily_key="actual_return_daily", cumulative_key="actual_return_cumulative")
     latest = rows[-1]
-    positions, position_sources, position_reasons = _actual_positions_for_date(repo, trade_date)
+    positions, position_sources, position_reasons, position_diagnostics = _actual_positions_for_date(repo, trade_date)
     if positions:
         latest["actual_positions"] = positions
     reasons.extend(position_reasons)
@@ -724,23 +952,39 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
         "reason_codes": _dedupe_reasons(reasons),
         "timeseries": rows,
         "source_artifacts": source_artifacts,
+        "source_diagnostics": {
+            "nav": nav_diagnostics,
+            "snapshot": snapshot_diagnostics,
+            "positions": position_diagnostics,
+        },
     }
 
 
-def _actual_rows_from_nav_series(repo: Path, trade_date: str) -> list[dict[str, Any]]:
-    path = repo / "outputs" / "perf" / "live_overlay_nav_series.csv"
-    rows: list[dict[str, Any]] = []
-    for raw in _read_csv_rows(path):
-        date = _date_text(raw.get("date"))
-        if not date or date > trade_date:
+def _actual_rows_from_nav_series(repo: Path, trade_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    diagnostics = _new_diagnostics()
+    by_date: dict[str, dict[str, Any]] = {}
+    candidates = [repo / rel for rel in ACTUAL_NAV_CSV_CANDIDATES]
+    candidates.extend(_run_scoped_paths(repo, "snapshots/nav_timeseries.csv"))
+    for path in candidates:
+        _diag_add_candidate(diagnostics, path)
+        if not path.exists():
+            _diag_add_failure(diagnostics, path, "missing")
             continue
-        equity = _safe_float(raw.get("equity") or raw.get("portfolio_value") or raw.get("nav"))
-        if equity is None:
+        rows = _read_csv_rows(path)
+        if not rows:
+            _diag_add_failure(diagnostics, path, "empty_or_unreadable")
             continue
-        cash = _safe_float(raw.get("cash"))
-        gross = _safe_float(raw.get("gross_exposure"))
-        rows.append(
-            {
+        loaded = 0
+        for raw in rows:
+            date = _date_text(raw.get("date") or raw.get("as_of_date"))
+            if not date or date > trade_date or date in by_date:
+                continue
+            equity = _safe_float(raw.get("equity") or raw.get("portfolio_value") or raw.get("nav"))
+            if equity is None:
+                continue
+            cash = _safe_float(raw.get("cash") or raw.get("cash_value"))
+            gross = _safe_float(raw.get("gross_exposure") or raw.get("gross") or raw.get("exposure"))
+            by_date[date] = {
                 "date": date,
                 "actual_equity_value": _round(equity, 6),
                 "actual_cash": _round(cash, 6),
@@ -751,29 +995,46 @@ def _actual_rows_from_nav_series(repo: Path, trade_date: str) -> list[dict[str, 
                 "reason_codes": ["ok"],
                 "source_artifacts": [str(path)],
             }
-        )
-    return sorted(rows, key=lambda row: row["date"])
+            loaded += 1
+        if loaded > 0:
+            _diag_add_selected(diagnostics, path)
+        else:
+            _diag_add_failure(diagnostics, path, "no_valid_nav_rows")
+    return [by_date[date] for date in sorted(by_date)], diagnostics
 
 
-def _actual_row_from_snapshot(repo: Path, trade_date: str) -> dict[str, Any] | None:
-    candidates = [
-        repo / "outputs" / "broker_snapshot" / f"broker_snapshot_{trade_date}.json",
-        repo / "outputs" / "broker" / "broker_snapshot_latest.json",
-    ]
+def _actual_row_from_snapshot(repo: Path, trade_date: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    diagnostics = _new_diagnostics()
+    candidates = _actual_json_candidates(repo, trade_date)
     for path in candidates:
+        _diag_add_candidate(diagnostics, path)
         payload = _read_json(path)
         if payload is None:
+            _diag_add_failure(diagnostics, path, "missing_or_unreadable")
             continue
-        payload_date = _date_text(payload.get("trade_date") or payload.get("as_of") or payload.get("captured_at"))
-        if path.name == "broker_snapshot_latest.json" and payload_date != trade_date:
+        payload_date = _payload_date(payload)
+        if payload_date and payload_date != trade_date:
+            _diag_add_failure(diagnostics, path, f"stale_trade_date:{payload_date}")
             continue
-        equity = _safe_float(payload.get("portfolio_value") or payload.get("equity") or (payload.get("account") or {}).get("equity"))
-        if equity is None:
-            continue
-        cash = _safe_float(payload.get("cash") or (payload.get("account") or {}).get("cash"))
-        positions = _positions_from_broker_snapshot(payload)
+        equity = _actual_equity_from_payload(payload)
+        positions = _positions_from_actual_payload(payload)
+        cash = _actual_cash_from_payload(payload)
         market_value = sum(abs(float(pos.get("market_value") or 0.0)) for pos in positions)
-        gross = market_value / equity if equity else None
+        row_reasons: list[str] = []
+        if equity is None and cash is not None and market_value > 0.0:
+            equity = cash + market_value
+            row_reasons.append("actual_equity_inferred_from_positions_and_cash")
+        if equity is None:
+            _diag_add_failure(diagnostics, path, "missing_actual_equity")
+            continue
+        gross = market_value / equity if equity and market_value else None
+        if "recon_posttrade_" in path.name:
+            row_reasons.append("actual_from_posttrade_reconciliation")
+            if not _reconciliation_clean(payload):
+                row_reasons.append("reconciliation_not_clean")
+        else:
+            row_reasons.append("actual_from_broker_snapshot")
+        _diag_add_selected(diagnostics, path)
         return {
             "date": trade_date,
             "actual_equity_value": _round(equity, 6),
@@ -781,15 +1042,87 @@ def _actual_row_from_snapshot(repo: Path, trade_date: str) -> dict[str, Any] | N
             "actual_gross_exposure": _round(gross, 10),
             "actual_positions": positions,
             "broker_source": str(path),
-            "reconciliation_source": None,
-            "reason_codes": ["actual_from_broker_snapshot"],
+            "reconciliation_source": str(path) if "recon_posttrade_" in path.name else None,
+            "reason_codes": _dedupe_reasons(row_reasons),
             "source_artifacts": [str(path)],
-        }
-    return None
+        }, diagnostics
+    return None, diagnostics
+
+
+def _run_scoped_paths(repo: Path, suffix: str) -> list[Path]:
+    runs_root = repo / "outputs" / "runs"
+    if not runs_root.exists():
+        return []
+    return sorted(runs_root.glob(f"*/{suffix}"), reverse=True)
+
+
+def _actual_json_candidates(repo: Path, trade_date: str) -> list[Path]:
+    candidates: list[Path] = []
+    candidates.extend(_run_scoped_paths(repo, f"broker/recon_posttrade_{trade_date}.json"))
+    candidates.append(repo / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
+    candidates.extend(_run_scoped_paths(repo, "broker/posttrade_positions.json"))
+    candidates.append(repo / "outputs" / "broker" / "posttrade_positions.json")
+    candidates.append(repo / "outputs" / "broker_snapshot" / f"broker_snapshot_{trade_date}.json")
+    candidates.append(repo / "outputs" / "broker" / "broker_snapshot_latest.json")
+    return _dedupe_paths(candidates)
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        text = str(path)
+        if text not in seen:
+            out.append(path)
+            seen.add(text)
+    return out
+
+
+def _payload_date(payload: dict[str, Any]) -> str | None:
+    return _date_text(payload.get("trade_date") or payload.get("date") or payload.get("as_of") or payload.get("captured_at"))
+
+
+def _actual_equity_from_payload(payload: dict[str, Any]) -> float | None:
+    account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
+    return _safe_float(
+        payload.get("broker_equity")
+        or payload.get("portfolio_value")
+        or payload.get("equity")
+        or account.get("equity")
+        or account.get("portfolio_value")
+    )
+
+
+def _actual_cash_from_payload(payload: dict[str, Any]) -> float | None:
+    account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
+    return _safe_float(payload.get("broker_cash") or payload.get("cash") or account.get("cash"))
+
+
+def _reconciliation_clean(payload: dict[str, Any]) -> bool:
+    verdict = str(payload.get("verdict") or payload.get("status") or "").upper()
+    drift_status = str(payload.get("drift_status") or payload.get("comparison_status") or "").upper()
+    verdict_clean = verdict in {"", "PASS", "OK", "CLEAN"}
+    drift_clean = not drift_status or "OK" in drift_status or "RECONCILED" in drift_status
+    return verdict_clean and drift_clean
+
+
+def _positions_from_actual_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(payload.get("actual_positions"), dict):
+        return [
+            {"symbol": str(symbol).upper(), "shares": _round(qty, 6), "price": None, "market_value": None}
+            for symbol, qty in sorted(payload["actual_positions"].items())
+            if str(symbol).strip()
+        ]
+    return _positions_from_broker_snapshot(payload)
 
 
 def _positions_from_broker_snapshot(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    positions = payload.get("positions_current") or payload.get("positions") or []
+    positions = (
+        payload.get("positions_current")
+        or payload.get("positions")
+        or payload.get("normalized_positions")
+        or []
+    )
     out: list[dict[str, Any]] = []
     if not isinstance(positions, list):
         return out
@@ -812,22 +1145,72 @@ def _positions_from_broker_snapshot(payload: dict[str, Any]) -> list[dict[str, A
     return sorted(out, key=lambda row: row["symbol"])
 
 
-def _actual_positions_for_date(repo: Path, trade_date: str) -> tuple[list[dict[str, Any]], list[str], list[str]]:
-    snapshot_path = repo / "outputs" / "broker_snapshot" / f"broker_snapshot_{trade_date}.json"
-    snapshot = _read_json(snapshot_path)
-    if snapshot is not None:
-        positions = _positions_from_broker_snapshot(snapshot)
-        if positions:
-            return positions, [str(snapshot_path)], ["ok"]
-    recon_path = repo / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json"
-    recon = _read_json(recon_path)
-    if recon is not None and isinstance(recon.get("actual_positions"), dict):
-        positions = [
-            {"symbol": str(symbol).upper(), "shares": _round(qty, 6), "price": None, "market_value": None}
-            for symbol, qty in sorted(recon["actual_positions"].items())
-        ]
-        return positions, [str(recon_path)], ["actual_positions_from_reconciliation"]
-    return [], [], ["actual_positions_unavailable"]
+def _positions_from_portfolio_history(repo: Path, trade_date: str, diagnostics: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    path = repo / "outputs" / "portfolio_history" / "positions.csv"
+    _diag_add_candidate(diagnostics, path)
+    if not path.exists():
+        _diag_add_failure(diagnostics, path, "missing")
+        return [], [], []
+    rows = _read_csv_rows(path)
+    if not rows:
+        _diag_add_failure(diagnostics, path, "empty_or_unreadable")
+        return [], [], []
+    positions: list[dict[str, Any]] = []
+    for raw in rows:
+        date = _date_text(raw.get("as_of_date") or raw.get("date") or raw.get("trade_date"))
+        if date != trade_date:
+            continue
+        symbol = str(raw.get("ticker") or raw.get("symbol") or "").upper().strip()
+        qty = _safe_float(raw.get("quantity") or raw.get("qty") or raw.get("shares"))
+        price = _safe_float(raw.get("current_price") or raw.get("price"))
+        market_value = _safe_float(raw.get("market_value"))
+        if symbol and qty is not None:
+            positions.append(
+                {
+                    "symbol": symbol,
+                    "shares": _round(qty, 6),
+                    "price": _round(price, 6),
+                    "market_value": _round(market_value, 6),
+                }
+            )
+    if not positions:
+        _diag_add_failure(diagnostics, path, f"no_positions_for_date:{trade_date}")
+        return [], [], []
+    _diag_add_selected(diagnostics, path)
+    return sorted(positions, key=lambda row: row["symbol"]), [str(path)], ["actual_positions_from_portfolio_history"]
+
+
+def _actual_positions_for_date(repo: Path, trade_date: str) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, Any]]:
+    diagnostics = _new_diagnostics()
+    for path in _actual_json_candidates(repo, trade_date):
+        _diag_add_candidate(diagnostics, path)
+        payload = _read_json(path)
+        if payload is None:
+            _diag_add_failure(diagnostics, path, "missing_or_unreadable")
+            continue
+        payload_date = _payload_date(payload)
+        if payload_date and payload_date != trade_date:
+            _diag_add_failure(diagnostics, path, f"stale_trade_date:{payload_date}")
+            continue
+        positions = _positions_from_actual_payload(payload)
+        if not positions:
+            _diag_add_failure(diagnostics, path, "no_positions")
+            continue
+        reasons: list[str]
+        if "recon_posttrade_" in path.name:
+            reasons = ["actual_positions_from_reconciliation"]
+            if _reconciliation_clean(payload):
+                reasons.append("actual_positions_from_reconciled_posttrade")
+            else:
+                reasons.append("reconciliation_not_clean")
+        else:
+            reasons = ["actual_positions_from_broker_artifact"]
+        _diag_add_selected(diagnostics, path)
+        return positions, [str(path)], _dedupe_reasons(reasons), diagnostics
+    csv_positions, sources, reasons = _positions_from_portfolio_history(repo, trade_date, diagnostics)
+    if csv_positions:
+        return csv_positions, sources, reasons, diagnostics
+    return [], [], ["actual_positions_unavailable"], diagnostics
 
 
 def build_benchmark_nav(
@@ -835,9 +1218,11 @@ def build_benchmark_nav(
     trade_date: str,
     repo_root: Path | str = Path("."),
     aligned_dates: list[str] | None = None,
+    price_store: PriceStore | None = None,
 ) -> dict[str, Any]:
     repo = Path(repo_root)
-    rows, source = _benchmark_rows(repo, trade_date)
+    prices = price_store or load_price_store(repo)
+    rows, source_paths, diagnostics = _benchmark_rows(repo, trade_date, prices)
     reasons: list[str] = []
     if aligned_dates is not None:
         wanted = set(aligned_dates)
@@ -855,6 +1240,7 @@ def build_benchmark_nav(
             "timeseries": [],
             "reason_codes": _dedupe_reasons(["missing_spy_benchmark"] + reasons),
             "source_artifacts": [],
+            "source_diagnostics": {"benchmark": diagnostics, "price": prices.diagnostics()},
         }
     latest = rows[-1]
     return {
@@ -865,22 +1251,30 @@ def build_benchmark_nav(
         "spy_price": latest.get("spy_price"),
         "spy_return_daily": latest.get("spy_return_daily"),
         "spy_return_cumulative": latest.get("spy_return_cumulative"),
-        "price_source": source,
+        "price_source": source_paths,
         "reason_codes": _dedupe_reasons(reasons),
         "timeseries": rows,
-        "source_artifacts": [source],
+        "source_artifacts": source_paths,
+        "source_diagnostics": {"benchmark": diagnostics, "price": prices.diagnostics()},
     }
 
 
-def _benchmark_rows(repo: Path, trade_date: str) -> tuple[list[dict[str, Any]], str]:
-    candidates = [
-        repo / "outputs" / "perf" / "live_overlay_benchmark_close_history.csv",
-        repo / "outputs" / "perf" / "benchmark_close_history.csv",
-    ]
+def _benchmark_rows(repo: Path, trade_date: str, prices: PriceStore) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+    diagnostics = _new_diagnostics()
+    candidates = [repo / rel for rel in BENCHMARK_CSV_CANDIDATES]
     by_date: dict[str, dict[str, Any]] = {}
     source_by_date: dict[str, str] = {}
     for path in candidates:
-        for raw in _read_csv_rows(path):
+        _diag_add_candidate(diagnostics, path)
+        if not path.exists():
+            _diag_add_failure(diagnostics, path, "missing")
+            continue
+        rows = _read_csv_rows(path)
+        if not rows:
+            _diag_add_failure(diagnostics, path, "empty_or_unreadable")
+            continue
+        loaded = 0
+        for raw in rows:
             date = _date_text(raw.get("date"))
             if not date or date > trade_date or date in by_date:
                 continue
@@ -889,9 +1283,21 @@ def _benchmark_rows(repo: Path, trade_date: str) -> tuple[list[dict[str, Any]], 
                 continue
             by_date[date] = {"date": date, "spy_price": _round(price, 6), "reason_codes": ["ok"]}
             source_by_date[date] = str(path)
+            loaded += 1
+        if loaded > 0:
+            _diag_add_selected(diagnostics, path)
+        else:
+            _diag_add_failure(diagnostics, path, "no_valid_spy_rows")
+    spy_prices = prices.prices.get("SPY", {})
+    for date in sorted(spy_prices):
+        if date > trade_date or date in by_date:
+            continue
+        source = prices.source_for("SPY", date) or (prices.source_paths[0] if prices.source_paths else "price_store")
+        by_date[date] = {"date": date, "spy_price": _round(spy_prices[date], 6), "reason_codes": ["ok"]}
+        source_by_date[date] = source
+        _diag_add_selected(diagnostics, source)
     rows = [by_date[date] | {"price_source": source_by_date[date]} for date in sorted(by_date)]
-    source = str(candidates[0] if candidates[0].exists() else candidates[1])
-    return rows, source
+    return rows, _dedupe_list(list(source_by_date.values())), diagnostics
 
 
 def _compute_return_fields(
@@ -1044,11 +1450,12 @@ def build_operational_drag(
         reasons.append("operational_drag_unavailable_fewer_than_two_aligned_observations")
     latest = available_rows[-1] if len(available_rows) >= 2 else (rows[-1] if rows else {})
     reasons.extend(reason for row in rows for reason in row.get("reason_codes", []) if reason != "ok")
+    material_reasons = [reason for reason in reasons if _is_material_data_reason(reason)]
     return {
         "schema_version": SCHEMA_VERSION,
         "date": trade_date,
         "available": len(available_rows) >= 2,
-        "confidence": "MEDIUM" if len(available_rows) >= 2 and not reasons else "LOW",
+        "confidence": "MEDIUM" if len(available_rows) >= 2 and not material_reasons else "LOW",
         "latest": latest,
         "timeseries": rows,
         "reason_codes": _dedupe_reasons(reasons),
@@ -1057,6 +1464,11 @@ def build_operational_drag(
             + list(actual.get("source_artifacts") or [])
             + list(benchmark.get("source_artifacts") or [])
         ),
+        "source_diagnostics": {
+            "intended": intended.get("source_diagnostics") or {},
+            "actual": actual.get("source_diagnostics") or {},
+            "benchmark": benchmark.get("source_diagnostics") or {},
+        },
     }
 
 
@@ -1361,11 +1773,11 @@ def build_operational_drag_analysis(
     if not _is_date(trade_date):
         raise ValueError(f"trade_date must be YYYY-MM-DD, got {trade_date!r}")
     repo = Path(repo_root)
+    price_store = load_price_store(repo)
     actual = build_actual_nav(trade_date=trade_date, repo_root=repo)
     actual_dates = [row["date"] for row in actual.get("timeseries") or []]
-    benchmark_seed = build_benchmark_nav(trade_date=trade_date, repo_root=repo)
+    benchmark_seed = build_benchmark_nav(trade_date=trade_date, repo_root=repo, price_store=price_store)
     benchmark_dates = [row["date"] for row in benchmark_seed.get("timeseries") or []]
-    price_store = load_price_store(repo)
     intended = build_intended_nav(
         trade_date=trade_date,
         repo_root=repo,
@@ -1374,7 +1786,12 @@ def build_operational_drag_analysis(
     )
     intended_dates = [row["date"] for row in intended.get("timeseries") or []]
     aligned_benchmark_dates = _sort_dates(set(actual_dates) | set(intended_dates))
-    benchmark = build_benchmark_nav(trade_date=trade_date, repo_root=repo, aligned_dates=aligned_benchmark_dates)
+    benchmark = build_benchmark_nav(
+        trade_date=trade_date,
+        repo_root=repo,
+        aligned_dates=aligned_benchmark_dates,
+        price_store=price_store,
+    )
     drag = build_operational_drag(
         trade_date=trade_date,
         intended=intended,
@@ -1426,6 +1843,12 @@ def build_operational_drag_analysis(
         "operational_drag_attribution": attribution,
         "stable_window_analysis": windows,
         "artifact_paths": artifact_paths,
+        "source_diagnostics": {
+            "price": price_store.diagnostics(),
+            "intended": intended.get("source_diagnostics") or {},
+            "actual": actual.get("source_diagnostics") or {},
+            "benchmark": benchmark.get("source_diagnostics") or {},
+        },
         "reason_codes": _dedupe_reasons(
             [reason for section in (intended, actual, benchmark, drag, attribution, windows) for reason in section.get("reason_codes", []) if reason != "ok"]
         ),
@@ -1563,12 +1986,27 @@ def main(argv: list[str] | None = None) -> int:
         output_root=Path(args.output_root) if args.output_root else None,
         write=not args.no_write,
     )
+    diagnostics = payload.get("source_diagnostics") or {}
+    selected_sources = {
+        "price": (diagnostics.get("price") or {}).get("selected_paths") or [],
+        "actual_nav": ((diagnostics.get("actual") or {}).get("nav") or {}).get("selected_paths") or [],
+        "actual_positions": ((diagnostics.get("actual") or {}).get("positions") or {}).get("selected_paths") or [],
+        "benchmark": (((diagnostics.get("benchmark") or {}).get("benchmark") or {}).get("selected_paths")) or [],
+    }
+    candidate_counts = {
+        "price": len((diagnostics.get("price") or {}).get("candidate_paths") or []),
+        "actual_nav": len(((diagnostics.get("actual") or {}).get("nav") or {}).get("candidate_paths") or []),
+        "actual_positions": len(((diagnostics.get("actual") or {}).get("positions") or {}).get("candidate_paths") or []),
+        "benchmark": len((((diagnostics.get("benchmark") or {}).get("benchmark") or {}).get("candidate_paths")) or []),
+    }
     print(json.dumps({
         "date": payload["date"],
         "available": payload["available"],
         "confidence": payload["confidence"],
         "reason_codes": payload["reason_codes"],
         "artifact_paths": payload["artifact_paths"],
+        "selected_sources": selected_sources,
+        "source_candidate_counts": candidate_counts,
     }, indent=2, sort_keys=True))
     return 0
 

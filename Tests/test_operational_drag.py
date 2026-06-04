@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from research.operational_drag import (
     build_actual_nav,
     build_benchmark_nav,
@@ -32,6 +34,16 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _write_price_panel_parquet(path: Path, rows: list[dict]) -> None:
+    pd = pytest.importorskip("pandas")
+    try:
+        import pyarrow  # noqa: F401
+    except Exception:
+        pytest.skip("pyarrow is required for parquet fixture coverage")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(path)
 
 
 def _fixture_repo(tmp_path: Path, *, missing_bbb_price: bool = False, missing_spy_end: bool = False) -> Path:
@@ -142,6 +154,72 @@ def test_actual_nav_can_be_built_from_nav_and_broker_fixture(tmp_path: Path) -> 
     assert {row["symbol"] for row in actual["actual_positions"]} == {"AAA", "BBB"}
 
 
+def test_price_panel_parquet_reader_succeeds_on_fixture(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    (root / "outputs" / "prices" / "close_history.csv").unlink()
+    parquet_path = root / "outputs" / "research" / "flow_detection_v1" / "price_panel.parquet"
+    _write_price_panel_parquet(
+        parquet_path,
+        [
+            {"date": "2026-06-01", "ticker": "AAA", "close": 100.0},
+            {"date": "2026-06-01", "ticker": "BBB", "close": 50.0},
+            {"date": "2026-06-02", "ticker": "AAA", "close": 110.0},
+            {"date": "2026-06-02", "ticker": "BBB", "close": 45.0},
+        ],
+    )
+
+    intended = build_intended_nav(trade_date=TRADE_DATE, repo_root=root, date_axis=["2026-06-01", "2026-06-02"])
+
+    assert intended["available"] is True
+    assert intended["intended_equity_value"] == 10100.0
+    assert str(parquet_path) in intended["source_diagnostics"]["price"]["selected_paths"]
+    assert "price_history_missing" not in intended["reason_codes"]
+
+
+def test_price_matrix_csv_reader_succeeds_on_fixture(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    (root / "outputs" / "prices" / "close_history.csv").unlink()
+    matrix_path = root / "alpha_stack_cache" / "csv_export" / "prices_matrix.csv"
+    _write_csv(
+        matrix_path,
+        [
+            {"Date": "2026-06-01", "AAA": 100.0, "BBB": 50.0, "SPY": 100.0},
+            {"Date": "2026-06-02", "AAA": 110.0, "BBB": 45.0, "SPY": 101.0},
+        ],
+    )
+
+    intended = build_intended_nav(trade_date=TRADE_DATE, repo_root=root, date_axis=["2026-06-01", "2026-06-02"])
+
+    assert intended["available"] is True
+    assert intended["intended_equity_value"] == 10100.0
+    assert str(matrix_path) in intended["source_diagnostics"]["price"]["selected_paths"]
+    assert "price_history_missing" not in intended["reason_codes"]
+
+
+def test_spy_price_is_found_from_price_panel(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    (root / "outputs" / "perf" / "live_overlay_benchmark_close_history.csv").unlink()
+    parquet_path = root / "outputs" / "research" / "flow_detection_v1" / "price_panel.parquet"
+    _write_price_panel_parquet(
+        parquet_path,
+        [
+            {"date": "2026-06-01", "ticker": "SPY", "close": 100.0},
+            {"date": "2026-06-02", "ticker": "SPY", "close": 101.0},
+        ],
+    )
+
+    benchmark = build_benchmark_nav(
+        trade_date=TRADE_DATE,
+        repo_root=root,
+        aligned_dates=["2026-06-01", "2026-06-02"],
+    )
+
+    assert benchmark["available"] is True
+    assert benchmark["spy_price"] == 101.0
+    assert str(parquet_path) in benchmark["source_artifacts"]
+    assert "missing_spy_price:2026-06-02" not in benchmark["reason_codes"]
+
+
 def test_spy_series_aligns_by_date_and_reports_missing_dates(tmp_path: Path) -> None:
     root = _fixture_repo(tmp_path, missing_spy_end=True)
 
@@ -156,6 +234,36 @@ def test_spy_series_aligns_by_date_and_reports_missing_dates(tmp_path: Path) -> 
     assert "missing_spy_price:2026-06-02" in benchmark["reason_codes"]
 
 
+def test_actual_positions_are_read_from_run_scoped_reconciliation(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    (root / "outputs" / "broker_snapshot" / "broker_snapshot_2026-06-02.json").unlink()
+    recon_path = (
+        root
+        / "outputs"
+        / "runs"
+        / "2026-06-02T093504-0400_fixture"
+        / "broker"
+        / "recon_posttrade_2026-06-02.json"
+    )
+    _write_json(
+        recon_path,
+        {
+            "trade_date": "2026-06-02",
+            "broker_equity": 10050.0,
+            "broker_cash": 5000.0,
+            "verdict": "PASS",
+            "drift_status": "OK_RECONCILED",
+            "actual_positions": {"AAA": 20.0, "BBB": 30.0},
+        },
+    )
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
+
+    assert {row["symbol"] for row in actual["actual_positions"]} == {"AAA", "BBB"}
+    assert "actual_positions_from_reconciled_posttrade" in actual["reason_codes"]
+    assert str(recon_path) in actual["source_diagnostics"]["positions"]["selected_paths"]
+
+
 def test_operational_drag_equals_intended_minus_actual(tmp_path: Path) -> None:
     root = _fixture_repo(tmp_path)
     analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
@@ -166,6 +274,28 @@ def test_operational_drag_equals_intended_minus_actual(tmp_path: Path) -> None:
     assert latest["actual_return_daily"] == 0.005
     assert latest["daily_operational_drag"] == 0.005
     assert latest["cumulative_operational_drag"] == 0.005
+
+
+def test_source_selection_diagnostics_list_selected_paths(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    diagnostics = analysis["operational_drag"]["source_diagnostics"]
+
+    assert diagnostics["intended"]["price"]["selected_paths"]
+    assert diagnostics["actual"]["nav"]["selected_paths"]
+    assert diagnostics["actual"]["positions"]["selected_paths"]
+    assert diagnostics["benchmark"]["benchmark"]["selected_paths"]
+
+
+def test_operational_drag_confidence_improves_with_aligned_observations(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    assert analysis["available"] is True
+    assert analysis["confidence"] == "MEDIUM"
+    assert "missing_spy_price:2026-06-02" not in analysis["reason_codes"]
+    assert "price_history_missing" not in analysis["reason_codes"]
 
 
 def test_underdeployment_cash_drag_is_classified(tmp_path: Path) -> None:
