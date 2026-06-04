@@ -1996,29 +1996,6 @@ def _sorted_unique(codes: list[str]) -> list[str]:
     return sorted({str(code) for code in codes if code and code != "ok"})
 
 
-def _component_reasons_by_recency(component: dict[str, Any], trade_date: str) -> tuple[list[str], list[str]]:
-    """FR-061: split a component's reason codes into (current_date, historical).
-
-    Row reason codes are bucketed by the row date; series-level reason codes that
-    do not appear on any row are treated as current-date (they describe this run).
-    """
-    current: list[str] = []
-    historical: list[str] = []
-    row_codes: set[str] = set()
-    for row in component.get("timeseries") or []:
-        rdate = row.get("date")
-        codes = [code for code in (row.get("reason_codes") or []) if code and code != "ok"]
-        row_codes.update(codes)
-        if rdate is not None and rdate < trade_date:
-            historical.extend(codes)
-        else:
-            current.extend(codes)
-    for code in component.get("reason_codes") or []:
-        if code and code != "ok" and code not in row_codes:
-            current.append(code)
-    return current, historical
-
-
 def classify_operational_drag_reasons(
     *,
     trade_date: str,
@@ -2032,25 +2009,41 @@ def classify_operational_drag_reasons(
     """FR-061: classify (never delete) operational-drag reason codes into
     current-date / historical / window buckets and a materiality cross-cut, and
     derive a CIO-readable current-date status + decision-grade explanation."""
-    current: list[str] = []
-    historical: list[str] = []
-    window: list[str] = []
+    # Bucket strictly by the row date a code is emitted on, across every component
+    # that has a dated timeseries (intended/actual/benchmark/drag). This prevents a
+    # flattened aggregate (e.g. drag.reason_codes, which unions all historical
+    # rows) from flooding the current-date bucket with historical missing prices.
+    current_set: set[str] = set()
+    historical_set: set[str] = set()
+    all_row_codes: set[str] = set()
+    for component in (intended, actual, benchmark, drag):
+        for row in component.get("timeseries") or []:
+            rdate = row.get("date")
+            codes = [code for code in (row.get("reason_codes") or []) if code and code != "ok"]
+            all_row_codes.update(codes)
+            if rdate is not None and rdate < trade_date:
+                historical_set.update(codes)
+            else:
+                current_set.update(codes)
+    # Series-level run codes not attributable to any dated row describe this run
+    # as a whole (e.g. actual_nav_stale, price_history_missing) -> current-date.
+    for component in (intended, actual, benchmark, drag, attribution):
+        for code in component.get("reason_codes") or []:
+            if code and code != "ok" and code not in all_row_codes:
+                current_set.add(code)
 
-    for component in (intended, actual, benchmark):
-        comp_current, comp_historical = _component_reasons_by_recency(component, trade_date)
-        current.extend(comp_current)
-        historical.extend(comp_historical)
-
-    for component in (drag, attribution):
-        current.extend(code for code in (component.get("reason_codes") or []) if code and code != "ok")
-
-    window.extend(code for code in (windows.get("reason_codes") or []) if code and code != "ok")
+    window_set: set[str] = set()
+    for code in windows.get("reason_codes") or []:
+        if code and code != "ok":
+            window_set.add(code)
     for win in windows.get("windows") or []:
-        window.extend(code for code in (win.get("reason_codes") or []) if code and code != "ok")
+        for code in win.get("reason_codes") or []:
+            if code and code != "ok":
+                window_set.add(code)
 
-    current = _sorted_unique(current)
-    historical = _sorted_unique(historical)
-    window = _sorted_unique(window)
+    current = sorted(current_set)
+    historical = sorted(historical_set)
+    window = sorted(window_set)
     all_codes = _sorted_unique(current + historical + window)
     material = [code for code in all_codes if _is_material_data_reason(code)]
     non_material = [code for code in all_codes if not _is_material_data_reason(code)]
