@@ -16,6 +16,7 @@ from research.operational_drag import (
     build_operational_drag_analysis,
     build_operational_drag_attribution,
     build_stable_window_analysis,
+    classify_operational_drag_reasons,
 )
 
 
@@ -582,3 +583,89 @@ def test_intended_nav_has_no_look_ahead(tmp_path: Path) -> None:
     # Uses 2026-06-02 price (120), not the future 9999.
     assert last["intended_equity_value"] == 11800.0
     assert last["intended_return_daily"] == 0.18
+
+
+# ---------------------------------------------------------------------------
+# FR-061 — Operational drag reporting cleanup (reason-code classification)
+# ---------------------------------------------------------------------------
+
+def test_classify_separates_historical_from_current_date(tmp_path: Path) -> None:
+    trade_date = "2026-06-04"
+    intended = {
+        "reason_codes": ["missing_price:BK", "intended_nav_marked_to_market"],
+        "timeseries": [
+            {"date": "2026-05-30", "reason_codes": ["missing_price:BK"]},
+            {"date": "2026-06-04", "reason_codes": ["intended_nav_marked_to_market", "ok"]},
+        ],
+    }
+    actual = {"reason_codes": ["actual_nav_from_live_overlay"], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]}
+    benchmark = {"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]}
+    drag = {"available": True, "latest": {"date": "2026-06-04"}, "reason_codes": []}
+    windows = {"reason_codes": ["window_start_missing_using_first_available"], "windows": []}
+
+    c = classify_operational_drag_reasons(
+        trade_date=trade_date, intended=intended, actual=actual, benchmark=benchmark,
+        drag=drag, attribution={"reason_codes": []}, windows=windows,
+    )
+
+    assert "missing_price:BK" in c["historical_reason_codes"]
+    assert "missing_price:BK" not in c["current_date_reason_codes"]
+    assert "missing_price:BK" in c["material_reason_codes"]  # still visible, not deleted
+    assert "intended_nav_marked_to_market" in c["current_date_reason_codes"]
+    assert "window_start_missing_using_first_available" in c["window_reason_codes"]
+    assert c["decision_grade"] is True
+    assert c["current_date_status"] == "current_date_available_with_historical_caveats"
+
+
+def test_classify_current_date_material_gap_not_decision_grade() -> None:
+    trade_date = "2026-06-04"
+    intended = {
+        "reason_codes": ["missing_price:BK"],
+        "timeseries": [{"date": "2026-06-04", "reason_codes": ["missing_price:BK"]}],
+    }
+    actual = {"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]}
+    benchmark = {"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]}
+    drag = {"available": True, "latest": {"date": "2026-06-04"}, "reason_codes": []}
+
+    c = classify_operational_drag_reasons(
+        trade_date=trade_date, intended=intended, actual=actual, benchmark=benchmark,
+        drag=drag, attribution={"reason_codes": []}, windows={"reason_codes": [], "windows": []},
+    )
+
+    assert "missing_price:BK" in c["current_date_reason_codes"]
+    assert c["decision_grade"] is False
+    assert c["current_date_status"] == "current_date_available_with_caveats"
+    assert "missing_price:BK" in c["current_date_health"]["current_date_material_reason_codes"]
+
+
+def test_classify_unavailable_when_series_does_not_reach_trade_date() -> None:
+    c = classify_operational_drag_reasons(
+        trade_date="2026-06-04",
+        intended={"reason_codes": [], "timeseries": []},
+        actual={"reason_codes": ["actual_nav_stale"], "timeseries": [{"date": "2026-05-20", "reason_codes": ["ok"]}]},
+        benchmark={"reason_codes": [], "timeseries": []},
+        drag={"available": True, "latest": {"date": "2026-05-20"}, "reason_codes": ["actual_nav_stale"]},
+        attribution={"reason_codes": []},
+        windows={"reason_codes": [], "windows": []},
+    )
+    assert c["current_date_status"] == "current_date_unavailable"
+    assert c["decision_grade"] is False
+
+
+def test_analysis_exposes_classified_buckets_and_keeps_flat_reason_codes(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    drag = analysis["operational_drag"]
+    for key in ("current_date_status", "decision_grade", "current_date_reason_codes",
+                "historical_reason_codes", "window_reason_codes", "material_reason_codes"):
+        assert key in drag, key
+        assert key in analysis, key
+    # Flat reason_codes remain present (backward compatible).
+    assert "reason_codes" in analysis
+    # Clean fixture: requested date is usable / decision-grade.
+    assert analysis["current_date_status"] in (
+        "current_date_ok",
+        "current_date_available_with_historical_caveats",
+    )
+    assert analysis["decision_grade"] is True

@@ -1937,16 +1937,34 @@ def _mean(values: list[float | None]) -> float | None:
 
 
 def render_stable_window_markdown(payload: dict[str, Any]) -> str:
+    summary = payload.get("current_date_summary") or {}
+    health = summary.get("current_date_health") or {}
     lines = [
         f"# Operational Drag Stable-Window Analysis - {payload.get('date')}",
         "",
         f"- Available: {payload.get('available')}",
         f"- Confidence: {payload.get('confidence')}",
-        f"- Reason codes: {', '.join(payload.get('reason_codes') or [])}",
-        "",
-        "| Window | Status | Actual Start | End | Intended | Actual | SPY | Drag | Avg Intended Gross | Avg Actual Gross | Confidence | Caveats |",
-        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|",
     ]
+    if summary:
+        # FR-061: requested-date health first, historical caveats clearly separated.
+        lines.extend(
+            [
+                f"- Requested date status: {summary.get('current_date_status')}",
+                f"- Latest aligned date: {health.get('latest_aligned_date')} (requested {health.get('requested_date')})",
+                f"- Decision grade: {summary.get('decision_grade')} — {summary.get('decision_grade_explanation')}",
+                f"- Current-date reason codes: {', '.join(summary.get('current_date_reason_codes') or []) or 'none'}",
+                f"- Historical caveats: {', '.join(summary.get('historical_reason_codes') or []) or 'none'}",
+                f"- Window caveats: {', '.join(summary.get('window_reason_codes') or []) or 'none'}",
+            ]
+        )
+    lines.extend(
+        [
+            f"- Reason codes (flat): {', '.join(payload.get('reason_codes') or [])}",
+            "",
+            "| Window | Status | Actual Start | End | Intended | Actual | SPY | Drag | Avg Intended Gross | Avg Actual Gross | Confidence | Caveats |",
+            "|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|",
+        ]
+    )
     for row in payload.get("windows") or []:
         lines.append(
             "| {window} | {status} | {start} | {end} | {intended} | {actual} | {spy} | {drag} | {igross} | {agross} | {confidence} | {caveats} |".format(
@@ -1972,6 +1990,123 @@ def _fmt_pct(value: Any) -> str:
     if numeric is None:
         return "n/a"
     return f"{numeric * 100:.2f}%"
+
+
+def _sorted_unique(codes: list[str]) -> list[str]:
+    return sorted({str(code) for code in codes if code and code != "ok"})
+
+
+def _component_reasons_by_recency(component: dict[str, Any], trade_date: str) -> tuple[list[str], list[str]]:
+    """FR-061: split a component's reason codes into (current_date, historical).
+
+    Row reason codes are bucketed by the row date; series-level reason codes that
+    do not appear on any row are treated as current-date (they describe this run).
+    """
+    current: list[str] = []
+    historical: list[str] = []
+    row_codes: set[str] = set()
+    for row in component.get("timeseries") or []:
+        rdate = row.get("date")
+        codes = [code for code in (row.get("reason_codes") or []) if code and code != "ok"]
+        row_codes.update(codes)
+        if rdate is not None and rdate < trade_date:
+            historical.extend(codes)
+        else:
+            current.extend(codes)
+    for code in component.get("reason_codes") or []:
+        if code and code != "ok" and code not in row_codes:
+            current.append(code)
+    return current, historical
+
+
+def classify_operational_drag_reasons(
+    *,
+    trade_date: str,
+    intended: dict[str, Any],
+    actual: dict[str, Any],
+    benchmark: dict[str, Any],
+    drag: dict[str, Any],
+    attribution: dict[str, Any],
+    windows: dict[str, Any],
+) -> dict[str, Any]:
+    """FR-061: classify (never delete) operational-drag reason codes into
+    current-date / historical / window buckets and a materiality cross-cut, and
+    derive a CIO-readable current-date status + decision-grade explanation."""
+    current: list[str] = []
+    historical: list[str] = []
+    window: list[str] = []
+
+    for component in (intended, actual, benchmark):
+        comp_current, comp_historical = _component_reasons_by_recency(component, trade_date)
+        current.extend(comp_current)
+        historical.extend(comp_historical)
+
+    for component in (drag, attribution):
+        current.extend(code for code in (component.get("reason_codes") or []) if code and code != "ok")
+
+    window.extend(code for code in (windows.get("reason_codes") or []) if code and code != "ok")
+    for win in windows.get("windows") or []:
+        window.extend(code for code in (win.get("reason_codes") or []) if code and code != "ok")
+
+    current = _sorted_unique(current)
+    historical = _sorted_unique(historical)
+    window = _sorted_unique(window)
+    all_codes = _sorted_unique(current + historical + window)
+    material = [code for code in all_codes if _is_material_data_reason(code)]
+    non_material = [code for code in all_codes if not _is_material_data_reason(code)]
+    current_material = [code for code in current if _is_material_data_reason(code)]
+
+    latest = drag.get("latest") if isinstance(drag.get("latest"), dict) else {}
+    latest_aligned_date = latest.get("date")
+    reaches_requested_date = bool(drag.get("available")) and latest_aligned_date == trade_date
+
+    if not reaches_requested_date:
+        status = "current_date_unavailable"
+    elif current_material:
+        status = "current_date_available_with_caveats"
+    elif historical or window or current:
+        status = "current_date_available_with_historical_caveats"
+    else:
+        status = "current_date_ok"
+
+    decision_grade = reaches_requested_date and not current_material
+    if not reaches_requested_date:
+        explanation = (
+            f"Not decision-grade: the aligned intended/actual/SPY series does not reach {trade_date} "
+            f"(latest aligned date {latest_aligned_date})."
+        )
+    elif current_material:
+        explanation = (
+            f"Not decision-grade for {trade_date}: material current-date data gaps present "
+            f"({', '.join(current_material)})."
+        )
+    else:
+        caveat_note = (
+            " Historical/window caveats exist but do not affect the requested date."
+            if (historical or window)
+            else ""
+        )
+        explanation = (
+            f"Decision-grade for {trade_date}: current-date intended, actual, and SPY data are present "
+            f"and aligned.{caveat_note}"
+        )
+
+    return {
+        "current_date_status": status,
+        "decision_grade": decision_grade,
+        "decision_grade_explanation": explanation,
+        "current_date_reason_codes": current,
+        "historical_reason_codes": historical,
+        "window_reason_codes": window,
+        "material_reason_codes": material,
+        "non_material_reason_codes": non_material,
+        "current_date_health": {
+            "requested_date": trade_date,
+            "latest_aligned_date": latest_aligned_date,
+            "reaches_requested_date": reaches_requested_date,
+            "current_date_material_reason_codes": current_material,
+        },
+    }
 
 
 def build_operational_drag_analysis(
@@ -2017,6 +2152,20 @@ def build_operational_drag_analysis(
         actual=actual,
     )
     windows = build_stable_window_analysis(trade_date=trade_date, operational_drag=drag)
+    # FR-061: classify (never delete) reason codes into current-date / historical /
+    # window / materiality buckets so a clean requested date is not obscured by
+    # historical or non-trading-day missing-price noise.
+    classification = classify_operational_drag_reasons(
+        trade_date=trade_date,
+        intended=intended,
+        actual=actual,
+        benchmark=benchmark,
+        drag=drag,
+        attribution=attribution,
+        windows=windows,
+    )
+    drag.update(classification)
+    windows["current_date_summary"] = classification
     out_dir = (Path(output_root) if output_root is not None else repo / "outputs" / "operational_drag") / trade_date
     artifact_paths = {
         "intended_nav": str(out_dir / "intended_nav.json"),
@@ -2063,6 +2212,17 @@ def build_operational_drag_analysis(
         "reason_codes": _dedupe_reasons(
             [reason for section in (intended, actual, benchmark, drag, attribution, windows) for reason in section.get("reason_codes", []) if reason != "ok"]
         ),
+        # FR-061: classified, CIO-readable view (flat reason_codes above kept for
+        # backward compatibility; nothing is dropped, only bucketed).
+        "current_date_status": classification["current_date_status"],
+        "decision_grade": classification["decision_grade"],
+        "decision_grade_explanation": classification["decision_grade_explanation"],
+        "current_date_reason_codes": classification["current_date_reason_codes"],
+        "historical_reason_codes": classification["historical_reason_codes"],
+        "window_reason_codes": classification["window_reason_codes"],
+        "material_reason_codes": classification["material_reason_codes"],
+        "non_material_reason_codes": classification["non_material_reason_codes"],
+        "current_date_health": classification["current_date_health"],
     }
     return payload
 

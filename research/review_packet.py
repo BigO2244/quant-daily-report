@@ -1319,6 +1319,14 @@ def _build_operational_drag_section(repo: Path, trade_date: str) -> tuple[dict[s
         "missing_data_warnings": warnings,
         "main_drag_contributors": contributors,
         "stable_windows": windows.get("windows") or [],
+        # FR-061: cleaned, CIO-readable view of requested-date health vs caveats.
+        "current_date_status": drag.get("current_date_status"),
+        "decision_grade": drag.get("decision_grade"),
+        "decision_grade_explanation": drag.get("decision_grade_explanation"),
+        "current_date_reason_codes": list(drag.get("current_date_reason_codes") or []),
+        "historical_reason_codes": list(drag.get("historical_reason_codes") or []),
+        "window_reason_codes": list(drag.get("window_reason_codes") or []),
+        "material_reason_codes": list(drag.get("material_reason_codes") or []),
         "reason_codes": reasons,
         "source_artifacts": [
             str(path) for path in (
@@ -2873,10 +2881,14 @@ def _render_operational_drag_md(section: dict[str, Any]) -> list[str]:
     if not section.get("available"):
         return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
     lines += [
+        f"- Requested date status: {_md(section.get('current_date_status'))}",
+        f"- Decision grade: {_md(section.get('decision_grade'))} — {_md(section.get('decision_grade_explanation'))}",
         f"- Current cumulative operational drag: {_md(section.get('current_cumulative_operational_drag'))}",
         f"- Latest daily operational drag: {_md(section.get('latest_daily_operational_drag'))}",
         f"- Performance gap driver: {_md(section.get('performance_gap_driver'))}",
         f"- Data confidence: {_md(section.get('data_confidence'))}",
+        f"- Current-date reason codes: {_md(section.get('current_date_reason_codes'))}",
+        f"- Historical caveats: {_md(section.get('historical_reason_codes'))}",
         f"- Missing data warnings: {_md(section.get('missing_data_warnings'))}",
         "",
     ]

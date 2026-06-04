@@ -47,6 +47,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-058 Actual NAV Refresh for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, FR-057, broker-authoritative live-overlay NAV producer, run-scoped NAV snapshots | implementation_started | Harden operational-drag actual-NAV discovery to select the freshest, highest-confidence broker NAV source (not first-file-found), add `source_diagnostics.actual_nav` with `max_available_date`, and emit explicit `actual_nav_from_*` / `actual_nav_stale` / `actual_nav_missing` reason codes so actual-vs-intended-vs-SPY drag can extend through the requested trade date when fresh broker NAV exists. | Revert FR-058 discovery patch; actual-NAV discovery falls back to FR-055 fixed-order readers. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
 | FR-059 Broker Telemetry Failure Detection | Operational Telemetry / Service Health | `IN_PROGRESS` | LOW | FR-058A audit (Alpaca 401 silent freeze 2026-05-20→2026-06-04), `scripts/refresh_quant_dashboard.py`, `deploy/caerus-dashboard-refresh.service` | implementation_started | Make Alpaca live-broker telemetry/auth failures loud and alertable: classify failures into reason codes (`alpaca_auth_failed`, `live_broker_required_failed`), add deterministic stale-artifact checks (`nav_artifact_stale`, `broker_snapshot_stale`, `recon_artifact_stale`), surface a structured `live_status` in the refresh output, and enable `--require-live-broker` in the systemd service so bad credentials exit non-zero instead of exit-0 with a swallowed warning. | Revert FR-059 patch + remove `--require-live-broker` from the service unit (sudo cp + daemon-reload); refresh reverts to warn-and-continue. No order execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-060 Intended NAV True Mark-to-Market | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-058, daily precompute plan snapshots, hydrated/historical price store | implementation_started | Fix intended-NAV so `intended_return_daily` is not mechanically 0.0: mark the carried intended holdings to market at each day's prices to derive the rebalance basis, so price moves since the last rebalance flow into the intended return instead of being erased by a same-day target reconstruction. Carry holdings forward between rebalances; no look-ahead; no fabricated prices; keep the same-day reconstruction as a clearly-labeled fallback when carried holdings cannot be priced. | Revert FR-060 patch; intended NAV reverts to same-day reconstruction (drag = 0 − actual). No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
+| FR-061 Operational Drag Reporting Cleanup | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055..FR-060, `research/review_packet.py` operational-drag section | implementation_started | Make operational-drag output CIO-readable by classifying (not hiding) reason codes into `current_date_reason_codes` / `historical_reason_codes` / `window_reason_codes` / `material_reason_codes` / `non_material_reason_codes`, plus a `current_date_status` (`current_date_ok` / `current_date_available_with_historical_caveats` / `current_date_unavailable`) and a decision-grade explanation. Keep the flat `reason_codes` backward-compatible; update the stable-window markdown and the review-packet section to use the cleaned summary so historical/non-trading missing prices no longer dominate a clean current-date run. | Revert FR-061 patch; consumers fall back to the flat `reason_codes` list. No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -390,6 +391,47 @@ procedures are proven.
   fallback rather than fabricating a mark. The reported latest-row holdings are
   the current day's intended target (post-rebalance), valued at the
   marked-to-market equity.
+
+## FR-061 Operational Drag Reporting Cleanup
+
+- **FR number:** FR-061
+- **Title:** Operational Drag Reporting Cleanup
+- **Date started:** 2026-06-04
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** The top-level operational-drag `reason_codes` flatten
+  every component/row reason into one list, so broad `missing_price:*` codes from
+  historical and non-trading-day rows (and current-date residue like
+  `missing_price:BK`) make a run whose requested-date intended/actual/SPY data is
+  clean look broken. CIOs cannot tell whether the requested date is usable.
+- **Scope:** In `research/operational_drag.py`, classify reason codes by recency
+  and materiality without deleting any: `current_date_reason_codes` (from the
+  requested-date rows + series-level reasons), `historical_reason_codes` (from
+  rows dated before the requested date), `window_reason_codes` (stable-window
+  caveats), and the materiality cross-cut `material_reason_codes` /
+  `non_material_reason_codes`. Add `current_date_status`
+  (`current_date_ok` / `current_date_available_with_historical_caveats` /
+  `current_date_available_with_caveats` / `current_date_unavailable`),
+  `decision_grade`, and `decision_grade_explanation`. Surface these in
+  `operational_drag.json`, the stable-window markdown header, and the
+  review-packet operational-drag section. Keep the flat `reason_codes`
+  backward-compatible.
+- **Non-goals:** No execution, broker, allocation, strategy, or promotion
+  changes. No missing data deleted or suppressed — only classified. No change to
+  drag math, NAV construction, or price discovery.
+- **Planned artifacts:** No new files. New classification keys in
+  `operational_drag.json` and the combined analysis payload; richer
+  `stable_window_analysis.md` header; cleaned review-packet section fields.
+- **Validation plan:** Tests that a clean current date with historical missing
+  prices yields `current_date_ok`/`..._with_historical_caveats` and
+  `decision_grade=True` while still listing the historical codes; that a
+  current-date material gap yields a non-decision-grade status; that flat
+  `reason_codes` stays populated. Targeted + broader pytest, `py_compile`,
+  `git diff --check`. VM: run operational_drag for 2026-06-04 and confirm the
+  JSON/markdown clearly separate current-date health from historical caveats.
+- **Risks / assumptions:** Classification is heuristic (recency by row date,
+  materiality by token match); it must never drop a code from the flat list.
+  `missing_price:BK` stays visible and is bucketed by the date(s) on which it
+  actually occurs.
 
 ## Roadmap Boundaries
 
