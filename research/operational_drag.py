@@ -50,6 +50,14 @@ BENCHMARK_CSV_CANDIDATES = (
     "outputs/perf/benchmark_close_history.csv",
 )
 
+# Source priority for the price store. Higher wins on (symbol, date) conflicts.
+# The fresh, date-scoped hydration artifact must take precedence over the
+# fresher parquet panels, which in turn take precedence over the stale CSVs.
+# Equal priority preserves within-source last-wins semantics.
+PRICE_PRIORITY_HYDRATION = 30
+PRICE_PRIORITY_PARQUET = 20
+PRICE_PRIORITY_CSV = 10
+
 
 @dataclass(frozen=True)
 class PlanPosition:
@@ -81,12 +89,27 @@ class PriceStore:
         self.reason_codes: list[str] = []
         self.candidate_paths: list[str] = []
         self.failed_paths: list[dict[str, str]] = []
+        self.priority_by_symbol_date: dict[str, dict[str, int]] = {}
+        self._active_priority: int = 0
+
+    def set_load_priority(self, priority: int) -> None:
+        """Set the priority applied to subsequent add() calls for the next source."""
+        self._active_priority = priority
 
     def add(self, symbol: str, date: str, close: float, source: Path) -> None:
         symbol = symbol.upper().strip()
         if not symbol or not _is_date(date):
             return
+        priority = self._active_priority
+        existing = self.priority_by_symbol_date.get(symbol, {}).get(date)
+        # A lower-priority source must never override a value already supplied by
+        # a higher-priority source. Equal priority overwrites (within-source
+        # last-wins is preserved). Fallback behaviour is preserved because lower
+        # priority sources still fill any (symbol, date) the higher ones lack.
+        if existing is not None and priority < existing:
+            return
         self.prices.setdefault(symbol, {})[date] = close
+        self.priority_by_symbol_date.setdefault(symbol, {})[date] = priority
         source_text = str(source)
         self.source_by_symbol_date.setdefault(symbol, {})[date] = source_text
         self.source_dates_by_path.setdefault(source_text, set()).add(date)
@@ -305,6 +328,14 @@ def _suppress_stderr_fd():
 def load_price_store(repo_root: Path | str = Path("."), *, trade_date: str | None = None) -> PriceStore:
     repo = Path(repo_root)
     store = PriceStore()
+    # 1) Fresh, date-scoped hydration artifact: highest priority, discovered first.
+    store.set_load_priority(PRICE_PRIORITY_HYDRATION)
+    _load_operational_drag_price_hydration(repo, store, trade_date=trade_date)
+    # 2) Fresher parquet / price-panel sources.
+    store.set_load_priority(PRICE_PRIORITY_PARQUET)
+    _load_parquet_price_panel(repo, store)
+    # 3) Stale historical CSV fallback (still consulted; only fills gaps).
+    store.set_load_priority(PRICE_PRIORITY_CSV)
     for rel in PRICE_CSV_CANDIDATES:
         path = repo / rel
         store.record_candidate(path)
@@ -319,8 +350,6 @@ def load_price_store(repo_root: Path | str = Path("."), *, trade_date: str | Non
         loaded = _load_price_csv_rows(rows, path, store)
         if loaded <= 0:
             store.record_failure(path, "no_valid_price_rows")
-    _load_parquet_price_panel(repo, store)
-    _load_operational_drag_price_hydration(repo, store, trade_date=trade_date)
     if not store.source_paths:
         store.reason_codes.append("price_history_missing")
     return store
@@ -1323,6 +1352,22 @@ def _benchmark_rows(repo: Path, trade_date: str, prices: PriceStore) -> tuple[li
     candidates = [repo / rel for rel in BENCHMARK_CSV_CANDIDATES]
     by_date: dict[str, dict[str, Any]] = {}
     source_by_date: dict[str, str] = {}
+    # The fresh, date-scoped hydration artifact is the top-priority SPY source.
+    # It is consulted before the curated benchmark CSVs so the current trade
+    # date is sourced from hydration rather than a stale fallback. CSVs and the
+    # parquet price store still fill every other date (fallback preserved).
+    hydration_path = repo / "outputs" / "operational_drag" / str(trade_date) / "price_hydration.json"
+    hydration_text = str(hydration_path)
+    _diag_add_candidate(diagnostics, hydration_path)
+    hydration_spy = prices.prices.get("SPY", {})
+    for date in sorted(hydration_spy):
+        if date > trade_date or date in by_date:
+            continue
+        if prices.source_for("SPY", date) != hydration_text:
+            continue
+        by_date[date] = {"date": date, "spy_price": _round(hydration_spy[date], 6), "reason_codes": ["ok"]}
+        source_by_date[date] = hydration_text
+        _diag_add_selected(diagnostics, hydration_path)
     for path in candidates:
         _diag_add_candidate(diagnostics, path)
         if not path.exists():
