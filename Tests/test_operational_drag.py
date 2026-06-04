@@ -372,3 +372,104 @@ def test_cli_writes_all_expected_artifacts(tmp_path: Path) -> None:
         "stable_window_analysis.md",
     ]:
         assert (out_dir / name).exists(), name
+
+
+# ---------------------------------------------------------------------------
+# FR-058 — Actual NAV Refresh for Operational Drag
+# ---------------------------------------------------------------------------
+
+_RUN_SNAPSHOT_FIELDS = ["date", "equity", "cash", "gross_exposure", "net_exposure"]
+
+
+def _write_run_nav_snapshot(root: Path, run_id: str, rows: list[dict]) -> Path:
+    path = root / "outputs" / "runs" / run_id / "snapshots" / "nav_timeseries.csv"
+    _write_csv(path, [{field: row.get(field, "") for field in _RUN_SNAPSHOT_FIELDS} for row in rows])
+    return path
+
+
+def _single_day_live_overlay(root: Path) -> None:
+    """Truncate the live-overlay NAV series so it ends before the trade date."""
+    _write_csv(
+        root / "outputs" / "perf" / "live_overlay_nav_series.csv",
+        [{"date": "2026-06-01", "equity": 10000.0, "cash": 5000.0, "gross_exposure": 0.50, "net_exposure": 0.50}],
+    )
+
+
+def test_actual_nav_diagnostics_expose_actual_nav_block_and_provenance(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
+
+    diag = actual["source_diagnostics"]["actual_nav"]
+    assert set(diag) >= {"candidate_paths", "selected_paths", "max_available_date", "failed_paths"}
+    assert diag["max_available_date"] == TRADE_DATE
+    assert actual["actual_nav_max_available_date"] == TRADE_DATE
+    # Latest date is supplied by the broker-authoritative live-overlay series.
+    assert "actual_nav_from_live_overlay" in actual["reason_codes"]
+    # Series reaches the trade date, so it is not flagged stale.
+    assert "actual_nav_stale" not in actual["reason_codes"]
+
+
+def test_actual_nav_stale_reason_when_series_ends_before_trade_date(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _single_day_live_overlay(root)
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
+
+    assert actual["timeseries"][-1]["date"] == "2026-06-01"
+    assert actual["source_diagnostics"]["actual_nav"]["max_available_date"] == "2026-06-01"
+    assert "actual_nav_stale" in actual["reason_codes"]
+    assert "actual_nav_from_live_overlay" in actual["reason_codes"]
+
+
+def test_run_snapshot_extends_actual_nav_through_trade_date(tmp_path: Path) -> None:
+    """Freshest-source selection: a run snapshot dated at the trade date extends
+    coverage past a stale live-overlay series, eliminating actual_nav_stale and
+    pushing operational-drag latest.date to the trade date."""
+    root = _fixture_repo(tmp_path)
+    _single_day_live_overlay(root)
+    _write_run_nav_snapshot(
+        root,
+        "2026-06-02T120000-0400_freshrun",
+        [
+            {"date": "2026-06-01", "equity": 10000.0, "cash": 5000.0, "gross_exposure": 0.50, "net_exposure": 0.50},
+            {"date": "2026-06-02", "equity": 10050.0, "cash": 5000.0, "gross_exposure": 0.50, "net_exposure": 0.50},
+        ],
+    )
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
+    assert actual["timeseries"][-1]["date"] == TRADE_DATE
+    assert actual["source_diagnostics"]["actual_nav"]["max_available_date"] == TRADE_DATE
+    assert "actual_nav_stale" not in actual["reason_codes"]
+    assert "actual_nav_from_run_snapshot" in actual["reason_codes"]
+
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+    assert analysis["operational_drag"]["latest"]["date"] == TRADE_DATE
+
+
+def test_higher_confidence_source_wins_same_date_conflict(tmp_path: Path) -> None:
+    """When live-overlay and a run snapshot both cover a date, the
+    broker-authoritative live-overlay value wins (not first-file-found)."""
+    root = _fixture_repo(tmp_path)  # live-overlay has 2026-06-02 equity = 10050
+    _write_run_nav_snapshot(
+        root,
+        "2026-06-02T120000-0400_conflict",
+        [{"date": "2026-06-02", "equity": 9999.0, "cash": 5000.0, "gross_exposure": 0.50, "net_exposure": 0.50}],
+    )
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
+    trade_row = next(row for row in actual["timeseries"] if row["date"] == TRADE_DATE)
+    assert trade_row["actual_equity_value"] == 10050.0
+    assert trade_row["broker_source"].endswith("live_overlay_nav_series.csv")
+
+
+def test_actual_nav_missing_reason_when_no_source(tmp_path: Path) -> None:
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=empty_root)
+
+    assert actual["available"] is False
+    assert "actual_nav_missing" in actual["reason_codes"]
+    assert "actual_nav" in actual["source_diagnostics"]
+    assert actual["source_diagnostics"]["actual_nav"]["max_available_date"] is None

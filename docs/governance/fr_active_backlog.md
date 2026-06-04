@@ -44,6 +44,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-055 Intended Portfolio NAV & Operational Drag Attribution | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | 2026-06-04 operational drag audit, existing planned portfolio/execution artifacts, broker/reconciliation/performance artifacts | implementation_started | Add read-only intended/counterfactual NAV, normalized actual NAV, SPY benchmark alignment, operational drag attribution, stable-window analysis, CLI generation, and research-packet consumption. | Revert FR-055 implementation commit; ignore/delete generated `outputs/operational_drag/<date>/` artifacts. No broker, execution, cron, strategy selection, allocation, or order-routing behavior changes are in scope. |
 | FR-056 Operational Drag Source Discovery Patch | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, canonical VM price/NAV/broker/reconciliation/SPY artifacts | implementation_started | Patch FR-055 source discovery/readers so operational drag locates canonical VM price, holdings, reconciliation, NAV, and SPY sources with explicit source-selection diagnostics. | Revert FR-056 reader patch; FR-055 artifacts remain read-only and degraded with missing-data reason codes. No execution, broker, cron, strategy, allocation, or promotion behavior changes are in scope. |
 | FR-057 Current Price Hydration for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, existing price hydration/export infrastructure | implementation_started | Hydrate or expose current trade-date price data for intended/actual holdings and SPY so operational drag can mark holdings without stale price gaps. | Revert FR-057 hydration/read-order patch; ignore/delete date-scoped `outputs/operational_drag/<date>/price_hydration.*` artifacts. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
+| FR-058 Actual NAV Refresh for Operational Drag | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-056, FR-057, broker-authoritative live-overlay NAV producer, run-scoped NAV snapshots | implementation_started | Harden operational-drag actual-NAV discovery to select the freshest, highest-confidence broker NAV source (not first-file-found), add `source_diagnostics.actual_nav` with `max_available_date`, and emit explicit `actual_nav_from_*` / `actual_nav_stale` / `actual_nav_missing` reason codes so actual-vs-intended-vs-SPY drag can extend through the requested trade date when fresh broker NAV exists. | Revert FR-058 discovery patch; actual-NAV discovery falls back to FR-055 fixed-order readers. No execution, broker, cron, strategy, allocation, promotion, or live trading behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -228,6 +229,76 @@ procedures are proven.
   post-close data is hydrated. The hydration source must report coverage and
   missing symbols honestly; stale canonical matrices must remain available as a
   lower-priority fallback without masking freshness gaps.
+
+## FR-058 Actual NAV Refresh for Operational Drag
+
+- **FR number:** FR-058
+- **Title:** Actual NAV Refresh for Operational Drag
+- **Date started:** 2026-06-04
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** After FR-057 fixed current-date price and SPY
+  hydration, intended NAV and benchmark NAV extend through the requested trade
+  date (2026-06-04), but actual NAV stops on 2026-05-20, so
+  `operational_drag_timeseries.csv` and `operational_drag.json.latest.date`
+  also stop on 2026-05-20. Intended-vs-actual-vs-SPY drag therefore cannot be
+  computed through the requested date. Evidence: `outputs/perf/live_overlay_nav_series.csv`
+  is produced by `scripts/refresh_quant_dashboard.py::refresh_live_performance_artifacts()`
+  from the Alpaca account portfolio-history API on a 5-minute systemd timer
+  (`deploy/caerus-dashboard-refresh.{service,timer}`). The legacy runtime
+  GitHub Actions that previously maintained live broker artifacts were
+  deprecated/archived under
+  `docs/archive/github_workflows/deprecated_runtime_workflows_2026-05-20/`
+  (directory mtime 2026-05-20) — the same date actual NAV stops. The actual-NAV
+  stop is therefore a producer/data-production event at the 2026-05-20 runtime
+  cutover, not (primarily) an operational-drag reader bug; however, the reader
+  also silently truncates at the freshest available date with no staleness
+  signal and selects by fixed file order rather than by freshness/confidence.
+- **Scope:** (1) Harden operational-drag actual-NAV discovery in
+  `research/operational_drag.py` to merge all candidate NAV sources by date,
+  resolving same-date conflicts by source confidence (broker-authoritative
+  live-overlay > run-scoped snapshots > legacy portfolio_history) while taking
+  the union of dates so the series extends to the freshest available date.
+  (2) Add `source_diagnostics.actual_nav` with `candidate_paths`,
+  `selected_paths`, `max_available_date`, and `failed_paths`. (3) Emit explicit
+  reason codes `actual_nav_from_run_snapshot` / `actual_nav_from_live_overlay` /
+  `actual_nav_from_portfolio_history` (which class supplied the latest date),
+  `actual_nav_stale` (latest available actual date < requested trade date), and
+  `actual_nav_missing` (no actual NAV source resolved).
+- **Non-goals:** No execution behavior changes, broker submission changes, cron
+  or systemd timer changes, strategy/allocation/promotion changes, fabricated or
+  forward-filled NAV, look-ahead, or live trading calls. This FR does not itself
+  re-run the VM producer or backfill broker NAV; reaching 2026-06-04 actual NAV
+  requires the broker-authoritative producer to have generated fresh data. Does
+  not start FR-059.
+- **Canonical source recommendation (evidence-based):** `live_overlay_nav_series.csv`
+  is broker-authoritative (Alpaca portfolio-history API), continuous, and
+  self-healing (each producer run rewrites the trailing window), so it is the
+  highest-confidence continuous actual-NAV series. Run-scoped
+  `snapshots/nav_timeseries.csv` is authoritative per run but fragmentary, and is
+  preferred only to *extend* coverage past the last live-overlay refresh.
+  `portfolio_history/nav.csv` is the stalest legacy series (lowest confidence).
+  Hierarchy: live-overlay (per-date authority) with run-snapshot/portfolio-history
+  filling any dates live-overlay lacks; series coverage = union of all sources.
+- **Planned artifacts:** No new files. Enriched `source_diagnostics.actual_nav`
+  block and new actual-NAV reason codes inside the existing FR-055
+  `outputs/operational_drag/<trade_date>/{actual_nav.json,operational_drag.json,*_timeseries.csv}`
+  artifacts.
+- **Validation plan:** Add fixture tests for freshest-source selection,
+  run-snapshot coverage extension, same-date confidence tie-break,
+  `source_diagnostics.actual_nav` shape (incl. `max_available_date`), and the
+  `actual_nav_from_*` / `actual_nav_stale` / `actual_nav_missing` reason codes;
+  run `pytest Tests/test_operational_drag.py`, `py_compile research/operational_drag.py`,
+  `git diff --check`. VM acceptance: after the broker-authoritative producer
+  refreshes NAV, `python3 -m research.operational_drag --date 2026-06-04` should
+  show actual and operational-drag timeseries through 2026-06-04 and
+  `operational_drag.json.latest.date == 2026-06-04`.
+- **Risks / assumptions:** The reader change cannot create broker NAV that does
+  not exist; if all sources end on 2026-05-20 (the expected post-cutover state),
+  the patch correctly surfaces `actual_nav_stale` and the residual blocker is VM
+  data production (re-run/repair `refresh_quant_dashboard.py` and confirm the
+  systemd timer). Confidence ranking must not let a stale source override a
+  fresher authoritative value on overlapping dates; the union must not drop the
+  freshest dates.
 
 ## Roadmap Boundaries
 

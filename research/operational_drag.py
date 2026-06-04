@@ -45,6 +45,30 @@ ACTUAL_NAV_CSV_CANDIDATES = (
     "outputs/perf/nav_timeseries.csv",
 )
 
+# FR-058: actual-NAV sources are merged by date and ranked by confidence rather
+# than by first-file-found. Higher confidence wins on same-date conflicts; the
+# union of all source dates determines coverage so the series extends to the
+# freshest available date. live_overlay is the broker-authoritative (Alpaca
+# portfolio-history), continuous, self-healing series; run snapshots are
+# authoritative per run but fragmentary (used to extend coverage); the
+# portfolio_history / legacy nav_timeseries CSVs are the stalest fallbacks.
+ACTUAL_NAV_CONFIDENCE_LIVE_OVERLAY = 30
+ACTUAL_NAV_CONFIDENCE_RUN_SNAPSHOT = 20
+ACTUAL_NAV_CONFIDENCE_PORTFOLIO_HISTORY = 10
+
+# Relative-path CSV sources mapped to (source_class, confidence).
+_ACTUAL_NAV_CSV_SOURCES = (
+    ("outputs/perf/live_overlay_nav_series.csv", "live_overlay", ACTUAL_NAV_CONFIDENCE_LIVE_OVERLAY),
+    ("outputs/portfolio_history/nav.csv", "portfolio_history", ACTUAL_NAV_CONFIDENCE_PORTFOLIO_HISTORY),
+    ("outputs/perf/nav_timeseries.csv", "portfolio_history", ACTUAL_NAV_CONFIDENCE_PORTFOLIO_HISTORY),
+)
+
+_ACTUAL_NAV_REASON_BY_CLASS = {
+    "run_snapshot": "actual_nav_from_run_snapshot",
+    "live_overlay": "actual_nav_from_live_overlay",
+    "portfolio_history": "actual_nav_from_portfolio_history",
+}
+
 BENCHMARK_CSV_CANDIDATES = (
     "outputs/perf/live_overlay_benchmark_close_history.csv",
     "outputs/perf/benchmark_close_history.csv",
@@ -249,6 +273,7 @@ def _is_material_data_reason(reason: str) -> bool:
         "unreadable",
         "failed",
         "stale_trade_date",
+        "actual_nav_stale",
         "no_aligned",
         "fewer_than_two",
         "reconciliation_not_clean",
@@ -992,7 +1017,7 @@ def _mark_intended_row(
 
 def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> dict[str, Any]:
     repo = Path(repo_root)
-    rows, nav_diagnostics = _actual_rows_from_nav_series(repo, trade_date)
+    rows, nav_diagnostics, latest_nav_class = _actual_rows_from_nav_series(repo, trade_date)
     snapshot_diagnostics = _new_diagnostics()
     reasons: list[str] = []
     if not rows:
@@ -1001,6 +1026,7 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
             rows = [snapshot_row]
             reasons.append("actual_nav_series_missing_using_broker_snapshot")
         else:
+            nav_diagnostics["max_available_date"] = None
             return {
                 "schema_version": SCHEMA_VERSION,
                 "date": trade_date,
@@ -1008,9 +1034,10 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
                 "confidence": "LOW",
                 "actual_positions": [],
                 "timeseries": [],
-                "reason_codes": ["missing_actual_nav"],
+                "reason_codes": _dedupe_reasons(["missing_actual_nav", "actual_nav_missing"]),
                 "source_artifacts": [],
                 "source_diagnostics": {
+                    "actual_nav": nav_diagnostics,
                     "nav": nav_diagnostics,
                     "snapshot": snapshot_diagnostics,
                     "positions": _new_diagnostics(),
@@ -1024,6 +1051,14 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
     reasons.extend(position_reasons)
     source_artifacts = sorted({source for row in rows for source in row.get("source_artifacts", [])} | set(position_sources))
     reasons.extend(reason for row in rows for reason in row.get("reason_codes", []) if reason != "ok")
+    # FR-058: record final coverage, provenance of the latest date, and staleness.
+    latest_available_date = latest.get("date")
+    nav_diagnostics["max_available_date"] = latest_available_date
+    provenance = _ACTUAL_NAV_REASON_BY_CLASS.get(latest_nav_class) if latest_nav_class else None
+    if provenance:
+        reasons.append(provenance)
+    if latest_available_date and latest_available_date < trade_date:
+        reasons.append("actual_nav_stale")
     return {
         "schema_version": SCHEMA_VERSION,
         "date": trade_date,
@@ -1035,12 +1070,14 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
         "actual_positions": latest.get("actual_positions") or [],
         "actual_return_daily": latest.get("actual_return_daily"),
         "actual_return_cumulative": latest.get("actual_return_cumulative"),
+        "actual_nav_max_available_date": latest_available_date,
         "broker_source": latest.get("broker_source"),
         "reconciliation_source": latest.get("reconciliation_source"),
         "reason_codes": _dedupe_reasons(reasons),
         "timeseries": rows,
         "source_artifacts": source_artifacts,
         "source_diagnostics": {
+            "actual_nav": nav_diagnostics,
             "nav": nav_diagnostics,
             "snapshot": snapshot_diagnostics,
             "positions": position_diagnostics,
@@ -1048,12 +1085,25 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
     }
 
 
-def _actual_rows_from_nav_series(repo: Path, trade_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _ranked_actual_nav_candidates(repo: Path) -> list[tuple[Path, str, int]]:
+    """FR-058: actual-NAV source candidates tagged with (source_class, confidence)."""
+    ranked: list[tuple[Path, str, int]] = [
+        (repo / rel, source_class, confidence)
+        for rel, source_class, confidence in _ACTUAL_NAV_CSV_SOURCES
+    ]
+    for path in _run_scoped_paths(repo, "snapshots/nav_timeseries.csv"):
+        ranked.append((path, "run_snapshot", ACTUAL_NAV_CONFIDENCE_RUN_SNAPSHOT))
+    return ranked
+
+
+def _actual_rows_from_nav_series(
+    repo: Path, trade_date: str
+) -> tuple[list[dict[str, Any]], dict[str, Any], str | None]:
     diagnostics = _new_diagnostics()
     by_date: dict[str, dict[str, Any]] = {}
-    candidates = [repo / rel for rel in ACTUAL_NAV_CSV_CANDIDATES]
-    candidates.extend(_run_scoped_paths(repo, "snapshots/nav_timeseries.csv"))
-    for path in candidates:
+    confidence_by_date: dict[str, int] = {}
+    class_by_date: dict[str, str] = {}
+    for path, source_class, confidence in _ranked_actual_nav_candidates(repo):
         _diag_add_candidate(diagnostics, path)
         if not path.exists():
             _diag_add_failure(diagnostics, path, "missing")
@@ -1062,13 +1112,21 @@ def _actual_rows_from_nav_series(repo: Path, trade_date: str) -> tuple[list[dict
         if not rows:
             _diag_add_failure(diagnostics, path, "empty_or_unreadable")
             continue
-        loaded = 0
+        parsed = 0
+        won = 0
         for raw in rows:
             date = _date_text(raw.get("date") or raw.get("as_of_date"))
-            if not date or date > trade_date or date in by_date:
+            if not date or date > trade_date:
                 continue
             equity = _safe_float(raw.get("equity") or raw.get("portfolio_value") or raw.get("nav"))
             if equity is None:
+                continue
+            parsed += 1
+            # Freshest-by-union with confidence tie-break: a lower-confidence
+            # source never overrides a value a higher-confidence source supplied,
+            # but still fills any date the higher-confidence sources lack.
+            existing = confidence_by_date.get(date)
+            if existing is not None and confidence < existing:
                 continue
             cash = _safe_float(raw.get("cash") or raw.get("cash_value"))
             gross = _safe_float(raw.get("gross_exposure") or raw.get("gross") or raw.get("exposure"))
@@ -1079,16 +1137,27 @@ def _actual_rows_from_nav_series(repo: Path, trade_date: str) -> tuple[list[dict
                 "actual_gross_exposure": _round(gross, 10),
                 "actual_positions": [],
                 "broker_source": str(path),
+                "actual_nav_source_class": source_class,
                 "reconciliation_source": None,
                 "reason_codes": ["ok"],
                 "source_artifacts": [str(path)],
             }
-            loaded += 1
-        if loaded > 0:
+            confidence_by_date[date] = confidence
+            class_by_date[date] = source_class
+            won += 1
+        if won > 0:
             _diag_add_selected(diagnostics, path)
-        else:
+        elif parsed == 0:
             _diag_add_failure(diagnostics, path, "no_valid_nav_rows")
-    return [by_date[date] for date in sorted(by_date)], diagnostics
+        else:
+            # Source was valid but every date was supplied by a higher-confidence
+            # source; record it as considered, not failed.
+            _diag_add_failure(diagnostics, path, "superseded_by_higher_confidence")
+    ordered = [by_date[date] for date in sorted(by_date)]
+    max_available_date = max(by_date) if by_date else None
+    diagnostics["max_available_date"] = max_available_date
+    latest_source_class = class_by_date.get(max_available_date) if max_available_date else None
+    return ordered, diagnostics, latest_source_class
 
 
 def _actual_row_from_snapshot(repo: Path, trade_date: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
