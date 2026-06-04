@@ -66,6 +66,7 @@ from research_registry.research.timing_summary import (
     summarise_timing,
     timing_summary_to_dict,
 )
+from research.operational_drag import load_latest_operational_drag_summary
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -121,6 +122,7 @@ def _tool_dispatch_table() -> dict[str, Any]:
         "stable_window_evaluation": stable_window_evaluation,
         "strategy_differentiation": strategy_differentiation,
         "strategy_behavior_differentiation": strategy_behavior_differentiation,
+        "operational_drag_analysis": operational_drag_analysis,
         "answer_research_question": answer_research_question,
     }
 
@@ -1822,6 +1824,27 @@ def stable_window_evaluation(
     )
     payload = stable_window_to_dict(answer)
     payload["tool"] = "stable_window_evaluation"
+    payload["queried_at"] = _now_utc()
+    return _jsonable(payload)
+
+
+def operational_drag_analysis(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    trade_date: str | None = None,
+) -> dict[str, Any]:
+    """Return the latest generated intended-vs-actual operational drag summary.
+
+    This tool is read-only. It does not generate missing artifacts and never
+    calls the broker; run ``python3 -m research.operational_drag --date
+    YYYY-MM-DD`` first when it returns ``NO_OPERATIONAL_DRAG_DATA``.
+    """
+    resolved_outputs = Path(outputs_root) if outputs_root else Path("outputs")
+    payload = load_latest_operational_drag_summary(
+        outputs_root=resolved_outputs,
+        trade_date=trade_date,
+    )
     payload["queried_at"] = _now_utc()
     return _jsonable(payload)
 

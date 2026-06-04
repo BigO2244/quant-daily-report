@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import StrategyRegistryEntry, load_strategy_registry_for_repo
 from research.cio_briefing import build_cio_briefing
 
 
@@ -1274,6 +1275,102 @@ def _build_governance_maturity_section(repo: Path, trade_date: str) -> tuple[dic
     )
 
 
+def _build_operational_drag_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    base = repo / "outputs" / "operational_drag" / trade_date
+    drag_path = base / "operational_drag.json"
+    drag = _read_json(drag_path)
+    if drag is None:
+        source = _status(
+            artifact_name="operational_drag",
+            path=drag_path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_operational_drag"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "latest_daily_operational_drag": None,
+            "current_cumulative_operational_drag": None,
+            "performance_gap_driver": "indeterminate",
+            "data_confidence": "LOW",
+            "missing_data_warnings": ["missing_operational_drag"],
+            "main_drag_contributors": [],
+            "stable_windows": [],
+            "reason_codes": ["missing_operational_drag"],
+            "source_artifacts": [],
+        }, source
+    attribution = _read_json(base / "operational_drag_attribution.json") or {}
+    windows = _read_json(base / "stable_window_analysis.json") or {}
+    latest = drag.get("latest") if isinstance(drag.get("latest"), dict) else {}
+    contributors = attribution.get("attributions") if isinstance(attribution.get("attributions"), list) else []
+    reasons = sorted(set(str(code) for code in list(drag.get("reason_codes") or ["ok"])))
+    warnings = [
+        reason for reason in reasons
+        if "missing" in reason or "unavailable" in reason or "no_aligned" in reason
+    ]
+    section = {
+        "available": bool(drag.get("available")),
+        "confidence": drag.get("confidence") or "LOW",
+        "latest_daily_operational_drag": latest.get("daily_operational_drag"),
+        "current_cumulative_operational_drag": latest.get("cumulative_operational_drag"),
+        "performance_gap_driver": _classify_operational_drag_driver(latest, contributors),
+        "data_confidence": drag.get("confidence") or "LOW",
+        "missing_data_warnings": warnings,
+        "main_drag_contributors": contributors,
+        "stable_windows": windows.get("windows") or [],
+        "reason_codes": reasons,
+        "source_artifacts": [
+            str(path) for path in (
+                drag_path,
+                base / "operational_drag_attribution.json",
+                base / "stable_window_analysis.json",
+            )
+            if path.exists()
+        ],
+    }
+    source = _status(
+        artifact_name="operational_drag",
+        path=drag_path,
+        date=str(drag.get("date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT" if section["available"] else "PARTIAL",
+    )
+    return section, source
+
+
+def _classify_operational_drag_driver(latest: dict[str, Any], contributors: list[Any]) -> str:
+    drag = _safe_float(latest.get("cumulative_operational_drag"))
+    intended_excess = _safe_float(latest.get("intended_vs_spy_excess"))
+    actual_excess = _safe_float(latest.get("actual_vs_spy_excess"))
+    categories = {
+        str(row.get("category"))
+        for row in contributors
+        if isinstance(row, dict)
+    }
+    operational_categories = {
+        "under_deployment_cash_drag",
+        "stale_price_gate",
+        "buy_suppression",
+        "partial_execution",
+        "symbol_resolution",
+        "missing_broker_position",
+        "reconciliation_mismatch",
+    }
+    if drag is None:
+        return "indeterminate"
+    if abs(drag) >= 0.005 and categories & operational_categories:
+        return "operations_driven"
+    if intended_excess is not None and actual_excess is not None:
+        if intended_excess < -0.005 and abs(drag) < 0.0025:
+            return "strategy_driven"
+        if intended_excess < -0.005 and abs(drag) >= 0.0025:
+            return "mixed"
+    return "indeterminate"
+
+
 def _build_governance_calibration_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
     return _generic_section_loader(
         artifact_name="governance_calibration",
@@ -1318,6 +1415,7 @@ def _build_governance_reclassification_section(repo: Path, trade_date: str) -> t
 def _build_promotion_governance_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
     path = repo / "outputs" / "research" / "promotion_governance" / trade_date / "promotion_governance.json"
     payload = _read_json(path)
+    control_strategy = load_strategy_registry_for_repo(repo).baseline_strategy_id()
     if payload is None:
         source = _status(
             artifact_name="promotion_governance",
@@ -1329,7 +1427,7 @@ def _build_promotion_governance_section(repo: Path, trade_date: str) -> tuple[di
         return {
             "available": False,
             "confidence": "LOW",
-            "current_control_strategy": "caerus_polaris",
+            "current_control_strategy": control_strategy,
             "promotion_recommendation": "NO_PROMOTION_RECOMMENDED",
             "demotion_recommendation": "NO_DEMOTION_RECOMMENDED",
             "challenger_rankings": [],
@@ -1344,7 +1442,7 @@ def _build_promotion_governance_section(repo: Path, trade_date: str) -> tuple[di
     section = {
         "available": available,
         "confidence": payload.get("confidence") or "LOW",
-        "current_control_strategy": payload.get("current_control_strategy") or "caerus_polaris",
+        "current_control_strategy": payload.get("current_control_strategy") or control_strategy,
         "promotion_recommendation": payload.get("promotion_recommendation") or "NO_PROMOTION_RECOMMENDED",
         "demotion_recommendation": payload.get("demotion_recommendation") or "NO_DEMOTION_RECOMMENDED",
         "challenger_rankings": payload.get("challenger_rankings") or [],
@@ -1643,7 +1741,42 @@ def _build_tier3_research_controls_section(sections: dict[str, Any]) -> dict[str
     }
 
 
-def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, Any]:
+def _strategy_status_from_decision(entry: StrategyRegistryEntry, decision: str) -> str:
+    if entry.role == "baseline" or entry.status == "paper":
+        return "BENCHMARK_CONTROL" if decision in {"HOLD", "BLOCKED"} else decision
+    if decision == "DEMOTE":
+        return "DEMOTED"
+    if decision == "BLOCKED":
+        return "BLOCKED"
+    return decision
+
+
+def _build_strategy_statuses(
+    strategies: dict[str, Any],
+    active_entries: tuple[StrategyRegistryEntry, ...],
+) -> dict[str, dict[str, Any]]:
+    statuses: dict[str, dict[str, Any]] = {}
+    for entry in active_entries:
+        default_decision = "HOLD" if entry.role == "baseline" or entry.status == "paper" else "BLOCKED"
+        raw = strategies.get(entry.strategy_id) or {}
+        decision = str(raw.get("decision") or default_decision).upper()
+        statuses[entry.strategy_id] = {
+            "strategy_id": entry.strategy_id,
+            "display_name": entry.display_name,
+            "short_name": entry.compact_name(),
+            "role": entry.role,
+            "decision": decision,
+            "status": _strategy_status_from_decision(entry, decision),
+            "strategy_type": entry.strategy_type,
+            "family": entry.family,
+        }
+    return statuses
+
+
+def _build_final_control_summary_section(
+    sections: dict[str, Any],
+    active_entries: tuple[StrategyRegistryEntry, ...],
+) -> dict[str, Any]:
     """All-tier rollup so consumers can read a single object for the
     final control status. Conservative by construction: no promotion or
     allocation change unless every tier agrees.
@@ -1671,6 +1804,7 @@ def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, 
 
     # Per-strategy status snapshots.
     strategies = governance.get("strategies") or {}
+    strategy_statuses = _build_strategy_statuses(strategies, active_entries)
     lyra_decision = str((strategies.get("caerus_lyra") or {}).get("decision") or "BLOCKED").upper()
     orion_decision = str((strategies.get("caerus_orion") or {}).get("decision") or "BLOCKED").upper()
     polaris_decision = str((strategies.get("caerus_polaris") or {}).get("decision") or "HOLD").upper()
@@ -1789,6 +1923,7 @@ def _build_final_control_summary_section(sections: dict[str, Any]) -> dict[str, 
         "promotion_status": promotion_rec,
         "demotion_status": str(tier3.get("demotion_recommendation") or "NO_DEMOTION_RECOMMENDED"),
         "allocation_status": allocation_summary,
+        "strategy_statuses": strategy_statuses,
         "lyra_status": lyra_status,
         "orion_status": orion_status,
         "polaris_status": polaris_status,
@@ -1899,6 +2034,8 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Run .venv/bin/python scripts/build_concentration_diagnostic.py --date YYYY-MM-DD to classify concentration blockers as actual vs configuration vs artifact.")
     if not sections.get("governance_maturity", {}).get("available"):
         actions.append("Run .venv/bin/python scripts/build_governance_maturity.py --date YYYY-MM-DD to score governance maturity deterministically.")
+    if not sections.get("operational_drag", {}).get("available"):
+        actions.append("Run python3 -m research.operational_drag --date YYYY-MM-DD to build intended-vs-actual operational drag artifacts.")
     if not sections.get("governance_calibration", {}).get("available"):
         actions.append("Run .venv/bin/python scripts/build_governance_calibration.py --date YYYY-MM-DD to evaluate concentration against design-aware (FR-040) thresholds and produce the OLD vs NEW reclassification artifact.")
     if signal.get("early_evidence"):
@@ -1968,6 +2105,8 @@ def build_research_review_packet(
     output_root: Path | str | None = None,
 ) -> dict[str, Any]:
     repo = Path(repo_root)
+    registry = load_strategy_registry_for_repo(repo)
+    active_strategy_entries = registry.active_shadow_security_selection_entries()
     selected_date, date_reason_codes = select_review_date(repo, trade_date)
     model_section, model_source = _discover_model_review(repo, selected_date)
     position_section, attribution_source = _build_position_attribution_section(repo, selected_date)
@@ -1994,6 +2133,7 @@ def build_research_review_packet(
     diff_diagnostic_section, diff_diagnostic_source = _build_differentiation_diagnostic_section(repo, selected_date)
     conc_diagnostic_section, conc_diagnostic_source = _build_concentration_diagnostic_section(repo, selected_date)
     maturity_section, maturity_source = _build_governance_maturity_section(repo, selected_date)
+    operational_drag_section, operational_drag_source = _build_operational_drag_section(repo, selected_date)
     sources = {
         "model_review": model_source,
         "attribution": attribution_source,
@@ -2017,6 +2157,7 @@ def build_research_review_packet(
         "differentiation_diagnostic": diff_diagnostic_source,
         "concentration_diagnostic": conc_diagnostic_source,
         "governance_maturity": maturity_source,
+        "operational_drag": operational_drag_source,
         "governance_calibration": calibration_source,
         "governance_reclassification": reclassification_source,
     }
@@ -2045,6 +2186,7 @@ def build_research_review_packet(
         "differentiation_diagnostic": diff_diagnostic_section,
         "concentration_diagnostic": conc_diagnostic_section,
         "governance_maturity": maturity_section,
+        "operational_drag": operational_drag_section,
         "governance_calibration": calibration_section,
         "governance_reclassification": reclassification_section,
         "data_freshness": data_freshness,
@@ -2052,7 +2194,7 @@ def build_research_review_packet(
     sections["tier1_research_controls"] = _build_tier1_research_controls_section(sections)
     sections["tier2_research_controls"] = _build_tier2_research_controls_section(sections)
     sections["tier3_research_controls"] = _build_tier3_research_controls_section(sections)
-    sections["final_control_summary"] = _build_final_control_summary_section(sections)
+    sections["final_control_summary"] = _build_final_control_summary_section(sections, active_strategy_entries)
     actions = _recommended_actions(sections, sources)
     sections["recommended_next_actions"] = actions
     overall = _overall(sections=sections, sources=sources, actions=actions)
@@ -2100,6 +2242,7 @@ def build_research_review_packet(
             "differentiation_diagnostic": diff_diagnostic_section,
             "concentration_diagnostic": conc_diagnostic_section,
             "governance_maturity": maturity_section,
+            "operational_drag": operational_drag_section,
             "governance_calibration": calibration_section,
             "governance_reclassification": reclassification_section,
             "tier1_research_controls": sections["tier1_research_controls"],
@@ -2178,6 +2321,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_differentiation_diagnostic_md(sections["differentiation_diagnostic"]))
     lines.extend(_render_concentration_diagnostic_md(sections["concentration_diagnostic"]))
     lines.extend(_render_governance_maturity_md(sections["governance_maturity"]))
+    lines.extend(_render_operational_drag_md(sections["operational_drag"]))
     lines.extend(_render_governance_calibration_md(sections["governance_calibration"]))
     lines.extend(_render_governance_reclassification_md(sections["governance_reclassification"]))
     lines.extend(_render_final_control_summary_md(sections["final_control_summary"]))
@@ -2659,7 +2803,7 @@ def _render_tier3_md(section: dict[str, Any]) -> list[str]:
 
 
 def _render_final_control_summary_md(section: dict[str, Any]) -> list[str]:
-    return [
+    lines = [
         "## Final Control Summary",
         "",
         f"- **Current recommendation:** {_md(section.get('current_recommendation'))}",
@@ -2686,6 +2830,24 @@ def _render_final_control_summary_md(section: dict[str, Any]) -> list[str]:
         f"- **Reason codes:** {_md(section.get('reason_codes'))}",
         "",
     ]
+    strategy_statuses = section.get("strategy_statuses") if isinstance(section.get("strategy_statuses"), dict) else {}
+    extra_statuses = [
+        row for strategy_id, row in strategy_statuses.items()
+        if strategy_id not in {"caerus_polaris", "caerus_orion", "caerus_lyra"}
+    ]
+    if extra_statuses:
+        lines += [
+            "Additional strategy statuses:",
+            "",
+            "| Strategy | Role | Decision | Status |",
+            "|---|---|---|---|",
+        ]
+        for row in extra_statuses:
+            lines.append(
+                f"| {_md(row.get('display_name'))} | {_md(row.get('role'))} | {_md(row.get('decision'))} | {_md(row.get('status'))} |"
+            )
+        lines.append("")
+    return lines
 
 
 def _render_governance_blocker_audit_md(section: dict[str, Any]) -> list[str]:
@@ -2703,6 +2865,46 @@ def _render_governance_blocker_audit_md(section: dict[str, Any]) -> list[str]:
             f"| {_md(row.get('blocker'))} | {_md(row.get('classification'))} | {_md(row.get('severity'))} | {_md(row.get('root_cause'))} |"
         )
     lines += ["", f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_operational_drag_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Operational Drag", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    lines += [
+        f"- Current cumulative operational drag: {_md(section.get('current_cumulative_operational_drag'))}",
+        f"- Latest daily operational drag: {_md(section.get('latest_daily_operational_drag'))}",
+        f"- Performance gap driver: {_md(section.get('performance_gap_driver'))}",
+        f"- Data confidence: {_md(section.get('data_confidence'))}",
+        f"- Missing data warnings: {_md(section.get('missing_data_warnings'))}",
+        "",
+    ]
+    contributors = section.get("main_drag_contributors") or []
+    if contributors:
+        lines += [
+            "| Category | Date Range | Estimated Drag bps | Confidence | Explanation |",
+            "|---|---|---:|---|---|",
+        ]
+        for row in contributors[:5]:
+            if isinstance(row, dict):
+                lines.append(
+                    f"| {_md(row.get('category'))} | {_md(row.get('date_range'))} | {_md(row.get('estimated_drag_bps'))} | {_md(row.get('confidence'))} | {_md(row.get('explanation'))} |"
+                )
+        lines.append("")
+    windows = section.get("stable_windows") or []
+    if windows:
+        lines += [
+            "| Window | Available | Intended | Actual | SPY | Drag | Confidence |",
+            "|---|---|---:|---:|---:|---:|---|",
+        ]
+        for row in windows:
+            if isinstance(row, dict):
+                lines.append(
+                    f"| {_md(row.get('window'))} | {_md(row.get('available'))} | {_md(row.get('intended_cumulative_return'))} | {_md(row.get('actual_cumulative_return'))} | {_md(row.get('spy_cumulative_return'))} | {_md(row.get('operational_drag'))} | {_md(row.get('confidence'))} |"
+                )
+        lines.append("")
+    lines += [f"Reason codes: {_md(section.get('reason_codes'))}", ""]
     return lines
 
 

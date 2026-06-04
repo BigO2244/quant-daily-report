@@ -349,6 +349,24 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "operational_drag_analysis",
+        "description": (
+            "Read-only intended-vs-actual operational drag summary. Reads "
+            "outputs/operational_drag/<DATE>/{operational_drag,"
+            "stable_window_analysis,operational_drag_attribution}.json and "
+            "returns latest intended vs actual vs SPY performance, stable-window "
+            "table, main drag contributors, data coverage status, and missing "
+            "artifact warnings. It does not generate artifacts or call the broker."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "trade_date": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "answer_research_question",
         "description": (
             "Deterministic NL wrapper. Matches the question against a regex whitelist "
