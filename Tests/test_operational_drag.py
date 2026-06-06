@@ -859,6 +859,31 @@ def test_historical_attribution_codes_do_not_become_current_date_reason_codes() 
     assert c["decision_grade"] is True
 
 
+def test_attribution_cannot_repromote_historical_row_codes_to_current_date() -> None:
+    c = classify_operational_drag_reasons(
+        trade_date="2026-06-04",
+        intended={
+            "reason_codes": ["missing_price:BK"],
+            "timeseries": [
+                {"date": "2026-06-03", "reason_codes": ["missing_price:BK"]},
+                {"date": "2026-06-04", "reason_codes": ["ok"]},
+            ],
+        },
+        actual={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        benchmark={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        drag={"available": True, "latest": {"date": "2026-06-04"}, "reason_codes": ["missing_price:BK"]},
+        attribution={
+            "reason_codes": ["missing_price:BK"],
+            "attributions": [{"date_range": "2026-06-04", "reason_codes": ["missing_price:BK"]}],
+        },
+        windows={"reason_codes": [], "windows": []},
+    )
+
+    assert "missing_price:BK" in c["historical_reason_codes"]
+    assert "missing_price:BK" not in c["current_date_reason_codes"]
+    assert c["decision_grade"] is True
+
+
 def test_current_partial_or_unfilled_execution_reason_is_material() -> None:
     c = classify_operational_drag_reasons(
         trade_date="2026-06-04",

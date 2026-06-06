@@ -2401,8 +2401,9 @@ def classify_operational_drag_reasons(
     for entry in attribution.get("attributions") or []:
         if not isinstance(entry, dict):
             continue
-        codes = [code for code in (entry.get("reason_codes") or []) if code and code != "ok"]
-        attribution_row_codes.update(codes)
+        raw_codes = [code for code in (entry.get("reason_codes") or []) if code and code != "ok"]
+        attribution_row_codes.update(raw_codes)
+        codes = [code for code in raw_codes if code not in all_row_codes]
         end_date = _date_range_end(entry.get("date_range"))
         if end_date and end_date < trade_date:
             historical_set.update(codes)
