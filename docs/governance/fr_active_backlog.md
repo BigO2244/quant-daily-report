@@ -48,6 +48,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-059 Broker Telemetry Failure Detection | Operational Telemetry / Service Health | `IN_PROGRESS` | LOW | FR-058A audit (Alpaca 401 silent freeze 2026-05-20→2026-06-04), `scripts/refresh_quant_dashboard.py`, `deploy/caerus-dashboard-refresh.service` | implementation_started | Make Alpaca live-broker telemetry/auth failures loud and alertable: classify failures into reason codes (`alpaca_auth_failed`, `live_broker_required_failed`), add deterministic stale-artifact checks (`nav_artifact_stale`, `broker_snapshot_stale`, `recon_artifact_stale`), surface a structured `live_status` in the refresh output, and enable `--require-live-broker` in the systemd service so bad credentials exit non-zero instead of exit-0 with a swallowed warning. | Revert FR-059 patch + remove `--require-live-broker` from the service unit (sudo cp + daemon-reload); refresh reverts to warn-and-continue. No order execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-060 Intended NAV True Mark-to-Market | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-058, daily precompute plan snapshots, hydrated/historical price store | implementation_started | Fix intended-NAV so `intended_return_daily` is not mechanically 0.0: mark the carried intended holdings to market at each day's prices to derive the rebalance basis, so price moves since the last rebalance flow into the intended return instead of being erased by a same-day target reconstruction. Carry holdings forward between rebalances; no look-ahead; no fabricated prices; keep the same-day reconstruction as a clearly-labeled fallback when carried holdings cannot be priced. | Revert FR-060 patch; intended NAV reverts to same-day reconstruction (drag = 0 − actual). No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-061 Operational Drag Reporting Cleanup | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055..FR-060, `research/review_packet.py` operational-drag section | implementation_started | Make operational-drag output CIO-readable by classifying (not hiding) reason codes into `current_date_reason_codes` / `historical_reason_codes` / `window_reason_codes` / `material_reason_codes` / `non_material_reason_codes`, plus a `current_date_status` (`current_date_ok` / `current_date_available_with_historical_caveats` / `current_date_unavailable`) and a decision-grade explanation. Keep the flat `reason_codes` backward-compatible; update the stable-window markdown and the review-packet section to use the cleaned summary so historical/non-trading missing prices no longer dominate a clean current-date run. | Revert FR-061 patch; consumers fall back to the flat `reason_codes` list. No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
+| FR-062 Reconciliation Drift Investigation and Patch | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-059..FR-061, 2026-06-04 run-scoped broker/reconciliation artifacts | implementation_started | Investigate and patch current-date operational-drag reconciliation blockers (`missing_broker_position`, `reconciliation_not_clean`) for 2026-06-04. Determine whether the blocker is true broker/model drift, stale artifact selection, alias normalization, partial-fill/timing semantics, parser behavior, or over-classification; emit an explicit diagnostic artifact and keep true drift material. | Revert FR-062 diagnostic/parser patch; ignore the date-scoped reconciliation drift diagnostic artifact. No execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -432,6 +433,46 @@ procedures are proven.
   materiality by token match); it must never drop a code from the flat list.
   `missing_price:BK` stays visible and is bucketed by the date(s) on which it
   actually occurs.
+
+## FR-062 Reconciliation Drift Investigation and Patch
+
+- **FR number:** FR-062
+- **Title:** Reconciliation Drift Investigation and Patch
+- **Date started:** 2026-06-06
+- **Status:** `IN_PROGRESS`
+- **Problem statement:** Operational-drag artifacts now reach 2026-06-04 after
+  FR-059 through FR-061, but the current-date readout remains non-decision-grade
+  because `missing_broker_position` and `reconciliation_not_clean` are material
+  blockers. The root cause must be proven from the full precompute, execution,
+  broker, reconciliation, and operational-drag chain before any patch.
+- **Scope:** Audit 2026-06-04 run-scoped and precompute artifacts; inspect
+  reconciliation schema, reason-code production, alias normalization, partial
+  fill/timing handling, and operational-drag source selection; then implement the
+  narrowest read-only correction or diagnostic needed. Valid outcomes include an
+  alias normalization fix, reconciliation parser fix, source-selection/staleness
+  fix, materiality rebucketing fix, or explicit true-drift diagnostic.
+- **Non-goals:** No live order submission changes, no broker API mutation, no
+  allocation or strategy-selection changes, no promotion/demotion, no fabricated
+  broker positions, fills, prices, NAV, or clean statuses, and no dashboard
+  redesign. True reconciliation drift must remain visible and material.
+- **Planned artifacts:**
+  `outputs/operational_drag/2026-06-04/reconciliation_drift_diagnostic.json`
+  or `outputs/reconciliation_diagnostics/2026-06-04/reconciliation_drift_diagnostic.json`,
+  including selected sources, mismatches, alias resolutions, stale-artifact
+  warnings, reason codes, decision-grade impact, and recommended action.
+- **Validation plan:** Add targeted tests covering alias resolution (BK/BNY),
+  true missing broker positions, clean reconciled artifacts, stale recon source
+  selection, sells removed from posttrade expectations, partial/unfilled order
+  materiality, and current-date reason-code bucketing. Run targeted
+  operational-drag/reconciliation tests, broader safe operational-drag
+  regression, `py_compile` on changed Python/scripts, and `git diff --check`;
+  then regenerate 2026-06-04 operational-drag artifacts locally and on the VM.
+- **Risks / assumptions:** Local artifacts may be incomplete or already include
+  unrelated WIP. BK/BNY aliasing is only a hypothesis and must not be assumed.
+  A clean-looking status from stale artifacts is unsafe; the selected run, source
+  timestamps, and stale warnings must be explicit. If true drift is confirmed,
+  the correct patch is diagnostic clarity and an explicit remediation path, not
+  suppression.
 
 ## Roadmap Boundaries
 

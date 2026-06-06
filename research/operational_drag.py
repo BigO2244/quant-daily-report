@@ -251,6 +251,15 @@ def _date_text(value: Any) -> str | None:
     return text if _is_date(text) else None
 
 
+def _date_range_end(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if ":" in text:
+        text = text.split(":", 1)[1]
+    return _date_text(text)
+
+
 def _sort_dates(values: set[str] | list[str]) -> list[str]:
     return sorted(value for value in values if _is_date(value))
 
@@ -277,6 +286,11 @@ def _is_material_data_reason(reason: str) -> bool:
         "no_aligned",
         "fewer_than_two",
         "reconciliation_not_clean",
+        "planned_buys_without_submissions",
+        "eligible_trades_not_fully_accepted",
+        "partial_execution",
+        "partial_fill",
+        "unfilled",
         "price_history_missing",
         "price_panel",
     )
@@ -331,6 +345,134 @@ def _merge_diagnostics(*items: dict[str, Any]) -> dict[str, Any]:
             if isinstance(failure, dict):
                 _diag_add_failure(merged, failure.get("path", ""), failure.get("reason", "unknown"))
     return merged
+
+
+def _load_manual_aliases(repo: Path) -> dict[str, str]:
+    path = repo / "data" / "security_master" / "manual_aliases.json"
+    payload = _read_json(path)
+    aliases = payload.get("aliases") if isinstance(payload, dict) else None
+    if not isinstance(aliases, dict):
+        return {}
+    out: dict[str, str] = {}
+    for source, target in aliases.items():
+        src = str(source or "").upper().strip()
+        dst = str(target or "").upper().strip()
+        if src and dst and src != dst:
+            out[src] = dst
+    return out
+
+
+def _resolve_alias(symbol: str, aliases: dict[str, str]) -> tuple[str, list[dict[str, str]]]:
+    original = str(symbol or "").upper().strip()
+    if not original:
+        return "", []
+    current = original
+    seen = {current}
+    resolutions: list[dict[str, str]] = []
+    while current in aliases:
+        resolved = aliases[current]
+        if not resolved or resolved in seen:
+            break
+        resolutions.append(
+            {
+                "original_symbol": current,
+                "resolved_symbol": resolved,
+                "source": "data/security_master/manual_aliases.json",
+                "reason": f"manual_alias:{current}->{resolved}",
+            }
+        )
+        current = resolved
+        seen.add(current)
+    if current != original and not resolutions:
+        resolutions.append(
+            {
+                "original_symbol": original,
+                "resolved_symbol": current,
+                "source": "data/security_master/manual_aliases.json",
+                "reason": f"manual_alias:{original}->{current}",
+            }
+        )
+    return current, resolutions
+
+
+def _alias_resolution_reason(resolution: dict[str, str]) -> str:
+    original = resolution.get("original_symbol") or ""
+    resolved = resolution.get("resolved_symbol") or ""
+    return f"symbol_alias_resolved:{original}->{resolved}" if original and resolved else "symbol_alias_resolved"
+
+
+def _position_map_from_any(value: Any) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if isinstance(value, dict):
+        for symbol, qty in value.items():
+            normalized = str(symbol or "").upper().strip()
+            numeric = _safe_float(qty)
+            if normalized and numeric is not None:
+                out[normalized] = out.get(normalized, 0.0) + float(numeric)
+    elif isinstance(value, list):
+        for row in value:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("symbol") or row.get("ticker") or "").upper().strip()
+            qty = _safe_float(row.get("qty") or row.get("shares") or row.get("quantity"))
+            if symbol and qty is not None:
+                out[symbol] = out.get(symbol, 0.0) + float(qty)
+    return {symbol: qty for symbol, qty in sorted(out.items()) if abs(qty) > 1e-9}
+
+
+def _normalize_position_aliases(
+    positions: dict[str, float],
+    aliases: dict[str, str],
+) -> tuple[dict[str, float], list[dict[str, str]]]:
+    normalized: dict[str, float] = {}
+    resolutions: list[dict[str, str]] = []
+    seen_reasons: set[str] = set()
+    for symbol, qty in sorted((positions or {}).items()):
+        resolved, symbol_resolutions = _resolve_alias(symbol, aliases)
+        if not resolved:
+            continue
+        normalized[resolved] = normalized.get(resolved, 0.0) + float(qty)
+        for resolution in symbol_resolutions:
+            key = json.dumps(resolution, sort_keys=True)
+            if key not in seen_reasons:
+                resolutions.append(resolution)
+                seen_reasons.add(key)
+    return {symbol: qty for symbol, qty in sorted(normalized.items()) if abs(qty) > 1e-9}, resolutions
+
+
+def _position_mismatches(expected: dict[str, float], actual: dict[str, float]) -> list[dict[str, Any]]:
+    mismatches: list[dict[str, Any]] = []
+    for symbol in sorted(set(expected) | set(actual)):
+        expected_qty = float(expected.get(symbol, 0.0))
+        actual_qty = float(actual.get(symbol, 0.0))
+        delta = actual_qty - expected_qty
+        if abs(delta) <= 1e-9:
+            continue
+        if symbol in expected and symbol not in actual:
+            classification = "MISSING_BROKER_POSITION"
+        elif symbol not in expected and symbol in actual:
+            classification = "UNEXPECTED_BROKER_POSITION"
+        else:
+            classification = "QTY_MISMATCH"
+        mismatches.append(
+            {
+                "symbol": symbol,
+                "expected_qty": _round(expected_qty, 6),
+                "broker_qty": _round(actual_qty, 6),
+                "delta_qty": _round(delta, 6),
+                "classification": classification,
+            }
+        )
+    return mismatches
+
+
+def _raw_reconciliation_position_issue(payload: dict[str, Any]) -> bool:
+    if payload.get("missing_in_actual") or payload.get("missing_in_expected") or payload.get("qty_mismatches"):
+        return True
+    for row in payload.get("share_deltas") or []:
+        if isinstance(row, dict) and str(row.get("classification") or "").upper() != "MATCH":
+            return True
+    return False
 
 
 @contextmanager
@@ -1225,8 +1367,11 @@ def _actual_row_from_snapshot(repo: Path, trade_date: str) -> tuple[dict[str, An
         gross = market_value / equity if equity and market_value else None
         if "recon_posttrade_" in path.name:
             row_reasons.append("actual_from_posttrade_reconciliation")
-            if not _reconciliation_clean(payload):
+            assessment = _reconciliation_assessment(payload, repo=repo, source_path=path)
+            if not assessment.get("clean"):
                 row_reasons.append("reconciliation_not_clean")
+            for resolution in assessment.get("alias_resolutions_applied") or []:
+                row_reasons.append(_alias_resolution_reason(resolution))
         else:
             row_reasons.append("actual_from_broker_snapshot")
         _diag_add_selected(diagnostics, path)
@@ -1293,12 +1438,59 @@ def _actual_cash_from_payload(payload: dict[str, Any]) -> float | None:
     return _safe_float(payload.get("broker_cash") or payload.get("cash") or account.get("cash"))
 
 
-def _reconciliation_clean(payload: dict[str, Any]) -> bool:
+def _reconciliation_assessment(
+    payload: dict[str, Any],
+    *,
+    repo: Path | None = None,
+    source_path: Path | str | None = None,
+) -> dict[str, Any]:
     verdict = str(payload.get("verdict") or payload.get("status") or "").upper()
     drift_status = str(payload.get("drift_status") or payload.get("comparison_status") or "").upper()
     verdict_clean = verdict in {"", "PASS", "OK", "CLEAN"}
     drift_clean = not drift_status or "OK" in drift_status or "RECONCILED" in drift_status
-    return verdict_clean and drift_clean
+    status_clean = verdict_clean and drift_clean
+    aliases = _load_manual_aliases(repo) if repo is not None else {}
+    has_expected_positions = isinstance(payload.get("expected_positions"), (dict, list))
+    has_actual_positions = isinstance(payload.get("actual_positions"), (dict, list))
+    raw_expected = _position_map_from_any(payload.get("expected_positions")) if has_expected_positions else {}
+    raw_actual = _position_map_from_any(payload.get("actual_positions")) if has_actual_positions else {}
+    expected, expected_aliases = _normalize_position_aliases(raw_expected, aliases)
+    actual, actual_aliases = _normalize_position_aliases(raw_actual, aliases)
+    mismatches = _position_mismatches(expected, actual) if has_expected_positions and has_actual_positions else []
+    alias_resolutions = expected_aliases + [
+        item for item in actual_aliases
+        if item not in expected_aliases
+    ]
+    raw_position_issue = _raw_reconciliation_position_issue(payload)
+    alias_resolved_clean = bool(alias_resolutions) and raw_position_issue and not mismatches
+    clean = (status_clean and not raw_position_issue and not mismatches) or alias_resolved_clean
+    reason_codes: list[str] = []
+    if clean:
+        reason_codes.append("reconciliation_clean")
+    else:
+        reason_codes.append("reconciliation_not_clean")
+    reason_codes.extend(_alias_resolution_reason(item) for item in alias_resolutions)
+    if any(row.get("classification") == "MISSING_BROKER_POSITION" for row in mismatches):
+        reason_codes.append("missing_broker_position")
+    return {
+        "clean": clean,
+        "status_clean": status_clean,
+        "alias_resolved_clean": alias_resolved_clean,
+        "verdict": verdict,
+        "drift_status": drift_status,
+        "expected_positions": expected,
+        "broker_positions": actual,
+        "raw_expected_positions": raw_expected,
+        "raw_broker_positions": raw_actual,
+        "mismatches": mismatches,
+        "alias_resolutions_applied": alias_resolutions,
+        "source_path": str(source_path) if source_path is not None else None,
+        "reason_codes": _dedupe_reasons(reason_codes),
+    }
+
+
+def _reconciliation_clean(payload: dict[str, Any], *, repo: Path | None = None) -> bool:
+    return bool(_reconciliation_assessment(payload, repo=repo).get("clean"))
 
 
 def _positions_from_actual_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1394,10 +1586,13 @@ def _actual_positions_for_date(repo: Path, trade_date: str) -> tuple[list[dict[s
         reasons: list[str]
         if "recon_posttrade_" in path.name:
             reasons = ["actual_positions_from_reconciliation"]
-            if _reconciliation_clean(payload):
+            assessment = _reconciliation_assessment(payload, repo=repo, source_path=path)
+            if assessment.get("clean"):
                 reasons.append("actual_positions_from_reconciled_posttrade")
             else:
                 reasons.append("reconciliation_not_clean")
+            for resolution in assessment.get("alias_resolutions_applied") or []:
+                reasons.append(_alias_resolution_reason(resolution))
         else:
             reasons = ["actual_positions_from_broker_artifact"]
         _diag_add_selected(diagnostics, path)
@@ -1767,8 +1962,69 @@ def _date_range(rows: list[dict[str, Any]]) -> str:
     return dates[0] if dates[0] == dates[-1] else f"{dates[0]}:{dates[-1]}"
 
 
+def _run_id_from_path(path: Path | str | None) -> str | None:
+    if path is None:
+        return None
+    parts = Path(path).parts
+    for idx, part in enumerate(parts):
+        if part == "runs" and idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
+
+
+def _current_reconciliation_candidates(repo: Path, trade_date: str) -> list[Path]:
+    candidates: list[Path] = []
+    candidates.extend(_run_scoped_paths(repo, f"broker/recon_posttrade_{trade_date}.json"))
+    candidates.append(repo / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
+    return _dedupe_paths(candidates)
+
+
+def _select_current_reconciliation(
+    repo: Path,
+    trade_date: str,
+) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any]]:
+    diagnostics = _new_diagnostics()
+    for path in _current_reconciliation_candidates(repo, trade_date):
+        _diag_add_candidate(diagnostics, path)
+        payload = _read_json(path)
+        if payload is None:
+            _diag_add_failure(diagnostics, path, "missing_or_unreadable")
+            continue
+        payload_date = _payload_date(payload) or _date_text(path.stem.replace("recon_posttrade_", ""))
+        if payload_date != trade_date:
+            _diag_add_failure(diagnostics, path, f"stale_trade_date:{payload_date or 'unknown'}")
+            continue
+        _diag_add_selected(diagnostics, path)
+        return path, payload, diagnostics
+    return None, None, diagnostics
+
+
+def _has_execution_evidence(repo: Path, trade_date: str) -> bool:
+    for path in _run_scoped_paths(repo, "execution_results.json"):
+        run_id = _run_id_from_path(path)
+        if not run_id or not run_id.startswith(trade_date):
+            continue
+        payload = _read_json(path)
+        if payload is None:
+            continue
+        status = str(
+            payload.get("status")
+            or payload.get("final_execution_status")
+            or payload.get("execution_status")
+            or ""
+        ).upper()
+        if status in {"EXECUTED", "RECONCILED_SUCCESS", "PARTIAL"}:
+            return True
+    for path in _run_scoped_paths(repo, f"broker/orders_{trade_date}.csv"):
+        run_id = _run_id_from_path(path)
+        if run_id and run_id.startswith(trade_date) and _read_csv_rows(path):
+            return True
+    return False
+
+
 def _attribution_from_plan_payloads(repo: Path, trade_date: str) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
+    execution_evidence: dict[str, bool] = {}
     for day_dir in sorted((repo / "outputs" / "precompute").glob("*")) if (repo / "outputs" / "precompute").exists() else []:
         if not day_dir.is_dir() or not _is_date(day_dir.name) or day_dir.name > trade_date:
             continue
@@ -1785,8 +2041,14 @@ def _attribution_from_plan_payloads(repo: Path, trade_date: str) -> list[dict[st
         eligible = int(_safe_float(payload.get("execution_eligible_trades_count") or payload.get("executable_trades_count")) or 0)
         accepted = int(_safe_float(payload.get("accepted_count") or payload.get("orders_filled_count")) or 0)
         if planned_buys > 0 and submitted == 0 and eligible > 0:
+            execution_evidence.setdefault(date, _has_execution_evidence(repo, date))
+            if execution_evidence[date]:
+                continue
             entries.append(_incident_entry("buy_suppression", date, path, "Planned buys existed but no orders were submitted.", ["planned_buys_without_submissions"]))
         elif eligible > 0 and 0 <= accepted < eligible:
+            execution_evidence.setdefault(date, _has_execution_evidence(repo, date))
+            if execution_evidence[date] and submitted == 0:
+                continue
             entries.append(_incident_entry("partial_execution", date, path, "Accepted/filled order count is below eligible planned trade count.", ["eligible_trades_not_fully_accepted"]))
         blocked = payload.get("blocked_tickers")
         if isinstance(blocked, list) and blocked:
@@ -1809,25 +2071,128 @@ def _incident_entry(category: str, date: str, path: Path, explanation: str, reas
 def _attribution_from_reconciliation(repo: Path, trade_date: str) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     recon_root = repo / "outputs" / "broker"
+    current_path, current_payload, _diag = _select_current_reconciliation(repo, trade_date)
+    historical: list[tuple[str, Path, dict[str, Any]]] = []
     for path in sorted(recon_root.glob("recon_posttrade_*.json")) if recon_root.exists() else []:
         date = path.stem.replace("recon_posttrade_", "")
-        if not _is_date(date) or date > trade_date:
+        if not _is_date(date) or date >= trade_date:
             continue
         payload = _read_json(path)
         if payload is None:
             continue
+        historical.append((date, path, payload))
+    current = [(trade_date, current_path, current_payload)] if current_path and current_payload else []
+    for date, path, payload in historical + current:
+        assessment = _reconciliation_assessment(payload, repo=repo, source_path=path)
         classifications = [
-            str(row.get("classification"))
-            for row in payload.get("share_deltas", [])
+            str(row.get("classification") or "")
+            for row in assessment.get("mismatches") or []
             if isinstance(row, dict)
         ]
         if "MISSING_BROKER_POSITION" in classifications:
             entries.append(_incident_entry("missing_broker_position", date, path, "Reconciliation found expected holdings missing at the broker.", ["missing_broker_position"]))
-        verdict = str(payload.get("verdict") or "").upper()
-        drift_status = str(payload.get("drift_status") or payload.get("comparison_status") or "").upper()
-        if verdict in {"WARN", "FAIL"} or (drift_status and "OK" not in drift_status):
+        if not assessment.get("clean"):
             entries.append(_incident_entry("reconciliation_mismatch", date, path, "Reconciliation reported drift or a non-pass verdict.", ["reconciliation_not_clean"]))
     return entries
+
+
+def build_reconciliation_drift_diagnostic(
+    *,
+    trade_date: str,
+    repo_root: Path | str,
+    actual: dict[str, Any],
+    attribution: dict[str, Any],
+) -> dict[str, Any]:
+    repo = Path(repo_root)
+    recon_path, payload, diagnostics = _select_current_reconciliation(repo, trade_date)
+    stale_warnings = [
+        dict(item)
+        for item in diagnostics.get("failed_paths", [])
+        if isinstance(item, dict) and "stale_trade_date" in str(item.get("reason") or "")
+    ]
+    historical_recon_issues = [
+        {
+            "category": entry.get("category"),
+            "date_range": entry.get("date_range"),
+            "reason_codes": entry.get("reason_codes") or [],
+            "supporting_artifacts": entry.get("supporting_artifacts") or [],
+        }
+        for entry in attribution.get("attributions") or []
+        if isinstance(entry, dict)
+        and _date_range_end(entry.get("date_range"))
+        and (_date_range_end(entry.get("date_range")) or "") < trade_date
+        and set(entry.get("reason_codes") or []) & {"missing_broker_position", "reconciliation_not_clean"}
+    ]
+    current_attribution_issues = [
+        {
+            "category": entry.get("category"),
+            "date_range": entry.get("date_range"),
+            "reason_codes": entry.get("reason_codes") or [],
+            "supporting_artifacts": entry.get("supporting_artifacts") or [],
+        }
+        for entry in attribution.get("attributions") or []
+        if isinstance(entry, dict)
+        and (not _date_range_end(entry.get("date_range")) or (_date_range_end(entry.get("date_range")) or "") >= trade_date)
+        and set(entry.get("reason_codes") or []) & {"missing_broker_position", "reconciliation_not_clean"}
+    ]
+    if payload is None or recon_path is None:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "date": trade_date,
+            "available": False,
+            "status": "missing_reconciliation_artifact",
+            "decision_grade_impact": "blocks_decision_grade",
+            "selected_run_id": None,
+            "expected_positions_source": None,
+            "broker_positions_source": None,
+            "reconciliation_source": None,
+            "mismatches": [],
+            "alias_resolutions_applied": [],
+            "stale_artifact_warnings": stale_warnings,
+            "reason_codes": ["reconciliation_artifact_missing"],
+            "recommended_action": "Restore or regenerate the current-date posttrade reconciliation artifact before treating operational drag as decision-grade.",
+            "source_diagnostics": {"reconciliation": diagnostics},
+            "historical_reconciliation_issues": historical_recon_issues,
+            "current_attribution_issues": current_attribution_issues,
+        }
+    assessment = _reconciliation_assessment(payload, repo=repo, source_path=recon_path)
+    mismatches = list(assessment.get("mismatches") or [])
+    reason_codes = list(assessment.get("reason_codes") or [])
+    if mismatches and any(row.get("classification") == "MISSING_BROKER_POSITION" for row in mismatches):
+        reason_codes.append("missing_broker_position")
+    clean = bool(assessment.get("clean"))
+    if clean:
+        status = "clean_reconciled"
+        impact = "none"
+        action = (
+            "No broker/model remediation required for the selected current-date reconciliation artifact. "
+            "If operational-drag previously showed reconciliation blockers, treat them as attribution/classification false positives from historical artifacts."
+        )
+    else:
+        status = "true_reconciliation_drift"
+        impact = "blocks_decision_grade"
+        action = "Review the listed mismatches against the selected expected and broker-position sources before the next execution window."
+    position_diag = (actual.get("source_diagnostics") or {}).get("positions") or {}
+    selected_position_sources = position_diag.get("selected_paths") or []
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "date": trade_date,
+        "available": True,
+        "status": status,
+        "decision_grade_impact": impact,
+        "selected_run_id": _run_id_from_path(recon_path) or payload.get("run_id"),
+        "expected_positions_source": str(recon_path) if assessment.get("expected_positions") else None,
+        "broker_positions_source": str(recon_path) if assessment.get("broker_positions") else (selected_position_sources[0] if selected_position_sources else None),
+        "reconciliation_source": str(recon_path),
+        "mismatches": mismatches,
+        "alias_resolutions_applied": assessment.get("alias_resolutions_applied") or [],
+        "stale_artifact_warnings": stale_warnings,
+        "reason_codes": _dedupe_reasons(reason_codes),
+        "recommended_action": action,
+        "source_diagnostics": {"reconciliation": diagnostics, "actual_positions": position_diag},
+        "historical_reconciliation_issues": historical_recon_issues,
+        "current_attribution_issues": current_attribution_issues,
+    }
 
 
 def _aggregate_confidence(entries: list[dict[str, Any]]) -> str:
@@ -2027,10 +2392,26 @@ def classify_operational_drag_reasons(
                 current_set.update(codes)
     # Series-level run codes not attributable to any dated row describe this run
     # as a whole (e.g. actual_nav_stale, price_history_missing) -> current-date.
-    for component in (intended, actual, benchmark, drag, attribution):
+    for component in (intended, actual, benchmark, drag):
         for code in component.get("reason_codes") or []:
             if code and code != "ok" and code not in all_row_codes:
                 current_set.add(code)
+
+    attribution_row_codes: set[str] = set()
+    for entry in attribution.get("attributions") or []:
+        if not isinstance(entry, dict):
+            continue
+        codes = [code for code in (entry.get("reason_codes") or []) if code and code != "ok"]
+        attribution_row_codes.update(codes)
+        end_date = _date_range_end(entry.get("date_range"))
+        if end_date and end_date < trade_date:
+            historical_set.update(codes)
+        else:
+            current_set.update(codes)
+    # Fallback for legacy attribution payloads without dated entries.
+    for code in attribution.get("reason_codes") or []:
+        if code and code != "ok" and code not in attribution_row_codes:
+            current_set.add(code)
 
     window_set: set[str] = set()
     for code in windows.get("reason_codes") or []:
@@ -2144,6 +2525,12 @@ def build_operational_drag_analysis(
         intended=intended,
         actual=actual,
     )
+    reconciliation_diagnostic = build_reconciliation_drift_diagnostic(
+        trade_date=trade_date,
+        repo_root=repo,
+        actual=actual,
+        attribution=attribution,
+    )
     windows = build_stable_window_analysis(trade_date=trade_date, operational_drag=drag)
     # FR-061: classify (never delete) reason codes into current-date / historical /
     # window / materiality buckets so a clean requested date is not obscured by
@@ -2169,6 +2556,7 @@ def build_operational_drag_analysis(
         "operational_drag": str(out_dir / "operational_drag.json"),
         "operational_drag_timeseries": str(out_dir / "operational_drag_timeseries.csv"),
         "operational_drag_attribution": str(out_dir / "operational_drag_attribution.json"),
+        "reconciliation_drift_diagnostic": str(out_dir / "reconciliation_drift_diagnostic.json"),
         "stable_window_analysis": str(out_dir / "stable_window_analysis.json"),
         "stable_window_analysis_md": str(out_dir / "stable_window_analysis.md"),
     }
@@ -2181,6 +2569,7 @@ def build_operational_drag_analysis(
         _write_json(out_dir / "operational_drag.json", drag)
         _write_csv(out_dir / "operational_drag_timeseries.csv", drag.get("timeseries") or [], _drag_csv_fields())
         _write_json(out_dir / "operational_drag_attribution.json", attribution)
+        _write_json(out_dir / "reconciliation_drift_diagnostic.json", reconciliation_diagnostic)
         _write_json(out_dir / "stable_window_analysis.json", windows)
         _write_text(out_dir / "stable_window_analysis.md", render_stable_window_markdown(windows))
     payload = {
@@ -2194,6 +2583,7 @@ def build_operational_drag_analysis(
         "benchmark_nav": benchmark,
         "operational_drag": drag,
         "operational_drag_attribution": attribution,
+        "reconciliation_drift_diagnostic": reconciliation_diagnostic,
         "stable_window_analysis": windows,
         "artifact_paths": artifact_paths,
         "source_diagnostics": {

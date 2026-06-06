@@ -15,6 +15,7 @@ from research.operational_drag import (
     build_operational_drag,
     build_operational_drag_analysis,
     build_operational_drag_attribution,
+    build_reconciliation_drift_diagnostic,
     build_stable_window_analysis,
     classify_operational_drag_reasons,
 )
@@ -369,6 +370,7 @@ def test_cli_writes_all_expected_artifacts(tmp_path: Path) -> None:
         "operational_drag.json",
         "operational_drag_timeseries.csv",
         "operational_drag_attribution.json",
+        "reconciliation_drift_diagnostic.json",
         "stable_window_analysis.json",
         "stable_window_analysis.md",
     ]:
@@ -669,3 +671,210 @@ def test_analysis_exposes_classified_buckets_and_keeps_flat_reason_codes(tmp_pat
         "current_date_available_with_historical_caveats",
     )
     assert analysis["decision_grade"] is True
+
+
+# ---------------------------------------------------------------------------
+# FR-062 — Reconciliation drift investigation and diagnostics
+# ---------------------------------------------------------------------------
+
+def _write_run_reconciliation(
+    root: Path,
+    *,
+    trade_date: str,
+    expected: dict[str, float],
+    actual: dict[str, float],
+    run_id: str | None = None,
+    clean: bool = False,
+) -> Path:
+    run_id = run_id or f"{trade_date}T093504-0400_fixture"
+    path = root / "outputs" / "runs" / run_id / "broker" / f"recon_posttrade_{trade_date}.json"
+    share_deltas = []
+    missing_in_actual = []
+    missing_in_expected = []
+    qty_mismatches = []
+    for symbol in sorted(set(expected) | set(actual)):
+        expected_qty = float(expected.get(symbol, 0.0))
+        actual_qty = float(actual.get(symbol, 0.0))
+        if symbol in expected and symbol not in actual:
+            classification = "MISSING_BROKER_POSITION"
+            missing_in_actual.append(symbol)
+        elif symbol not in expected and symbol in actual:
+            classification = "UNEXPECTED_BROKER_POSITION"
+            missing_in_expected.append(symbol)
+        elif abs(actual_qty - expected_qty) > 1e-9:
+            classification = "QTY_MISMATCH"
+            qty_mismatches.append({"symbol": symbol, "expected_qty": expected_qty, "actual_qty": actual_qty})
+        else:
+            classification = "MATCH"
+        share_deltas.append(
+            {
+                "symbol": symbol,
+                "expected_qty": expected_qty,
+                "broker_qty": actual_qty,
+                "delta_qty": actual_qty - expected_qty,
+                "classification": classification,
+            }
+        )
+    _write_json(
+        path,
+        {
+            "trade_date": trade_date,
+            "verdict": "PASS" if clean else "WARN",
+            "drift_status": "OK_RECONCILED" if clean else "DRIFT_DETECTED",
+            "comparison_status": "OK_RECONCILED" if clean else "DRIFT_DETECTED",
+            "expected_positions": expected,
+            "actual_positions": actual,
+            "missing_in_actual": [] if clean else missing_in_actual,
+            "missing_in_expected": [] if clean else missing_in_expected,
+            "qty_mismatches": [] if clean else qty_mismatches,
+            "share_deltas": share_deltas,
+        },
+    )
+    return path
+
+
+def _write_manual_aliases(root: Path, aliases: dict[str, str]) -> None:
+    _write_json(root / "data" / "security_master" / "manual_aliases.json", {"aliases": aliases, "notes": {}})
+
+
+def test_bk_bny_alias_mismatch_does_not_emit_false_missing_broker_position(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _write_manual_aliases(root, {"BK": "BNY"})
+    recon_path = _write_run_reconciliation(
+        root,
+        trade_date=TRADE_DATE,
+        expected={"BK": 7.0},
+        actual={"BNY": 7.0},
+        clean=False,
+    )
+
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+    current = analysis["current_date_reason_codes"]
+    diagnostic = analysis["reconciliation_drift_diagnostic"]
+
+    assert "missing_broker_position" not in current
+    assert "reconciliation_not_clean" not in current
+    assert diagnostic["status"] == "clean_reconciled"
+    assert diagnostic["reconciliation_source"] == str(recon_path)
+    assert diagnostic["mismatches"] == []
+    assert diagnostic["alias_resolutions_applied"] == [
+        {
+            "original_symbol": "BK",
+            "resolved_symbol": "BNY",
+            "source": "data/security_master/manual_aliases.json",
+            "reason": "manual_alias:BK->BNY",
+        }
+    ]
+
+
+def test_true_missing_broker_position_remains_material_and_not_decision_grade(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _write_run_reconciliation(
+        root,
+        trade_date=TRADE_DATE,
+        expected={"AAA": 20.0, "BBB": 30.0},
+        actual={"AAA": 20.0},
+        clean=False,
+    )
+
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    assert "missing_broker_position" in analysis["current_date_reason_codes"]
+    assert "reconciliation_not_clean" in analysis["current_date_reason_codes"]
+    assert analysis["decision_grade"] is False
+    assert analysis["reconciliation_drift_diagnostic"]["status"] == "true_reconciliation_drift"
+
+
+def test_clean_reconciled_posttrade_artifact_does_not_emit_reconciliation_not_clean(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _write_run_reconciliation(
+        root,
+        trade_date=TRADE_DATE,
+        expected={"AAA": 20.0, "BBB": 30.0},
+        actual={"AAA": 20.0, "BBB": 30.0},
+        clean=True,
+    )
+
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    assert "reconciliation_not_clean" not in analysis["current_date_reason_codes"]
+    assert analysis["reconciliation_drift_diagnostic"]["status"] == "clean_reconciled"
+
+
+def test_stale_global_recon_is_not_selected_over_current_run_scoped_recon(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    stale_global = root / "outputs" / "broker" / f"recon_posttrade_{TRADE_DATE}.json"
+    _write_json(
+        stale_global,
+        {
+            "trade_date": "2026-06-01",
+            "verdict": "WARN",
+            "drift_status": "DRIFT_DETECTED",
+            "expected_positions": {"AAA": 20.0},
+            "actual_positions": {},
+            "missing_in_actual": ["AAA"],
+            "share_deltas": [{"symbol": "AAA", "classification": "MISSING_BROKER_POSITION"}],
+        },
+    )
+    recon_path = _write_run_reconciliation(
+        root,
+        trade_date=TRADE_DATE,
+        expected={"AAA": 20.0, "BBB": 30.0},
+        actual={"AAA": 20.0, "BBB": 30.0},
+        run_id=f"{TRADE_DATE}T120000-0400_current",
+        clean=True,
+    )
+
+    diagnostic = build_reconciliation_drift_diagnostic(
+        trade_date=TRADE_DATE,
+        repo_root=root,
+        actual=build_actual_nav(trade_date=TRADE_DATE, repo_root=root),
+        attribution={"attributions": [], "reason_codes": []},
+    )
+
+    assert diagnostic["reconciliation_source"] == str(recon_path)
+    assert diagnostic["selected_run_id"] == f"{TRADE_DATE}T120000-0400_current"
+    assert diagnostic["status"] == "clean_reconciled"
+
+
+def test_historical_attribution_codes_do_not_become_current_date_reason_codes() -> None:
+    c = classify_operational_drag_reasons(
+        trade_date="2026-06-04",
+        intended={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        actual={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        benchmark={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        drag={"available": True, "latest": {"date": "2026-06-04"}, "reason_codes": []},
+        attribution={
+            "reason_codes": ["missing_broker_position", "reconciliation_not_clean"],
+            "attributions": [
+                {"date_range": "2026-03-23", "reason_codes": ["missing_broker_position", "reconciliation_not_clean"]}
+            ],
+        },
+        windows={"reason_codes": [], "windows": []},
+    )
+
+    assert "missing_broker_position" not in c["current_date_reason_codes"]
+    assert "reconciliation_not_clean" not in c["current_date_reason_codes"]
+    assert "missing_broker_position" in c["historical_reason_codes"]
+    assert c["decision_grade"] is True
+
+
+def test_current_partial_or_unfilled_execution_reason_is_material() -> None:
+    c = classify_operational_drag_reasons(
+        trade_date="2026-06-04",
+        intended={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        actual={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        benchmark={"reason_codes": [], "timeseries": [{"date": "2026-06-04", "reason_codes": ["ok"]}]},
+        drag={"available": True, "latest": {"date": "2026-06-04"}, "reason_codes": []},
+        attribution={
+            "reason_codes": ["eligible_trades_not_fully_accepted"],
+            "attributions": [
+                {"date_range": "2026-06-04", "reason_codes": ["eligible_trades_not_fully_accepted"]}
+            ],
+        },
+        windows={"reason_codes": [], "windows": []},
+    )
+
+    assert "eligible_trades_not_fully_accepted" in c["current_date_reason_codes"]
+    assert "eligible_trades_not_fully_accepted" in c["material_reason_codes"]
+    assert c["decision_grade"] is False
