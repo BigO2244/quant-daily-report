@@ -221,6 +221,8 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
     assert "regime_market_state" in payload["sections"]
     assert "daily_decision_intelligence" in payload["sections"]
     assert "live_readiness" in payload["sections"]
+    assert "decision_grade" in payload["sections"]
+    assert payload["sections"]["decision_grade"]["status"] == "PARTIAL"
     assert payload["terminal"]["headline"]["nav"] == 10000.0
     assert payload["terminal"]["benchmark"]["rolling_5d_return"] is None
     assert payload["terminal"]["leaders"]["winners"][0]["ticker"] == "AAPL"

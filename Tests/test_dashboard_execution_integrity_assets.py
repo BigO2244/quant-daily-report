@@ -8,6 +8,7 @@ def test_dashboard_terminal_health_mounts_exist():
     assert 'id="system-health-console"' in html
     assert 'id="health-matrix"' in html
     assert 'id="meta-status"' in html
+    assert 'id="decision-grade-list"' in html
 
 
 def test_dashboard_js_loads_broker_authoritative_data():
@@ -17,3 +18,4 @@ def test_dashboard_js_loads_broker_authoritative_data():
     assert "dashboard_data.json" in js
     assert "cache: 'no-store'" in js
     assert "function boot()" in js
+    assert "function renderDecisionGrade" in js

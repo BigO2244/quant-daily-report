@@ -887,6 +887,95 @@ class DashboardV1Builder:
             "criteria": criteria,
         }
 
+    def _model_quality_dir(self) -> Path | None:
+        root = self.repo_root / "outputs" / "model_quality"
+        exact = root / self.report_date
+        if exact.exists():
+            return exact
+        if not root.exists():
+            return None
+        dated = []
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            parsed = _parse_date(child.name)
+            report = _parse_date(self.report_date)
+            if parsed is not None and report is not None and parsed <= report:
+                dated.append(child)
+        return sorted(dated, key=lambda path: path.name)[-1] if dated else None
+
+    def _build_decision_grade(self) -> dict[str, Any]:
+        model_dir = self._model_quality_dir()
+        source_date = model_dir.name if model_dir is not None else None
+        expected_dir = self.repo_root / "outputs" / "model_quality" / self.report_date
+        files = {
+            "model_quality_packet": "model_quality_packet.json",
+            "model_tournament": "model_tournament.json",
+            "argo_phase_b_validation": "argo_phase_b_validation.json",
+            "strategy_differentiation_deep_dive": "strategy_differentiation_deep_dive.json",
+            "phoenix_phase_b_review": "phoenix_phase_b_review.json",
+            "multi_asset_research_framework": "multi_asset_research_framework.json",
+        }
+        payloads: dict[str, dict[str, Any] | None] = {}
+        source_paths: dict[str, str] = {}
+        missing: list[str] = []
+        for label, filename in files.items():
+            path = (model_dir / filename) if model_dir is not None else (expected_dir / filename)
+            payload = _read_json(path)
+            payloads[label] = payload if isinstance(payload, dict) else None
+            if isinstance(payload, dict):
+                source_paths[label] = str(path.relative_to(self.repo_root))
+            elif label in {"model_quality_packet", "model_tournament"}:
+                missing.append(label)
+            self._record_source(
+                section="decision_grade",
+                label=label.replace("_", " "),
+                path=path,
+                source_type="model_quality",
+                trust_level="diagnostic" if isinstance(payload, dict) else "missing",
+                as_of=source_date,
+                used=isinstance(payload, dict),
+            )
+        packet = payloads["model_quality_packet"] or {}
+        tournament = payloads["model_tournament"] or {}
+        argo = payloads["argo_phase_b_validation"] or {}
+        differentiation = payloads["strategy_differentiation_deep_dive"] or {}
+        phoenix = payloads["phoenix_phase_b_review"] or {}
+        multi_asset = payloads["multi_asset_research_framework"] or {}
+        promotion_ready_count = sum(1 for row in tournament.get("strategies") or [] if isinstance(row, dict) and row.get("decision_grade"))
+        decision_grade_strategy_change = bool((packet.get("executive_summary") or {}).get("strategy_change_decision_grade")) or bool(argo.get("decision_grade_recommendation"))
+        blockers: list[str] = []
+        blockers.extend(str(code) for code in packet.get("reason_codes") or [] if code != "ok")
+        blockers.extend(str(code) for code in argo.get("evidence_blockers") or [] if code != "ok")
+        for row in differentiation.get("retirement_watchlist") or []:
+            if isinstance(row, dict):
+                blockers.append(str(row.get("reason") or "RETIREMENT_WATCHLIST_ENTRY"))
+        blockers.extend(f"{name.upper()}_MISSING" for name in missing)
+        if source_date is not None and source_date != self.report_date:
+            blockers.append("MODEL_QUALITY_DATE_DIFFERS_FROM_REPORT_DATE")
+        reason_codes = sorted(set(blockers)) or ["ok"]
+        status = "PARTIAL" if missing or model_dir is None or source_date != self.report_date else "READY" if decision_grade_strategy_change and reason_codes == ["ok"] else "BLOCKED"
+        if status == "PARTIAL":
+            self._mark(_check("decision_grade_model_quality_present", "warn", "non_blocking", "Decision-grade model-quality artifacts are incomplete."))
+        else:
+            self._mark(_check("decision_grade_model_quality_present", "pass", "non_blocking", "Decision-grade model-quality artifacts loaded."))
+        return {
+            "status": status,
+            "latest_model_quality_date": source_date,
+            "promotion_ready_count": promotion_ready_count,
+            "decision_grade_strategy_change": decision_grade_strategy_change,
+            "top_blockers": reason_codes[:8] if reason_codes != ["ok"] else [],
+            "confidence_summary": {
+                "model_quality_packet_status": packet.get("status"),
+                "argo_recommendation_confidence": argo.get("recommendation_confidence"),
+                "phoenix_confidence": phoenix.get("confidence"),
+                "strategy_differentiation_counts": differentiation.get("redundancy_classification_counts"),
+                "multi_asset_status": multi_asset.get("status"),
+            },
+            "source_paths": source_paths,
+            "reason_codes": reason_codes,
+        }
+
     def _build_terminal_view(self, sections: dict[str, Any]) -> dict[str, Any]:
         nav = sections["nav"]
         positions = sections["positions"]
@@ -1065,6 +1154,8 @@ class DashboardV1Builder:
         sections["system_health_console"] = system_health_section
         live_readiness_section = self._build_live_readiness(sections)
         sections["live_readiness"] = live_readiness_section
+        decision_grade_section = self._build_decision_grade()
+        sections["decision_grade"] = decision_grade_section
         self._freshness_checks(sections)
         terminal = self._build_terminal_view(sections)
 

@@ -9,6 +9,7 @@ def test_dashboard_terminal_shell_present():
     assert 'id="shadow-strategy-body"' in html
     assert 'id="positions-body"' in html
     assert 'id="fills-body"' in html
+    assert 'id="decision-grade-summary"' in html
 
 
 def test_dashboard_redirect_file_points_to_terminal_root():
@@ -28,3 +29,4 @@ def test_dashboard_js_current_render_contract():
     assert "function renderFills" in js
     assert "function renderPerformanceMatrix" in js
     assert "function renderHealthMatrix" in js
+    assert "function renderDecisionGrade" in js

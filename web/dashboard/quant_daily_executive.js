@@ -73,8 +73,8 @@ function colorClass(value) {
 
 function statusClass(value) {
   const text = String(value || '').toUpperCase();
-  if (['PASS', 'OK', 'GREEN', 'CONTROL', 'PROMOTION_ELIGIBLE', 'HIGH', 'PRESENT'].includes(text)) return 'pos';
-  if (['FAIL', 'ERROR', 'RED', 'NO_DATA', 'NO_PRIOR', 'BROKEN_CHAIN', 'NOT_READY'].includes(text)) return 'neg';
+  if (['PASS', 'OK', 'GREEN', 'CONTROL', 'PROMOTION_ELIGIBLE', 'HIGH', 'PRESENT', 'READY'].includes(text)) return 'pos';
+  if (['FAIL', 'ERROR', 'RED', 'NO_DATA', 'NO_PRIOR', 'BROKEN_CHAIN', 'NOT_READY', 'BLOCKED'].includes(text)) return 'neg';
   return 'neutral';
 }
 
@@ -293,6 +293,29 @@ function renderLiveReadiness(payload) {
   `).join('') : '<div class="check-item warn"><strong>No readiness criteria available.</strong></div>');
 }
 
+function renderDecisionGrade(payload) {
+  const section = payload.sections?.decision_grade || {};
+  const blockers = section.top_blockers || [];
+  const confidence = section.confidence_summary || {};
+  setText('decision-grade-summary', `${section.status || 'PARTIAL'} · MQ ${section.latest_model_quality_date || '—'}`, statusClass(section.status));
+  const rows = [
+    { name: 'Strategy Change', status: section.decision_grade_strategy_change ? 'READY' : 'BLOCKED', detail: section.decision_grade_strategy_change ? 'decision-grade evidence present' : 'no decision-grade change' },
+    { name: 'Promotion Ready', status: section.promotion_ready_count > 0 ? 'READY' : 'PARTIAL', detail: `${section.promotion_ready_count || 0} strategies` },
+    { name: 'Argo Confidence', status: confidence.argo_recommendation_confidence || 'PARTIAL', detail: `packet ${confidence.model_quality_packet_status || '—'}` },
+    { name: 'Phoenix Evidence', status: confidence.phoenix_confidence || 'PARTIAL', detail: `multi-asset ${confidence.multi_asset_status || '—'}` },
+  ];
+  if (blockers.length) {
+    blockers.slice(0, 4).forEach(blocker => rows.push({ name: 'Blocker', status: 'WARN', detail: blocker }));
+  }
+  setHTML('decision-grade-list', rows.map(row => `
+    <div class="check-item ${statusClass(row.status)}">
+      <strong>${row.name || '—'}</strong>
+      <div class="matrix-value ${statusClass(row.status)}">${row.status || '—'}</div>
+      <div class="check-detail">${row.detail || '—'}</div>
+    </div>
+  `).join(''));
+}
+
 function renderPositions(payload) {
   const section = payload.sections?.positions || {};
   setText('positions-asof', section.as_of ? `as of ${fmtDateTime(section.as_of)}` : 'as of unavailable');
@@ -499,6 +522,7 @@ async function boot() {
     renderShadowCommand(payload);
     renderDecisionIntelligence(payload);
     renderLiveReadiness(payload);
+    renderDecisionGrade(payload);
     renderPositioning(payload);
     renderPositions(payload);
     renderFills(payload);
