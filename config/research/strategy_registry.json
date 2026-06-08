@@ -1,0 +1,209 @@
+{
+  "schema_version": "caerus_strategy_registry_v1",
+  "strategies": [
+    {
+      "strategy_id": "caerus_polaris",
+      "display_name": "Caerus Polaris",
+      "short_name": "polaris",
+      "delta_summary_name": "Caerus Polaris",
+      "strategy_type": "security_selection",
+      "family": "core_momentum",
+      "status": "paper",
+      "role": "baseline",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": false,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 10,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": true,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": true,
+        "source_variant": "baseline_top10_daily"
+      }
+    },
+    {
+      "strategy_id": "caerus_orion",
+      "display_name": "Caerus Orion",
+      "short_name": "orion",
+      "delta_summary_name": "Orion",
+      "strategy_type": "security_selection",
+      "family": "core_momentum",
+      "status": "shadow",
+      "role": "challenger",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": true,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 20,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": true,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": true,
+        "source_variant": "h2_rank_decay_exit_h6_top5"
+      }
+    },
+    {
+      "strategy_id": "caerus_lyra",
+      "display_name": "Caerus Lyra",
+      "short_name": "lyra",
+      "delta_summary_name": "Caerus Lyra",
+      "strategy_type": "security_selection",
+      "family": "core_momentum",
+      "status": "shadow",
+      "role": "challenger",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": true,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 30,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": true,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": true,
+        "source_variant": "h1_weekly_h6_top5"
+      }
+    },
+    {
+      "strategy_id": "caerus_phoenix",
+      "display_name": "Caerus Phoenix",
+      "short_name": "phoenix",
+      "strategy_type": "security_selection",
+      "family": "crisis_reversal",
+      "status": "research",
+      "role": "research_candidate",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": false,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 40,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": false,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": false,
+        "source_variant": null
+      }
+    },
+    {
+      "strategy_id": "caerus_cygnus",
+      "display_name": "Caerus Cygnus",
+      "short_name": "cygnus",
+      "strategy_type": "security_selection",
+      "family": "earnings_drift",
+      "status": "research",
+      "role": "research_candidate",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": false,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 50,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": false,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": false,
+        "source_variant": null
+      }
+    },
+    {
+      "strategy_id": "caerus_cassiopeia",
+      "display_name": "Caerus Cassiopeia",
+      "short_name": "cassiopeia",
+      "strategy_type": "meta_model",
+      "family": "regime_overlay",
+      "status": "research",
+      "role": "selector",
+      "eligible_for_shadow": false,
+      "eligible_for_promotion": false,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 60,
+      "capabilities": {
+        "produces_holdings": false,
+        "produces_nav": false,
+        "produces_attribution": false,
+        "produces_promotion_metrics": false,
+        "produces_regime_overlay": true,
+        "produces_model_selection": true
+      },
+      "shadow_tracking": {
+        "enabled": false,
+        "source_variant": null
+      }
+    },
+    {
+      "strategy_id": "caerus_argo",
+      "display_name": "Caerus Argo",
+      "short_name": "argo",
+      "strategy_type": "overlay",
+      "family": "regime_overlay",
+      "status": "research",
+      "role": "overlay",
+      "eligible_for_shadow": false,
+      "eligible_for_promotion": false,
+      "benchmark": null,
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 70,
+      "capabilities": {
+        "produces_holdings": false,
+        "produces_nav": false,
+        "produces_attribution": false,
+        "produces_promotion_metrics": false,
+        "produces_regime_overlay": true
+      },
+      "shadow_tracking": {
+        "enabled": false,
+        "source_variant": null
+      }
+    },
+    {
+      "strategy_id": "spy_benchmark",
+      "display_name": "SPY",
+      "short_name": "spy",
+      "strategy_type": "benchmark",
+      "family": "benchmark",
+      "status": "shadow",
+      "role": "benchmark",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": false,
+      "benchmark": null,
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 900,
+      "capabilities": {
+        "produces_holdings": false,
+        "produces_nav": true,
+        "produces_attribution": false,
+        "produces_promotion_metrics": false,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": false,
+        "source_variant": null
+      }
+    }
+  ]
+}
