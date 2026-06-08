@@ -2,7 +2,7 @@
 
 Status: Draft
 Owner: Caerus Research Program
-Last Updated: 2026-06-03
+Last Updated: 2026-06-08
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
@@ -452,3 +452,12 @@ Open questions:
   to availability and first eligible reaction dates?
 - Should guidance be parsed from text, consumed from normalized vendor fields,
   or deferred until the baseline event/revision strategy is validated?
+
+## Current Canonical Boundary
+
+Cygnus remains the canonical earnings / post-earnings drift research strategy.
+The superseded FR-056 design draft is non-canonical and must not broaden Cygnus
+into a generic price/factor drift sleeve without an explicit roadmap decision.
+The FR-064 multi-asset framework is a separate portfolio research framework and
+does not change Cygnus strategy identity, data requirements, or implementation
+status.

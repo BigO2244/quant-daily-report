@@ -34,7 +34,7 @@ editing code or specs.
 ## 1. Verified state (as of 2026-06-08)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
-- **Local HEAD:** `ac70e7b` — "Add model tournament quality packet" (branch `main`)
+- **Local HEAD:** `ab8a8da` — "Ignore generated local report artifacts" (branch `main`)
 - **Production posture:** paper only, US long-only equities + options overlay, Alpaca paper broker. No shorting, no leverage, no real capital.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
 - **Shadow (non-blocking):** Caerus Orion, Caerus Lyra. SPY = benchmark.
@@ -47,18 +47,28 @@ editing code or specs.
 
 | FR | Strategy | Canonical role (intended) | Canonical spec (authoritative) | Status in spec | Code module? | Registry status |
 |----|----------|---------------------------|--------------------------------|----------------|--------------|-----------------|
-| FR-050 | Phoenix | Crisis reversal | `fr_050_phoenix_research_spec.md` | Draft | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` | research |
+| FR-050 | Phoenix | Crisis reversal | `fr_050_phoenix_research_spec.md` | ACTIVE_RESEARCH — Phase B review | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
 | FR-051 | Cygnus | Earnings / post-earnings drift | `fr_051_cygnus_research_spec.md` | Draft | none (spec only) | research (`earnings_drift`) |
-| FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_052_cassiopeia_research_spec.md` | Draft | **conflict — see §4** | research (`meta_model`) |
-| FR-053 | Argo | Regime allocation overlay | `fr_053_argo_research_spec.md` | Draft | none (spec only) | research (`overlay`) |
+| FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_052_cassiopeia_research_spec.md` | Draft / spec-only | none | research (`event_driven`) |
+| FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
 | FR-054 | — | Dynamic strategy registry audit | `fr_054_dynamic_strategy_registry_audit.md` | Audit | n/a | n/a |
 | FR-055 | — | Registry surface cleanup audit | `fr_055_registry_surface_cleanup_audit.md` | Audit | n/a | n/a |
 | FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | superseded → FR-051 | Design Only | none | n/a |
 | FR-057 | Argo | *(design draft — CONFLICTS with FR-053)* | superseded/quarantined → FR-053 | Design Only | none | n/a |
+| FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
+| FR-064 | Portfolio research | Multi-asset research framework | `fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
+| FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
 **not** new roadmap items. See Section 4.
+
+Numbering note: the requested investment-confidence wave originally referenced
+FR-058, FR-059, and FR-060, but those IDs are already active operational-telemetry
+work in `fr_active_backlog.md` (FR-058 through FR-062). To preserve source-of-truth
+lineage and avoid duplicate FR numbers, the new investment-confidence items are
+assigned to the next open IDs: FR-063 strategy differentiation, FR-064 multi-asset
+framework, and FR-065 dashboard decision-grade consolidation.
 
 ---
 
@@ -116,7 +126,10 @@ or fold FR-056.
 - **Security master auth / missing artifact** — `security_master_diagnostics.py` / `audit_security_master_refresh.py` (untracked) flag auth or missing-artifact gaps blocking PIT-safe alias resolution.
 - **BK → BNY universe migration** — pending; do NOT migrate `universe.csv` without explicit approval.
 - **Phoenix needs passive (out-of-sample) evidence** before any shadow/promotion consideration.
-- **Cassiopeia / Argo / Cygnus taxonomy ambiguity** — see Section 4. Highest-priority documentation blocker.
+- **Cygnus definition drift** — see Section 4, Conflict B. The canonical FR-051
+  earnings-drift definition remains source of truth until explicitly changed.
+- **Post-submit snapshot baseline failures** — known unrelated validation backlog.
+- **MCP full-suite order pollution** — known unrelated full-suite ordering backlog.
 
 ---
 
@@ -125,7 +138,7 @@ or fold FR-056.
 Before creating any new FR, design spec, or strategy module:
 
 1. Read this file and `config/research/strategy_registry.json`.
-2. Check whether a canonical spec already exists (FR-050..FR-053). If it does, extend
+2. Check whether a canonical spec already exists (FR-050..FR-053 or FR-063..FR-065). If it does, extend
    the canonical spec — do **not** create a parallel "design" spec under a new FR number.
 3. Never reassign or rename an existing strategy ID without recording the decision in
    Section 4 and obtaining explicit owner approval.

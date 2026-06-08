@@ -49,6 +49,11 @@ Fully deployed history and reviewed deferred items belong in
 | FR-060 Intended NAV True Mark-to-Market | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-058, daily precompute plan snapshots, hydrated/historical price store | implementation_started | Fix intended-NAV so `intended_return_daily` is not mechanically 0.0: mark the carried intended holdings to market at each day's prices to derive the rebalance basis, so price moves since the last rebalance flow into the intended return instead of being erased by a same-day target reconstruction. Carry holdings forward between rebalances; no look-ahead; no fabricated prices; keep the same-day reconstruction as a clearly-labeled fallback when carried holdings cannot be priced. | Revert FR-060 patch; intended NAV reverts to same-day reconstruction (drag = 0 − actual). No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-061 Operational Drag Reporting Cleanup | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055..FR-060, `research/review_packet.py` operational-drag section | implementation_started | Make operational-drag output CIO-readable by classifying (not hiding) reason codes into `current_date_reason_codes` / `historical_reason_codes` / `window_reason_codes` / `material_reason_codes` / `non_material_reason_codes`, plus a `current_date_status` (`current_date_ok` / `current_date_available_with_historical_caveats` / `current_date_unavailable`) and a decision-grade explanation. Keep the flat `reason_codes` backward-compatible; update the stable-window markdown and the review-packet section to use the cleaned summary so historical/non-trading missing prices no longer dominate a clean current-date run. | Revert FR-061 patch; consumers fall back to the flat `reason_codes` list. No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-062 Reconciliation Drift Investigation and Patch | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-059..FR-061, 2026-06-04 run-scoped broker/reconciliation artifacts | implementation_started | Investigate and patch current-date operational-drag reconciliation blockers (`missing_broker_position`, `reconciliation_not_clean`) for 2026-06-04. Determine whether the blocker is true broker/model drift, stale artifact selection, alias normalization, partial-fill/timing semantics, parser behavior, or over-classification; emit an explicit diagnostic artifact and keep true drift material. | Revert FR-062 diagnostic/parser patch; ignore the date-scoped reconciliation drift diagnostic artifact. No execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
+| FR-050 Phoenix Phase B Historical Behavior Review | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Existing Phoenix research artifacts, VIX/regime data, price panels, shadow snapshots | implementation_started | Evaluate Phoenix historical activation behavior, candidate families, regime triggers, overlap versus Polaris/Orion/Lyra, and drawdown/recovery tradeoffs without tuning thresholds. | Revert the Phase B review module/CLI/tests; ignore generated `phoenix_phase_b_review.*` model-quality artifacts. No strategy, execution, broker, cron, or promotion behavior changes are in scope. |
+| FR-053 Argo Phase B Regime Selection Validation | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Existing Argo selection artifacts, model tournament, promotion readiness, VIX/regime data | implementation_started | Validate Argo as a research-only regime overlay/model-selection layer, including stability, transition diagnostics, input freshness, no-lookahead checks, and the distinction between leaderboard winner and decision-grade recommendation. | Revert the Phase B validation module/CLI/tests; ignore generated `argo_phase_b_validation.*` model-quality artifacts. No capital routing or production selection behavior changes are in scope. |
+| FR-063 Strategy Differentiation Deep Dive | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Shadow snapshots, attribution, model tournament, promotion readiness, strategy registry | implementation_started | Decide whether Polaris/Orion/Lyra are meaningfully distinct or redundant, evaluate Phoenix distinctiveness when evidence exists, and surface pairwise redundancy watchlist findings without recommending retirement absent decision-grade evidence. | Revert the deep-dive module/CLI/tests; ignore generated `strategy_differentiation_deep_dive.*` artifacts. No strategy retirement, promotion, or execution behavior changes are in scope. |
+| FR-064 Multi-Asset Research Framework | Investment Confidence / Research Design | `DRAFT_RESEARCH` | LOW | Strategy registry, data inventory, existing price artifacts | design_audit_started | Create a non-executional audit framework for evaluating Treasury duration, cash/T-bills, gold, commodities, managed-futures proxies, defensive equity ETF proxies, and deferred options-overlay design questions. | Revert the framework doc/module/CLI/tests; ignore generated `multi_asset_research_framework.*` artifacts. No trading, allocation, or production order generation is in scope. |
+| FR-065 Dashboard Decision-Grade Consolidation | Investment Confidence / Operator Surface | `ACTIVE_RESEARCH` | LOW | Model-quality artifacts, dashboard data builder, terminal dashboard assets | implementation_started | Add a compact dashboard data-model and terminal panel section summarizing decision-grade readiness, research confidence, latest model-quality evidence, blockers, and source paths. | Revert dashboard data/UI/test changes; dashboard falls back to existing broker-authoritative panels. No broker truth, execution, planned-trade, or warning behavior changes are in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -473,6 +478,121 @@ procedures are proven.
   timestamps, and stale warnings must be explicit. If true drift is confirmed,
   the correct patch is diagnostic clarity and an explicit remediation path, not
   suppression.
+
+## Investment-Confidence Numbering Note
+
+The next research wave was requested as FR-058 strategy differentiation, FR-059
+multi-asset research, and FR-060 dashboard consolidation. Those FR numbers are
+already assigned above to operational-drag and broker-telemetry work. This
+backlog therefore preserves the existing operational lineage and assigns the new
+investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
+
+## FR-050 Phase B Phoenix Historical Behavior Review
+
+- **FR number:** FR-050 Phase B
+- **Title:** Phoenix Historical Behavior Review
+- **Date started:** 2026-06-08
+- **Status:** `ACTIVE_RESEARCH`
+- **Problem statement:** Phoenix has an implemented research generator and an
+  evidence tracker, but Caerus still needs a broader historical behavior review
+  before Phoenix can be treated as a differentiated crisis-reversal candidate.
+- **Scope:** Build a research-only review of active/inactive days, activation
+  reasons, candidate count distribution, top candidates, overlap versus
+  Polaris/Orion/Lyra, regime summaries, drawdown/recovery context when
+  available, confidence, and conservative decision-grade status.
+- **Non-goals:** No Phoenix threshold tuning, no shadow promotion, no paper/live
+  behavior changes, no broker calls, no cron changes, and no capital routing.
+- **Planned artifacts:** `outputs/model_quality/<date>/phoenix_phase_b_review.json`
+  and `.md`.
+- **Validation plan:** Fixture tests for populated history, missing history,
+  active/inactive mixes, missing regime/price data, deterministic ordering, and
+  sparse evidence blocking decision-grade status.
+
+## FR-053 Phase B Argo Regime Selection Validation
+
+- **FR number:** FR-053 Phase B
+- **Title:** Argo Regime Selection Validation
+- **Date started:** 2026-06-08
+- **Status:** `ACTIVE_RESEARCH`
+- **Problem statement:** Argo has been re-homed as the regime overlay /
+  model-selection layer, but it needs explicit validation that its artifacts are
+  stable, point-in-time, and research-only.
+- **Scope:** Validate current regime, current recommendation, recommendation
+  confidence, transition and stability diagnostics, input freshness,
+  no-lookahead checks, and evidence blockers. The validation must distinguish a
+  leaderboard winner from a decision-grade recommendation.
+- **Non-goals:** No execution, broker submission, cron timing, production
+  strategy selection, allocation change, or promotion recommendation.
+- **Planned artifacts:** `outputs/model_quality/<date>/argo_phase_b_validation.json`
+  and `.md`.
+- **Validation plan:** Fixture tests for stable regimes, transitions, stale data,
+  missing model-selection artifacts, leaderboard winner without decision-grade
+  recommendation, and deterministic output.
+
+## FR-063 Strategy Differentiation Deep Dive
+
+- **FR number:** FR-063
+- **Title:** Strategy Differentiation Deep Dive
+- **Date started:** 2026-06-08
+- **Status:** `ACTIVE_RESEARCH`
+- **Problem statement:** Caerus needs a cross-strategy view of whether Polaris,
+  Orion, Lyra, Phoenix, and registered research strategies are materially
+  distinct or redundant, especially Lyra versus Orion.
+- **Scope:** Produce pairwise holdings overlap, active share, sector difference,
+  turnover difference, concentration difference, return correlation when
+  available, attribution spread, regime-specific behavior, redundancy
+  classification, and a conservative retirement watchlist.
+- **Non-goals:** No actual strategy retirement, strategy promotion, allocation
+  change, broker behavior, cron change, or production order change.
+- **Planned artifacts:** `outputs/model_quality/<date>/strategy_differentiation_deep_dive.json`
+  and `.md`.
+- **Validation plan:** Fixture tests for near-duplicate Lyra/Orion, distinct
+  Phoenix, missing history, identical strategies, no overlap, deterministic pair
+  ordering, and sparse evidence blocking decision-grade retirement.
+
+## FR-064 Multi-Asset Research Framework
+
+- **FR number:** FR-064
+- **Title:** Multi-Asset Research Framework
+- **Date started:** 2026-06-08
+- **Status:** `DRAFT_RESEARCH`
+- **Problem statement:** Caerus is currently equity-centric. Before any
+  non-equity sleeve is researched in detail, the required data, candidate
+  sleeves, measurements, promotion preconditions, and explicit non-goals must be
+  documented and audited.
+- **Scope:** Evaluate design readiness for Treasury duration, cash/T-bill,
+  gold, broad commodities, managed-futures proxy, defensive equity ETF proxy,
+  and options overlay as deferred design-only.
+- **Non-goals:** No trading implementation, no allocation engine, no production
+  order generation, no broker calls, no options execution integration, and no
+  promotion recommendation.
+- **Planned artifacts:** `docs/governance/fr_064_multi_asset_research_framework.md`
+  plus `outputs/model_quality/<date>/multi_asset_research_framework.json` and
+  `.md`.
+- **Validation plan:** Fixture tests for candidate sleeves, missing-data
+  degradation, options deferred status, no execution integration, and
+  deterministic output.
+
+## FR-065 Dashboard Decision-Grade Consolidation
+
+- **FR number:** FR-065
+- **Title:** Dashboard Decision-Grade Consolidation
+- **Date started:** 2026-06-08
+- **Status:** `ACTIVE_RESEARCH`
+- **Problem statement:** The terminal dashboard is broker-authoritative and
+  aligned with its shell contract, but it lacks a compact view of model-quality
+  decision-grade evidence, blockers, freshness, and research confidence.
+- **Scope:** Extend the dashboard data model with a `decision_grade` section and
+  render a compact terminal panel sourced from model-quality artifacts. Missing
+  artifacts must degrade visibly to `PARTIAL`.
+- **Non-goals:** No dashboard redesign, no replacement of broker state with
+  planned trades, no suppression of warnings, no execution or broker behavior
+  changes, and no promotion routing.
+- **Planned artifacts:** Dashboard data JSON section only; no generated outputs
+  are committed.
+- **Validation plan:** Tests for decision-grade data model presence, visible
+  partial degradation when model-quality artifacts are missing, HTML mount, JS
+  renderer, and existing dashboard test continuity.
 
 ## Roadmap Boundaries
 

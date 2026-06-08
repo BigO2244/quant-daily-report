@@ -21,7 +21,9 @@ full three-way taxonomy collision (Cassiopeia code = regime/meta-model selector;
 event-driven role specified twice and implemented zero times).
 
 Action: requires explicit owner decision. Do NOT use this file to drive code,
-registry, strategy-ID, or roadmap changes. No content below altered.
+registry, strategy-ID, or roadmap changes. FR-053 Phase B validation must use
+the canonical Argo regime-overlay spec, not this event-sleeve draft. No content
+below altered.
 =============================================================================
 -->
 

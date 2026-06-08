@@ -14,7 +14,8 @@ EARNINGS / post-earnings DRIFT strategy (family = earnings_drift).
 Action: fold any needed content into FR-051 and retire this file, OR record an
 explicit decision to broaden Cygnus, in docs/governance/CURRENT_RESEARCH_ROADMAP.md
 (Section 4, Conflict B). Pending that decision this file is non-canonical and
-must not drive code, registry, or roadmap changes. No content below altered.
+must not drive code, registry, or roadmap changes. FR-064 multi-asset framework
+does not revive this draft. No content below altered.
 =============================================================================
 -->
 

@@ -1,8 +1,8 @@
 # FR-053 Argo Research Specification
 
-Status: Draft
+Status: ACTIVE_RESEARCH — Phase B Validation
 Owner: Caerus Research Program
-Last Updated: 2026-06-03
+Last Updated: 2026-06-08
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 Implementation Status: ACTIVE — the regime / model-selection layer is implemented as research_registry/research/argo.py (schema caerus_argo_regime_selection_v1, artifact argo_regime_selection.*). Argo is the regime overlay / model-selection layer; it does not select securities.
@@ -421,3 +421,24 @@ Open questions:
   until their availability timing is documented in Argo artifacts?
 - How should Argo handle conflicting states, such as strong price trend with
   weak breadth and high concentration?
+
+## Phase B Regime Selection Validation
+
+Phase B validates Argo as a research-only regime overlay / model-selection
+layer. It does not route capital and does not change any paper/live strategy
+weights. The validation must distinguish the current leaderboard winner from a
+decision-grade recommendation and must make stale or unavailable evidence
+visible.
+
+Required Phase B artifact fields:
+
+- `trade_date`, `schema_version`, `overlay_id: caerus_argo`,
+  `governance_label: RESEARCH_ONLY`, and `execution_impact: NON_EXECUTIONAL`.
+- `current_regime`, `current_recommendation`, `recommendation_confidence`,
+  `decision_grade_recommendation`, `stability_summary`, `transition_summary`,
+  `input_freshness`, `no_lookahead_checks`, `evidence_blockers`, and
+  `reason_codes`.
+
+Decision policy: a leaderboard winner is not a capital-routing recommendation.
+Argo remains research-only unless separate governance explicitly approves a
+promotion or allocation change.

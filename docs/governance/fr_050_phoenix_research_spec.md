@@ -1,8 +1,8 @@
 # FR-050 Phoenix Research Specification
 
-Status: Draft
+Status: ACTIVE_RESEARCH — Phase B Review
 Owner: Caerus Research Program
-Last Updated: 2026-06-03
+Last Updated: 2026-06-08
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
@@ -359,3 +359,26 @@ Open questions:
 - No options overlay changes.
 - No changes to Polaris, Orion, or Lyra selection logic.
 - No automatic promotion, demotion, or capital allocation.
+
+## Phase B Historical Behavior Review
+
+Phase B evaluates Phoenix as a research-only crisis-reversal candidate without
+tuning thresholds. The review answers how often Phoenix would have been active,
+which regimes and stress states triggered it, which candidate families appeared,
+how much it overlapped Polaris/Orion/Lyra, whether drawdown/recovery behavior
+looks additive, and what risk-on performance Phoenix may sacrifice.
+
+Required Phase B artifact fields:
+
+- `trade_date`, `schema_version`, `strategy_id: caerus_phoenix`,
+  `governance_label: RESEARCH_ONLY`, and `execution_impact: NON_EXECUTIONAL`.
+- `review_window`, `active_days`, `inactive_days`, `activation_reasons`,
+  `candidate_count_distribution`, `top_candidates`,
+  `overlap_vs_polaris_orion_lyra`, `regime_summary`,
+  `drawdown_recovery_summary`, `confidence`, `decision_grade`, and
+  `reason_codes`.
+
+Decision policy: Phoenix should remain `decision_grade: false` unless there is
+clean, stable, non-sparse evidence across historical stress and recovery
+periods. Sparse evidence, missing regime data, missing price data, or absent
+Phoenix history must degrade visibly through reason codes.

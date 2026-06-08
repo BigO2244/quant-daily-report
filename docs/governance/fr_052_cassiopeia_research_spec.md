@@ -2,7 +2,7 @@
 
 Status: Draft
 Owner: Caerus Research Program
-Last Updated: 2026-06-03
+Last Updated: 2026-06-08
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 Implementation Status: SPEC-ONLY — no module. The Cassiopeia name was previously used in code for a regime/model-selection layer; that implementation was re-homed to Argo (FR-053) on 2026-06-08. Cassiopeia remains the canonical EVENT-DRIVEN strategy and is unimplemented.
@@ -499,3 +499,11 @@ Open questions:
   available?
 - Should Cassiopeia initially require price confirmation, or should immediate
   event-following entry be tested as a separate variant?
+
+## Current Canonical Boundary
+
+Cassiopeia remains the canonical event-driven strategy and is spec-only. The
+regime/model-selection implementation has been re-homed to Argo (FR-053). The
+FR-063 strategy differentiation deep dive may compare Cassiopeia only when
+registered research evidence exists; it must not create an event-driven module,
+promote Cassiopeia, or reuse Argo artifacts as Cassiopeia evidence.

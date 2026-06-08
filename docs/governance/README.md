@@ -16,6 +16,12 @@ Start here before creating or editing any governance/strategy/FR document.
 - `fr_051_cygnus_research_spec.md` — Cygnus (earnings drift)
 - `fr_052_cassiopeia_research_spec.md` — Cassiopeia (event-driven)
 - `fr_053_argo_research_spec.md` — Argo (regime allocation overlay)
+- `fr_063_strategy_differentiation_deep_dive.md` — cross-strategy redundancy /
+  complementarity research
+- `fr_064_multi_asset_research_framework.md` — non-equity sleeve research
+  framework, design/audit only
+- `fr_065_dashboard_decision_grade_consolidation.md` — dashboard model-quality
+  evidence consolidation
 
 **Audits:**
 
@@ -34,3 +40,8 @@ Start here before creating or editing any governance/strategy/FR document.
 > Rule: do not create a parallel "design" spec for a strategy that already has a
 > canonical FR spec. Extend the canonical spec instead. Never reassign a strategy ID
 > or change registry/execution/broker/cron behavior as part of documentation work.
+
+**Numbering note:** FR-058 through FR-062 are already active operational-telemetry
+items. The investment-confidence wave requested on 2026-06-08 is recorded as
+FR-063 through FR-065 for new work, with Phoenix and Argo Phase B staying under
+their canonical FR-050 and FR-053 specs.

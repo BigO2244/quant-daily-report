@@ -9,6 +9,23 @@ references, validation summaries, and final or current operational state.
 Active upcoming work belongs in `docs/governance/fr_active_backlog.md`.
 Methodology belongs in `docs/governance/fr_governance_model.md`.
 
+## Active Numbering Note
+
+FR-058 through FR-062 are already assigned to operational-drag and broker-
+telemetry work in the active backlog. The 2026-06-08 investment-confidence
+research wave therefore uses the next open numbers instead of duplicating those
+IDs:
+
+- FR-050 Phase B: Phoenix Historical Behavior Review (`ACTIVE_RESEARCH`)
+- FR-053 Phase B: Argo Regime Selection Validation (`ACTIVE_RESEARCH`)
+- FR-063: Strategy Differentiation Deep Dive (`ACTIVE_RESEARCH`)
+- FR-064: Multi-Asset Research Framework (`DRAFT_RESEARCH`)
+- FR-065: Dashboard Decision-Grade Consolidation (`ACTIVE_RESEARCH`)
+
+All five are research-only / non-executional. They do not change live/paper
+execution behavior, broker submission, cron timing, order generation, capital
+routing, or strategy promotion state.
+
 ## Wave Summary
 
 | Phase | Date | FRs | Status | Operational Theme | Observation Focus |
