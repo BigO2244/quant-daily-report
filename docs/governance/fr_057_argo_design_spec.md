@@ -27,7 +27,7 @@ registry, strategy-ID, or roadmap changes. No content below altered.
 
 # FR-057 Argo Event Sleeve Design Spec
 
-Status: Design Only — CONFLICTS WITH FR-053 (see header)
+Status: RETIRED (Option A, 2026-06-08) — event-driven content belongs to Cassiopeia (FR-052); Argo is the regime / model-selection layer (FR-053). Superseded; do not use.
 Owner: Caerus Research Program
 Last Updated: 2026-06-08
 Governance Label: RESEARCH_ONLY

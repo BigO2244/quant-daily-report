@@ -133,22 +133,21 @@
       "strategy_id": "caerus_cassiopeia",
       "display_name": "Caerus Cassiopeia",
       "short_name": "cassiopeia",
-      "strategy_type": "meta_model",
-      "family": "regime_overlay",
+      "strategy_type": "security_selection",
+      "family": "event_driven",
       "status": "research",
-      "role": "selector",
+      "role": "research_candidate",
       "eligible_for_shadow": false,
       "eligible_for_promotion": false,
       "benchmark": "SPY",
       "execution_impact": "NON_EXECUTIONAL",
       "display_order": 60,
       "capabilities": {
-        "produces_holdings": false,
-        "produces_nav": false,
-        "produces_attribution": false,
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
         "produces_promotion_metrics": false,
-        "produces_regime_overlay": true,
-        "produces_model_selection": true
+        "produces_regime_overlay": false
       },
       "shadow_tracking": {
         "enabled": false,
@@ -159,13 +158,13 @@
       "strategy_id": "caerus_argo",
       "display_name": "Caerus Argo",
       "short_name": "argo",
-      "strategy_type": "overlay",
+      "strategy_type": "meta_model",
       "family": "regime_overlay",
       "status": "research",
-      "role": "overlay",
+      "role": "selector",
       "eligible_for_shadow": false,
       "eligible_for_promotion": false,
-      "benchmark": null,
+      "benchmark": "SPY",
       "execution_impact": "NON_EXECUTIONAL",
       "display_order": 70,
       "capabilities": {
@@ -173,7 +172,8 @@
         "produces_nav": false,
         "produces_attribution": false,
         "produces_promotion_metrics": false,
-        "produces_regime_overlay": true
+        "produces_regime_overlay": true,
+        "produces_model_selection": true
       },
       "shadow_tracking": {
         "enabled": false,

@@ -71,17 +71,21 @@ contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They
 | Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
 | Phoenix | security_selection / crisis_reversal | research | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts |
 | Cygnus | security_selection / earnings_drift | research | none | none | no | no | spec_only |
-| Cassiopeia | **meta_model / regime_overlay** | research | cassiopeia.py | run_cassiopeia_model_selection.py | no | no | research_module — **but built as a regime/meta-model selector, NOT the event-driven strategy its canonical spec (FR-052) describes** |
-| Argo | **overlay / regime_overlay** | research | none | none | no | no | spec_only — **canonical FR-053 says regime overlay; FR-057 design draft wrongly redefines it as event-driven** |
+| Cassiopeia | security_selection / event_driven | research | none (spec-only) | none | no | no | spec_only — canonical EVENT-DRIVEN strategy (FR-052); selector code re-homed to Argo 2026-06-08 |
+| Argo | meta_model / regime_overlay | research | argo.py | run_argo_regime_selection.py | no | no | regime overlay / model-selection layer (FR-053); active selector re-homed from Cassiopeia 2026-06-08 |
 | SPY | benchmark | shadow | n/a | n/a | no | no | benchmark |
 | growth_engine_v4 | (engine behind Polaris) | n/a | core/growth_engine_v4.py | n/a | n/a | n/a | live paper baseline engine |
 
 ---
 
-## 4. OPEN taxonomy conflicts (require explicit decision — do NOT silently fix)
+## 4. Taxonomy conflicts
 
-These are unresolved and must be decided by the program owner. No code, registry, or
-strategy-ID changes should be made until a decision is recorded here.
+**Conflict A — RESOLVED 2026-06-08 (Option A).** The regime / model-selection layer
+implemented in code has been re-homed from `caerus_cassiopeia` to `caerus_argo`
+(meta_model, schema `caerus_argo_regime_selection_v1`, artifact `argo_regime_selection.*`,
+module `research_registry/research/argo.py`). `caerus_cassiopeia` is restored to its
+canonical EVENT-DRIVEN definition (FR-052), spec-only. FR-057 is retired. The historical
+narrative below is retained for lineage. Conflict B (Cygnus definition drift) remains OPEN.
 
 **Conflict A — the "event-driven" role is double-specified and unimplemented.**
 - Canonical intent (roadmap + FR-052): **Cassiopeia = event-driven** catalyst strategy.

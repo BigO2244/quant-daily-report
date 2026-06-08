@@ -5,6 +5,7 @@ Owner: Caerus Research Program
 Last Updated: 2026-06-03
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
+Implementation Status: SPEC-ONLY — no module. The Cassiopeia name was previously used in code for a regime/model-selection layer; that implementation was re-homed to Argo (FR-053) on 2026-06-08. Cassiopeia remains the canonical EVENT-DRIVEN strategy and is unimplemented.
 
 ## Purpose
 

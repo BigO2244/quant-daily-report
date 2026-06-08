@@ -25,7 +25,7 @@ Start here before creating or editing any governance/strategy/FR document.
 **Superseded / conflicting (NON-canonical — do not treat as roadmap items):**
 
 - `fr_056_cygnus_design_spec.md` — DUPLICATE of FR-051; definition drift (see file header + roadmap §4 Conflict B).
-- `fr_057_argo_design_spec.md` — CONFLICTS with FR-053; appears to describe the Cassiopeia event-driven role (see file header + roadmap §4 Conflict A).
+- `fr_057_argo_design_spec.md` — RETIRED (Option A, 2026-06-08); event-driven content belongs to Cassiopeia (FR-052). Argo is the active regime / model-selection layer (FR-053).
 
 **Other governance references:** `fr_registry.md`, `fr_active_backlog.md`,
 `caerus_strategic_backlog.md`, `fr_governance_model.md`, `governance_taxonomy.md`,

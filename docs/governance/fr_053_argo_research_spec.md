@@ -5,6 +5,7 @@ Owner: Caerus Research Program
 Last Updated: 2026-06-03
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
+Implementation Status: ACTIVE — the regime / model-selection layer is implemented as research_registry/research/argo.py (schema caerus_argo_regime_selection_v1, artifact argo_regime_selection.*). Argo is the regime overlay / model-selection layer; it does not select securities.
 
 ## Purpose
 
