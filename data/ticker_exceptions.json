@@ -1,9 +1,12 @@
 {
-  "aliases": {},
+  "aliases": {
+    "BK": "BNY"
+  },
   "ignore": [
     "MMC"
   ],
   "notes": {
+    "BK": "Bank of New York Mellon changed ticker to BNY; use BNY as the provider symbol while preserving BK in research panels.",
     "MMC": "Empty download / possibly delisted on Yahoo"
   }
 }
