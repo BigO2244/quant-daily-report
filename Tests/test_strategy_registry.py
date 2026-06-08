@@ -70,22 +70,21 @@ def test_default_registry_keeps_future_research_and_overlay_entries_inactive() -
     assert phoenix.status == "research"
     assert cygnus.status == "research"
     assert cassiopeia.status == "research"
-    assert cassiopeia.strategy_type == "meta_model"
-    assert cassiopeia.is_meta_model is True
+    assert cassiopeia.strategy_type == "security_selection"
+    assert cassiopeia.is_security_selection is True
     assert cassiopeia.capabilities == {
-        "produces_holdings": False,
-        "produces_nav": False,
-        "produces_attribution": False,
+        "produces_holdings": True,
+        "produces_nav": True,
+        "produces_attribution": True,
         "produces_promotion_metrics": False,
-        "produces_regime_overlay": True,
-        "produces_model_selection": True,
+        "produces_regime_overlay": False,
     }
     assert phoenix.strategy_id not in registry.active_shadow_security_selection_ids()
     assert cygnus.strategy_id not in registry.active_shadow_security_selection_ids()
     assert cassiopeia.strategy_id not in registry.active_shadow_security_selection_ids()
 
-    assert argo.strategy_type == "overlay"
-    assert argo.is_overlay is True
+    assert argo.strategy_type == "meta_model"
+    assert argo.is_meta_model is True
     assert argo.strategy_id not in registry.active_shadow_security_selection_ids()
     assert argo.capabilities == {
         "produces_holdings": False,
@@ -93,6 +92,7 @@ def test_default_registry_keeps_future_research_and_overlay_entries_inactive() -
         "produces_attribution": False,
         "produces_promotion_metrics": False,
         "produces_regime_overlay": True,
+        "produces_model_selection": True,
     }
 
 

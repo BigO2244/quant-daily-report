@@ -16,7 +16,7 @@ def test_model_quality_packet_aggregates_sections(tmp_path: Path) -> None:
     root = tmp_path / "outputs" / "model_quality" / trade_date
     for name, filename in SECTION_FILES.items():
         payload = {"date": trade_date, "status": "OK", "available": True, "reason_codes": ["ok"]}
-        if name == "cassiopeia_model_selection":
+        if name == "argo_regime_selection":
             payload["decision_grade_recommendation"] = False
         if name == "model_tournament":
             payload["current_leader"] = "caerus_orion"
@@ -44,7 +44,7 @@ def test_model_quality_packet_optional_sections_do_not_block_availability(tmp_pa
     root = tmp_path / "outputs" / "model_quality" / trade_date
     for name, filename in SECTION_FILES.items():
         payload = {"date": trade_date, "status": "OK", "available": True, "reason_codes": ["ok"]}
-        if name == "cassiopeia_model_selection":
+        if name == "argo_regime_selection":
             payload["decision_grade_recommendation"] = False
         if name == "model_tournament":
             payload["current_leader"] = "caerus_lyra"

@@ -88,9 +88,9 @@ def test_model_tournament_handles_meta_model_strategy(tmp_path: Path) -> None:
 
     payload = build_model_tournament(trade_date="2026-06-02", repo_root=tmp_path)
 
-    cassiopeia = [row for row in payload["strategies"] if row["strategy"] == "caerus_cassiopeia"][0]
-    assert cassiopeia["status"] == "META_MODEL_RECOMMENDATION_ONLY"
-    assert cassiopeia["rankable"] is False
+    argo = [row for row in payload["strategies"] if row["strategy"] == "caerus_argo"][0]
+    assert argo["status"] == "META_MODEL_RECOMMENDATION_ONLY"
+    assert argo["rankable"] is False
 
 
 def test_model_tournament_deterministic_ranking_tie_breaks_by_strategy(tmp_path: Path) -> None:
