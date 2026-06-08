@@ -43,6 +43,13 @@ def _current_regime(repo: Path, trade_date: str) -> tuple[dict[str, Any], list[s
             source_date = normalize_date(str(raw_date))
             if source_date > trade_date:
                 reasons.append("CURRENT_REGIME_AFTER_TARGET_IGNORED")
+                return {
+                    "regime": "UNKNOWN",
+                    "evidence_regime": "neutral",
+                    "source_date": raw_date,
+                    "source_artifact": str(path),
+                    "reason_codes": sorted(set(reasons)),
+                }, sorted(set(reasons))
             elif source_date != trade_date:
                 reasons.append("CURRENT_REGIME_DATE_DIFFERS_FROM_TARGET")
         except Exception:
@@ -86,6 +93,26 @@ def _latest_payload(
     return (read_json(directory / filename) if directory else None), status
 
 
+def _performance_source_status(*, path: Path, payload: dict[str, Any] | None, target: str) -> dict[str, Any]:
+    reasons = ["SHADOW_PERFORMANCE_SUMMARY_MISSING"] if payload is None else ["ok"]
+    source_date = (payload or {}).get("trade_date") if payload else None
+    if payload is not None and source_date:
+        try:
+            if normalize_date(str(source_date)[:10]) != target:
+                reasons = ["SOURCE_DATE_DIFFERS_FROM_TARGET"]
+        except Exception:
+            reasons = ["SOURCE_DATE_INVALID"]
+    elif payload is not None:
+        reasons = ["SOURCE_DATE_MISSING"]
+    return source_status(
+        name="shadow_performance_summary",
+        path=path if path.exists() else None,
+        source_date=source_date,
+        target_date=target,
+        reason_codes=reasons,
+    )
+
+
 def _regime_metrics(regime_payload: dict[str, Any] | None, strategy: str, evidence_regime: str) -> dict[str, Any] | None:
     block = (((regime_payload or {}).get("strategies") or {}).get(strategy) or {}).get("regimes") or {}
     row = block.get(evidence_regime)
@@ -105,8 +132,9 @@ def _promotion_blockers(governance_payload: dict[str, Any] | None, strategy: str
 
 
 def _readiness_summary(readiness_payload: dict[str, Any] | None, strategy: str) -> dict[str, Any]:
-    windows = (((readiness_payload or {}).get("strategies") or {}).get(strategy) or {}).get("windows") or {}
-    if not isinstance(windows, dict):
+    strategy_payload = ((readiness_payload or {}).get("strategies") or {}).get(strategy)
+    windows = strategy_payload.get("windows") if isinstance(strategy_payload, dict) else None
+    if not isinstance(windows, dict) or not windows:
         return {"available": False, "best_state": None, "max_observations": 0, "reason_codes": ["PROMOTION_READINESS_MISSING"]}
     best_state = None
     max_obs = 0
@@ -139,7 +167,18 @@ def build_argo_regime_selection(
 ) -> dict[str, Any]:
     target = normalize_date(trade_date)
     repo = Path(repo_root)
-    registry = load_strategy_registry_for_repo(repo)
+    try:
+        registry = load_strategy_registry_for_repo(repo)
+    except Exception as exc:
+        payload = _blocked_payload(
+            target=target,
+            repo=repo,
+            output_root=output_root,
+            write=write,
+            reason_codes=["STRATEGY_REGISTRY_LOAD_FAILED"],
+            detail=str(exc),
+        )
+        return payload
     current_regime, current_regime_reasons = _current_regime(repo, target)
     performance_path = repo / "outputs" / "shadow_candidates" / "performance" / "shadow_summary.json"
     performance_payload = read_json(performance_path)
@@ -148,13 +187,7 @@ def build_argo_regime_selection(
     readiness_payload, readiness_status = _latest_payload(repo, target, "outputs/research/promotion_readiness", "promotion_readiness_windows.json")
 
     source_statuses = [
-        source_status(
-            name="shadow_performance_summary",
-            path=performance_path if performance_path.exists() else None,
-            source_date=(performance_payload or {}).get("trade_date") if performance_payload else None,
-            target_date=target,
-            reason_codes=["ok"] if performance_payload else ["SHADOW_PERFORMANCE_SUMMARY_MISSING"],
-        ),
+        _performance_source_status(path=performance_path, payload=performance_payload, target=target),
         regime_status,
         governance_status,
         readiness_status,
@@ -230,27 +263,47 @@ def build_argo_regime_selection(
     ranked = sorted(eligible, key=lambda row: (-(safe_float(row.get("leaderboard_score")) or 0.0), row["strategy"]))
     leaderboard_winner = ranked[0]["strategy"] if ranked else None
     decision_grade = [row for row in ranked if row.get("decision_grade")]
-    recommended = decision_grade[0]["strategy"] if decision_grade else None
+    source_blockers = [code for status in source_statuses for code in (status.get("reason_codes") or []) if code != "ok"]
+    global_decision_blockers = sorted(set(source_blockers + [code for code in current_regime_reasons if code != "ok"]))
+    recommended = decision_grade[0]["strategy"] if decision_grade and not global_decision_blockers else None
     reason_codes = collect_reason_codes(
         current_regime_reasons,
+        *(status.get("reason_codes") or [] for status in source_statuses),
         *(row.get("reason_codes") or [] for row in eligible),
+        *(row.get("reason_codes") or [] for row in excluded),
         ["NO_DECISION_GRADE_EVIDENCE"] if recommended is None else [],
     )
+    row_blockers = [
+        code
+        for row in [*eligible, *excluded]
+        for code in (row.get("reason_codes") or [])
+        if code != "ok"
+    ]
+    evidence_blockers = sorted(set(global_decision_blockers + row_blockers))
+    if recommended is None:
+        evidence_blockers.append("NO_DECISION_GRADE_EVIDENCE")
+    no_evidence = performance_payload is None and not ranked
+    artifact_status = "READY" if recommended is not None else "BLOCKED" if no_evidence or not ranked else "PARTIAL"
     payload = {
         "schema_version": SCHEMA_VERSION,
         "date": target,
         "strategy_id": STRATEGY_ID,
         "governance_label": "RESEARCH_ONLY",
         "execution_impact": "NON_EXECUTIONAL",
+        "status": artifact_status,
         "current_regime": current_regime,
         "eligible_strategies": ranked,
         "excluded_strategies": sorted(excluded, key=lambda row: str(row.get("strategy") or "")),
         "leaderboard_winner": leaderboard_winner,
+        "recommendation": recommended,
         "recommended_strategy": recommended,
         "confidence": "MEDIUM" if recommended else "LOW",
+        "decision_grade": recommended is not None,
         "decision_grade_recommendation": recommended is not None,
+        "evidence_blockers": sorted(set(evidence_blockers)),
         "reason_codes": reason_codes,
         "source_statuses": source_statuses,
+        "input_freshness": _input_freshness(source_statuses),
         "decision_policy": {
             "min_coverage_days": MIN_COVERAGE_DAYS,
             "min_regime_observations": MIN_REGIME_OBSERVATIONS,
@@ -264,11 +317,76 @@ def build_argo_regime_selection(
     return payload
 
 
+def _input_freshness(source_statuses: list[dict[str, Any]]) -> dict[str, Any]:
+    missing = sorted(str(status.get("name") or "unknown") for status in source_statuses if status.get("status") == "MISSING")
+    stale = sorted(str(status.get("name") or "unknown") for status in source_statuses if status.get("status") == "STALE")
+    partial = sorted(str(status.get("name") or "unknown") for status in source_statuses if status.get("status") == "PARTIAL")
+    status = "FRESH"
+    if missing:
+        status = "MISSING"
+    elif stale:
+        status = "STALE"
+    elif partial:
+        status = "PARTIAL"
+    return {
+        "status": status,
+        "missing_inputs": missing,
+        "stale_inputs": stale,
+        "partial_inputs": partial,
+        "reason_codes": collect_reason_codes(*(row.get("reason_codes") or [] for row in source_statuses)),
+    }
+
+
+def _blocked_payload(
+    *,
+    target: str,
+    repo: Path,
+    output_root: Path | str | None,
+    write: bool,
+    reason_codes: list[str],
+    detail: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "date": target,
+        "strategy_id": STRATEGY_ID,
+        "governance_label": "RESEARCH_ONLY",
+        "execution_impact": "NON_EXECUTIONAL",
+        "status": "BLOCKED",
+        "current_regime": {"regime": "UNKNOWN", "evidence_regime": "neutral", "source_artifact": None, "reason_codes": reason_codes},
+        "eligible_strategies": [],
+        "excluded_strategies": [],
+        "leaderboard_winner": None,
+        "recommendation": None,
+        "recommended_strategy": None,
+        "confidence": "NONE",
+        "decision_grade": False,
+        "decision_grade_recommendation": False,
+        "evidence_blockers": sorted(set(reason_codes)),
+        "reason_codes": sorted(set(reason_codes)),
+        "source_statuses": [],
+        "input_freshness": {"status": "MISSING", "missing_inputs": ["strategy_registry"], "stale_inputs": [], "partial_inputs": [], "reason_codes": sorted(set(reason_codes))},
+        "decision_policy": {
+            "min_coverage_days": MIN_COVERAGE_DAYS,
+            "min_regime_observations": MIN_REGIME_OBSERVATIONS,
+            "leaderboard_winner_is_not_promotion_recommendation": True,
+        },
+    }
+    if detail:
+        payload["error_detail"] = detail
+    if write:
+        out_dir = model_quality_dir(repo, target, output_root)
+        write_json(out_dir / "argo_regime_selection.json", payload)
+        write_text(out_dir / "argo_regime_selection.md", render_markdown(payload))
+    return payload
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     lines = [
         f"# Argo Regime Selection - {payload.get('date')}",
         "",
         f"- Current regime: {(payload.get('current_regime') or {}).get('regime')} / evidence bucket {(payload.get('current_regime') or {}).get('evidence_regime')}",
+        f"- Status: {payload.get('status')}",
         f"- Leaderboard winner: {payload.get('leaderboard_winner')}",
         f"- Decision-grade recommendation: {payload.get('recommended_strategy') or 'none'}",
         f"- Confidence: {payload.get('confidence')}",
@@ -302,7 +420,17 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=Path(args.repo_root),
         output_root=Path(args.output_root) if args.output_root else None,
     )
-    print(json.dumps({"date": payload["date"], "recommended_strategy": payload["recommended_strategy"], "reason_codes": payload["reason_codes"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "date": payload["date"],
+                "status": payload.get("status"),
+                "recommended_strategy": payload["recommended_strategy"],
+                "reason_codes": payload["reason_codes"],
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
