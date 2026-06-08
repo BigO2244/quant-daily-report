@@ -122,7 +122,10 @@ def build_model_tournament(
     regime_payload, regime_status = _latest_payload(repo, target, "outputs/research/regime_attribution", "regime_attribution.json")
     readiness_payload, readiness_status = _latest_payload(repo, target, "outputs/research/promotion_readiness", "promotion_readiness_windows.json")
     governance_payload, governance_status = _latest_payload(repo, target, "outputs/research/promotion_governance", "promotion_governance.json")
-    cassiopeia_payload = read_json(repo / "outputs" / "model_quality" / target / "cassiopeia_model_selection.json")
+    _model_quality_dir = repo / "outputs" / "model_quality" / target
+    argo_payload = read_json(_model_quality_dir / "argo_regime_selection.json")
+    if argo_payload is None:
+        argo_payload = read_json(_model_quality_dir / "cassiopeia_model_selection.json")  # bounded legacy fallback
 
     records: list[dict[str, Any]] = []
     for entry in registry.entries:
@@ -141,7 +144,7 @@ def build_model_tournament(
                     "data_quality_status": "RECOMMENDATION_LAYER",
                     "learning_readiness": "META_MODEL",
                     "reason_codes": ["META_MODEL_RECOMMENDATION_ONLY"],
-                    "cassiopeia_recommendation": (cassiopeia_payload or {}).get("recommended_strategy"),
+                    "argo_recommendation": (argo_payload or {}).get("recommended_strategy"),
                 }
             )
             continue

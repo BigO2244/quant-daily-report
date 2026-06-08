@@ -20,8 +20,8 @@ from research_registry.research.model_quality_common import (
     write_text,
 )
 
-SCHEMA_VERSION = "caerus_cassiopeia_model_selection_v1"
-STRATEGY_ID = "caerus_cassiopeia"
+SCHEMA_VERSION = "caerus_argo_regime_selection_v1"
+STRATEGY_ID = "caerus_argo"
 MIN_COVERAGE_DAYS = 252
 MIN_REGIME_OBSERVATIONS = 30
 
@@ -130,7 +130,7 @@ def _readiness_summary(readiness_payload: dict[str, Any] | None, strategy: str) 
     }
 
 
-def build_cassiopeia_model_selection(
+def build_argo_regime_selection(
     *,
     trade_date: str,
     repo_root: Path | str = Path("."),
@@ -259,14 +259,14 @@ def build_cassiopeia_model_selection(
     }
     if write:
         out_dir = model_quality_dir(repo, target, output_root)
-        write_json(out_dir / "cassiopeia_model_selection.json", payload)
-        write_text(out_dir / "cassiopeia_model_selection.md", render_markdown(payload))
+        write_json(out_dir / "argo_regime_selection.json", payload)
+        write_text(out_dir / "argo_regime_selection.md", render_markdown(payload))
     return payload
 
 
 def render_markdown(payload: dict[str, Any]) -> str:
     lines = [
-        f"# Cassiopeia Model Selection - {payload.get('date')}",
+        f"# Argo Regime Selection - {payload.get('date')}",
         "",
         f"- Current regime: {(payload.get('current_regime') or {}).get('regime')} / evidence bucket {(payload.get('current_regime') or {}).get('evidence_regime')}",
         f"- Leaderboard winner: {payload.get('leaderboard_winner')}",
@@ -292,12 +292,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build Cassiopeia research-only model-selection artifacts.")
+    parser = argparse.ArgumentParser(description="Build Argo research-only regime/model-selection artifacts.")
     parser.add_argument("--date", required=True)
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--output-root", default=None)
     args = parser.parse_args(argv)
-    payload = build_cassiopeia_model_selection(
+    payload = build_argo_regime_selection(
         trade_date=args.date,
         repo_root=Path(args.repo_root),
         output_root=Path(args.output_root) if args.output_root else None,

@@ -18,9 +18,12 @@ SCHEMA_VERSION = "caerus_model_quality_packet_v1"
 SECTION_FILES = {
     "attribution_quality": "attribution_quality.json",
     "phoenix_research": "phoenix_research.json",
-    "cassiopeia_model_selection": "cassiopeia_model_selection.json",
+    "argo_regime_selection": "argo_regime_selection.json",
     "universe_quality": "universe_quality.json",
     "model_tournament": "model_tournament.json",
+}
+LEGACY_SECTION_FILES = {
+    "argo_regime_selection": "cassiopeia_model_selection.json",
 }
 OPTIONAL_SECTION_FILES = {
     "portfolio_history_freshness": "portfolio_history_freshness.json",
@@ -46,6 +49,12 @@ def build_model_quality_packet(
     missing: list[str] = []
     for name, filename in SECTION_FILES.items():
         payload = read_json(out_dir / filename)
+        if payload is None and name in LEGACY_SECTION_FILES:
+            legacy_payload = read_json(out_dir / LEGACY_SECTION_FILES[name])
+            if legacy_payload is not None:
+                existing = [code for code in (legacy_payload.get("reason_codes") or []) if code != "ok"]
+                legacy_payload["reason_codes"] = sorted(set(existing + ["LEGACY_ARTIFACT_NAME"]))
+                payload = legacy_payload
         if payload is None:
             sections[name] = {"available": False, "reason_codes": [f"{name.upper()}_MISSING"]}
             missing.append(name)
@@ -64,7 +73,7 @@ def build_model_quality_packet(
             sections[name] = {"available": False, "optional": True, "reason_codes": [f"{name.upper()}_MISSING"]}
         else:
             sections[name] = payload
-    cassiopeia = sections.get("cassiopeia_model_selection") or {}
+    argo = sections.get("argo_regime_selection") or {}
     tournament = sections.get("model_tournament") or {}
     attribution = sections.get("attribution_quality") or {}
     universe = sections.get("universe_quality") or {}
@@ -76,7 +85,7 @@ def build_model_quality_packet(
     reason_codes = []
     if missing:
         reason_codes.extend(f"MISSING_SECTION:{name}" for name in missing)
-    if not (cassiopeia or {}).get("decision_grade_recommendation"):
+    if not (argo or {}).get("decision_grade_recommendation"):
         reason_codes.append("NO_DECISION_GRADE_STRATEGY_CHANGE")
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -92,16 +101,16 @@ def build_model_quality_packet(
             "security_master_status": (security.get("security_master_artifact") or {}).get("status"),
             "lyra_orion_decision_grade": bool(differentiation.get("decision_grade_flag")),
             "phoenix_evidence_confidence": phoenix_evidence.get("confidence"),
-            "cygnus_argo_design_status": "DESIGN_ONLY_DOCS",
+            "cygnus_design_status": "DESIGN_ONLY_DOCS",
             "best_current_research_insight": _best_insight(
-                cassiopeia=cassiopeia,
+                argo=argo,
                 phoenix=phoenix,
                 universe=universe,
                 tournament=tournament,
                 differentiation=differentiation,
             ),
-            "strategy_change_decision_grade": bool((cassiopeia or {}).get("decision_grade_recommendation")) and bool((tournament or {}).get("decision_grade_leader")),
-            "next_recommended_research_action": _next_action(cassiopeia=cassiopeia, universe=universe, tournament=tournament, portfolio=portfolio, security=security),
+            "strategy_change_decision_grade": bool((argo or {}).get("decision_grade_recommendation")) and bool((tournament or {}).get("decision_grade_leader")),
+            "next_recommended_research_action": _next_action(argo=argo, universe=universe, tournament=tournament, portfolio=portfolio, security=security),
         },
         "sections": sections,
         "reason_codes": sorted(set(reason_codes)) or ["ok"],
@@ -114,7 +123,7 @@ def build_model_quality_packet(
 
 def _best_insight(
     *,
-    cassiopeia: dict[str, Any],
+    argo: dict[str, Any],
     phoenix: dict[str, Any],
     universe: dict[str, Any],
     tournament: dict[str, Any],
@@ -132,14 +141,14 @@ def _best_insight(
         return "Phoenix has active crisis-reversal candidates, pending history."
     if universe.get("status") == "PARTIAL":
         return "Universe/data quality remains a gating constraint."
-    if cassiopeia.get("recommended_strategy"):
-        return f"Cassiopeia recommends {cassiopeia.get('recommended_strategy')}."
+    if argo.get("recommended_strategy"):
+        return f"Argo recommends {argo.get('recommended_strategy')}."
     return "No single model-quality insight is decision-grade yet."
 
 
 def _next_action(
     *,
-    cassiopeia: dict[str, Any],
+    argo: dict[str, Any],
     universe: dict[str, Any],
     tournament: dict[str, Any],
     portfolio: dict[str, Any] | None = None,
@@ -152,7 +161,7 @@ def _next_action(
         return "Resolve security-master refresh/auth diagnostics before universe expansion or alias migration."
     if "SECURITY_MASTER_MISSING" in (universe.get("reason_codes") or []):
         return "Refresh security master and rerun universe quality plus tournament."
-    if not cassiopeia.get("decision_grade_recommendation"):
+    if not argo.get("decision_grade_recommendation"):
         return "Accumulate cleaner promotion-governance evidence before any strategy change."
     if not tournament.get("decision_grade_leader"):
         return "Resolve tournament decision-grade blockers."
