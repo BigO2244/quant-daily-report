@@ -34,7 +34,7 @@ editing code or specs.
 ## 1. Verified state (as of 2026-06-08)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
-- **Local HEAD:** `ab8a8da` — "Ignore generated local report artifacts" (branch `main`)
+- **Local HEAD:** `216ac5f` — "Integrate investment confidence sections into model quality packet" (branch `main`)
 - **Production posture:** paper only, US long-only equities + options overlay, Alpaca paper broker. No shorting, no leverage, no real capital.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
 - **Shadow (non-blocking):** Caerus Orion, Caerus Lyra. SPY = benchmark.
@@ -85,6 +85,14 @@ framework, and FR-065 dashboard decision-grade consolidation.
 | Argo | meta_model / regime_overlay | research | argo.py | run_argo_regime_selection.py | no | no | regime overlay / model-selection layer (FR-053); active selector re-homed from Cassiopeia 2026-06-08 |
 | SPY | benchmark | shadow | n/a | n/a | no | no | benchmark |
 | growth_engine_v4 | (engine behind Polaris) | n/a | core/growth_engine_v4.py | n/a | n/a | n/a | live paper baseline engine |
+
+**FR-053 evidence state (2026-06-08):** Argo now emits a governance-valid
+`argo_regime_selection.*` artifact even when evidence is stale or sparse. The
+current 2026-06-08 selector state is `PARTIAL`, with `recommended_strategy:
+null`, `decision_grade: false`, and stale-input blockers from shadow performance
+(2026-04-30) plus promotion governance/readiness evidence (2026-06-02). The
+dashboard decision-grade section therefore remains `BLOCKED` for substantive
+evidence reasons, not because the Argo selector artifact is missing.
 
 ---
 

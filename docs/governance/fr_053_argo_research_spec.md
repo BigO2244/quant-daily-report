@@ -442,3 +442,12 @@ Required Phase B artifact fields:
 Decision policy: a leaderboard winner is not a capital-routing recommendation.
 Argo remains research-only unless separate governance explicitly approves a
 promotion or allocation change.
+
+Current Phase B evidence state (2026-06-08): `argo_regime_selection.*` is a
+required daily research artifact and must emit even when evidence is incomplete.
+When source evidence is stale, partial, or missing, the artifact must set
+`recommendation: null`, `decision_grade: false`, and explicit `reason_codes`
+instead of failing silently. The 2026-06-08 artifact is `PARTIAL`: Lyra is the
+leaderboard winner, but there is no decision-grade recommendation because shadow
+performance is stale to 2026-04-30, promotion governance/readiness evidence is
+stale to 2026-06-02, and promotion governance blockers remain.

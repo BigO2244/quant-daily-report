@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.research.build_dashboard_v1 import DashboardV1Builder
+from scripts.research.build_dashboard_v1 import DashboardV1Builder, parse_args
 
 
 def _write_strategy_registry(root: Path) -> None:
@@ -95,6 +95,12 @@ def _write_strategy_registry(root: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_build_dashboard_v1_accepts_date_alias() -> None:
+    args = parse_args(["--date", "2026-06-08"])
+
+    assert args.report_date == "2026-06-08"
 
 
 def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:

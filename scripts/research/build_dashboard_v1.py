@@ -1228,6 +1228,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build the strict Dashboard V1 payload.")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--report-date", default=None)
+    parser.add_argument("--date", dest="report_date", default=None)
     parser.add_argument("--output-dir", default="web/dashboard")
     return parser.parse_args(argv)
 

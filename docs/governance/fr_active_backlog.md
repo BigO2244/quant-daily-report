@@ -528,6 +528,14 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Validation plan:** Fixture tests for stable regimes, transitions, stale data,
   missing model-selection artifacts, leaderboard winner without decision-grade
   recommendation, and deterministic output.
+- **Current evidence state (2026-06-08):** `argo_regime_selection.*` is now
+  expected to emit every run, including degraded `PARTIAL`/`BLOCKED` artifacts
+  with explicit reason codes. The 2026-06-08 artifact is `PARTIAL` with Lyra as
+  leaderboard winner only, no decision-grade recommendation, stale shadow
+  performance evidence dated 2026-04-30, stale promotion governance/readiness
+  evidence dated 2026-06-02, and remaining promotion governance blockers. The
+  dashboard decision-grade section remains `BLOCKED` until those evidence
+  blockers clear.
 
 ## FR-063 Strategy Differentiation Deep Dive
 
