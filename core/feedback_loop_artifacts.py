@@ -7,13 +7,12 @@ from typing import Any
 
 import pandas as pd
 
+from core.strategy_registry import load_strategy_registry
 
-STRATEGY_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra")
-STRATEGY_NAMES = {
-    "caerus_polaris": "polaris",
-    "caerus_orion": "orion",
-    "caerus_lyra": "lyra",
-}
+
+_REGISTRY = load_strategy_registry()
+STRATEGY_SLUGS = _REGISTRY.active_shadow_security_selection_ids()
+STRATEGY_NAMES = _REGISTRY.strategy_short_names()
 BENCHMARK_SLUG = "spy_benchmark"
 ROLLING_INDEX_CSV = "feedback_loop_rolling_index.csv"
 ROLLING_INDEX_JSON = "feedback_loop_rolling_index.json"

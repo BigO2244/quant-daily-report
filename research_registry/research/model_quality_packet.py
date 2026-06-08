@@ -22,6 +22,14 @@ SECTION_FILES = {
     "universe_quality": "universe_quality.json",
     "model_tournament": "model_tournament.json",
 }
+OPTIONAL_SECTION_FILES = {
+    "portfolio_history_freshness": "portfolio_history_freshness.json",
+    "lyra_orion_differentiation": "lyra_orion_differentiation.json",
+    "phoenix_evidence_tracker": "phoenix_evidence_tracker.json",
+}
+OPTIONAL_EXTERNAL_SECTION_FILES = {
+    "security_master_diagnostics": Path("outputs/research/security_master_diagnostics") / "{date}" / "security_master_diagnostics.json",
+}
 
 
 def build_model_quality_packet(
@@ -43,11 +51,28 @@ def build_model_quality_packet(
             missing.append(name)
         else:
             sections[name] = payload
+    for name, filename in OPTIONAL_SECTION_FILES.items():
+        payload = read_json(out_dir / filename)
+        if payload is None:
+            sections[name] = {"available": False, "optional": True, "reason_codes": [f"{name.upper()}_MISSING"]}
+        else:
+            sections[name] = payload
+    for name, rel_template in OPTIONAL_EXTERNAL_SECTION_FILES.items():
+        rel = Path(str(rel_template).format(date=target))
+        payload = read_json(repo / rel)
+        if payload is None:
+            sections[name] = {"available": False, "optional": True, "reason_codes": [f"{name.upper()}_MISSING"]}
+        else:
+            sections[name] = payload
     cassiopeia = sections.get("cassiopeia_model_selection") or {}
     tournament = sections.get("model_tournament") or {}
     attribution = sections.get("attribution_quality") or {}
     universe = sections.get("universe_quality") or {}
     phoenix = sections.get("phoenix_research") or {}
+    portfolio = sections.get("portfolio_history_freshness") or {}
+    security = sections.get("security_master_diagnostics") or {}
+    differentiation = sections.get("lyra_orion_differentiation") or {}
+    phoenix_evidence = sections.get("phoenix_evidence_tracker") or {}
     reason_codes = []
     if missing:
         reason_codes.extend(f"MISSING_SECTION:{name}" for name in missing)
@@ -63,9 +88,20 @@ def build_model_quality_packet(
         "executive_summary": {
             "alpha_quality_status": "RESEARCH_IMPROVEMENT_PACKET_BUILT" if not missing else "INCOMPLETE_PACKET",
             "attribution_status": attribution.get("status"),
-            "best_current_research_insight": _best_insight(cassiopeia=cassiopeia, phoenix=phoenix, universe=universe, tournament=tournament),
+            "portfolio_history_freshness": portfolio.get("freshness_status"),
+            "security_master_status": (security.get("security_master_artifact") or {}).get("status"),
+            "lyra_orion_decision_grade": bool(differentiation.get("decision_grade_flag")),
+            "phoenix_evidence_confidence": phoenix_evidence.get("confidence"),
+            "cygnus_argo_design_status": "DESIGN_ONLY_DOCS",
+            "best_current_research_insight": _best_insight(
+                cassiopeia=cassiopeia,
+                phoenix=phoenix,
+                universe=universe,
+                tournament=tournament,
+                differentiation=differentiation,
+            ),
             "strategy_change_decision_grade": bool((cassiopeia or {}).get("decision_grade_recommendation")) and bool((tournament or {}).get("decision_grade_leader")),
-            "next_recommended_research_action": _next_action(cassiopeia=cassiopeia, universe=universe, tournament=tournament),
+            "next_recommended_research_action": _next_action(cassiopeia=cassiopeia, universe=universe, tournament=tournament, portfolio=portfolio, security=security),
         },
         "sections": sections,
         "reason_codes": sorted(set(reason_codes)) or ["ok"],
@@ -76,7 +112,20 @@ def build_model_quality_packet(
     return payload
 
 
-def _best_insight(*, cassiopeia: dict[str, Any], phoenix: dict[str, Any], universe: dict[str, Any], tournament: dict[str, Any]) -> str:
+def _best_insight(
+    *,
+    cassiopeia: dict[str, Any],
+    phoenix: dict[str, Any],
+    universe: dict[str, Any],
+    tournament: dict[str, Any],
+    differentiation: dict[str, Any] | None = None,
+) -> str:
+    diff_summary = (differentiation or {}).get("executive_summary") or {}
+    if diff_summary.get("lyra_only_symbols") or diff_summary.get("orion_only_symbols"):
+        return (
+            "Lyra and Orion share the same momentum core; current mechanical difference is replacement-name "
+            f"selection ({md_join(diff_summary.get('lyra_only_symbols') or [])} vs {md_join(diff_summary.get('orion_only_symbols') or [])})."
+        )
     if tournament.get("current_leader"):
         return f"Leaderboard leader is {tournament.get('current_leader')}, but decision-grade leader is {tournament.get('decision_grade_leader') or 'none'}."
     if phoenix.get("active"):
@@ -88,7 +137,19 @@ def _best_insight(*, cassiopeia: dict[str, Any], phoenix: dict[str, Any], univer
     return "No single model-quality insight is decision-grade yet."
 
 
-def _next_action(*, cassiopeia: dict[str, Any], universe: dict[str, Any], tournament: dict[str, Any]) -> str:
+def _next_action(
+    *,
+    cassiopeia: dict[str, Any],
+    universe: dict[str, Any],
+    tournament: dict[str, Any],
+    portfolio: dict[str, Any] | None = None,
+    security: dict[str, Any] | None = None,
+) -> str:
+    if (portfolio or {}).get("freshness_status") == "STALE":
+        return "Refresh canonical portfolio history or document broker history unavailability before promotion-readiness use."
+    refresh = (security or {}).get("refresh_diagnostic") or {}
+    if refresh.get("auth_status") in {"MISSING_CREDENTIALS", "UNAUTHORIZED", "NETWORK_UNAVAILABLE"}:
+        return "Resolve security-master refresh/auth diagnostics before universe expansion or alias migration."
     if "SECURITY_MASTER_MISSING" in (universe.get("reason_codes") or []):
         return "Refresh security master and rerun universe quality plus tournament."
     if not cassiopeia.get("decision_grade_recommendation"):

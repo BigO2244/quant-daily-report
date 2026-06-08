@@ -8,19 +8,17 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from core.strategy_registry import load_strategy_registry
 
-MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+_REGISTRY = load_strategy_registry()
+MODEL_SLUGS = _REGISTRY.active_shadow_security_selection_ids()
+BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 DISPLAY_NAMES = {
-    "caerus_polaris": "Polaris",
-    "caerus_orion": "Orion",
-    "caerus_lyra": "Lyra",
-    "spy_benchmark": "SPY",
+    entry.strategy_id: entry.display_name.replace("Caerus ", "")
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
 }
-SHORT_NAMES = {
-    "caerus_polaris": "polaris",
-    "caerus_orion": "orion",
-    "caerus_lyra": "lyra",
-}
+DISPLAY_NAMES["spy_benchmark"] = "SPY"
+SHORT_NAMES = _REGISTRY.strategy_short_names()
 ARTIFACT_NAMES = (
     "decision_trace.json",
     "attribution.json",
@@ -219,7 +217,7 @@ def _strategy_metrics(inputs: dict[str, Any], slug: str) -> dict[str, Any]:
     strategies = evaluation.get("strategies") if isinstance(evaluation.get("strategies"), dict) else {}
     payload = strategies.get(slug) if isinstance(strategies.get(slug), dict) else {}
     spy = strategies.get("spy_benchmark") if isinstance(strategies.get("spy_benchmark"), dict) else {}
-    polaris = strategies.get("caerus_polaris") if isinstance(strategies.get("caerus_polaris"), dict) else {}
+    polaris = strategies.get(BASELINE_SLUG) if isinstance(strategies.get(BASELINE_SLUG), dict) else {}
     comparison_strategies = comparison.get("strategies") if isinstance(comparison.get("strategies"), dict) else {}
     comparison_payload = comparison_strategies.get(slug) if isinstance(comparison_strategies.get(slug), dict) else {}
     concentration = comparison_payload.get("weight_concentration") if isinstance(comparison_payload.get("weight_concentration"), dict) else {}
@@ -228,7 +226,7 @@ def _strategy_metrics(inputs: dict[str, Any], slug: str) -> dict[str, Any]:
     cumulative = _as_float(payload.get("cumulative_return"))
     polaris_cumulative = _as_float(polaris.get("cumulative_return"))
     spy_cumulative = _as_float(spy.get("cumulative_return"))
-    vs_polaris = cumulative - polaris_cumulative if slug != "caerus_polaris" and cumulative is not None and polaris_cumulative is not None else None
+    vs_polaris = cumulative - polaris_cumulative if slug != BASELINE_SLUG and cumulative is not None and polaris_cumulative is not None else None
     vs_spy = _as_float(payload.get("excess_return_vs_spy"))
     if vs_spy is None and cumulative is not None and spy_cumulative is not None:
         vs_spy = cumulative - spy_cumulative

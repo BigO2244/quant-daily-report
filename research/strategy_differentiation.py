@@ -8,12 +8,15 @@ from typing import Any
 
 import pandas as pd
 
+from core.strategy_registry import active_shadow_security_selection_ids
+
 
 SCHEMA_VERSION = "caerus_strategy_differentiation_v1"
-PAIRS = (
-    ("caerus_lyra", "caerus_orion"),
-    ("caerus_lyra", "caerus_polaris"),
-    ("caerus_orion", "caerus_polaris"),
+_PAIR_ORDER = tuple(reversed(active_shadow_security_selection_ids()))
+PAIRS = tuple(
+    (_PAIR_ORDER[left], _PAIR_ORDER[right])
+    for left in range(len(_PAIR_ORDER))
+    for right in range(left + 1, len(_PAIR_ORDER))
 )
 
 

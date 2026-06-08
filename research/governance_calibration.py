@@ -40,10 +40,12 @@ import math
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import active_shadow_security_selection_ids
+
 SCHEMA_VERSION_CALIBRATION = "caerus_governance_calibration_v1"
 SCHEMA_VERSION_RECLASSIFICATION = "caerus_governance_reclassification_v1"
 
-STRATEGIES = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+STRATEGIES = active_shadow_security_selection_ids()
 
 DESIGN_MICRO = "MICRO_PORTFOLIO"
 DESIGN_CONCENTRATED = "CONCENTRATED"

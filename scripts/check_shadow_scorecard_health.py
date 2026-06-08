@@ -22,9 +22,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.send_shadow_cio_report import MODEL_ORDER, build_report  # noqa: E402
+from core.strategy_registry import active_shadow_security_selection_ids  # noqa: E402
 
 
-MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+MODEL_SLUGS = active_shadow_security_selection_ids()
 BAD_REASON_TOKENS = ("PRICE_CACHE_STALE", "NO_PRIOR", "NO_DATA", "BROKEN_CHAIN", "missing-shadow-dir")
 
 

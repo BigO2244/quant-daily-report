@@ -27,10 +27,13 @@ import math
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import load_strategy_registry
+
 SCHEMA_VERSION = "caerus_promotion_governance_v1"
 
-STRATEGIES = ("caerus_polaris", "caerus_orion", "caerus_lyra")
-CONTROL_STRATEGY = "caerus_polaris"
+_REGISTRY = load_strategy_registry()
+STRATEGIES = _REGISTRY.active_shadow_security_selection_ids()
+CONTROL_STRATEGY = _REGISTRY.baseline_strategy_id()
 
 WINDOW_MIN_WATCH = 20
 WINDOW_MIN_CANDIDATE = 40

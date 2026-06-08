@@ -29,8 +29,8 @@ realized vol + sufficient valid observation windows). Any missing
 gating input is surfaced as an explicit ``blocker`` so the operator
 sees exactly what's stopping promotion.
 
-Question parsing reuses the closed strategy list
-``polaris | orion | lyra | leda`` from ``shadow_comparison.py``.
+Question parsing reuses the registry-backed security-selection strategy
+list from ``shadow_comparison.py``.
 Unknown names → NEEDS_DATA with ``missing_strategies`` populated.
 """
 

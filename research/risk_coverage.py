@@ -8,9 +8,10 @@ from typing import Any
 
 import pandas as pd
 
+from core.strategy_registry import active_shadow_security_selection_ids
 
 SCHEMA_VERSION = "caerus_risk_coverage_v1"
-STRATEGY_NAMES = ("caerus_lyra", "caerus_orion", "caerus_polaris")
+STRATEGY_NAMES = tuple(reversed(active_shadow_security_selection_ids()))
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:

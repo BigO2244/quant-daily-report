@@ -8,9 +8,13 @@ from typing import Any
 
 import pandas as pd
 
+from core.strategy_registry import load_strategy_registry
 
 SCHEMA_VERSION = "caerus_promotion_readiness_windows_v1"
-STRATEGIES = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+_REGISTRY = load_strategy_registry()
+STRATEGIES = _REGISTRY.active_shadow_security_selection_ids()
+CONTROL_STRATEGY = _REGISTRY.baseline_strategy_id()
+PROMOTION_CANDIDATES = _REGISTRY.promotion_candidate_ids()
 WINDOWS = (20, 40, 60)
 
 
@@ -131,19 +135,19 @@ def _classify_readiness(
     reasons: list[str] = []
     if observation_count < window:
         reasons.append("insufficient_observation_count")
-    if strategy == "caerus_polaris":
+    if strategy == CONTROL_STRATEGY:
         reasons.append("baseline_strategy_not_promotion_candidate")
-    if strategy != "caerus_polaris" and excess_vs_polaris is None:
+    if strategy != CONTROL_STRATEGY and excess_vs_polaris is None:
         reasons.append("missing_polaris_benchmark")
     if missing_spy:
         reasons.append("missing_spy_benchmark")
     if max_drawdown is not None and max_drawdown <= -0.15:
         reasons.append("drawdown_block")
-    if strategy != "caerus_polaris" and correlation_vs_polaris is not None and correlation_vs_polaris >= 0.95:
+    if strategy != CONTROL_STRATEGY and correlation_vs_polaris is not None and correlation_vs_polaris >= 0.95:
         reasons.append("low_differentiation_vs_polaris")
     if observation_count < window or "missing_polaris_benchmark" in reasons or "drawdown_block" in reasons:
         return "NOT_READY", "LOW", sorted(set(reasons))
-    if strategy == "caerus_polaris":
+    if strategy == CONTROL_STRATEGY:
         return "WATCH", "MEDIUM", sorted(set(reasons)) or ["ok"]
     if "low_differentiation_vs_polaris" in reasons:
         return "WATCH", "LOW" if missing_spy else "MEDIUM", sorted(set(reasons))
@@ -193,15 +197,15 @@ def build_promotion_readiness_windows(
             window_dates = {d.date().isoformat() for d in rows["date"]}
             daily = rows[strategy].pct_change().dropna() if strategy in rows.columns else pd.Series(dtype=float)
             spy_daily = rows["spy_benchmark"].pct_change().dropna() if "spy_benchmark" in rows.columns else pd.Series(dtype=float)
-            polaris_daily = rows["caerus_polaris"].pct_change().dropna() if "caerus_polaris" in rows.columns else pd.Series(dtype=float)
+            polaris_daily = rows[CONTROL_STRATEGY].pct_change().dropna() if CONTROL_STRATEGY in rows.columns else pd.Series(dtype=float)
             observation_count = int(daily.dropna().shape[0])
             missing_days = max(window - observation_count, 0)
             total_return = None
             if strategy in rows.columns and rows[strategy].dropna().shape[0] >= 2:
                 total_return = _round((rows[strategy].dropna().iloc[-1] / rows[strategy].dropna().iloc[0]) - 1.0)
             polaris_return = None
-            if "caerus_polaris" in rows.columns and rows["caerus_polaris"].dropna().shape[0] >= 2:
-                polaris_return = _round((rows["caerus_polaris"].dropna().iloc[-1] / rows["caerus_polaris"].dropna().iloc[0]) - 1.0)
+            if CONTROL_STRATEGY in rows.columns and rows[CONTROL_STRATEGY].dropna().shape[0] >= 2:
+                polaris_return = _round((rows[CONTROL_STRATEGY].dropna().iloc[-1] / rows[CONTROL_STRATEGY].dropna().iloc[0]) - 1.0)
             spy_return = None
             if "spy_benchmark" in rows.columns and rows["spy_benchmark"].dropna().shape[0] >= 2:
                 spy_return = _round((rows["spy_benchmark"].dropna().iloc[-1] / rows["spy_benchmark"].dropna().iloc[0]) - 1.0)
@@ -209,7 +213,7 @@ def build_promotion_readiness_windows(
             excess_vs_spy = _round((total_return or 0.0) - spy_return) if total_return is not None and spy_return is not None else None
             aligned = pd.concat([daily.rename("s"), polaris_daily.rename("p")], axis=1).dropna()
             corr = None
-            if strategy != "caerus_polaris" and aligned.shape[0] >= 2 and aligned["s"].std(ddof=0) > 0 and aligned["p"].std(ddof=0) > 0:
+            if strategy != CONTROL_STRATEGY and aligned.shape[0] >= 2 and aligned["s"].std(ddof=0) > 0 and aligned["p"].std(ddof=0) > 0:
                 corr = _round(aligned["s"].corr(aligned["p"]))
             missing_spy = spy_return is None
             state, confidence, reasons = _classify_readiness(
@@ -231,7 +235,7 @@ def build_promotion_readiness_windows(
             strategy_windows[str(window)] = {
                 "window_trading_days": window,
                 "total_return": total_return,
-                "excess_return_vs_polaris": 0.0 if strategy == "caerus_polaris" and total_return is not None else excess_vs_polaris,
+                "excess_return_vs_polaris": 0.0 if strategy == CONTROL_STRATEGY and total_return is not None else excess_vs_polaris,
                 "excess_return_vs_spy": excess_vs_spy,
                 "hit_rate": _round((daily > 0).mean()) if observation_count else None,
                 "average_daily_contribution": _round(daily.mean()) if observation_count else None,
@@ -268,7 +272,7 @@ def build_promotion_readiness_windows(
 
 def _promotion_recommendation(strategies_payload: dict[str, Any]) -> tuple[str, list[str]]:
     blockers: list[str] = []
-    for strategy in ("caerus_orion", "caerus_lyra"):
+    for strategy in PROMOTION_CANDIDATES:
         windows = (strategies_payload.get(strategy) or {}).get("windows") or {}
         states = [str((windows.get(str(w)) or {}).get("readiness_state")) for w in WINDOWS]
         reasons = [code for w in WINDOWS for code in ((windows.get(str(w)) or {}).get("reason_codes") or [])]

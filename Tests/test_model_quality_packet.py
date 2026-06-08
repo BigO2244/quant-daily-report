@@ -37,3 +37,23 @@ def test_model_quality_packet_missing_sections_degrade(tmp_path: Path) -> None:
     assert packet["available"] is False
     assert packet["status"] == "PARTIAL"
     assert any(code.startswith("MISSING_SECTION:") for code in packet["reason_codes"])
+
+
+def test_model_quality_packet_optional_sections_do_not_block_availability(tmp_path: Path) -> None:
+    trade_date = "2026-06-02"
+    root = tmp_path / "outputs" / "model_quality" / trade_date
+    for name, filename in SECTION_FILES.items():
+        payload = {"date": trade_date, "status": "OK", "available": True, "reason_codes": ["ok"]}
+        if name == "cassiopeia_model_selection":
+            payload["decision_grade_recommendation"] = False
+        if name == "model_tournament":
+            payload["current_leader"] = "caerus_lyra"
+            payload["decision_grade_leader"] = None
+        _write_json(root / filename, payload)
+
+    packet = build_model_quality_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    assert packet["available"] is True
+    assert packet["sections"]["portfolio_history_freshness"]["optional"] is True
+    assert packet["sections"]["security_master_diagnostics"]["optional"] is True
+    assert not any(code.startswith("MISSING_SECTION:portfolio_history_freshness") for code in packet["reason_codes"])

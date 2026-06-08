@@ -1,5 +1,15 @@
 # AGENTS.md
 
+> SOURCE OF TRUTH (added 2026-06-08): Before creating or editing any strategy,
+> FR, or governance document, read `docs/governance/CURRENT_RESEARCH_ROADMAP.md`
+> and `config/research/strategy_registry.json`. That roadmap holds the canonical
+> FR table, strategy state table, open taxonomy conflicts (Cassiopeia/Argo/Cygnus),
+> and current blockers. Do not create a parallel "design" spec for a strategy that
+> already has a canonical FR spec, and do not reassign strategy IDs or change
+> execution/broker/cron behavior as part of documentation work. The strategy state
+> below this banner predates the FR-050..FR-053 research wave and is retained as
+> history — defer to the canonical roadmap where they differ.
+
 CURRENT STRATEGY STATE
 
 Paper (Active):

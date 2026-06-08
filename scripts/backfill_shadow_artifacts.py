@@ -13,13 +13,15 @@ from typing import Any
 
 import pandas as pd
 
+from core.strategy_registry import active_shadow_security_selection_ids, load_strategy_registry
 from research.flow_detection.data import ensure_price_panel, load_universe
 from research.shadow_tracking import run as shadow
 from scripts import refresh_shadow_scorecard_artifacts
 
 
 BENCHMARK_SYMBOL = "SPY"
-MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
+_REGISTRY = load_strategy_registry()
+MODEL_SLUGS = (*active_shadow_security_selection_ids(), "spy_benchmark")
 DEFAULT_CACHE_PATH = Path("outputs/research/flow_detection_v1/price_panel.parquet")
 DEFAULT_OUTPUT_DIR = Path("outputs/shadow_candidates")
 
@@ -200,12 +202,7 @@ def _seed_anchor_performance_from_nav_series(*, output_root: Path, anchor_date: 
     current = rows[index]
     previous = rows[index - 1] if index > 0 else None
     previous_date = previous.get("date") if previous else None
-    names = {
-        "caerus_polaris": "Caerus Polaris",
-        "caerus_orion": "Caerus Orion",
-        "caerus_lyra": "Caerus Lyra",
-        "spy_benchmark": "SPY",
-    }
+    names = _REGISTRY.strategy_labels()
     strategies: dict[str, dict[str, Any]] = {}
     for slug in MODEL_SLUGS:
         nav = float(current[slug])
@@ -315,9 +312,7 @@ def _result_row(output_root: Path, date: str, before: dict[str, Any], action: st
         "files_written": ";".join(
             name
             for name in (
-                "caerus_polaris.json",
-                "caerus_orion.json",
-                "caerus_lyra.json",
+                *(f"{slug}.json" for slug in active_shadow_security_selection_ids()),
                 "delta.json",
                 "summary.json",
                 "comparison.json",

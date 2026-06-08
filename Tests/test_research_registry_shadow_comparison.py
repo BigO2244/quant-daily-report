@@ -86,6 +86,12 @@ def test_strategy_slug_normalises():
     assert sc.strategy_slug("caerus_orion") == "caerus_orion"
 
 
+def test_registered_overlay_names_are_not_nav_comparison_targets():
+    assert "phoenix" in sc.KNOWN_STRATEGY_NAMES
+    assert "argo" not in sc.KNOWN_STRATEGY_NAMES
+    assert sc.parse_strategy_names("compare Argo and Phoenix") == ["phoenix"]
+
+
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------

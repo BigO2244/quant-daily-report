@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from alpha_stack.research.metrics import summarise_performance
+from core.strategy_registry import load_strategy_registry
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot, run_backtest
 from research.flow_detection.data import ensure_price_panel, load_universe
@@ -280,9 +281,8 @@ def build_comparison_payload(strategy_payloads: dict[str, dict], *, trade_date: 
         right = strategy_payloads[right_slug]
         pairwise.append(compare_two_strategies(left, right))
 
-    polaris = strategy_payloads["caerus_polaris"]
-    orion = strategy_payloads["caerus_orion"]
-    lyra = strategy_payloads["caerus_lyra"]
+    baseline_slug = _baseline_strategy_slug()
+    baseline_payload = strategy_payloads.get(baseline_slug)
     return {
         "trade_date": trade_date,
         "benchmark_symbol": BENCHMARK_SYMBOL,
@@ -300,8 +300,9 @@ def build_comparison_payload(strategy_payloads: dict[str, dict], *, trade_date: 
         },
         "pairwise_overlap": pairwise,
         "differences_vs_polaris": {
-            "caerus_orion": compare_two_strategies(polaris, orion),
-            "caerus_lyra": compare_two_strategies(polaris, lyra),
+            slug: compare_two_strategies(baseline_payload, payload)
+            for slug, payload in strategy_payloads.items()
+            if baseline_payload is not None and slug != baseline_slug
         },
         "broker_context": _load_broker_context(strategy_payloads),
     }
@@ -366,22 +367,16 @@ def build_comparison_markdown(comparison: dict, *, dated_dir: Path | None = None
             ]
         )
         return "\n".join(lines) + "\n"
-    lines.extend([
-        "",
-        "## Polaris vs Orion",
-    ])
-    lines.extend(_pairwise_lines(comparison, "caerus_polaris", "caerus_orion"))
-    lines.extend(["", "## Polaris vs Lyra"])
-    lines.extend(_pairwise_lines(comparison, "caerus_polaris", "caerus_lyra"))
-    lines.extend(["", "## Orion vs Lyra"])
-    lines.extend(_pairwise_lines(comparison, "caerus_orion", "caerus_lyra"))
+    for left_slug, right_slug in combinations(_model_strategy_slugs(), 2):
+        lines.extend(["", f"## {_heading_label(left_slug)} vs {_heading_label(right_slug)}"])
+        lines.extend(_pairwise_lines(comparison, left_slug, right_slug))
     lines.extend(["", "## Current Top Holdings"])
-    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra"):
+    for slug in _model_strategy_slugs():
         payload = strategies[slug]
         top = ", ".join(f"{item['ticker']} ({item['target_weight']:.2%})" for item in payload["holdings"][:5])
         lines.append(f"- {payload['strategy_name']}: {top}")
     lines.extend(["", "## Turnover / Concentration Summary"])
-    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra"):
+    for slug in _model_strategy_slugs():
         payload = strategies[slug]
         conc = payload["weight_concentration"]
         lines.append(
@@ -394,7 +389,7 @@ def build_comparison_markdown(comparison: dict, *, dated_dir: Path | None = None
         lines.append(
             f"- Snapshot as of {broker_context.get('as_of') or 'unknown'} with {broker_context.get('positions_count') or 0} broker positions."
         )
-        for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra"):
+        for slug in _model_strategy_slugs():
             overlap = (broker_context.get("strategy_overlap") or {}).get(slug) or {}
             lines.append(
                 f"- {comparison['strategies'][slug]['strategy_name']} overlap with broker: {overlap.get('overlap_names_count', 0)} names; broker-only names: {', '.join(overlap.get('broker_only_names') or []) or 'None'}"
@@ -409,8 +404,20 @@ def _load_markdown_sidecar(dated_dir: Path | None, filename: str) -> dict | None
     return safe_read_json(dated_dir / filename)
 
 
+def _heading_label(slug: str) -> str:
+    return _strategy_label(slug).replace("Caerus ", "")
+
+
 def _model_strategy_slugs() -> tuple[str, ...]:
-    return ("caerus_polaris", "caerus_orion", "caerus_lyra")
+    return load_strategy_registry().active_shadow_security_selection_ids()
+
+
+def _baseline_strategy_slug() -> str:
+    return load_strategy_registry().baseline_strategy_id()
+
+
+def _promotion_candidate_slugs() -> tuple[str, ...]:
+    return load_strategy_registry().promotion_candidate_ids()
 
 
 def _scoreboard_slugs(evaluation: dict | None) -> list[str]:
@@ -424,12 +431,15 @@ def _scoreboard_slugs(evaluation: dict | None) -> list[str]:
 def _strategy_label(slug: str, payload: dict | None = None) -> str:
     if payload and payload.get("strategy_name"):
         return str(payload["strategy_name"])
-    return {
-        "caerus_polaris": "Caerus Polaris",
-        "caerus_orion": "Caerus Orion",
-        "caerus_lyra": "Caerus Lyra",
-        BENCHMARK_SLUG: "SPY",
-    }.get(slug, slug)
+    labels = load_strategy_registry().strategy_labels()
+    return labels.get(slug, slug)
+
+
+def _strategy_role(slug: str) -> str:
+    if slug == BENCHMARK_SLUG:
+        return "BENCHMARK"
+    baseline = _baseline_strategy_slug()
+    return "BASELINE" if slug == baseline else "CHALLENGER"
 
 
 def _as_float(value: object) -> float | None:
@@ -496,7 +506,8 @@ def _best_strategy(evaluation: dict | None, field: str) -> tuple[str, dict] | No
     return slug, payload
 
 
-def _cum_diff(evaluation: dict | None, slug: str, baseline_slug: str = "caerus_polaris") -> float | None:
+def _cum_diff(evaluation: dict | None, slug: str, baseline_slug: str | None = None) -> float | None:
+    baseline_slug = baseline_slug or _baseline_strategy_slug()
     strategies = _evaluation_strategies(evaluation)
     left = _as_float((strategies.get(slug) or {}).get("cumulative_return"))
     baseline = _as_float((strategies.get(baseline_slug) or {}).get("cumulative_return"))
@@ -512,15 +523,21 @@ def _excess_vs_spy(evaluation: dict | None, slug: str) -> float | None:
 def _executive_summary_lines(*, evaluation: dict | None, delta: dict) -> list[str]:
     lines = ["## Executive Summary"]
     if evaluation is None:
-        return lines + [
+        missing_lines = [
             "- Best performer today: N/A - performance scoreboard unavailable: shadow_evaluation.json missing",
             "- Best cumulative performer: N/A - performance scoreboard unavailable: shadow_evaluation.json missing",
-            "- Polaris vs SPY: N/A - shadow_evaluation.json missing",
-            "- Orion vs Polaris: N/A - shadow_evaluation.json missing",
-            "- Lyra vs Polaris: N/A - shadow_evaluation.json missing",
-            f"- Chain health: UNKNOWN; delta status is {delta.get('status') or 'NO_PRIOR'}",
-            "- Operator conclusion: Do not use shadow performance for decisions until shadow_evaluation.json is generated.",
         ]
+        baseline = _baseline_strategy_slug()
+        missing_lines.append(f"- {_heading_label(baseline)} vs SPY: N/A - shadow_evaluation.json missing")
+        for slug in _promotion_candidate_slugs():
+            missing_lines.append(f"- {_heading_label(slug)} vs {_heading_label(baseline)}: N/A - shadow_evaluation.json missing")
+        missing_lines.extend(
+            [
+                f"- Chain health: UNKNOWN; delta status is {delta.get('status') or 'NO_PRIOR'}",
+                "- Operator conclusion: Do not use shadow performance for decisions until shadow_evaluation.json is generated.",
+            ]
+        )
+        return lines + missing_lines
 
     if BENCHMARK_SLUG not in _evaluation_strategies(evaluation):
         lines.append("- Warning: SPY benchmark unavailable in evaluation artifact")
@@ -540,9 +557,10 @@ def _executive_summary_lines(*, evaluation: dict | None, delta: dict) -> list[st
         lines.append(f"- Best cumulative performer: {_strategy_label('', payload)} ({_fmt_pct(payload.get('cumulative_return'))}){suffix}")
     else:
         lines.append("- Best cumulative performer: N/A")
-    lines.append(f"- Polaris vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_polaris'))} excess return")
-    lines.append(f"- Orion vs Polaris: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_orion'))} cumulative return difference")
-    lines.append(f"- Lyra vs Polaris: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_lyra'))} cumulative return difference")
+    baseline = _baseline_strategy_slug()
+    lines.append(f"- {_heading_label(baseline)} vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, baseline))} excess return")
+    for slug in _promotion_candidate_slugs():
+        lines.append(f"- {_heading_label(slug)} vs {_heading_label(baseline)}: {_fmt_signed_pct(_cum_diff(evaluation, slug, baseline))} cumulative return difference")
     lines.append(f"- Chain health: {_chain_health_summary(evaluation=evaluation, delta=delta)}")
     if initializing:
         lines.append(
@@ -596,13 +614,17 @@ def _relative_performance_lines(evaluation: dict | None) -> list[str]:
         return ["- Status: UNKNOWN - shadow_evaluation.json missing"]
     min_valid = _min_valid_days(evaluation)
     status = "INITIALIZING" if min_valid is None or min_valid < 2 else "DECISION_USEFUL"
+    baseline = _baseline_strategy_slug()
     lines = [
         f"- Status: {status}",
-        f"- Orion minus Polaris cumulative return: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_orion'))}",
-        f"- Lyra minus Polaris cumulative return: {_fmt_signed_pct(_cum_diff(evaluation, 'caerus_lyra'))}",
-        f"- Polaris excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_polaris'))}",
-        f"- Orion excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_orion'))}",
-        f"- Lyra excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, 'caerus_lyra'))}",
+        *[
+            f"- {_heading_label(slug)} minus {_heading_label(baseline)} cumulative return: {_fmt_signed_pct(_cum_diff(evaluation, slug, baseline))}"
+            for slug in _promotion_candidate_slugs()
+        ],
+        *[
+            f"- {_heading_label(slug)} excess vs SPY: {_fmt_signed_pct(_excess_vs_spy(evaluation, slug))}"
+            for slug in _model_strategy_slugs()
+        ],
     ]
     if status == "INITIALIZING":
         lines.append("- Diagnosis: INITIALIZING; one valid day cannot establish performance trend.")
@@ -751,7 +773,7 @@ def build_shadow_performance_payload(
         print(f"[SHADOW] broken performance chain at prior date={previous_trade_date}")
 
     strategies = {}
-    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra"):
+    for slug in _model_strategy_slugs():
         prev_nav_raw = (prior_navs.get(slug) or {}).get("nav", 1.0 if chain_state == "NO_PRIOR" else None)
         prev_nav = float(prev_nav_raw) if prev_nav_raw is not None else None
         if chain_state == "BROKEN_CHAIN":
@@ -773,11 +795,7 @@ def build_shadow_performance_payload(
         strategies[slug] = {
             "strategy_name": (strategy_payloads.get(slug) or {}).get(
                 "strategy_name",
-                {
-                    "caerus_polaris": "Caerus Polaris",
-                    "caerus_orion": "Caerus Orion",
-                    "caerus_lyra": "Caerus Lyra",
-                }[slug],
+                _strategy_label(slug),
             ),
             "daily_return": daily_return,
             "nav": nav,
@@ -848,10 +866,8 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
         "strategies": {},
     }
     strategy_names = {
-        "caerus_polaris": "Caerus Polaris",
-        "caerus_orion": "Caerus Orion",
-        "caerus_lyra": "Caerus Lyra",
-        BENCHMARK_SLUG: "SPY",
+        slug: _strategy_label(slug)
+        for slug in (*_model_strategy_slugs(), BENCHMARK_SLUG)
     }
     spy_current = ((current_performance.get("strategies") or {}).get(BENCHMARK_SLUG) or {})
     spy_cumulative_return = (
@@ -932,7 +948,7 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
         strategy_returns["cumulative"] = evaluation.get("cumulative_return")
         strategies[slug] = {
             "strategy_name": evaluation.get("strategy_name") or _strategy_label(slug),
-            "role": "BENCHMARK" if slug == BENCHMARK_SLUG else "BASELINE" if slug == "caerus_polaris" else "CHALLENGER",
+            "role": _strategy_role(slug),
             "data_status": evaluation.get("data_status"),
             "chain_status": evaluation.get("status"),
             "rolling_returns": strategy_returns,
@@ -960,9 +976,9 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
         for window in ("5", "10", "20", "cumulative"):
             key = window if window == "cumulative" else f"{window}D"
             left = payload["rolling_returns"].get(key)
-            polaris = strategies.get("caerus_polaris", {}).get("rolling_returns", {}).get(key)
+            baseline = strategies.get(_baseline_strategy_slug(), {}).get("rolling_returns", {}).get(key)
             spy = strategies.get(BENCHMARK_SLUG, {}).get("rolling_returns", {}).get(key)
-            payload["rolling_excess_return"]["vs_polaris"][f"{window}D" if window != "cumulative" else "cumulative"] = _diff_or_none(left, polaris)
+            payload["rolling_excess_return"]["vs_polaris"][f"{window}D" if window != "cumulative" else "cumulative"] = _diff_or_none(left, baseline)
             payload["rolling_excess_return"]["vs_spy"][f"{window}D" if window != "cumulative" else "cumulative"] = _diff_or_none(left, spy)
     return {
         "schema_version": "fr_028_phase_c_longitudinal_metrics_v1",
@@ -1032,7 +1048,7 @@ def build_phase_c_promotion_readiness_payload(*, longitudinal: dict, stability: 
         "trade_date": longitudinal.get("trade_date"),
         "governance_label": "RESEARCH_ONLY",
         "execution_impact": "NON_EXECUTIONAL",
-        "active_baseline": "caerus_polaris",
+        "active_baseline": _baseline_strategy_slug(),
         "benchmark_symbol": BENCHMARK_SYMBOL,
         "current_leader": current_leader if leader_score is not None and leader_score > 0 else None,
         "leader_evidence": {
@@ -1378,7 +1394,7 @@ def build_delta_payload(
 
     previous_dir = output_root / previous_trade_date
     strategies = {}
-    for slug in ("caerus_orion", "caerus_polaris", "caerus_lyra"):
+    for slug in _model_strategy_slugs():
         previous_path = previous_dir / f"{slug}.json"
         if not previous_path.exists():
             print(f"[SHADOW] warning: prior snapshot missing for {slug} on {previous_trade_date}")
@@ -1455,14 +1471,11 @@ def compute_strategy_delta(previous_payload: dict, current_payload: dict) -> dic
         6,
     )
     rotated_names = len(added) + len(removed)
+    summary_name = _delta_summary_label(current_payload)
     summary = (
-        "Orion stable"
-        if current_payload.get("strategy_slug") == "caerus_orion" and rotated_names == 0 and not increases and not decreases
-        else f"Orion rotated {rotated_names} names"
-        if current_payload.get("strategy_slug") == "caerus_orion"
-        else f"{current_payload.get('strategy_name')} stable"
+        f"{summary_name} stable"
         if rotated_names == 0 and not increases and not decreases
-        else f"{current_payload.get('strategy_name')} rotated {rotated_names} names"
+        else f"{summary_name} rotated {rotated_names} names"
     )
     return {
         "strategy_name": current_payload.get("strategy_name"),
@@ -1483,6 +1496,13 @@ def compute_strategy_delta(previous_payload: dict, current_payload: dict) -> dic
     }
 
 
+def _delta_summary_label(current_payload: dict) -> str:
+    slug = str(current_payload.get("strategy_slug") or "")
+    entry = load_strategy_registry().get(slug)
+    raw = entry.raw if entry else {}
+    return str((raw or {}).get("delta_summary_name") or current_payload.get("strategy_name") or _strategy_label(slug))
+
+
 def _delta_markdown_lines(delta_payload: dict | None) -> list[str]:
     if not delta_payload:
         return ["No prior day available for comparison."]
@@ -1500,7 +1520,7 @@ def _delta_markdown_lines(delta_payload: dict | None) -> list[str]:
             "- No prior day available for comparison.",
         ]
     lines = [f"- Previous available day: {delta_payload.get('previous_date')}"]
-    for slug in ("caerus_orion", "caerus_polaris", "caerus_lyra"):
+    for slug in _model_strategy_slugs():
         item = (delta_payload.get("strategies") or {}).get(slug) or {}
         lines.extend(
             [

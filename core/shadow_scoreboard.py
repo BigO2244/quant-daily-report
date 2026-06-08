@@ -7,20 +7,18 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from core.strategy_registry import load_strategy_registry
 from paper.trading_calendar import is_trading_day, prev_trading_day
 
 
-MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+_REGISTRY = load_strategy_registry()
+MODEL_SLUGS = _REGISTRY.active_shadow_security_selection_ids()
+BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 DISPLAY_NAMES = {
-    "caerus_polaris": "Polaris",
-    "caerus_orion": "Orion",
-    "caerus_lyra": "Lyra",
+    entry.strategy_id: entry.display_name.replace("Caerus ", "")
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
 }
-SUMMARY_KEYS = {
-    "caerus_polaris": "polaris",
-    "caerus_orion": "orion",
-    "caerus_lyra": "lyra",
-}
+SUMMARY_KEYS = _REGISTRY.strategy_short_names()
 BENCHMARK_SLUG = "spy_benchmark"
 BLOCKED_LANGUAGE = ("promote", "replace", "deploy capital")
 ET = ZoneInfo("America/New_York")
@@ -164,10 +162,10 @@ def _strategy_block(slug: str, evaluation: dict[str, Any], comparison: dict[str,
     artifact_status = "OK" if data_status == "OK" else "DEGRADED"
 
     cumulative = _as_float(payload.get("cumulative_return"))
-    polaris = strategies.get("caerus_polaris") if isinstance(strategies.get("caerus_polaris"), dict) else {}
+    polaris = strategies.get(BASELINE_SLUG) if isinstance(strategies.get(BASELINE_SLUG), dict) else {}
     polaris_cumulative = _as_float(polaris.get("cumulative_return"))
     spy_cumulative = _as_float(spy.get("cumulative_return"))
-    vs_polaris = cumulative - polaris_cumulative if slug != "caerus_polaris" and cumulative is not None and polaris_cumulative is not None else None
+    vs_polaris = cumulative - polaris_cumulative if slug != BASELINE_SLUG and cumulative is not None and polaris_cumulative is not None else None
     vs_spy = _as_float(payload.get("excess_return_vs_spy"))
     if vs_spy is None and cumulative is not None and spy_cumulative is not None:
         vs_spy = cumulative - spy_cumulative
@@ -184,8 +182,8 @@ def _strategy_block(slug: str, evaluation: dict[str, Any], comparison: dict[str,
         today_line,
         f"Since inception: {_fmt_pct(cumulative)}",
     ]
-    if slug != "caerus_polaris":
-        lines.append(f"vs Polaris: {_fmt_pct(vs_polaris)}")
+    if slug != BASELINE_SLUG:
+        lines.append(f"vs {DISPLAY_NAMES.get(BASELINE_SLUG, BASELINE_SLUG)}: {_fmt_pct(vs_polaris)}")
     lines.extend(
         [
             f"vs SPY: {_fmt_pct(vs_spy)}",

@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import StrategyRegistryEntry, load_strategy_registry_for_repo
+
 
 def _read_json(path: Path) -> dict[str, Any] | list[Any] | None:
     if not path.exists():
@@ -70,6 +72,15 @@ def _latest_dated_dir(path: Path) -> Path | None:
 
 def _status_entry(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
+
+
+def _dashboard_strategy_display(entry: StrategyRegistryEntry) -> str:
+    raw = entry.raw or {}
+    explicit = str(raw.get("dashboard_display") or "").strip()
+    if explicit:
+        return explicit
+    compact = entry.compact_name().replace("_", " ").strip()
+    return compact.title() if compact else entry.display_name
 
 
 def _median(values: list[float]) -> float | None:
@@ -660,10 +671,14 @@ class DashboardV1Builder:
             }
         self._mark(_check("shadow_command_center_source_present", "pass", "non_blocking", "Shadow evaluation artifact loaded."))
 
+        registry = load_strategy_registry_for_repo(self.repo_root)
+        baseline_slug = registry.baseline_strategy_id()
         strategy_meta = {
-            "caerus_polaris": {"role": "CONTROL", "display": "Polaris"},
-            "caerus_orion": {"role": "CHALLENGER", "display": "Orion"},
-            "caerus_lyra": {"role": "CHALLENGER", "display": "Lyra"},
+            entry.strategy_id: {
+                "role": "CONTROL" if entry.strategy_id == baseline_slug else "CHALLENGER",
+                "display": _dashboard_strategy_display(entry),
+            }
+            for entry in registry.active_shadow_security_selection_entries()
         }
         nav_by_slug: dict[str, list[float]] = {}
         spy_values: list[float] = []
@@ -686,7 +701,7 @@ class DashboardV1Builder:
 
         strategies: list[dict[str, Any]] = []
         eval_strategies = latest_eval.get("strategies") if isinstance(latest_eval.get("strategies"), dict) else {}
-        baseline_excess = _to_float((eval_strategies.get("caerus_polaris") or {}).get("excess_return_vs_spy"))
+        baseline_excess = _to_float((eval_strategies.get(baseline_slug) or {}).get("excess_return_vs_spy"))
         for slug, meta in strategy_meta.items():
             raw = eval_strategies.get(slug) or {}
             values = [_to_float(row.get(slug)) for row in nav_rows if _to_float(row.get(slug)) is not None]
@@ -744,7 +759,7 @@ class DashboardV1Builder:
             "summary": {
                 "latest_nav_date": latest_nav_date,
                 "candidate_count": len([s for s in strategies if s["role"] == "CHALLENGER"]),
-                "control": "caerus_polaris",
+                "control": baseline_slug,
                 "benchmark": latest_eval.get("benchmark_symbol") or "SPY",
             },
             "strategies": strategies,

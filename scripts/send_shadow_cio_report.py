@@ -20,14 +20,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-MODEL_ORDER = ["caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark"]
-PROMOTION_SLUGS = ["caerus_lyra", "caerus_orion"]
-BASELINE_SLUG = "caerus_polaris"
+from core.strategy_registry import load_strategy_registry  # noqa: E402
+
+_REGISTRY = load_strategy_registry()
+MODEL_ORDER = [*_REGISTRY.active_shadow_security_selection_ids(), "spy_benchmark"]
+PROMOTION_SLUGS = list(reversed(_REGISTRY.promotion_candidate_ids()))
+BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 BENCHMARK_SLUG = "spy_benchmark"
 DISPLAY_NAMES = {
-    "caerus_polaris": "Polaris",
-    "caerus_orion": "Orion",
-    "caerus_lyra": "Lyra",
+    entry.strategy_id: entry.display_name.replace("Caerus ", "")
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
+} | {
     "spy_benchmark": "SPY",
 }
 

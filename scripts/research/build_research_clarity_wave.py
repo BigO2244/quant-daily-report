@@ -17,8 +17,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import active_shadow_security_selection_ids
 
-STRATEGY_ORDER = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+STRATEGY_ORDER = active_shadow_security_selection_ids()
 BENCHMARK_ID = "spy_benchmark"
 LOW_CONFIDENCE_REASON = "FR-028 timing semantics remain unresolved for operational shadow NAV."
 

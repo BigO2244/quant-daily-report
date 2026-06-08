@@ -1,5 +1,12 @@
 'use strict';
 
+const SHADOW_SERIES_COLORS = {
+  caerus_polaris: '#4fd1ff',
+  caerus_orion: '#8b7dff',
+  caerus_lyra: '#f3a712',
+};
+const SHADOW_FALLBACK_COLORS = ['#7dd3fc', '#c084fc', '#fbbf24', '#34d399', '#fb7185', '#a3e635'];
+
 function resolveDataPath() {
   const base = new URL('.', window.location.href);
   const params = new URL(window.location.href).searchParams;
@@ -467,11 +474,12 @@ function renderCharts(payload) {
     zeroLine: true,
   });
   const shadowSeries = payload.sections?.shadow_command_center?.rolling_excess_series || [];
-  drawLineChart('shadow-excess-chart', [
-    { color: '#4fd1ff', points: shadowSeries.map(row => ({ date: row.date, value: row.caerus_polaris })) },
-    { color: '#8b7dff', points: shadowSeries.map(row => ({ date: row.date, value: row.caerus_orion })) },
-    { color: '#f3a712', points: shadowSeries.map(row => ({ date: row.date, value: row.caerus_lyra })) },
-  ], {
+  const shadowStrategies = payload.sections?.shadow_command_center?.strategies || [];
+  const dynamicShadowSeries = shadowStrategies.map((strategy, index) => ({
+    color: SHADOW_SERIES_COLORS[strategy.slug] || SHADOW_FALLBACK_COLORS[index % SHADOW_FALLBACK_COLORS.length],
+    points: shadowSeries.map(row => ({ date: row.date, value: row[strategy.slug] })),
+  }));
+  drawLineChart('shadow-excess-chart', dynamicShadowSeries, {
     xLabel: 'Date',
     yLabel: '5D XS %',
     yFormatter: (value) => `${(Number(value) * 100).toFixed(1)}%`,

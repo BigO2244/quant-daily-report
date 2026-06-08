@@ -31,9 +31,11 @@ from typing import Any
 
 import pandas as pd
 
+from core.strategy_registry import active_shadow_security_selection_ids
+
 SCHEMA_VERSION = "caerus_regime_attribution_v1"
 
-STRATEGIES = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+STRATEGIES = active_shadow_security_selection_ids()
 SPY_COLUMN = "spy_benchmark"
 
 REGIME_LABELS = (

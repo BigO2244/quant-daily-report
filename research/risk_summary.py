@@ -6,13 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import active_shadow_security_selection_ids
 
 SCHEMA_VERSION = "caerus_risk_summary_v1"
-STRATEGY_FILE_NAMES = {
-    "caerus_polaris.json",
-    "caerus_orion.json",
-    "caerus_lyra.json",
-}
+STRATEGY_FILE_NAMES = {f"{slug}.json" for slug in active_shadow_security_selection_ids()}
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:

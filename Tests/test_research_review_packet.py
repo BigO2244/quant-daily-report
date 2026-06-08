@@ -6,9 +6,23 @@ from pathlib import Path
 from research.review_packet import build_research_review_packet
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _write_registry_with_active_phoenix(root: Path) -> None:
+    payload = json.loads((REPO_ROOT / "config" / "research" / "strategy_registry.json").read_text(encoding="utf-8"))
+    for entry in payload["strategies"]:
+        if entry["strategy_id"] == "caerus_phoenix":
+            entry["status"] = "shadow"
+            entry["role"] = "challenger"
+            entry["shadow_tracking"]["enabled"] = True
+            entry["shadow_tracking"]["source_variant"] = "phoenix_fixture"
+    _write_json(root / "config" / "research" / "strategy_registry.json", payload)
 
 
 def _write_attribution(root: Path, trade_date: str, *, fresh: bool = True) -> None:
@@ -691,11 +705,49 @@ def test_tier3_sections_populate_when_artifacts_exist(tmp_path):
     final = result["sections"]["final_control_summary"]
     assert final["current_recommendation"] == "No promotion recommended"
     assert final["polaris_status"] == "BENCHMARK_CONTROL"
+    assert set(final["strategy_statuses"]) == {"caerus_polaris", "caerus_orion", "caerus_lyra"}
+    assert "caerus_phoenix" not in final["strategy_statuses"]
+    assert "caerus_argo" not in final["strategy_statuses"]
     markdown = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text()
     assert "Promotion Governance (Tier 3)" in markdown
     assert "Regime Attribution (Tier 3)" in markdown
     assert "Dynamic Strategy Allocation (Tier 3, Research Only)" in markdown
     assert "Final Control Summary" in markdown
+
+
+def test_final_control_summary_surfaces_fixture_active_phoenix_without_overlay(tmp_path):
+    trade_date = "2026-06-02"
+    _write_registry_with_active_phoenix(tmp_path)
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_tier1_sources(tmp_path, trade_date)
+    _write_tier2_sources(tmp_path, trade_date, deep_verdict="STRONG_DIFFERENTIATION")
+    _write_tier3_sources(tmp_path, trade_date)
+    governance_path = tmp_path / "outputs" / "research" / "promotion_governance" / trade_date / "promotion_governance.json"
+    governance = json.loads(governance_path.read_text(encoding="utf-8"))
+    governance["strategies"]["caerus_phoenix"] = {
+        "strategy": "caerus_phoenix",
+        "decision": "HOLD",
+        "evidence_strength": "LOW",
+        "reason_codes": ["research_only_fixture"],
+        "gates": {},
+    }
+    _write_json(governance_path, governance)
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    final = result["sections"]["final_control_summary"]
+    assert list(final["strategy_statuses"]) == [
+        "caerus_polaris",
+        "caerus_orion",
+        "caerus_lyra",
+        "caerus_phoenix",
+    ]
+    assert final["strategy_statuses"]["caerus_phoenix"]["status"] == "HOLD"
+    assert "caerus_argo" not in final["strategy_statuses"]
+    markdown = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text(encoding="utf-8")
+    assert "Caerus Phoenix" in markdown
+    assert "Caerus Argo" not in markdown
 
 
 def test_tier3_missing_artifacts_degrade_gracefully(tmp_path):

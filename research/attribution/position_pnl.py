@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.strategy_registry import active_shadow_security_selection_ids
 
 SCHEMA_VERSION = "position_pnl_attribution_phase_a_v1"
 DEFAULT_PRICE_PATHS = (
@@ -15,11 +16,7 @@ DEFAULT_PRICE_PATHS = (
     Path("alpha_stack_cache/csv_export/prices_matrix.csv"),
     Path("data/alpha_stack_cache/csv_export/prices_matrix.csv"),
 )
-STRATEGY_FILE_NAMES = {
-    "caerus_polaris.json",
-    "caerus_orion.json",
-    "caerus_lyra.json",
-}
+STRATEGY_FILE_NAMES = {f"{slug}.json" for slug in active_shadow_security_selection_ids()}
 
 
 @dataclass(frozen=True)

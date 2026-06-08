@@ -35,9 +35,11 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import active_shadow_security_selection_ids
+
 SCHEMA_VERSION = "caerus_differentiation_diagnostic_v1"
 
-STRATEGIES = ("caerus_lyra", "caerus_orion", "caerus_polaris")
+STRATEGIES = active_shadow_security_selection_ids()
 
 VERDICT_TRUE_WEAK = "TRUE_WEAK_DIFFERENTIATION"
 VERDICT_POSSIBLE_DATA = "POSSIBLE_DATA_LIMITATION"

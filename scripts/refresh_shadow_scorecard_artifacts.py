@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from core.feedback_loop_artifacts import write_feedback_loop_artifacts
+from core.strategy_registry import active_shadow_security_selection_ids
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot
 from research.flow_detection.data import ensure_price_panel, load_universe
@@ -18,7 +19,7 @@ from research.shadow_tracking.strategies import build_shadow_definitions
 
 
 BENCHMARK_SYMBOL = "SPY"
-MODEL_SLUGS = ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
+MODEL_SLUGS = (*active_shadow_security_selection_ids(), "spy_benchmark")
 
 
 def build_parser() -> argparse.ArgumentParser:

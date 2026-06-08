@@ -24,9 +24,9 @@ the operator knows what's missing.
 
 Question handling
 -----------------
-* Strategy names parsed from the question against the fixed list
-  ``polaris | orion | lyra | leda``. Mapped to the artifact's
-  ``caerus_<name>`` slug.
+* Strategy names parsed from the question against registered
+  security-selection strategies plus legacy ``leda``. Mapped to the
+  artifact's ``caerus_<name>`` slug.
 * If no strategy name is mentioned, all available strategies are
   returned (the "which strategy is performing best?" case).
 * ``spy_benchmark`` is excluded from the leader ranking but included
@@ -51,11 +51,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+from core.strategy_registry import load_strategy_registry
+
 DEFAULT_SHADOW_ROOT = Path("outputs/shadow_candidates")
-KNOWN_STRATEGY_NAMES = ("polaris", "orion", "lyra", "leda")
+_REGISTRY = load_strategy_registry()
+KNOWN_STRATEGY_NAMES = tuple(
+    sorted(
+        {
+            entry.compact_name()
+            for entry in _REGISTRY.security_selection_entries()
+        }
+        | {"leda"}
+    )
+)
 """Closed set of recognised strategy names; the tool refuses unknown
-names deterministically (no inference, no fuzzy-matching). Adding a new
-strategy is a one-line tuple extension."""
+names deterministically (no inference, no fuzzy-matching). Strategy names
+come from the Caerus strategy registry."""
 
 BENCHMARK_SLUG = "spy_benchmark"
 

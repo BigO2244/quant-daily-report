@@ -19,18 +19,20 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from core.strategy_registry import load_strategy_registry  # noqa: E402
 from scripts.check_shadow_scorecard_health import build_health_payload  # noqa: E402
 from scripts.send_shadow_cio_report import build_report  # noqa: E402
 
 
-BASELINE_SLUG = "caerus_polaris"
+_REGISTRY = load_strategy_registry()
+BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 BENCHMARK_SLUG = "spy_benchmark"
-CHALLENGER_SLUGS = ("caerus_orion", "caerus_lyra")
+CHALLENGER_SLUGS = _REGISTRY.promotion_candidate_ids()
 MODEL_SLUGS = (BASELINE_SLUG, *CHALLENGER_SLUGS, BENCHMARK_SLUG)
 DISPLAY_NAMES = {
-    "caerus_polaris": "Polaris",
-    "caerus_orion": "Orion",
-    "caerus_lyra": "Lyra",
+    entry.strategy_id: entry.display_name.replace("Caerus ", "")
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
+} | {
     "spy_benchmark": "SPY",
 }
 BAD_TOKENS = ("PRICE_CACHE_STALE", "NO_PRIOR", "NO_DATA", "BROKEN_CHAIN")
@@ -308,7 +310,7 @@ def build_promotion_audit(
         "schema_version": "shadow_promotion_readiness_v1",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "read_only": True,
-        "active_baseline": "caerus_polaris",
+        "active_baseline": BASELINE_SLUG,
         "benchmark": "SPY",
         "latest_source_date": report.latest_source_date,
         "data_through_date": report.as_of_date,

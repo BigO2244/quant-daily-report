@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.execution_equality_gate import classify_equality_gate_observe_status
+from core.strategy_registry import active_shadow_security_selection_ids
 
 
 STATUS_ORDER = {"GREEN": 0, "YELLOW": 1, "RED": 2}
@@ -16,7 +17,7 @@ RECOMMENDED_ACTIONS = {
     "YELLOW": "HOLD_MONITOR",
     "RED": "INVESTIGATE_BEFORE_TRADING_CHANGES",
 }
-SHADOW_STRATEGIES = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+SHADOW_STRATEGIES = active_shadow_security_selection_ids()
 
 
 @dataclass(frozen=True)

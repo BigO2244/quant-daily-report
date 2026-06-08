@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from core.strategy_registry import active_shadow_security_selection_ids, load_strategy_registry
 
 LOW_CONFIDENCE_REASON = "FR-028 timing semantics remain unresolved for operational shadow NAV."
 INCOMPLETE_EXPOSURE_MESSAGE = (
@@ -22,7 +23,9 @@ INCOMPLETE_EXPOSURE_MESSAGE = (
 INCOMPLETE_NEXT_ACTION = (
     "Wait for post-close hydration and shadow artifact refresh, then rerun Orion.command. Do not force an incomplete packet unless diagnosing source readiness."
 )
-STRATEGY_ORDER = ("caerus_polaris", "caerus_orion", "caerus_lyra")
+_REGISTRY = load_strategy_registry()
+STRATEGY_ORDER = active_shadow_security_selection_ids()
+PROMOTION_CANDIDATES = set(_REGISTRY.promotion_candidate_ids())
 EXPOSURE_SOURCE_ARTIFACTS = (
     "exposures_snapshot.json",
     "exposure_summary.json",
@@ -866,7 +869,7 @@ def _research_attention_flags(
     max_rotation = max([abs(float(item["change"])) for item in [*additions, *removals, *increases, *decreases]] or [0.0])
     if max_rotation >= 0.20 or len(additions) + len(removals) >= 3:
         flags.append(_attention_flag(strategy_id, "HIGH", "SUDDEN_COMPOSITION_ROTATION", {"largest_weight_change": max_rotation}, "Composition rotation appears structural rather than routine."))
-    if strategy_id in {"caerus_orion", "caerus_lyra"} and flags:
+    if strategy_id in PROMOTION_CANDIDATES and flags:
         flags.append(_attention_flag(strategy_id, "MEDIUM", "CHALLENGER_INSTABILITY", {"flag_count": len(flags)}, "Challenger stability should be reviewed before interpreting outperformance as durable."))
     if data_completeness["exposure_data_status"] != "complete":
         flags.append(_attention_flag(strategy_id, "MEDIUM", "MISSING_ATTRIBUTION_EVIDENCE", {"exposure_data_status": data_completeness["exposure_data_status"]}, "Missing exposure evidence limits attribution and drift interpretation."))
