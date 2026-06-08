@@ -92,3 +92,11 @@ fred_ingestion.py
 macro_store.py
 test_datastore.py
 validate_regime_history.py
+
+# Local/editor artifacts
+*.code-workspace
+
+# Generated reports
+reports/trading_audit/
+reports/execution_timing/
+research/model_review_*.md
