@@ -29,6 +29,10 @@ OPTIONAL_SECTION_FILES = {
     "portfolio_history_freshness": "portfolio_history_freshness.json",
     "lyra_orion_differentiation": "lyra_orion_differentiation.json",
     "phoenix_evidence_tracker": "phoenix_evidence_tracker.json",
+    "phoenix_phase_b_review": "phoenix_phase_b_review.json",
+    "strategy_differentiation_deep_dive": "strategy_differentiation_deep_dive.json",
+    "argo_phase_b_validation": "argo_phase_b_validation.json",
+    "multi_asset_research_framework": "multi_asset_research_framework.json",
 }
 OPTIONAL_EXTERNAL_SECTION_FILES = {
     "security_master_diagnostics": Path("outputs/research/security_master_diagnostics") / "{date}" / "security_master_diagnostics.json",
@@ -73,6 +77,7 @@ def build_model_quality_packet(
             sections[name] = {"available": False, "optional": True, "reason_codes": [f"{name.upper()}_MISSING"]}
         else:
             sections[name] = payload
+    sections["dashboard_decision_grade"] = _dashboard_decision_grade(repo)
     argo = sections.get("argo_regime_selection") or {}
     tournament = sections.get("model_tournament") or {}
     attribution = sections.get("attribution_quality") or {}
@@ -82,6 +87,11 @@ def build_model_quality_packet(
     security = sections.get("security_master_diagnostics") or {}
     differentiation = sections.get("lyra_orion_differentiation") or {}
     phoenix_evidence = sections.get("phoenix_evidence_tracker") or {}
+    phoenix_phase_b = sections.get("phoenix_phase_b_review") or {}
+    strategy_deep_dive = sections.get("strategy_differentiation_deep_dive") or {}
+    argo_phase_b = sections.get("argo_phase_b_validation") or {}
+    multi_asset = sections.get("multi_asset_research_framework") or {}
+    dashboard_decision_grade = sections.get("dashboard_decision_grade") or {}
     reason_codes = []
     if missing:
         reason_codes.extend(f"MISSING_SECTION:{name}" for name in missing)
@@ -101,6 +111,11 @@ def build_model_quality_packet(
             "security_master_status": (security.get("security_master_artifact") or {}).get("status"),
             "lyra_orion_decision_grade": bool(differentiation.get("decision_grade_flag")),
             "phoenix_evidence_confidence": phoenix_evidence.get("confidence"),
+            "phoenix_phase_b_confidence": phoenix_phase_b.get("confidence"),
+            "strategy_differentiation_watchlist_count": len(strategy_deep_dive.get("retirement_watchlist") or []),
+            "argo_phase_b_decision_grade": bool(argo_phase_b.get("decision_grade_recommendation")),
+            "multi_asset_framework_status": multi_asset.get("status"),
+            "dashboard_decision_grade_status": dashboard_decision_grade.get("status"),
             "cygnus_design_status": "DESIGN_ONLY_DOCS",
             "best_current_research_insight": _best_insight(
                 argo=argo,
@@ -119,6 +134,20 @@ def build_model_quality_packet(
         write_json(out_dir / "model_quality_packet.json", payload)
         write_text(out_dir / "model_quality_packet.md", render_markdown(payload))
     return payload
+
+
+def _dashboard_decision_grade(repo: Path) -> dict[str, Any]:
+    path = repo / "web" / "dashboard" / "dashboard_data.json"
+    payload = read_json(path)
+    section = ((payload or {}).get("sections") or {}).get("decision_grade") if isinstance(payload, dict) else None
+    if not isinstance(section, dict):
+        return {"available": False, "optional": True, "source_path": str(path), "reason_codes": ["DASHBOARD_DECISION_GRADE_MISSING"]}
+    out = dict(section)
+    out.setdefault("available", True)
+    out["optional"] = True
+    out["source_path"] = str(path)
+    out.setdefault("reason_codes", ["ok"])
+    return out
 
 
 def _best_insight(
