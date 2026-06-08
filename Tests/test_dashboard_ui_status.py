@@ -1,66 +1,30 @@
 from pathlib import Path
 
 
-def test_run_status_wrapping_rules_present():
-    repo_root = Path(__file__).resolve().parents[1]
-    js = (repo_root / "web/dashboard/quant_daily_executive.js").read_text(encoding="utf-8")
-    css = (repo_root / "web/dashboard/quant_daily_executive.css").read_text(encoding="utf-8")
+def test_dashboard_terminal_shell_present():
+    html = Path("web/dashboard/index.html").read_text(encoding="utf-8")
 
-    assert "function statusLengthClass" in js
-    assert "status-wrap" in js
-    assert "status-long" in js
-    assert "status-very-long" in js
-
-    assert ".kpi-value.status-wrap" in css
-    assert ".kpi-value.status-long" in css
-    assert ".kpi-value.status-very-long" in css
+    assert "terminal-shell" in html
+    assert 'id="performance-matrix"' in html
+    assert 'id="shadow-strategy-body"' in html
+    assert 'id="positions-body"' in html
+    assert 'id="fills-body"' in html
 
 
-def test_dashboard_js_supports_query_data_and_refresh():
-    repo_root = Path(__file__).resolve().parents[1]
-    js = (repo_root / "web/dashboard/quant_daily_executive.js").read_text(encoding="utf-8")
+def test_dashboard_redirect_file_points_to_terminal_root():
+    html = Path("web/dashboard/quant_daily_executive.html").read_text(encoding="utf-8")
 
-    assert "params.get('data')" in js
-    assert "params.get('summary')" in js
-    assert "params.get('refresh')" in js
-    assert "cache: 'no-store'" in js
-    assert "window.setTimeout(() => { void boot(); }" in js
-    assert "alignState !== 'aligned' && alignState !== 'overlay'" in js
-    assert "case 'overlay': return 'pos';" in js
-    assert "reconStatus === 'OVERLAY_ONLY'" in js
-    assert "comparisonMode === 'previous_trading_day'" in js
-    assert "benchmark unavailable for current date" in js
-    assert "SPY as of" in js
-    assert "function renderAttribution" in js
-    assert "function renderEdgeDiagnostics" in js
-    assert "function renderContributionSnapshot" in js
-    assert "function renderPortfolioHistory" in js
+    assert 'http-equiv="refresh"' in html
+    assert 'url=./' in html
+    assert "Redirecting to Dashboard V1" in html
 
 
-def test_dashboard_index_redirects_to_monitor():
-    repo_root = Path(__file__).resolve().parents[1]
-    html = (repo_root / "web/dashboard/index.html").read_text(encoding="utf-8")
+def test_dashboard_js_current_render_contract():
+    js = Path("web/dashboard/quant_daily_executive.js").read_text(encoding="utf-8")
 
-    assert "quant_daily_executive.html" in html
-    assert "window.location.replace" in html
-
-
-def test_dashboard_html_has_edge_diagnostic_sections():
-    repo_root = Path(__file__).resolve().parents[1]
-    main_html = (repo_root / "web/dashboard/quant_daily_executive.html").read_text(encoding="utf-8")
-    review_html = (repo_root / "web/dashboard/engine_review.html").read_text(encoding="utf-8")
-
-    # These analytics sections are now rendered in the main dashboard.
-    assert 'id="attribution-stats"' in main_html
-    assert 'id="edge-list"' in main_html
-    assert 'id="contribution-panel"' in main_html
-    # Current positions table added to portfolio row.
-    assert 'id="positions-body"' in main_html
-    # Broker-authoritative history is rendered separately from dashboard summary cards.
-    assert 'id="history-transactions-body"' in main_html
-    assert 'id="history-positions-body"' in main_html
-    assert 'id="history-summary"' in main_html
-    # Engine review page retains its own diagnostics sections.
-    assert 'id="signals-list"' in review_html
-    assert 'id="recommendations-list"' in review_html
-    assert 'id="contribution-panel"' in review_html
+    assert "function boot()" in js
+    assert "function renderShadowCommand" in js
+    assert "function renderPositions" in js
+    assert "function renderFills" in js
+    assert "function renderPerformanceMatrix" in js
+    assert "function renderHealthMatrix" in js
