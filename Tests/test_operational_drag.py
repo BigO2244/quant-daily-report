@@ -480,6 +480,7 @@ def test_current_broker_snapshot_extends_stale_actual_nav_through_trade_date(tmp
     assert "actual_nav_stale" not in actual["reason_codes"]
     assert "actual_nav_extended_from_current_broker_artifact" in actual["reason_codes"]
     assert {row["symbol"] for row in actual["actual_positions"]} == {"AAA", "BBB"}
+    assert actual["actual_gross_exposure"] == pytest.approx((10050.0 - 5000.0) / 10050.0)
     assert analysis["operational_drag"]["latest"]["date"] == TRADE_DATE
     assert analysis["decision_grade"] is True
 

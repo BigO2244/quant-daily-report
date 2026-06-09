@@ -1374,6 +1374,8 @@ def _actual_row_from_snapshot(repo: Path, trade_date: str) -> tuple[dict[str, An
             _diag_add_failure(diagnostics, path, "missing_actual_equity")
             continue
         gross = market_value / equity if equity and market_value else None
+        if gross is None and equity and cash is not None:
+            gross = max(0.0, (float(equity) - float(cash)) / float(equity))
         if "recon_posttrade_" in path.name:
             row_reasons.append("actual_from_posttrade_reconciliation")
             assessment = _reconciliation_assessment(payload, repo=repo, source_path=path)
@@ -2655,7 +2657,7 @@ def _component_freshness(
     ]
     blocking_reasons = sorted(
         {
-            reason for reason in component_reasons + list(material_reasons or [])
+            reason for reason in list(material_reasons or [])
             if _reason_blocks_component(component, reason)
         }
     )
