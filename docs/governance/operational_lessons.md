@@ -85,11 +85,74 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   limits but before executable-order construction, and approximately 16.72%
   average underdeployment on impacted days. Treat these as operational-drag
   evidence, not a strategy target-cash decision.
+- Commit `e249f61` deployed the fractional-share execution fix. Future
+  execution validation must verify that `allow_fractional_shares=true` survives
+  every stage: target-weight conversion, raw target shares, risk controls,
+  capital-budget clipping, executable-order filtering, intended/shadow order
+  construction, and broker payload submission. A downstream conversion to
+  integer shares is a defect unless fractional trading is explicitly disabled.
 - Future execution-adjacent reviews should distinguish target cash, capital
   reserve/cash-budget clipping, min-notional filtering, whole-share-only
   behavior, fractional-enabled execution, and market-guard/plan-only states.
   A reported achieved-cash or gross-exposure value is not sufficient evidence
   that portfolio construction intentionally targeted cash.
+- The 2026-06-09 run also exposed a staged-execution planning defect:
+  `planned_payload_exact` submitted the precomputed buy list after sells
+  without rebuilding buys from confirmed post-sell cash and refreshed broker
+  positions. The model's raw target cash was near 0%, the risk-control target
+  cash was 5%, and ending cash remained approximately $2,196.67 versus a
+  $530.09 risk cash target. Confirmed sell proceeds of approximately $1,106.06
+  were available, but the stale buy list limited deployment; rebudgeting would
+  have increased buy notional by about $1,666.58.
+- Commit `aaf5961` deployed post-sell buy rebudgeting. If sell orders exist,
+  the execution path must treat the buy leg as dependent on broker-confirmed
+  post-sell state, not as a replay of stale precompute rows. The runtime now
+  emits `post_sell_rebudget_<date>.json` with pre-sell cash, submitted sells,
+  sell-phase status, confirmed proceeds, post-sell cash/buying power, buy
+  budget before and after safeguards, original versus recomputed buy notional,
+  final buy orders, and ending cash versus risk target.
+- Partial, rejected, or timed-out sells must release only confirmed cash and
+  buying power. The buy leg may still proceed against confirmed available cash,
+  but it must never assume proceeds from unfilled or unresolved sell orders.
+- Buy-only/no-sell runs intentionally preserve exact-plan behavior. Post-sell
+  rebudgeting is a sell-leg invariant, not a license to rebuild every
+  precomputed buy plan.
+- June 10 monitoring should review the next `post_sell_rebudget_<date>.json`,
+  confirm fractional quantities appear in intended/shadow orders when
+  applicable, confirm ending cash moves toward the 5% risk target, confirm
+  posttrade reconciliation remains `OK_RECONCILED`, and confirm rejected orders
+  remain zero.
+- The June 9 operational-drag repair restored current-date decision-grade
+  attribution by fixing artifact freshness and lineage gaps, not by changing
+  strategy behavior. Root causes included stale actual NAV not being extended
+  by current broker/run artifacts, split account and position artifacts not
+  being merged, `normalized_positions` dictionaries not being parsed, gross
+  exposure not being derived when cash/equity were available, and freshness
+  diagnostics that were too coarse to distinguish current-date blockers from
+  historical caveats.
+- Commits `d13e804`, `c55f2ba`, and `67911c9` made operational-drag
+  diagnostics explicit: source paths, source dates, stale components, blocking
+  components, current-date status, decision-grade readiness, and confidence are
+  surfaced in the artifact family. For 2026-06-09, operational drag is
+  decision-grade with MEDIUM confidence and latest aligned date 2026-06-09.
+- Broker-state reconciliation is necessary but not sufficient. `OK_RECONCILED`
+  means broker positions match expected post-execution broker state; it does
+  not prove the actual portfolio attained the risk-adjusted target. The
+  2026-06-09 run reconciled cleanly while actual cash remained 20.8417% versus
+  the 5.0% risk target.
+- Commits `81a0468` and `5663313` deployed target-attainment reconciliation as
+  observability only. The artifact
+  `outputs/target_attainment/<date>/target_attainment_<date>.json` compares
+  target portfolio, risk-adjusted portfolio, intended orders, executed orders,
+  broker holdings, and actual portfolio. The CLI is
+  `python3 -m research.target_attainment --date YYYY-MM-DD`.
+- The 2026-06-09 target-attainment baseline records target cash 5.0%, actual
+  cash 20.8417%, cash gap 15.8417%, deployment efficiency 83.3245%,
+  attainment score 37.15, and excess cash of approximately $1,669.68.
+- Observability artifacts must expose enough context to diagnose deployment
+  gaps: reason codes, source paths, source dates, stale inputs, blocking
+  components, top drift contributors, and confidence. A single green
+  reconciliation status is not enough for deployment-integrity monitoring.
 
 ## Artifact Lessons
 

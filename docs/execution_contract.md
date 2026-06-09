@@ -26,6 +26,11 @@ Required behavior:
 - The run records `execution_source=planned_payload_exact`.
 - The run preserves the planned payload price basis and `pricing_asof`.
 - The run does not rebuild executable trades from signals.
+- If the planned payload includes sell orders, the buy leg is rebuilt after
+  sell submission from confirmed post-sell broker state and existing target
+  weights. This is a capital-availability rebudget, not a model/signal rebuild.
+- If the planned payload is buy-only/no-sell, exact-plan buy behavior is
+  preserved.
 - The run does not enter same-day open-price freshness validation solely because
   the planned payload uses prior-close prices.
 
@@ -86,6 +91,8 @@ operator summaries, timeline artifacts, or helper output when available:
 - `execution_integrity_status`
 - `execution_integrity_findings`
 - `terminal_status`
+- `post_sell_rebudget`
+- `post_sell_rebudget_artifact_path`
 
 The lifecycle timeline artifacts provide the run narrative:
 
@@ -111,6 +118,20 @@ Expected operator interpretation:
 evidence proves whether it is expected pending-fill drift or an accounting
 problem. Do not suppress it globally to make operator output green.
 
+Broker-state reconciliation and target-attainment reconciliation are separate
+operator questions. `OK_RECONCILED` means broker positions match the expected
+post-execution broker state; it does not prove the actual portfolio reached the
+risk-adjusted target portfolio. Use
+`outputs/target_attainment/<DATE>/target_attainment_<DATE>.json` or:
+
+```bash
+python3 -m research.target_attainment --date YYYY-MM-DD
+```
+
+to inspect target cash versus actual cash, target gross exposure versus actual
+gross exposure, deployment efficiency, excess cash, attainment score, and top
+drift contributors.
+
 ## 2026-05-28 Example
 
 On 2026-05-28, precompute produced a valid prior-close planned payload for
@@ -129,3 +150,23 @@ The deployed recovery changed cron-driven validated precompute execution to
 
 The manual paper rerun submitted 13 orders and Alpaca accepted all 13. The
 stale-price guard remains intact for `rebuilt_from_signals`.
+
+## 2026-06-09 Execution Integrity Updates
+
+Two execution-layer integrity fixes are deployed under the existing source
+contract:
+
+- Commit `e249f61` preserves fractional quantities when
+  `allow_fractional_shares=true`; downstream executable-order and shadow-order
+  construction must not floor valid fractional buys or top-ups.
+- Commit `aaf5961` rebuilds buy orders after confirmed sell proceeds when a
+  sell leg exists; the runtime writes `post_sell_rebudget_<DATE>.json`.
+
+These fixes do not change cron timing, alpha/model logic, target weights,
+95%/5% risk exposure policy, stale-price guards, broker credentials, or broker
+cash/buying-power safeguards.
+
+The same June 9 observability wave added target-attainment reconciliation under
+commits `81a0468` and `5663313`. It is read-only monitoring. It records whether
+the actual portfolio attained the risk-adjusted target portfolio after
+execution, but it does not change order generation or broker submission.

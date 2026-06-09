@@ -19,9 +19,15 @@ Primary operator surfaces:
 Primary broker audit artifacts:
 
 - `outputs/runs/<RUN_ID>/broker/recon_posttrade_<DATE>.json`
+- `outputs/runs/<RUN_ID>/broker/post_sell_rebudget_<DATE>.json`
 - `outputs/runs/<RUN_ID>/broker/posttrade_positions.json`
 - `outputs/runs/<RUN_ID>/broker/posttrade_account_snapshot.json`
 - `outputs/runs/<RUN_ID>/broker/orders_<DATE>.csv`
+
+Primary deployment-attainment artifacts:
+
+- `outputs/operational_drag/<DATE>/operational_drag.json`
+- `outputs/target_attainment/<DATE>/target_attainment_<DATE>.json`
 
 Duplicate-protection artifacts:
 
@@ -79,6 +85,47 @@ Key fields to check:
 - `affected_symbols`
 - `repair_suggestions`
 - `duplicate_fill_suspicions_count`
+- `post_sell_rebudget`
+- `post_sell_rebudget_artifact_path`
+
+If sell orders were present, also inspect
+`outputs/runs/<RUN_ID>/broker/post_sell_rebudget_<DATE>.json`:
+
+- `sell_phase_status`
+- `confirmed_sell_proceeds`
+- `buy_budget_before_safeguards`
+- `buy_budget_after_safeguards`
+- `original_precomputed_buy_notional`
+- `recomputed_buy_notional`
+- `final_submitted_buy_notional`
+- `final_buy_orders_submitted`
+- `estimated_ending_cash_vs_risk_target`
+- `ending_cash_vs_risk_target`
+- `reason_codes`
+
+Also build or inspect target-attainment reconciliation:
+
+```bash
+python3 -m research.target_attainment --date YYYY-MM-DD
+```
+
+Key fields:
+
+- `summary.target_cash_pct`
+- `summary.actual_cash_pct`
+- `summary.cash_gap_pct`
+- `summary.target_gross_exposure_pct`
+- `summary.actual_gross_exposure_pct`
+- `summary.exposure_gap_pct`
+- `summary.deployment_efficiency_pct`
+- `summary.deployment_score`
+- `summary.attainment_score`
+- `summary.excess_cash`
+- `execution.intended_notional`
+- `execution.executed_notional`
+- `top_drift_contributors`
+- `reason_codes`
+- `confidence`
 
 ## How To Use The Paper Repair Helper
 
@@ -141,6 +188,37 @@ The helper is read-only. It only prints recommended paper repair actions from th
 - Confirm whether `posttrade_positions.json` and `recon_posttrade_<DATE>.json` were written.
 - If artifacts are missing or corrupt, pause before the next run and inspect the failed run logs.
 
+### If a sell-leg run leaves excess cash
+
+- Open `post_sell_rebudget_<DATE>.json`.
+- Confirm `sell_phase_status` and `confirmed_sell_proceeds`.
+- Compare `original_precomputed_buy_notional` to `recomputed_buy_notional`.
+- Confirm fractional quantities appear in `final_buy_orders_submitted` when
+  `allow_fractional_shares=true` and fractional targets are applicable.
+- Confirm `ending_cash_vs_risk_target` moved toward zero.
+- Review `reason_codes` before treating excess cash as intentional target cash.
+- Do not assume proceeds from rejected, timed-out, or partially unresolved
+  sells; only confirmed cash should release buy capacity.
+
+### Daily deployment monitoring
+
+For each paper execution day, confirm:
+
+- `post_sell_rebudget_<DATE>.json` exists when sell orders were present.
+- Fractional quantities survive into intended/shadow/final orders when
+  `allow_fractional_shares=true` and fractional targets are applicable.
+- Ending cash moved toward the 5% risk target unless explicit safeguards or
+  missing evidence explain otherwise.
+- `outputs/target_attainment/<DATE>/target_attainment_<DATE>.json` exists.
+- Target cash versus actual cash and target gross exposure versus actual gross
+  exposure are reviewed.
+- Deployment efficiency and attainment score are reviewed.
+- Current-date operational drag is decision-grade or carries explicit blockers.
+- Posttrade reconciliation remains `OK_RECONCILED`.
+- Rejected orders remain 0.
+- Target-attainment reason codes explain any material excess cash,
+  underdeployment, or target-weight drift.
+
 ## When To Pause The Next Trading Day
 
 Pause or halt the next trading day if any of the following are true:
@@ -150,6 +228,12 @@ Pause or halt the next trading day if any of the following are true:
 - `DRIFT_DETECTED` and the affected symbols are not understood before market open
 - duplicate protection fired, but broker/order artifacts do not clearly prove what happened
 - `duplicate_fill_suspicions_count > 0` and broker positions still look wrong after review
+- a sell-leg run has missing/corrupt `post_sell_rebudget_<DATE>.json` or
+  unexplained excess cash versus the 5% risk target
+- rejected orders are non-zero or reconciliation is not `OK_RECONCILED` after
+  the post-sell rebudget path runs
+- target-attainment shows material cash/exposure drift without an explicit
+  reason code explaining the constraint or missing input
 
 ## Minimum Incident Checklist
 
@@ -159,6 +243,9 @@ Pause or halt the next trading day if any of the following are true:
   - `operator_summary.json`
   - `trading_day_summary.json`
   - `broker/recon_posttrade_<DATE>.json`
+  - `broker/post_sell_rebudget_<DATE>.json`
   - `broker/posttrade_positions.json`
   - `broker/orders_<DATE>.csv`
+  - `outputs/target_attainment/<DATE>/target_attainment_<DATE>.json`
+  - `outputs/operational_drag/<DATE>/operational_drag.json`
 - Record whether the next trading day is safe to continue or should be paused
