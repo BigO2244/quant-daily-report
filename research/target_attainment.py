@@ -150,8 +150,10 @@ def _positions_from_recon(
     *,
     equity: float | None,
     reason_codes: list[str],
+    price_hints: dict[str, float] | None = None,
 ) -> dict[str, dict[str, Any]]:
     price_store = load_price_store(repo, trade_date=trade_date)
+    hints = price_hints or {}
     out: dict[str, dict[str, Any]] = {}
     for symbol, raw_qty in sorted(positions.items()):
         normalized = str(symbol).upper().strip()
@@ -159,6 +161,10 @@ def _positions_from_recon(
         if not normalized or shares is None:
             continue
         price = price_store.get(normalized, trade_date)
+        if price is None:
+            price = hints.get(normalized)
+            if price is not None:
+                reason_codes.append("actual_position_prices_from_execution_or_target_basis")
         market_value = shares * price if price is not None else None
         if price is None:
             reason_codes.append("missing_market_data")
@@ -306,6 +312,11 @@ def build_target_attainment(
         intended_nav.get("intended_positions") if isinstance(intended_nav.get("intended_positions"), list) else [],
         equity=target_equity,
     )
+    price_hints: dict[str, float] = {
+        symbol: float(row["price"])
+        for symbol, row in target_positions.items()
+        if row.get("price") is not None
+    }
     raw_target_gross = round(sum(abs(float(row.get("weight") or 0.0)) for row in target_positions.values()), 6)
     risk_adjustment_scale = 1.0
     if target_gross is not None and raw_target_gross > 0:
@@ -327,6 +338,17 @@ def build_target_attainment(
         actual_nav.get("actual_positions") if isinstance(actual_nav.get("actual_positions"), list) else [],
         equity=actual_equity,
     )
+    intended_orders = _orders(intended_orders_payload, "orders_intended")
+    executed_orders = _orders(execution_payload, "trades")
+    for order in intended_orders + executed_orders:
+        symbol = _order_symbol(order)
+        price = _safe_float(order.get("price") or order.get("entry_price"))
+        shares = _safe_float(order.get("shares") or order.get("qty") or order.get("quantity"))
+        notional = _safe_float(order.get("notional"))
+        if price is None and shares not in (None, 0.0) and notional is not None:
+            price = abs(notional / shares)
+        if symbol and price is not None:
+            price_hints.setdefault(symbol, price)
     if actual_positions and all(row.get("market_value") is None for row in actual_positions.values()) and isinstance(recon.get("actual_positions"), dict):
         actual_positions = _positions_from_recon(
             repo,
@@ -334,6 +356,7 @@ def build_target_attainment(
             recon["actual_positions"],
             equity=actual_equity,
             reason_codes=actual_position_reasons,
+            price_hints=price_hints,
         )
     elif not actual_positions and isinstance(recon.get("actual_positions"), dict):
         actual_positions = _positions_from_recon(
@@ -342,10 +365,9 @@ def build_target_attainment(
             recon["actual_positions"],
             equity=actual_equity,
             reason_codes=actual_position_reasons,
+            price_hints=price_hints,
         )
     reason_codes.extend(actual_position_reasons)
-    intended_orders = _orders(intended_orders_payload, "orders_intended")
-    executed_orders = _orders(execution_payload, "trades")
     intended_notional = _notional_by_side(intended_orders)
     executed_notional = _notional_by_side(executed_orders)
     symbols = sorted(set(target_positions) | set(actual_positions))
