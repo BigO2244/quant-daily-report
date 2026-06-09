@@ -416,6 +416,7 @@ def test_actual_nav_diagnostics_expose_actual_nav_block_and_provenance(tmp_path:
 def test_actual_nav_stale_reason_when_series_ends_before_trade_date(tmp_path: Path) -> None:
     root = _fixture_repo(tmp_path)
     _single_day_live_overlay(root)
+    (root / "outputs" / "broker_snapshot" / "broker_snapshot_2026-06-02.json").unlink()
 
     actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
 
@@ -448,6 +449,60 @@ def test_run_snapshot_extends_actual_nav_through_trade_date(tmp_path: Path) -> N
 
     analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
     assert analysis["operational_drag"]["latest"]["date"] == TRADE_DATE
+
+
+def test_current_broker_snapshot_extends_stale_actual_nav_through_trade_date(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _single_day_live_overlay(root)
+    (root / "outputs" / "broker_snapshot" / "broker_snapshot_2026-06-02.json").unlink()
+    run_root = root / "outputs" / "runs" / "2026-06-02T093504-0400_current" / "broker"
+    _write_json(
+        run_root / "posttrade_account_snapshot.json",
+        {
+            "trade_date": TRADE_DATE,
+            "cash": 5000.0,
+            "equity": 10050.0,
+            "buying_power": 15000.0,
+        },
+    )
+    _write_json(
+        run_root / "posttrade_positions.json",
+        {
+            "trade_date": TRADE_DATE,
+            "normalized_positions": {"AAA": 20.0, "BBB": 30.0},
+        },
+    )
+
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    actual = analysis["actual_nav"]
+    assert actual["timeseries"][-1]["date"] == TRADE_DATE
+    assert "actual_nav_stale" not in actual["reason_codes"]
+    assert "actual_nav_extended_from_current_broker_artifact" in actual["reason_codes"]
+    assert {row["symbol"] for row in actual["actual_positions"]} == {"AAA", "BBB"}
+    assert analysis["operational_drag"]["latest"]["date"] == TRADE_DATE
+    assert analysis["decision_grade"] is True
+
+
+def test_current_date_freshness_diagnostics_name_blocking_component(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _single_day_live_overlay(root)
+    (root / "outputs" / "broker_snapshot" / "broker_snapshot_2026-06-02.json").unlink()
+
+    analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)
+
+    freshness = analysis["freshness_diagnostics"]
+    assert freshness["decision_grade_ready"] is False
+    assert "actual" in freshness["blocking_components"]
+    actual = freshness["components"]["actual"]
+    assert actual["source_date"] == "2026-06-01"
+    assert actual["freshness_status"] == "STALE"
+    assert actual["blocking_component"] == "actual"
+    assert actual["missing_dependency_reason"] in {
+        "actual_nav_stale",
+        "actual_does_not_reach_requested_date",
+    }
+    assert "actual" in analysis["current_date_health"]["blocking_components"]
 
 
 def test_higher_confidence_source_wins_same_date_conflict(tmp_path: Path) -> None:

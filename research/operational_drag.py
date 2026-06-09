@@ -1200,6 +1200,7 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
     rows, nav_diagnostics, latest_nav_class = _actual_rows_from_nav_series(repo, trade_date)
     snapshot_diagnostics = _new_diagnostics()
     reasons: list[str] = []
+    snapshot_row: dict[str, Any] | None = None
     if not rows:
         snapshot_row, snapshot_diagnostics = _actual_row_from_snapshot(repo, trade_date)
         if snapshot_row:
@@ -1223,6 +1224,13 @@ def build_actual_nav(*, trade_date: str, repo_root: Path | str = Path(".")) -> d
                     "positions": _new_diagnostics(),
                 },
             }
+    else:
+        latest_row_date = rows[-1].get("date")
+        if latest_row_date and latest_row_date < trade_date:
+            snapshot_row, snapshot_diagnostics = _actual_row_from_snapshot(repo, trade_date)
+            if snapshot_row:
+                rows.append(snapshot_row)
+                reasons.append("actual_nav_extended_from_current_broker_artifact")
     rows = _compute_return_fields(rows, value_key="actual_equity_value", daily_key="actual_return_daily", cumulative_key="actual_return_cumulative")
     latest = rows[-1]
     positions, position_sources, position_reasons, position_diagnostics = _actual_positions_for_date(repo, trade_date)
@@ -1349,6 +1357,7 @@ def _actual_row_from_snapshot(repo: Path, trade_date: str) -> tuple[dict[str, An
         if payload is None:
             _diag_add_failure(diagnostics, path, "missing_or_unreadable")
             continue
+        payload = _enrich_actual_payload_from_sibling_artifacts(path, payload)
         payload_date = _payload_date(payload)
         if payload_date and payload_date != trade_date:
             _diag_add_failure(diagnostics, path, f"stale_trade_date:{payload_date}")
@@ -1400,7 +1409,11 @@ def _actual_json_candidates(repo: Path, trade_date: str) -> list[Path]:
     candidates: list[Path] = []
     candidates.extend(_run_scoped_paths(repo, f"broker/recon_posttrade_{trade_date}.json"))
     candidates.append(repo / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
+    candidates.extend(_run_scoped_paths(repo, "broker/posttrade_account_snapshot.json"))
     candidates.extend(_run_scoped_paths(repo, "broker/posttrade_positions.json"))
+    candidates.extend(_run_scoped_paths(repo, "trading_day_summary.json"))
+    candidates.extend(_run_scoped_paths(repo, "execution_payload.json"))
+    candidates.append(repo / "outputs" / "broker" / "posttrade_account_snapshot.json")
     candidates.append(repo / "outputs" / "broker" / "posttrade_positions.json")
     candidates.append(repo / "outputs" / "broker_snapshot" / f"broker_snapshot_{trade_date}.json")
     candidates.append(repo / "outputs" / "broker" / "broker_snapshot_latest.json")
@@ -1419,15 +1432,29 @@ def _dedupe_paths(paths: list[Path]) -> list[Path]:
 
 
 def _payload_date(payload: dict[str, Any]) -> str | None:
-    return _date_text(payload.get("trade_date") or payload.get("date") or payload.get("as_of") or payload.get("captured_at"))
+    return _date_text(
+        payload.get("trade_date")
+        or payload.get("report_date")
+        or payload.get("date")
+        or payload.get("as_of")
+        or payload.get("captured_at")
+    )
 
 
 def _actual_equity_from_payload(payload: dict[str, Any]) -> float | None:
     account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
+    portfolio_state = payload.get("portfolio_state") if isinstance(payload.get("portfolio_state"), dict) else {}
+    broker_preflight = payload.get("broker_preflight") if isinstance(payload.get("broker_preflight"), dict) else {}
     return _safe_float(
         payload.get("broker_equity")
+        or payload.get("posttrade_equity")
+        or payload.get("equity_after")
         or payload.get("portfolio_value")
         or payload.get("equity")
+        or portfolio_state.get("equity")
+        or portfolio_state.get("total_equity")
+        or portfolio_state.get("portfolio_value")
+        or broker_preflight.get("equity")
         or account.get("equity")
         or account.get("portfolio_value")
     )
@@ -1435,7 +1462,45 @@ def _actual_equity_from_payload(payload: dict[str, Any]) -> float | None:
 
 def _actual_cash_from_payload(payload: dict[str, Any]) -> float | None:
     account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
-    return _safe_float(payload.get("broker_cash") or payload.get("cash") or account.get("cash"))
+    portfolio_state = payload.get("portfolio_state") if isinstance(payload.get("portfolio_state"), dict) else {}
+    broker_preflight = payload.get("broker_preflight") if isinstance(payload.get("broker_preflight"), dict) else {}
+    return _safe_float(
+        payload.get("broker_cash")
+        or payload.get("posttrade_cash")
+        or payload.get("cash_after")
+        or payload.get("cash")
+        or portfolio_state.get("cash_after")
+        or portfolio_state.get("cash")
+        or broker_preflight.get("cash")
+        or account.get("cash")
+    )
+
+
+def _enrich_actual_payload_from_sibling_artifacts(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """Combine split broker account/position artifacts from the same run.
+
+    Some run roots persist account and positions separately. Operational drag
+    needs both NAV/cash and positions for current-date attribution, so this
+    read-only merge lets either sibling artifact satisfy the actual snapshot
+    contract without changing the source artifacts.
+    """
+    enriched = dict(payload or {})
+    if path.name == "posttrade_positions.json":
+        account_path = path.with_name("posttrade_account_snapshot.json")
+        account = _read_json(account_path)
+        if isinstance(account, dict):
+            enriched.setdefault("account", account.get("account") if isinstance(account.get("account"), dict) else account)
+            for key in ("trade_date", "cash", "equity", "portfolio_value", "buying_power"):
+                if enriched.get(key) is None and account.get(key) is not None:
+                    enriched[key] = account.get(key)
+    elif path.name == "posttrade_account_snapshot.json":
+        positions_path = path.with_name("posttrade_positions.json")
+        positions = _read_json(positions_path)
+        if isinstance(positions, dict):
+            for key in ("positions_current", "positions", "normalized_positions"):
+                if enriched.get(key) is None and positions.get(key) is not None:
+                    enriched[key] = positions.get(key)
+    return enriched
 
 
 def _reconciliation_assessment(
@@ -1511,6 +1576,20 @@ def _positions_from_broker_snapshot(payload: dict[str, Any]) -> list[dict[str, A
         or []
     )
     out: list[dict[str, Any]] = []
+    if isinstance(positions, dict):
+        for symbol, qty in sorted(positions.items()):
+            numeric_qty = _safe_float(qty)
+            normalized = str(symbol or "").upper().strip()
+            if normalized and numeric_qty is not None:
+                out.append(
+                    {
+                        "symbol": normalized,
+                        "shares": _round(numeric_qty, 6),
+                        "price": None,
+                        "market_value": None,
+                    }
+                )
+        return out
     if not isinstance(positions, list):
         return out
     for row in positions:
@@ -2434,6 +2513,14 @@ def classify_operational_drag_reasons(
     latest = drag.get("latest") if isinstance(drag.get("latest"), dict) else {}
     latest_aligned_date = latest.get("date")
     reaches_requested_date = bool(drag.get("available")) and latest_aligned_date == trade_date
+    freshness = build_operational_drag_freshness_diagnostics(
+        trade_date=trade_date,
+        intended=intended,
+        actual=actual,
+        benchmark=benchmark,
+        drag=drag,
+        current_material=current_material,
+    )
 
     if not reaches_requested_date:
         status = "current_date_unavailable"
@@ -2480,8 +2567,170 @@ def classify_operational_drag_reasons(
             "latest_aligned_date": latest_aligned_date,
             "reaches_requested_date": reaches_requested_date,
             "current_date_material_reason_codes": current_material,
+            "stale_components": freshness["stale_components"],
+            "blocking_components": freshness["blocking_components"],
+            "dependency_diagnostics": freshness["components"],
         },
+        "freshness_diagnostics": freshness,
     }
+
+
+def build_operational_drag_freshness_diagnostics(
+    *,
+    trade_date: str,
+    intended: dict[str, Any],
+    actual: dict[str, Any],
+    benchmark: dict[str, Any],
+    drag: dict[str, Any],
+    current_material: list[str],
+) -> dict[str, Any]:
+    components = {
+        "intended": _component_freshness(
+            component="intended",
+            trade_date=trade_date,
+            payload=intended,
+            timeseries_key="timeseries",
+            source_diag=intended.get("source_diagnostics") or {},
+            material_reasons=current_material,
+        ),
+        "actual": _component_freshness(
+            component="actual",
+            trade_date=trade_date,
+            payload=actual,
+            timeseries_key="timeseries",
+            source_diag=actual.get("source_diagnostics") or {},
+            material_reasons=current_material,
+        ),
+        "benchmark": _component_freshness(
+            component="benchmark",
+            trade_date=trade_date,
+            payload=benchmark,
+            timeseries_key="timeseries",
+            source_diag=benchmark.get("source_diagnostics") or {},
+            material_reasons=current_material,
+        ),
+        "operational_drag": _component_freshness(
+            component="operational_drag",
+            trade_date=trade_date,
+            payload=drag,
+            timeseries_key="timeseries",
+            source_diag=drag.get("source_diagnostics") or {},
+            material_reasons=current_material,
+        ),
+    }
+    stale_components = sorted(
+        name for name, row in components.items()
+        if row.get("freshness_status") in {"STALE", "MISSING", "UNAVAILABLE"}
+    )
+    blocking_components = sorted(name for name, row in components.items() if row.get("blocks_decision_grade"))
+    return {
+        "schema_version": "operational_drag_freshness.v1",
+        "requested_date": trade_date,
+        "latest_aligned_date": ((drag.get("latest") or {}) if isinstance(drag.get("latest"), dict) else {}).get("date"),
+        "decision_grade_ready": not blocking_components,
+        "stale_components": stale_components,
+        "blocking_components": blocking_components,
+        "components": components,
+    }
+
+
+def _component_freshness(
+    *,
+    component: str,
+    trade_date: str,
+    payload: dict[str, Any],
+    timeseries_key: str,
+    source_diag: dict[str, Any],
+    material_reasons: list[str],
+) -> dict[str, Any]:
+    rows = payload.get(timeseries_key) if isinstance(payload.get(timeseries_key), list) else []
+    row_dates = sorted(str(row.get("date")) for row in rows if isinstance(row, dict) and _is_date(row.get("date")))
+    latest_date = row_dates[-1] if row_dates else None
+    selected_paths = _selected_paths_from_diagnostics(source_diag)
+    failed_paths = _failed_paths_from_diagnostics(source_diag)
+    component_reasons = [
+        str(reason)
+        for reason in (payload.get("reason_codes") or [])
+        if reason and reason != "ok"
+    ]
+    blocking_reasons = sorted(
+        {
+            reason for reason in component_reasons + list(material_reasons or [])
+            if _reason_blocks_component(component, reason)
+        }
+    )
+    if not bool(payload.get("available")):
+        freshness_status = "UNAVAILABLE"
+    elif latest_date is None:
+        freshness_status = "MISSING"
+    elif latest_date < trade_date:
+        freshness_status = "STALE"
+    else:
+        freshness_status = "CURRENT"
+    missing_dependency_reason = None
+    if freshness_status in {"UNAVAILABLE", "MISSING", "STALE"}:
+        missing_dependency_reason = blocking_reasons[0] if blocking_reasons else f"{component}_does_not_reach_requested_date"
+    return {
+        "component": component,
+        "requested_date": trade_date,
+        "source_date": latest_date,
+        "freshness_status": freshness_status,
+        "source_paths": selected_paths,
+        "failed_paths": failed_paths,
+        "reason_codes": _dedupe_reasons(component_reasons),
+        "missing_dependency_reason": missing_dependency_reason,
+        "blocking_component": component if missing_dependency_reason or blocking_reasons else None,
+        "blocks_decision_grade": bool(freshness_status != "CURRENT" or blocking_reasons),
+        "blocking_reason_codes": blocking_reasons,
+    }
+
+
+def _selected_paths_from_diagnostics(diagnostics: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    if not isinstance(diagnostics, dict):
+        return out
+    for key, value in diagnostics.items():
+        if key == "selected_paths" and isinstance(value, list):
+            out.extend(str(path) for path in value if path)
+        elif isinstance(value, dict):
+            out.extend(_selected_paths_from_diagnostics(value))
+    return _dedupe_list(out)
+
+
+def _failed_paths_from_diagnostics(diagnostics: dict[str, Any]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    if not isinstance(diagnostics, dict):
+        return out
+    for key, value in diagnostics.items():
+        if key == "failed_paths" and isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    out.append({"path": str(item.get("path") or ""), "reason": str(item.get("reason") or "unknown")})
+        elif isinstance(value, dict):
+            out.extend(_failed_paths_from_diagnostics(value))
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in out:
+        key = (item["path"], item["reason"])
+        if key not in seen:
+            deduped.append(item)
+            seen.add(key)
+    return deduped
+
+
+def _reason_blocks_component(component: str, reason: str) -> bool:
+    text = str(reason).lower()
+    if not _is_material_data_reason(text):
+        return False
+    if component == "actual":
+        return "actual" in text or "broker" in text or "reconciliation" in text or "position" in text
+    if component == "intended":
+        return "intended" in text or "plan" in text or "price" in text or "target" in text
+    if component == "benchmark":
+        return "spy" in text or "benchmark" in text or "price" in text
+    if component == "operational_drag":
+        return True
+    return False
 
 
 def build_operational_drag_analysis(
@@ -2607,6 +2856,7 @@ def build_operational_drag_analysis(
         "material_reason_codes": classification["material_reason_codes"],
         "non_material_reason_codes": classification["non_material_reason_codes"],
         "current_date_health": classification["current_date_health"],
+        "freshness_diagnostics": classification["freshness_diagnostics"],
     }
     return payload
 
@@ -2709,6 +2959,9 @@ def load_latest_operational_drag_summary(
             if "missing" in str(reason) or "unavailable" in str(reason)
         ],
         "reason_codes": _dedupe_reasons(drag.get("reason_codes") or []),
+        "current_date_status": drag.get("current_date_status"),
+        "decision_grade": drag.get("decision_grade"),
+        "freshness_diagnostics": drag.get("freshness_diagnostics") or {},
         "source_artifacts": [
             str(selected / name)
             for name in (
