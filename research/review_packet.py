@@ -1349,6 +1349,68 @@ def _build_operational_drag_section(repo: Path, trade_date: str) -> tuple[dict[s
     return section, source
 
 
+def _build_target_attainment_section(repo: Path, trade_date: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    base = repo / "outputs" / "target_attainment" / trade_date
+    path = base / f"target_attainment_{trade_date}.json"
+    artifact = _read_json(path)
+    if artifact is None:
+        source = _status(
+            artifact_name="target_attainment",
+            path=path,
+            date=trade_date,
+            exists=False,
+            reason_codes=["missing_target_attainment"],
+        )
+        return {
+            "available": False,
+            "confidence": "LOW",
+            "attainment_score": None,
+            "deployment_score": None,
+            "target_cash_pct": None,
+            "actual_cash_pct": None,
+            "cash_gap_pct": None,
+            "target_gross_exposure_pct": None,
+            "actual_gross_exposure_pct": None,
+            "exposure_gap_pct": None,
+            "deployment_efficiency_pct": None,
+            "undeployed_capital": None,
+            "excess_cash": None,
+            "top_drift_contributors": [],
+            "reason_codes": ["missing_target_attainment"],
+            "source_artifacts": [],
+        }, source
+    summary = artifact.get("summary") if isinstance(artifact.get("summary"), dict) else {}
+    reasons = sorted(set(str(code) for code in list(artifact.get("reason_codes") or ["ok"])))
+    section = {
+        "available": True,
+        "confidence": artifact.get("confidence") or summary.get("confidence") or "LOW",
+        "attainment_score": artifact.get("attainment_score") or summary.get("attainment_score"),
+        "deployment_score": artifact.get("deployment_score") or summary.get("deployment_score"),
+        "target_cash_pct": summary.get("target_cash_pct"),
+        "actual_cash_pct": summary.get("actual_cash_pct"),
+        "cash_gap_pct": summary.get("cash_gap_pct"),
+        "target_gross_exposure_pct": summary.get("target_gross_exposure_pct"),
+        "actual_gross_exposure_pct": summary.get("actual_gross_exposure_pct"),
+        "exposure_gap_pct": summary.get("exposure_gap_pct"),
+        "deployment_efficiency_pct": summary.get("deployment_efficiency_pct"),
+        "undeployed_capital": summary.get("undeployed_capital"),
+        "excess_cash": summary.get("excess_cash"),
+        "top_drift_contributors": artifact.get("top_drift_contributors") or [],
+        "reason_codes": reasons,
+        "source_artifacts": [str(path)],
+    }
+    source = _status(
+        artifact_name="target_attainment",
+        path=path,
+        date=str(artifact.get("trade_date") or trade_date),
+        exists=True,
+        confidence=section["confidence"],
+        reason_codes=reasons,
+        status="PRESENT",
+    )
+    return section, source
+
+
 def _classify_operational_drag_driver(latest: dict[str, Any], contributors: list[Any]) -> str:
     drag = _safe_float(latest.get("cumulative_operational_drag"))
     intended_excess = _safe_float(latest.get("intended_vs_spy_excess"))
@@ -2044,6 +2106,8 @@ def _recommended_actions(sections: dict[str, Any], sources: dict[str, Any]) -> l
         actions.append("Run .venv/bin/python scripts/build_governance_maturity.py --date YYYY-MM-DD to score governance maturity deterministically.")
     if not sections.get("operational_drag", {}).get("available"):
         actions.append("Run python3 -m research.operational_drag --date YYYY-MM-DD to build intended-vs-actual operational drag artifacts.")
+    if not sections.get("target_attainment", {}).get("available"):
+        actions.append("Run python3 -m research.target_attainment --date YYYY-MM-DD to build target-vs-actual attainment reconciliation.")
     if not sections.get("governance_calibration", {}).get("available"):
         actions.append("Run .venv/bin/python scripts/build_governance_calibration.py --date YYYY-MM-DD to evaluate concentration against design-aware (FR-040) thresholds and produce the OLD vs NEW reclassification artifact.")
     if signal.get("early_evidence"):
@@ -2142,6 +2206,7 @@ def build_research_review_packet(
     conc_diagnostic_section, conc_diagnostic_source = _build_concentration_diagnostic_section(repo, selected_date)
     maturity_section, maturity_source = _build_governance_maturity_section(repo, selected_date)
     operational_drag_section, operational_drag_source = _build_operational_drag_section(repo, selected_date)
+    target_attainment_section, target_attainment_source = _build_target_attainment_section(repo, selected_date)
     sources = {
         "model_review": model_source,
         "attribution": attribution_source,
@@ -2166,6 +2231,7 @@ def build_research_review_packet(
         "concentration_diagnostic": conc_diagnostic_source,
         "governance_maturity": maturity_source,
         "operational_drag": operational_drag_source,
+        "target_attainment": target_attainment_source,
         "governance_calibration": calibration_source,
         "governance_reclassification": reclassification_source,
     }
@@ -2195,6 +2261,7 @@ def build_research_review_packet(
         "concentration_diagnostic": conc_diagnostic_section,
         "governance_maturity": maturity_section,
         "operational_drag": operational_drag_section,
+        "target_attainment": target_attainment_section,
         "governance_calibration": calibration_section,
         "governance_reclassification": reclassification_section,
         "data_freshness": data_freshness,
@@ -2251,6 +2318,7 @@ def build_research_review_packet(
             "concentration_diagnostic": conc_diagnostic_section,
             "governance_maturity": maturity_section,
             "operational_drag": operational_drag_section,
+            "target_attainment": target_attainment_section,
             "governance_calibration": calibration_section,
             "governance_reclassification": reclassification_section,
             "tier1_research_controls": sections["tier1_research_controls"],
@@ -2330,6 +2398,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.extend(_render_concentration_diagnostic_md(sections["concentration_diagnostic"]))
     lines.extend(_render_governance_maturity_md(sections["governance_maturity"]))
     lines.extend(_render_operational_drag_md(sections["operational_drag"]))
+    lines.extend(_render_target_attainment_md(sections["target_attainment"]))
     lines.extend(_render_governance_calibration_md(sections["governance_calibration"]))
     lines.extend(_render_governance_reclassification_md(sections["governance_reclassification"]))
     lines.extend(_render_final_control_summary_md(sections["final_control_summary"]))
@@ -2914,6 +2983,40 @@ def _render_operational_drag_md(section: dict[str, Any]) -> list[str]:
             if isinstance(row, dict):
                 lines.append(
                     f"| {_md(row.get('window'))} | {_md(row.get('available'))} | {_md(row.get('intended_cumulative_return'))} | {_md(row.get('actual_cumulative_return'))} | {_md(row.get('spy_cumulative_return'))} | {_md(row.get('operational_drag'))} | {_md(row.get('confidence'))} |"
+                )
+        lines.append("")
+    lines += [f"Reason codes: {_md(section.get('reason_codes'))}", ""]
+    return lines
+
+
+def _render_target_attainment_md(section: dict[str, Any]) -> list[str]:
+    lines = ["## Target Attainment", ""]
+    if not section.get("available"):
+        return lines + [f"Missing or unavailable. Reason codes: {_md(section.get('reason_codes'))}", ""]
+    lines += [
+        f"- Attainment score: {_md(section.get('attainment_score'))}",
+        f"- Deployment score: {_md(section.get('deployment_score'))}",
+        f"- Target cash: {_md(section.get('target_cash_pct'))}",
+        f"- Actual cash: {_md(section.get('actual_cash_pct'))}",
+        f"- Cash gap: {_md(section.get('cash_gap_pct'))}",
+        f"- Target gross exposure: {_md(section.get('target_gross_exposure_pct'))}",
+        f"- Actual gross exposure: {_md(section.get('actual_gross_exposure_pct'))}",
+        f"- Exposure gap: {_md(section.get('exposure_gap_pct'))}",
+        f"- Undeployed capital: {_md(section.get('undeployed_capital'))}",
+        f"- Excess cash: {_md(section.get('excess_cash'))}",
+        f"- Confidence: {_md(section.get('confidence'))}",
+        "",
+    ]
+    contributors = section.get("top_drift_contributors") or []
+    if contributors:
+        lines += [
+            "| Symbol | Target Weight | Actual Weight | Drift | Reasons |",
+            "|---|---:|---:|---:|---|",
+        ]
+        for row in contributors[:10]:
+            if isinstance(row, dict):
+                lines.append(
+                    f"| {_md(row.get('symbol'))} | {_md(row.get('target_weight'))} | {_md(row.get('actual_weight'))} | {_md(row.get('weight_drift'))} | {_md(row.get('reason_codes'))} |"
                 )
         lines.append("")
     lines += [f"Reason codes: {_md(section.get('reason_codes'))}", ""]

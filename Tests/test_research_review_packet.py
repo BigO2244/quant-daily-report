@@ -364,6 +364,52 @@ def test_all_core_artifacts_present_generates_packet(tmp_path):
     assert (out_dir / "research_review.html").exists()
 
 
+def test_target_attainment_section_populates_when_artifact_exists(tmp_path):
+    trade_date = "2026-06-01"
+    _write_attribution(tmp_path, trade_date)
+    _write_decision(tmp_path, trade_date)
+    _write_json(
+        tmp_path / "outputs" / "target_attainment" / trade_date / f"target_attainment_{trade_date}.json",
+        {
+            "trade_date": trade_date,
+            "confidence": "HIGH",
+            "attainment_score": 72.5,
+            "deployment_score": 78.0,
+            "summary": {
+                "target_cash_pct": 0.05,
+                "actual_cash_pct": 0.25,
+                "cash_gap_pct": 0.20,
+                "target_gross_exposure_pct": 0.95,
+                "actual_gross_exposure_pct": 0.75,
+                "exposure_gap_pct": 0.20,
+                "deployment_efficiency_pct": 0.789474,
+                "undeployed_capital": 2000.0,
+                "excess_cash": 2000.0,
+            },
+            "top_drift_contributors": [
+                {
+                    "symbol": "AAA",
+                    "target_weight": 0.5,
+                    "actual_weight": 0.3,
+                    "weight_drift": -0.2,
+                    "reason_codes": ["sell_confirmation_constraint"],
+                }
+            ],
+            "reason_codes": ["cash_above_target", "exposure_below_target"],
+        },
+    )
+
+    result = build_research_review_packet(trade_date=trade_date, repo_root=tmp_path)
+
+    section = result["sections"]["target_attainment"]
+    assert section["available"] is True
+    assert section["attainment_score"] == 72.5
+    assert section["excess_cash"] == 2000.0
+    assert result["sources"]["target_attainment"]["status"] == "PRESENT"
+    md = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text()
+    assert "## Target Attainment" in md
+
+
 def test_missing_attribution_recommends_phase_a(tmp_path):
     trade_date = "2026-06-01"
     _write_decision(tmp_path, trade_date)
