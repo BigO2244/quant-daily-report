@@ -1493,6 +1493,8 @@ def main(argv: list[str] | None = None) -> int:
             "security_master_path",
             "security_master_warnings",
             "cash_gate_diagnostics",
+            "post_sell_rebudget",
+            "post_sell_rebudget_artifact_path",
         ):
             if key in (paper_summary or {}):
                 execution_payload[key] = (paper_summary or {}).get(key)

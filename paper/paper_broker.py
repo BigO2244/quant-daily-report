@@ -2892,6 +2892,302 @@ def _apply_buy_budget(
     return kept, skipped
 
 
+def _post_sell_rebudget_default(*, enabled: bool = False) -> Dict[str, object]:
+    return {
+        "schema_version": "post_sell_rebudget.v1",
+        "enabled": bool(enabled),
+        "status": "NOT_RUN",
+        "reason_codes": [],
+        "pre_sell_cash": None,
+        "pre_sell_buying_power": None,
+        "pre_sell_equity": None,
+        "sell_orders_submitted_count": 0,
+        "sell_orders_submitted": [],
+        "sell_phase_status": None,
+        "sell_phase_completion_reason": None,
+        "sell_phase_observed_statuses": {},
+        "confirmed_sell_proceeds": 0.0,
+        "post_sell_cash": None,
+        "post_sell_buying_power": None,
+        "post_sell_equity": None,
+        "risk_cash_target": None,
+        "target_cash_weight": None,
+        "buy_budget_before_safeguards": 0.0,
+        "broker_safeguard_buy_budget": 0.0,
+        "risk_cash_target_buy_budget": 0.0,
+        "buy_budget_after_safeguards": 0.0,
+        "buy_budget_basis": None,
+        "original_precomputed_buy_notional": 0.0,
+        "recomputed_requested_buy_notional": 0.0,
+        "recomputed_buy_notional": 0.0,
+        "final_submitted_buy_notional": 0.0,
+        "final_buy_orders_submitted": [],
+        "skipped_buy_orders": [],
+        "estimated_ending_cash": None,
+        "estimated_ending_cash_vs_risk_target": None,
+        "ending_cash": None,
+        "ending_cash_vs_risk_target": None,
+        "artifact_path": None,
+    }
+
+
+def _write_post_sell_rebudget_artifact(
+    *,
+    run_date: str,
+    payload: Dict[str, object],
+) -> str:
+    root = _run_output_root()
+    out_path = root / "broker" / f"post_sell_rebudget_{run_date}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_write_text(
+        out_path,
+        json.dumps(json_safe_primitive(payload), indent=2, sort_keys=True) + "\n",
+        allow_overwrite=True,
+    )
+    return str(out_path)
+
+
+def _rebudget_prices_with_precomputed_fallback(
+    *,
+    prev_closes: pd.Series,
+    plan_prices: pd.Series,
+) -> pd.Series:
+    if prev_closes is None or prev_closes.empty:
+        base = pd.Series(dtype=float)
+    else:
+        base = prev_closes.astype(float).copy()
+    if plan_prices is not None and not plan_prices.empty:
+        for ticker, price in plan_prices.astype(float).items():
+            base.loc[str(ticker)] = float(price)
+    return base
+
+
+def _positions_snapshot_to_holdings(
+    positions: List[Dict[str, object]] | None,
+    *,
+    sleeve: str,
+) -> pd.DataFrame:
+    holdings, _ = _alpaca_positions_to_holdings(positions or [], sleeve)
+    if holdings is None or holdings.empty:
+        return pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    return holdings[["ticker", "sleeve", "shares"]].copy()
+
+
+def _post_sell_buy_budget(
+    *,
+    account: Dict[str, object],
+    cfg: PaperConfig,
+    target_cash_weight: float,
+    fallback_equity: float,
+    capital_constraint_clear: bool,
+) -> Tuple[float, Dict[str, object]]:
+    cash_value = _coerce_float(account.get("cash"), 0.0) or 0.0
+    equity_value = _coerce_float(
+        account.get("equity") or account.get("portfolio_value"),
+        fallback_equity,
+    )
+    if equity_value is None or float(equity_value) <= 0.0:
+        equity_value = float(fallback_equity or 0.0)
+    buying_power_value = _coerce_float(account.get("buying_power"), None)
+    broker_budget, broker_basis = _compute_buy_budget(
+        account,
+        cfg,
+        capital_constraint_clear=capital_constraint_clear,
+    )
+    risk_cash_target = max(0.0, float(equity_value or 0.0) * float(target_cash_weight or 0.0))
+    cash_before_safeguards = max(0.0, float(cash_value))
+    risk_budget = max(0.0, float(cash_value) - risk_cash_target)
+    buy_budget = min(cash_before_safeguards, float(broker_budget), float(risk_budget))
+    return float(max(0.0, buy_budget)), {
+        "post_sell_cash": float(cash_value),
+        "post_sell_equity": float(equity_value or 0.0),
+        "post_sell_buying_power": buying_power_value,
+        "risk_cash_target": float(risk_cash_target),
+        "target_cash_weight": float(target_cash_weight or 0.0),
+        "buy_budget_before_safeguards": float(cash_before_safeguards),
+        "broker_safeguard_buy_budget": float(broker_budget),
+        "risk_cash_target_buy_budget": float(risk_budget),
+        "buy_budget_after_safeguards": float(max(0.0, buy_budget)),
+        "buy_budget_basis": broker_basis,
+    }
+
+
+def _rebuild_post_sell_buy_trades(
+    *,
+    holdings: pd.DataFrame,
+    targets: pd.DataFrame,
+    prices: pd.Series,
+    total_equity: float,
+    buy_budget: float,
+    cfg: PaperConfig,
+    max_buy_orders: int | None = None,
+) -> Tuple[pd.DataFrame, Dict[str, object], List[Dict[str, object]]]:
+    cols = ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
+    reason_codes: List[str] = []
+    skipped: List[Dict[str, object]] = []
+    kept_rows: List[Dict[str, object]] = []
+    candidates: List[Dict[str, object]] = []
+
+    if targets is None or targets.empty:
+        return pd.DataFrame(columns=cols), {
+            "status": "SKIPPED",
+            "reason_codes": ["missing_targets"],
+            "candidate_count": 0,
+            "recomputed_requested_buy_notional": 0.0,
+            "recomputed_buy_notional": 0.0,
+        }, []
+    if prices is None or prices.empty:
+        return pd.DataFrame(columns=cols), {
+            "status": "SKIPPED",
+            "reason_codes": ["missing_prices"],
+            "candidate_count": 0,
+            "recomputed_requested_buy_notional": 0.0,
+            "recomputed_buy_notional": 0.0,
+        }, []
+
+    holdings_map: Dict[str, float] = {}
+    if holdings is not None and not holdings.empty:
+        for _, row in holdings.iterrows():
+            ticker = str(row.get("ticker") or "").upper().strip()
+            if ticker:
+                holdings_map[ticker] = holdings_map.get(ticker, 0.0) + float(row.get("shares") or 0.0)
+
+    cash_buffer = 1.0 - (float(cfg.cash_buffer_bps or 0.0) / 10000.0)
+    cash_buffer = max(0.0, min(1.0, cash_buffer))
+    deadband_pct = float(getattr(cfg, "rebalance_deadband_pct", 0.0) or 0.0)
+    equity_value = max(0.0, float(total_equity or 0.0))
+
+    for _, row in targets.copy().sort_values(["target_weight", "ticker"], ascending=[False, True]).iterrows():
+        ticker = str(row.get("ticker") or "").upper().strip()
+        if not ticker:
+            continue
+        if ticker not in prices.index:
+            reason_codes.append(f"missing_price:{ticker}")
+            skipped.append({"ticker": ticker, "block_reason": "missing_price"})
+            continue
+        price = float(prices.loc[ticker])
+        if price <= 0.0:
+            reason_codes.append(f"invalid_price:{ticker}")
+            skipped.append({"ticker": ticker, "block_reason": "invalid_price", "price": price})
+            continue
+
+        target_weight = float(row.get("target_weight") or 0.0)
+        target_dollars = target_weight * equity_value * cash_buffer
+        target_shares = target_dollars / price if price > 0 else 0.0
+        if not cfg.allow_fractional:
+            target_shares = float(math.floor(max(0.0, target_shares)))
+        current_shares = float(holdings_map.get(ticker, 0.0))
+        desired_shares = max(0.0, float(target_shares) - current_shares)
+        if not cfg.allow_fractional:
+            desired_shares = float(math.floor(desired_shares))
+        if desired_shares <= 1e-12:
+            continue
+        if not cfg.allow_fractional and desired_shares < 1.0:
+            skipped.append({"ticker": ticker, "block_reason": "whole_share_sub_one_drop"})
+            continue
+
+        current_weight = (current_shares * price / equity_value) if equity_value > 0 else 0.0
+        drift = abs(target_weight - current_weight)
+        if deadband_pct > 0.0 and drift < deadband_pct:
+            skipped.append(
+                {
+                    "ticker": ticker,
+                    "block_reason": "deadband_drift_below_threshold",
+                    "current_weight": float(current_weight),
+                    "target_weight": float(target_weight),
+                    "drift": float(drift),
+                    "deadband_pct": float(deadband_pct),
+                }
+            )
+            continue
+
+        notional = desired_shares * price
+        if notional + 1e-9 < float(cfg.min_trade_dollars):
+            skipped.append(
+                {
+                    "ticker": ticker,
+                    "block_reason": "min_trade_dollars",
+                    "requested_notional": float(notional),
+                    "min_trade_dollars": float(cfg.min_trade_dollars),
+                }
+            )
+            continue
+
+        candidates.append(
+            {
+                "ticker": ticker,
+                "side": "BUY",
+                "shares": float(desired_shares),
+                "price": float(price),
+                "slippage_cost": 0.0,
+                "notional": float(notional),
+                "reason": "post_sell_rebudget",
+                "target_weight": float(target_weight),
+            }
+        )
+
+    candidates = sorted(candidates, key=lambda item: (-float(item["target_weight"]), str(item["ticker"])))
+    if max_buy_orders is None:
+        max_buy_orders = max(0, int(cfg.max_trades_per_day or 0))
+    else:
+        max_buy_orders = max(0, int(max_buy_orders))
+    spent = 0.0
+    for candidate in candidates:
+        if max_buy_orders > 0 and len(kept_rows) >= max_buy_orders:
+            skipped.append({**candidate, "block_reason": "max_trades_per_day"})
+            continue
+        remaining_budget = max(0.0, float(buy_budget) - spent)
+        requested_shares = float(candidate["shares"])
+        price = float(candidate["price"])
+        requested_notional = float(candidate["notional"])
+        if requested_notional <= remaining_budget + 1e-9:
+            allowed_shares = requested_shares
+        else:
+            allowed_shares = (
+                min(requested_shares, remaining_budget / price)
+                if cfg.allow_fractional
+                else min(requested_shares, float(math.floor(remaining_budget / price)))
+            )
+            if not cfg.allow_fractional:
+                allowed_shares = float(math.floor(max(0.0, allowed_shares)))
+
+        allowed_notional = allowed_shares * price
+        if allowed_shares <= 1e-12:
+            skipped.append({**candidate, "block_reason": BUY_BLOCKED_INSUFFICIENT_BUYING_POWER})
+            continue
+        if allowed_notional + 1e-9 < float(cfg.min_trade_dollars):
+            skipped.append(
+                {
+                    **candidate,
+                    "block_reason": "min_trade_dollars_after_budget_clip",
+                    "allowed_notional": float(allowed_notional),
+                }
+            )
+            continue
+
+        row = dict(candidate)
+        row["shares"] = float(allowed_shares)
+        row["notional"] = float(allowed_notional)
+        if allowed_shares + 1e-12 < requested_shares:
+            row["reason"] = "post_sell_rebudget_capital_clipped"
+        kept_rows.append({key: row.get(key) for key in cols})
+        spent += float(allowed_notional)
+
+    requested_total = float(sum(float(item["notional"]) for item in candidates))
+    status = "REBUILT" if kept_rows else ("NO_BUYS" if not candidates else "BLOCKED")
+    if not kept_rows and candidates:
+        reason_codes.append("buy_budget_exhausted")
+    meta = {
+        "status": status,
+        "reason_codes": sorted(set(reason_codes)),
+        "candidate_count": int(len(candidates)),
+        "recomputed_requested_buy_notional": requested_total,
+        "recomputed_buy_notional": float(spent),
+    }
+    frame = pd.DataFrame(kept_rows, columns=cols) if kept_rows else pd.DataFrame(columns=cols)
+    return frame, meta, skipped
+
+
 def _default_pdt_pretrade_meta() -> Dict[str, object]:
     return {
         "broker_pdt_risk_status": "UNKNOWN",
@@ -3788,10 +4084,18 @@ def run_paper_day(
     )
     if use_precomputed_trade_plan:
         pricing_source = "PRECOMPUTED_PLAN"
+        plan_pricing_series = (
+            pd.DataFrame(plan_price_rows).set_index("ticker")["price"].astype(float)
+            if plan_price_rows
+            else pd.Series(dtype=float)
+        )
         if plan_price_rows:
-            pricing_series = pd.DataFrame(plan_price_rows).set_index("ticker")["price"].astype(float)
+            pricing_series = _rebudget_prices_with_precomputed_fallback(
+                prev_closes=prev_closes,
+                plan_prices=plan_pricing_series,
+            )
         else:
-            pricing_series = pd.Series(dtype=float)
+            pricing_series = prev_closes.copy() if prev_closes is not None else pd.Series(dtype=float)
         pricing_asof = run_date
         validation_price_proxy = pd.Series(1.0, index=tickers, dtype=float)
     elif planning_mode:
@@ -4146,6 +4450,10 @@ def run_paper_day(
     buy_budget_computed: float | None = None
     buy_budget_basis: str = "cash"
     budget_skipped_orders: List[Dict[str, object]] = []
+    post_sell_rebudget: Dict[str, object] = _post_sell_rebudget_default(
+        enabled=bool(paper_execution_requested)
+    )
+    post_sell_rebudget_path: str | None = None
     posttrade_account_snapshot_path: str | None = None
     posttrade_positions_snapshot_path: str | None = None
     posttrade_recon_path: str | None = None
@@ -4345,6 +4653,33 @@ def run_paper_day(
                 alpaca = AlpacaBroker.from_env()
             remote_existing_orders: List[Dict[str, object]] = []
             sell_orders, buy_orders = _split_orders_for_execution(orders)
+            pre_sell_cash_value = _coerce_float(
+                (planning_account_snapshot or {}).get("cash"),
+                cash_prev,
+            )
+            pre_sell_equity_value = _coerce_float(
+                (planning_account_snapshot or {}).get("equity")
+                or (planning_account_snapshot or {}).get("portfolio_value"),
+                equity_prev,
+            )
+            pre_sell_buying_power_value = _coerce_float(
+                (planning_account_snapshot or {}).get("buying_power"),
+                None,
+            )
+            original_precomputed_buy_notional = _orders_notional(buy_orders, side="BUY")
+            post_sell_rebudget.update(
+                {
+                    "enabled": True,
+                    "status": "PENDING",
+                    "pre_sell_cash": pre_sell_cash_value,
+                    "pre_sell_buying_power": pre_sell_buying_power_value,
+                    "pre_sell_equity": pre_sell_equity_value,
+                    "sell_orders_submitted_count": 0,
+                    "original_precomputed_buy_notional": float(original_precomputed_buy_notional),
+                    "target_cash_weight": float(target_cash_weight),
+                    "risk_cash_target": float(float(pre_sell_equity_value or equity_prev) * float(target_cash_weight)),
+                }
+            )
             orders_by_id = {
                 str(order.get("order_id") or ""): dict(order)
                 for order in orders
@@ -4380,7 +4715,6 @@ def run_paper_day(
                     submission_metadata=submission_metadata,
                     alpaca_submissions=alpaca_submissions,
                     starting_positions=_holdings_to_quantity_map(holdings_prev),
-                    timeout_seconds_override=0.0,
                 )
                 sell_phase_status = str(sell_phase_result.get("status") or "UNKNOWN")
                 sell_phase_completion_reason = str(
@@ -4440,21 +4774,263 @@ def run_paper_day(
                         capital_constraint_clear = not bool(
                             (capital_budget_meta or {}).get("capital_constraint_triggered")
                         )
-                        buy_budget_computed, buy_budget_basis = _compute_buy_budget(
-                            postsell_account_snapshot,
-                            cfg,
-                            capital_constraint_clear=capital_constraint_clear,
+                        if sell_orders:
+                            buy_budget_computed, post_sell_budget_meta = _post_sell_buy_budget(
+                                account=postsell_account_snapshot,
+                                cfg=cfg,
+                                target_cash_weight=float(target_cash_weight),
+                                fallback_equity=float(equity_prev),
+                                capital_constraint_clear=capital_constraint_clear,
+                            )
+                        else:
+                            buy_budget_computed, buy_budget_basis_no_sells = _compute_buy_budget(
+                                postsell_account_snapshot,
+                                cfg,
+                                capital_constraint_clear=capital_constraint_clear,
+                            )
+                            post_sell_equity_no_sells = _coerce_float(
+                                postsell_account_snapshot.get("equity")
+                                or postsell_account_snapshot.get("portfolio_value"),
+                                equity_prev,
+                            )
+                            risk_cash_target_no_sells = max(
+                                0.0,
+                                float(post_sell_equity_no_sells or 0.0)
+                                * float(target_cash_weight or 0.0),
+                            )
+                            post_sell_budget_meta = {
+                                "post_sell_cash": float(postsell_cash_confirmed or 0.0),
+                                "post_sell_equity": float(post_sell_equity_no_sells or 0.0),
+                                "post_sell_buying_power": postsell_buying_power_confirmed,
+                                "risk_cash_target": float(risk_cash_target_no_sells),
+                                "target_cash_weight": float(target_cash_weight or 0.0),
+                                "buy_budget_before_safeguards": float(postsell_cash_confirmed or 0.0),
+                                "broker_safeguard_buy_budget": float(buy_budget_computed or 0.0),
+                                "risk_cash_target_buy_budget": max(
+                                    0.0,
+                                    float(postsell_cash_confirmed or 0.0)
+                                    - float(risk_cash_target_no_sells),
+                                ),
+                                "buy_budget_after_safeguards": float(buy_budget_computed or 0.0),
+                                "buy_budget_basis": buy_budget_basis_no_sells,
+                            }
+                        buy_budget_basis = str(
+                            post_sell_budget_meta.get("buy_budget_basis") or "cash"
                         )
                         cash_at_buy_decision = postsell_cash_confirmed
                         buying_power_at_buy_decision = postsell_buying_power_confirmed
+                        confirmed_sell_proceeds = max(
+                            0.0,
+                            float(postsell_cash_confirmed or 0.0)
+                            - float(pre_sell_cash_value or 0.0),
+                        )
+                        if not sell_orders:
+                            rebuilt_buy_orders = list(buy_orders)
+                            rebuilt_buy_trades = (
+                                execution_trades[
+                                    execution_trades["side"].astype(str).str.upper().isin(
+                                        {"BUY", "ADD"}
+                                    )
+                                ].copy()
+                                if execution_trades is not None
+                                and not execution_trades.empty
+                                and "side" in execution_trades.columns
+                                else pd.DataFrame(columns=executable_trades.columns)
+                            )
+                            rebudget_trade_meta = {
+                                "status": "SKIPPED",
+                                "reason_codes": ["no_sell_orders"],
+                                "candidate_count": int(len(rebuilt_buy_orders)),
+                                "recomputed_requested_buy_notional": float(original_precomputed_buy_notional),
+                                "recomputed_buy_notional": float(original_precomputed_buy_notional),
+                            }
+                            rebudget_skipped_orders = []
+                        else:
+                            if sell_phase_result.get("positions") is not None:
+                                post_sell_positions_for_rebudget = list(
+                                    json_safe_primitive(sell_phase_result.get("positions") or [])
+                                )
+                            else:
+                                post_sell_positions_for_rebudget = list(
+                                    json_safe_primitive(alpaca.get_positions() or [])
+                                )
+                            post_sell_holdings = _positions_snapshot_to_holdings(
+                                post_sell_positions_for_rebudget,
+                                sleeve=cfg.portfolio_id,
+                            )
+                            max_rebudget_buy_orders = max(
+                                0,
+                                int(cfg.max_trades_per_day or 0) - int(len(sell_orders)),
+                            )
+                            rebuilt_buy_trades, rebudget_trade_meta, rebudget_skipped_orders = (
+                                _rebuild_post_sell_buy_trades(
+                                    holdings=post_sell_holdings,
+                                    targets=targets,
+                                    prices=pricing_series,
+                                    total_equity=float(
+                                        post_sell_budget_meta.get("post_sell_equity") or equity_prev
+                                    ),
+                                    buy_budget=float(buy_budget_computed or 0.0),
+                                    cfg=cfg,
+                                    max_buy_orders=max_rebudget_buy_orders,
+                                )
+                            )
+                            if rebuilt_buy_trades is not None and not rebuilt_buy_trades.empty:
+                                rebuilt_buy_trades, rebudget_symbol_resolution = (
+                                    _apply_security_master_resolution_to_frame(
+                                        rebuilt_buy_trades,
+                                        run_date=run_date,
+                                    )
+                                )
+                                if str(
+                                    rebudget_symbol_resolution.get("security_master_resolution_status")
+                                    or ""
+                                ).upper() == "FAIL":
+                                    rebuilt_buy_trades = rebuilt_buy_trades.iloc[0:0].copy()
+                                    rebudget_trade_meta.setdefault("reason_codes", [])
+                                    rebudget_trade_meta["reason_codes"] = sorted(
+                                        set(
+                                            list(rebudget_trade_meta.get("reason_codes") or [])
+                                            + ["rebudget_security_master_resolution_failed"]
+                                        )
+                                    )
+                            rebuilt_buy_orders = _build_shadow_orders(
+                                rebuilt_buy_trades,
+                                run_id,
+                                allow_fractional=bool(cfg.allow_fractional),
+                            )
+                            rebuilt_buy_orders, rebudget_idempotent_skips = _filter_idempotent_orders(
+                                rebuilt_buy_orders,
+                                sent_ledger_path,
+                            )
+                            if rebudget_idempotent_skips:
+                                idempotent_skips.extend(rebudget_idempotent_skips)
+                                idempotent_drop_reasons["local_ledger"] += int(
+                                    len(rebudget_idempotent_skips)
+                                )
+                            if rebuilt_buy_orders:
+                                rebudget_asset_validation = _validate_alpaca_assets(
+                                    alpaca,
+                                    rebuilt_buy_orders,
+                                )
+                                if str(
+                                    rebudget_asset_validation.get("asset_validation_status") or ""
+                                ).upper() == "FAIL":
+                                    asset_validation = rebudget_asset_validation
+                                    asset_validation["asset_validation_artifact_path"] = _write_asset_validation_artifact(
+                                        run_date,
+                                        run_id,
+                                        asset_validation,
+                                    )
+                                    blocked_buy_count = int(len(rebuilt_buy_orders))
+                                    skipped_buy_count = int(len(rebuilt_buy_orders))
+                                    budget_skipped_orders = [
+                                        {**dict(order), "block_reason": BUY_BLOCKED_ASSET_VALIDATION_FAILED}
+                                        for order in rebuilt_buy_orders
+                                    ]
+                                    rebuilt_buy_orders = []
+                                    rebuilt_buy_trades = rebuilt_buy_trades.iloc[0:0].copy()
+                                    rebudget_trade_meta.setdefault("reason_codes", [])
+                                    rebudget_trade_meta["reason_codes"] = sorted(
+                                        set(
+                                            list(rebudget_trade_meta.get("reason_codes") or [])
+                                            + [BUY_BLOCKED_ASSET_VALIDATION_FAILED]
+                                        )
+                                    )
+                                else:
+                                    asset_validation = rebudget_asset_validation
+                        buy_orders = list(rebuilt_buy_orders)
+                        orders_by_id.update(
+                            {
+                                str(order.get("order_id") or ""): dict(order)
+                                for order in buy_orders
+                                if str(order.get("order_id") or "")
+                            }
+                        )
+                        sell_trade_rows = (
+                            execution_trades[
+                                execution_trades["side"].astype(str).str.upper().isin(
+                                    {"SELL", "CLOSE", "REDUCE"}
+                                )
+                            ].copy()
+                            if execution_trades is not None
+                            and not execution_trades.empty
+                            and "side" in execution_trades.columns
+                            else pd.DataFrame(columns=rebuilt_buy_trades.columns)
+                        )
+                        execution_trades = pd.concat(
+                            [sell_trade_rows, rebuilt_buy_trades],
+                            ignore_index=True,
+                            sort=False,
+                        ).reindex(columns=executable_trades.columns)
+                        trade_plan_trades = execution_trades.copy()
+                        execution_filter_stats["post_sell_rebudgeted"] = int(
+                            len(rebuilt_buy_orders)
+                        )
+                        rebudget_reason_codes = list(
+                            rebudget_trade_meta.get("reason_codes") or []
+                        )
+                        if str(sell_phase_status or "").upper() not in {"COMPLETED", "NO_SELLS"}:
+                            rebudget_reason_codes.append("sell_phase_not_fully_confirmed")
+                        if int(pending_sell_count_at_buy_decision or 0) > 0:
+                            rebudget_reason_codes.append("pending_sells_excluded_from_buy_budget")
+                        post_sell_rebudget.update(
+                            {
+                                **post_sell_budget_meta,
+                                "status": str(rebudget_trade_meta.get("status") or "SKIPPED"),
+                                "reason_codes": sorted(set(rebudget_reason_codes)),
+                                "sell_orders_submitted_count": int(len(phase_submitted)),
+                                "sell_orders_submitted": list(phase_submitted),
+                                "sell_phase_status": sell_phase_status,
+                                "sell_phase_completion_reason": sell_phase_completion_reason,
+                                "sell_phase_observed_statuses": dict(sell_phase_observed_statuses),
+                                "confirmed_sell_proceeds": float(confirmed_sell_proceeds),
+                                "original_precomputed_buy_notional": float(original_precomputed_buy_notional),
+                                "recomputed_requested_buy_notional": float(
+                                    rebudget_trade_meta.get("recomputed_requested_buy_notional")
+                                    or 0.0
+                                ),
+                                "recomputed_buy_notional": float(
+                                    rebudget_trade_meta.get("recomputed_buy_notional") or 0.0
+                                ),
+                                "final_submitted_buy_notional": float(
+                                    _orders_notional(rebuilt_buy_orders, side="BUY")
+                                ),
+                                "final_buy_orders_submitted": list(rebuilt_buy_orders),
+                                "skipped_buy_orders": list(rebudget_skipped_orders),
+                                "estimated_ending_cash": (
+                                    float(postsell_cash_confirmed or 0.0)
+                                    - float(_orders_notional(rebuilt_buy_orders, side="BUY"))
+                                ),
+                            }
+                        )
+                        if post_sell_rebudget.get("estimated_ending_cash") is not None:
+                            post_sell_rebudget["estimated_ending_cash_vs_risk_target"] = (
+                                float(post_sell_rebudget.get("estimated_ending_cash") or 0.0)
+                                - float(post_sell_rebudget.get("risk_cash_target") or 0.0)
+                            )
+                        post_sell_rebudget_path = _write_post_sell_rebudget_artifact(
+                            run_date=run_date,
+                            payload=post_sell_rebudget,
+                        )
+                        post_sell_rebudget["artifact_path"] = post_sell_rebudget_path
                         alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                         alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
                         alpaca_submission_summary["buy_budget_basis"] = buy_budget_basis
                         alpaca_submission_summary["cash_at_buy_decision"] = cash_at_buy_decision
                         alpaca_submission_summary["buying_power_at_buy_decision"] = buying_power_at_buy_decision
                         alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
+                        alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
+                        alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
+                        alpaca_submission_summary["asset_validation_status"] = asset_validation.get("asset_validation_status")
+                        alpaca_submission_summary["asset_validation_reason"] = asset_validation.get("asset_validation_reason")
+                        alpaca_submission_summary["invalid_symbols"] = list(asset_validation.get("invalid_symbols") or [])
+                        alpaca_submission_summary["non_tradable_symbols"] = list(asset_validation.get("non_tradable_symbols") or [])
+                        alpaca_submission_summary["invalid_asset_count"] = int(asset_validation.get("invalid_asset_count") or 0)
+                        if asset_validation.get("asset_validation_artifact_path"):
+                            alpaca_submission_summary["asset_validation_artifact_path"] = asset_validation.get("asset_validation_artifact_path")
                         logger.info(
-                            "[ALPACA][BUY_DECISION] sell_status=%s reason=%s snapshot=%s cash=%s buying_power=%s buy_budget=%.2f buy_budget_basis=%s pending_sells=%d",
+                            "[ALPACA][BUY_DECISION] sell_status=%s reason=%s snapshot=%s cash=%s buying_power=%s buy_budget=%.2f buy_budget_basis=%s pending_sells=%d rebudget_status=%s original_buy_notional=%.2f recomputed_buy_notional=%.2f",
                             sell_phase_status,
                             sell_phase_completion_reason,
                             postsell_account_snapshot_path,
@@ -4463,24 +5039,45 @@ def run_paper_day(
                             float(buy_budget_computed or 0.0),
                             buy_budget_basis,
                             int(pending_sell_count_at_buy_decision),
+                            post_sell_rebudget.get("status"),
+                            float(original_precomputed_buy_notional),
+                            float(post_sell_rebudget.get("recomputed_buy_notional") or 0.0),
                         )
                     except Exception as exc:
                         execution_outcome = EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE
-                        execution_reason = "post_sell_account_snapshot_write_failed"
+                        execution_reason = "post_sell_rebudget_failed"
                         execution_halt_reason = (
                             f"{EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE}:"
-                            "post_sell_account_snapshot_write_failed:"
+                            "post_sell_rebudget_failed:"
                             f"{CASH_REBALANCE_INCOMPLETE}"
                         )
                         cash_rebalance_status = CASH_REBALANCE_INCOMPLETE
-                        artifact_failure_stage = "post_sell_account_snapshot"
+                        artifact_failure_stage = "post_sell_rebudget"
                         artifact_failure_message = str(exc)
                         halt_remaining_buys = True
                         budget_skipped_orders = list(buy_orders)
                         buy_budget_computed = 0.0
+                        post_sell_rebudget.update(
+                            {
+                                "status": "SKIPPED",
+                                "reason_codes": ["post_sell_rebudget_failed"],
+                                "buy_budget_after_safeguards": 0.0,
+                                "final_submitted_buy_notional": 0.0,
+                            }
+                        )
+                        try:
+                            post_sell_rebudget_path = _write_post_sell_rebudget_artifact(
+                                run_date=run_date,
+                                payload=post_sell_rebudget,
+                            )
+                            post_sell_rebudget["artifact_path"] = post_sell_rebudget_path
+                        except Exception:
+                            pass
                         alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                         alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
                         alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
+                        alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
+                        alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
                         alpaca_submission_summary["artifact_failure_stage"] = artifact_failure_stage
                         alpaca_submission_summary["artifact_failure_message"] = artifact_failure_message
                         alpaca_submission_summary["execution_outcome"] = execution_outcome
@@ -4499,9 +5096,25 @@ def run_paper_day(
                         )
                 else:
                     buy_budget_computed = 0.0
+                    buy_orders = []
+                    post_sell_rebudget.update(
+                        {
+                            "status": "SKIPPED",
+                            "reason_codes": ["missing_postsell_account_snapshot"],
+                            "buy_budget_after_safeguards": 0.0,
+                            "final_submitted_buy_notional": 0.0,
+                        }
+                    )
+                    post_sell_rebudget_path = _write_post_sell_rebudget_artifact(
+                        run_date=run_date,
+                        payload=post_sell_rebudget,
+                    )
+                    post_sell_rebudget["artifact_path"] = post_sell_rebudget_path
                     alpaca_submission_summary["postsell_cash_confirmed"] = postsell_cash_confirmed
                     alpaca_submission_summary["buy_budget_computed"] = buy_budget_computed
                     alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
+                    alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
+                    alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
 
                 buy_phase_block_reason = execution_reason if execution_outcome else None
                 if execution_outcome == EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE:
@@ -4606,6 +5219,25 @@ def run_paper_day(
                 submit_success += phase_success
                 submit_failed += phase_failed
                 alpaca_submission_summary["buy_phase_submitted"] = int(len(phase_submitted))
+                if post_sell_rebudget.get("enabled"):
+                    final_buy_notional = float(_orders_notional(phase_submitted, side="BUY"))
+                    post_sell_rebudget["final_submitted_buy_notional"] = final_buy_notional
+                    post_sell_rebudget["final_buy_orders_submitted"] = list(phase_submitted)
+                    if postsell_cash_confirmed is not None:
+                        post_sell_rebudget["estimated_ending_cash"] = (
+                            float(postsell_cash_confirmed) - final_buy_notional
+                        )
+                        post_sell_rebudget["estimated_ending_cash_vs_risk_target"] = (
+                            float(post_sell_rebudget.get("estimated_ending_cash") or 0.0)
+                            - float(post_sell_rebudget.get("risk_cash_target") or 0.0)
+                        )
+                    post_sell_rebudget_path = _write_post_sell_rebudget_artifact(
+                        run_date=run_date,
+                        payload=post_sell_rebudget,
+                    )
+                    post_sell_rebudget["artifact_path"] = post_sell_rebudget_path
+                    alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
+                    alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
                 alpaca_submission_summary["sell_submit_started_at"] = sell_submit_started_at
                 alpaca_submission_summary["sell_submit_completed_at"] = sell_submit_completed_at
                 alpaca_submission_summary["buy_submit_started_at"] = buy_submit_started_at
@@ -4730,19 +5362,34 @@ def run_paper_day(
                     posttrade_filled_orders_count = int(
                         posttrade_state.get("posttrade_filled_orders_count") or 0
                     )
-                posttrade_resolved_orders = list(
-                    posttrade_state.get("posttrade_resolved_orders") or []
-                )
+                    posttrade_resolved_orders = list(
+                        posttrade_state.get("posttrade_resolved_orders") or []
+                    )
+                    if post_sell_rebudget.get("enabled"):
+                        ending_cash = _coerce_float(alpaca_account_snapshot.get("cash"), None)
+                        if ending_cash is not None:
+                            post_sell_rebudget["ending_cash"] = float(ending_cash)
+                            post_sell_rebudget["ending_cash_vs_risk_target"] = (
+                                float(ending_cash)
+                                - float(post_sell_rebudget.get("risk_cash_target") or 0.0)
+                            )
+                        post_sell_rebudget_path = _write_post_sell_rebudget_artifact(
+                            run_date=run_date,
+                            payload=post_sell_rebudget,
+                        )
+                        post_sell_rebudget["artifact_path"] = post_sell_rebudget_path
+                        alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
+                        alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
 
-            if (
-                execution_outcome in {
-                    EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
-                    EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
-                }
-                and cash_rebalance_status == CASH_REBALANCE_INCOMPLETE
-                and CASH_REBALANCE_INCOMPLETE not in posttrade_repair_suggestions
-            ):
-                posttrade_repair_suggestions.append(CASH_REBALANCE_INCOMPLETE)
+                if (
+                    execution_outcome in {
+                        EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT,
+                        EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE,
+                    }
+                    and cash_rebalance_status == CASH_REBALANCE_INCOMPLETE
+                    and CASH_REBALANCE_INCOMPLETE not in posttrade_repair_suggestions
+                ):
+                    posttrade_repair_suggestions.append(CASH_REBALANCE_INCOMPLETE)
 
             execution_submitted_symbols = sorted(
                 {
@@ -5019,6 +5666,9 @@ def run_paper_day(
         posttrade_recon_status=posttrade_recon_status,
         posttrade_resolved_orders=posttrade_resolved_orders,
     )
+    cash_gate_diagnostics["post_sell_rebudget"] = dict(post_sell_rebudget)
+    if post_sell_rebudget_path:
+        cash_gate_diagnostics["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
 
     return {
         "date": run_date,
@@ -5093,8 +5743,10 @@ def run_paper_day(
         "alpaca_submissions": alpaca_submissions,
         "alpaca_orders_path": alpaca_orders_path,
         "alpaca_submission_summary": alpaca_submission_summary,
-        "cash_gate_diagnostics": cash_gate_diagnostics,
-        "order_lifecycle": [
+            "cash_gate_diagnostics": cash_gate_diagnostics,
+            "post_sell_rebudget": post_sell_rebudget,
+            "post_sell_rebudget_artifact_path": post_sell_rebudget_path,
+            "order_lifecycle": [
             {
                 "symbol": str(item.get("symbol") or item.get("ticker") or ""),
                 "ticker": str(item.get("ticker") or item.get("symbol") or ""),
