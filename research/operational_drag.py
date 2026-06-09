@@ -1318,6 +1318,8 @@ def _actual_rows_from_nav_series(
                 continue
             cash = _safe_float(raw.get("cash") or raw.get("cash_value"))
             gross = _safe_float(raw.get("gross_exposure") or raw.get("gross") or raw.get("exposure"))
+            if gross is None and cash is not None:
+                gross = max(0.0, (float(equity) - float(cash)) / float(equity))
             by_date[date] = {
                 "date": date,
                 "actual_equity_value": _round(equity, 6),

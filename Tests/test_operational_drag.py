@@ -156,6 +156,21 @@ def test_actual_nav_can_be_built_from_nav_and_broker_fixture(tmp_path: Path) -> 
     assert {row["symbol"] for row in actual["actual_positions"]} == {"AAA", "BBB"}
 
 
+def test_actual_nav_derives_gross_from_cash_and_equity_when_nav_series_omits_gross(tmp_path: Path) -> None:
+    root = _fixture_repo(tmp_path)
+    _write_csv(
+        root / "outputs" / "perf" / "live_overlay_nav_series.csv",
+        [
+            {"date": "2026-06-01", "equity": 10000.0, "cash": 5000.0},
+            {"date": "2026-06-02", "equity": 10050.0, "cash": 5000.0},
+        ],
+    )
+
+    actual = build_actual_nav(trade_date=TRADE_DATE, repo_root=root)
+
+    assert actual["actual_gross_exposure"] == pytest.approx((10050.0 - 5000.0) / 10050.0)
+
+
 def test_price_panel_parquet_reader_succeeds_on_fixture(tmp_path: Path) -> None:
     root = _fixture_repo(tmp_path)
     (root / "outputs" / "prices" / "close_history.csv").unlink()
