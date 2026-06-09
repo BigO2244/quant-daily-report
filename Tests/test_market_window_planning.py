@@ -969,6 +969,83 @@ def test_normalize_and_filter_executable_trades_applies_rounding_and_min_notiona
     assert stats["kept"] == 1
 
 
+def test_normalize_and_filter_executable_trades_preserves_fractional_shares_when_enabled():
+    trades = pd.DataFrame(
+        [
+            {"ticker": "CAT", "side": "BUY", "shares": 0.56, "price": 915.0, "slippage_cost": 0.0, "notional": 512.4, "reason": "fractional"},
+            {"ticker": "GS", "side": "BUY", "shares": 0.04, "price": 1000.0, "slippage_cost": 0.0, "notional": 40.0, "reason": "below_min"},
+        ]
+    )
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=True,
+        min_trade_dollars=100.0,
+    )
+
+    out, stats = broker._normalize_and_filter_executable_trades(trades, cfg)
+
+    assert list(out["ticker"]) == ["CAT"]
+    assert float(out.iloc[0]["shares"]) == pytest.approx(0.56)
+    assert float(out.iloc[0]["notional"]) == pytest.approx(512.4)
+    assert stats["raw"] == 2
+    assert stats["dropped_zero_shares"] == 0
+    assert stats["dropped_min_notional"] == 1
+    assert stats["kept"] == 1
+
+
+def test_build_shadow_orders_preserves_fractional_shares_when_enabled():
+    trades = pd.DataFrame(
+        [
+            {"ticker": "CAT", "side": "BUY", "shares": 0.56, "price": 915.0, "slippage_cost": 0.0, "notional": 512.4, "reason": "fractional"},
+        ]
+    )
+
+    fractional_orders = broker._build_shadow_orders(
+        trades,
+        "run-fractional",
+        allow_fractional=True,
+    )
+    whole_share_orders = broker._build_shadow_orders(
+        trades,
+        "run-whole-share",
+        allow_fractional=False,
+    )
+
+    assert len(fractional_orders) == 1
+    assert fractional_orders[0]["quantity"] == pytest.approx(0.56)
+    assert whole_share_orders == []
+
+
+def test_risk_controls_preflight_position_cap_preserves_fractional_shares(tmp_path):
+    trades = pd.DataFrame(
+        [
+            {"ticker": "CAT", "side": "BUY", "shares": 2.0, "price": 900.0, "slippage_cost": 0.0, "notional": 1800.0, "reason": "rebalance"},
+        ]
+    )
+    cfg = broker.PaperConfig(
+        initial_equity=5000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=True,
+        min_trade_dollars=100.0,
+        max_position_pct=0.20,
+    )
+
+    result = broker._risk_controls_preflight(
+        trades,
+        equity=5000.0,
+        ledger_path=str(tmp_path / "missing_ledger.csv"),
+        cfg=cfg,
+    )
+
+    assert result["blocked"] is False
+    assert result["trimmed_tickers"] == ["CAT"]
+    assert float(trades.iloc[0]["shares"]) == pytest.approx(1000.0 / 900.0)
+    assert float(trades.iloc[0]["notional"]) == pytest.approx(1000.0)
+
+
 def test_apply_risk_guards_turnover_cap_scales_without_hard_stop_and_drops_dust():
     cfg = broker.PaperConfig(
         initial_equity=10000.0,

@@ -1142,14 +1142,21 @@ def _run_id(run_date: str, cfg: PaperConfig) -> str:
     return f"{run_date}:{cfg.portfolio_id}:{cfg.strategy_version}"
 
 
-def _build_shadow_orders(trades: pd.DataFrame, run_id: str) -> List[Dict[str, object]]:
+def _build_shadow_orders(
+    trades: pd.DataFrame,
+    run_id: str,
+    *,
+    allow_fractional: bool = False,
+) -> List[Dict[str, object]]:
     orders: List[Dict[str, object]] = []
     if trades is None or trades.empty:
         return orders
     for _, tr in trades.iterrows():
         shares = abs(float(tr.get("shares", 0.0)))
         notional = abs(float(tr.get("notional", 0.0)))
-        if shares < 1.0 or notional < 1.0:
+        if shares <= 1e-12 or notional < 1.0:
+            continue
+        if not allow_fractional and shares < 1.0:
             continue
         ticker = str(tr["ticker"])
         side = str(tr["side"]).upper()
@@ -1257,9 +1264,11 @@ def _normalize_and_filter_executable_trades(
         rounded = row.to_dict()
         shares = abs(float(rounded.get("shares", 0.0)))
         price = float(rounded.get("price", 0.0))
-        rounded_shares = float(math.floor(shares))
+        rounded_shares = shares if cfg.allow_fractional else float(math.floor(shares))
 
-        if rounded_shares < 1.0:
+        if rounded_shares <= 1e-12 or (
+            not cfg.allow_fractional and rounded_shares < 1.0
+        ):
             dropped_zero_shares += 1
             continue
 
@@ -3499,7 +3508,12 @@ def _risk_controls_preflight(
                 execution_trades.loc[idx, "notional"] = rc.max_position_pct * equity
                 price = float(row.get("price") or 0.0)
                 if price > 0:
-                    new_shares = math.floor((rc.max_position_pct * equity) / price)
+                    capped_shares = (rc.max_position_pct * equity) / price
+                    new_shares = (
+                        capped_shares
+                        if bool(getattr(cfg, "allow_fractional", False))
+                        else math.floor(capped_shares)
+                    )
                     execution_trades.loc[idx, "shares"] = float(new_shares)
                     execution_trades.loc[idx, "notional"] = new_shares * price
                 ticker = str(row.get("ticker", ""))
@@ -4196,7 +4210,11 @@ def run_paper_day(
 
     alpaca: AlpacaBroker | None = None
     if execution_enabled:
-        initial_orders = _build_shadow_orders(execution_trades, run_id)
+        initial_orders = _build_shadow_orders(
+            execution_trades,
+            run_id,
+            allow_fractional=bool(cfg.allow_fractional),
+        )
         alpaca_submission_summary["initial_intended_orders"] = int(len(initial_orders))
         same_day_locked_orders = 0
         same_day_prior_run_ids: List[str] = []

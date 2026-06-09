@@ -70,6 +70,26 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   deployed version: it observes and classifies integrity failures, but does not
   create a new post-submit halt path unless a later FR explicitly promotes that
   behavior with its own validation and rollback boundary.
+- On 2026-06-09, a fractional-trading execution audit confirmed that
+  `allow_fractional_shares=true` is intended system behavior for the paper
+  broker, not an accidental config setting. Target-weight construction,
+  rebalance sizing, turnover scaling, capital-budget clipping, and Alpaca
+  submission are all compatible with fractional quantities.
+- The defect was downstream whole-share normalization in the execution path:
+  final executable-trade filtering and shadow-order construction treated
+  sub-1-share orders as zero-share drops even when fractional trading was
+  enabled. That made high-price target allocations appear as explicit target
+  weights but disappear before order eligibility/submission.
+- Historical artifact review found 53 impacted days, 230 zero-share drops,
+  approximately $93.7k of aggregate buy capacity lost after capital-budget
+  limits but before executable-order construction, and approximately 16.72%
+  average underdeployment on impacted days. Treat these as operational-drag
+  evidence, not a strategy target-cash decision.
+- Future execution-adjacent reviews should distinguish target cash, capital
+  reserve/cash-budget clipping, min-notional filtering, whole-share-only
+  behavior, fractional-enabled execution, and market-guard/plan-only states.
+  A reported achieved-cash or gross-exposure value is not sufficient evidence
+  that portfolio construction intentionally targeted cash.
 
 ## Artifact Lessons
 

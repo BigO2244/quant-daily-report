@@ -57,11 +57,31 @@ The audit artifact contains:
   block/defer/continuation scope explains the difference.
 - Intended BUY orders must not disappear silently.
 - Pending BUYs with zero submitted BUYs must not be treated as clean success.
+- When `allow_fractional_shares=true`, sub-1-share orders that satisfy the
+  minimum-notional and risk/capital checks are valid execution candidates. They
+  must not be reclassified as zero-share drops by downstream executable-order
+  filtering or shadow-order construction.
 - Execution eligible count should match `execution_payload.trades` unless an
   explicit exception reason exists.
 - Submitted, accepted, rejected, and broker response counts should reconcile.
 - Material cash target drift should surface as an operator warning.
 - Continuation runs should identify mode, side, source, and source artifact.
+
+## Fractional Trading Semantics
+
+`allow_fractional_shares=true` is intended system behavior for the paper
+broker. Fractional quantities are expected to survive target-weight conversion,
+rebalance sizing, turnover-risk scaling, capital-budget clipping, executable
+trade filtering, shadow-order construction, and Alpaca submission as long as
+all existing safeguards still pass.
+
+The 2026-06-09 fractional-trading audit found that historical underdeployment
+was caused by downstream whole-share normalization, not by portfolio
+construction, cash-target policy, or strategy intent. Historical artifact
+review measured 53 impacted days, 230 zero-share drops, approximately $93.7k of
+aggregate buy capacity lost, and approximately 16.72% average underdeployment
+on impacted days. See `docs/governance/operational_lessons.md` for the
+operational lesson.
 
 ## Operator Surface
 
