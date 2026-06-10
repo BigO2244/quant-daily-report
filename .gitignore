@@ -81,6 +81,8 @@ data/cache/
 data/research_cache/
 data/security_master/*
 !data/security_master/manual_aliases.json
+data/pit_universe/*
+!data/pit_universe/README.md
 *.csv
 *.parquet
 # Loose root-level scripts and artifacts
