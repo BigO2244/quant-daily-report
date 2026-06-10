@@ -1,6 +1,6 @@
 # FR-067 Vela Research Specification (Small-Cap Momentum Sleeve)
 
-Status: Draft (strategy name and registry addition pending owner approval)
+Status: Draft / BLOCKED_ON_VENDOR_TRIAL (Sharadar conditional pending coverage verification)
 Owner: Caerus Research Program
 Last Updated: 2026-06-10
 Governance Label: RESEARCH_ONLY
@@ -222,8 +222,9 @@ Risks:
 
 Open questions (answer before Stage 1):
 
-1. Universe/membership source: Norgate vs Sharadar vs reconstructed S&P 600
-   announcements — cost, license, and delisted-price coverage comparison.
+1. Universe/membership source: Sharadar is conditional pending trial verification
+   by `scripts/research/verify_sharadar_coverage.py`; if coverage is inadequate,
+   Norgate, CRSP/WRDS, or other vendors remain under evaluation.
 2. IWM vs S&P 600 (VIOO/IJR) as primary benchmark.
 3. Should the regime risk-off gate reuse the existing four-dimension regime
    engine (large-cap inputs) or a small-cap-native breadth measure?

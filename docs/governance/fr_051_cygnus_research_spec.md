@@ -1,6 +1,6 @@
 # FR-051 Cygnus Research Specification
 
-Status: Draft — Implementation Wave 1 addendum added 2026-06-10 (pending owner approval)
+Status: V0_SHELVED — Stage 2 validation FAIL recorded 2026-06-10
 Owner: Caerus Research Program
 Last Updated: 2026-06-10
 Governance Label: RESEARCH_ONLY
@@ -565,3 +565,25 @@ Resolved by this addendum: event source (EDGAR), v0 surprise definition
 above). Still open: consensus/revision vendor for v1/v2; guidance parsing
 (deferred per canonical spec); whether `filing_only` events earn a permanent
 place or are dropped after Stage 2 attribution.
+
+### A7. Stage 2 v0 verdict (2026-06-10)
+
+Cygnus v0 Stage 2 validation verdict: **FAIL**. The v0 event-reaction variant is
+shelved and must not be re-tuned. The 2025-forward holdout remains untouched and
+preserved; it was not run for this verdict.
+
+| Criterion | Result | Verdict |
+|---|---:|---|
+| Rank IC of v0 score vs 10D forward returns | IC 0.0318, t-stat 1.59 | FAIL — t-stat below 2 |
+| IC 20D/60D decay | positive decay profile | PASS |
+| Net IR vs SPY at 25 bps | 0.44 | PASS |
+| Excess-return correlation vs Polaris proxy | 0.043 | PASS |
+| Event coverage | 1.05 | PASS |
+| Cost sensitivity at 50 bps | IR -0.32 | FAIL |
+| Overall | 4/6 | FAIL |
+
+The tune window also failed, so the failure is not a validation-only anomaly.
+Cygnus v1 is gated on EPS-surprise / consensus data with auditable point-in-time
+availability. Future diagnostics may compute Newey-West or date-clustered
+t-statistics to better characterize event clustering, but that diagnostic is
+optional and does not change the v0 verdict.

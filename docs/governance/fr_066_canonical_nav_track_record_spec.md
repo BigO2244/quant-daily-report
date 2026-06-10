@@ -1,6 +1,6 @@
 # FR-066 Canonical NAV Track Record Integrity Specification
 
-Status: Draft (pending owner approval)
+Status: DEPLOYED_OBSERVING
 Owner: Caerus Research Program
 Last Updated: 2026-06-10
 Governance Label: OPERATIONAL_TELEMETRY
@@ -21,10 +21,10 @@ strategy evidence is decision-grade, and the fund cannot answer the most basic
 question a fund must answer: what did the book return, against what benchmark,
 every day since inception.
 
-## Problem Statement (verified evidence, 2026-06-10)
+## Problem Statement (verified evidence before FR-066 deployment, 2026-06-10)
 
-1. The canonical NAV artifact `outputs/portfolio_history/nav.csv` covers only
-   2026-03-03 through 2026-04-08 (26 rows, $10,000.00 -> $9,715.45). The
+1. Before deployment, the canonical NAV artifact `outputs/portfolio_history/nav.csv`
+   covered only 2026-03-03 through 2026-04-08 (26 rows). The
    builder (`scripts/build_portfolio_history.py`) was last run for trade date
    2026-04-09 and was never scheduled.
 2. The 2026-06-08 freshness audit (`portfolio_history_freshness.json`) reports
@@ -42,10 +42,25 @@ every day since inception.
    telemetry failure) is in progress and is a sibling of this FR, not a
    substitute: FR-059 makes the refresh fail loudly; FR-066 ensures a durable
    canonical record exists independent of the refresh.
-5. Known broker equity points: $10,000.00 (2026-03-03, inception),
-   $9,715.45 (2026-04-08), $10,359.36 (2026-05-18 snapshot). No daily series
-   connects these points, and no SPY-relative or beta-adjusted record exists
-   anywhere in the system.
+5. Known broker equity points existed as isolated dashboard/snapshot evidence.
+   No daily series connected these points, and no SPY-relative or beta-adjusted
+   record existed anywhere in the system.
+
+## Deployment Note (2026-06-10)
+
+FR-066 was deployed to the VM after owner approval. The inception backfill dry-run
+and write used the VM `.env` without printing credentials. After correcting Alpaca
+1D portfolio-history timestamp alignment to the New York session date, the
+canonical series is continuous from 2026-03-03 and the daily builder extended it
+through 2026-06-10. The Apr 8 canonical Alpaca portfolio-history row is
+`$9,751.97`; the older `$9,715.45` figure remains a historical baseline
+discrepancy and is not source truth. SPY and beta-adjusted columns are populated
+subject to rolling-window availability. The 7:15 PM ET builder/escalation cron is
+installed on the VM and writes to `logs/portfolio_history.cron.log`.
+
+Backfill reconciliation is clean against overlapping `nav.csv` rows. Broker
+snapshot reconciliation remains a provenance caveat because snapshots are
+point-in-time account captures and are not the same EOD portfolio-history source.
 
 ## Design
 

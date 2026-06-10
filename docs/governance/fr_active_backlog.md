@@ -54,9 +54,9 @@ Fully deployed history and reviewed deferred items belong in
 | FR-063 Strategy Differentiation Deep Dive | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Shadow snapshots, attribution, model tournament, promotion readiness, strategy registry | implementation_started | Decide whether Polaris/Orion/Lyra are meaningfully distinct or redundant, evaluate Phoenix distinctiveness when evidence exists, and surface pairwise redundancy watchlist findings without recommending retirement absent decision-grade evidence. | Revert the deep-dive module/CLI/tests; ignore generated `strategy_differentiation_deep_dive.*` artifacts. No strategy retirement, promotion, or execution behavior changes are in scope. |
 | FR-064 Multi-Asset Research Framework | Investment Confidence / Research Design | `DRAFT_RESEARCH` | LOW | Strategy registry, data inventory, existing price artifacts | design_audit_started | Create a non-executional audit framework for evaluating Treasury duration, cash/T-bills, gold, commodities, managed-futures proxies, defensive equity ETF proxies, and deferred options-overlay design questions. | Revert the framework doc/module/CLI/tests; ignore generated `multi_asset_research_framework.*` artifacts. No trading, allocation, or production order generation is in scope. |
 | FR-065 Dashboard Decision-Grade Consolidation | Investment Confidence / Operator Surface | `ACTIVE_RESEARCH` | LOW | Model-quality artifacts, dashboard data builder, terminal dashboard assets | implementation_started | Add a compact dashboard data-model and terminal panel section summarizing decision-grade readiness, research confidence, latest model-quality evidence, blockers, and source paths. | Revert dashboard data/UI/test changes; dashboard falls back to existing broker-authoritative panels. No broker truth, execution, planned-trade, or warning behavior changes are in scope. |
-| FR-066 Canonical NAV Track Record Integrity | Operational Telemetry / Performance Provenance | `IN_PROGRESS` | LOW (telemetry-only) | FR-059 reason codes, Alpaca portfolio-history endpoint, existing `build_portfolio_history.py` / benchmark CSV / broker snapshots | local_implementation_validated | Local-validated: backfill script (dry-run default, 1bp reconciliation, manifest), builder extended (benchmark/beta columns, append-only guard, checksum manifest, scoreboard summary), `core/portfolio_history_escalation.py` (NAV_GAP + `[CAERUS NAV BROKEN]` escalation), freshness checksum/gap checks, and a proposed (uninstalled) post-close cron line. 27 targeted tests pass; cron validates (24 checks); `git diff --check` clean. Owner-gated: run the inception backfill with credentials; install the cron line on the VM. | Revert the four module changes + crontab line; delete `backfill_manifest.json`, `checksum_manifest.json`, and added NAV columns; existing 26 nav rows are never deleted. No execution, broker submission, allocation, strategy, or promotion behavior is in scope. |
-| FR-051 Cygnus Wave 1 (v0 event-reaction) | Research / Earnings Drift | `IN_PROGRESS` | LOW (research-only) | FR-051 spec + 2026-06-10 addendum, EDGAR submissions API, `cik_mapping_results.csv`, `paper/trading_calendar.py` | stage1_complete_stage2_owner_gated | Stage 1 delivered: `research/cygnus/` event-tape module (8-K Item 2.02, A2 ET availability rules, `filings.files` pagination) + acceptance-timestamp audit + CLI. Live bounded sample: 255 events / 6 tickers, `look_ahead_safe=True`, 0 missing timestamps; 10 tests pass. PAUSED: Stage 2 (`cygnus_v0_event_reaction` + A4 pass/fail table) is gated on owner review of the acceptance-timestamp audit. No shadow integration this wave. | Delete `research/cygnus/`, `scripts/research/run_cygnus_research.py`, `Tests/test_cygnus_events.py`, and dated `outputs/research/cygnus/` artifacts. No execution, broker, registry, allocation, or paper/live behavior is in scope. |
-| FR-067 Vela Stage 0 (PIT universe source comparison) | Research / Strategy Design | `BLOCKED_ON_OWNER` | LOW (docs-only) | FR-067 spec, vendor diligence (Norgate / Sharadar / reconstructed S&P 600 / CRSP) | stage0_doc_complete | Stage 0 deliverable written: `docs/governance/fr_067_stage0_source_comparison.md` compares sources on cost, license, delisted-ticker price coverage, and integration effort; recommends Sharadar (advisory). Strategy code is blocked until the owner picks a source and records it in the roadmap; the Vela strategy name + registry entry also require owner approval. | Delete the comparison doc. No code, registry, execution, or strategy behavior is in scope. |
+| FR-066 Canonical NAV Track Record Integrity | Operational Telemetry / Performance Provenance | `DEPLOYED_OBSERVING` | LOW (telemetry-only) | FR-059 reason codes, Alpaca portfolio-history endpoint, existing `build_portfolio_history.py` / benchmark CSV / broker snapshots | vm_backfill_and_cron_installed | Backfill dry-run/write completed on VM using VM `.env` without printing credentials; canonical rows are continuous from 2026-03-03 through the current builder date, SPY/beta columns are populated, and the 7:15 PM ET builder/escalation cron is installed to `logs/portfolio_history.cron.log`. Caveat: Alpaca portfolio-history Apr 8 canonical NAV is `$9,751.97`, not the older `$9,715.45` baseline; broker snapshot reconciliation remains non-clean because those snapshots are point-in-time account captures, while `nav.csv` overlap is clean. | Revert the four module changes + crontab line; delete `backfill_manifest.json`, `checksum_manifest.json`, and added NAV columns; existing nav rows are never deleted. No execution, broker submission, allocation, strategy, or promotion behavior is in scope. |
+| FR-051 Cygnus Wave 1 (v0 event-reaction) | Research / Earnings Drift | `SHELVED` | LOW (research-only) | FR-051 spec + 2026-06-10 addendum, EDGAR submissions API, `cik_mapping_results.csv`, `paper/trading_calendar.py` | v0_stage2_failed_holdout_preserved | Stage 1 delivered the PIT EDGAR event tape. Stage 2 v0 validation failed 4/6: Rank IC 10D IC 0.0318 with t-stat 1.59 (FAIL), IC 20D/60D decay PASS, net IR vs SPY at 25 bps 0.44 PASS, excess correlation vs Polaris proxy 0.043 PASS, event coverage 1.05 PASS, cost sensitivity at 50 bps IR -0.32 FAIL. Tune window also failed. v0 is shelved, not re-tuned; 2025-forward holdout remains untouched; v1 requires EPS-surprise / consensus data. | Delete `research/cygnus/`, `scripts/research/run_cygnus_research.py`, `Tests/test_cygnus_events.py`, and dated `outputs/research/cygnus/` artifacts. No execution, broker, registry, allocation, or paper/live behavior is in scope. |
+| FR-067 Vela Stage 0 (PIT universe source comparison) | Research / Strategy Design | `BLOCKED_ON_VENDOR_TRIAL` | LOW (docs-only + verifier) | FR-067 spec, vendor diligence (Norgate / Sharadar / reconstructed S&P 600 / CRSP), `scripts/research/verify_sharadar_coverage.py` | sharadar_conditional_pending_trial_key | Sharadar selection is owner-conditional and pending trial verification. The verifier exists but has not been run because no trial key is available. If the audit demonstrates adequate historical delisted small-cap coverage and PIT membership reconstruction support, Sharadar becomes the preferred candidate source; otherwise alternative vendors remain under evaluation. | Delete the comparison doc and verifier if abandoned. No API key, code execution, registry, execution, or strategy behavior is in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -636,8 +636,7 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Title:** Canonical NAV Track Record Integrity (daily build, inception
   backfill, SPY/beta-adjusted scoreboard, fail-loud freshness)
 - **Date started:** 2026-06-10
-- **Status:** `IN_PROGRESS` (local implementation complete + validated; owner-gated
-  on backfill run and VM cron install)
+- **Status:** `DEPLOYED_OBSERVING` (VM backfill/write completed; cron installed)
 - **Governance label:** OPERATIONAL_TELEMETRY / NON_EXECUTIONAL
 - **Problem statement:** `outputs/portfolio_history/nav.csv` covers only
   2026-03-03..2026-04-08 (26 rows); the builder was never scheduled; the
@@ -659,8 +658,8 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
     the Shadow CIO path.
   - `research_registry/research/portfolio_history_freshness.py` (extended):
     checksum verification + trading-day NAV gap scan.
-  - `scripts/crontab.txt`: proposed post-close build+escalation line (7:15 PM ET);
-    present in source, **not installed** pending owner approval.
+  - `scripts/crontab.txt`: post-close build+escalation line (7:15 PM ET);
+    installed on the VM 2026-06-10 after owner approval.
 - **Non-goals:** No execution, broker submission, order routing, allocation,
   strategy selection, promotion, or cron execution-phase change. Existing nav rows
   are never deleted.
@@ -671,23 +670,28 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
   - `python3 scripts/validate_cron_commands.py scripts/crontab.txt`: **24 checks
     PASS**.
   - `git diff --check`: clean.
-  - Backfill dry-run rendered against real local artifacts: 26 rows reconstructed,
-    reconcile vs nav.csv 26/26 and vs broker snapshot 1/1 clean within 1 bp.
-- **Owner-gated next steps:** (1) run the inception backfill with `.env`
-  credentials, reviewing the dry-run before `--write`; (2) approve + install the
-  VM cron line (`crontab scripts/crontab.txt`) after fast-forward deploy.
-- **Acceptance criteria status:** criteria 1/2/5 are deployment/observation-gated
-  (require the backfill run + 10 fresh trading days); criterion 3 (benchmark/beta
-  columns) and 4 (forced-failure escalation) are implemented and unit-proven.
+  - VM backfill dry-run/write using VM `.env`: rows reconstructed from
+    2026-03-03 with no trading-day gaps; no credentials printed.
+  - VM builder after write: 70 NAV rows through 2026-06-10 with SPY/beta columns
+    populated per rolling-window availability.
+  - VM `scripts/operational_validation.py`: PASS.
+- **Deployment caveat:** `nav.csv` overlap is clean, but broker snapshot
+  reconciliation is non-clean because snapshots are point-in-time account captures
+  rather than the same EOD portfolio-history source. The Apr 8 canonical Alpaca
+  portfolio-history row is `$9,751.97`; the older `$9,715.45` baseline is retained
+  only as a historical discrepancy, not source truth.
+- **Acceptance criteria status:** criteria 1/3/4 are implemented/deployed; criterion
+  2 remains observing for 10 fresh trading days; criterion 5 is active via the
+  installed escalation cron.
 - **Rollback:** Revert the four module changes + the crontab line; delete
   `backfill_manifest.json`, `checksum_manifest.json`, and the added NAV columns.
 
 ## FR-051 Cygnus Implementation Wave 1 (v0 Event-Reaction)
 
 - **FR number:** FR-051 (Wave 1 per the 2026-06-10 addendum)
-- **Title:** Cygnus post-earnings drift — Wave 1 Stage 1 event tape
+- **Title:** Cygnus post-earnings drift — Wave 1 v0 validation
 - **Date started:** 2026-06-10
-- **Status:** `IN_PROGRESS` (Stage 1 complete; Stage 2 owner-gated)
+- **Status:** `SHELVED` (v0 Stage 2 validation FAIL; holdout preserved)
 - **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
 - **Problem statement:** Cygnus needs a point-in-time earnings-event tape with
   auditable availability dates before any backtest. Addendum A2 fixes EDGAR as the
@@ -698,9 +702,9 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
   same-day, else next trading date; Friday/holiday → next trading date) and emit
   the acceptance-timestamp audit. `filings.files` pagination was added after the
   sample revealed `filings.recent` truncates active filers (JPM 4→42 events).
-- **Non-goals:** No Stage 2 strategy/backtest yet; no shadow integration; no
-  registry, execution, broker, cron, allocation, or paper/live change. Consensus/
-  revision-dependent fields (v1/v2) remain vendor-gated and deferred.
+- **Non-goals:** No shadow integration; no registry, execution, broker, cron,
+  allocation, or paper/live change. Consensus/revision-dependent fields (v1/v2)
+  remain vendor-gated and deferred.
 - **Validation evidence (commands run):**
   - `py_compile` on the cygnus modules + runner + tests: PASS.
   - `pytest Tests/test_cygnus_events.py`: **10 passed**.
@@ -708,10 +712,15 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
     `look_ahead_safe=True`, 0 look-ahead violations, 0 missing timestamps,
     distribution 127 after-close / 126 before-open / 2 during-market (correctly
     delayed). Artifacts under `outputs/research/cygnus/2026-06-10/`.
-- **PAUSE (owner action required):** Review the acceptance-timestamp audit
-  (`cygnus_acceptance_timestamp_audit.json`). Stage 2 (`cygnus_v0_event_reaction`,
-  A3 composite, A4 pre-registered pass/fail table, walk-forward split) begins only
-  after sign-off.
+- **Stage 2 v0 verdict:** FAIL, 4/6. Rank IC 10D: IC 0.0318, t-stat 1.59, FAIL
+  due to t-stat below 2. IC 20D/60D decay: PASS. Net IR vs SPY at 25 bps: 0.44,
+  PASS. Excess correlation vs Polaris proxy: 0.043, PASS. Event coverage: 1.05,
+  PASS. Cost sensitivity at 50 bps: IR -0.32, FAIL.
+- **Governance decision:** The tune window also failed. Cygnus v0 is shelved and
+  must not be re-tuned. The 2025-forward holdout remains untouched and preserved.
+  Cygnus v1 requires EPS-surprise / consensus data. Future diagnostics may compute
+  Newey-West or date-clustered t-statistics, but that diagnostic does not change
+  the v0 verdict.
 - **Rollback:** Delete `research/cygnus/`, the runner, the test, and dated
   `outputs/research/cygnus/` artifacts.
 
@@ -720,23 +729,27 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **FR number:** FR-067 (Stage 0)
 - **Title:** Vela small-cap momentum — Stage 0 PIT universe source comparison
 - **Date started:** 2026-06-10
-- **Status:** `BLOCKED_ON_OWNER` (Stage 0 doc complete; source pick pending)
+- **Status:** `BLOCKED_ON_VENDOR_TRIAL` (Sharadar conditional; verifier pending
+  trial key)
 - **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
 - **Problem statement:** FR-067 is blocked until a PIT small-cap universe with
   delisted-ticker price coverage exists; hand-curating current names is forbidden.
 - **Scope (this session):** `docs/governance/fr_067_stage0_source_comparison.md`
   compares Norgate, Sharadar (Nasdaq Data Link), reconstructed S&P 600, and
   CRSP/WRDS across cost, license, delisted-ticker price coverage, integration
-  effort, and PIT membership feasibility. Advisory recommendation: Sharadar
-  (cross-platform integration; survivorship-free delisted prices; PIT market-cap
-  band as the small-cap definition).
+  effort, and PIT membership feasibility. Conditional recommendation: Sharadar
+  after successful coverage verification (cross-platform integration;
+  survivorship-free delisted prices; PIT market-cap band as the small-cap
+  definition).
 - **Non-goals:** No `research/vela/` strategy code, no registry entry, no Vela
   strategy-name assignment — all owner decisions per roadmap Section 6.
 - **Validation evidence:** Docs-only; `git diff --check` clean.
-- **Owner-gated next steps:** Pick a source (and, if Sharadar, membership vs
-  market-cap band) and record it in `CURRENT_RESEARCH_ROADMAP.md`; approve the
-  Vela strategy name + registry addition. Stage 1 (PIT universe machinery +
-  snapshot artifact) begins only after the pick.
+- **Owner/vendor-gated next steps:** Obtain a trial key and run
+  `scripts/research/verify_sharadar_coverage.py` without committing or printing
+  credentials. If the audit demonstrates adequate historical delisted small-cap
+  coverage and PIT membership reconstruction support, Sharadar becomes the
+  preferred candidate source; otherwise alternative vendors remain under
+  evaluation. Stage 1 begins only after that evidence is recorded.
 - **Rollback:** Delete the comparison doc.
 
 ## Roadmap Boundaries

@@ -130,10 +130,13 @@ standard, included for completeness because FR-067 mentions it).
 | Integration effort on Linux/macOS | **High (Windows NDU)** | **Low (REST/Python/bulk)** | Highest (bespoke scrape) | Low (if access) |
 | Reproduces FR-066/PIT remediation pilot | Yes | **Yes** | No | Yes |
 
-## Recommendation (advisory — owner decides)
+## Recommendation (conditional — owner/trial verification required)
 
-**Primary recommendation: Sharadar via Nasdaq Data Link**, using a PIT
-market-cap-banded small-cap universe rather than official S&P 600 membership.
+**Conditional recommendation: Sharadar via Nasdaq Data Link**, using a PIT
+market-cap-banded small-cap universe rather than official S&P 600 membership,
+pending a trial-key coverage audit. The verifier exists at
+`scripts/research/verify_sharadar_coverage.py`; it has not been run because a
+trial key is not yet available. Do not include or commit any API key.
 Rationale:
 
 1. It passes the dimension that actually blocks the FR — **delisted-ticker price
@@ -162,8 +165,11 @@ if such access exists.
 
 ## Open Decisions Routed to Owner (no code until resolved)
 
-1. **Source pick** (Sharadar recommended) — record in
-   `CURRENT_RESEARCH_ROADMAP.md`. This unblocks FR-067 Stage 1.
+1. **Source pick** (Sharadar conditional) — record the coverage-verification
+   result in `CURRENT_RESEARCH_ROADMAP.md`. If Sharadar demonstrates adequate
+   historical delisted small-cap coverage and point-in-time membership
+   reconstruction support, it becomes the preferred candidate source. Otherwise
+   alternative vendors remain under evaluation.
 2. If Sharadar: **index membership vs market-cap band** for universe definition
    (recommend band; freeze the band rule — e.g. $300M–$2B, US common stock — before
    any tuning, per FR-067's pre-registration discipline).

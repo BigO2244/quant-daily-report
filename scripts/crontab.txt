@@ -41,8 +41,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # FR-066: canonical NAV daily build + fail-loud freshness escalation — 7:15 PM ET,
 # after price hydration. Read-only telemetry builder; NON_EXECUTIONAL. The
 # escalation step always runs (even if the build fails) so silence is never a
-# valid state. PROPOSED: present in source crontab but install on the VM only
-# after explicit owner approval (do not run `crontab scripts/crontab.txt` yet).
+# valid state. Installed on the VM 2026-06-10 after owner approval; output is
+# captured in logs/portfolio_history.cron.log.
 15 19 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && ( python3 scripts/build_portfolio_history.py --trade-date $(TZ=America/New_York date +\%F) ; python3 -m core.portfolio_history_escalation --trade-date $(TZ=America/New_York date +\%F) --send ) >> logs/portfolio_history.cron.log 2>&1
 
 # Weekly Model Review (Monday 8:00 AM ET)

@@ -31,20 +31,25 @@ their working state, validation evidence, and rollback references live in
 `docs/governance/fr_active_backlog.md`; they will move here only once deployed
 and past their observation criteria:
 
-- FR-066: Canonical NAV Track Record Integrity (`IN_PROGRESS`) — local
-  implementation validated (27 tests; cron validates 24 checks); owner-gated on
-  the inception backfill run and VM cron install. OPERATIONAL_TELEMETRY /
-  NON_EXECUTIONAL.
-- FR-051 Wave 1: Cygnus v0 event-reaction (`IN_PROGRESS`) — Stage 1 EDGAR event
-  tape + acceptance-timestamp audit complete (10 tests; clean live audit); Stage 2
-  gated on owner review of the audit. RESEARCH_ONLY / NON_EXECUTIONAL.
-- FR-067 Stage 0: Vela PIT universe source comparison (`BLOCKED_ON_OWNER`) —
-  comparison doc complete; strategy code blocked until the owner picks a source.
+- FR-066: Canonical NAV Track Record Integrity (`DEPLOYED_OBSERVING`) — VM
+  inception backfill/write completed, daily builder/escalation cron installed,
+  operational validation passed, and SPY/beta columns are populated. Snapshot
+  comparisons remain a provenance caveat because broker snapshots are
+  point-in-time captures. OPERATIONAL_TELEMETRY / NON_EXECUTIONAL.
+- FR-051 Wave 1: Cygnus v0 event-reaction (`SHELVED`) — Stage 2 validation
+  failed 4/6 criteria, including sub-threshold 10D rank-IC t-stat and failed
+  50 bps cost sensitivity. The tune window also failed; the 2025-forward holdout
+  remains untouched. Cygnus v1 is gated on EPS-surprise / consensus data.
   RESEARCH_ONLY / NON_EXECUTIONAL.
+- FR-067 Stage 0: Vela PIT universe source comparison (`BLOCKED_ON_VENDOR_TRIAL`)
+  — Sharadar is owner-conditional pending trial coverage verification by
+  `scripts/research/verify_sharadar_coverage.py`; the verifier has not been run
+  because no trial key is available. RESEARCH_ONLY / NON_EXECUTIONAL.
 
 None of these three change execution, broker submission, cron execution-phase,
 order generation, allocation, the strategy registry, or promotion state. The
-FR-066 cron line is present in source but uninstalled pending owner approval.
+FR-066 cron line is installed on the VM as telemetry only and writes to
+`logs/portfolio_history.cron.log`.
 
 ## Wave Summary
 

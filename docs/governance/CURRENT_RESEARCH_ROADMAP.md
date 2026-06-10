@@ -2,9 +2,8 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-10 (added FR-066/FR-067 proposed rows; FR-051 Implementation
-Wave 1 addendum recorded; Conflict B RESOLVED 2026-06-10 (owner-approved): Cygnus
-is earnings-drift, FR-056 retired)
+Last Updated: 2026-06-10 (FR-066 VM backfill/cron deployed; FR-051 Cygnus v0
+Stage 2 FAIL recorded and v0 shelved; FR-067 Sharadar gate recorded)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -50,7 +49,7 @@ editing code or specs.
 | FR | Strategy | Canonical role (intended) | Canonical spec (authoritative) | Status in spec | Code module? | Registry status |
 |----|----------|---------------------------|--------------------------------|----------------|--------------|-----------------|
 | FR-050 | Phoenix | Crisis reversal | `fr_050_phoenix_research_spec.md` | ACTIVE_RESEARCH — Phase B review | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
-| FR-051 | Cygnus | Earnings / post-earnings drift | `fr_051_cygnus_research_spec.md` | Draft | none (spec only) | research (`earnings_drift`) |
+| FR-051 | Cygnus | Earnings / post-earnings drift | `fr_051_cygnus_research_spec.md` | V0_SHELVED — Stage 2 validation FAIL; v1 vendor-gated | `research/cygnus/` research-only modules | research (`earnings_drift`) |
 | FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_052_cassiopeia_research_spec.md` | Draft / spec-only | none | research (`event_driven`) |
 | FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
 | FR-054 | — | Dynamic strategy registry audit | `fr_054_dynamic_strategy_registry_audit.md` | Audit | n/a | n/a |
@@ -60,8 +59,8 @@ editing code or specs.
 | FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
 | FR-064 | Portfolio research | Multi-asset research framework | `fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
 | FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
-| FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_066_canonical_nav_track_record_spec.md` | PROPOSED 2026-06-10 — pending owner approval | none (spec only) | n/a |
-| FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test; blocked on Stage 0 PIT universe) | `fr_067_vela_research_spec.md` | PROPOSED 2026-06-10 — strategy name + registry addition pending owner approval | none (spec only) | not yet registered |
+| FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
+| FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test; blocked on Stage 0 PIT universe) | `fr_067_vela_research_spec.md` | BLOCKED_ON_VENDOR_TRIAL — Sharadar conditional pending coverage verification | `scripts/research/verify_sharadar_coverage.py` verifier only | not yet registered |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
@@ -84,7 +83,7 @@ framework, and FR-065 dashboard decision-grade consolidation.
 | Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_only |
 | Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
 | Phoenix | security_selection / crisis_reversal | research | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts |
-| Cygnus | security_selection / earnings_drift | research | none | none | no | no | spec_only |
+| Cygnus | security_selection / earnings_drift | research | research/cygnus | run_cygnus_research.py | no | no | v0_shelved_after_stage2_fail; v1_vendor_gated |
 | Cassiopeia | security_selection / event_driven | research | none (spec-only) | none | no | no | spec_only — canonical EVENT-DRIVEN strategy (FR-052); selector code re-homed to Argo 2026-06-08 |
 | Argo | meta_model / regime_overlay | research | argo.py | run_argo_regime_selection.py | no | no | regime overlay / model-selection layer (FR-053); active selector re-homed from Cassiopeia 2026-06-08 |
 | SPY | benchmark | shadow | n/a | n/a | no | no | benchmark |
@@ -149,6 +148,21 @@ or fold FR-056 — now done.
 - **Phoenix needs passive (out-of-sample) evidence** before any shadow/promotion consideration.
 - **Cygnus definition drift** — RESOLVED 2026-06-10 (owner-approved): Cygnus is
   earnings-drift (canonical FR-051); FR-056 retired. See Section 4, Conflict B.
+- **Cygnus v0 validation** — FR-051 Stage 2 verdict is FAIL (4/6 criteria).
+  The tune window also failed; v0 is shelved and must not be re-tuned. The
+  2025-forward holdout remains untouched and preserved. Cygnus v1 is gated on
+  EPS-surprise / consensus data vendor selection.
+- **FR-066 NAV provenance** — VM backfill/write and cron install completed
+  2026-06-10. The corrected Alpaca portfolio-history series is continuous from
+  2026-03-03, clean versus existing `nav.csv`, and includes SPY/beta columns;
+  broker snapshot comparisons remain non-clean because snapshots are point-in-time
+  account captures rather than the same EOD portfolio-history source. The Apr 8
+  canonical row is `$9,751.97`; the older `$9,715.45` baseline is not used as
+  source truth.
+- **FR-067 vendor gate** — Sharadar is owner-conditional pending a trial-key
+  coverage audit. The verifier exists at
+  `scripts/research/verify_sharadar_coverage.py` but has not been run because no
+  trial key is available.
 - **Post-submit snapshot baseline failures** — known unrelated validation backlog.
 - **MCP full-suite order pollution** — known unrelated full-suite ordering backlog.
 
