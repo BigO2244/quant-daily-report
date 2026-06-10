@@ -1,0 +1,277 @@
+{
+  "schema_version": "caerus_pit_universe_plan_v1",
+  "generated_at": "2026-06-10",
+  "governance_label": "RESEARCH_ONLY",
+  "execution_impact": "NON_EXECUTIONAL",
+  "local_only": true,
+  "vm_actions_taken": false,
+  "holdout_accessed": false,
+  "source_audit": "research/survivorship_bias_audit_2026-06-10.md",
+  "survivorship_verdict": {
+    "status": "CONFIRMED_BIASED",
+    "confidence": "HIGH",
+    "legacy_current_universe_cagr": 0.2499,
+    "restricted_2014_valid_cagr": 0.1929,
+    "legacy_current_universe_sharpe": 0.969,
+    "restricted_2014_valid_sharpe": 0.83
+  },
+  "recommended_vendor": {
+    "primary": "Sharadar conditional pending trial verification",
+    "fallback": "Norgate",
+    "gold_standard_if_available": "CRSP/WRDS",
+    "decision_rule": "Accept Sharadar only if the verifier demonstrates adequate delisted coverage, stable IDs, symbol-change support, and PIT membership or market-cap reconstruction for required Caerus families."
+  },
+  "canonical_schema": {
+    "security_master_required_fields": [
+      "security_id",
+      "vendor_security_id",
+      "perm_id",
+      "ticker",
+      "company_name",
+      "exchange",
+      "asset_type",
+      "listing_date",
+      "delisting_date",
+      "delisting_reason",
+      "is_active",
+      "source",
+      "source_asof_date",
+      "confidence"
+    ],
+    "membership_required_fields": [
+      "security_id",
+      "ticker",
+      "company_name",
+      "exchange",
+      "membership_family",
+      "membership_start_date",
+      "membership_end_date",
+      "listing_date",
+      "delisting_date",
+      "source",
+      "source_asof_date",
+      "confidence",
+      "reason_codes"
+    ],
+    "symbol_change_required_fields": [
+      "security_id",
+      "old_ticker",
+      "new_ticker",
+      "effective_date",
+      "reason",
+      "source",
+      "confidence"
+    ],
+    "security_event_types": [
+      "MERGER",
+      "ACQUISITION",
+      "BANKRUPTCY",
+      "DELISTING",
+      "SPINOFF",
+      "TICKER_CHANGE",
+      "EXCHANGE_CHANGE",
+      "REENTRY"
+    ]
+  },
+  "universe_contract": {
+    "name": "Universe(as_of_date)",
+    "inputs": [
+      "as_of_date",
+      "membership_family",
+      "min_confidence",
+      "asset_type",
+      "exchange",
+      "include_inactive_if_valid_then",
+      "require_price_available",
+      "require_fundamentals_available"
+    ],
+    "outputs": [
+      "security_id",
+      "ticker",
+      "company_name",
+      "exchange",
+      "membership_family",
+      "membership_start_date",
+      "membership_end_date",
+      "listing_date",
+      "delisting_date",
+      "source",
+      "confidence",
+      "reason_codes"
+    ],
+    "invariants": [
+      "membership_start_date <= as_of_date",
+      "membership_end_date is null or membership_end_date >= as_of_date",
+      "listing_date <= as_of_date",
+      "delisted securities may appear only before or on delisting_date",
+      "security_id appears at most once per date/family",
+      "ticker changes preserve security_id",
+      "no silent fallback to data/universe.csv in official PIT mode"
+    ]
+  },
+  "migration_inventory": {
+    "easy": [
+      "research/flow_detection/data.py",
+      "research/flow_detection/run.py",
+      "research/flow_detection/v2_run.py",
+      "research/alpha_lab_v1/run.py",
+      "research/alpha_lab_v2/run.py",
+      "scripts/backfill_shadow_artifacts.py",
+      "scripts/refresh_shadow_scorecard_artifacts.py",
+      "scripts/hydrate_price_cache_only.py",
+      "scripts/research/check_price_cache_coverage.py",
+      "research_registry/research/universe_quality.py"
+    ],
+    "moderate": [
+      "research/shadow_tracking/run.py",
+      "alpha_stack/research/backtest.py",
+      "alpha_stack/research/shadow_runner.py",
+      "alpha_stack/research/validation_runner.py",
+      "alpha_stack/datastore/breadth.py",
+      "scripts/research/run_phoenix_research.py",
+      "scripts/research/run_cygnus_research.py",
+      "research/cygnus/events.py",
+      "core/quant_report.py",
+      "scripts/diag_regime_engine.py",
+      "research/universe_governance.py",
+      "research/security_master_reconciliation.py",
+      "research_registry/research/security_master_diagnostics.py"
+    ],
+    "high_risk": [
+      "core/risk_controls.py",
+      "core/security_master.py",
+      "core/universe_v4.py",
+      "production-adjacent execution/precompute diagnostics that import universe files"
+    ]
+  },
+  "vendor_matrix": [
+    {
+      "vendor": "Sharadar / Nasdaq Data Link",
+      "delisted_coverage": "LIKELY_GOOD_MUST_VERIFY",
+      "pit_constituent_coverage": "PIT_RECONSTRUCTION_LIKELY_OFFICIAL_MEMBERSHIP_UNCERTAIN",
+      "symbol_change_support": "MODERATE_MUST_VERIFY",
+      "cost": "MODERATE",
+      "implementation_effort": "LOW_MEDIUM",
+      "suitability": "RECOMMENDED_FIRST_CONDITIONAL_GATE"
+    },
+    {
+      "vendor": "Norgate",
+      "delisted_coverage": "STRONG",
+      "pit_constituent_coverage": "STRONG",
+      "symbol_change_support": "STRONG",
+      "cost": "MODERATE_HIGH",
+      "implementation_effort": "MEDIUM_HIGH_WINDOWS_NDU",
+      "suitability": "BEST_BACKUP_IF_SHARADAR_FAILS"
+    },
+    {
+      "vendor": "CRSP/WRDS",
+      "delisted_coverage": "EXCELLENT",
+      "pit_constituent_coverage": "EXCELLENT",
+      "symbol_change_support": "EXCELLENT",
+      "cost": "HIGH_OR_ACCESS_GATED",
+      "implementation_effort": "MEDIUM_IF_ACCESS_EXISTS",
+      "suitability": "GOLD_STANDARD"
+    },
+    {
+      "vendor": "Polygon",
+      "delisted_coverage": "MUST_VERIFY",
+      "pit_constituent_coverage": "INSUFFICIENT_ALONE",
+      "symbol_change_support": "MODERATE",
+      "cost": "MODERATE_HIGH",
+      "implementation_effort": "MEDIUM",
+      "suitability": "SUPPLEMENT_ONLY_UNLESS_PIT_PROVEN"
+    },
+    {
+      "vendor": "Tiingo",
+      "delisted_coverage": "MUST_VERIFY",
+      "pit_constituent_coverage": "INSUFFICIENT_ALONE",
+      "symbol_change_support": "MODERATE",
+      "cost": "LOW_MODERATE",
+      "implementation_effort": "LOW",
+      "suitability": "SUPPLEMENT_ONLY"
+    },
+    {
+      "vendor": "Nasdaq Data Link other datasets",
+      "delisted_coverage": "DATASET_DEPENDENT",
+      "pit_constituent_coverage": "DATASET_DEPENDENT",
+      "symbol_change_support": "DATASET_DEPENDENT",
+      "cost": "VARIABLE",
+      "implementation_effort": "LOW_MEDIUM",
+      "suitability": "CANDIDATE_ONLY_WITH_EXPLICIT_PROOF"
+    }
+  ],
+  "rebaseline_plan": [
+    {
+      "phase": 1,
+      "name": "PIT universe creation",
+      "effort": "4-8 engineering days after vendor access",
+      "runtime": "minutes for metadata; hours for initial hydration",
+      "compute_cost": "low local compute; vendor/API limits dominate"
+    },
+    {
+      "phase": 2,
+      "name": "Polaris rebaseline",
+      "effort": "2-4 engineering days",
+      "runtime": "1-4 hours"
+    },
+    {
+      "phase": 3,
+      "name": "Orion rebaseline",
+      "effort": "2-4 engineering days",
+      "runtime": "1-3 hours"
+    },
+    {
+      "phase": 4,
+      "name": "Lyra rebaseline",
+      "effort": "2-4 engineering days",
+      "runtime": "1-3 hours"
+    },
+    {
+      "phase": 5,
+      "name": "Future sleeves",
+      "effort": "incremental after framework exists",
+      "runtime": "strategy dependent"
+    }
+  ],
+  "governance_plan": [
+    "Mark pre-PIT backtests as NON_DECISION_GRADE_SURVIVORSHIP_BIASED.",
+    "Preserve legacy artifacts under legacy_current_universe namespaces.",
+    "Add universe_method, universe_artifact_path, and universe_snapshot_hash to official research artifacts.",
+    "Promotion packets must reject evidence without universe_method=pit_universe.",
+    "Keep data/universe.csv as current operational/watchlist input only until retired."
+  ],
+  "draft_fr": {
+    "title": "Point-in-Time Universe Build and Backtest Rebaseline",
+    "status": "DRAFT_RESEARCH",
+    "objective": "Build the canonical PIT universe framework for Caerus research, remove current-universe survivorship contamination from official historical evidence, and rebaseline Polaris, Orion, and Lyra before further promotion decisions.",
+    "success_criteria": [
+      "Universe(as_of_date) returns deterministic PIT-eligible securities with stable security_id.",
+      "Delisted securities and ended memberships are represented.",
+      "Symbol changes preserve stable security identity.",
+      "Vendor coverage audit passes for required history and membership families.",
+      "Legacy current-universe backtests are explicitly labeled non-decision-grade.",
+      "Polaris/Orion/Lyra PIT rebaseline artifacts include universe hashes, membership counts, delisting coverage, and comparison against legacy results.",
+      "No execution, broker, cron, strategy registry, or production allocation behavior changes during the research build."
+    ],
+    "implementation_phases": [
+      "Vendor verification and PIT source selection.",
+      "Canonical data model and fixture build.",
+      "Universe(as_of_date) module, CLI, and tests.",
+      "Backtest/shadow loader migration behind an explicit research flag.",
+      "Polaris rebaseline.",
+      "Orion rebaseline.",
+      "Lyra rebaseline.",
+      "Governance packet integration and legacy artifact relabeling."
+    ],
+    "validation_plan": [
+      "Unit tests for IPO, delisting, ticker change, merger, acquisition, bankruptcy, and re-entry.",
+      "Deterministic snapshot tests for historical dates.",
+      "Cross-check membership counts against vendor documentation.",
+      "Ensure no data/universe.csv fallback in official PIT mode.",
+      "Compare legacy vs PIT backtest metrics and top contributors.",
+      "Verify 2025-forward holdout remains untouched until explicitly authorized."
+    ],
+    "deployment_plan": "Research-only until accepted. No VM deployment, cron installation, execution path change, model promotion, or strategy registry edit is part of the initial FR."
+  },
+  "recommended_first_implementation_task": "Implement a local read-only PIT universe skeleton with fixtures, schema dataclasses, Universe(as_of_date), deterministic tests, and a diagnostic CLI before vendor import work begins."
+}
