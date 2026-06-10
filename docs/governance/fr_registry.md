@@ -26,6 +26,26 @@ All five are research-only / non-executional. They do not change live/paper
 execution behavior, broker submission, cron timing, order generation, capital
 routing, or strategy promotion state.
 
+The 2026-06-10 wave adds three more IDs. These are **active, not yet deployed** —
+their working state, validation evidence, and rollback references live in
+`docs/governance/fr_active_backlog.md`; they will move here only once deployed
+and past their observation criteria:
+
+- FR-066: Canonical NAV Track Record Integrity (`IN_PROGRESS`) — local
+  implementation validated (27 tests; cron validates 24 checks); owner-gated on
+  the inception backfill run and VM cron install. OPERATIONAL_TELEMETRY /
+  NON_EXECUTIONAL.
+- FR-051 Wave 1: Cygnus v0 event-reaction (`IN_PROGRESS`) — Stage 1 EDGAR event
+  tape + acceptance-timestamp audit complete (10 tests; clean live audit); Stage 2
+  gated on owner review of the audit. RESEARCH_ONLY / NON_EXECUTIONAL.
+- FR-067 Stage 0: Vela PIT universe source comparison (`BLOCKED_ON_OWNER`) —
+  comparison doc complete; strategy code blocked until the owner picks a source.
+  RESEARCH_ONLY / NON_EXECUTIONAL.
+
+None of these three change execution, broker submission, cron execution-phase,
+order generation, allocation, the strategy registry, or promotion state. The
+FR-066 cron line is present in source but uninstalled pending owner approval.
+
 ## Wave Summary
 
 | Phase | Date | FRs | Status | Operational Theme | Observation Focus |

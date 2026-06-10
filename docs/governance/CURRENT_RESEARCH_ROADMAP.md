@@ -3,8 +3,8 @@
 Status: Canonical
 Owner: Caerus Research Program
 Last Updated: 2026-06-10 (added FR-066/FR-067 proposed rows; FR-051 Implementation
-Wave 1 addendum recorded; Conflict B resolution recommended in FR-051 addendum,
-decision still owner-pending)
+Wave 1 addendum recorded; Conflict B RESOLVED 2026-06-10 (owner-approved): Cygnus
+is earnings-drift, FR-056 retired)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -55,7 +55,7 @@ editing code or specs.
 | FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
 | FR-054 | — | Dynamic strategy registry audit | `fr_054_dynamic_strategy_registry_audit.md` | Audit | n/a | n/a |
 | FR-055 | — | Registry surface cleanup audit | `fr_055_registry_surface_cleanup_audit.md` | Audit | n/a | n/a |
-| FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | superseded → FR-051 | Design Only | none | n/a |
+| FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | RETIRED 2026-06-10 (owner-approved) → FR-051 | Retired | none | n/a |
 | FR-057 | Argo | *(design draft — CONFLICTS with FR-053)* | superseded/quarantined → FR-053 | Design Only | none | n/a |
 | FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
 | FR-064 | Portfolio research | Multi-asset research framework | `fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
@@ -123,12 +123,21 @@ identity (or a new explicit `caerus_selector` identity), and leave the event-dri
 Cassiopeia as unimplemented spec. This requires a strategy-ID rename and registry
 edit and therefore explicit approval — it is intentionally NOT done in this cleanup.
 
-**Conflict B — Cygnus definition drift.** Canonical FR-051 and the registry define
-Cygnus as **earnings drift** (`earnings_drift`). The later design draft
-`fr_056_cygnus_design_spec.md` describes Cygnus as a generic "persistent, slow-moving
-factor or price drift" sleeve. These are related but not identical. Confirm whether
-Cygnus is earnings-drift (canonical) or broadened to price/factor drift, then retire
-or fold FR-056.
+**Conflict B — RESOLVED 2026-06-10 (owner-approved).** Cygnus is **earnings drift**
+(`earnings_drift`), the canonical FR-051 definition. The later design draft
+`fr_056_cygnus_design_spec.md` — which broadened Cygnus into a generic
+"persistent, slow-moving factor or price drift" sleeve — is **retired** and is
+non-canonical. Rationale (FR-051 addendum A1): the earnings-event underreaction
+thesis is what makes Cygnus a distinct return stream from the Polaris/Orion
+momentum family; a generic drift sleeve would reproduce the 97%+ correlation
+problem documented in FR-063. The registry `earnings_drift` family for
+`caerus_cygnus` is unchanged and remains source of truth. No strategy ID, registry,
+or execution change results from this resolution.
+
+*Historical statement (retained for lineage):* Canonical FR-051 and the registry
+defined Cygnus as earnings drift; the FR-056 draft described a generic price/factor
+drift sleeve; these were related but not identical, and the decision was to retire
+or fold FR-056 — now done.
 
 ---
 
@@ -138,8 +147,8 @@ or fold FR-056.
 - **Security master auth / missing artifact** — `security_master_diagnostics.py` / `audit_security_master_refresh.py` (untracked) flag auth or missing-artifact gaps blocking PIT-safe alias resolution.
 - **BK → BNY universe migration** — pending; do NOT migrate `universe.csv` without explicit approval.
 - **Phoenix needs passive (out-of-sample) evidence** before any shadow/promotion consideration.
-- **Cygnus definition drift** — see Section 4, Conflict B. The canonical FR-051
-  earnings-drift definition remains source of truth until explicitly changed.
+- **Cygnus definition drift** — RESOLVED 2026-06-10 (owner-approved): Cygnus is
+  earnings-drift (canonical FR-051); FR-056 retired. See Section 4, Conflict B.
 - **Post-submit snapshot baseline failures** — known unrelated validation backlog.
 - **MCP full-suite order pollution** — known unrelated full-suite ordering backlog.
 
