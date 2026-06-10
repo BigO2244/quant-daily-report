@@ -1,0 +1,199 @@
+{
+  "by_date": [
+    {
+      "absent_from_current_universe": 5121,
+      "active": 2473,
+      "current_universe_eligible": 183,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 17,
+      "date": "2014-01-02",
+      "delisted": 2829,
+      "frac_current_unavailable_historically": 0.085,
+      "frac_pit_absent_from_current": 0.9659,
+      "pit_universe_count": 5302,
+      "present_in_current_universe": 181
+    },
+    {
+      "absent_from_current_universe": 5186,
+      "active": 2781,
+      "current_universe_eligible": 186,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 14,
+      "date": "2016-01-04",
+      "delisted": 2589,
+      "frac_current_unavailable_historically": 0.07,
+      "frac_pit_absent_from_current": 0.9657,
+      "pit_universe_count": 5370,
+      "present_in_current_universe": 184
+    },
+    {
+      "absent_from_current_universe": 4999,
+      "active": 3053,
+      "current_universe_eligible": 188,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 12,
+      "date": "2018-01-02",
+      "delisted": 2132,
+      "frac_current_unavailable_historically": 0.06,
+      "frac_pit_absent_from_current": 0.9641,
+      "pit_universe_count": 5185,
+      "present_in_current_universe": 186
+    },
+    {
+      "absent_from_current_universe": 5177,
+      "active": 3445,
+      "current_universe_eligible": 191,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 9,
+      "date": "2020-01-02",
+      "delisted": 1921,
+      "frac_current_unavailable_historically": 0.045,
+      "frac_pit_absent_from_current": 0.9648,
+      "pit_universe_count": 5366,
+      "present_in_current_universe": 189
+    },
+    {
+      "absent_from_current_universe": 7443,
+      "active": 4313,
+      "current_universe_eligible": 197,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 3,
+      "date": "2022-01-03",
+      "delisted": 3325,
+      "frac_current_unavailable_historically": 0.015,
+      "frac_pit_absent_from_current": 0.9745,
+      "pit_universe_count": 7638,
+      "present_in_current_universe": 195
+    },
+    {
+      "absent_from_current_universe": 6137,
+      "active": 4667,
+      "current_universe_eligible": 198,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 2,
+      "date": "2024-01-02",
+      "delisted": 1666,
+      "frac_current_unavailable_historically": 0.01,
+      "frac_pit_absent_from_current": 0.9691,
+      "pit_universe_count": 6333,
+      "present_in_current_universe": 196
+    },
+    {
+      "absent_from_current_universe": 5517,
+      "active": 5509,
+      "current_universe_eligible": 199,
+      "current_universe_no_pit_match": 1,
+      "current_universe_unavailable": 1,
+      "date": "2026-01-02",
+      "delisted": 205,
+      "frac_current_unavailable_historically": 0.005,
+      "frac_pit_absent_from_current": 0.9655,
+      "pit_universe_count": 5714,
+      "present_in_current_universe": 197
+    }
+  ],
+  "date": "2026-06-10",
+  "distortion_classification": "SEVERE",
+  "execution_impact": "NON_EXECUTIONAL",
+  "governance_label": "RESEARCH_ONLY",
+  "known_examples": {
+    "ATVI": {
+      "eligible_by_date": {
+        "2014-01-02": true,
+        "2016-01-04": true,
+        "2018-01-02": true,
+        "2020-01-02": true,
+        "2022-01-03": true,
+        "2024-01-02": false,
+        "2026-01-02": false
+      },
+      "firstpricedate": "1993-10-25",
+      "isdelisted": "Y",
+      "lastpricedate": "2023-10-12",
+      "resolved_security_id": "SHARADAR:198850",
+      "resolved_ticker": "ATVI",
+      "resolved_via": "direct"
+    },
+    "FB": {
+      "eligible_by_date": {
+        "2014-01-02": true,
+        "2016-01-04": true,
+        "2018-01-02": true,
+        "2020-01-02": true,
+        "2022-01-03": true,
+        "2024-01-02": true,
+        "2026-01-02": true
+      },
+      "firstpricedate": "2012-05-18",
+      "isdelisted": "N",
+      "lastpricedate": "2026-06-09",
+      "resolved_security_id": "SHARADAR:194817",
+      "resolved_ticker": "META",
+      "resolved_via": "relatedtickers->META"
+    },
+    "GYMB": {
+      "eligible_by_date": {
+        "2014-01-02": false,
+        "2016-01-04": false,
+        "2018-01-02": false,
+        "2020-01-02": false,
+        "2022-01-03": false,
+        "2024-01-02": false,
+        "2026-01-02": false
+      },
+      "firstpricedate": "1993-04-01",
+      "isdelisted": "Y",
+      "lastpricedate": "2010-11-22",
+      "resolved_security_id": "SHARADAR:198521",
+      "resolved_ticker": "GYMB",
+      "resolved_via": "direct"
+    },
+    "META": {
+      "eligible_by_date": {
+        "2014-01-02": true,
+        "2016-01-04": true,
+        "2018-01-02": true,
+        "2020-01-02": true,
+        "2022-01-03": true,
+        "2024-01-02": true,
+        "2026-01-02": true
+      },
+      "firstpricedate": "2012-05-18",
+      "isdelisted": "N",
+      "lastpricedate": "2026-06-09",
+      "resolved_security_id": "SHARADAR:194817",
+      "resolved_ticker": "META",
+      "resolved_via": "direct"
+    },
+    "TWTR": {
+      "eligible_by_date": {
+        "2014-01-02": true,
+        "2016-01-04": true,
+        "2018-01-02": true,
+        "2020-01-02": true,
+        "2022-01-03": true,
+        "2024-01-02": false,
+        "2026-01-02": false
+      },
+      "firstpricedate": "2013-11-07",
+      "isdelisted": "Y",
+      "lastpricedate": "2022-10-27",
+      "resolved_security_id": "SHARADAR:187959",
+      "resolved_ticker": "TWTR",
+      "resolved_via": "direct"
+    }
+  },
+  "metric_notes": {
+    "frac_current_unavailable_historically": "survivorship/look-ahead signal: today's 201 names not yet tradable on the date",
+    "frac_pit_absent_from_current": "breadth-dominated (full market vs 201 curated names); NOT a pure survivorship metric",
+    "market_delisted_fraction": "share of all common stocks ever that are delisted; invisible to the current-universe foundation"
+  },
+  "schema_version": "caerus_pit_impact_v1",
+  "summary": {
+    "current_universe_size": 200,
+    "market_delisted_fraction": 0.7173,
+    "pit_active": 5828,
+    "pit_delisted": 14790,
+    "pit_total_securities": 20618
+  }
+}
