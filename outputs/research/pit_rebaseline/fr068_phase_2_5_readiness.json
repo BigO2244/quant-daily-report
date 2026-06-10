@@ -3,164 +3,116 @@
   "execution_impact": "NON_EXECUTIONAL",
   "governance_label": "RESEARCH_ONLY",
   "known_case_notes": {
-    "brk_normalization": "BRK-B normalizes to BRK.B and now resolves (prior no_pit_match fixed).",
-    "date_claims": "firstpricedate/lastpricedate confirmed from PIT master metadata; actual PRICE-through-delist-date requires SEP hydration (pending key).",
-    "meta_fb": "FB preserved via META relatedtickers; identity = permaticker, not ticker."
+    "BRK.B": "resolved via normalize_ticker (legacy BRK-B).",
+    "GYMB": "small-cap delisted 2010; correctly NOT in caerus_large_cap and not hydrated (expected, not a gap).",
+    "META": "relatedtickers FB preserved."
   },
   "known_case_validation": {
     "ATVI": {
-      "firstpricedate": "1993-10-25",
+      "declared_last": "2023-10-12",
+      "hydrated": true,
+      "in_large_cap_family": true,
       "isdelisted": "Y",
-      "lastpricedate": "2023-10-12",
-      "matched_ticker": "ATVI",
-      "normalized_from": "ATVI",
-      "relatedtickers": "",
-      "resolved": true,
-      "security_id": "SHARADAR:198850"
+      "reaches_last_price_date": true,
+      "rows": 6488,
+      "series_first": "1997-12-31",
+      "series_last": "2023-10-12"
     },
-    "BRK-B": {
-      "firstpricedate": "1996-05-09",
+    "BRK.B": {
+      "declared_last": "2026-06-09",
+      "hydrated": true,
+      "in_large_cap_family": true,
       "isdelisted": "N",
-      "lastpricedate": "2026-06-09",
-      "matched_ticker": "BRK.B",
-      "normalized_from": "BRK.B",
-      "relatedtickers": "BRK.A",
-      "resolved": true,
-      "security_id": "SHARADAR:196523"
+      "reaches_last_price_date": true,
+      "rows": 7153,
+      "series_first": "1997-12-31",
+      "series_last": "2026-06-09"
     },
     "GYMB": {
-      "firstpricedate": "1993-04-01",
-      "isdelisted": "Y",
-      "lastpricedate": "2010-11-22",
-      "matched_ticker": "GYMB",
-      "normalized_from": "GYMB",
-      "relatedtickers": "",
-      "resolved": true,
-      "security_id": "SHARADAR:198521"
+      "hydrated": false,
+      "in_large_cap_family": false,
+      "note": "not in caerus_large_cap family (small-cap) \u2014 not hydrated; expected"
     },
     "META": {
-      "firstpricedate": "2012-05-18",
+      "declared_last": "2026-06-09",
+      "hydrated": true,
+      "in_large_cap_family": true,
       "isdelisted": "N",
-      "lastpricedate": "2026-06-09",
-      "matched_ticker": "META",
-      "normalized_from": "META",
-      "relatedtickers": "FB",
-      "resolved": true,
-      "security_id": "SHARADAR:194817"
+      "reaches_last_price_date": true,
+      "rows": 3534,
+      "series_first": "2012-05-18",
+      "series_last": "2026-06-09"
     },
     "TWTR": {
-      "firstpricedate": "2013-11-07",
+      "declared_last": "2022-10-27",
+      "hydrated": true,
+      "in_large_cap_family": true,
       "isdelisted": "Y",
-      "lastpricedate": "2022-10-27",
-      "matched_ticker": "TWTR",
-      "normalized_from": "TWTR",
-      "relatedtickers": "",
-      "resolved": true,
-      "security_id": "SHARADAR:187959"
+      "reaches_last_price_date": true,
+      "rows": 2259,
+      "series_first": "2013-11-07",
+      "series_last": "2022-10-27"
     }
   },
   "large_cap_family": {
-    "block_reason": "market_cap_unavailable: supply TICKERS scalemarketcap or DAILY marketcap",
-    "by_date_reason_counts": [
-      {
-        "date": "2014-01-02",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 8041,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 7275,
-          "non_us_exchange": 5
-        }
-      },
-      {
-        "date": "2016-01-04",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 8688,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 6560,
-          "non_us_exchange": 5
-        }
-      },
-      {
-        "date": "2018-01-02",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 9419,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 6014,
-          "non_us_exchange": 5
-        }
-      },
-      {
-        "date": "2020-01-02",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 10026,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 5226,
-          "non_us_exchange": 5
-        }
-      },
-      {
-        "date": "2022-01-03",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 10887,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 2093,
-          "non_us_exchange": 5
-        }
-      },
-      {
-        "date": "2024-01-02",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 13065,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 1220,
-          "non_us_exchange": 5
-        }
-      },
-      {
-        "date": "2026-01-02",
-        "included": 0,
-        "reason_counts": {
-          "delisted_before_date": 14585,
-          "market_cap_unavailable": 20618,
-          "no_price_history_on_date": 319,
-          "non_us_exchange": 5
-        }
-      }
+    "active_in_family": 1246,
+    "artifact": "data/pit_universe/membership_universe_large_cap.csv",
+    "blocked": false,
+    "delisted_in_family": 354,
+    "included_by_date": [
+      [
+        "2014-01-02",
+        1197
+      ],
+      [
+        "2016-01-04",
+        1231
+      ],
+      [
+        "2018-01-02",
+        1221
+      ],
+      [
+        "2020-01-02",
+        1243
+      ],
+      [
+        "2022-01-03",
+        1317
+      ],
+      [
+        "2024-01-02",
+        1277
+      ],
+      [
+        "2026-01-02",
+        1260
+      ]
     ],
-    "note": "Counts show structural eligibility (history/delist/exchange); the large-cap SCALE filter needs TICKERS scalemarketcap or DAILY marketcap (API key).",
+    "membership_rows": 1600,
     "scale_caveat": "scalemarketcap is CURRENT scale (approximate for history); DAILY numeric marketcap is the PIT-exact source.",
-    "status": "BLOCKED_market_cap_unavailable"
+    "sha256": "a73c8352f0e8485fd0e3d289ce00c4266da4228cea022e0b3165f5e03b121cb8",
+    "status": "BUILT"
   },
-  "polaris_priced_rebaseline_unblocked": false,
-  "schema_version": "caerus_fr068_phase_2_5_readiness_v1",
+  "next_step": "Phase 3 priced run: AlphaStackBacktest universe -> Universe(as_of_date,'caerus_large_cap') priced from data/research_cache/sharadar_sep/. NOT run here.",
+  "polaris_priced_rebaseline_unblocked": true,
+  "regenerated_from": "real_local_artifacts",
+  "schema_version": "caerus_fr068_phase_2_5_readiness_v2",
   "sep_price_hydration": {
-    "hydrated_tickers_local": 0,
-    "note": "Hydrator built + tested (injected fetch). Live run needs the key; delisted SEP coverage already proven by the FR-067 verifier.",
-    "prior_delisted_coverage_evidence": {
-      "complete_count": 100,
-      "complete_pct": 1.0,
-      "median_coverage_pct": 0.999
-    },
-    "status": "NOT_RUN_needs_api_key"
+    "date_range": [
+      "1997-12-31",
+      "2026-06-09"
+    ],
+    "delisted_hydrated": 354,
+    "delisted_in_family": 354,
+    "empty": 0,
+    "hydrated": 1600,
+    "manifest_sha256": "05ff438ca8cc4385a1a7c0f3731836c4cb7918e7f000bb9785dca9f0a0d3e538",
+    "requested": 1600,
+    "retrieved_at": "2026-06-10T20:12:59.090717+00:00",
+    "skipped_existing": 0,
+    "source_table": "SHARADAR/SEP",
+    "status": "COMPLETE"
   },
-  "unblock_commands": [
-    "python3 scripts/research/build_caerus_large_cap_family.py --scalemarketcap-from-tickers --api-key \"$NASDAQ_DATA_LINK_API_KEY\"",
-    "python3 scripts/research/hydrate_sharadar_sep.py --from-family data/pit_universe/membership_universe_large_cap.csv --family caerus_large_cap --api-key \"$NASDAQ_DATA_LINK_API_KEY\""
-  ],
-  "unresolved_blockers": [
-    {
-      "detail": "scalemarketcap (TICKERS) or DAILY marketcap needed to define large-cap scale.",
-      "id": "api_key_market_cap"
-    },
-    {
-      "detail": "SEP adjusted prices (incl delisted) must be hydrated for the priced backtest.",
-      "id": "api_key_sep_hydration"
-    }
-  ]
+  "unresolved_blockers": []
 }
