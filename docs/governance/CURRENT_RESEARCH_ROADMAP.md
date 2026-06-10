@@ -3,7 +3,9 @@
 Status: Canonical
 Owner: Caerus Research Program
 Last Updated: 2026-06-10 (FR-066 VM backfill/cron deployed; FR-051 Cygnus v0
-Stage 2 FAIL recorded and v0 shelved; FR-067 Sharadar gate recorded)
+Stage 2 FAIL recorded and v0 shelved; FR-067 Sharadar gate CLOSED_PASS; FR-068
+PIT remediation Phases 1-3 complete — Polaris priced rebaseline MATERIAL; FR-069
+Research Lab / modular sleeve architecture design recorded)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -61,7 +63,8 @@ editing code or specs.
 | FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
 | FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
 | FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
-| FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md` | PHASE1_IN_PROGRESS 2026-06-10 — security-existence PIT from Sharadar TICKERS; strategy migration deferred | `scripts/research/build_pit_universe_from_sharadar.py`, `research/pit_universe.py` | n/a |
+| FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md` | PHASES 1-3 COMPLETE 2026-06-10 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra rebaselines pending | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py` | n/a |
+| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (design only; no production refactor) | `fr_069_research_lab_modular_sleeve_architecture.md` | DESIGN 2026-06-10 — pluggable sleeve contract on the PIT foundation; shared data/signal/backtest/eval layers; migration deferred to future FRs | none (design spec) | n/a |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
@@ -143,6 +146,15 @@ or fold FR-056 — now done.
 
 ## 5. Current blockers (research-grade findings, non-decision-grade until resolved)
 
+- **Survivorship remediation (FR-068) — PIT foundation now built; legacy backtests
+  are NON-DECISION-GRADE.** The static `data/universe.csv` (200 current survivors)
+  is confirmed SEVERELY survivorship-biased; the PIT universe (20,618 securities,
+  71.7% delisted) and `Universe(as_of_date)` now exist. The Polaris priced
+  rebaseline on the honest large-cap universe is **MATERIAL** (Sharpe overstated
+  1.05→0.85, max drawdown understated −43%→−54%). **Promotion requirement (new):**
+  all promotion evidence must carry `universe_method = pit_universe`;
+  current-universe backtests are retained as `legacy_current_universe` for lineage
+  only. Orion/Lyra rebaselines are still pending.
 - **Portfolio history stale** — freshness audit added (`portfolio_history_freshness.py`, untracked); confirms staleness needs resolution before promotion-grade evaluation.
 - **Security master auth / missing artifact** — `security_master_diagnostics.py` / `audit_security_master_refresh.py` (untracked) flag auth or missing-artifact gaps blocking PIT-safe alias resolution.
 - **BK → BNY universe migration** — pending; do NOT migrate `universe.csv` without explicit approval.

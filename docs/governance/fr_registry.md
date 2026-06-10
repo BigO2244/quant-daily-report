@@ -48,8 +48,16 @@ and past their observation criteria:
   source for FR-068 Phase 1. Caveats: no S&P 600/Russell membership (use market-cap
   band/supplemental); Cygnus v1 consensus still separately blocked.
   RESEARCH_ONLY / NON_EXECUTIONAL.
+- FR-068: PIT universe + survivorship rebaseline (`PHASES_1_3_COMPLETE`) —
+  PIT universe (20,618 secs / 14,790 delisted) + `Universe(as_of_date)`;
+  caerus_large_cap family (1,600) + full SEP price hydration; Polaris priced
+  rebaseline **MATERIAL** (Sharpe 1.05→0.85, MaxDD −43%→−54%). Legacy backtests
+  non-decision-grade; promotion evidence now requires `universe_method=pit_universe`.
+  Orion/Lyra rebaselines pending. RESEARCH_ONLY / NON_EXECUTIONAL.
+- FR-069: Research Lab / modular sleeve architecture (`DESIGN`) — design-only spec;
+  no production refactor. RESEARCH_ONLY / NON_EXECUTIONAL.
 
-None of these three change execution, broker submission, cron execution-phase,
+None of these change execution, broker submission, cron execution-phase,
 order generation, allocation, the strategy registry, or promotion state. The
 FR-066 cron line is installed on the VM as telemetry only and writes to
 `logs/portfolio_history.cron.log`.

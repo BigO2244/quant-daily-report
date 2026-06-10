@@ -57,6 +57,8 @@ Fully deployed history and reviewed deferred items belong in
 | FR-066 Canonical NAV Track Record Integrity | Operational Telemetry / Performance Provenance | `DEPLOYED_OBSERVING` | LOW (telemetry-only) | FR-059 reason codes, Alpaca portfolio-history endpoint, existing `build_portfolio_history.py` / benchmark CSV / broker snapshots | vm_backfill_and_cron_installed | Backfill dry-run/write completed on VM using VM `.env` without printing credentials; canonical rows are continuous from 2026-03-03 through the current builder date, SPY/beta columns are populated, and the 7:15 PM ET builder/escalation cron is installed to `logs/portfolio_history.cron.log`. Caveat: Alpaca portfolio-history Apr 8 canonical NAV is `$9,751.97`, not the older `$9,715.45` baseline; broker snapshot reconciliation remains non-clean because those snapshots are point-in-time account captures, while `nav.csv` overlap is clean. | Revert the four module changes + crontab line; delete `backfill_manifest.json`, `checksum_manifest.json`, and added NAV columns; existing nav rows are never deleted. No execution, broker submission, allocation, strategy, or promotion behavior is in scope. |
 | FR-051 Cygnus Wave 1 (v0 event-reaction) | Research / Earnings Drift | `SHELVED` | LOW (research-only) | FR-051 spec + 2026-06-10 addendum, EDGAR submissions API, `cik_mapping_results.csv`, `paper/trading_calendar.py` | v0_stage2_failed_holdout_preserved | Stage 1 delivered the PIT EDGAR event tape. Stage 2 v0 validation failed 4/6: Rank IC 10D IC 0.0318 with t-stat 1.59 (FAIL), IC 20D/60D decay PASS, net IR vs SPY at 25 bps 0.44 PASS, excess correlation vs Polaris proxy 0.043 PASS, event coverage 1.05 PASS, cost sensitivity at 50 bps IR -0.32 FAIL. Tune window also failed. v0 is shelved, not re-tuned; 2025-forward holdout remains untouched; v1 requires EPS-surprise / consensus data. | Delete `research/cygnus/`, `scripts/research/run_cygnus_research.py`, `Tests/test_cygnus_events.py`, and dated `outputs/research/cygnus/` artifacts. No execution, broker, registry, allocation, or paper/live behavior is in scope. |
 | FR-067 Vela Stage 0 (PIT universe source comparison) | Research / Strategy Design | `CLOSED_PASS` | LOW (docs-only + verifier) | FR-067 spec, vendor diligence (Norgate / Sharadar / reconstructed S&P 600 / CRSP), `scripts/research/verify_sharadar_coverage.py` | sharadar_verified_100pct_delisted_coverage | Sharadar paid entitlement PASSED the delisted-price coverage gate (2026-06-10): sample_size=100, complete_count=100, complete_pct=1.0, median_coverage_pct=0.999 (verifier scoring bug fixed in `e4b6201`). Sharadar approved as the PIT price/security-history source for FR-068 Phase 1. Caveats: historical index membership still needs a supplemental source or market-cap proxy (no S&P 600/Russell membership); Cygnus v1 analyst-consensus/EPS-surprise remains separately blocked. FR-068 supersedes for the PIT build. | Revert governance edits; the comparison doc + verifier remain as evidence. No API key, registry, execution, or strategy behavior is in scope. |
+| FR-068 PIT Universe + Polaris/Orion/Lyra Rebaseline | Research / Survivorship Remediation | `PHASES_1_3_COMPLETE` | LOW (research-only) | Sharadar (FR-067), PIT universe + caerus_large_cap family + SEP cache | polaris_rebaseline_MATERIAL_orion_lyra_pending | Phase 1 PIT universe (20,618 secs, 14,790 delisted) + `Universe(as_of_date)`; Phase 2 impact (SEVERE; 71.7% delisted); Phase 2.5 caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Phase 3 Polaris priced rebaseline on the committed momentum harness = **MATERIAL** (Sharpe 1.054→0.851, MaxDD −43%→−54%; CAGR 28.83%→30.68%). Legacy = non-decision-grade; promotion evidence must carry `universe_method=pit_universe`. Orion/Lyra rebaselines pending; DAILY-marketcap PIT family + index membership families are later phases. | Revert rebaseline research modules + artifacts; PIT data is gitignored/regenerable. No execution, model, cron, registry, or holdout change in scope. |
+| FR-069 Research Lab / Modular Sleeve Architecture | Architecture / Design | `DESIGN` | NONE (design-only) | FR-068 PIT foundation, existing sleeve specs (FR-050..053, 067), alpha_lab harness | design_only_no_refactor | Design a pluggable sleeve architecture on the PIT foundation: a common Sleeve contract, shared data/signal/backtest/evaluation layers, membership families, and governance gates (PIT-required evidence, holdout protection). No production refactor; migration sequenced into future FRs. | Delete the design doc; nothing is wired. No code, execution, registry, or strategy behavior in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -755,6 +757,60 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Next:** FR-068 Phase 1 (PIT universe foundation) — security-existence
   universe from Sharadar TICKERS; strategy migration deferred.
 - **Rollback:** Revert governance edits; comparison doc + verifier remain as evidence.
+
+## FR-068 PIT Universe + Polaris/Orion/Lyra Rebaseline
+
+- **FR number:** FR-068
+- **Title:** Point-in-Time universe foundation + survivorship rebaseline
+- **Date started:** 2026-06-10
+- **Status:** `PHASES_1_3_COMPLETE` (Polaris rebaseline done — MATERIAL; Orion/Lyra pending)
+- **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
+- **Problem statement:** Every official historical backtest was built from
+  `data/universe.csv` (200 current survivors) — confirmed SEVERELY survivorship-
+  biased (71.7% of the investable common-stock universe is delisted and invisible).
+- **Phases delivered:**
+  - **Phase 1** — PIT universe foundation from Sharadar TICKERS (20,618 securities,
+    14,790 delisted); `research/pit_universe.py` `Universe(as_of_date)` reader
+    (security-existence family; no `data/universe.csv` fallback).
+  - **Phase 2** — PIT impact assessment: classification **SEVERE**; 8.5% early
+    look-ahead in the curated 200; 71.7% market delisted.
+  - **Phase 2.5** — `caerus_large_cap` membership family (1,600; 354 delisted) via
+    `research/pit_large_cap_family.py`; full Sharadar SEP price hydration
+    (1,600/1,600, incl. delisted) via `scripts/research/hydrate_sharadar_sep.py`.
+  - **Phase 3 (priced)** — Legacy vs PIT Polaris on the committed momentum baseline
+    (`alpha_lab_v1` signals + `alpha_lab_v2` `baseline_top10_daily`), changing only
+    the universe; both legs SEP-priced; window 2014-01-02..2024-12-31 (holdout
+    excluded). Result **MATERIAL**: Sharpe 1.054→0.851 (−19%), MaxDD −43%→−54%,
+    CAGR 28.83%→30.68%. Attribution dominated by curated-out high-momentum
+    large-caps (ENPH/PLUG/GME/NVAX/...), not delisted-loser drag.
+- **Governance outcome:** legacy current-universe backtests are **non-decision-grade**;
+  promotion evidence must carry `universe_method = pit_universe`. Legacy retained as
+  `legacy_current_universe` (lineage).
+- **Non-goals:** No production Polaris/execution/model/ranking/sizing/risk/cost/cron/
+  registry change; no holdout access; no tuning.
+- **Validation evidence:** py_compile; targeted PIT tests (39+ across PIT suites);
+  json.tool on artifacts; git diff --check clean. Real priced run, committed harness.
+- **Next:** Orion (`h2_rank_decay_exit_top10_daily`) + Lyra (`h1_weekly_top10`)
+  rebaselines; DAILY-marketcap PIT large-cap family; index membership families
+  (sp500_proxy, small_cap_band for Vela). Sequenced under FR-069.
+- **Rollback:** Revert rebaseline research modules + artifacts; PIT data is
+  gitignored/regenerable.
+
+## FR-069 Research Lab / Modular Sleeve Architecture
+
+- **FR number:** FR-069
+- **Title:** Research Lab / modular sleeve architecture (design only)
+- **Date started:** 2026-06-10
+- **Status:** `DESIGN` (no production refactor)
+- **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
+- **Scope:** `docs/governance/fr_069_research_lab_modular_sleeve_architecture.md` —
+  a pluggable Sleeve contract on the PIT foundation; shared data/signal/backtest/
+  evaluation layers; membership families; governance gates (PIT-required evidence,
+  holdout protection, pre-registration). Maps existing strategies to the contract
+  and sequences migration into future FRs.
+- **Non-goals:** No code, no production refactor, no execution/registry change. The
+  doc changes nothing that runs.
+- **Rollback:** Delete the design doc.
 
 ## Roadmap Boundaries
 

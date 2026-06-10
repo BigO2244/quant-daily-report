@@ -327,3 +327,37 @@ classification mix (`REAL` / `DATA_QUALITY` / `CONFIGURATION` /
 `OBSERVATION_WINDOW`) so promotion-readiness trends become operator
 visible rather than implicit. Trajectory tooling is scoped as FR-041
 in the strategic backlog.
+
+## 2026-06-10 — PIT Universe Remediation and Polaris Rebaseline (FR-067/FR-068)
+
+## Status: RESEARCH / NON_EXECUTIONAL
+
+Lesson: a static current-universe (`data/universe.csv`, 200 survivors) projected
+backward is severely survivorship-biased, and the distortion is **risk-adjusted**,
+not just return-level. The Polaris priced rebaseline on the honest large-cap PIT
+universe (Sharadar; 1,600 names incl. 354 delisted, full SEP prices) showed:
+
+- Sharpe **overstated** 1.054 → 0.851 (−19%).
+- Max drawdown **understated** −43.2% → −54.4% (+11.2 pts deeper).
+- Raw CAGR slightly **understated** (28.83% → 30.68%).
+
+Counter-intuitively the dominant channel for this large-cap momentum strategy was
+universe **curation** (the 200 quietly omits volatile high-momentum large-caps like
+ENPH/PLUG/GME/NVAX), not delisted-loser drag — delisted names did not appear among
+the top contributors. Survivorship can flatter *quality metrics* even when raw
+return is unaffected.
+
+Governance changes adopted:
+- Legacy current-universe backtests are **non-decision-grade**; retain them as
+  `legacy_current_universe` for lineage only.
+- All promotion evidence must carry `universe_method = pit_universe`.
+- Verify the vendor's *delisted* coverage with a paid trial before committing
+  (FR-067): the free preview confirmed everything except delisted prices — the one
+  thing that mattered. Also: a verifier that imports a heavy optional dependency
+  (pandas via the trading calendar) can fail silently and null out every metric;
+  keep validation scoring dependency-free and deterministic.
+
+Non-blocking follow-up:
+Orion/Lyra PIT rebaselines; DAILY-marketcap PIT large-cap family (current
+scalemarketcap is PIT-approximate); index membership families. Modular sleeve
+architecture to standardize PIT-first evidence is designed in FR-069.
