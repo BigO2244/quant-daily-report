@@ -294,6 +294,40 @@ draft FR in the remediation plan). Implication of this assessment:
 
 ---
 
+## Addendum 2026-06-10b — Paid entitlement result + verifier scoring fix
+
+The owner purchased Sharadar access and ran the verifier (`--sample-size 100`).
+Two findings:
+
+1. **Paid entitlement resolves the preview gap.** Under the paid key the verifier
+   now retrieves historical prices for delisted securities (e.g. GYMB: 3,245
+   price rows, 1993→2010), versus the preview's empty SEP responses. The single
+   paywalled unknown from the main assessment — *does Sharadar actually deliver
+   delisted prices* — is answered **yes** for the sampled names.
+
+2. **Verifier scoring bug (found + fixed).** The first paid run reported
+   `coverage_pct = null`, `expected_trading_days = null`, and
+   `reaches_delist_date = false` for all 100 names despite thousands of price
+   rows. Root cause: `scripts/research/verify_sharadar_coverage.py` imported
+   `paper.trading_calendar`, which imports `pandas`; run under a Python without
+   pandas, that import failed silently (swallowed `try/except`) and every
+   calendar-derived field collapsed to null/false. Fix: scoring is now
+   calendar-independent and deterministic (weekday count × 252/261), coverage is
+   measured over the observed price window, and `reaches_delist_date` is a direct
+   date comparison. Re-scoring the existing 100-name report with the corrected
+   `reaches_delist` logic flips it **0 → 100/100** (all sampled names deliver
+   prices through their exact delisting date).
+
+**Status: still INCONCLUSIVE on full PASS/FAIL** until the verifier is re-run with
+the key to populate within-window `coverage_pct` (internal-gap completeness).
+Reaches-delist (100/100) is necessary but not sufficient — `complete` also
+requires `coverage_pct ≥ 0.95`. **FR-068 remains NOT-GO pending the corrected
+full metrics** (no GO declared on partial evidence). Owner action: re-run
+`python3 scripts/research/verify_sharadar_coverage.py --api-key "$NASDAQ_DATA_LINK_API_KEY" --sample-size 100`
+(key never logged) and regenerate the report; the direction is strongly positive.
+
+---
+
 ## Constraints honored
 
 Research-only. Local Mac Studio only. No VM/deploy, execution, model, cron, or

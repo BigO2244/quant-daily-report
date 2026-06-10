@@ -39,6 +39,7 @@ import ssl
 import sys
 import urllib.parse
 import urllib.request
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -46,11 +47,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-try:
-    from paper.trading_calendar import is_trading_day, next_trading_day
-except Exception:  # pragma: no cover - defensive
-    is_trading_day = None  # type: ignore[assignment]
-    next_trading_day = None  # type: ignore[assignment]
+# Scoring is intentionally calendar-independent and dependency-free so the
+# verifier produces identical, deterministic results under any Python (the
+# original version imported paper.trading_calendar, which pulls in pandas; under
+# a no-pandas interpreter that import failed silently and collapsed every
+# calendar-derived field to null/false even though prices were returned).
+TRADING_DAYS_PER_WEEKDAY = 252.0 / 261.0  # ~9 US market full-day holidays/year
 
 SCHEMA_VERSION = "caerus_vela_sharadar_coverage_v1"
 NDL_BASE = "https://data.nasdaq.com/api/v3/datatables"
@@ -141,17 +143,37 @@ def select_delisted_small_caps(
 # --------------------------------------------------------------------------- #
 # Coverage computation (pure; unit-tested)
 # --------------------------------------------------------------------------- #
-def expected_trading_days(first: str, last: str) -> int | None:
-    if is_trading_day is None or next_trading_day is None or first > last:
+def _parse_date(value: object) -> date | None:
+    text = str(value or "").strip()[:10]
+    if not text:
         return None
-    count = 1 if is_trading_day(first) else 0
-    cursor = first
-    for _ in range(20000):
-        cursor = next_trading_day(cursor)
-        if cursor > last:
-            break
-        count += 1
-    return count
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _count_weekdays(d0: date, d1: date) -> int:
+    """Inclusive count of Mon-Fri weekdays in [d0, d1]."""
+    days = (d1 - d0).days + 1
+    full_weeks, rem = divmod(days, 7)
+    weekdays = full_weeks * 5
+    start = d0.weekday()
+    for i in range(rem):
+        if (start + i) % 7 < 5:
+            weekdays += 1
+    return weekdays
+
+
+def expected_trading_days(first: str, last: str) -> int | None:
+    """Deterministic, dependency-free estimate of US trading sessions in
+    [first, last] inclusive. Weekday count scaled by 252/261 (~9 market
+    holidays/year). Returns None only when the dates are missing or inverted —
+    never because an optional calendar package is unavailable."""
+    d0, d1 = _parse_date(first), _parse_date(last)
+    if d0 is None or d1 is None or d0 > d1:
+        return None
+    return max(1, round(_count_weekdays(d0, d1) * TRADING_DAYS_PER_WEEKDAY))
 
 
 def assess_ticker_coverage(
@@ -161,30 +183,70 @@ def assess_ticker_coverage(
     first_price_date: str,
     last_price_date: str,
     complete_threshold: float = DEFAULT_COMPLETE_THRESHOLD,
-    delist_gap_tolerance_td: int = 5,
+    delist_tolerance_days: int = 7,
 ) -> dict[str, Any]:
-    """Coverage of a delisted ticker's price history through its delist date."""
-    dates = sorted({d[:10] for d in price_dates if d})
-    n_days = len(dates)
-    expected = expected_trading_days(first_price_date, last_price_date)
+    """Coverage of a delisted ticker's price history through its delist date.
+
+    Coverage is measured over the OBSERVED price window (gap detection within
+    delivered data). `reaches_delist_date` is a direct date comparison: the
+    observed series must extend to within `delist_tolerance_days` of the declared
+    last price date. `declared_history_complete` flags when delivered data starts
+    materially later than the declared first price date (informational)."""
+    observed = sorted({d for d in (_parse_date(x) for x in price_dates) if d is not None})
+    declared_first = _parse_date(first_price_date)
+    declared_last = _parse_date(last_price_date)
+    n_days = len(observed)
+
+    if n_days == 0:
+        return {
+            "ticker": ticker,
+            "price_day_count": 0,
+            "first_price_date": first_price_date,
+            "last_price_date": last_price_date,
+            "observed_first_price_date": None,
+            "actual_last_price_date": None,
+            "expected_trading_days": None,
+            "coverage_pct": None,
+            "reaches_delist_date": False,
+            "declared_history_complete": False,
+            "complete": False,
+            "reason_codes": ["no_prices"],
+        }
+
+    obs_first, obs_last = observed[0], observed[-1]
+    expected = expected_trading_days(obs_first.isoformat(), obs_last.isoformat())
     coverage = (n_days / expected) if expected else None
-    actual_last = dates[-1] if dates else None
-    # Does coverage extend to (near) the delisting date?
-    reaches_delist = False
-    if actual_last and last_price_date:
-        gap = expected_trading_days(actual_last, last_price_date)
-        reaches_delist = gap is not None and gap <= delist_gap_tolerance_td
+    reaches_delist = (
+        declared_last is None or obs_last >= declared_last - timedelta(days=delist_tolerance_days)
+    )
+    declared_history_complete = (
+        declared_first is None or obs_first <= declared_first + timedelta(days=delist_tolerance_days)
+    )
     complete = bool(coverage is not None and coverage >= complete_threshold and reaches_delist)
+
+    reason_codes: list[str] = []
+    if not reaches_delist:
+        reason_codes.append("does_not_reach_delist")
+    if coverage is not None and coverage < complete_threshold:
+        reason_codes.append("gap_within_window")
+    if not declared_history_complete:
+        reason_codes.append("declared_history_short")
+    if not reason_codes:
+        reason_codes.append("ok")
+
     return {
         "ticker": ticker,
         "price_day_count": n_days,
         "first_price_date": first_price_date,
         "last_price_date": last_price_date,
-        "actual_last_price_date": actual_last,
+        "observed_first_price_date": obs_first.isoformat(),
+        "actual_last_price_date": obs_last.isoformat(),
         "expected_trading_days": expected,
         "coverage_pct": round(coverage, 4) if coverage is not None else None,
         "reaches_delist_date": reaches_delist,
+        "declared_history_complete": declared_history_complete,
         "complete": complete,
+        "reason_codes": reason_codes,
     }
 
 
