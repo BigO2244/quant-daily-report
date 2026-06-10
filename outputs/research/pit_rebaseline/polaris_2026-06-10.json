@@ -1,0 +1,654 @@
+{
+  "blockers": [
+    {
+      "detail": "Sharadar SEP adjusted prices for delisted names not downloaded (needs API key + bulk fetch); local price matrix is current-names-only, so the delisted-loser return channel cannot be priced.",
+      "id": "delisted_prices"
+    },
+    {
+      "detail": "Universe(as_of_date) is the whole ~20.6k market, not a large-cap family mirroring Polaris selection; a faithful swap needs a PIT large-cap membership family (later FR-068 phase).",
+      "id": "pit_large_cap_membership_family"
+    }
+  ],
+  "channels": {
+    "A_delisted_securities": "UNMEASURED \u2014 requires SEP prices + PIT large-cap family; ~0 delisted names in the current 200 by construction (survivor-curated).",
+    "B_ipo_timing": "MEASURED \u2014 16 look-ahead inclusions on 2014-01-02 (all post-2014 IPOs/spinoffs), decaying to 1 by 2026.",
+    "C_symbol_history": "PARTIAL \u2014 1 no_pit_match (BRK-B vs Sharadar BRK.B ticker format); resolver handles relatedtickers (e.g. FB->META).",
+    "D_universe_composition": "N/A for like-for-like swap; would change if all-cap Universe used directly (not done)."
+  },
+  "date": "2026-06-10",
+  "execution_impact": "NON_EXECUTIONAL",
+  "governance": {
+    "confidence": {
+      "membership_delta": "HIGH",
+      "return_delta_magnitude": "UNQUANTIFIED"
+    },
+    "foundation_distortion_classification": "MATERIAL (provisional; likely SEVERE once delisted losers are priced)",
+    "quantitative_return_delta": "INCONCLUSIVE \u2014 cannot be computed without delisted prices; no numbers fabricated.",
+    "rationale": "The measurable look-ahead inclusions on 2014 are concentrated in high-growth winners (ABNB, COIN, PLTR, CRWD, UBER, HOOD, DASH, APP) that a momentum strategy weights heavily, systematically inflating early-period returns; combined with Phase 2's SEVERE universe distortion (71.7% of the market delisted and invisible) the historical Polaris results are materially distorted.",
+    "recommendation": [
+      "Retain legacy results as legacy_current_universe (lineage, non-decision-grade).",
+      "Make PIT results canonical once the priced rebaseline runs.",
+      "Require universe_method=pit_universe in all promotion evidence.",
+      "Run the full priced rebaseline after SEP delisted-price hydration + a PIT large-cap membership family."
+    ],
+    "results_status": "materially distorted; NOT decision-grade for promotion pending PIT rebaseline"
+  },
+  "governance_label": "RESEARCH_ONLY",
+  "legacy_universe_size": 200,
+  "lookahead_attribution_2014": [
+    {
+      "firstpricedate": "2020-12-10",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:632745",
+      "ticker": "ABNB"
+    },
+    {
+      "firstpricedate": "2014-06-06",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:187524",
+      "ticker": "ANET"
+    },
+    {
+      "firstpricedate": "2021-04-15",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:634780",
+      "ticker": "APP"
+    },
+    {
+      "firstpricedate": "2022-02-02",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:637462",
+      "ticker": "CEG"
+    },
+    {
+      "firstpricedate": "2021-04-14",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:634771",
+      "ticker": "COIN"
+    },
+    {
+      "firstpricedate": "2019-06-12",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:110725",
+      "ticker": "CRWD"
+    },
+    {
+      "firstpricedate": "2020-12-09",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:632730",
+      "ticker": "DASH"
+    },
+    {
+      "firstpricedate": "2016-09-07",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:124114",
+      "ticker": "DELL"
+    },
+    {
+      "firstpricedate": "2024-04-02",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:641611",
+      "ticker": "GEV"
+    },
+    {
+      "firstpricedate": "2014-03-27",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:119496",
+      "ticker": "GOOG"
+    },
+    {
+      "firstpricedate": "2021-07-29",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:635864",
+      "ticker": "HOOD"
+    },
+    {
+      "firstpricedate": "2018-10-31",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:113554",
+      "ticker": "LIN"
+    },
+    {
+      "firstpricedate": "2020-09-30",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:632043",
+      "ticker": "PLTR"
+    },
+    {
+      "firstpricedate": "2015-07-06",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:178719",
+      "ticker": "PYPL"
+    },
+    {
+      "firstpricedate": "2019-05-10",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:110842",
+      "ticker": "UBER"
+    },
+    {
+      "firstpricedate": "2016-10-05",
+      "lastpricedate": "2026-06-09",
+      "reason": "ipo_after_date",
+      "security_id": "SHARADAR:121834",
+      "ticker": "VST"
+    },
+    {
+      "firstpricedate": null,
+      "lastpricedate": null,
+      "reason": "no_pit_match",
+      "security_id": null,
+      "ticker": "BRK-B"
+    }
+  ],
+  "measured_now": "membership-level look-ahead correction for the static 200-name universe (IPO-timing channel).",
+  "membership_by_date": [
+    {
+      "date": "2014-01-02",
+      "excluded": [
+        {
+          "firstpricedate": "2020-12-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632745",
+          "ticker": "ABNB"
+        },
+        {
+          "firstpricedate": "2014-06-06",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:187524",
+          "ticker": "ANET"
+        },
+        {
+          "firstpricedate": "2021-04-15",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634780",
+          "ticker": "APP"
+        },
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        },
+        {
+          "firstpricedate": "2022-02-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:637462",
+          "ticker": "CEG"
+        },
+        {
+          "firstpricedate": "2021-04-14",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634771",
+          "ticker": "COIN"
+        },
+        {
+          "firstpricedate": "2019-06-12",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:110725",
+          "ticker": "CRWD"
+        },
+        {
+          "firstpricedate": "2020-12-09",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632730",
+          "ticker": "DASH"
+        },
+        {
+          "firstpricedate": "2016-09-07",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:124114",
+          "ticker": "DELL"
+        },
+        {
+          "firstpricedate": "2024-04-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:641611",
+          "ticker": "GEV"
+        },
+        {
+          "firstpricedate": "2014-03-27",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:119496",
+          "ticker": "GOOG"
+        },
+        {
+          "firstpricedate": "2021-07-29",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:635864",
+          "ticker": "HOOD"
+        },
+        {
+          "firstpricedate": "2018-10-31",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:113554",
+          "ticker": "LIN"
+        },
+        {
+          "firstpricedate": "2020-09-30",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632043",
+          "ticker": "PLTR"
+        },
+        {
+          "firstpricedate": "2015-07-06",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:178719",
+          "ticker": "PYPL"
+        },
+        {
+          "firstpricedate": "2019-05-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:110842",
+          "ticker": "UBER"
+        },
+        {
+          "firstpricedate": "2016-10-05",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:121834",
+          "ticker": "VST"
+        }
+      ],
+      "excluded_count": 17,
+      "legacy_count": 200,
+      "lookahead_pct": 0.085,
+      "pit_eligible_count": 183
+    },
+    {
+      "date": "2016-01-04",
+      "excluded": [
+        {
+          "firstpricedate": "2020-12-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632745",
+          "ticker": "ABNB"
+        },
+        {
+          "firstpricedate": "2021-04-15",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634780",
+          "ticker": "APP"
+        },
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        },
+        {
+          "firstpricedate": "2022-02-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:637462",
+          "ticker": "CEG"
+        },
+        {
+          "firstpricedate": "2021-04-14",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634771",
+          "ticker": "COIN"
+        },
+        {
+          "firstpricedate": "2019-06-12",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:110725",
+          "ticker": "CRWD"
+        },
+        {
+          "firstpricedate": "2020-12-09",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632730",
+          "ticker": "DASH"
+        },
+        {
+          "firstpricedate": "2016-09-07",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:124114",
+          "ticker": "DELL"
+        },
+        {
+          "firstpricedate": "2024-04-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:641611",
+          "ticker": "GEV"
+        },
+        {
+          "firstpricedate": "2021-07-29",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:635864",
+          "ticker": "HOOD"
+        },
+        {
+          "firstpricedate": "2018-10-31",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:113554",
+          "ticker": "LIN"
+        },
+        {
+          "firstpricedate": "2020-09-30",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632043",
+          "ticker": "PLTR"
+        },
+        {
+          "firstpricedate": "2019-05-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:110842",
+          "ticker": "UBER"
+        },
+        {
+          "firstpricedate": "2016-10-05",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:121834",
+          "ticker": "VST"
+        }
+      ],
+      "excluded_count": 14,
+      "legacy_count": 200,
+      "lookahead_pct": 0.07,
+      "pit_eligible_count": 186
+    },
+    {
+      "date": "2018-01-02",
+      "excluded": [
+        {
+          "firstpricedate": "2020-12-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632745",
+          "ticker": "ABNB"
+        },
+        {
+          "firstpricedate": "2021-04-15",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634780",
+          "ticker": "APP"
+        },
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        },
+        {
+          "firstpricedate": "2022-02-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:637462",
+          "ticker": "CEG"
+        },
+        {
+          "firstpricedate": "2021-04-14",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634771",
+          "ticker": "COIN"
+        },
+        {
+          "firstpricedate": "2019-06-12",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:110725",
+          "ticker": "CRWD"
+        },
+        {
+          "firstpricedate": "2020-12-09",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632730",
+          "ticker": "DASH"
+        },
+        {
+          "firstpricedate": "2024-04-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:641611",
+          "ticker": "GEV"
+        },
+        {
+          "firstpricedate": "2021-07-29",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:635864",
+          "ticker": "HOOD"
+        },
+        {
+          "firstpricedate": "2018-10-31",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:113554",
+          "ticker": "LIN"
+        },
+        {
+          "firstpricedate": "2020-09-30",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632043",
+          "ticker": "PLTR"
+        },
+        {
+          "firstpricedate": "2019-05-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:110842",
+          "ticker": "UBER"
+        }
+      ],
+      "excluded_count": 12,
+      "legacy_count": 200,
+      "lookahead_pct": 0.06,
+      "pit_eligible_count": 188
+    },
+    {
+      "date": "2020-01-02",
+      "excluded": [
+        {
+          "firstpricedate": "2020-12-10",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632745",
+          "ticker": "ABNB"
+        },
+        {
+          "firstpricedate": "2021-04-15",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634780",
+          "ticker": "APP"
+        },
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        },
+        {
+          "firstpricedate": "2022-02-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:637462",
+          "ticker": "CEG"
+        },
+        {
+          "firstpricedate": "2021-04-14",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:634771",
+          "ticker": "COIN"
+        },
+        {
+          "firstpricedate": "2020-12-09",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632730",
+          "ticker": "DASH"
+        },
+        {
+          "firstpricedate": "2024-04-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:641611",
+          "ticker": "GEV"
+        },
+        {
+          "firstpricedate": "2021-07-29",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:635864",
+          "ticker": "HOOD"
+        },
+        {
+          "firstpricedate": "2020-09-30",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:632043",
+          "ticker": "PLTR"
+        }
+      ],
+      "excluded_count": 9,
+      "legacy_count": 200,
+      "lookahead_pct": 0.045,
+      "pit_eligible_count": 191
+    },
+    {
+      "date": "2022-01-03",
+      "excluded": [
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        },
+        {
+          "firstpricedate": "2022-02-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:637462",
+          "ticker": "CEG"
+        },
+        {
+          "firstpricedate": "2024-04-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:641611",
+          "ticker": "GEV"
+        }
+      ],
+      "excluded_count": 3,
+      "legacy_count": 200,
+      "lookahead_pct": 0.015,
+      "pit_eligible_count": 197
+    },
+    {
+      "date": "2024-01-02",
+      "excluded": [
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        },
+        {
+          "firstpricedate": "2024-04-02",
+          "lastpricedate": "2026-06-09",
+          "reason": "ipo_after_date",
+          "security_id": "SHARADAR:641611",
+          "ticker": "GEV"
+        }
+      ],
+      "excluded_count": 2,
+      "legacy_count": 200,
+      "lookahead_pct": 0.01,
+      "pit_eligible_count": 198
+    },
+    {
+      "date": "2026-01-02",
+      "excluded": [
+        {
+          "firstpricedate": null,
+          "lastpricedate": null,
+          "reason": "no_pit_match",
+          "security_id": null,
+          "ticker": "BRK-B"
+        }
+      ],
+      "excluded_count": 1,
+      "legacy_count": 200,
+      "lookahead_pct": 0.005,
+      "pit_eligible_count": 199
+    }
+  ],
+  "pit_master_size": 20618,
+  "priced_run_plan_preregistered": {
+    "attribution": "top-25 securities by Legacy-minus-PIT return contribution, each tagged delisted_loser / ipo_unavailable / survivor_distortion / symbol_history.",
+    "method": "AlphaStackBacktest with universe selection replaced by Universe(as_of_date) per rebalance date; identical ranking/costs/sizing/risk; PIT prices from hydrated Sharadar SEP.",
+    "metrics": [
+      "CAGR",
+      "Sharpe",
+      "Sortino",
+      "MaxDrawdown",
+      "Volatility",
+      "Turnover",
+      "HitRate",
+      "WinLossRatio",
+      "AvgHoldingPeriod",
+      "Concentration"
+    ],
+    "unblock_command": "python3 scripts/research/build_pit_universe_from_sharadar.py --api-key \"$NASDAQ_DATA_LINK_API_KEY\"  # plus a SEP price hydration step for delisted names",
+    "windows": "validation window only; holdout (2025+) untouched"
+  },
+  "schema_version": "caerus_polaris_pit_rebaseline_v1",
+  "status": "PARTIAL_MEMBERSHIP_ONLY__PRICED_RUN_BLOCKED",
+  "strategy": "caerus_polaris",
+  "the_only_change": "universe source data/universe.csv (static 200) -> Universe(as_of_date) (PIT). Ranking, costs, sizing, risk, cadence unchanged."
+}
