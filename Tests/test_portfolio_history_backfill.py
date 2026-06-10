@@ -17,6 +17,10 @@ FIXED_GENERATED_AT = "2026-06-10T00:00:00+00:00"
 
 
 def _ts(date_str: str) -> int:
+    if "T" not in date_str:
+        # Alpaca's daily portfolio-history timestamp for a market session is
+        # after the New York close, which may be the following UTC date.
+        return int(datetime.fromisoformat(f"{date_str}T20:00:00-05:00").timestamp())
     return int(datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc).timestamp())
 
 
@@ -49,6 +53,18 @@ def test_reconstruct_nav_series_orders_and_derives_returns() -> None:
     assert rows[2]["return_1d"] == pytest.approx((10100.0 / 10000.0) - 1.0)
     assert rows[2]["cumulative_return"] == pytest.approx((10100.0 / 10000.0) - 1.0)
     assert rows[0]["source"] == "alpaca_portfolio_history_backfill"
+
+
+def test_reconstruct_uses_new_york_session_date_for_after_close_timestamps() -> None:
+    # Alpaca daily portfolio-history bars can be timestamped after market close
+    # in New York, which is the following UTC calendar date. The row belongs to
+    # the market session date, not the UTC date.
+    rows = reconstruct_nav_series(
+        {"timestamp": [_ts("2026-03-04T01:00:00")], "equity": [10000.0]},
+        inception="2026-03-03",
+    )
+
+    assert rows[0]["date"] == "2026-03-03"
 
 
 def test_reconstruct_drops_pre_inception_and_nonpositive() -> None:

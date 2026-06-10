@@ -43,6 +43,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -69,6 +70,7 @@ RECON_TOLERANCE_REL = RECON_TOLERANCE_BPS / 10_000.0
 LARGE_MOVE_THRESHOLD = 0.05  # FR-066 risks: flag |return_1d| > 5%
 
 BACKFILL_SOURCE = "alpaca_portfolio_history_backfill"
+MARKET_TZ = ZoneInfo("America/New_York")
 
 
 # --------------------------------------------------------------------------- #
@@ -138,8 +140,11 @@ def _history_date(timestamp: Any) -> str | None:
         ts = int(float(timestamp))
     except Exception:
         return None
-    # Alpaca 1D timestamps are session dates; UTC date is stable for daily bars.
-    return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+    # Alpaca 1D portfolio-history timestamps arrive after the session close
+    # (for example 20:00 ET). The market session date is therefore the New York
+    # local date, not the following UTC date. Using UTC shifts every row forward
+    # one trading day and creates false Monday gaps.
+    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(MARKET_TZ).date().isoformat()
 
 
 def reconstruct_nav_series(
