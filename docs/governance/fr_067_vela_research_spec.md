@@ -1,6 +1,9 @@
 # FR-067 Vela Research Specification (Small-Cap Momentum Sleeve)
 
-Status: Draft / BLOCKED_ON_VENDOR_TRIAL (Sharadar conditional pending coverage verification)
+Status: Draft / STAGE0_PASSED 2026-06-10 (Sharadar coverage verified: 100/100,
+complete_pct 1.0, median 0.999; approved as PIT price/security source). Vela
+strategy build still gated on FR-068 PIT foundation + small-cap membership
+(no S&P 600 in Sharadar — market-cap band or supplemental source required).
 Owner: Caerus Research Program
 Last Updated: 2026-06-10
 Governance Label: RESEARCH_ONLY

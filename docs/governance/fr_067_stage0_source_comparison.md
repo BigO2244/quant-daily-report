@@ -1,6 +1,10 @@
 # FR-067 Vela — Stage 0 PIT Small-Cap Universe Source Comparison
 
-Status: Draft (decision input — owner must pick a source before Stage 1)
+Status: CLOSED_PASS 2026-06-10 — Sharadar selected and verified (paid entitlement:
+100/100 delisted small-caps complete, complete_pct 1.0, median coverage 0.999).
+Approved as the PIT price/security-history source for FR-068 Phase 1. Caveats
+below stand: Sharadar lacks S&P 600/Russell membership (use market-cap band) and
+analyst consensus (Cygnus v1 remains separately blocked).
 Owner: Caerus Research Program
 Last Updated: 2026-06-10
 Governance Label: RESEARCH_ONLY

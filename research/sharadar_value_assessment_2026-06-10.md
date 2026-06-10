@@ -328,6 +328,23 @@ full metrics** (no GO declared on partial evidence). Owner action: re-run
 
 ---
 
+## Addendum 2026-06-10c — Gate CLOSED PASS
+
+Re-run with the paid key after the scoring fix (`e4b6201`):
+
+- `--sample-size 100` → **complete_count = 100, complete_pct = 1.0,
+  median_coverage_pct = 0.999.**
+
+**FR-067 Stage 0 gate: PASS / CLOSED.** Sharadar is approved as the canonical PIT
+price/security-history source for **FR-068 Phase 1**. Recommendation A
+(BUY_ONE_MONTH_NOW) is realized and validated. Standing caveats: Sharadar
+provides **no S&P 600/Russell membership** (small-cap membership uses a PIT
+market-cap band or supplemental source) and **no analyst consensus** (Cygnus v1
+EPS-surprise-vs-consensus remains separately blocked). FR-068 Phase 1 builds the
+security-existence PIT foundation; strategy rebaseline follows in later phases.
+
+---
+
 ## Constraints honored
 
 Research-only. Local Mac Studio only. No VM/deploy, execution, model, cron, or

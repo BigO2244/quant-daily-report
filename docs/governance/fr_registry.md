@@ -41,10 +41,13 @@ and past their observation criteria:
   50 bps cost sensitivity. The tune window also failed; the 2025-forward holdout
   remains untouched. Cygnus v1 is gated on EPS-surprise / consensus data.
   RESEARCH_ONLY / NON_EXECUTIONAL.
-- FR-067 Stage 0: Vela PIT universe source comparison (`BLOCKED_ON_VENDOR_TRIAL`)
-  — Sharadar is owner-conditional pending trial coverage verification by
-  `scripts/research/verify_sharadar_coverage.py`; the verifier has not been run
-  because no trial key is available. RESEARCH_ONLY / NON_EXECUTIONAL.
+- FR-067 Stage 0: Vela PIT universe source comparison (`CLOSED_PASS`)
+  — Sharadar paid entitlement PASSED the delisted-price coverage gate 2026-06-10
+  (sample_size=100, complete_count=100, complete_pct=1.0, median=0.999; verifier
+  scoring bug fixed in `e4b6201`). Sharadar approved as the PIT price/security
+  source for FR-068 Phase 1. Caveats: no S&P 600/Russell membership (use market-cap
+  band/supplemental); Cygnus v1 consensus still separately blocked.
+  RESEARCH_ONLY / NON_EXECUTIONAL.
 
 None of these three change execution, broker submission, cron execution-phase,
 order generation, allocation, the strategy registry, or promotion state. The

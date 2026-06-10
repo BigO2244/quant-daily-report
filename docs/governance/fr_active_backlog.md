@@ -56,7 +56,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-065 Dashboard Decision-Grade Consolidation | Investment Confidence / Operator Surface | `ACTIVE_RESEARCH` | LOW | Model-quality artifacts, dashboard data builder, terminal dashboard assets | implementation_started | Add a compact dashboard data-model and terminal panel section summarizing decision-grade readiness, research confidence, latest model-quality evidence, blockers, and source paths. | Revert dashboard data/UI/test changes; dashboard falls back to existing broker-authoritative panels. No broker truth, execution, planned-trade, or warning behavior changes are in scope. |
 | FR-066 Canonical NAV Track Record Integrity | Operational Telemetry / Performance Provenance | `DEPLOYED_OBSERVING` | LOW (telemetry-only) | FR-059 reason codes, Alpaca portfolio-history endpoint, existing `build_portfolio_history.py` / benchmark CSV / broker snapshots | vm_backfill_and_cron_installed | Backfill dry-run/write completed on VM using VM `.env` without printing credentials; canonical rows are continuous from 2026-03-03 through the current builder date, SPY/beta columns are populated, and the 7:15 PM ET builder/escalation cron is installed to `logs/portfolio_history.cron.log`. Caveat: Alpaca portfolio-history Apr 8 canonical NAV is `$9,751.97`, not the older `$9,715.45` baseline; broker snapshot reconciliation remains non-clean because those snapshots are point-in-time account captures, while `nav.csv` overlap is clean. | Revert the four module changes + crontab line; delete `backfill_manifest.json`, `checksum_manifest.json`, and added NAV columns; existing nav rows are never deleted. No execution, broker submission, allocation, strategy, or promotion behavior is in scope. |
 | FR-051 Cygnus Wave 1 (v0 event-reaction) | Research / Earnings Drift | `SHELVED` | LOW (research-only) | FR-051 spec + 2026-06-10 addendum, EDGAR submissions API, `cik_mapping_results.csv`, `paper/trading_calendar.py` | v0_stage2_failed_holdout_preserved | Stage 1 delivered the PIT EDGAR event tape. Stage 2 v0 validation failed 4/6: Rank IC 10D IC 0.0318 with t-stat 1.59 (FAIL), IC 20D/60D decay PASS, net IR vs SPY at 25 bps 0.44 PASS, excess correlation vs Polaris proxy 0.043 PASS, event coverage 1.05 PASS, cost sensitivity at 50 bps IR -0.32 FAIL. Tune window also failed. v0 is shelved, not re-tuned; 2025-forward holdout remains untouched; v1 requires EPS-surprise / consensus data. | Delete `research/cygnus/`, `scripts/research/run_cygnus_research.py`, `Tests/test_cygnus_events.py`, and dated `outputs/research/cygnus/` artifacts. No execution, broker, registry, allocation, or paper/live behavior is in scope. |
-| FR-067 Vela Stage 0 (PIT universe source comparison) | Research / Strategy Design | `BLOCKED_ON_VENDOR_TRIAL` | LOW (docs-only + verifier) | FR-067 spec, vendor diligence (Norgate / Sharadar / reconstructed S&P 600 / CRSP), `scripts/research/verify_sharadar_coverage.py` | sharadar_conditional_pending_trial_key | Sharadar selection is owner-conditional and pending trial verification. The verifier exists but has not been run because no trial key is available. If the audit demonstrates adequate historical delisted small-cap coverage and PIT membership reconstruction support, Sharadar becomes the preferred candidate source; otherwise alternative vendors remain under evaluation. | Delete the comparison doc and verifier if abandoned. No API key, code execution, registry, execution, or strategy behavior is in scope. |
+| FR-067 Vela Stage 0 (PIT universe source comparison) | Research / Strategy Design | `CLOSED_PASS` | LOW (docs-only + verifier) | FR-067 spec, vendor diligence (Norgate / Sharadar / reconstructed S&P 600 / CRSP), `scripts/research/verify_sharadar_coverage.py` | sharadar_verified_100pct_delisted_coverage | Sharadar paid entitlement PASSED the delisted-price coverage gate (2026-06-10): sample_size=100, complete_count=100, complete_pct=1.0, median_coverage_pct=0.999 (verifier scoring bug fixed in `e4b6201`). Sharadar approved as the PIT price/security-history source for FR-068 Phase 1. Caveats: historical index membership still needs a supplemental source or market-cap proxy (no S&P 600/Russell membership); Cygnus v1 analyst-consensus/EPS-surprise remains separately blocked. FR-068 supersedes for the PIT build. | Revert governance edits; the comparison doc + verifier remain as evidence. No API key, registry, execution, or strategy behavior is in scope. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -729,11 +729,15 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **FR number:** FR-067 (Stage 0)
 - **Title:** Vela small-cap momentum — Stage 0 PIT universe source comparison
 - **Date started:** 2026-06-10
-- **Status:** `BLOCKED_ON_VENDOR_TRIAL` (Sharadar conditional; verifier pending
-  trial key)
+- **Status:** `CLOSED_PASS` (Sharadar coverage gate verified 2026-06-10; FR-068
+  Phase 1 supersedes for the PIT build)
 - **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
 - **Problem statement:** FR-067 is blocked until a PIT small-cap universe with
   delisted-ticker price coverage exists; hand-curating current names is forbidden.
+- **PASS result (2026-06-10):** Sharadar paid entitlement ran the verifier at
+  `--sample-size 100`: complete_count=100, complete_pct=1.0,
+  median_coverage_pct=0.999. Verifier scoring bug fixed first (`e4b6201`).
+  Sharadar approved as the PIT price/security-history source for FR-068 Phase 1.
 - **Scope (this session):** `docs/governance/fr_067_stage0_source_comparison.md`
   compares Norgate, Sharadar (Nasdaq Data Link), reconstructed S&P 600, and
   CRSP/WRDS across cost, license, delisted-ticker price coverage, integration
@@ -744,13 +748,13 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Non-goals:** No `research/vela/` strategy code, no registry entry, no Vela
   strategy-name assignment — all owner decisions per roadmap Section 6.
 - **Validation evidence:** Docs-only; `git diff --check` clean.
-- **Owner/vendor-gated next steps:** Obtain a trial key and run
-  `scripts/research/verify_sharadar_coverage.py` without committing or printing
-  credentials. If the audit demonstrates adequate historical delisted small-cap
-  coverage and PIT membership reconstruction support, Sharadar becomes the
-  preferred candidate source; otherwise alternative vendors remain under
-  evaluation. Stage 1 begins only after that evidence is recorded.
-- **Rollback:** Delete the comparison doc.
+- **Caveats carried into FR-068:** (1) Sharadar has no S&P 600 / Russell index
+  membership — small-cap membership uses a PIT market-cap band or a supplemental
+  source; (2) Sharadar carries no analyst consensus, so Cygnus v1
+  EPS-surprise-vs-consensus remains separately blocked.
+- **Next:** FR-068 Phase 1 (PIT universe foundation) — security-existence
+  universe from Sharadar TICKERS; strategy migration deferred.
+- **Rollback:** Revert governance edits; comparison doc + verifier remain as evidence.
 
 ## Roadmap Boundaries
 
