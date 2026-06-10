@@ -95,6 +95,7 @@ validate_regime_history.py
 
 # Local/editor artifacts
 *.code-workspace
+.claude/
 
 # Generated reports
 reports/trading_audit/
