@@ -1,8 +1,8 @@
 # FR-051 Cygnus Research Specification
 
-Status: Draft
+Status: Draft — Implementation Wave 1 addendum added 2026-06-10 (pending owner approval)
 Owner: Caerus Research Program
-Last Updated: 2026-06-08
+Last Updated: 2026-06-10
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
@@ -461,3 +461,107 @@ into a generic price/factor drift sleeve without an explicit roadmap decision.
 The FR-064 multi-asset framework is a separate portfolio research framework and
 does not change Cygnus strategy identity, data requirements, or implementation
 status.
+
+---
+
+## Addendum 2026-06-10 — Implementation Wave 1 Plan (v0 Event-Reaction)
+
+This addendum extends the canonical spec per `CURRENT_RESEARCH_ROADMAP.md`
+Section 6 (extend, do not fork). It resolves the open questions blocking
+implementation and sequences a buildable first wave. It changes no execution,
+broker, cron, registry, or paper/live behavior.
+
+### A1. Conflict B resolution (recommendation for owner decision)
+
+Affirm the canonical FR-051 definition: Cygnus is **earnings drift**, not
+generic price/factor drift. Retire FR-056 formally in
+`CURRENT_RESEARCH_ROADMAP.md` Section 4. Rationale: the edge thesis (market
+underreaction to a discrete, timestamped information event) is what makes
+Cygnus a distinct return stream from the Polaris/Orion momentum family; a
+generic drift sleeve would reproduce the 97%+ correlation problem documented
+in FR-063.
+
+### A2. Data source decision (resolves the primary open question)
+
+Wave 1 uses **SEC EDGAR as the sole event source** and builds only
+`cygnus_v0_event_reaction`. Rationale:
+
+- EDGAR acceptance timestamps are point-in-time by construction, free, and the
+  repo already operates EDGAR ingestion (`edgar_ingestion.py`,
+  `alpha_stack/datastore/sec_edgar.py`, the insider-activity overnight agent).
+- Every consensus-estimate vendor evaluated so far either restates history or
+  lacks auditable availability dates at acceptable cost. Deferring the
+  vendor decision unblocks the venue test now; revision-dependent variants
+  (v1/v2) remain gated on the vendor question.
+
+Event definition for Wave 1:
+
+- Event = 8-K filing with Item 2.02 (Results of Operations) and/or the
+  associated earnings exhibit (EX-99), keyed by EDGAR `acceptanceDateTime`.
+- Availability rule: acceptance before 09:00 ET => available for same-date
+  close selection; acceptance 09:00-16:00 ET => treated as during-market and
+  available next trading date (conservative); acceptance after 16:00 ET =>
+  next trading date. Friday/holiday acceptances map to the next trading date.
+- 10-Q/10-K filings without a preceding 8-K event within 5 trading days form a
+  secondary, lower-weight event class (`filing_only`).
+
+### A3. Wave 1 signal substitutions (no consensus dependency)
+
+The v0 composite from the canonical spec is implemented with these
+substitutions, keeping component persistence requirements unchanged:
+
+- `eps_surprise_z` -> **deferred** (vendor-gated); weight redistributed.
+- `revenue_surprise_z` -> **revenue YoY acceleration**: YoY revenue growth from
+  the filed XBRL figure versus the prior filed quarter's YoY growth (both
+  PIT-safe filed values).
+- `event_reaction_abnormal_return` -> first eligible close-to-close return
+  minus SPY return (unchanged from canonical definition).
+- `drift_confirmation`, run-up penalty, failed-reaction penalty: unchanged.
+
+Wave 1 composite:
+
+```text
+cygnus_v0_score =
+  0.40 * percentile(event_reaction_abnormal_return)
++ 0.25 * percentile(revenue_yoy_acceleration)
++ 0.20 * percentile(drift_confirmation)
++ 0.15 * filing_quality_bonus   # on-time filer, 8-K + exhibit present
+- pre_event_runup_penalty
+- failed_reaction_penalty
+```
+
+### A4. Pre-registered pass/fail criteria (frozen before first backtest)
+
+| Criterion | Threshold |
+|---|---|
+| Rank IC of v0 score vs 10D forward returns | >= 0.02, t-stat >= 2 |
+| Rank IC vs 20D and 60D forward returns | positive, monotone-ish decay |
+| Net IR vs SPY (25 bps costs) | >= 0.30 |
+| Excess-return correlation vs Polaris excess | <= 0.50 |
+| Event coverage | >= 60% of universe earnings events captured by tape |
+| Cost sensitivity | thesis survives at 50 bps |
+
+A failing variant is reported and shelved, not re-tuned until the criteria
+pass. Walk-forward split: tune on events through 2021, validate 2022-2024,
+holdout 2025-forward run once.
+
+### A5. Wave 1 sequencing and effort
+
+1. **Stage 1 (event tape, ~1 week):** EDGAR 8-K Item 2.02 tape for the
+   existing 201-name universe, 2016-present, with acceptance-timestamp audit
+   per canonical Stage 1. The small universe is acceptable for Wave 1 because
+   the venue is large-cap; the FR-067 Stage 0 PIT machinery lifts this later.
+2. **Stage 2 (v0 strategy + backtest, ~1-2 weeks):** canonical Stage 2 with
+   the A3 composite, Polaris/Orion/Lyra/SPY comparisons, and the A4 criteria
+   table as the only headline output.
+3. **Stage 3+ (robustness, dry run, shadow):** unchanged from canonical spec.
+   Shadow integration remains gated on the dynamic-strategy-slug prerequisite
+   shared with FR-067.
+
+### A6. Updated open questions
+
+Resolved by this addendum: event source (EDGAR), v0 surprise definition
+(filed-revenue acceleration), entry timing (conservative availability rules
+above). Still open: consensus/revision vendor for v1/v2; guidance parsing
+(deferred per canonical spec); whether `filing_only` events earn a permanent
+place or are dropped after Stage 2 attribution.

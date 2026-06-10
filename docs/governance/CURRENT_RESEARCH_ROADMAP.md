@@ -2,7 +2,9 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-08
+Last Updated: 2026-06-10 (added FR-066/FR-067 proposed rows; FR-051 Implementation
+Wave 1 addendum recorded; Conflict B resolution recommended in FR-051 addendum,
+decision still owner-pending)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -58,6 +60,8 @@ editing code or specs.
 | FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
 | FR-064 | Portfolio research | Multi-asset research framework | `fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
 | FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
+| FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_066_canonical_nav_track_record_spec.md` | PROPOSED 2026-06-10 — pending owner approval | none (spec only) | n/a |
+| FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test; blocked on Stage 0 PIT universe) | `fr_067_vela_research_spec.md` | PROPOSED 2026-06-10 — strategy name + registry addition pending owner approval | none (spec only) | not yet registered |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
