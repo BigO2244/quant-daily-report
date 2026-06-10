@@ -49,19 +49,7 @@ def _resolve_universe(repo_root: Path, tickers: str | None, limit: int | None) -
     return universe
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="FR-051 Cygnus research runner (Wave 1).")
-    parser.add_argument("--stage", choices=["events"], default="events",
-                        help="Wave 1 implements 'events' (Stage 1). Stage 2 is gated on audit sign-off.")
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--trade-date", default=None, help="Artifact date folder; default today UTC.")
-    parser.add_argument("--start", default="2016-01-01")
-    parser.add_argument("--end", default=None)
-    parser.add_argument("--tickers", default=None, help="Comma-separated subset for a bounded run.")
-    parser.add_argument("--limit", type=int, default=None, help="Cap number of universe tickers.")
-    args = parser.parse_args(argv)
-
-    repo_root = Path(args.repo_root).resolve()
+def _run_events_stage(args: argparse.Namespace, repo_root: Path) -> int:
     now = datetime.now(tz=timezone.utc)
     trade_date = args.trade_date or now.date().isoformat()
     end_date = args.end or now.date().isoformat()
@@ -77,7 +65,6 @@ def main(argv: list[str] | None = None) -> int:
         universe, start_date=args.start, end_date=end_date, ingested_at=ingested_at
     )
     audit = audit_acceptance_timestamps(events)
-
     tape_paths = write_event_tape(events, repo_root=repo_root, trade_date=trade_date, fetch_errors=fetch_errors)
     audit_path = write_acceptance_audit(audit, repo_root=repo_root, trade_date=trade_date)
 
@@ -91,11 +78,108 @@ def main(argv: list[str] | None = None) -> int:
             "fetch_errors": len(fetch_errors),
             "artifacts": {**tape_paths, "audit": audit_path},
         },
-        indent=2,
-        sort_keys=True,
+        indent=2, sort_keys=True,
     ))
     print("\n[CYGNUS] Stage 1 complete. Review the acceptance-timestamp audit before Stage 2.")
     return 0 if audit["look_ahead_safe"] else 2
+
+
+def _run_backtest_stage(args: argparse.Namespace, repo_root: Path) -> int:
+    """Stage 2 cygnus_v0_event_reaction backtest. Tune + validate ONLY; the
+    2025+ holdout is excluded from all data and is never run here."""
+    import pandas as pd
+
+    from research.cygnus import backtest as B
+    from research.cygnus.artifacts import cygnus_output_dir
+
+    trade_date = args.trade_date or datetime.now(tz=timezone.utc).date().isoformat()
+    if args.window == "holdout":
+        print("[CYGNUS][REFUSED] holdout (2025+) is owner-gated; pause for review before any holdout run.",
+              file=sys.stderr)
+        return 3
+
+    prices = B.load_price_matrix(repo_root)  # sliced < 2025-01-01
+    events = load_event_tape_csv(repo_root, args.tape_date or trade_date)
+    if not events:
+        print("[CYGNUS][ERROR] no event tape found; run --stage events first.", file=sys.stderr)
+        return 1
+
+    panel = B.build_event_panel(events, prices, fundamentals_loader=B._fundamentals_loader(repo_root))
+    # Expected events for coverage: ~4 quarterly per name over the window years.
+    years = (B.VALIDATE_END.year - 2016 + 1)
+    expected_total = 199 * 4 * years
+
+    tables = []
+    if args.window in ("tune", "both"):
+        tables.append(B.a4_table(panel, prices, window_name="tune",
+                                 start=pd.Timestamp("2016-01-01"), end=B.TUNE_END,
+                                 expected_events=199 * 4 * (B.TUNE_END.year - 2016 + 1)))
+    if args.window in ("validate", "both"):
+        tables.append(B.a4_table(panel, prices, window_name="validate",
+                                 start=B.VALIDATE_START, end=B.VALIDATE_END,
+                                 expected_events=199 * 4 * (B.VALIDATE_END.year - B.VALIDATE_START.year + 1)))
+
+    out_dir = cygnus_output_dir(repo_root, trade_date)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report = {
+        "schema_version": "caerus_cygnus_v0_backtest_v1",
+        "strategy_id": "caerus_cygnus",
+        "variant": "cygnus_v0_event_reaction",
+        "governance_label": "RESEARCH_ONLY",
+        "execution_impact": "NON_EXECUTIONAL",
+        "panel_events": len(panel),
+        "holdout_excluded": True,
+        "a4_tables": tables,
+    }
+    report_path = out_dir / "cygnus_v0_backtest_report.json"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(_format_a4(tables))
+    print(f"\n[CYGNUS] Stage 2 backtest written: {report_path}")
+    print("[CYGNUS] Holdout (2025+) NOT run — pause for owner review of validation results first.")
+    return 0
+
+
+def load_event_tape_csv(repo_root: Path, tape_date: str) -> list:
+    from research.cygnus.backtest import load_event_tape
+    return load_event_tape(repo_root, tape_date)
+
+
+def _format_a4(tables: list) -> str:
+    lines = []
+    for tbl in tables:
+        lines.append("=" * 78)
+        lines.append(f"A4 PASS/FAIL — {tbl['window'].upper()} {tbl['window_range']} "
+                     f"(events={tbl['events_in_window']})  ->  {tbl['overall']} "
+                     f"({tbl['criteria_passed']}/{tbl['criteria_total']})")
+        lines.append("=" * 78)
+        for name, c in tbl["criteria"].items():
+            val = {k: v for k, v in c.items() if k not in ("verdict", "threshold")}
+            lines.append(f"  [{c['verdict']:>11}] {name}")
+            lines.append(f"               threshold: {c['threshold']}")
+            lines.append(f"               actual:    {val}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="FR-051 Cygnus research runner (Wave 1).")
+    parser.add_argument("--stage", choices=["events", "backtest"], default="events",
+                        help="'events' = Stage 1 tape; 'backtest' = Stage 2 cygnus_v0_event_reaction.")
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--trade-date", default=None, help="Artifact date folder; default today UTC.")
+    parser.add_argument("--tape-date", default=None, help="Event-tape date folder to read for backtest.")
+    parser.add_argument("--start", default="2016-01-01")
+    parser.add_argument("--end", default=None)
+    parser.add_argument("--tickers", default=None, help="Comma-separated subset for a bounded run.")
+    parser.add_argument("--limit", type=int, default=None, help="Cap number of universe tickers.")
+    parser.add_argument("--window", choices=["tune", "validate", "both", "holdout"], default="both",
+                        help="Backtest window. 'holdout' is refused (owner-gated).")
+    args = parser.parse_args(argv)
+
+    repo_root = Path(args.repo_root).resolve()
+    if args.stage == "events":
+        return _run_events_stage(args, repo_root)
+    return _run_backtest_stage(args, repo_root)
 
 
 if __name__ == "__main__":
