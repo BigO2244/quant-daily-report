@@ -1,0 +1,637 @@
+{
+  "backtest_sensitivity": {
+    "end_date": "2024-12-31",
+    "start_date": "2014-01-02",
+    "variants": [
+      {
+        "avg_eligible_names_by_year": {
+          "2014": 0.0,
+          "2015": 10.0,
+          "2016": 10.0,
+          "2017": 10.0,
+          "2018": 10.0,
+          "2019": 10.0,
+          "2020": 10.0,
+          "2021": 10.0,
+          "2022": 10.0,
+          "2023": 10.0,
+          "2024": 10.0
+        },
+        "daily_rows": 2767,
+        "name": "A_current_universe_as_is",
+        "summary": {
+          "annualised_vol": 0.2675,
+          "avg_holding_period_days": 18.25,
+          "avg_turnover": 0.144199,
+          "benchmark_cumulative_return": 2.888133,
+          "cagr": 0.2499,
+          "cumulative_return": 10.578833,
+          "excess_return_vs_spy": 7.6907,
+          "max_drawdown": -0.4307,
+          "sharpe": 0.969,
+          "win_rate": 0.509939
+        },
+        "top_contributors": [
+          {
+            "approx_sum_weighted_daily_return": 0.506866,
+            "ticker": "NVDA"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.286705,
+            "ticker": "AMD"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.24888,
+            "ticker": "APP"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.22248,
+            "ticker": "TSLA"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.148628,
+            "ticker": "ANET"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.121891,
+            "ticker": "PLTR"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.099897,
+            "ticker": "META"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.090744,
+            "ticker": "AMAT"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.075339,
+            "ticker": "AVGO"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.073834,
+            "ticker": "LRCX"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.072663,
+            "ticker": "AAPL"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.071503,
+            "ticker": "HOOD"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.06935,
+            "ticker": "NEM"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.068578,
+            "ticker": "MU"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.068571,
+            "ticker": "COIN"
+          }
+        ],
+        "universe_size": 200
+      },
+      {
+        "avg_eligible_names_by_year": {
+          "2014": 0.0,
+          "2015": 10.0,
+          "2016": 10.0,
+          "2017": 10.0,
+          "2018": 10.0,
+          "2019": 10.0,
+          "2020": 10.0,
+          "2021": 10.0,
+          "2022": 10.0,
+          "2023": 10.0,
+          "2024": 10.0
+        },
+        "daily_rows": 2767,
+        "name": "B_restricted_valid_price_on_2014_01_02",
+        "summary": {
+          "annualised_vol": 0.2506,
+          "avg_holding_period_days": 17.63,
+          "avg_turnover": 0.149259,
+          "benchmark_cumulative_return": 2.888133,
+          "cagr": 0.1929,
+          "cumulative_return": 5.938072,
+          "excess_return_vs_spy": 3.049939,
+          "max_drawdown": -0.404,
+          "sharpe": 0.83,
+          "win_rate": 0.509216
+        },
+        "top_contributors": [
+          {
+            "approx_sum_weighted_daily_return": 0.508645,
+            "ticker": "NVDA"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.339163,
+            "ticker": "AMD"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.196481,
+            "ticker": "TSLA"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.116722,
+            "ticker": "META"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.098431,
+            "ticker": "MU"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.088256,
+            "ticker": "LRCX"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.085959,
+            "ticker": "AMAT"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.080408,
+            "ticker": "AVGO"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.077584,
+            "ticker": "FCX"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.07731,
+            "ticker": "AAPL"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.071332,
+            "ticker": "NEM"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.071139,
+            "ticker": "FTNT"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.065855,
+            "ticker": "NFLX"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.059793,
+            "ticker": "COP"
+          },
+          {
+            "approx_sum_weighted_daily_return": 0.056903,
+            "ticker": "PWR"
+          }
+        ],
+        "universe_size": 184
+      },
+      {
+        "description": "Current engine behavior: all current tickers are in the candidate universe, but each ticker only becomes selectable after local price history makes signal_ready true. This is data-availability-aware, not membership-aware.",
+        "name": "C_naive_ipo_aware_inferred_from_price_history",
+        "same_metrics_as": "A_current_universe_as_is"
+      },
+      {
+        "available": false,
+        "name": "D_historical_index_membership",
+        "reason": "No local PIT constituent/membership table found."
+      }
+    ]
+  },
+  "confidence": "HIGH",
+  "delisting_survivorship_audit": {
+    "current_tickers_only_count": 200,
+    "delisted_securities_represented_count": 0,
+    "evidence": "Universe contains only current ticker/sector rows and no membership_end_date, delisting_date, inactive symbols, or stable security_id.",
+    "historical_constituents_missing_count": "UNKNOWN_WITHOUT_VENDOR_OR_PIT_CONSTITUENT_TABLE",
+    "implicit_excludes_disappeared_losers": true
+  },
+  "execution_impact": "NON_EXECUTIONAL",
+  "generated_at": "2026-06-10",
+  "governance_label": "RESEARCH_ONLY",
+  "holdout_2025_forward_read_or_run": false,
+  "local_only": true,
+  "pit_universe_design": {
+    "contract": "Universe(date) returns securities whose membership_start_date <= date and (membership_end_date is null or membership_end_date >= date), after applying data availability and governance exclusions known as of date.",
+    "required_fields": [
+      "security_id",
+      "ticker",
+      "perm_id",
+      "company_name",
+      "membership_start_date",
+      "membership_end_date",
+      "listing_date",
+      "delisting_date",
+      "exchange",
+      "asset_type",
+      "index_or_family",
+      "source",
+      "source_asof_date",
+      "confidence",
+      "symbol_change_history",
+      "data_availability_flags"
+    ]
+  },
+  "price_coverage_summary": {
+    "current_universe_tickers_unavailable_at_2014_start": 16,
+    "current_universe_tickers_with_price_on_or_before_2014_01_02": 184,
+    "panel_end": "2026-06-08",
+    "panel_path": "outputs/research/flow_detection_v1/price_panel.parquet",
+    "panel_start": "2014-01-02",
+    "pct_complete_from_2014": 0.92,
+    "pct_likely_unavailable_at_2014_start": 0.08,
+    "tickers_with_stale_last_price_local_panel": []
+  },
+  "recommended_frs": [
+    "Point-in-time universe build",
+    "Vendor verification",
+    "Backtest invalidation / rebaseline"
+  ],
+  "schema_version": "caerus_survivorship_bias_audit_v1",
+  "time_machine_tests": [
+    {
+      "current_engine_top10_if_rebalanced": [],
+      "current_universe_count": 200,
+      "date": "2014-01-02",
+      "first_price_after_date_examples": [
+        {
+          "first_local_price_date": "2014-06-06",
+          "ticker": "ANET"
+        },
+        {
+          "first_local_price_date": "2015-07-06",
+          "ticker": "PYPL"
+        },
+        {
+          "first_local_price_date": "2016-08-17",
+          "ticker": "DELL"
+        },
+        {
+          "first_local_price_date": "2016-10-05",
+          "ticker": "VST"
+        },
+        {
+          "first_local_price_date": "2016-11-01",
+          "ticker": "HWM"
+        },
+        {
+          "first_local_price_date": "2019-05-10",
+          "ticker": "UBER"
+        },
+        {
+          "first_local_price_date": "2019-06-12",
+          "ticker": "CRWD"
+        },
+        {
+          "first_local_price_date": "2020-09-30",
+          "ticker": "PLTR"
+        },
+        {
+          "first_local_price_date": "2020-12-09",
+          "ticker": "DASH"
+        },
+        {
+          "first_local_price_date": "2020-12-10",
+          "ticker": "ABNB"
+        },
+        {
+          "first_local_price_date": "2021-04-14",
+          "ticker": "COIN"
+        },
+        {
+          "first_local_price_date": "2021-04-15",
+          "ticker": "APP"
+        },
+        {
+          "first_local_price_date": "2021-07-29",
+          "ticker": "HOOD"
+        },
+        {
+          "first_local_price_date": "2022-01-19",
+          "ticker": "CEG"
+        },
+        {
+          "first_local_price_date": "2024-03-27",
+          "ticker": "GEV"
+        }
+      ],
+      "has_any_price_by_date": 184,
+      "not_trading_or_no_local_price_yet_count": 16,
+      "not_trading_or_no_local_price_yet_examples": [
+        "ABNB",
+        "ANET",
+        "APP",
+        "CEG",
+        "COIN",
+        "CRWD",
+        "DASH",
+        "DELL",
+        "GEV",
+        "HOOD",
+        "HWM",
+        "MMC",
+        "PLTR",
+        "PYPL",
+        "UBER",
+        "VST"
+      ],
+      "signal_ready_count": 0
+    },
+    {
+      "current_engine_top10_if_rebalanced": [
+        "NFLX",
+        "AMZN",
+        "NVDA",
+        "GOOG",
+        "GOOGL",
+        "PANW",
+        "SBUX",
+        "EQIX",
+        "NKE",
+        "MNST"
+      ],
+      "current_universe_count": 200,
+      "date": "2016-01-04",
+      "first_price_after_date_examples": [
+        {
+          "first_local_price_date": "2016-08-17",
+          "ticker": "DELL"
+        },
+        {
+          "first_local_price_date": "2016-10-05",
+          "ticker": "VST"
+        },
+        {
+          "first_local_price_date": "2016-11-01",
+          "ticker": "HWM"
+        },
+        {
+          "first_local_price_date": "2019-05-10",
+          "ticker": "UBER"
+        },
+        {
+          "first_local_price_date": "2019-06-12",
+          "ticker": "CRWD"
+        },
+        {
+          "first_local_price_date": "2020-09-30",
+          "ticker": "PLTR"
+        },
+        {
+          "first_local_price_date": "2020-12-09",
+          "ticker": "DASH"
+        },
+        {
+          "first_local_price_date": "2020-12-10",
+          "ticker": "ABNB"
+        },
+        {
+          "first_local_price_date": "2021-04-14",
+          "ticker": "COIN"
+        },
+        {
+          "first_local_price_date": "2021-04-15",
+          "ticker": "APP"
+        },
+        {
+          "first_local_price_date": "2021-07-29",
+          "ticker": "HOOD"
+        },
+        {
+          "first_local_price_date": "2022-01-19",
+          "ticker": "CEG"
+        },
+        {
+          "first_local_price_date": "2024-03-27",
+          "ticker": "GEV"
+        }
+      ],
+      "has_any_price_by_date": 186,
+      "not_trading_or_no_local_price_yet_count": 14,
+      "not_trading_or_no_local_price_yet_examples": [
+        "ABNB",
+        "APP",
+        "CEG",
+        "COIN",
+        "CRWD",
+        "DASH",
+        "DELL",
+        "GEV",
+        "HOOD",
+        "HWM",
+        "MMC",
+        "PLTR",
+        "UBER",
+        "VST"
+      ],
+      "signal_ready_count": 186
+    },
+    {
+      "current_engine_top10_if_rebalanced": [
+        "AMD",
+        "LRCX",
+        "KLAC",
+        "APO",
+        "BX",
+        "AMAT",
+        "AAPL",
+        "TDG",
+        "HWM",
+        "STX"
+      ],
+      "current_universe_count": 200,
+      "date": "2020-01-02",
+      "first_price_after_date_examples": [
+        {
+          "first_local_price_date": "2020-09-30",
+          "ticker": "PLTR"
+        },
+        {
+          "first_local_price_date": "2020-12-09",
+          "ticker": "DASH"
+        },
+        {
+          "first_local_price_date": "2020-12-10",
+          "ticker": "ABNB"
+        },
+        {
+          "first_local_price_date": "2021-04-14",
+          "ticker": "COIN"
+        },
+        {
+          "first_local_price_date": "2021-04-15",
+          "ticker": "APP"
+        },
+        {
+          "first_local_price_date": "2021-07-29",
+          "ticker": "HOOD"
+        },
+        {
+          "first_local_price_date": "2022-01-19",
+          "ticker": "CEG"
+        },
+        {
+          "first_local_price_date": "2024-03-27",
+          "ticker": "GEV"
+        }
+      ],
+      "has_any_price_by_date": 191,
+      "not_trading_or_no_local_price_yet_count": 9,
+      "not_trading_or_no_local_price_yet_examples": [
+        "ABNB",
+        "APP",
+        "CEG",
+        "COIN",
+        "DASH",
+        "GEV",
+        "HOOD",
+        "MMC",
+        "PLTR"
+      ],
+      "signal_ready_count": 190
+    },
+    {
+      "current_engine_top10_if_rebalanced": [
+        "NVDA",
+        "BX",
+        "F",
+        "FTNT",
+        "KKR",
+        "SPG",
+        "INTU",
+        "AMD",
+        "COP",
+        "STX"
+      ],
+      "current_universe_count": 200,
+      "date": "2022-01-03",
+      "first_price_after_date_examples": [
+        {
+          "first_local_price_date": "2022-01-19",
+          "ticker": "CEG"
+        },
+        {
+          "first_local_price_date": "2024-03-27",
+          "ticker": "GEV"
+        }
+      ],
+      "has_any_price_by_date": 197,
+      "not_trading_or_no_local_price_yet_count": 3,
+      "not_trading_or_no_local_price_yet_examples": [
+        "CEG",
+        "GEV",
+        "MMC"
+      ],
+      "signal_ready_count": 195
+    },
+    {
+      "current_engine_top10_if_rebalanced": [
+        "COIN",
+        "APP",
+        "PLTR",
+        "NVDA",
+        "META",
+        "CRWD",
+        "UBER",
+        "DELL",
+        "PANW",
+        "RCL"
+      ],
+      "current_universe_count": 200,
+      "date": "2024-01-02",
+      "first_price_after_date_examples": [
+        {
+          "first_local_price_date": "2024-03-27",
+          "ticker": "GEV"
+        }
+      ],
+      "has_any_price_by_date": 198,
+      "not_trading_or_no_local_price_yet_count": 2,
+      "not_trading_or_no_local_price_yet_examples": [
+        "GEV",
+        "MMC"
+      ],
+      "signal_ready_count": 199
+    }
+  ],
+  "universe_sources": [
+    {
+      "exists": true,
+      "mtime": "2026-03-04 19:55:23",
+      "path": "data/universe.csv",
+      "size_bytes": 3937
+    },
+    {
+      "exists": true,
+      "mtime": "2026-03-22 14:38:05",
+      "path": "cik_mapping_results.csv",
+      "size_bytes": 10659
+    },
+    {
+      "exists": true,
+      "mtime": "2026-06-01 14:25:36",
+      "path": "data/security_master/manual_aliases.json",
+      "size_bytes": 344
+    },
+    {
+      "exists": true,
+      "mtime": "2026-06-08 15:33:59",
+      "path": "outputs/research/flow_detection_v1/price_panel.parquet",
+      "size_bytes": 21833268
+    },
+    {
+      "exists": true,
+      "mtime": "2026-03-10 14:35:12",
+      "path": "alpha_stack_cache/prices/_matrix_prices_2007_2026.parquet",
+      "size_bytes": 6563176
+    }
+  ],
+  "universe_summary": {
+    "columns": [
+      "ticker",
+      "sector"
+    ],
+    "data_universe_rows": 200,
+    "has_delisted_securities": false,
+    "has_membership_end_date": false,
+    "has_membership_start_date": false,
+    "sector_counts": {
+      "Communication Services": 10,
+      "Consumer Discretionary": 19,
+      "Consumer Staples": 10,
+      "Energy": 9,
+      "Financials": 35,
+      "Health Care": 26,
+      "Industrials": 33,
+      "Information Technology": 39,
+      "Materials": 6,
+      "Real Estate": 6,
+      "Utilities": 7
+    },
+    "supports_point_in_time_eligibility": false,
+    "unique_tickers": 200
+  },
+  "validation_commands": [
+    "git diff --check",
+    "no py_compile needed before artifact creation; no scripts added",
+    "targeted tests not run because no audit utility code added"
+  ],
+  "vendor_assessment": {
+    "crsp": "Best institutional source if WRDS access exists.",
+    "local_feasibility": "PARTIAL_DIAGNOSTIC_ONLY",
+    "missing": [
+      "historical constituents",
+      "delisted prices",
+      "membership start/end dates",
+      "symbol-change stable IDs",
+      "delisting dates/reasons",
+      "PIT market-cap/index membership"
+    ],
+    "norgate": "Strong survivorship-free historical equity data candidate; operational Windows/NDU dependency is a cost.",
+    "polygon_tiingo_nasdaq": "May help pricing but must be verified for delisted coverage, stable IDs, and PIT membership.",
+    "sharadar": "Useful candidate if SEP/SFP or equivalent trial verifies delisted small-cap coverage and PIT reconstruction support."
+  },
+  "verdict": "CONFIRMED_BIASED",
+  "vm_actions_taken": false
+}
