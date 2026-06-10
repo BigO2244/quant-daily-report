@@ -49,8 +49,22 @@ NAV_FIELDS = [
     "turnover_dollars",
     "turnover_pct",
     "cumulative_return",
+    # FR-066 §3 benchmark / beta-adjusted scoreboard columns (additive).
+    "spy_close",
+    "spy_return_1d",
+    "benchmark_nav",
+    "excess_return_1d",
+    "rolling_beta_60d",
+    "beta_adjusted_excess_1d",
     "source",
 ]
+
+# FR-066: 1 bp of equity reconciliation tolerance; append-only immutability.
+NAV_RECON_TOLERANCE_REL = 1.0 / 10_000.0
+TRADING_DAYS_PER_YEAR = 252
+BETA_WINDOW = 60
+BETA_MIN_OBS = 30
+IR_WINDOWS = (63, 126, 252)
 
 ATTRIBUTION_FIELDS = [
     "ticker",
@@ -428,15 +442,272 @@ def _build_attribution(positions: list[dict[str, Any]], transactions: list[dict[
     return rows
 
 
-def build_portfolio_history(repo_root: Path | str = ".", *, report_date: str | None = None) -> dict[str, Any]:
+def _read_existing_canonical_nav(out_dir: Path) -> dict[str, dict[str, Any]]:
+    """Existing canonical nav rows keyed by date (for the append-only merge)."""
+    rows = _read_csv_rows(out_dir / "nav.csv")
+    by_date: dict[str, dict[str, Any]] = {}
+    for raw in rows:
+        date = _iso_date(raw.get("date"))
+        if not date:
+            continue
+        merged = {field: raw.get(field) for field in NAV_FIELDS}
+        merged["date"] = date
+        merged["equity"] = _to_float(raw.get("equity"))
+        by_date[date] = merged
+    return by_date
+
+
+def _merge_append_only(
+    existing: dict[str, dict[str, Any]],
+    candidates: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge candidate rows into the canonical series without dropping or
+    silently overwriting any historical date (FR-066 §5 immutability).
+
+    Returns (merged_rows_sorted, restatement_candidates). A candidate whose
+    equity disagrees with an existing immutable row beyond 1 bp is reported as
+    a restatement candidate but NOT applied — restating a historical row is an
+    explicit, logged operator action via outputs/portfolio_history/restatements.json.
+    """
+    merged: dict[str, dict[str, Any]] = {date: dict(row) for date, row in existing.items()}
+    restatement_candidates: list[dict[str, Any]] = []
+    for cand in candidates:
+        date = _iso_date(cand.get("date"))
+        if not date:
+            continue
+        if date not in merged:
+            merged[date] = dict(cand)
+            continue
+        prior_equity = _to_float(merged[date].get("equity"))
+        cand_equity = _to_float(cand.get("equity"))
+        if (
+            prior_equity not in (None, 0)
+            and cand_equity is not None
+            and abs(cand_equity - prior_equity) / prior_equity > NAV_RECON_TOLERANCE_REL
+        ):
+            restatement_candidates.append(
+                {
+                    "date": date,
+                    "canonical_equity": prior_equity,
+                    "candidate_equity": cand_equity,
+                    "candidate_source": cand.get("source"),
+                    "rel_diff_bps": round(abs(cand_equity - prior_equity) / prior_equity * 10_000.0, 3),
+                }
+            )
+        # Append-only: keep the immutable canonical equity row as-is.
+    ordered = [merged[date] for date in sorted(merged)]
+    return ordered, restatement_candidates
+
+
+def _read_benchmark_series(repo_root: Path) -> tuple[dict[str, dict[str, float | None]], str | None]:
+    """date -> {spy_close, spy_return} from the live benchmark close history."""
+    path = repo_root / "outputs" / "perf" / "live_overlay_benchmark_close_history.csv"
+    by_date: dict[str, dict[str, float | None]] = {}
+    for raw in _read_csv_rows(path):
+        date = _iso_date(raw.get("date"))
+        if not date:
+            continue
+        by_date[date] = {
+            "spy_close": _to_float(raw.get("spy_close")),
+            "spy_return": _to_float(raw.get("spy_return") or raw.get("spy_return_1d")),
+        }
+    return by_date, (_relative(repo_root, path) if by_date else None)
+
+
+def _rolling_beta(pairs: list[tuple[float, float] | None], window: int, min_obs: int) -> float | None:
+    """Beta of portfolio vs SPY over the trailing `window` paired daily returns.
+
+    `pairs[i]` is (port_return, spy_return) or None where unavailable.
+    """
+    sample = [p for p in pairs[-window:] if p is not None]
+    if len(sample) < min_obs:
+        return None
+    port = [p[0] for p in sample]
+    spy = [p[1] for p in sample]
+    n = len(sample)
+    mean_p = sum(port) / n
+    mean_s = sum(spy) / n
+    cov = sum((port[i] - mean_p) * (spy[i] - mean_s) for i in range(n)) / n
+    var_s = sum((s - mean_s) ** 2 for s in spy) / n
+    if var_s <= 0:
+        return None
+    return cov / var_s
+
+
+def _augment_benchmark(rows: list[dict[str, Any]], benchmark: dict[str, dict[str, float | None]]) -> None:
+    """Fill the SPY-relative and beta-adjusted columns in place (FR-066 §3)."""
+    base_equity = next((r["equity"] for r in rows if _to_float(r.get("equity")) not in (None, 0)), None)
+    base_spy = next(
+        (benchmark[r["date"]]["spy_close"] for r in rows
+         if r["date"] in benchmark and benchmark[r["date"]]["spy_close"] not in (None, 0)),
+        None,
+    )
+    pair_history: list[tuple[float, float] | None] = []
+    for row in rows:
+        date = row["date"]
+        bench = benchmark.get(date) or {}
+        spy_close = bench.get("spy_close")
+        spy_ret = bench.get("spy_return")
+        port_ret = _to_float(row.get("return_1d"))
+
+        row["spy_close"] = spy_close
+        row["spy_return_1d"] = spy_ret
+        row["benchmark_nav"] = (
+            float(base_equity) * (float(spy_close) / float(base_spy))
+            if spy_close not in (None, 0) and base_spy not in (None, 0) and base_equity not in (None, 0)
+            else None
+        )
+        row["excess_return_1d"] = (
+            float(port_ret) - float(spy_ret) if port_ret is not None and spy_ret is not None else None
+        )
+
+        pair_history.append((float(port_ret), float(spy_ret)) if port_ret is not None and spy_ret is not None else None)
+        beta = _rolling_beta(pair_history, BETA_WINDOW, BETA_MIN_OBS)
+        row["rolling_beta_60d"] = beta
+        row["beta_adjusted_excess_1d"] = (
+            float(port_ret) - float(beta) * float(spy_ret)
+            if beta is not None and port_ret is not None and spy_ret is not None
+            else None
+        )
+
+
+def _annualized_ir(daily_excess: list[float]) -> float | None:
+    n = len(daily_excess)
+    if n < 2:
+        return None
+    mean = sum(daily_excess) / n
+    var = sum((x - mean) ** 2 for x in daily_excess) / (n - 1)
+    std = var ** 0.5
+    if std <= 0:
+        return None
+    return (mean / std) * (TRADING_DAYS_PER_YEAR ** 0.5)
+
+
+def _drawdowns(equities: list[float]) -> tuple[float | None, float | None]:
+    """(max_drawdown, current_drawdown) as negative fractions from prior peak."""
+    if not equities:
+        return None, None
+    peak = equities[0]
+    max_dd = 0.0
+    for eq in equities:
+        peak = max(peak, eq)
+        if peak > 0:
+            max_dd = min(max_dd, (eq / peak) - 1.0)
+    last = equities[-1]
+    current_dd = (last / peak) - 1.0 if peak > 0 else None
+    return max_dd, current_dd
+
+
+def _derived_scoreboard(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Cumulative excess, IR windows, drawdowns, and the headline scoreboard
+    metric (information ratio of beta-adjusted excess vs SPY) — FR-066 §3."""
+    excess = [_to_float(r.get("excess_return_1d")) for r in rows]
+    excess = [x for x in excess if x is not None]
+    beta_excess = [_to_float(r.get("beta_adjusted_excess_1d")) for r in rows]
+    beta_excess = [x for x in beta_excess if x is not None]
+    equities = [float(r["equity"]) for r in rows if _to_float(r.get("equity")) is not None]
+
+    cumulative_excess = 1.0
+    for x in excess:
+        cumulative_excess *= (1.0 + x)
+    cumulative_excess -= 1.0
+
+    information_ratio = {
+        f"ir_{w}d": _annualized_ir(excess[-w:]) for w in IR_WINDOWS
+    }
+    max_dd, current_dd = _drawdowns(equities)
+    scoreboard_metric = _annualized_ir(beta_excess[-TRADING_DAYS_PER_YEAR:]) if beta_excess else None
+    return {
+        "scoreboard_metric": "beta_adjusted_excess_information_ratio_vs_spy",
+        "beta_adjusted_excess_information_ratio": scoreboard_metric,
+        "cumulative_excess_return": cumulative_excess if excess else None,
+        "information_ratio": information_ratio,
+        "max_drawdown": max_dd,
+        "current_drawdown": current_dd,
+        "excess_observation_count": len(excess),
+        "beta_adjusted_observation_count": len(beta_excess),
+        "note": "CAGR reported but never used as a promotion or review headline (FR-066 §3).",
+    }
+
+
+def _write_checksum_manifest(out_dir: Path, repo_root: Path, artifacts: dict[str, Path]) -> dict[str, Any]:
+    """sha256 + row-count manifest, refreshed on each append (FR-066 §5)."""
+    import hashlib
+
+    entries: dict[str, Any] = {}
+    for name, path in sorted(artifacts.items()):
+        if not path.exists():
+            entries[name] = {"path": _relative(repo_root, path), "exists": False}
+            continue
+        data = path.read_bytes()
+        line_count = data.count(b"\n")
+        row_count = max(line_count - 1, 0) if path.suffix == ".csv" else None
+        entries[name] = {
+            "path": _relative(repo_root, path),
+            "exists": True,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+            "row_count": row_count,
+        }
+    manifest = {
+        "schema_version": "caerus_portfolio_history_checksum_v1",
+        "governance_label": "OPERATIONAL_TELEMETRY",
+        "execution_impact": "NON_EXECUTIONAL",
+        "artifacts": entries,
+    }
+    (out_dir / "checksum_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return manifest
+
+
+def build_portfolio_history(
+    repo_root: Path | str = ".",
+    *,
+    report_date: str | None = None,
+    append_only: bool = True,
+) -> dict[str, Any]:
     root = Path(repo_root).resolve()
     out_dir = root / "outputs" / "portfolio_history"
     report_date = _iso_date(report_date) if report_date else None
 
     transactions, transaction_sources, tx_warnings = _build_transactions(root, report_date)
     positions, position_source, positions_as_of, pos_warnings = _build_positions(root, report_date)
-    nav_rows, nav_source, nav_warnings = _build_nav(root, report_date)
+    candidate_nav, nav_source, nav_warnings = _build_nav(root, report_date)
     attribution = _build_attribution(positions, transactions)
+
+    # FR-066: append-only canonical NAV series. Existing historical rows are
+    # immutable; candidates only add new dates. Equity conflicts are surfaced as
+    # restatement candidates, never silently overwritten.
+    restatement_candidates: list[dict[str, Any]] = []
+    if append_only:
+        existing_nav = _read_existing_canonical_nav(out_dir)
+        nav_rows, restatement_candidates = _merge_append_only(existing_nav, candidate_nav)
+    else:
+        nav_rows = candidate_nav
+
+    # Recompute the inception-anchored cumulative return across the merged series.
+    first_equity = next((r["equity"] for r in nav_rows if _to_float(r.get("equity")) not in (None, 0)), None)
+    for row in nav_rows:
+        equity = _to_float(row.get("equity"))
+        row["cumulative_return"] = (
+            (float(equity) / float(first_equity)) - 1.0
+            if equity is not None and first_equity not in (None, 0)
+            else None
+        )
+
+    # FR-066 §3: SPY-relative and beta-adjusted scoreboard columns (additive).
+    benchmark_by_date, benchmark_source = _read_benchmark_series(root)
+    _augment_benchmark(nav_rows, benchmark_by_date)
+    scoreboard = _derived_scoreboard(nav_rows)
+    if not benchmark_by_date:
+        nav_warnings.append("No SPY benchmark close history available; benchmark/beta columns are null.")
+    if restatement_candidates:
+        nav_warnings.append(
+            f"{len(restatement_candidates)} candidate NAV row(s) disagree with the immutable canonical "
+            "series beyond 1 bp; append-only guard kept the canonical values. "
+            "Log explicit restatements in outputs/portfolio_history/restatements.json if a correction is intended."
+        )
 
     tx_path = _write_csv(out_dir / "transactions.csv", TRANSACTION_FIELDS, transactions)
     pos_path = _write_csv(out_dir / "positions.csv", POSITION_FIELDS, positions)
@@ -470,6 +741,8 @@ def build_portfolio_history(repo_root: Path | str = ".", *, report_date: str | N
             "total_traded_notional": total_traded,
             "turnover_pct": (total_traded / float(latest_equity)) if latest_equity not in (None, 0) else None,
         },
+        "scoreboard": scoreboard,
+        "restatement_candidates": restatement_candidates,
         "paths": {
             "transactions": _relative(root, tx_path),
             "positions": _relative(root, pos_path),
@@ -478,11 +751,24 @@ def build_portfolio_history(repo_root: Path | str = ".", *, report_date: str | N
             "transaction_sources": transaction_sources,
             "position_source": position_source or "",
             "nav_source": nav_source or "",
+            "benchmark_source": benchmark_source or "",
         },
         "warnings": tx_warnings + pos_warnings + nav_warnings,
     }
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    checksum_manifest = _write_checksum_manifest(
+        out_dir,
+        root,
+        {
+            "transactions": tx_path,
+            "positions": pos_path,
+            "nav": nav_path,
+            "attribution": attr_path,
+            "summary": summary_path,
+        },
+    )
 
     return {
         "summary": summary,
@@ -490,6 +776,7 @@ def build_portfolio_history(repo_root: Path | str = ".", *, report_date: str | N
         "positions": positions,
         "nav": nav_rows,
         "attribution": attribution,
+        "checksum_manifest": checksum_manifest,
     }
 
 

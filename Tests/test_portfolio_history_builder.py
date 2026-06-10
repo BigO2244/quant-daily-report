@@ -89,3 +89,86 @@ def test_portfolio_history_prefers_broker_fills_and_positions(tmp_path: Path) ->
     assert (out_dir / "attribution.csv").exists()
     assert json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))["paths"]["nav_source"] == "outputs/perf/live_overlay_nav_series.csv"
 
+
+# --------------------------------------------------------------------------- #
+# FR-066 extensions: benchmark columns, append-only guard, checksum manifest
+# --------------------------------------------------------------------------- #
+def _seed_perf(tmp_path: Path) -> None:
+    perf_dir = tmp_path / "outputs" / "perf"
+    perf_dir.mkdir(parents=True, exist_ok=True)
+    (perf_dir / "live_overlay_nav_series.csv").write_text(
+        "date,equity,cash,return_1d\n"
+        "2026-03-03,10000,2000,\n"
+        "2026-03-04,10100,2000,0.01\n"
+        "2026-03-05,10050,2000,-0.00495\n",
+        encoding="utf-8",
+    )
+    (perf_dir / "live_overlay_benchmark_close_history.csv").write_text(
+        "date,spy_close,spy_return\n"
+        "2026-03-03,680,\n"
+        "2026-03-04,683.4,0.005\n"
+        "2026-03-05,681.0,-0.00351\n",
+        encoding="utf-8",
+    )
+
+
+def test_benchmark_columns_and_checksum_manifest(tmp_path: Path) -> None:
+    _seed_perf(tmp_path)
+    payload = build_portfolio_history(tmp_path, report_date="2026-03-05")
+
+    nav = {row["date"]: row for row in payload["nav"]}
+    assert nav["2026-03-03"]["benchmark_nav"] == 10000.0  # indexed to inception equity
+    # excess = port_ret - spy_ret on 03-04
+    assert round(nav["2026-03-04"]["excess_return_1d"], 6) == round(0.01 - 0.005, 6)
+    # rolling beta needs >= 30 obs; only 3 here -> null
+    assert nav["2026-03-05"]["rolling_beta_60d"] is None
+    assert nav["2026-03-05"]["beta_adjusted_excess_1d"] is None
+
+    summary = payload["summary"]
+    assert summary["scoreboard"]["scoreboard_metric"] == "beta_adjusted_excess_information_ratio_vs_spy"
+    assert "cumulative_excess_return" in summary["scoreboard"]
+    assert summary["paths"]["benchmark_source"] == "outputs/perf/live_overlay_benchmark_close_history.csv"
+
+    manifest_path = tmp_path / "outputs" / "portfolio_history" / "checksum_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "nav" in manifest["artifacts"]
+    assert manifest["artifacts"]["nav"]["sha256"]
+
+
+def test_append_only_preserves_immutable_rows_and_flags_restatements(tmp_path: Path) -> None:
+    _seed_perf(tmp_path)
+    out_dir = tmp_path / "outputs" / "portfolio_history"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Pre-existing canonical series: an older immutable date + a conflicting equity.
+    (out_dir / "nav.csv").write_text(
+        "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,"
+        "cumulative_return,spy_close,spy_return_1d,benchmark_nav,excess_return_1d,rolling_beta_60d,"
+        "beta_adjusted_excess_1d,source\n"
+        "2026-02-27,9990,,,,,,,,,,,,,,broker_backfill\n"     # immutable older row
+        "2026-03-04,9700,,,,,,,,,,,,,,broker_backfill\n",     # conflicts with candidate 10100
+        encoding="utf-8",
+    )
+    payload = build_portfolio_history(tmp_path, report_date="2026-03-05")
+    nav = {row["date"]: row for row in payload["nav"]}
+
+    # Older immutable row is preserved (never dropped).
+    assert "2026-02-27" in nav
+    # Conflicting date keeps the canonical (broker) equity, not the candidate.
+    assert float(nav["2026-03-04"]["equity"]) == 9700.0
+    # Restatement candidate is recorded, not silently applied.
+    rc = payload["summary"]["restatement_candidates"]
+    assert any(r["date"] == "2026-03-04" and r["candidate_equity"] == 10100.0 for r in rc)
+
+
+def test_append_only_can_be_disabled(tmp_path: Path) -> None:
+    _seed_perf(tmp_path)
+    out_dir = tmp_path / "outputs" / "portfolio_history"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "nav.csv").write_text(
+        "date,equity,source\n2026-02-27,9990,broker_backfill\n", encoding="utf-8"
+    )
+    payload = build_portfolio_history(tmp_path, report_date="2026-03-05", append_only=False)
+    nav_dates = {row["date"] for row in payload["nav"]}
+    assert "2026-02-27" not in nav_dates  # not merged when append_only is off
+

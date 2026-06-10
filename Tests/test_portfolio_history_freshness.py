@@ -82,3 +82,39 @@ def test_portfolio_history_freshness_deterministic_output(tmp_path: Path) -> Non
     second = build_portfolio_history_freshness(trade_date="2026-06-08", repo_root=tmp_path, write=False)
 
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+# --------------------------------------------------------------------------- #
+# FR-066 extensions: checksum verification + NAV gap detection
+# --------------------------------------------------------------------------- #
+def test_checksum_verification_detects_tamper(tmp_path: Path) -> None:
+    import hashlib
+
+    out = tmp_path / "outputs" / "portfolio_history"
+    out.mkdir(parents=True, exist_ok=True)
+    nav = out / "nav.csv"
+    nav.write_text("date,equity\n2026-06-08,100\n", encoding="utf-8")
+    good_sha = hashlib.sha256(nav.read_bytes()).hexdigest()
+    _write_json(out / "checksum_manifest.json", {"artifacts": {"nav": {"path": "outputs/portfolio_history/nav.csv", "sha256": good_sha}}})
+
+    ok = build_portfolio_history_freshness(trade_date="2026-06-08", repo_root=tmp_path)
+    assert ok["checksum_verification"]["status"] == "VERIFIED"
+    assert "CHECKSUM_MISMATCH" not in ok["reason_codes"]
+
+    nav.write_text("date,equity\n2026-06-08,999\n", encoding="utf-8")  # tamper
+    bad = build_portfolio_history_freshness(trade_date="2026-06-08", repo_root=tmp_path)
+    assert bad["checksum_verification"]["status"] == "MISMATCH"
+    assert "CHECKSUM_MISMATCH" in bad["reason_codes"]
+
+
+def test_nav_gap_detection(tmp_path: Path) -> None:
+    out = tmp_path / "outputs" / "portfolio_history"
+    out.mkdir(parents=True, exist_ok=True)
+    _write_json(out / "summary.json", {"as_of_date": "2026-06-10", "counts": {}})
+    # 2026-06-09 (a trading day) is missing between 06-08 and 06-10.
+    _write_csv(out / "nav.csv", [{"date": "2026-06-08", "equity": "100"}, {"date": "2026-06-10", "equity": "101"}])
+
+    payload = build_portfolio_history_freshness(trade_date="2026-06-10", repo_root=tmp_path)
+    assert payload["nav_gap_check"]["status"] == "GAP_DETECTED"
+    assert "2026-06-09" in payload["nav_gap_check"]["gaps"]
+    assert "NAV_GAP" in payload["reason_codes"]

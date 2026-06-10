@@ -3,9 +3,16 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    from paper.trading_calendar import is_trading_day, next_trading_day
+except Exception:  # pragma: no cover - defensive
+    is_trading_day = None  # type: ignore[assignment]
+    next_trading_day = None  # type: ignore[assignment]
 
 from research_registry.research.model_quality_common import (
     collect_reason_codes,
@@ -75,6 +82,13 @@ def build_portfolio_history_freshness(
     elif status == "UNKNOWN":
         reason_codes.add("PORTFOLIO_HISTORY_DIAGNOSTIC_UNKNOWN")
 
+    # FR-066 §5: verify the checksum manifest and scan for trading-day NAV gaps.
+    checksum_verification = _verify_checksum_manifest(repo=repo)
+    nav_gap_check = _nav_gap_check(repo=repo)
+    reason_codes.update(checksum_verification.get("reason_codes") or [])
+    reason_codes.update(nav_gap_check.get("reason_codes") or [])
+    reason_codes.discard("ok")
+
     confidence = _downstream_confidence(status)
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -101,6 +115,8 @@ def build_portfolio_history_freshness(
         f"{target}",
         "downstream_impact": confidence,
         "summary_artifact": _summary_view(summary_payload),
+        "checksum_verification": checksum_verification,
+        "nav_gap_check": nav_gap_check,
         "reason_codes": sorted(reason_codes) or ["ok"],
     }
     if write:
@@ -108,6 +124,72 @@ def build_portfolio_history_freshness(
         write_json(out_dir / "portfolio_history_freshness.json", payload)
         write_text(out_dir / "portfolio_history_freshness.md", render_markdown(payload))
     return payload
+
+
+def _verify_checksum_manifest(*, repo: Path) -> dict[str, Any]:
+    """Recompute artifact checksums and compare to the FR-066 checksum manifest."""
+    manifest_path = repo / "outputs" / "portfolio_history" / "checksum_manifest.json"
+    if not manifest_path.exists():
+        return {"status": "MISSING", "mismatches": [], "reason_codes": ["CHECKSUM_MANIFEST_MISSING"]}
+    payload = read_json(manifest_path)
+    artifacts = (payload or {}).get("artifacts") if isinstance(payload, dict) else None
+    if not isinstance(artifacts, dict):
+        return {"status": "MALFORMED", "mismatches": [], "reason_codes": ["CHECKSUM_MANIFEST_MALFORMED"]}
+    mismatches: list[dict[str, Any]] = []
+    verified = 0
+    for name, entry in sorted(artifacts.items()):
+        if not isinstance(entry, dict) or not entry.get("sha256"):
+            continue
+        rel = entry.get("path") or ""
+        path = repo / rel if not Path(str(rel)).is_absolute() else Path(str(rel))
+        if not path.exists():
+            mismatches.append({"artifact": name, "reason": "missing_on_disk", "path": str(rel)})
+            continue
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != entry.get("sha256"):
+            mismatches.append({"artifact": name, "reason": "sha256_mismatch", "path": str(rel)})
+        else:
+            verified += 1
+    reason_codes = ["CHECKSUM_MISMATCH"] if mismatches else ["ok"]
+    return {
+        "status": "MISMATCH" if mismatches else "VERIFIED",
+        "verified_count": verified,
+        "mismatches": mismatches,
+        "reason_codes": reason_codes,
+    }
+
+
+def _nav_gap_check(*, repo: Path) -> dict[str, Any]:
+    """Scan canonical nav.csv for missing trading days (FR-066 §4 NAV_GAP)."""
+    path = repo / "outputs" / "portfolio_history" / "nav.csv"
+    if not path.exists() or path.stat().st_size <= 0:
+        return {"status": "NO_DATA", "gaps": [], "reason_codes": ["ok"]}
+    dates: list[str] = []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                for candidate in _date_candidates(row.get("date")):
+                    dates.append(candidate)
+                    break
+    except Exception:
+        return {"status": "READ_ERROR", "gaps": [], "reason_codes": ["NAV_GAP_CHECK_READ_ERROR"]}
+    dates = sorted(set(dates))
+    if len(dates) < 2 or is_trading_day is None or next_trading_day is None:
+        return {"status": "OK", "gaps": [], "reason_codes": ["ok"]}
+    present = set(dates)
+    gaps: list[str] = []
+    cursor = dates[0]
+    for _ in range(5000):
+        cursor = next_trading_day(cursor)
+        if cursor >= dates[-1]:
+            break
+        if is_trading_day(cursor) and cursor not in present:
+            gaps.append(cursor)
+    return {
+        "status": "GAP_DETECTED" if gaps else "OK",
+        "gaps": gaps,
+        "reason_codes": ["NAV_GAP"] if gaps else ["ok"],
+    }
 
 
 def _inspect_portfolio_files(*, repo: Path) -> dict[str, dict[str, Any]]:
