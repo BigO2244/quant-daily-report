@@ -388,7 +388,7 @@ any capital allocation or execution change.
 
 Research-only first pass:
 
-- `docs/governance/fr_051_cygnus_research_spec.md`
+- `fr_051_cygnus_research_spec.md`
 - `research/cygnus/__init__.py`
 - `research/cygnus/events.py`
 - `research/cygnus/features.py`

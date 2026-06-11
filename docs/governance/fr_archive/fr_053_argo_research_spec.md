@@ -355,7 +355,7 @@ Stage 4: promotion-readiness evidence
 
 Research-only first pass:
 
-- `docs/governance/fr_053_argo_research_spec.md`
+- `fr_053_argo_research_spec.md`
 - `research/argo/__init__.py`
 - `research/argo/indicators.py`
 - `research/argo/classifier.py`

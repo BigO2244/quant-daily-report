@@ -4,7 +4,7 @@ CONFLICT / QUARANTINED — DO NOT TREAT AS A NEW ROADMAP ITEM
 Disposition added 2026-06-08 by repo source-of-truth cleanup.
 
 This design draft CONTRADICTS the canonical Argo research spec:
-    docs/governance/fr_053_argo_research_spec.md  (FR-053, canonical)
+    fr_053_argo_research_spec.md  (FR-053, canonical)
 
 CONFLICT: FR-053 (canonical) defines Argo as a REGIME ALLOCATION OVERLAY that
 classifies market regimes and produces allocation recommendations and "is not

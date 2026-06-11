@@ -2,9 +2,10 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-10 (FR-066 VM backfill/cron deployed; FR-051 Cygnus v0
-Stage 2 FAIL recorded and v0 shelved; FR-067 Sharadar gate CLOSED_PASS; FR-068
-PIT remediation Phases 1-3 complete — Polaris priced rebaseline MATERIAL; FR-069
+Last Updated: 2026-06-11 (governance file locations updated to fr_active/ and
+fr_archive/; FR-066 VM backfill/cron deployed; FR-051 Cygnus v0 Stage 2 FAIL
+recorded and v0 shelved; FR-067 Sharadar gate CLOSED_PASS; FR-068 PIT
+remediation Phases 1-3 complete — Polaris priced rebaseline MATERIAL; FR-069
 Research Lab / modular sleeve architecture design recorded)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
@@ -50,21 +51,21 @@ editing code or specs.
 
 | FR | Strategy | Canonical role (intended) | Canonical spec (authoritative) | Status in spec | Code module? | Registry status |
 |----|----------|---------------------------|--------------------------------|----------------|--------------|-----------------|
-| FR-050 | Phoenix | Crisis reversal | `fr_050_phoenix_research_spec.md` | ACTIVE_RESEARCH — Phase B review | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
-| FR-051 | Cygnus | Earnings / post-earnings drift | `fr_051_cygnus_research_spec.md` | V0_SHELVED — Stage 2 validation FAIL; v1 vendor-gated | `research/cygnus/` research-only modules | research (`earnings_drift`) |
-| FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_052_cassiopeia_research_spec.md` | Draft / spec-only | none | research (`event_driven`) |
-| FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
-| FR-054 | — | Dynamic strategy registry audit | `fr_054_dynamic_strategy_registry_audit.md` | Audit | n/a | n/a |
-| FR-055 | — | Registry surface cleanup audit | `fr_055_registry_surface_cleanup_audit.md` | Audit | n/a | n/a |
-| FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | RETIRED 2026-06-10 (owner-approved) → FR-051 | Retired | none | n/a |
-| FR-057 | Argo | *(design draft — CONFLICTS with FR-053)* | superseded/quarantined → FR-053 | Design Only | none | n/a |
-| FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
-| FR-064 | Portfolio research | Multi-asset research framework | `fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
-| FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
-| FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
-| FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
+| FR-050 | Phoenix | Crisis reversal | `fr_archive/fr_050_phoenix_research_spec.md` | ACTIVE_RESEARCH — Phase B review | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
+| FR-051 | Cygnus | Earnings / post-earnings drift | `fr_archive/fr_051_cygnus_research_spec.md` | V0_SHELVED — Stage 2 validation FAIL; v1 vendor-gated | `research/cygnus/` research-only modules | research (`earnings_drift`) |
+| FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_archive/fr_052_cassiopeia_research_spec.md` | Draft / spec-only | none | research (`event_driven`) |
+| FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_archive/fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
+| FR-054 | — | Dynamic strategy registry audit | `fr_archive/fr_054_dynamic_strategy_registry_audit.md` | Audit | n/a | n/a |
+| FR-055 | — | Registry surface cleanup audit | `fr_archive/fr_055_registry_surface_cleanup_audit.md` | Audit | n/a | n/a |
+| FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | `fr_archive/fr_056_cygnus_design_spec.md` | RETIRED 2026-06-10 (owner-approved) → FR-051 | Retired | none | n/a |
+| FR-057 | Argo | *(design draft — CONFLICTS with FR-053)* | `fr_archive/fr_057_argo_design_spec.md` | superseded/quarantined → FR-053 | Design Only | none | n/a |
+| FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
+| FR-064 | Portfolio research | Multi-asset research framework | `fr_archive/fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
+| FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_archive/fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
+| FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_archive/fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
+| FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_archive/fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
 | FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md` | PHASES 1-3 COMPLETE 2026-06-10 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra rebaselines pending | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py` | n/a |
-| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (design only; no production refactor) | `fr_069_research_lab_modular_sleeve_architecture.md` | DESIGN 2026-06-10 — pluggable sleeve contract on the PIT foundation; shared data/signal/backtest/eval layers; migration deferred to future FRs | none (design spec) | n/a |
+| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (design only; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | DESIGN 2026-06-10 — pluggable sleeve contract on the PIT foundation; shared data/signal/backtest/eval layers; migration deferred to future FRs | none (design spec) | n/a |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
@@ -116,7 +117,7 @@ narrative below is retained for lineage. Conflict B (Cygnus definition drift) re
 - Canonical intent (roadmap + FR-052): **Cassiopeia = event-driven** catalyst strategy.
 - Canonical intent (roadmap + FR-053): **Argo = regime allocation overlay** (not security-selecting).
 - BUT: the code module `cassiopeia.py` (`SCHEMA_VERSION = caerus_cassiopeia_model_selection_v1`) and CLI `run_cassiopeia_model_selection.py` implement Cassiopeia as a **regime-aware model selector / meta-model** — i.e. it occupies Argo's regime role, under Cassiopeia's name.
-- AND: the later design draft `fr_057_argo_design_spec.md` redefines **Argo as an event-driven event sleeve** — i.e. it occupies Cassiopeia's role, under Argo's name.
+- AND: the later design draft `fr_archive/fr_057_argo_design_spec.md` redefines **Argo as an event-driven event sleeve** — i.e. it occupies Cassiopeia's role, under Argo's name.
 - Net effect: the event-driven alpha source (intended Cassiopeia) is specified twice (FR-052 and FR-057) and implemented zero times; the regime/selector function is implemented once but mislabeled as Cassiopeia; the registry lists BOTH Cassiopeia and Argo as `regime_overlay`.
 
 **Recommended resolution (for decision, not yet applied):** keep the canonical mapping
@@ -128,7 +129,7 @@ edit and therefore explicit approval — it is intentionally NOT done in this cl
 
 **Conflict B — RESOLVED 2026-06-10 (owner-approved).** Cygnus is **earnings drift**
 (`earnings_drift`), the canonical FR-051 definition. The later design draft
-`fr_056_cygnus_design_spec.md` — which broadened Cygnus into a generic
+`fr_archive/fr_056_cygnus_design_spec.md` — which broadened Cygnus into a generic
 "persistent, slow-moving factor or price drift" sleeve — is **retired** and is
 non-canonical. Rationale (FR-051 addendum A1): the earnings-event underreaction
 thesis is what makes Cygnus a distinct return stream from the Polaris/Orion

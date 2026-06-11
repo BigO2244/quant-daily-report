@@ -8,6 +8,7 @@ Refactor (FR) work. It contains only work that is not fully closed:
 - `BACKLOG`
 - `READY`
 - `READY_VALIDATED`
+- `PROPOSED`
 - `IN_PROGRESS`
 - `PROMOTION_READY`
 - `DEPLOYED_OBSERVING`
@@ -59,6 +60,7 @@ Fully deployed history and reviewed deferred items belong in
 | FR-067 Vela Stage 0 (PIT universe source comparison) | Research / Strategy Design | `CLOSED_PASS` | LOW (docs-only + verifier) | FR-067 spec, vendor diligence (Norgate / Sharadar / reconstructed S&P 600 / CRSP), `scripts/research/verify_sharadar_coverage.py` | sharadar_verified_100pct_delisted_coverage | Sharadar paid entitlement PASSED the delisted-price coverage gate (2026-06-10): sample_size=100, complete_count=100, complete_pct=1.0, median_coverage_pct=0.999 (verifier scoring bug fixed in `e4b6201`). Sharadar approved as the PIT price/security-history source for FR-068 Phase 1. Caveats: historical index membership still needs a supplemental source or market-cap proxy (no S&P 600/Russell membership); Cygnus v1 analyst-consensus/EPS-surprise remains separately blocked. FR-068 supersedes for the PIT build. | Revert governance edits; the comparison doc + verifier remain as evidence. No API key, registry, execution, or strategy behavior is in scope. |
 | FR-068 PIT Universe + Polaris/Orion/Lyra Rebaseline | Research / Survivorship Remediation | `PHASES_1_3_COMPLETE` | LOW (research-only) | Sharadar (FR-067), PIT universe + caerus_large_cap family + SEP cache | polaris_rebaseline_MATERIAL_orion_lyra_pending | Phase 1 PIT universe (20,618 secs, 14,790 delisted) + `Universe(as_of_date)`; Phase 2 impact (SEVERE; 71.7% delisted); Phase 2.5 caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Phase 3 Polaris priced rebaseline on the committed momentum harness = **MATERIAL** (Sharpe 1.054→0.851, MaxDD −43%→−54%; CAGR 28.83%→30.68%). Legacy = non-decision-grade; promotion evidence must carry `universe_method=pit_universe`. Orion/Lyra rebaselines pending; DAILY-marketcap PIT family + index membership families are later phases. | Revert rebaseline research modules + artifacts; PIT data is gitignored/regenerable. No execution, model, cron, registry, or holdout change in scope. |
 | FR-069 Research Lab / Modular Sleeve Architecture | Architecture / Design | `DESIGN` | NONE (design-only) | FR-068 PIT foundation, existing sleeve specs (FR-050..053, 067), alpha_lab harness | design_only_no_refactor | Design a pluggable sleeve architecture on the PIT foundation: a common Sleeve contract, shared data/signal/backtest/evaluation layers, membership families, and governance gates (PIT-required evidence, holdout protection). No production refactor; migration sequenced into future FRs. | Delete the design doc; nothing is wired. No code, execution, registry, or strategy behavior in scope. |
+| FR-070 Cash Gating and Post-Sell Buy Budget Reconciliation | Execution Integrity / Cash Deployment | `PROPOSED` | HIGH | Sell-first execution path, posttrade state capture, capital-budget rebudgeting, execution contract guardrails | proposed_weekend_maintenance_only | Recompute buy-side executable plans after confirmed sell proceeds and refreshed broker/account state so the execution layer does not replay stale precomputed buys. Weekend-maintenance only for implementation because it may touch trading behavior; preserve all existing safeguards, risk cash target, and fractional-share behavior. | No implementation yet; treat as proposed until an explicit weekend-maintenance change is approved and validated. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -604,7 +606,7 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Non-goals:** No trading implementation, no allocation engine, no production
   order generation, no broker calls, no options execution integration, and no
   promotion recommendation.
-- **Planned artifacts:** `docs/governance/fr_064_multi_asset_research_framework.md`
+- **Planned artifacts:** `docs/governance/fr_archive/fr_064_multi_asset_research_framework.md`
   plus `outputs/model_quality/<date>/multi_asset_research_framework.json` and
   `.md`.
 - **Validation plan:** Fixture tests for candidate sleeves, missing-data
@@ -740,7 +742,7 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
   `--sample-size 100`: complete_count=100, complete_pct=1.0,
   median_coverage_pct=0.999. Verifier scoring bug fixed first (`e4b6201`).
   Sharadar approved as the PIT price/security-history source for FR-068 Phase 1.
-- **Scope (this session):** `docs/governance/fr_067_stage0_source_comparison.md`
+- **Scope (this session):** `docs/governance/fr_archive/fr_067_stage0_source_comparison.md`
   compares Norgate, Sharadar (Nasdaq Data Link), reconstructed S&P 600, and
   CRSP/WRDS across cost, license, delisted-ticker price coverage, integration
   effort, and PIT membership feasibility. Conditional recommendation: Sharadar
@@ -803,7 +805,7 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Date started:** 2026-06-10
 - **Status:** `DESIGN` (no production refactor)
 - **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
-- **Scope:** `docs/governance/fr_069_research_lab_modular_sleeve_architecture.md` —
+- **Scope:** `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` —
   a pluggable Sleeve contract on the PIT foundation; shared data/signal/backtest/
   evaluation layers; membership families; governance gates (PIT-required evidence,
   holdout protection, pre-registration). Maps existing strategies to the contract

@@ -9,6 +9,33 @@ references, validation summaries, and final or current operational state.
 Active upcoming work belongs in `docs/governance/fr_active_backlog.md`.
 Methodology belongs in `docs/governance/fr_governance_model.md`.
 
+## FR File Location Audit
+
+This section records where the FR source documents live after the governance
+folder reorganization. The file path is navigational only; the authoritative
+status for each FR still comes from this registry and the active backlog.
+Archived copies are retained for auditability.
+
+| FR | Title | Registry status | Current location | Lifecycle | Notes |
+|---|---|---|---|---|---|
+| FR-050 | Phoenix Historical Behavior Review | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_050_phoenix_research_spec.md` | ARCHIVED | Archived copy retained; active work and current evidence live in the registry/backlog. |
+| FR-051 | Cygnus v0 event-reaction / Wave 1 | `SHELVED` | `docs/governance/fr_archive/fr_051_cygnus_research_spec.md` | ARCHIVED | Archived spec copy retained for auditability; holdout-preserved v0 governance remains in registry. |
+| FR-052 | Cassiopeia event-driven spec | `DRAFT_RESEARCH` | `docs/governance/fr_archive/fr_052_cassiopeia_research_spec.md` | ARCHIVED | Archived spec copy retained; canonical role is still spec-only / event-driven. |
+| FR-053 | Argo Phase B Regime Selection Validation | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_053_argo_research_spec.md` | ARCHIVED | Archived spec copy retained; current Phase B work is tracked in the active backlog and model-quality artifacts. |
+| FR-054 | Dynamic Strategy Registry Audit | `COMPLETED` | `docs/governance/fr_archive/fr_054_dynamic_strategy_registry_audit.md` | ARCHIVED | Historical audit record. |
+| FR-055 | Registry Surface Cleanup Audit | `COMPLETED` | `docs/governance/fr_archive/fr_055_registry_surface_cleanup_audit.md` | ARCHIVED | Historical audit record. |
+| FR-056 | Cygnus design draft | `SUPERSEDED` / retired | `docs/governance/fr_archive/fr_056_cygnus_design_spec.md` | ARCHIVED | Archived design draft; superseded by FR-051 canonical earnings-drift definition. |
+| FR-057 | Argo design draft | `SUPERSEDED` | `docs/governance/fr_archive/fr_057_argo_design_spec.md` | ARCHIVED | Archived design draft; superseded by FR-053 canonical regime-overlay definition. |
+| FR-063 | Strategy Differentiation Deep Dive | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ARCHIVED | Archived spec copy retained while active research remains tracked in the backlog. |
+| FR-064 | Multi-Asset Research Framework | `DRAFT_RESEARCH` | `docs/governance/fr_archive/fr_064_multi_asset_research_framework.md` | ARCHIVED | Archived draft retained for auditability and linkage. |
+| FR-065 | Dashboard Decision-Grade Consolidation | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_065_dashboard_decision_grade_consolidation.md` | ARCHIVED | Archived spec copy retained; current dashboard work is tracked in the active backlog. |
+| FR-066 | Canonical NAV Track Record Integrity | `DEPLOYED_OBSERVING` | `docs/governance/fr_archive/fr_066_canonical_nav_track_record_spec.md` | ARCHIVED | Historical spec copy retained; deployed-observing state remains in the registry and backlog. |
+| FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_stage0_source_comparison.md` | ARCHIVED | Archived comparison spec retained; FR-067 outcome gates FR-068. |
+| FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_vela_research_spec.md` | ARCHIVED | Archived Vela research spec retained alongside the source-comparison evidence. |
+| FR-068 | PIT universe + survivorship rebaseline | `PHASES_1_3_COMPLETE` | `research/pit_universe_architecture_2026-06-10.md` | ACTIVE | Current design and results live in the research artifact; the supporting FR spec has been archived. |
+| FR-069 | Research Lab / modular sleeve architecture | `DESIGN` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Active design spec retained in `fr_active/`; migration sequencing remains future work. |
+| FR-070 | Cash Gating and Post-Sell Buy Budget Reconciliation | `PROPOSED` | `docs/governance/fr_active/fr_070 - Cash Gating and Post-Sell Budget Reconciliation` | PROPOSED | Proposed high-priority FR; weekend-maintenance only if implementation is approved because it may touch trading behavior. |
+
 ## Active Numbering Note
 
 FR-058 through FR-062 are already assigned to operational-drag and broker-

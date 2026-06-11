@@ -22,6 +22,9 @@ evidence is trustworthy, and what level of capital confidence is justified.
 This backlog is additive to the FR governance system. It does not replace
 `fr_active_backlog.md`, `fr_registry.md`, `fr_governance_model.md`, or
 `operational_lessons.md`.
+It is strategic context only; FR status and current file location are
+authoritative in `fr_registry.md`, while the operational FR queue lives in
+`fr_active_backlog.md`.
 
 ## Strategic Priorities
 

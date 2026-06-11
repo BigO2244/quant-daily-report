@@ -4,7 +4,7 @@ SUPERSEDED / DUPLICATE — DO NOT TREAT AS A NEW ROADMAP ITEM
 Disposition added 2026-06-08 by repo source-of-truth cleanup.
 
 This design draft duplicates the canonical Cygnus research spec:
-    docs/governance/fr_051_cygnus_research_spec.md  (FR-051, canonical)
+    fr_051_cygnus_research_spec.md  (FR-051, canonical)
 
 DEFINITION DRIFT TO RESOLVE: this draft describes Cygnus as a generic
 "persistent, slow-moving factor / price drift" sleeve, whereas the canonical

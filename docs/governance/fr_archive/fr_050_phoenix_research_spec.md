@@ -298,7 +298,7 @@ any capital allocation or execution change.
 
 Research-only first pass:
 
-- `docs/governance/fr_050_phoenix_research_spec.md`
+- `fr_050_phoenix_research_spec.md`
 - `research/phoenix/__init__.py`
 - `research/phoenix/features.py`
 - `research/phoenix/signals.py`

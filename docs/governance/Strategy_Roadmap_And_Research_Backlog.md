@@ -14,6 +14,8 @@ The primary objective of the next phase is no longer operational reliability. Th
 
 Future portfolio construction should avoid concentration in highly correlated strategies and instead seek diversification across distinct return drivers.
 
+This document is strategic context only. For authoritative FR status and the operational FR queue, use `fr_registry.md` and `fr_active_backlog.md`.
+
 ---
 
 # Current Strategy Inventory

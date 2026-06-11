@@ -431,7 +431,7 @@ any capital allocation or execution change.
 
 Research-only first pass:
 
-- `docs/governance/fr_052_cassiopeia_research_spec.md`
+- `fr_052_cassiopeia_research_spec.md`
 - `research/cassiopeia/__init__.py`
 - `research/cassiopeia/events.py`
 - `research/cassiopeia/event_sources.py`
