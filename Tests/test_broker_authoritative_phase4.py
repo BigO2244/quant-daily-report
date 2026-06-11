@@ -378,3 +378,73 @@ def test_posttrade_expected_positions_ignore_zero_share_orders():
 
     assert resolved == []
     assert expected == {}
+
+
+class _SequencingAlpaca:
+    """Returns PRE-fill account/positions until an order is resolved via
+    get_order(), then POST-fill state. Proves posttrade snapshots are captured
+    AFTER fill resolution (regression for the 2026-06-11 stale-snapshot defect)."""
+
+    def __init__(self):
+        self._fills_visible = False
+        self.account_calls_seen = 0
+        self.positions_calls_seen = 0
+
+    def get_order(self, order_id):
+        # The act of resolving the order is when the fill becomes visible.
+        self._fills_visible = True
+        return {"id": order_id, "status": "filled", "filled_qty": "2"}
+
+    def find_order_by_client_id(self, client_id):
+        self._fills_visible = True
+        return {"id": "alpaca-1", "status": "filled", "filled_qty": "2"}
+
+    def get_account(self):
+        self.account_calls_seen += 1
+        if self._fills_visible:
+            return {"cash": "820.0", "equity": "10010.0", "buying_power": "820.0", "status": "ACTIVE"}
+        return {"cash": "10000.0", "equity": "10000.0", "buying_power": "10000.0", "status": "ACTIVE"}
+
+    def get_positions(self):
+        self.positions_calls_seen += 1
+        if self._fills_visible:
+            return [{"symbol": "BBB", "qty": "2", "current_price": "90.0", "market_value": "180.0"}]
+        return []
+
+
+def test_posttrade_snapshot_captured_after_fill_resolution_not_before(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [
+        {"alpaca_order_id": "alpaca-1", "order_id": "day:BBB:BUY", "ticker": "BBB", "side": "BUY", "quantity": 2}
+    ]
+    alpaca = _SequencingAlpaca()
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-06-11",
+        holdings_prev=pd.DataFrame(columns=["ticker", "sleeve", "shares"]),
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+    )
+
+    # Returned snapshot reflects POST-fill account cash (820), not the pre-fill 10000.
+    assert float(state["alpaca_account_snapshot"]["cash"]) == pytest.approx(820.0)
+
+    # Written canonical artifacts reflect post-fill state.
+    account_payload = json.loads(Path(state["posttrade_account_snapshot_path"]).read_text(encoding="utf-8"))
+    positions_payload = json.loads(Path(state["posttrade_positions_snapshot_path"]).read_text(encoding="utf-8"))
+    assert float(account_payload["cash"]) == pytest.approx(820.0)
+    assert positions_payload["normalized_positions"] == {"BBB": 2.0}
+
+    # Reconciliation uses the refreshed post-fill positions.
+    recon_payload = json.loads(Path(state["posttrade_recon_path"]).read_text(encoding="utf-8"))
+    assert recon_payload["expected_positions"] == {"BBB": 2.0}
+    assert recon_payload["actual_positions"] == {"BBB": 2.0}
+    assert state["posttrade_filled_orders_count"] == 1

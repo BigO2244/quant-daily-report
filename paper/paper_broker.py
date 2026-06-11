@@ -3540,6 +3540,35 @@ def _capture_alpaca_posttrade_state(
     cfg: "PaperConfig",
     raise_on_failure: bool,
 ) -> Dict[str, object]:
+    starting_positions = _holdings_to_quantity_map(holdings_prev)
+    unresolved_orders: List[Dict[str, object]] = []
+
+    # Resolve/re-poll filled orders FIRST. At the instant submission returns,
+    # orders may still be ACCEPTED/pending, so account cash/positions fetched now
+    # would reflect pre-fill state (the 2026-06-11 stale-snapshot defect: account
+    # captured at 09:36:48 showed ~73% cash while fills completed 09:37-09:38). A
+    # fresh positions read backs the partial-fill position-delta fallback inside
+    # the resolver. The resolver itself is intentionally left outside this
+    # try/except so its fill-resolution exceptions propagate exactly as before.
+    try:
+        resolver_positions_snapshot = json_safe_primitive(alpaca.get_positions())
+    except Exception as exc:
+        if raise_on_failure:
+            raise RuntimeError(f"Failed to refresh Alpaca account/positions: {exc}") from exc
+        logger.warning("[ALPACA][POSTTRADE] refresh failed after broker abort: %s", exc)
+        return {}
+    orders_for_recon = _resolve_filled_orders_for_recon(
+        alpaca,
+        submitted_orders,
+        starting_positions=starting_positions,
+        actual_positions=_positions_to_quantity_map(resolver_positions_snapshot),
+        unresolved_orders=unresolved_orders,
+    )
+
+    # Re-fetch the AUTHORITATIVE post-fill account + positions AFTER fill
+    # resolution, and write the canonical posttrade snapshots from this refreshed
+    # state (so posttrade_account_snapshot.json / posttrade_positions.json and the
+    # downstream post_sell_rebudget ending_cash reflect post-fill truth).
     try:
         alpaca_account_snapshot = json_safe_primitive(alpaca.get_account())
         alpaca_positions_snapshot = json_safe_primitive(alpaca.get_positions())
@@ -3559,16 +3588,8 @@ def _capture_alpaca_posttrade_state(
         run_date,
         alpaca_positions_snapshot,
     )
-    starting_positions = _holdings_to_quantity_map(holdings_prev)
+    # Recompute actual_positions from the refreshed post-fill positions.
     actual_positions = _positions_to_quantity_map(alpaca_positions_snapshot)
-    unresolved_orders: List[Dict[str, object]] = []
-    orders_for_recon = _resolve_filled_orders_for_recon(
-        alpaca,
-        submitted_orders,
-        starting_positions=starting_positions,
-        actual_positions=actual_positions,
-        unresolved_orders=unresolved_orders,
-    )
     expected_positions = _expected_positions_after_orders(
         starting_positions,
         orders_for_recon,
