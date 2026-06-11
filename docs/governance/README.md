@@ -37,6 +37,11 @@ Start here before creating or editing any governance/strategy/FR document.
 `caerus_strategic_backlog.md`, `fr_governance_model.md`, `governance_taxonomy.md`,
 `operational_lessons.md`, `repo_artifact_policy.md`, `change_lineage_standard.md`.
 
+**Canonical doctrine:** `docs/governance/caerus_investment_doctrine.md` is the
+strategic doctrine for strategy, sleeve, promotion, and portfolio-construction
+work. New governance or research references should defer to it unless an
+explicit amendment is recorded.
+
 **Folder semantics:** `fr_active/` contains active, proposed, or currently
 researched FR specs; `fr_archive/` contains completed, superseded, retired, or
 historical FR specs. Folder location is navigational only. `fr_registry.md` is
@@ -59,3 +64,12 @@ their canonical FR-050 and FR-053 specs.
   for auditability.
 - `fr_registry.md`: authoritative FR status record.
 - `fr_active_backlog.md`: prioritized work queue.
+
+## Governance Hygiene Agent
+
+- Script: `scripts/governance_hygiene_agent.py`
+- Output: `outputs/governance_hygiene/YYYY-MM-DD/`
+- Guarantee: read-only audit only; it writes review artifacts for its own run
+  and does not patch governance sources.
+- Cadence: daily, before CIO review.
+- Operator rule: review proposed findings before applying any suggested change.

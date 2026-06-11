@@ -8,6 +8,9 @@ references, validation summaries, and final or current operational state.
 
 Active upcoming work belongs in `docs/governance/fr_active_backlog.md`.
 Methodology belongs in `docs/governance/fr_governance_model.md`.
+The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md`
+is the canonical strategic doctrine for strategy, sleeve, promotion, and
+portfolio-construction work.
 
 ## FR File Location Audit
 
@@ -18,23 +21,47 @@ Archived copies are retained for auditability.
 
 | FR | Title | Registry status | Current location | Lifecycle | Notes |
 |---|---|---|---|---|---|
+| FR-021 | Partial execution state normalization | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
+| FR-029 | Promotion governance hardening for provenance, exposure, and timing confidence | `IN_PROGRESS` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog and partially realized through FR-037 / FR-038. |
+| FR-032 | Execution lifecycle observability hardening | `READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
+| FR-033 | Dashboard/operator asset alignment | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
+| FR-034 | Post-submit cash drift reconciliation review | `READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
+| FR-035 | Execution contract documentation hardening | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
+| FR-036 | MCP Phase 7 — research-question capability router | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current MCP surface tracked in the active backlog. |
+| FR-036a | MCP conformance audit vs frozen semantics layer | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Documentation-only audit tracked in the active backlog. |
+| FR-036b | MCP `attribution_analysis` capability promotion | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability promotion tracked in the active backlog. |
+| FR-036c | MCP `stable_window_evaluation` capability promotion | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability promotion tracked in the active backlog. |
+| FR-036d | MCP strategy-aware promotion readiness drill-down | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability drill-down tracked in the active backlog. |
 | FR-050 | Phoenix Historical Behavior Review | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_050_phoenix_research_spec.md` | ARCHIVED | Archived copy retained; active work and current evidence live in the registry/backlog. |
 | FR-051 | Cygnus v0 event-reaction / Wave 1 | `SHELVED` | `docs/governance/fr_archive/fr_051_cygnus_research_spec.md` | ARCHIVED | Archived spec copy retained for auditability; holdout-preserved v0 governance remains in registry. |
 | FR-052 | Cassiopeia event-driven spec | `DRAFT_RESEARCH` | `docs/governance/fr_archive/fr_052_cassiopeia_research_spec.md` | ARCHIVED | Archived spec copy retained; canonical role is still spec-only / event-driven. |
 | FR-053 | Argo Phase B Regime Selection Validation | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_053_argo_research_spec.md` | ARCHIVED | Archived spec copy retained; current Phase B work is tracked in the active backlog and model-quality artifacts. |
 | FR-054 | Dynamic Strategy Registry Audit | `COMPLETED` | `docs/governance/fr_archive/fr_054_dynamic_strategy_registry_audit.md` | ARCHIVED | Historical audit record. |
-| FR-055 | Registry Surface Cleanup Audit | `COMPLETED` | `docs/governance/fr_archive/fr_055_registry_surface_cleanup_audit.md` | ARCHIVED | Historical audit record. |
-| FR-056 | Cygnus design draft | `SUPERSEDED` / retired | `docs/governance/fr_archive/fr_056_cygnus_design_spec.md` | ARCHIVED | Archived design draft; superseded by FR-051 canonical earnings-drift definition. |
-| FR-057 | Argo design draft | `SUPERSEDED` | `docs/governance/fr_archive/fr_057_argo_design_spec.md` | ARCHIVED | Archived design draft; superseded by FR-053 canonical regime-overlay definition. |
+| FR-055 | Intended Portfolio NAV & Operational Drag Attribution | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work; archival audit copy retained at `docs/governance/fr_archive/fr_055_registry_surface_cleanup_audit.md`. |
+| FR-056 | Operational Drag Source Discovery Patch | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work; archival design copy retained at `docs/governance/fr_archive/fr_056_cygnus_design_spec.md`. |
+| FR-057 | Current Price Hydration for Operational Drag | `IN_PROGRESS` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work; archival design copy retained at `docs/governance/fr_archive/fr_057_argo_design_spec.md`. |
+| FR-058 | Actual NAV Refresh for Operational Drag | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work tracked in the active backlog. |
+| FR-059 | Broker Telemetry Failure Detection | `IN_PROGRESS` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-telemetry work tracked in the active backlog. |
+| FR-060 | Intended NAV True Mark-to-Market | `IN_PROGRESS` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-telemetry work tracked in the active backlog. |
+| FR-061 | Operational Drag Reporting Cleanup | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work tracked in the active backlog. |
+| FR-062 | Reconciliation Drift Investigation and Patch | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work tracked in the active backlog. |
 | FR-063 | Strategy Differentiation Deep Dive | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ARCHIVED | Archived spec copy retained while active research remains tracked in the backlog. |
 | FR-064 | Multi-Asset Research Framework | `DRAFT_RESEARCH` | `docs/governance/fr_archive/fr_064_multi_asset_research_framework.md` | ARCHIVED | Archived draft retained for auditability and linkage. |
 | FR-065 | Dashboard Decision-Grade Consolidation | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_065_dashboard_decision_grade_consolidation.md` | ARCHIVED | Archived spec copy retained; current dashboard work is tracked in the active backlog. |
 | FR-066 | Canonical NAV Track Record Integrity | `DEPLOYED_OBSERVING` | `docs/governance/fr_archive/fr_066_canonical_nav_track_record_spec.md` | ARCHIVED | Historical spec copy retained; deployed-observing state remains in the registry and backlog. |
-| FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_stage0_source_comparison.md` | ARCHIVED | Archived comparison spec retained; FR-067 outcome gates FR-068. |
-| FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_vela_research_spec.md` | ARCHIVED | Archived Vela research spec retained alongside the source-comparison evidence. |
+| FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_stage0_source_comparison.md` | ARCHIVED | Archived comparison spec retained; paired evidence with `docs/governance/fr_archive/fr_067_vela_research_spec.md`. |
 | FR-068 | PIT universe + survivorship rebaseline | `PHASES_1_3_COMPLETE` | `research/pit_universe_architecture_2026-06-10.md` | ACTIVE | Current design and results live in the research artifact; the supporting FR spec has been archived. |
 | FR-069 | Research Lab / modular sleeve architecture | `DESIGN` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Active design spec retained in `fr_active/`; migration sequencing remains future work. |
 | FR-070 | Cash Gating and Post-Sell Buy Budget Reconciliation | `PROPOSED` | `docs/governance/fr_active/fr_070_cash_gating_post_sell_budget_reconciliation.md` | PROPOSED | Proposed high-priority FR; weekend-maintenance only if implementation is approved because it may touch trading behavior. |
+| FR-071 | Governance Doctrine Integration | `READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
+| FR-072 | Governance Hygiene Agent | `READY` | `docs/governance/fr_active/fr_072_governance_hygiene_agent.md` | ACTIVE | Read-only governance auditor; output artifacts only, no auto-patch or auto-commit. Phase B scheduling requires separate approval. |
+
+## FR Numbering Exceptions
+
+The following paired documents intentionally reuse FR numbers for auditability:
+
+- FR-051 / FR-056: FR-056 is a superseded archival appendix to FR-051. Keep both files for historical traceability; treat the pair as one canonical lineage.
+- FR-067: the Stage 0 source-comparison spec and the Vela research spec intentionally share FR-067 as paired evidence for the same FR lineage.
 
 ## Active Numbering Note
 

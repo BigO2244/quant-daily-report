@@ -10,6 +10,10 @@ Research Lab / modular sleeve architecture design recorded)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
+The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md`
+is the canonical strategic north star for strategy, sleeve, promotion, and
+portfolio-construction work unless explicitly amended.
+
 ---
 
 ## 0. How to use this document

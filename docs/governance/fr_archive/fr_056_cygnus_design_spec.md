@@ -8,7 +8,7 @@ This design draft duplicates the canonical Cygnus research spec:
 
 DEFINITION DRIFT TO RESOLVE: this draft describes Cygnus as a generic
 "persistent, slow-moving factor / price drift" sleeve, whereas the canonical
-FR-051 spec and config/research/strategy_registry.json define Cygnus as an
+Cygnus research spec and config/research/strategy_registry.json define Cygnus as an
 EARNINGS / post-earnings DRIFT strategy (family = earnings_drift).
 
 Action: fold any needed content into FR-051 and retire this file, OR record an
