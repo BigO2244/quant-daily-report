@@ -34,7 +34,7 @@ Archived copies are retained for auditability.
 | FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_vela_research_spec.md` | ARCHIVED | Archived Vela research spec retained alongside the source-comparison evidence. |
 | FR-068 | PIT universe + survivorship rebaseline | `PHASES_1_3_COMPLETE` | `research/pit_universe_architecture_2026-06-10.md` | ACTIVE | Current design and results live in the research artifact; the supporting FR spec has been archived. |
 | FR-069 | Research Lab / modular sleeve architecture | `DESIGN` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Active design spec retained in `fr_active/`; migration sequencing remains future work. |
-| FR-070 | Cash Gating and Post-Sell Buy Budget Reconciliation | `PROPOSED` | `docs/governance/fr_active/fr_070 - Cash Gating and Post-Sell Budget Reconciliation` | PROPOSED | Proposed high-priority FR; weekend-maintenance only if implementation is approved because it may touch trading behavior. |
+| FR-070 | Cash Gating and Post-Sell Buy Budget Reconciliation | `PROPOSED` | `docs/governance/fr_active/fr_070_cash_gating_post_sell_budget_reconciliation.md` | PROPOSED | Proposed high-priority FR; weekend-maintenance only if implementation is approved because it may touch trading behavior. |
 
 ## Active Numbering Note
 
