@@ -28,9 +28,12 @@ artifacts and an explicit research-to-production promotion ladder.
 - Lyra is the shadow challenger.
 - SPY is the benchmark anchor.
 - Only Polaris sends orders. Orion and Lyra produce artifacts only.
-- Execution integrity and target attainment are the top operational concerns.
-- Research architecture is moving toward a modular sleeve model aligned with
-  the Caerus Investment Doctrine.
+- Execution integrity and target attainment are in observation after the June
+  12 FR-070 remediation. New FR-070 implementation work requires classified
+  evidence from the next run.
+- FR-069 research architecture is now the primary active workstream and is
+  moving toward a modular sleeve model aligned with the Caerus Investment
+  Doctrine.
 - The live dashboard is nginx-protected with basic auth; recovery uses
   `scripts/reset_dashboard_auth.sh` and does not change trading, execution,
   allocation, or cron behavior.
@@ -57,8 +60,8 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Current Priority Stack
 
-1. FR-070 execution integrity / target attainment.
-2. FR-069 research lab modular sleeve architecture.
+1. FR-069 research lab modular sleeve architecture, design/Phase A only.
+2. FR-070 execution integrity / target attainment observation.
 3. Continued Orion/Lyra evaluation before any retirement decision.
 4. FR-063 remains deprioritized behind FR-069; no retirement decision is
    approved, and any Orion/Lyra disposition belongs inside FR-069.

@@ -18,9 +18,9 @@ Historical targeted execution validation reported seven failing tests concentrat
 
 These failures were verified to exist before deployment of FR-069 (posttrade telemetry sequencing) and therefore are not regressions introduced by commit `0aab2e1`.
 
-While recent live execution evidence suggests that sell execution, buy execution, fractional shares, and post-sell rebudgeting are functioning, the failing tests cover the exact execution-control surfaces responsible for capital deployment and therefore require formal review. The June 12 live-run investigation classified the cash discrepancy as `ARTIFACT_TIMING_FAILURE`, not failed rebudgeting; the open gate is post-buy snapshot validation on the next live run.
+While recent live execution evidence suggests that sell execution, buy execution, fractional shares, and post-sell rebudgeting are functioning, the failing tests cover the exact execution-control surfaces responsible for capital deployment and therefore require formal review. The June 12 live-run investigation classified the cash discrepancy as `ARTIFACT_TIMING_FAILURE`, not failed rebudgeting; remediation is deployed and the workstream now monitors post-buy snapshot validation through the next live run.
 
-Because any remediation may alter trading behavior, this workstream will be conducted as research first and any resulting implementation changes will be deployed only during a scheduled maintenance window outside active market hours.
+New implementation work should reopen FR-070 only if diagnostics show a stale/pre-buy posttrade snapshot, buy timeout/failure, unclassified cash drift, reconciliation/target-attainment contradiction, or achieved cash materially outside tolerance without a classified reason. Because any remediation may alter trading behavior, any future implementation changes must be conducted as research first and deployed only during a scheduled maintenance window outside active market hours.
 
 ---
 

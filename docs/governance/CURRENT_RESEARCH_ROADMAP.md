@@ -6,8 +6,9 @@ Last Updated: 2026-06-12 (governance file locations updated to fr_active/ and
 fr_archive/; FR-066 VM backfill/cron deployed; FR-051 Cygnus v0 Stage 2 FAIL
 recorded and v0 shelved; FR-067 Sharadar gate CLOSED_PASS; FR-068 PIT
 remediation Phases 1-3 complete — Polaris priced rebaseline MATERIAL; FR-069
-Research Lab / modular sleeve architecture design recorded; FR-070 June 12
-investigation classed the cash discrepancy as artifact timing failure)
+Research Lab / modular sleeve architecture promoted to primary active
+architecture workstream; FR-070 June 12 investigation classed the cash
+discrepancy as artifact timing failure and moved to observation/monitoring)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -15,16 +16,17 @@ The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md
 is the canonical strategic north star for strategy, sleeve, promotion, and
 portfolio-construction work unless explicitly amended.
 
-Priority note 2026-06-12: FR-070 cash-gating / post-sell buy-budget review is
-the first priority before new research buildout. The June 12 live-run
-investigation classified the discrepancy as `ARTIFACT_TIMING_FAILURE` and
-left post-buy snapshot validation open until the next live run. FR-069 modular
-sleeve / research-lab architecture follows FR-070 and must align with the
-doctrine. The Orion/Lyra retain-or-retire decision is deferred to the
-data-driven sleeve architecture review; no immediate retirement or Lyra-name
-reuse is approved. Phoenix remains the next major sleeve-design focus after the
-architecture is settled. Dashboard auth cleanup remains operational hygiene,
-not a research priority.
+Priority note 2026-06-12: FR-070 cash-gating / post-sell buy-budget remediation
+is deployed and moves to observation/monitoring. The June 12 live-run
+investigation classified the discrepancy as `ARTIFACT_TIMING_FAILURE` and left
+post-buy snapshot validation open until the next live run, but FR-070 no longer
+blocks the active roadmap as the primary engineering focus. FR-069 modular
+sleeve / research-lab architecture is now the primary active architecture
+workstream and must align with the doctrine. The Orion/Lyra retain-or-retire
+decision is deferred to the data-driven sleeve architecture review; no immediate
+retirement or Lyra-name reuse is approved. Phoenix remains the next major
+sleeve-design focus after the architecture is settled. Dashboard auth cleanup
+remains operational hygiene, not a research priority.
 
 ---
 
@@ -81,7 +83,7 @@ editing code or specs.
 | FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_archive/fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
 | FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_archive/fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
 | FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md` | PHASES 1-3 COMPLETE 2026-06-10 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra rebaselines pending | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py` | n/a |
-| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (design only; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | DESIGN 2026-06-10 — pluggable sleeve contract on the PIT foundation; shared data/signal/backtest/eval layers; migration deferred to future FRs | none (design spec) | n/a |
+| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (design only; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | DESIGN / ACTIVE_PHASE_A 2026-06-12 — primary active architecture workstream; pluggable sleeve contract on the PIT foundation; shared data/signal/backtest/eval layers; Phase A is governance/spec/test planning only | none (design spec) | n/a |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are

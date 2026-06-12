@@ -1,8 +1,8 @@
 # FR-069 — Research Lab / Modular Sleeve Architecture (Design)
 
-Status: DESIGN (design-only — no production refactor in this FR)
+Status: DESIGN / ACTIVE_PHASE_A (design-only — no production refactor in this FR)
 Owner: Caerus Research Program
-Last Updated: 2026-06-10
+Last Updated: 2026-06-12
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes nothing that runs — no
 code, execution, broker, cron, registry, allocation, or paper/live behavior)
@@ -176,7 +176,75 @@ auditable; `universe_method` makes survivorship status machine-checkable.
 - This FR ships **no code**. Each migration step below is its own future FR with
   its own validation and rollback.
 
-## 5. Migration Sequence (each a separate, reversible future FR)
+## 5. Phase A Orchestrated Work Plan
+
+FR-069 is now the primary active architecture/research workstream. Phase A is
+specification, file-area assignment, and test planning only. It does not change
+production strategy behavior, execution, broker submission, allocation, model
+logic, cron, or the live strategy registry.
+
+### Agent Roles
+
+1. **Governance auditor** — reconcile `fr_active_backlog.md`, `fr_registry.md`,
+   `CURRENT_RESEARCH_ROADMAP.md`, and `ORCHESTRATOR_CONTEXT.md`; keep FR-070 in
+   observation/monitoring and ensure FR-063, Orion, and Lyra are not retired.
+2. **FR-070 closeout reviewer** — monitor next-run MCP target-attainment output
+   and post-buy artifact gates; reopen FR-070 only for classified failure
+   evidence.
+3. **FR-069 architecture planner** — maintain this spec, define Phase A packets,
+   and keep the work design-first until a future FR authorizes implementation.
+4. **File-structure mapper** — map sleeve work to existing governance, registry,
+   research, MCP, and test surfaces before any code scaffold is proposed.
+5. **Implementation planner** — propose minimal future abstractions and registry-
+   first onboarding paths without editing production behavior.
+6. **Final reviewer** — verify no trading, broker, execution, allocation, model,
+   strategy, cron, holdout, or secret behavior changed; run docs validation.
+
+### File-Area Assignment
+
+| Area | Existing surfaces | Phase A assignment |
+|---|---|---|
+| Governance / Specs | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md`, `docs/governance/fr_active_backlog.md`, `docs/governance/fr_registry.md`, `docs/governance/CURRENT_RESEARCH_ROADMAP.md` | Keep FR-069 primary, define lifecycle terms, and record non-goals. |
+| Registry / Metadata | `core/strategy_registry.py`, `config/research/strategy_registry.json`, `research_registry/models/`, `research_registry/registry/` | Document sleeve metadata requirements; defer registry schema edits to a future FR. |
+| Research Artifacts | `research/`, `research_registry/research/`, `scripts/research/`, `outputs/research_review/`, promotion-readiness artifacts | Specify standard sleeve artifact envelope and PIT evidence requirements. |
+| MCP / Read-only Access | `research_registry/mcp_server/`, `research_registry/research/capabilities.py`, MCP schemas/tools | Define read-only sleeve status, promotion readiness, and comparison visibility requirements. |
+| Tests | `Tests/test_strategy_registry.py`, `Tests/test_research_registry_mcp_server.py`, `Tests/test_research_review_packet.py`, PIT and Lyra/Orion tests | Identify future test coverage for registry metadata, artifact envelope, MCP read-only outputs, and parity gates. |
+| Future Implementation Boundary | portfolio construction, execution, broker, cron, production allocation | Explicitly out of scope until a later approved FR. |
+
+### Phase A Packets
+
+1. **Current-state audit packet** — map Polaris, Orion, Lyra, Phoenix, Cygnus,
+   Cassiopeia, and Argo into sleeve or overlay roles using existing registry and
+   research artifacts.
+2. **Registry-first onboarding packet** — define required sleeve metadata:
+   `sleeve_id`, `strategy_id`, `universe_family`, `benchmark`, lifecycle status,
+   evidence status, promotion eligibility, artifact families, and execution
+   impact.
+3. **Read-only MCP packet** — specify tools or schemas for sleeve status,
+   promotion readiness, PIT evidence quality, and Orion/Lyra comparison without
+   adding production behavior.
+4. **Research artifact packet** — standardize the artifact envelope, PIT method
+   tags, reason codes, and holdout flags for future sleeve runs.
+5. **Test plan packet** — list targeted tests for strategy registry metadata,
+   MCP read-only surfaces, research review packet consumption, PIT parity, and
+   Orion/Lyra differentiation continuity.
+6. **Review packet** — confirm Phase A changes are docs/spec/test scaffolding
+   only and do not retire any strategy.
+
+### Agent Loop
+
+1. Read canonical sources.
+2. Compare current state against the target architecture.
+3. Identify one bounded gap.
+4. Propose one doc-level change or research artifact requirement.
+5. Validate that the change preserves all non-goals.
+6. Record open questions and owner decisions.
+7. Repeat until Phase A acceptance criteria are satisfied.
+
+Loop rule: one iteration, one bounded output, no runtime changes, no retirement
+decisions.
+
+## 6. Migration Sequence (each a separate, reversible future FR)
 
 1. **L1 contract finalization** — promote `Universe(as_of_date)` + a `Prices(SEP)`
    accessor to the canonical data surface; mark yfinance matrix diagnostic-only.
@@ -196,7 +264,7 @@ Order is lowest-risk-first; nothing migrates until its parity/validation passes,
 and production consumers keep their current behavior until a separate
 deployment/governance approval.
 
-## 6. Open Questions (owner decisions)
+## 7. Open Questions (owner decisions)
 
 1. **Sleeve registry home** — extend `config/research/strategy_registry.json`
    semantics (owner-gated; registry edits are out of scope here) or a separate
@@ -211,7 +279,25 @@ deployment/governance approval.
 5. **Backwards-compat window** — how long do `legacy_current_universe` artifacts
    remain readable (lineage) before archival?
 
-## 7. Success Criteria (for the migration FRs, not this design)
+## 8. Phase A Acceptance Criteria
+
+- Current Polaris, Orion, and Lyra behavior remains unchanged.
+- FR-063 remains deprioritized behind FR-069, not retired.
+- Orion and Lyra remain under evaluation; no retirement, promotion, rename, or
+  Lyra-name reuse is approved.
+- Strategy/sleeve lifecycle terms are documented.
+- Registry requirements are documented without editing production registry
+  behavior.
+- Phoenix, Cygnus, Cassiopeia, and Argo have placeholder onboarding
+  requirements.
+- MCP read-only visibility requirements are defined.
+- Promotion readiness and PIT evidence requirements are documented.
+- Tests are identified or scaffolded only in a later approved implementation
+  packet.
+- No execution, broker, allocation, model, strategy, cron, live-capital, or
+  holdout behavior changes.
+
+## 9. Success Criteria (for the migration FRs, not this design)
 
 - A new sleeve can be added by implementing the contract only (no bespoke data,
   backtest, or metrics code).
