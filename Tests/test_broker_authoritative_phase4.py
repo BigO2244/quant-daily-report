@@ -448,3 +448,171 @@ def test_posttrade_snapshot_captured_after_fill_resolution_not_before(tmp_path, 
     assert recon_payload["expected_positions"] == {"BBB": 2.0}
     assert recon_payload["actual_positions"] == {"BBB": 2.0}
     assert state["posttrade_filled_orders_count"] == 1
+
+
+class _DelayedBuyFillAlpaca:
+    def __init__(self, *, fill_after_polls: int, final_status: str = "filled", final_filled_qty: str = "2"):
+        self.fill_after_polls = fill_after_polls
+        self.final_status = final_status
+        self.final_filled_qty = final_filled_qty
+        self.order_polls = 0
+
+    def get_order(self, order_id):
+        self.order_polls += 1
+        if self.order_polls >= self.fill_after_polls:
+            return {
+                "id": order_id,
+                "status": self.final_status,
+                "filled_qty": self.final_filled_qty,
+                "filled_at": "2026-06-12T13:36:40+00:00",
+            }
+        return {"id": order_id, "status": "pending_new", "filled_qty": "0"}
+
+    def find_order_by_client_id(self, client_id):
+        return self.get_order(client_id)
+
+    def get_account(self):
+        if self.order_polls >= self.fill_after_polls and self.final_status == "filled":
+            return {"cash": "820.0", "equity": "10010.0", "buying_power": "820.0", "status": "ACTIVE"}
+        return {"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0", "status": "ACTIVE"}
+
+    def get_positions(self):
+        if self.order_polls >= self.fill_after_polls and self.final_status == "filled":
+            return [{"symbol": "BBB", "qty": "2", "current_price": "90.0", "market_value": "180.0"}]
+        return []
+
+
+def test_posttrade_capture_waits_for_delayed_buy_fill_before_snapshot(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [
+        {"alpaca_order_id": "buy-bbb", "order_id": "day:BBB:BUY", "ticker": "BBB", "side": "BUY", "quantity": 2}
+    ]
+    alpaca = _DelayedBuyFillAlpaca(fill_after_polls=3)
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-06-12",
+        holdings_prev=pd.DataFrame(columns=["ticker", "sleeve", "shares"]),
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+        buy_fill_timeout_seconds=5.0,
+        buy_fill_poll_interval_seconds=0.0,
+    )
+
+    account_payload = json.loads(Path(state["posttrade_account_snapshot_path"]).read_text(encoding="utf-8"))
+    positions_payload = json.loads(Path(state["posttrade_positions_snapshot_path"]).read_text(encoding="utf-8"))
+    assert float(account_payload["cash"]) == pytest.approx(820.0)
+    assert positions_payload["normalized_positions"] == {"BBB": 2.0}
+    assert state["buy_phase_status"] == broker.BUY_PHASE_COMPLETED
+    assert state["buy_phase_completion_reason"] == "all_buy_orders_filled"
+    assert state["buy_fill_poll_count"] >= 3
+    assert state["posttrade_snapshot_stage"] == "post_buy"
+    assert state["filled_buy_count"] == 1
+    assert state["pending_buy_count"] == 0
+
+
+def test_posttrade_capture_marks_buy_timeout_and_unresolved_recon(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [
+        {"alpaca_order_id": "buy-bbb", "order_id": "day:BBB:BUY", "ticker": "BBB", "side": "BUY", "quantity": 2}
+    ]
+    alpaca = _DelayedBuyFillAlpaca(fill_after_polls=999)
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-06-12",
+        holdings_prev=pd.DataFrame(columns=["ticker", "sleeve", "shares"]),
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+        buy_fill_timeout_seconds=0.0,
+        buy_fill_poll_interval_seconds=0.0,
+    )
+
+    recon_payload = json.loads(Path(state["posttrade_recon_path"]).read_text(encoding="utf-8"))
+    assert state["buy_phase_status"] == broker.BUY_PHASE_TIMEOUT
+    assert state["posttrade_snapshot_stage"] == "buy_timeout"
+    assert state["pending_buy_count"] == 1
+    assert state["posttrade_unresolved_orders"][0]["ticker"] == "BBB"
+    assert state["posttrade_recon_status"] == "NOT_COMPARABLE"
+    assert recon_payload["manual_intervention_required"] is True
+
+
+def test_posttrade_capture_marks_rejected_buy_failed_without_fabricating_fill(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [
+        {"alpaca_order_id": "buy-bbb", "order_id": "day:BBB:BUY", "ticker": "BBB", "side": "BUY", "quantity": 2}
+    ]
+    alpaca = _DelayedBuyFillAlpaca(fill_after_polls=1, final_status="rejected", final_filled_qty="0")
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-06-12",
+        holdings_prev=pd.DataFrame(columns=["ticker", "sleeve", "shares"]),
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+        buy_fill_timeout_seconds=5.0,
+        buy_fill_poll_interval_seconds=0.0,
+    )
+
+    recon_payload = json.loads(Path(state["posttrade_recon_path"]).read_text(encoding="utf-8"))
+    assert state["buy_phase_status"] == broker.BUY_PHASE_FAILED
+    assert state["failed_buy_count"] == 1
+    assert state["filled_buy_count"] == 0
+    assert state["posttrade_unresolved_orders"] == []
+    assert recon_payload["expected_positions"] == {}
+    assert recon_payload["actual_positions"] == {}
+
+
+def test_posttrade_capture_no_buy_run_preserves_existing_snapshot_flow(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [
+        {"alpaca_order_id": "sell-aaa", "order_id": "day:AAA:SELL", "ticker": "AAA", "side": "SELL", "quantity": 1}
+    ]
+    alpaca = _PosttradePartialAlpaca(
+        order_status={"sell-aaa": {"status": "filled", "filled_qty": "1"}},
+        positions=[],
+    )
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=alpaca,
+        run_date="2026-06-12",
+        holdings_prev=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+        buy_fill_timeout_seconds=0.0,
+        buy_fill_poll_interval_seconds=0.0,
+    )
+
+    assert state["buy_phase_status"] == broker.BUY_PHASE_COMPLETED
+    assert state["buy_phase_completion_reason"] == "no_buy_orders"
+    assert state["submitted_buy_count"] == 0
+    assert state["buy_fill_poll_count"] == 0
+    assert state["posttrade_snapshot_stage"] == "post_buy"

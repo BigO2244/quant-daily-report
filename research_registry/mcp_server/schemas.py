@@ -122,7 +122,8 @@ TOOL_DEFINITIONS: list[dict] = [
             "rebudget expectations, submitted/filled side counts, and skipped "
             "or deferred buy notional. Returns OK_TARGET_ATTAINED, "
             "WARN_CASH_DRIFT, WARN_RECONCILED_BUT_UNDERDEPLOYED, "
-            "FAIL_EXECUTION_INCOMPLETE, or UNKNOWN_INSUFFICIENT_ARTIFACTS."
+            "WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY, FAIL_EXECUTION_INCOMPLETE, "
+            "or UNKNOWN_INSUFFICIENT_ARTIFACTS."
         ),
         "inputSchema": {
             "type": "object",

@@ -58,6 +58,8 @@ CAPITAL_RESERVE_EQUITY_PCT = float(os.getenv("CAPITAL_RESERVE_EQUITY_PCT", "0.00
 CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
 ALPACA_SELL_PHASE_TIMEOUT_SECONDS = 90.0
 ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS = 3.0
+ALPACA_BUY_FILL_TIMEOUT_SECONDS = 60.0
+ALPACA_BUY_FILL_POLL_INTERVAL_SECONDS = 3.0
 PRETRADE_ASSET_VALIDATION_FAILED = "pretrade_asset_validation_failed"
 BUY_SUBMITTED_USING_AVAILABLE_BUYING_POWER = "buy_submitted_using_available_buying_power"
 BUY_BLOCKED_INSUFFICIENT_BUYING_POWER = "buy_blocked_insufficient_buying_power"
@@ -71,6 +73,10 @@ ORDER_TERMINAL_STATUSES = {
     "REJECTED",
     "SUSPENDED",
 }
+BUY_PHASE_COMPLETED = "BUY_PHASE_COMPLETED"
+BUY_PHASE_PARTIAL = "BUY_PHASE_PARTIAL"
+BUY_PHASE_TIMEOUT = "BUY_PHASE_TIMEOUT"
+BUY_PHASE_FAILED = "BUY_PHASE_FAILED"
 
 
 def _reserve_cash_for_equity(
@@ -1781,6 +1787,14 @@ def _write_broker_positions_snapshot(
     return str(out_path)
 
 
+def _read_json_object(path: str | Path) -> Dict[str, object]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _split_orders_for_execution(
     orders: List[Dict[str, object]],
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
@@ -2300,6 +2314,18 @@ def _resolve_filled_orders_for_recon(
             if status in {"REJECTED", "CANCELED", "CANCELLED", "EXPIRED"}:
                 rejected_count += 1
             else:
+                if unresolved_orders is not None:
+                    unresolved_orders.append(
+                        {
+                            "order_id": str(order.get("order_id") or "").strip(),
+                            "alpaca_order_id": alpaca_order_id,
+                            "ticker": symbol,
+                            "side": side,
+                            "submitted_quantity": float(submitted_qty),
+                            "resolved_order_status": status or "UNKNOWN",
+                            "reason": "order_not_terminal_or_unfilled_after_observation",
+                        }
+                    )
                 pending_count += 1
             continue
 
@@ -2386,6 +2412,182 @@ def _sell_phase_poll_interval_seconds() -> float:
     if raw is None:
         return float(ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS)
     return max(0.0, float(raw))
+
+
+def _buy_fill_timeout_seconds() -> float:
+    raw = _coerce_float(os.getenv("ALPACA_BUY_FILL_TIMEOUT_SECONDS"), None)
+    if raw is None:
+        return float(ALPACA_BUY_FILL_TIMEOUT_SECONDS)
+    return max(0.0, float(raw))
+
+
+def _buy_fill_poll_interval_seconds() -> float:
+    raw = _coerce_float(os.getenv("ALPACA_BUY_FILL_POLL_INTERVAL_SECONDS"), None)
+    if raw is None:
+        return float(ALPACA_BUY_FILL_POLL_INTERVAL_SECONDS)
+    return max(0.0, float(raw))
+
+
+def _is_buy_order(order: Mapping[str, object]) -> bool:
+    return str(order.get("side") or "").upper().strip() == "BUY"
+
+
+def _is_buy_observation_terminal(status: str) -> bool:
+    normalized = str(status or "").upper().replace("ORDERSTATUS.", "")
+    return normalized in ORDER_TERMINAL_STATUSES or normalized == "PARTIALLY_FILLED"
+
+
+def _refresh_submitted_order_lifecycle(
+    *,
+    alpaca: AlpacaBroker,
+    order: Dict[str, object],
+) -> Dict[str, object]:
+    alpaca_order_id = str(order.get("alpaca_order_id") or "").strip()
+    current_order: Dict[str, object] | None = None
+    if alpaca_order_id:
+        current_order = alpaca.get_order(alpaca_order_id)
+    else:
+        internal_order_id = str(order.get("order_id") or "").strip()
+        if internal_order_id:
+            current_order = alpaca.find_order_by_client_id(
+                alpaca_client_order_id(internal_order_id)
+            )
+    lifecycle = _submission_lifecycle_fields(
+        submitted_order=order,
+        current_order=current_order,
+        fallback_quantity=order.get("quantity"),
+        prior_first_seen_status=order.get("first_seen_status"),
+        prior_submitted_at=order.get("submitted_at"),
+    )
+    order.update(lifecycle)
+    if alpaca_order_id:
+        order["alpaca_order_id"] = alpaca_order_id
+    return order
+
+
+def _buy_observation_counts(buy_orders: List[Dict[str, object]]) -> Dict[str, int]:
+    counts = {
+        "submitted_buy_count": len(buy_orders),
+        "filled_buy_count": 0,
+        "partial_buy_count": 0,
+        "failed_buy_count": 0,
+        "pending_buy_count": 0,
+    }
+    for order in buy_orders:
+        status = _order_status_value(order)
+        filled_qty = _order_filled_quantity(order, fallback_quantity=order.get("quantity"))
+        submitted_qty = abs(_coerce_float(order.get("quantity"), 0.0) or 0.0)
+        if status == "PARTIALLY_FILLED":
+            counts["partial_buy_count"] += 1
+        if status in {"REJECTED", "CANCELED", "CANCELLED", "EXPIRED"}:
+            counts["failed_buy_count"] += 1
+        elif filled_qty is not None and filled_qty > 1e-12:
+            counts["filled_buy_count"] += 1
+            if submitted_qty > 0 and filled_qty + 1e-12 < submitted_qty:
+                counts["partial_buy_count"] += 1
+        if not _is_buy_observation_terminal(status):
+            counts["pending_buy_count"] += 1
+    return counts
+
+
+def _buy_phase_status_from_counts(counts: Mapping[str, int]) -> tuple[str, str]:
+    submitted = int(counts.get("submitted_buy_count") or 0)
+    filled = int(counts.get("filled_buy_count") or 0)
+    partial = int(counts.get("partial_buy_count") or 0)
+    failed = int(counts.get("failed_buy_count") or 0)
+    pending = int(counts.get("pending_buy_count") or 0)
+    if submitted <= 0:
+        return BUY_PHASE_COMPLETED, "no_buy_orders"
+    if pending > 0:
+        return BUY_PHASE_TIMEOUT, "buy_fill_observation_timeout"
+    if filled >= submitted and partial == 0 and failed == 0:
+        return BUY_PHASE_COMPLETED, "all_buy_orders_filled"
+    if failed >= submitted and filled == 0:
+        return BUY_PHASE_FAILED, "all_buy_orders_failed"
+    return BUY_PHASE_PARTIAL, "partial_buy_order_completion"
+
+
+def _wait_for_alpaca_buy_phase_completion(
+    *,
+    alpaca: AlpacaBroker,
+    submitted_orders: List[Dict[str, object]],
+    timeout_seconds_override: float | None = None,
+    poll_interval_seconds_override: float | None = None,
+) -> Dict[str, object]:
+    buy_orders = [order for order in submitted_orders if isinstance(order, dict) and _is_buy_order(order)]
+    timeout_seconds = (
+        _buy_fill_timeout_seconds()
+        if timeout_seconds_override is None
+        else max(0.0, float(timeout_seconds_override))
+    )
+    poll_interval_seconds = (
+        _buy_fill_poll_interval_seconds()
+        if poll_interval_seconds_override is None
+        else max(0.0, float(poll_interval_seconds_override))
+    )
+    started = time.monotonic()
+    deadline = started + float(timeout_seconds)
+    poll_count = 0
+    if not buy_orders:
+        return {
+            "buy_phase_status": BUY_PHASE_COMPLETED,
+            "buy_phase_completion_reason": "no_buy_orders",
+            "buy_fill_poll_count": 0,
+            "buy_fill_observation_window_seconds": 0.0,
+            "submitted_buy_count": 0,
+            "filled_buy_count": 0,
+            "pending_buy_count": 0,
+            "failed_buy_count": 0,
+            "partial_buy_count": 0,
+            "observed_buy_orders": [],
+        }
+
+    counts: Dict[str, int] = {}
+    while True:
+        poll_count += 1
+        for order in buy_orders:
+            try:
+                _refresh_submitted_order_lifecycle(alpaca=alpaca, order=order)
+            except Exception as exc:
+                logger.warning(
+                    "[ALPACA][BUY_PHASE] order refresh failed order_id=%s message=%s",
+                    str(order.get("order_id") or order.get("alpaca_order_id") or ""),
+                    exc,
+                )
+        counts = _buy_observation_counts(buy_orders)
+        if int(counts.get("pending_buy_count") or 0) <= 0:
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            break
+        if poll_interval_seconds > 0.0:
+            time.sleep(min(float(poll_interval_seconds), max(0.0, remaining)))
+
+    status, reason = _buy_phase_status_from_counts(counts)
+    observed = [
+        {
+            "order_id": order.get("order_id"),
+            "alpaca_order_id": order.get("alpaca_order_id"),
+            "ticker": order.get("ticker"),
+            "side": order.get("side"),
+            "quantity": order.get("quantity"),
+            "latest_status": order.get("latest_status") or order.get("status"),
+            "filled_qty": order.get("filled_qty"),
+            "filled_at": order.get("filled_at"),
+            "submitted_at": order.get("submitted_at"),
+            "last_polled_at": order.get("last_polled_at"),
+            "seconds_to_fill": order.get("seconds_to_fill"),
+        }
+        for order in buy_orders
+    ]
+    return {
+        "buy_phase_status": status,
+        "buy_phase_completion_reason": reason,
+        "buy_fill_poll_count": int(poll_count),
+        "buy_fill_observation_window_seconds": round(time.monotonic() - started, 6),
+        "observed_buy_orders": observed,
+        **counts,
+    }
 
 
 def _positions_match_expected_after_sells(
@@ -3539,9 +3741,17 @@ def _capture_alpaca_posttrade_state(
     submitted_orders: List[Dict[str, object]],
     cfg: "PaperConfig",
     raise_on_failure: bool,
+    buy_fill_timeout_seconds: float | None = None,
+    buy_fill_poll_interval_seconds: float | None = None,
 ) -> Dict[str, object]:
     starting_positions = _holdings_to_quantity_map(holdings_prev)
     unresolved_orders: List[Dict[str, object]] = []
+    buy_phase_observation = _wait_for_alpaca_buy_phase_completion(
+        alpaca=alpaca,
+        submitted_orders=submitted_orders,
+        timeout_seconds_override=buy_fill_timeout_seconds,
+        poll_interval_seconds_override=buy_fill_poll_interval_seconds,
+    )
 
     # Resolve/re-poll filled orders FIRST. At the instant submission returns,
     # orders may still be ACCEPTED/pending, so account cash/positions fetched now
@@ -3588,6 +3798,7 @@ def _capture_alpaca_posttrade_state(
         run_date,
         alpaca_positions_snapshot,
     )
+    posttrade_account_snapshot_payload = _read_json_object(posttrade_account_snapshot_path)
     # Recompute actual_positions from the refreshed post-fill positions.
     actual_positions = _positions_to_quantity_map(alpaca_positions_snapshot)
     expected_positions = _expected_positions_after_orders(
@@ -3611,6 +3822,8 @@ def _capture_alpaca_posttrade_state(
         posttrade_recon,
         unresolved_orders,
     )
+    buy_phase_status = str(buy_phase_observation.get("buy_phase_status") or BUY_PHASE_COMPLETED)
+    posttrade_snapshot_stage = "buy_timeout" if buy_phase_status == BUY_PHASE_TIMEOUT else "post_buy"
     # Final observed fill count from the post-trade re-poll (orders_for_recon
     # only contains orders whose broker status resolved to a positive filled
     # quantity). This is authoritative over the submit-time broker_responses
@@ -3628,6 +3841,8 @@ def _capture_alpaca_posttrade_state(
         "posttrade_resolved_orders": list(orders_for_recon),
         "posttrade_account_snapshot_path": posttrade_account_snapshot_path,
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
+        "posttrade_snapshot_stage": posttrade_snapshot_stage,
+        "posttrade_snapshot_timestamp": posttrade_account_snapshot_payload.get("captured_at"),
         "posttrade_recon_path": str(posttrade_recon.get("report_path") or ""),
         "posttrade_recon_status": str(posttrade_recon.get("drift_status") or ""),
         "posttrade_unresolved_orders": list(unresolved_orders),
@@ -3636,6 +3851,18 @@ def _capture_alpaca_posttrade_state(
         "posttrade_duplicate_fill_suspicions_count": int(
             posttrade_recon.get("duplicate_fill_suspicions_count") or 0
         ),
+        "buy_phase_status": buy_phase_status,
+        "buy_phase_completion_reason": buy_phase_observation.get("buy_phase_completion_reason"),
+        "buy_fill_poll_count": int(buy_phase_observation.get("buy_fill_poll_count") or 0),
+        "buy_fill_observation_window_seconds": float(
+            buy_phase_observation.get("buy_fill_observation_window_seconds") or 0.0
+        ),
+        "submitted_buy_count": int(buy_phase_observation.get("submitted_buy_count") or 0),
+        "filled_buy_count": int(buy_phase_observation.get("filled_buy_count") or 0),
+        "pending_buy_count": int(buy_phase_observation.get("pending_buy_count") or 0),
+        "failed_buy_count": int(buy_phase_observation.get("failed_buy_count") or 0),
+        "partial_buy_count": int(buy_phase_observation.get("partial_buy_count") or 0),
+        "observed_buy_orders": list(buy_phase_observation.get("observed_buy_orders") or []),
     }
 
 
@@ -4485,6 +4712,17 @@ def run_paper_day(
     posttrade_duplicate_fill_suspicions_count: int = 0
     posttrade_filled_orders_count: int | None = None
     posttrade_resolved_orders: List[Dict[str, object]] = []
+    posttrade_snapshot_stage: str | None = None
+    posttrade_snapshot_timestamp: str | None = None
+    buy_phase_status: str | None = None
+    buy_phase_completion_reason: str | None = None
+    buy_fill_poll_count: int = 0
+    buy_fill_observation_window_seconds: float = 0.0
+    filled_buy_count: int = 0
+    posttrade_pending_buy_count: int = 0
+    failed_buy_count: int = 0
+    partial_buy_count: int = 0
+    observed_buy_orders: List[Dict[str, object]] = []
     execution_outcome: str | None = None
     execution_reason: str | None = None
     execution_halt_reason: str | None = None
@@ -5370,10 +5608,37 @@ def run_paper_day(
                 posttrade_recon_path = str(posttrade_state.get("posttrade_recon_path") or "") or None
                 posttrade_recon_status = str(posttrade_state.get("posttrade_recon_status") or "") or None
                 posttrade_unresolved_orders = list(posttrade_state.get("posttrade_unresolved_orders") or [])
+                posttrade_snapshot_stage = str(posttrade_state.get("posttrade_snapshot_stage") or "") or None
+                posttrade_snapshot_timestamp = str(posttrade_state.get("posttrade_snapshot_timestamp") or "") or None
+                buy_phase_status = str(posttrade_state.get("buy_phase_status") or "") or None
+                buy_phase_completion_reason = str(posttrade_state.get("buy_phase_completion_reason") or "") or None
+                buy_fill_poll_count = int(posttrade_state.get("buy_fill_poll_count") or 0)
+                buy_fill_observation_window_seconds = float(
+                    posttrade_state.get("buy_fill_observation_window_seconds") or 0.0
+                )
+                filled_buy_count = int(posttrade_state.get("filled_buy_count") or 0)
+                posttrade_pending_buy_count = int(posttrade_state.get("pending_buy_count") or 0)
+                failed_buy_count = int(posttrade_state.get("failed_buy_count") or 0)
+                partial_buy_count = int(posttrade_state.get("partial_buy_count") or 0)
+                observed_buy_orders = list(posttrade_state.get("observed_buy_orders") or [])
                 if posttrade_unresolved_orders:
                     alpaca_submission_summary["posttrade_unresolved_orders_count"] = int(
                         len(posttrade_unresolved_orders)
                     )
+                for key, value in {
+                    "posttrade_snapshot_stage": posttrade_snapshot_stage,
+                    "posttrade_snapshot_timestamp": posttrade_snapshot_timestamp,
+                    "buy_phase_status": buy_phase_status,
+                    "buy_phase_completion_reason": buy_phase_completion_reason,
+                    "buy_fill_poll_count": buy_fill_poll_count,
+                    "buy_fill_observation_window_seconds": buy_fill_observation_window_seconds,
+                    "filled_buy_count": filled_buy_count,
+                    "pending_buy_count": posttrade_pending_buy_count,
+                    "failed_buy_count": failed_buy_count,
+                    "partial_buy_count": partial_buy_count,
+                    "observed_buy_orders": observed_buy_orders,
+                }.items():
+                    alpaca_submission_summary[key] = value
                 posttrade_repair_suggestions = list(posttrade_state.get("posttrade_repair_suggestions") or [])
                 posttrade_affected_symbols = list(posttrade_state.get("posttrade_affected_symbols") or [])
                 posttrade_duplicate_fill_suspicions_count = int(
@@ -5821,6 +6086,9 @@ def run_paper_day(
         "budget_skipped_orders": budget_skipped_orders,
         "posttrade_account_snapshot_path": posttrade_account_snapshot_path,
         "posttrade_positions_snapshot_path": posttrade_positions_snapshot_path,
+        "posttrade_snapshot_stage": posttrade_snapshot_stage,
+        "posttrade_snapshot_timestamp": posttrade_snapshot_timestamp,
+        "actual_posttrade_cash_source": "posttrade_account_snapshot" if posttrade_account_snapshot_path else None,
         "posttrade_recon_path": posttrade_recon_path,
         "posttrade_recon_status": posttrade_recon_status,
         "posttrade_unresolved_orders": posttrade_unresolved_orders,
@@ -5828,6 +6096,16 @@ def run_paper_day(
         "posttrade_filled_orders_count": posttrade_filled_orders_count,
         "posttrade_resolved_orders": posttrade_resolved_orders,
         "orders_filled_count": posttrade_filled_orders_count,
+        "buy_phase_status": buy_phase_status,
+        "buy_phase_completion_reason": buy_phase_completion_reason,
+        "buy_fill_poll_count": int(buy_fill_poll_count),
+        "buy_fill_observation_window_seconds": float(buy_fill_observation_window_seconds),
+        "submitted_buy_count": int(len([order for order in submitted_orders if str(order.get("side") or "").upper() == "BUY"])),
+        "filled_buy_count": int(filled_buy_count),
+        "pending_buy_count": int(posttrade_pending_buy_count),
+        "failed_buy_count": int(failed_buy_count),
+        "partial_buy_count": int(partial_buy_count),
+        "observed_buy_orders": observed_buy_orders,
         "posttrade_repair_suggestions": posttrade_repair_suggestions,
         "posttrade_affected_symbols": posttrade_affected_symbols,
         "posttrade_duplicate_fill_suspicions_count": posttrade_duplicate_fill_suspicions_count,

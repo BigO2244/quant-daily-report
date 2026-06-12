@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -11,6 +12,7 @@ SCHEMA_VERSION = "execution_target_attainment.v1"
 OK_TARGET_ATTAINED = "OK_TARGET_ATTAINED"
 WARN_CASH_DRIFT = "WARN_CASH_DRIFT"
 WARN_RECONCILED_BUT_UNDERDEPLOYED = "WARN_RECONCILED_BUT_UNDERDEPLOYED"
+WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY = "WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY"
 FAIL_EXECUTION_INCOMPLETE = "FAIL_EXECUTION_INCOMPLETE"
 UNKNOWN_INSUFFICIENT_ARTIFACTS = "UNKNOWN_INSUFFICIENT_ARTIFACTS"
 
@@ -21,6 +23,7 @@ DEFAULT_NOTIONAL_DRIFT_TOLERANCE_EQUITY_PCT = 0.0025
 _RECONCILED_STATUSES = {"OK", "PASS", "OK_RECONCILED", "RECONCILED", "SUCCESS"}
 _INCOMPLETE_EXECUTION_STATUSES = {"FAILED", "HALTED", "PARTIAL", "ERROR"}
 _FILLED_STATUSES = {"FILLED", "PARTIALLY_FILLED"}
+_PENDING_STATUSES = {"PENDING_NEW", "NEW", "ACCEPTED", "PENDING_REPLACE", "PENDING_CANCEL"}
 _SELL_SIDES = {"SELL", "CLOSE", "REDUCE"}
 
 
@@ -125,11 +128,51 @@ def _notional(rows: list[Any], side: str, *, filled: bool = False) -> float:
 def _filled_count(rows: list[Any], side: str) -> int:
     count = 0
     for row in _side_orders(rows, side):
-        status = _upper(row.get("resolved_order_status") or row.get("latest_status") or row.get("status"))
+        status = _normalized_order_status(row)
         filled_qty = _to_float(row.get("filled_quantity") if row.get("filled_quantity") is not None else row.get("filled_qty"))
         if status in _FILLED_STATUSES or (filled_qty is not None and filled_qty > 0.0):
             count += 1
     return count
+
+
+def _pending_count(rows: list[Any], side: str) -> int:
+    count = 0
+    for row in _side_orders(rows, side):
+        status = _normalized_order_status(row)
+        filled_qty = _to_float(row.get("filled_quantity") if row.get("filled_quantity") is not None else row.get("filled_qty"))
+        if status in _PENDING_STATUSES and float(filled_qty or 0.0) <= 0.0:
+            count += 1
+    return count
+
+
+def _normalized_order_status(order: Mapping[str, Any]) -> str:
+    status = _upper(order.get("resolved_order_status") or order.get("latest_status") or order.get("status"))
+    return status.split(".")[-1] if "." in status else status
+
+
+def _timestamp(payload: Mapping[str, Any]) -> str | None:
+    for key in ("captured_at", "timestamp", "updated_at", "created_at", "asof", "as_of", "generated_at"):
+        if str(payload.get(key) or "").strip():
+            return str(payload.get(key))
+    return None
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _seconds_between(start: str | None, end: str | None) -> float | None:
+    start_dt = _parse_timestamp(start)
+    end_dt = _parse_timestamp(end)
+    if start_dt is None or end_dt is None:
+        return None
+    return (end_dt - start_dt).total_seconds()
 
 
 def _reconciliation_status(
@@ -214,6 +257,40 @@ def _source_probe(path: Path) -> dict[str, Any]:
         "path": str(path),
         "exists": path.exists(),
         "size_bytes": path.stat().st_size if path.exists() and path.is_file() else None,
+    }
+
+
+def _cash_source(
+    *,
+    posttrade_account: Mapping[str, Any],
+    posttrade_account_path: Path,
+    recon: Mapping[str, Any],
+    recon_path: Path,
+    post_sell_rebudget: Mapping[str, Any],
+    rebudget_path: Path,
+) -> dict[str, Any]:
+    if posttrade_account and _to_float(posttrade_account.get("cash")) is not None:
+        return {
+            "cash": _to_float(posttrade_account.get("cash")),
+            "equity": _to_float(posttrade_account.get("equity") or posttrade_account.get("portfolio_value")),
+            "source": "posttrade_account_snapshot",
+            "path": str(posttrade_account_path),
+            "timestamp": _timestamp(posttrade_account),
+        }
+    if recon and _to_float(recon.get("broker_cash")) is not None:
+        return {
+            "cash": _to_float(recon.get("broker_cash")),
+            "equity": _to_float(recon.get("broker_equity")),
+            "source": "reconciliation",
+            "path": str(recon_path),
+            "timestamp": _timestamp(recon),
+        }
+    return {
+        "cash": _to_float(post_sell_rebudget.get("ending_cash")),
+        "equity": _to_float(post_sell_rebudget.get("post_sell_equity")),
+        "source": "post_sell_rebudget_ending_cash",
+        "path": str(rebudget_path),
+        "timestamp": _timestamp(post_sell_rebudget),
     }
 
 
@@ -312,8 +389,16 @@ def build_execution_target_attainment(
     submitted_count = _to_int(execution_results.get("submitted_count") or execution_payload.get("submitted_count"))
     accepted_count = _to_int(execution_results.get("accepted_count") or execution_payload.get("accepted_count"))
     rejected_count = _to_int(execution_results.get("rejected_count") or execution_payload.get("rejected_count"))
-    submitted_buy_count = _to_int(execution_payload.get("submitted_buy_count") or operator_summary.get("submitted_buy_count"))
-    submitted_sell_count = _to_int(execution_payload.get("submitted_sell_count") or operator_summary.get("submitted_sell_count"))
+    submitted_buy_count = _to_int(
+        execution_payload.get("submitted_buy_count")
+        or execution_results.get("submitted_buy_count")
+        or operator_summary.get("submitted_buy_count")
+    )
+    submitted_sell_count = _to_int(
+        execution_payload.get("submitted_sell_count")
+        or execution_results.get("submitted_sell_count")
+        or operator_summary.get("submitted_sell_count")
+    )
 
     submitted_orders = (
         _as_list(post_sell_rebudget.get("final_buy_orders_submitted"))
@@ -325,9 +410,37 @@ def build_execution_target_attainment(
     if not resolved_orders and isinstance(execution_payload.get("broker_reconciliation"), Mapping):
         resolved_orders = _as_list(execution_payload["broker_reconciliation"].get("posttrade_resolved_orders"))
     filled_source_orders = resolved_orders or order_lifecycle or submitted_orders
+    buy_fill_status_source = (
+        "posttrade_resolved_orders"
+        if resolved_orders
+        else "execution_results_order_lifecycle"
+        if order_lifecycle
+        else "submitted_orders"
+        if submitted_orders
+        else "none"
+    )
 
-    filled_buy_count = _filled_count(filled_source_orders, "BUY")
+    execution_result_filled_buy_count = (
+        _to_int(execution_results.get("filled_buy_count"))
+        if execution_results.get("filled_buy_count") is not None
+        else None
+    )
+    execution_result_pending_buy_count = (
+        _to_int(execution_results.get("pending_buy_count"))
+        if execution_results.get("pending_buy_count") is not None
+        else None
+    )
+    filled_buy_count = (
+        execution_result_filled_buy_count
+        if execution_result_filled_buy_count is not None
+        else _filled_count(filled_source_orders, "BUY")
+    )
     filled_sell_count = _filled_count(filled_source_orders, "SELL")
+    pending_buy_count = (
+        execution_result_pending_buy_count
+        if execution_result_pending_buy_count is not None
+        else _pending_count(filled_source_orders, "BUY")
+    )
     submitted_buy_notional = (
         _to_float(post_sell_rebudget.get("final_submitted_buy_notional"))
         or _notional(submitted_orders, "BUY")
@@ -345,17 +458,24 @@ def build_execution_target_attainment(
         "BUY",
     ) + float(cash_gate_skipped_notional or 0.0)
 
-    actual_posttrade_cash = (
-        _to_float(posttrade_account.get("cash"))
-        if posttrade_account
-        else _to_float(recon.get("broker_cash"))
-        if recon
-        else _to_float(post_sell_rebudget.get("ending_cash"))
+    actual_cash_source = _cash_source(
+        posttrade_account=posttrade_account,
+        posttrade_account_path=posttrade_account_path,
+        recon=recon,
+        recon_path=recon_path,
+        post_sell_rebudget=post_sell_rebudget,
+        rebudget_path=rebudget_path,
     )
-    actual_posttrade_equity = (
-        _to_float(posttrade_account.get("equity") or posttrade_account.get("portfolio_value"))
-        if posttrade_account
-        else _to_float(recon.get("broker_equity"))
+    actual_posttrade_cash = _to_float(actual_cash_source.get("cash"))
+    actual_posttrade_equity = _to_float(actual_cash_source.get("equity"))
+    posttrade_snapshot_lag_seconds = _seconds_between(
+        str(execution_results.get("buy_submit_completed_at") or execution_payload.get("buy_submit_completed_at") or "") or None,
+        actual_cash_source.get("timestamp"),
+    )
+    posttrade_cash_equals_post_sell_cash = (
+        actual_posttrade_cash is not None
+        and _to_float(post_sell_rebudget.get("post_sell_cash")) is not None
+        and abs(actual_posttrade_cash - float(post_sell_rebudget.get("post_sell_cash") or 0.0)) <= 0.01
     )
     target_cash_weight = (
         _to_float(post_sell_rebudget.get("target_cash_weight"))
@@ -391,6 +511,32 @@ def build_execution_target_attainment(
         )
     )
     notional_drift_warning = abs(dollar_drift) > resolved_notional_tolerance if dollar_drift is not None else False
+    posttrade_cash_snapshot_stale = bool(
+        submitted_buy_count > 0
+        and pending_buy_count > 0
+        and filled_buy_count < submitted_buy_count
+        and posttrade_cash_equals_post_sell_cash
+        and expected_post_buy_cash is not None
+        and dollar_drift is not None
+        and abs(dollar_drift) > resolved_notional_tolerance
+    )
+    explicit_posttrade_snapshot_stage = str(
+        execution_results.get("posttrade_snapshot_stage")
+        or execution_payload.get("posttrade_snapshot_stage")
+        or ""
+    ).strip()
+    if explicit_posttrade_snapshot_stage:
+        posttrade_cash_snapshot_stage = explicit_posttrade_snapshot_stage
+    elif actual_cash_source.get("source") == "post_sell_rebudget_ending_cash":
+        posttrade_cash_snapshot_stage = "post_sell"
+    elif posttrade_cash_snapshot_stale:
+        posttrade_cash_snapshot_stage = "pre_buy"
+    elif submitted_buy_count > 0 and filled_buy_count >= submitted_buy_count:
+        posttrade_cash_snapshot_stage = "post_buy"
+    elif _reconciliation_passed(reconciliation_status):
+        posttrade_cash_snapshot_stage = "post_reconciliation"
+    else:
+        posttrade_cash_snapshot_stage = "unknown"
 
     missing_required = []
     if not execution_payload_path.exists() and not execution_results_path.exists():
@@ -415,6 +561,8 @@ def build_execution_target_attainment(
         rejected_count=rejected_count,
     ):
         status = FAIL_EXECUTION_INCOMPLETE
+    elif posttrade_cash_snapshot_stale:
+        status = WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY
     elif _reconciliation_passed(reconciliation_status) and cash_target_drift is not None and cash_target_drift > float(cash_weight_drift_tolerance):
         status = WARN_RECONCILED_BUT_UNDERDEPLOYED
     elif cash_drift_warning or notional_drift_warning:
@@ -429,6 +577,8 @@ def build_execution_target_attainment(
         warnings.append("cash_target_drift")
     if not missing_required and notional_drift_warning:
         warnings.append("post_buy_cash_drift")
+    if posttrade_cash_snapshot_stale:
+        warnings.append("posttrade cash snapshot appears stale or pre-buy")
     if status == WARN_RECONCILED_BUT_UNDERDEPLOYED:
         warnings.append("reconciliation passed despite target cash miss")
 
@@ -445,6 +595,7 @@ def build_execution_target_attainment(
         "rejected_count": rejected_count,
         "submitted_buy_count": submitted_buy_count,
         "filled_buy_count": filled_buy_count,
+        "pending_buy_count": pending_buy_count,
         "submitted_sell_count": submitted_sell_count,
         "filled_sell_count": filled_sell_count,
         "target_cash_weight": _round(target_cash_weight),
@@ -455,9 +606,16 @@ def build_execution_target_attainment(
         "post_sell_cash": _round(post_sell_rebudget.get("post_sell_cash"), 2),
         "expected_post_buy_cash": _round(expected_post_buy_cash, 2),
         "actual_posttrade_cash": _round(actual_posttrade_cash, 2),
+        "actual_posttrade_cash_source": actual_cash_source.get("source"),
+        "actual_posttrade_cash_source_path": actual_cash_source.get("path"),
+        "actual_posttrade_cash_timestamp": actual_cash_source.get("timestamp"),
+        "posttrade_cash_snapshot_stale": bool(posttrade_cash_snapshot_stale),
+        "posttrade_cash_snapshot_stage": posttrade_cash_snapshot_stage,
+        "posttrade_snapshot_lag_seconds": _round(posttrade_snapshot_lag_seconds, 3),
         "post_buy_cash_drift": _round(dollar_drift, 2),
         "submitted_buy_notional": _round(submitted_buy_notional, 2),
         "filled_buy_notional": _round(filled_buy_notional, 2),
+        "buy_fill_status_source": buy_fill_status_source,
         "skipped_deferred_buy_notional": _round(skipped_deferred_buy_notional, 2),
         "missing_intended_buys": integrity.get("missing_buy_orders") or _missing_intended_buys(intended_orders, submitted_orders),
         "reconciled_but_target_miss": bool(status == WARN_RECONCILED_BUT_UNDERDEPLOYED),

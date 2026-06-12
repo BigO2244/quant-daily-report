@@ -544,6 +544,10 @@ def _execution_target_attainment_fixture(
     actual_cash: float = 2080.68,
     expected_cash: float = 551.17,
     include_rebudget: bool = True,
+    buy_latest_status: str = "FILLED",
+    buy_filled: bool = True,
+    accepted_count: int = 5,
+    rejected_count: int = 0,
 ) -> Path:
     outputs = tmp_path / "outputs"
     trade_date = "2026-06-12"
@@ -553,8 +557,22 @@ def _execution_target_attainment_fixture(
         {"ticker": "OLD1", "side": "SELL", "quantity": 1, "price": 100.0, "latest_status": "FILLED", "filled_qty": 1},
         {"ticker": "OLD2", "side": "SELL", "quantity": 2, "price": 100.0, "latest_status": "FILLED", "filled_qty": 2},
         {"ticker": "OLD3", "side": "SELL", "quantity": 3, "price": 100.0, "latest_status": "FILLED", "filled_qty": 3},
-        {"ticker": "NEW1", "side": "BUY", "quantity": 10, "price": 100.0, "latest_status": "FILLED", "filled_qty": 10},
-        {"ticker": "NEW2", "side": "BUY", "quantity": 5, "price": 150.0, "latest_status": "FILLED", "filled_qty": 5},
+        {
+            "ticker": "NEW1",
+            "side": "BUY",
+            "quantity": 10,
+            "price": 100.0,
+            "latest_status": buy_latest_status,
+            "filled_qty": 10 if buy_filled else 0,
+        },
+        {
+            "ticker": "NEW2",
+            "side": "BUY",
+            "quantity": 5,
+            "price": 150.0,
+            "latest_status": buy_latest_status,
+            "filled_qty": 5 if buy_filled else 0,
+        },
     ]
     _write_json(
         run / "execution_payload.json",
@@ -564,13 +582,14 @@ def _execution_target_attainment_fixture(
             "execution_status": "RECONCILED_SUCCESS",
             "operator_execution_status": "reconciled_success",
             "submitted_count": 5,
-            "accepted_count": 5,
-            "rejected_count": 0,
+            "accepted_count": accepted_count,
+            "rejected_count": rejected_count,
             "submitted_buy_count": 2,
             "submitted_sell_count": 3,
             "cash_target_weight": 0.05,
             "achieved_cash_weight": achieved_cash_weight,
             "order_lifecycle": order_lifecycle,
+            "buy_submit_completed_at": "2026-06-12T13:36:10.873020+00:00",
         },
     )
     _write_json(
@@ -580,9 +599,11 @@ def _execution_target_attainment_fixture(
             "trade_date": trade_date,
             "status": "RECONCILED_SUCCESS",
             "submitted_count": 5,
-            "accepted_count": 5,
-            "rejected_count": 0,
+            "accepted_count": accepted_count,
+            "rejected_count": rejected_count,
             "broker_responses": order_lifecycle,
+            "order_lifecycle": order_lifecycle,
+            "buy_submit_completed_at": "2026-06-12T13:36:10.873020+00:00",
         },
     )
     _write_json(
@@ -622,6 +643,7 @@ def _execution_target_attainment_fixture(
         {
             "cash": actual_cash,
             "equity": actual_cash / achieved_cash_weight,
+            "captured_at": "2026-06-12T13:36:11.531954+00:00",
         },
     )
     _write_json(
@@ -642,10 +664,10 @@ def _execution_target_attainment_fixture(
                 "status": "REBUILT",
                 "target_cash_weight": 0.05,
                 "pre_sell_cash": 480.0,
-                "post_sell_cash": 3000.0,
+                "post_sell_cash": actual_cash,
                 "estimated_ending_cash": expected_cash,
                 "ending_cash": actual_cash,
-                "final_submitted_buy_notional": 2448.83,
+                "final_submitted_buy_notional": round(actual_cash - expected_cash, 6),
                 "final_buy_orders_submitted": [
                     {"ticker": "NEW1", "side": "BUY", "quantity": 10, "price": 100.0},
                     {"ticker": "NEW2", "side": "BUY", "quantity": 5, "price": 150.0},
@@ -681,6 +703,48 @@ def test_execution_target_attainment_flags_reconciled_underdeployment(tmp_path: 
     assert payload["expected_post_buy_cash"] == 551.17
     assert payload["actual_posttrade_cash"] == 2080.68
     assert payload["reconciled_but_target_miss"] is True
+
+
+def test_execution_target_attainment_flags_stale_pre_buy_cash_snapshot(tmp_path: Path) -> None:
+    outputs = _execution_target_attainment_fixture(
+        tmp_path,
+        buy_latest_status="OrderStatus.PENDING_NEW",
+        buy_filled=False,
+    )
+
+    payload = call_tool(
+        "execution_target_attainment",
+        {"outputs_root": str(outputs), "trade_date": "2026-06-12"},
+    )
+
+    assert payload["status"] == "WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY"
+    assert payload["actual_posttrade_cash_source"] == "posttrade_account_snapshot"
+    assert payload["actual_posttrade_cash_timestamp"] == "2026-06-12T13:36:11.531954+00:00"
+    assert payload["posttrade_cash_snapshot_stale"] is True
+    assert payload["posttrade_cash_snapshot_stage"] == "pre_buy"
+    assert payload["post_sell_cash"] == payload["actual_posttrade_cash"]
+    assert payload["pending_buy_count"] == 2
+    assert payload["filled_buy_count"] == 0
+    assert payload["buy_fill_status_source"] == "execution_results_order_lifecycle"
+
+
+def test_execution_target_attainment_fails_incomplete_rejected_buys(tmp_path: Path) -> None:
+    outputs = _execution_target_attainment_fixture(
+        tmp_path,
+        buy_latest_status="OrderStatus.REJECTED",
+        buy_filled=False,
+        accepted_count=4,
+        rejected_count=1,
+    )
+
+    payload = call_tool(
+        "execution_target_attainment",
+        {"outputs_root": str(outputs), "trade_date": "2026-06-12"},
+    )
+
+    assert payload["status"] == "FAIL_EXECUTION_INCOMPLETE"
+    assert payload["rejected_count"] == 1
+    assert payload["posttrade_cash_snapshot_stale"] is False
 
 
 def test_execution_target_attainment_ok_when_cash_within_tolerance(tmp_path: Path) -> None:

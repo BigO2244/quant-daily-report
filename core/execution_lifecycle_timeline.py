@@ -371,21 +371,32 @@ def build_execution_lifecycle_timeline(
         _event(
             sequence=9,
             checkpoint="buy_phase_completion",
-            status="OK"
-            if submitted_buy_count > 0 and not execution_payload.get("buy_phase_block_reason")
-            else ("WARN" if execution_payload.get("buy_phase_block_reason") else "SKIPPED"),
+            status=str(execution_payload.get("buy_phase_status") or "")
+            or (
+                "OK"
+                if submitted_buy_count > 0 and not execution_payload.get("buy_phase_block_reason")
+                else ("WARN" if execution_payload.get("buy_phase_block_reason") else "SKIPPED")
+            ),
             timestamp=None,
             summary=(
                 f"Buy phase submitted {submitted_buy_count}; "
                 f"decision_reason={_text(execution_payload.get('buy_phase_decision_reason')) or 'none'}; "
-                f"block_reason={_text(execution_payload.get('buy_phase_block_reason')) or 'none'}"
+                f"block_reason={_text(execution_payload.get('buy_phase_block_reason')) or 'none'}; "
+                f"fill_status={_text(execution_payload.get('buy_phase_status')) or 'unknown'}"
             ),
             source_artifacts=[_safe_relative(execution_payload_path)],
             details={
                 "buy_phase_planned": execution_payload.get("buy_phase_planned"),
                 "buy_phase_submitted": execution_payload.get("buy_phase_submitted"),
+                "buy_phase_status": execution_payload.get("buy_phase_status"),
+                "buy_phase_completion_reason": execution_payload.get("buy_phase_completion_reason"),
+                "buy_fill_poll_count": execution_payload.get("buy_fill_poll_count"),
+                "buy_fill_observation_window_seconds": execution_payload.get("buy_fill_observation_window_seconds"),
                 "submitted_buy_count": submitted_buy_count,
+                "filled_buy_count": execution_payload.get("filled_buy_count"),
                 "pending_buy_count": execution_payload.get("pending_buy_count"),
+                "failed_buy_count": execution_payload.get("failed_buy_count"),
+                "partial_buy_count": execution_payload.get("partial_buy_count"),
                 "buy_phase_block_reason": execution_payload.get("buy_phase_block_reason"),
                 "buy_phase_decision_reason": execution_payload.get("buy_phase_decision_reason"),
                 "skipped_buy_count": execution_payload.get("skipped_buy_count"),
