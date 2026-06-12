@@ -183,6 +183,13 @@ specification, file-area assignment, and test planning only. It does not change
 production strategy behavior, execution, broker submission, allocation, model
 logic, cron, or the live strategy registry.
 
+Canonical Phase A package:
+`docs/governance/fr_active/fr_069_phase_a_architecture_package.md`.
+
+That package contains the Canonical Sleeve Protocol, Registry-Onboarding
+Architecture, Research Lab Operating Model, Future Sleeve Inventory, and
+recommended Phase B implementation roadmap.
+
 ### Agent Roles
 
 1. **Governance auditor** — reconcile `fr_active_backlog.md`, `fr_registry.md`,
