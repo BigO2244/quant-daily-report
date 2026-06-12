@@ -150,6 +150,11 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   not prove the actual portfolio attained the risk-adjusted target. The
   2026-06-09 run reconciled cleanly while actual cash remained 20.8417% versus
   the 5.0% risk target.
+- The June 12 execution investigation classified the cash discrepancy as an
+  `ARTIFACT_TIMING_FAILURE`, not a failed sell-first rebudget. Post-sell
+  rebudgeting remained correct; the open issue was post-buy snapshot timing.
+  Future validation must check the post-buy terminal/timeout stage and the
+  target-attainment diagnostic before treating cash attainment as proven.
 - Commits `81a0468` and `5663313` deployed target-attainment reconciliation as
   observability only. The artifact
   `outputs/target_attainment/<date>/target_attainment_<date>.json` compares
@@ -178,6 +183,8 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   actual failure states. Before the post-close hydration window, stale same-day
   shadow artifacts can be expected; after the window, missing hydration evidence
   becomes an operator action item.
+- Dashboard auth recovery should use direct `htpasswd` updates and a local
+  authenticated curl check, not ad hoc credential staging or secret printing.
 
 ## Governance Lessons
 
@@ -189,6 +196,22 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   silently return as unscoped implementation work.
 - Low-blast-radius governance work should remain additive first; code paths can
   adopt the model after operator trust semantics are clear.
+
+## Next Live Run Checklist
+
+- Confirm the execution email status for the live run.
+- Inspect the latest `run_id` and execution artifacts.
+- Check `execution_results.json` for `submitted_count`, `accepted_count`,
+  `rejected_count`, `buy_phase_status`, `filled_buy_count`, and
+  `pending_buy_count`.
+- Check `execution_timeline.json` or the matching markdown summary for
+  `posttrade_snapshot_stage` and buy-phase completion.
+- Check the execution target-attainment MCP output for `target_cash_weight`,
+  `achieved_cash_weight`, `cash_target_drift`, and diagnostic status.
+- If buys fill, require `posttrade_snapshot_stage=post_buy` and
+  `pending_buy_count=0`.
+- If buys time out or reject, require an explicit classified warning rather
+  than a stale pre-buy snapshot masquerading as final state.
 
 ## Anti-Patterns To Avoid
 

@@ -31,6 +31,9 @@ artifacts and an explicit research-to-production promotion ladder.
 - Execution integrity and target attainment are the top operational concerns.
 - Research architecture is moving toward a modular sleeve model aligned with
   the Caerus Investment Doctrine.
+- The live dashboard is nginx-protected with basic auth; recovery uses
+  `scripts/reset_dashboard_auth.sh` and does not change trading, execution,
+  allocation, or cron behavior.
 
 ## Infrastructure Assumptions
 
@@ -57,8 +60,9 @@ artifacts and an explicit research-to-production promotion ladder.
 1. FR-070 execution integrity / target attainment.
 2. FR-069 research lab modular sleeve architecture.
 3. Continued Orion/Lyra evaluation before any retirement decision.
-4. FR-063 is retired or merged as an independent priority because it overlaps
-   Orion/Lyra differentiation work inside FR-069.
+4. FR-063 remains deprioritized behind FR-069; no retirement decision is
+   approved, and any Orion/Lyra disposition belongs inside FR-069.
+5. Dashboard auth cleanup remains operational hygiene, not a research priority.
 
 ## Operational vs Strategic Changes
 

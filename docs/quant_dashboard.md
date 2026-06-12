@@ -208,8 +208,9 @@ Both routes use nginx basic auth with the credential file
 
 If the login is lost or needs rotation, run
 `scripts/reset_dashboard_auth.sh` on the VM checkout. The script prompts for a
-new username and password, updates the htpasswd file in place, and reloads
-nginx. It does not print or commit secrets.
+new username and password, writes the htpasswd file directly, validates the
+login with a local authenticated curl check, and reloads nginx. It does not
+print or commit secrets.
 
 How `?data=` is resolved:
 

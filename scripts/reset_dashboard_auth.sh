@@ -14,6 +14,11 @@ if ! command -v htpasswd >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v curl >/dev/null 2>&1; then
+    echo "ERROR: curl is required but not installed." >&2
+    exit 1
+fi
+
 read -r -p "Dashboard username: " DASHBOARD_USER
 if [[ -z "${DASHBOARD_USER}" ]]; then
     echo "ERROR: username is required." >&2
@@ -35,16 +40,27 @@ if [[ "${DASHBOARD_PASSWORD}" != "${DASHBOARD_PASSWORD_CONFIRM}" ]]; then
     exit 4
 fi
 
-tmp_password_file="$(mktemp)"
-trap 'rm -f "${tmp_password_file}"' EXIT
+if [[ ! -f "${AUTH_FILE}" ]]; then
+    printf '%s\n' "${DASHBOARD_PASSWORD}" | sudo htpasswd -c -iB "${AUTH_FILE}" "${DASHBOARD_USER}" >/dev/null
+else
+    printf '%s\n' "${DASHBOARD_PASSWORD}" | sudo htpasswd -iB "${AUTH_FILE}" "${DASHBOARD_USER}" >/dev/null
+fi
 
-printf '%s\n%s\n' "${DASHBOARD_PASSWORD}" "${DASHBOARD_PASSWORD}" > "${tmp_password_file}"
-
-sudo htpasswd -iB "${AUTH_FILE}" "${DASHBOARD_USER}" < "${tmp_password_file}" >/dev/null
 sudo chown root:www-data "${AUTH_FILE}"
 sudo chmod 0640 "${AUTH_FILE}"
 
 sudo nginx -t
 sudo systemctl reload nginx
+
+tmp_netrc="$(mktemp)"
+trap 'rm -f "${tmp_netrc}"' EXIT
+chmod 600 "${tmp_netrc}"
+printf 'machine 127.0.0.1 login %s password %s\n' "${DASHBOARD_USER}" "${DASHBOARD_PASSWORD}" > "${tmp_netrc}"
+
+auth_probe="$(curl -I -s -o /dev/null -w '%{http_code}' --netrc-file "${tmp_netrc}" http://127.0.0.1/dashboard/)"
+if [[ "${auth_probe}" != "200" ]]; then
+    echo "ERROR: dashboard auth validation failed (HTTP ${auth_probe})." >&2
+    exit 5
+fi
 
 echo "Dashboard auth reset complete."

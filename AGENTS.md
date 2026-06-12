@@ -454,6 +454,8 @@ with clearer axis labels and scale markers.
 - Deploy script: `scripts/deploy_dashboard_vm.sh`
 - Dashboard auth reset: `scripts/reset_dashboard_auth.sh`
 - Protected routes use nginx basic auth via `/etc/nginx/.htpasswd_dashboard`
+- The reset script uses direct `htpasswd` writes and a local authenticated curl
+  check; it must not print or commit secrets.
 
 **Dashboard operational notes**
 

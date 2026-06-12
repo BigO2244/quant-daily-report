@@ -2,17 +2,29 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-11 (governance file locations updated to fr_active/ and
+Last Updated: 2026-06-12 (governance file locations updated to fr_active/ and
 fr_archive/; FR-066 VM backfill/cron deployed; FR-051 Cygnus v0 Stage 2 FAIL
 recorded and v0 shelved; FR-067 Sharadar gate CLOSED_PASS; FR-068 PIT
 remediation Phases 1-3 complete — Polaris priced rebaseline MATERIAL; FR-069
-Research Lab / modular sleeve architecture design recorded)
+Research Lab / modular sleeve architecture design recorded; FR-070 June 12
+investigation classed the cash discrepancy as artifact timing failure)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
 The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md`
 is the canonical strategic north star for strategy, sleeve, promotion, and
 portfolio-construction work unless explicitly amended.
+
+Priority note 2026-06-12: FR-070 cash-gating / post-sell buy-budget review is
+the first priority before new research buildout. The June 12 live-run
+investigation classified the discrepancy as `ARTIFACT_TIMING_FAILURE` and
+left post-buy snapshot validation open until the next live run. FR-069 modular
+sleeve / research-lab architecture follows FR-070 and must align with the
+doctrine. The Orion/Lyra retain-or-retire decision is deferred to the
+data-driven sleeve architecture review; no immediate retirement or Lyra-name
+reuse is approved. Phoenix remains the next major sleeve-design focus after the
+architecture is settled. Dashboard auth cleanup remains operational hygiene,
+not a research priority.
 
 ---
 

@@ -35,9 +35,9 @@ architecture should align with it unless explicitly amended.
 | FR-021 partial execution state normalization | Phase 4 | `BACKLOG` | HIGH | FR-015, FR-017 | not_started | Execution-adjacent semantic work; defer until lower-risk telemetry is established. | Leave current partial-failure interpretation unchanged. |
 | FR-028 shadow execution timing semantics correction candidate | Accounting Correctness / Promotion Analytics | `DEPLOYED_OBSERVING` | HIGH | FR-024, FR-025, FR-026, FR-027, FR-030 | observing | Phase C adds research-only promotion readiness sidecars: `longitudinal_metrics.json`, `stability_surface.json`, `promotion_readiness.json`, and `promotion_readiness.md`; no historical migration, execution, broker, cron, strategy selection, or capital-allocation change. | Revert FR-028 Phase C commit; ignore new dated promotion-readiness sidecars and continue reading existing `shadow_evaluation.json` / `comparison.json`. |
 | FR-029 promotion governance hardening for provenance, exposure, and timing confidence | Promotion Governance | `IN_PROGRESS` | MEDIUM | FR-028, FR-037, FR-038 | tracked_via_children | Partially implemented through FR-037 (Tier 3 promotion governance surfaces) and FR-038 (governance blocker audit + diagnostic surfaces). Both are `DEPLOYED_OBSERVING`. FR-029 itself transitions to `DEPLOYED` only after both children satisfy their observation criteria. Historical intent (consume provenance, exposure, and timing confidence in promotion gates) is preserved and now realized via deterministic six-gate evaluation, regime attribution, research-only allocation evaluation, blocker classification, and deterministic maturity scoring. | Revert promotion-readiness checks to existing scorecard criteria; see FR-037 and FR-038 rollback references for code-level reversal. |
-| FR-031 execution integrity contract | Execution Integrity | `DEPLOYED_OBSERVING` | HIGH | HOTFIX-2026-05-27, FR-021, broker/order evidence | observing | Additive validator deployed; writes `audit/execution_integrity.json` and compact operator-summary integrity fields. June 9 execution-integrity patches are deployed: fractional quantities now survive executable-order/shadow-order/broker-payload construction (`e249f61`), and sell-leg runs rebuild buys after confirmed sell proceeds with `post_sell_rebudget_<date>.json` evidence (`aaf5961`). Cron timing, model logic, risk caps, and broker safeguards remain unchanged. | Revert FR-031 implementation commits; ignore existing audit artifacts. For June 9 patches, revert `e249f61` or `aaf5961` only if the specific execution invariant regresses. |
-| FR-032 execution lifecycle observability hardening | Execution Observability | `READY` | LOW | FR-031, 2026-05-28 recovery evidence | ready_for_low_risk_implementation | Backfill or generate lifecycle timeline artifacts from existing run artifacts when missing; improve latest-run/operator timeline usability without invoking execution. | Revert helper commit; delete only helper-generated timeline artifacts if they were created for validation. |
-| FR-033 dashboard/operator asset alignment | Operator Surfaces | `BACKLOG` | LOW | FR-031, dashboard architecture review | not_started | Resolve stale dashboard execution-integrity asset tests or align them to the current dashboard architecture without redesigning dashboard UI. | Revert test/asset alignment commit; preserve dashboard publishing behavior. |
+| FR-031 execution integrity contract | Execution Integrity | `DEPLOYED_OBSERVING` | HIGH | HOTFIX-2026-05-27, FR-021, broker/order evidence | observing | Additive validator deployed; writes `audit/execution_integrity.json` and compact operator-summary integrity fields. June 9 execution-integrity patches are deployed: fractional quantities now survive executable-order/shadow-order/broker-payload construction (`e249f61`), and sell-leg runs rebuild buys after confirmed sell proceeds with `post_sell_rebudget_<date>.json` evidence (`aaf5961`). June 12 target-attainment MCP diagnostic (`4b426a0`) is deployed and classifies target-attainment status/warnings without changing execution. Cron timing, model logic, risk caps, and broker safeguards remain unchanged. | Revert FR-031 implementation commits; ignore existing audit artifacts. For June 9 patches, revert `e249f61` or `aaf5961` only if the specific execution invariant regresses. |
+| FR-032 execution lifecycle observability hardening | Execution Observability | `DEPLOYED_OBSERVING` | LOW | FR-031, 2026-05-28 recovery evidence, 2026-06-12 artifact timing investigation | observing | Backfill or generate lifecycle timeline artifacts from existing run artifacts when missing; improve latest-run/operator timeline usability without invoking execution. June 12 post-buy artifact timing patch delays post-buy snapshot capture until buy fills terminal/timeout, which resolved the cash-discrepancy investigation as `ARTIFACT_TIMING_FAILURE` rather than a failed sell-first rebudget. Next live-run validation must confirm the new `post_buy` capture stage. | Revert helper commit; delete only helper-generated timeline artifacts if they were created for validation. |
+| FR-033 dashboard/operator asset alignment | Operator Surfaces | `BACKLOG` | LOW | FR-031, dashboard architecture review, dashboard auth recovery | not_started | Resolve stale dashboard execution-integrity asset tests or align them to the current dashboard architecture without redesigning dashboard UI. Dashboard auth recovery now has a documented `scripts/reset_dashboard_auth.sh` path backed by nginx basic auth and local curl validation; no dashboard runtime behavior changed. | Revert test/asset alignment commit; preserve dashboard publishing behavior. |
 | FR-034 post-submit cash drift reconciliation review | Execution Accounting Review | `READY` | LOW | FR-031, latest paper execution artifacts | ready_for_audit | Determine whether `cash_target_drift` clears after fills/reconciliation, represents expected pending-fill drift, or indicates accounting/reconciliation mismatch. | Docs-only/audit rollback; no runtime behavior should change. |
 | FR-035 execution contract documentation hardening | Execution Documentation | `PROMOTION_READY` | LOW | 2026-05-28 recovery, FR-031 | local_validation_pending | Canonicalize execution source, price basis, freshness scope, fail-closed boundaries, and operator provenance semantics. | Revert docs commit; runtime behavior unchanged. |
 | FR-036 MCP Phase 7 — research-question capability router | Research MCP | `DEPLOYED_OBSERVING` | LOW | FR-015 / FR-017 / FR-018 / FR-024–FR-030 telemetry, registry semantics | observing | Read-only operator MCP shipped 2026-05-29: 20 tools, 9-capability registry, deterministic regex classifier + artifact pre-check + tool dispatch (OK / NEEDS_DATA / NEEDS_CAPABILITY / UNSUPPORTED_INTENT), operator gateway at `scripts/research_mcp_ask.py`. No transport beyond local stdio, no LLM, no execution-path coupling. | Revert MCP Phase 7 commits; delete `research_registry/research/`, `scripts/research_mcp_ask.{py,sh}`, and `outputs/research_mcp/`. Server reverts to 16-tool Phase 6 surface. |
@@ -58,14 +58,14 @@ architecture should align with it unless explicitly amended.
 | FR-050 Phoenix Phase B Historical Behavior Review | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Existing Phoenix research artifacts, VIX/regime data, price panels, shadow snapshots | implementation_started | Evaluate Phoenix historical activation behavior, candidate families, regime triggers, overlap versus Polaris/Orion/Lyra, and drawdown/recovery tradeoffs without tuning thresholds. | Revert the Phase B review module/CLI/tests; ignore generated `phoenix_phase_b_review.*` model-quality artifacts. No strategy, execution, broker, cron, or promotion behavior changes are in scope. |
 | FR-053 Argo Phase B Regime Selection Validation | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Existing Argo selection artifacts, model tournament, promotion readiness, VIX/regime data | implementation_started | Validate Argo as a research-only regime overlay/model-selection layer, including stability, transition diagnostics, input freshness, no-lookahead checks, and the distinction between leaderboard winner and decision-grade recommendation. | Revert the Phase B validation module/CLI/tests; ignore generated `argo_phase_b_validation.*` model-quality artifacts. No capital routing or production selection behavior changes are in scope. |
 | FR-052 Cassiopeia Event-Driven Spec | Research / Event-Driven Strategy Spec | `BACKLOG` | LOW | `docs/governance/fr_archive/fr_052_cassiopeia_research_spec.md` | not_started | Canonical event-driven strategy spec remains spec-only and active backlog maintenance is tracked here until an explicit implementation decision is made. | Revert documentation links only. |
-| FR-063 Strategy Differentiation Deep Dive | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Shadow snapshots, attribution, model tournament, promotion readiness, strategy registry | implementation_started | Strategically elevated: the doctrine makes Lyra vs Orion differentiation central to capital allocation. Decide whether Polaris/Orion/Lyra are meaningfully distinct or redundant, evaluate Phoenix distinctiveness when evidence exists, and surface pairwise redundancy watchlist findings without recommending retirement absent decision-grade evidence. | Revert the deep-dive module/CLI/tests; ignore generated `strategy_differentiation_deep_dive.*` artifacts. No strategy retirement, promotion, or execution behavior changes are in scope. |
+| FR-063 Strategy Differentiation Deep Dive | Investment Confidence / Research Evidence | `BACKLOG_REVIEW` | LOW | Shadow snapshots, attribution, model tournament, promotion readiness, strategy registry, FR-069 sleeve architecture | deprioritized_pending_architecture | Deprioritized behind FR-070 and FR-069. Preliminary evidence suggests Orion and Lyra are highly correlated and likely redundant, with a working hypothesis that only one is needed long-term; Lyra may be the leading retention candidate if evidence confirms outperformance. No final retain/retire decision is approved; disposition belongs inside FR-069's sleeve architecture and data-driven promotion/retirement framework. | Revert the deep-dive module/CLI/tests; ignore generated `strategy_differentiation_deep_dive.*` artifacts. No strategy retirement, promotion, Lyra-name reuse, or execution behavior changes are in scope. |
 | FR-064 Multi-Asset Research Framework | Investment Confidence / Research Design | `DRAFT_RESEARCH` | LOW | Strategy registry, data inventory, existing price artifacts | design_audit_started | Create a non-executional audit framework for evaluating Treasury duration, cash/T-bills, gold, commodities, managed-futures proxies, defensive equity ETF proxies, and deferred options-overlay design questions. | Revert the framework doc/module/CLI/tests; ignore generated `multi_asset_research_framework.*` artifacts. No trading, allocation, or production order generation is in scope. |
 | FR-065 Dashboard Decision-Grade Consolidation | Investment Confidence / Operator Surface | `ACTIVE_RESEARCH` | LOW | Model-quality artifacts, dashboard data builder, terminal dashboard assets | implementation_started | Add a compact dashboard data-model and terminal panel section summarizing decision-grade readiness, research confidence, latest model-quality evidence, blockers, and source paths. | Revert dashboard data/UI/test changes; dashboard falls back to existing broker-authoritative panels. No broker truth, execution, planned-trade, or warning behavior changes are in scope. |
 | FR-066 Canonical NAV Track Record Integrity | Operational Telemetry / Performance Provenance | `DEPLOYED_OBSERVING` | LOW (telemetry-only) | FR-059 reason codes, Alpaca portfolio-history endpoint, existing `build_portfolio_history.py` / benchmark CSV / broker snapshots | vm_backfill_and_cron_installed | Backfill dry-run/write completed on VM using VM `.env` without printing credentials; canonical rows are continuous from 2026-03-03 through the current builder date, SPY/beta columns are populated, and the 7:15 PM ET builder/escalation cron is installed to `logs/portfolio_history.cron.log`. Caveat: Alpaca portfolio-history Apr 8 canonical NAV is `$9,751.97`, not the older `$9,715.45` baseline; broker snapshot reconciliation remains non-clean because those snapshots are point-in-time account captures, while `nav.csv` overlap is clean. | Revert the four module changes + crontab line; delete `backfill_manifest.json`, `checksum_manifest.json`, and added NAV columns; existing nav rows are never deleted. No execution, broker submission, allocation, strategy, or promotion behavior is in scope. |
 | FR-051 Cygnus Wave 1 (v0 event-reaction) | Research / Earnings Drift | `SHELVED` | LOW (research-only) | FR-051 spec + 2026-06-10 addendum, EDGAR submissions API, `cik_mapping_results.csv`, `paper/trading_calendar.py` | v0_stage2_failed_holdout_preserved | Stage 1 delivered the PIT EDGAR event tape. Stage 2 v0 validation failed 4/6: Rank IC 10D IC 0.0318 with t-stat 1.59 (FAIL), IC 20D/60D decay PASS, net IR vs SPY at 25 bps 0.44 PASS, excess correlation vs Polaris proxy 0.043 PASS, event coverage 1.05 PASS, cost sensitivity at 50 bps IR -0.32 FAIL. Tune window also failed. v0 is shelved, not re-tuned; 2025-forward holdout remains untouched; v1 requires EPS-surprise / consensus data. | Delete `research/cygnus/`, `scripts/research/run_cygnus_research.py`, `Tests/test_cygnus_events.py`, and dated `outputs/research/cygnus/` artifacts. No execution, broker, registry, allocation, or paper/live behavior is in scope. |
 | FR-068 PIT Universe + Polaris/Orion/Lyra Rebaseline | Research / Survivorship Remediation | `PHASES_1_3_COMPLETE` | LOW (research-only) | Sharadar (FR-067), PIT universe + caerus_large_cap family + SEP cache | polaris_rebaseline_MATERIAL_orion_lyra_pending | Phase 1 PIT universe (20,618 secs, 14,790 delisted) + `Universe(as_of_date)`; Phase 2 impact (SEVERE; 71.7% delisted); Phase 2.5 caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Phase 3 Polaris priced rebaseline on the committed momentum harness = **MATERIAL** (Sharpe 1.054→0.851, MaxDD −43%→−54%; CAGR 28.83%→30.68%). Legacy = non-decision-grade; promotion evidence must carry `universe_method=pit_universe`. Orion/Lyra rebaselines pending; DAILY-marketcap PIT family + index membership families are later phases. | Revert rebaseline research modules + artifacts; PIT data is gitignored/regenerable. No execution, model, cron, registry, or holdout change in scope. |
-| FR-069 Research Lab / Modular Sleeve Architecture | Architecture / Design | `DESIGN` | NONE (design-only) | FR-068 PIT foundation, existing sleeve specs (FR-050..053, 067), alpha_lab harness | design_only_no_refactor | Align the modular sleeve design with the Caerus Investment Doctrine and the portfolio-of-sleeves target state. Design a pluggable sleeve architecture on the PIT foundation: a common Sleeve contract, shared data/signal/backtest/evaluation layers, membership families, and governance gates (PIT-required evidence, holdout protection). No production refactor; migration sequenced into future FRs. | Delete the design doc; nothing is wired. No code, execution, registry, or strategy behavior in scope. |
-| FR-070 Cash Gating and Post-Sell Buy Budget Reconciliation | Execution Integrity / Cash Deployment | `PROPOSED` | HIGH | Sell-first execution path, posttrade state capture, capital-budget rebudgeting, execution contract guardrails | proposed_weekend_maintenance_only | Recompute buy-side executable plans after confirmed sell proceeds and refreshed broker/account state so the execution layer does not replay stale precomputed buys. Weekend-maintenance only for implementation because it may touch trading behavior; preserve all existing safeguards, risk cash target, and fractional-share behavior. | No implementation yet; treat as proposed until an explicit weekend-maintenance change is approved and validated. |
+| FR-069 Research Lab / Modular Sleeve Architecture | Architecture / Design | `DESIGN` | NONE (design-only) | FR-068 PIT foundation, existing sleeve specs (FR-050..053, 067), alpha_lab harness, `docs/governance/caerus_investment_doctrine.md` | second_active_priority_design_only | Second active priority after FR-070. Align the modular sleeve design with the Caerus Investment Doctrine and the portfolio-of-sleeves target state, including 0%-100% sleeve allocation, sleeve onboarding, evaluation, promotion, allocation, and retirement rules. Orion/Lyra rationalization belongs inside this architecture rather than as an isolated immediate retirement decision. No production refactor; migration sequenced into future FRs. | Delete the design doc; nothing is wired. No code, execution, registry, or strategy behavior in scope. |
+| FR-070 Cash Gating and Post-Sell Buy Budget Reconciliation | Execution Integrity / Cash Deployment | `DEPLOYED_OBSERVING` | HIGH | Sell-first execution path, posttrade state capture, capital-budget rebudgeting, execution contract guardrails, target-attainment telemetry, FR-031 target-attainment diagnostic | observing | The June 12 live-run investigation classified the cash discrepancy as `ARTIFACT_TIMING_FAILURE`, not a failed sell-first rebudget. Post-sell rebudgeting is behaving correctly against confirmed sell proceeds; the remaining open gate is post-buy artifact timing and target-attainment validation on the next live run. Preserve all existing safeguards, risk cash target, and fractional-share behavior. Validation criteria for the next live run: `buy_phase_status=BUY_PHASE_COMPLETED` or a terminal timeout/fail state, `posttrade_snapshot_stage=post_buy`, `pending_buy_count=0` when buys fill, `achieved_cash_weight` within tolerance of `target_cash_weight`, and MCP target-attainment status `OK_TARGET_ATTAINED` or a properly classified warning. | Revert the post-buy timing patch and target-attainment diagnostic if the specific execution invariant regresses; preserve execution safeguards and sell-first rebudgeting. |
 | FR-071 Governance Doctrine Integration | Governance Documentation | `READY` | NONE | `docs/governance/caerus_investment_doctrine.md` | not_started | Documentation-only task to ensure doctrine is referenced from README, roadmap, registry, AGENTS.md, and future FR workflow. | Revert documentation links only. |
 | FR-072 Governance Hygiene Agent | Governance Automation / Operational Risk Reduction | `READY` | NONE | `docs/governance/caerus_investment_doctrine.md`, `docs/governance/fr_registry.md`, `docs/governance/fr_active_backlog.md`, `docs/governance/CURRENT_RESEARCH_ROADMAP.md`, `docs/governance/README.md`, `AGENTS.md` | not_started | Read-only daily governance audit to remove manual tracking drift; proposed findings only, no automatic writes, no auto-patch, no cron install. | Revert docs and script only; delete output artifacts if needed. |
 
@@ -105,13 +105,26 @@ procedures are proven.
 
 ## Current Priority Order
 
-1. Observe the next execution run after the FR-069 posttrade telemetry
-   sequencing fix.
-2. Weekend-only FR-070 cash-gating / post-sell buy-budget review.
-3. FR-063 strategy differentiation, especially Lyra vs Orion.
-4. FR-071 doctrine integration.
-5. FR-069 modular sleeve migration roadmap.
-6. FR-068 Orion/Lyra PIT rebaselines.
+1. FR-070 execution/capital deployment accuracy and target-attainment closure.
+2. FR-069 modular sleeve / research-lab architecture aligned to the Caerus
+   Investment Doctrine.
+3. Observe the next live/paper execution for post-buy artifact timing and target-attainment correctness.
+4. Orion/Lyra continued evaluation as part of sleeve architecture, not as a
+   standalone immediate retirement decision.
+5. Phoenix and future sleeve design after FR-069 architecture is clear.
+
+## Priority Decision Note — 2026-06-11
+
+- FR-070 is the top priority because execution target-attainment remains the
+  highest unresolved operational question.
+- FR-069 is the second priority because the Investment Doctrine requires a
+  modular sleeve architecture.
+- Orion and Lyra are likely redundant / highly correlated, but the final
+  retain/retire decision remains data-driven.
+- No immediate retirement of Orion or Lyra is approved.
+- No reuse of the Lyra name is approved yet.
+- This note supersedes informal discussion but does not override future
+  data-driven evidence.
 
 ## FR-055 Intended Portfolio NAV & Operational Drag Attribution
 
@@ -532,16 +545,27 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **FR number:** FR-063
 - **Title:** Strategy Differentiation Deep Dive
 - **Date started:** 2026-06-08
-- **Status:** `ACTIVE_RESEARCH`
+- **Status:** `BACKLOG_REVIEW`
 - **Problem statement:** Caerus needs a cross-strategy view of whether Polaris,
   Orion, Lyra, Phoenix, and registered research strategies are materially
   distinct or redundant, especially Lyra versus Orion.
+- **Priority state:** Deprioritized behind FR-070 and FR-069. Preliminary
+  evidence suggests Orion and Lyra are highly correlated and likely redundant,
+  but the final retain/retire decision remains data-driven.
+- **Working hypothesis:** Only one of Orion/Lyra is likely needed long-term.
+  Lyra may be the leading candidate for retention if evidence confirms
+  outperformance, but no final decision is approved and the Lyra name must not
+  be redeployed yet.
 - **Scope:** Produce pairwise holdings overlap, active share, sector difference,
   turnover difference, concentration difference, return correlation when
   available, attribution spread, regime-specific behavior, redundancy
   classification, and a conservative retirement watchlist.
 - **Non-goals:** No actual strategy retirement, strategy promotion, allocation
-  change, broker behavior, cron change, or production order change.
+  change, Lyra-name reuse, broker behavior, cron change, or production order
+  change.
+- **Decision path:** Future Orion/Lyra disposition should be made through the
+  FR-069 sleeve architecture and promotion/retirement framework, not as an
+  isolated FR-063 decision.
 - **Planned artifacts:** `outputs/model_quality/<date>/strategy_differentiation_deep_dive.json`
   and `.md`.
 - **Validation plan:** Fixture tests for near-duplicate Lyra/Orion, distinct
@@ -777,15 +801,35 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **Date started:** 2026-06-10
 - **Status:** `DESIGN` (no production refactor)
 - **Governance label:** RESEARCH_ONLY / NON_EXECUTIONAL
+- **Priority state:** Second active priority after FR-070.
 - **Scope:** `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` —
   a pluggable Sleeve contract on the PIT foundation; shared data/signal/backtest/
   evaluation layers; membership families; governance gates (PIT-required evidence,
   holdout protection, pre-registration). The Caerus Investment Doctrine is the
-  architectural north star and target-state constraint. Maps existing strategies
-  to the contract and sequences migration into future FRs.
+  architectural north star and target-state constraint. Target state is a
+  portfolio-of-sleeves platform with each sleeve allocatable from 0% to 100%.
+  FR-069 should define how sleeves are onboarded, evaluated, promoted,
+  allocated, and retired. Orion/Lyra rationalization belongs inside this
+  architecture rather than as an isolated immediate retirement decision. Maps
+  existing strategies to the contract and sequences migration into future FRs.
 - **Non-goals:** No code, no production refactor, no execution/registry change. The
   doc changes nothing that runs.
 - **Rollback:** Delete the design doc.
+
+## FR-070 Cash Gating and Post-Sell Buy Budget Reconciliation
+
+- **FR number:** FR-070
+- **Title:** Cash Gating and Post-Sell Buy Budget Reconciliation
+- **Date started:** 2026-06-11
+- **Phase:** Execution Integrity / Cash Deployment
+- **Status:** `PROPOSED`
+- **Blast Radius:** HIGH
+- **Priority state:** Top active priority.
+- **Observation Status:** proposed_weekend_maintenance_only
+- **Current State:** Proposed execution-integrity review focused on target-attainment closure: target cash vs achieved cash, target gross exposure vs achieved gross exposure, target weights vs achieved weights, deployment shortfall attribution, and clear reason codes for missed allocation.
+- **Implementation Window:** Weekend-maintenance only for any implementation; no code changes during active trading windows.
+- **Non-goals:** No weakening of broker cash, buying-power, risk-cash, min-notional, fractional-share, or reconciliation safeguards. No strategy, allocation, cron, or broker-submission behavior change is approved by this documentation entry.
+- **Rollback Reference:** No implementation yet; treat as proposed until explicit weekend-maintenance approval and validation exist.
 
 ## Roadmap Boundaries
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-PROPOSED
+DEPLOYED_OBSERVING
 
 ## Priority
 
@@ -14,11 +14,11 @@ Execution Integrity / Capital Deployment
 
 ## Executive Summary
 
-Targeted execution validation currently reports seven failing tests concentrated in post-submit artifact handling, cash gating, buying-power budgeting, pending-sell handling, and buy eligibility logic.
+Historical targeted execution validation reported seven failing tests concentrated in post-submit artifact handling, cash gating, buying-power budgeting, pending-sell handling, and buy eligibility logic.
 
 These failures were verified to exist before deployment of FR-069 (posttrade telemetry sequencing) and therefore are not regressions introduced by commit `0aab2e1`.
 
-While recent live execution evidence suggests that sell execution, buy execution, fractional shares, and post-sell rebudgeting are functioning, the failing tests cover the exact execution-control surfaces responsible for capital deployment and therefore require formal review.
+While recent live execution evidence suggests that sell execution, buy execution, fractional shares, and post-sell rebudgeting are functioning, the failing tests cover the exact execution-control surfaces responsible for capital deployment and therefore require formal review. The June 12 live-run investigation classified the cash discrepancy as `ARTIFACT_TIMING_FAILURE`, not failed rebudgeting; the open gate is post-buy snapshot validation on the next live run.
 
 Because any remediation may alter trading behavior, this workstream will be conducted as research first and any resulting implementation changes will be deployed only during a scheduled maintenance window outside active market hours.
 
