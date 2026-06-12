@@ -1,6 +1,15 @@
 """Deterministic Caerus research object registry foundation."""
 
-from research_registry.models.base import ResearchObjectEnvelope
-from research_registry.registry.sqlite_registry import SQLiteResearchRegistry
-
 __all__ = ["ResearchObjectEnvelope", "SQLiteResearchRegistry"]
+
+
+def __getattr__(name: str):
+    if name == "ResearchObjectEnvelope":
+        from research_registry.models.base import ResearchObjectEnvelope
+
+        return ResearchObjectEnvelope
+    if name == "SQLiteResearchRegistry":
+        from research_registry.registry.sqlite_registry import SQLiteResearchRegistry
+
+        return SQLiteResearchRegistry
+    raise AttributeError(name)

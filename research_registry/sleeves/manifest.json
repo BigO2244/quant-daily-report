@@ -1,0 +1,410 @@
+{
+  "schema_version": "caerus_sleeve_manifest_v1",
+  "manifest_version": "2026-06-12-fr069-phase-b",
+  "governance_fr": "FR-069",
+  "phase": "Phase B",
+  "research_only": true,
+  "behavior_change_allowed": false,
+  "source_commit": "5943842",
+  "description": "Research-only modular sleeve inventory for FR-069 Phase B. This manifest is metadata only and does not alter trading, broker, execution, allocation, portfolio construction, model, strategy, cron, or live-capital behavior.",
+  "sleeves": [
+    {
+      "sleeve_id": "polaris",
+      "strategy_id": "caerus_polaris",
+      "display_name": "Caerus Polaris",
+      "status": "current_paper_baseline",
+      "lifecycle_stage": "paper_observed",
+      "sleeve_type": "security_selection",
+      "family": "core_momentum",
+      "thesis": "Reference momentum security-selection sleeve and current paper baseline.",
+      "intended_market_environment": "Broad large-cap equity regimes where cross-sectional momentum remains persistent after transaction costs.",
+      "universe_policy": {
+        "universe_family": "caerus_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "daily paper baseline; parity checks must match existing cadence before abstraction migration",
+      "holding_count_policy": "Preserve existing Polaris holding-count behavior; do not change in Phase B.",
+      "risk_profile": "Baseline core-momentum risk profile; compare drawdown, concentration, turnover, and beta to existing artifacts.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "strategy_id",
+          "lifecycle_status",
+          "universe_family",
+          "universe_method",
+          "universe_snapshot_hash",
+          "price_source",
+          "benchmark",
+          "window",
+          "holdout_excluded",
+          "metrics",
+          "holdings",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "holdings",
+          "nav",
+          "attribution",
+          "promotion_readiness",
+          "parity_report"
+        ]
+      },
+      "promotion_requirements": [
+        "Not applicable for current baseline in Phase B.",
+        "Any generalized harness migration must first prove Polaris parity against existing behavior."
+      ],
+      "retirement_policy": "No retirement decision is allowed in Phase B.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "existing_strategy_reference",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "orion",
+      "strategy_id": "caerus_orion",
+      "display_name": "Caerus Orion",
+      "status": "current_shadow_challenger",
+      "lifecycle_stage": "shadow_observed",
+      "sleeve_type": "security_selection",
+      "family": "core_momentum",
+      "thesis": "Momentum challenger using a rank-decay/exit variant that must remain under observation until PIT evidence is decision-grade.",
+      "intended_market_environment": "Large-cap momentum regimes where faster decay and exit rules may improve drawdown or turnover-adjusted return.",
+      "universe_policy": {
+        "universe_family": "caerus_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Preserve existing shadow cadence; do not change in Phase B.",
+      "holding_count_policy": "Preserve existing Orion holding-count behavior; document from artifacts before any abstraction migration.",
+      "risk_profile": "Core-momentum challenger; compare active share, concentration, turnover, drawdown, and regime behavior versus Polaris and Lyra.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "strategy_id",
+          "lifecycle_status",
+          "universe_family",
+          "universe_method",
+          "universe_snapshot_hash",
+          "price_source",
+          "benchmark",
+          "window",
+          "holdout_excluded",
+          "metrics",
+          "holdings",
+          "attribution",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "pit_rebaseline",
+          "correlation_analysis",
+          "return_risk_drawdown",
+          "turnover_concentration",
+          "regime_decomposition",
+          "differentiation_packet"
+        ]
+      },
+      "promotion_requirements": [
+        "20/40/60-day observation gates where relevant.",
+        "Decision-grade PIT evidence.",
+        "Material differentiation from Polaris and Lyra.",
+        "Owner approval before promotion, retirement, rename, or allocation changes."
+      ],
+      "retirement_policy": "No retirement decision is allowed in Phase B; future retirement requires owner-approved evidence threshold.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "existing_shadow_reference",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "lyra",
+      "strategy_id": "caerus_lyra",
+      "display_name": "Caerus Lyra",
+      "status": "current_shadow_challenger",
+      "lifecycle_stage": "shadow_observed",
+      "sleeve_type": "security_selection",
+      "family": "core_momentum",
+      "thesis": "Momentum challenger using a weekly/holding-period variant that must continue evaluation without retirement or rename in Phase B.",
+      "intended_market_environment": "Large-cap momentum regimes where slower rebalance/holding-period behavior may improve stability or reduce turnover.",
+      "universe_policy": {
+        "universe_family": "caerus_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Preserve existing shadow cadence; do not change in Phase B.",
+      "holding_count_policy": "Preserve existing Lyra holding-count behavior; document from artifacts before any abstraction migration.",
+      "risk_profile": "Core-momentum challenger; compare active share, concentration, turnover, drawdown, and regime behavior versus Polaris and Orion.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "strategy_id",
+          "lifecycle_status",
+          "universe_family",
+          "universe_method",
+          "universe_snapshot_hash",
+          "price_source",
+          "benchmark",
+          "window",
+          "holdout_excluded",
+          "metrics",
+          "holdings",
+          "attribution",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "pit_rebaseline",
+          "correlation_analysis",
+          "return_risk_drawdown",
+          "turnover_concentration",
+          "regime_decomposition",
+          "differentiation_packet"
+        ]
+      },
+      "promotion_requirements": [
+        "20/40/60-day observation gates where relevant.",
+        "Decision-grade PIT evidence.",
+        "Material differentiation from Polaris and Orion.",
+        "Owner approval before promotion, retirement, rename, or allocation changes."
+      ],
+      "retirement_policy": "No retirement decision is allowed in Phase B; future retirement requires owner-approved evidence threshold.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "existing_shadow_reference",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "phoenix",
+      "strategy_id": "caerus_phoenix",
+      "display_name": "Caerus Phoenix",
+      "status": "research_placeholder",
+      "lifecycle_stage": "spec_only",
+      "sleeve_type": "security_selection",
+      "family": "crisis_reversal",
+      "thesis": "Crisis-reversal sleeve intended to identify oversold, high-quality recovery candidates after broad stress.",
+      "intended_market_environment": "Drawdown, volatility shock, or post-crisis recovery regimes.",
+      "universe_policy": {
+        "universe_family": "caerus_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "To be specified; likely event/regime gated rather than always-on daily production behavior.",
+      "holding_count_policy": "To be specified through research; no production target count in Phase B.",
+      "risk_profile": "High regime sensitivity; must quantify drawdown capture, recovery beta, liquidity, and concentration risk.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "universe_method",
+          "universe_snapshot_hash",
+          "holdout_excluded",
+          "metrics",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "crisis_window_definition",
+          "candidate_universe",
+          "signal_panel",
+          "backtest_summary",
+          "drawdown_recovery_analysis"
+        ]
+      },
+      "promotion_requirements": [
+        "Pre-registered crisis-window definition.",
+        "PIT evidence excluding holdout.",
+        "Recovery/drawdown improvement after costs.",
+        "Owner approval before any shadow or paper behavior."
+      ],
+      "retirement_policy": "Shelve if crisis-window signal fails preregistered evidence or cannot avoid look-ahead bias.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "research_placeholder",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "cygnus",
+      "strategy_id": "caerus_cygnus",
+      "display_name": "Caerus Cygnus",
+      "status": "research_placeholder",
+      "lifecycle_stage": "shelved_v0",
+      "sleeve_type": "event_driven",
+      "family": "earnings_drift",
+      "thesis": "Post-earnings drift/event-reaction sleeve; v0 is shelved pending consensus/EPS-surprise data for v1.",
+      "intended_market_environment": "Single-name earnings events with measurable surprise, drift, and liquidity after announcement.",
+      "universe_policy": {
+        "universe_family": "event_eligible_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Event-driven; no production cadence in Phase B.",
+      "holding_count_policy": "To be determined by event frequency, liquidity, and overlap controls.",
+      "risk_profile": "Event concentration and gap-risk sensitive; requires event-tape quality diagnostics.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "event_timestamp",
+          "universe_method",
+          "holdout_excluded",
+          "metrics",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "event_tape",
+          "consensus_surprise_inputs",
+          "coverage_report",
+          "backtest_summary",
+          "cost_sensitivity"
+        ]
+      },
+      "promotion_requirements": [
+        "Vendor/consensus surprise data available PIT.",
+        "Coverage and cost-sensitivity pass.",
+        "Owner approval before v1 holdout access or shadow behavior."
+      ],
+      "retirement_policy": "Remain shelved until v1 data dependency is solved; retire only with explicit owner approval.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "research_placeholder",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "cassiopeia",
+      "strategy_id": "caerus_cassiopeia",
+      "display_name": "Caerus Cassiopeia",
+      "status": "research_placeholder",
+      "lifecycle_stage": "spec_only",
+      "sleeve_type": "event_driven",
+      "family": "event_driven",
+      "thesis": "Event-driven sleeve placeholder requiring a canonical event contract before implementation.",
+      "intended_market_environment": "Discrete corporate or macro events where preregistered signals can be tested PIT.",
+      "universe_policy": {
+        "universe_family": "event_eligible_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Event-driven; no production cadence in Phase B.",
+      "holding_count_policy": "To be specified after event contract approval.",
+      "risk_profile": "Event timing, liquidity, and sparse-sample risk; must include false-positive and crowding diagnostics.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "event_timestamp",
+          "universe_method",
+          "holdout_excluded",
+          "metrics",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "event_contract",
+          "event_tape",
+          "candidate_universe",
+          "backtest_summary",
+          "sparse_sample_diagnostics"
+        ]
+      },
+      "promotion_requirements": [
+        "Approved event taxonomy.",
+        "PIT event tape and preregistered signal definition.",
+        "Owner approval before any implementation beyond research scaffolding."
+      ],
+      "retirement_policy": "Shelve if event data cannot be made PIT-safe or sample size remains non-decision-grade.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "research_placeholder",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "argo",
+      "strategy_id": "caerus_argo",
+      "display_name": "Caerus Argo",
+      "status": "research_placeholder",
+      "lifecycle_stage": "spec_only",
+      "sleeve_type": "meta_model",
+      "family": "regime_overlay",
+      "thesis": "Regime/model-selection overlay that may eventually consume sleeve evidence but must not switch production behavior in Phase B.",
+      "intended_market_environment": "Cross-regime environments where sleeve selection or weighting may depend on PIT regime diagnostics.",
+      "universe_policy": {
+        "universe_family": "derived_from_member_sleeves",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "To be specified; no production switching cadence in Phase B.",
+      "holding_count_policy": "Not applicable; Argo is an overlay/meta-model and should not produce holdings directly.",
+      "risk_profile": "Model-selection, overfit, and regime look-ahead risk; must use frozen member-sleeve evidence only.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "input_sleeves",
+          "universe_method",
+          "holdout_excluded",
+          "metrics",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "regime_definition",
+          "member_sleeve_inputs",
+          "selection_backtest",
+          "overfit_diagnostics",
+          "no_live_switching_attestation"
+        ]
+      },
+      "promotion_requirements": [
+        "Frozen member-sleeve evidence.",
+        "No look-ahead regime labels.",
+        "Owner approval before any paper/live switching or allocation behavior."
+      ],
+      "retirement_policy": "Shelve if regime labels are unstable, look-ahead-prone, or fail out-of-sample differentiation.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "research_placeholder",
+      "behavior_change_allowed": false
+    }
+  ]
+}

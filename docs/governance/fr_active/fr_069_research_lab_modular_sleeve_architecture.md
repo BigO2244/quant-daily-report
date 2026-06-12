@@ -1,6 +1,6 @@
 # FR-069 — Research Lab / Modular Sleeve Architecture (Design)
 
-Status: DESIGN / ACTIVE_PHASE_A (design-only — no production refactor in this FR)
+Status: PHASE_B_IMPLEMENTED_RESEARCH_ONLY (research-only scaffold — no production refactor in this FR)
 Owner: Caerus Research Program
 Last Updated: 2026-06-12
 Governance Label: RESEARCH_ONLY
@@ -189,6 +189,21 @@ Canonical Phase A package:
 That package contains the Canonical Sleeve Protocol, Registry-Onboarding
 Architecture, Research Lab Operating Model, Future Sleeve Inventory, and
 recommended Phase B implementation roadmap.
+
+Canonical Phase B scaffold:
+`docs/governance/fr_active/fr_069_phase_b_scaffolding.md`.
+
+The Phase B scaffold adds the machine-readable sleeve manifest at
+`research_registry/sleeves/manifest.json`, the deterministic validator at
+`scripts/research/validate_sleeve_manifest.py`, read-only MCP tool
+`fr069_sleeve_inventory`, Polaris parity plan, Orion/Lyra PIT evidence plan,
+and future sleeve onboarding placeholders. It remains research-only and does
+not change execution, broker, allocation, portfolio construction, model,
+strategy, cron, live-capital behavior, or production registry semantics.
+
+Phase C must not begin until manifest, validator, MCP inventory, and targeted
+tests pass. Phase C still requires separate approval for any implementation
+beyond research-only scaffolding.
 
 ### Agent Roles
 

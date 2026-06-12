@@ -66,6 +66,7 @@ from research_registry.research.timing_summary import (
     summarise_timing,
     timing_summary_to_dict,
 )
+from research_registry.sleeves import sleeve_inventory_payload
 from research.operational_drag import load_latest_operational_drag_summary
 from core.execution_target_attainment import build_execution_target_attainment
 
@@ -119,6 +120,7 @@ def _tool_dispatch_table() -> dict[str, Any]:
         "execution_timing_by_vix_regime": execution_timing_by_vix_regime,
         "execution_timing_summary": execution_timing_summary,
         "execution_target_attainment": execution_target_attainment,
+        "fr069_sleeve_inventory": fr069_sleeve_inventory,
         "shadow_comparison": shadow_comparison,
         "attribution_analysis": attribution_analysis,
         "stable_window_evaluation": stable_window_evaluation,
@@ -603,6 +605,29 @@ def execution_target_attainment(
         context.db_path,
         warnings=warnings,
         diagnostic_status=status,
+        **payload,
+    )
+
+
+def fr069_sleeve_inventory(
+    *,
+    context: ToolContext | None = None,
+    manifest_path: str | None = None,
+) -> dict[str, Any]:
+    """Return FR-069 sleeve manifest inventory and validation status.
+
+    This tool is read-only. It loads static research metadata only and does not
+    call brokers, generate trades, mutate artifacts, or change production
+    strategy registry behavior.
+    """
+    context = context or ToolContext()
+    payload = sleeve_inventory_payload(manifest_path)
+    status = str(payload.pop("status", "INVALID_MANIFEST"))
+    validation = payload.get("validation") or {}
+    return _response(
+        status,
+        context.db_path,
+        warnings=list(validation.get("warnings") or []),
         **payload,
     )
 

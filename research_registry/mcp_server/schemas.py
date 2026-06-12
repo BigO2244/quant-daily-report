@@ -155,6 +155,25 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "fr069_sleeve_inventory",
+        "description": (
+            "Read-only FR-069 sleeve manifest inventory. Loads the research-only "
+            "sleeve manifest, validates it, and returns compact sleeve metadata, "
+            "counts by status/lifecycle, current sleeves, future placeholders, "
+            "and validation warnings/errors. It does not mutate files, call "
+            "brokers, generate artifacts, or change production strategy behavior."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "manifest_path": {
+                    "type": "string",
+                    "description": "Optional override path for fixture/testing manifests.",
+                },
+            },
+        },
+    },
+    {
         "name": "promotion_readiness",
         "description": (
             "Per-strategy promotion-readiness assessment from shadow artifacts. "

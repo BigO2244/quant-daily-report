@@ -51,7 +51,7 @@ Archived copies are retained for auditability.
 | FR-066 | Canonical NAV Track Record Integrity | `DEPLOYED_OBSERVING` | `docs/governance/fr_archive/fr_066_canonical_nav_track_record_spec.md` | ARCHIVED | Historical spec copy retained; deployed-observing state remains in the registry and backlog. |
 | FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_stage0_source_comparison.md` | ARCHIVED | Archived comparison spec retained; paired evidence with `docs/governance/fr_archive/fr_067_vela_research_spec.md`. |
 | FR-068 | PIT universe + survivorship rebaseline | `PHASES_1_3_COMPLETE` | `research/pit_universe_architecture_2026-06-10.md` | ACTIVE | Current design and results live in the research artifact; the supporting FR spec has been archived. |
-| FR-069 | Research Lab / modular sleeve architecture | `ACTIVE_PHASE_A` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Primary active architecture/research workstream; Phase A package at `docs/governance/fr_active/fr_069_phase_a_architecture_package.md` defines the sleeve protocol, registry-onboarding architecture, research lab operating model, future sleeve inventory, and Phase B roadmap. Design/scaffolding only. |
+| FR-069 | Research Lab / modular sleeve architecture | `PHASE_B_IMPLEMENTED_RESEARCH_ONLY` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Primary active architecture/research workstream; Phase B scaffold at `docs/governance/fr_active/fr_069_phase_b_scaffolding.md` adds the research-only sleeve manifest, validator, MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, and future sleeve onboarding placeholders. No production refactor or runtime behavior change. |
 | FR-070 | Cash Gating and Post-Sell Buy Budget Reconciliation | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_070_cash_gating_post_sell_budget_reconciliation.md` | ACTIVE | Observation/monitoring; June 12 remediation is deployed, the discrepancy was artifact timing failure rather than failed rebudgeting, and new implementation reopens only for classified next-run failure evidence. |
 | FR-071 | Governance Doctrine Integration | `READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
 | FR-072 | Governance Hygiene Agent | `READY` | `docs/governance/fr_active/fr_072_governance_hygiene_agent.md` | ACTIVE | Read-only governance auditor; output artifacts only, no auto-patch or auto-commit. Phase B scheduling requires separate approval. |
@@ -108,7 +108,7 @@ and past their observation criteria:
   rebaseline **MATERIAL** (Sharpe 1.05→0.85, MaxDD −43%→−54%). Legacy backtests
   non-decision-grade; promotion evidence now requires `universe_method=pit_universe`.
   Orion/Lyra rebaselines pending. RESEARCH_ONLY / NON_EXECUTIONAL.
-- FR-069: Research Lab / modular sleeve architecture (`DESIGN`) — design-only spec;
+- FR-069: Research Lab / modular sleeve architecture (`PHASE_B_IMPLEMENTED_RESEARCH_ONLY`) — research-only scaffold;
   no production refactor. RESEARCH_ONLY / NON_EXECUTIONAL.
 
 None of these change execution, broker submission, cron execution-phase,

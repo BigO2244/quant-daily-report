@@ -147,6 +147,7 @@ def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
         "artifact_drilldown",
         "execution_target_attainment",
         "morning_cio_brief",
+        "fr069_sleeve_inventory",
         "promotion_readiness",
         "anomaly_report",
     }.issubset(names)
@@ -240,6 +241,33 @@ def test_mcp_server_jsonrpc_tools_call(tmp_path: Path) -> None:
     assert response["id"] == 1
     assert response["result"]["isError"] is False
     assert "run-20260527-warn" in response["result"]["content"][0]["text"]
+
+
+def test_mcp_fr069_sleeve_inventory_returns_manifest_counts() -> None:
+    payload = call_tool("fr069_sleeve_inventory", {})
+
+    assert payload["status"] == "OK"
+    assert payload["governance_fr"] == "FR-069"
+    assert payload["phase"] == "Phase B"
+    assert payload["research_only"] is True
+    assert payload["behavior_change_allowed"] is False
+    assert payload["sleeve_count"] == 7
+    assert payload["counts_by_status"]["research_placeholder"] == 4
+    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "orion", "lyra"}
+
+
+def test_mcp_fr069_sleeve_inventory_jsonrpc_call() -> None:
+    response = handle_jsonrpc(
+        {"jsonrpc": "2.0", "id": 69, "method": "tools/call", "params": {"name": "fr069_sleeve_inventory", "arguments": {}}},
+        ToolContext(),
+    )
+
+    assert response["id"] == 69
+    assert response["result"]["isError"] is False
+    text = response["result"]["content"][0]["text"]
+    assert "fr069_sleeve_inventory" not in text
+    assert "research_placeholder" in text
+    assert "polaris" in text
 
 
 def test_mcp_safety_boundaries(tmp_path: Path, monkeypatch) -> None:
