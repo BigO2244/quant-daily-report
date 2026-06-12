@@ -9,7 +9,7 @@ cd "${REPO_ROOT}"
 TRADE_DATE=""
 SHADOW_START_DATE="${SHADOW_START_DATE:-2014-01-01}"
 SHADOW_OUTPUT_DIR="${SHADOW_OUTPUT_DIR:-outputs/shadow_candidates}"
-REMOTE_HOST="${CAERUS_REMOTE_HOST:-brettolson@34.61.147.38}"
+REMOTE_HOST="${CAERUS_REMOTE_HOST:-brettolson@alpha-stack-scheduler}"
 REMOTE_REPO="${CAERUS_REMOTE_REPO:-~/quant-daily-report}"
 RUN_REMOTE_REFRESH=1
 DRY_RUN=0
@@ -23,7 +23,7 @@ Options:
   --trade-date YYYY-MM-DD     Required trade date to hydrate.
   --start-date YYYY-MM-DD     Shadow backtest start date. Default: 2014-01-01.
   --output-dir PATH           Local shadow output dir. Default: outputs/shadow_candidates.
-  --remote-host HOST          SSH target. Default: brettolson@34.61.147.38.
+  --remote-host HOST          SSH target. Default: brettolson@alpha-stack-scheduler.
   --remote-repo PATH          Remote repo path. Default: ~/quant-daily-report.
   --no-remote-refresh         Sync artifacts only; skip VM reconciliation/health refresh.
   --dry-run                   Print commands without running them.

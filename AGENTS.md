@@ -1,5 +1,64 @@
 # AGENTS.md
 
+## AI Orchestration Instructions
+
+Before beginning any Caerus task, read
+`docs/governance/ORCHESTRATOR_CONTEXT.md`. Treat it as the durable operating
+context for ChatGPT-as-orchestrator and Codex-as-implementation-agent work.
+The strategic escalation policy lives at
+`docs/governance/STRATEGIC_ESCALATION_POLICY.md`.
+
+Caerus is Brett's paper-traded quantitative investment operating system. The
+mission is to build a disciplined, evidence-driven, long-only alpha stack with
+deterministic artifacts, explicit governance, and a promotion ladder from
+research to shadow to paper to live. The strategic doctrine for strategy,
+sleeve, promotion, retirement, and portfolio-construction decisions is
+`docs/governance/caerus_investment_doctrine.md`.
+
+Safety boundaries:
+- Do not mutate trading, execution, allocation, broker, strategy, cron, or
+  production runtime behavior unless the task explicitly authorizes it.
+- Do not weaken execution reconciliation, asset validation, cash gates,
+  freshness gates, look-ahead controls, or fail-closed behavior.
+- Do not promote, retire, rename, or reweight strategies or sleeves without
+  explicit Brett approval.
+- Documentation, diagnostics, and tests must remain clearly separate from
+  production trading behavior unless a task explicitly says otherwise.
+
+## VM Access Policy
+
+- Do not assume a static external IP address for the scheduler VM.
+- Canonical access command:
+  `gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a`
+- External IPs may change after stop/start, billing suspension, maintenance, or
+  VM recreation.
+- If direct SSH is needed, resolve the current external IP first:
+  `gcloud compute instances describe alpha-stack-scheduler --zone us-central1-a --format="get(networkInterfaces[0].accessConfigs[0].natIP)"`
+- Treat direct SSH by external IP as ephemeral and non-authoritative.
+
+Required pre-work before editing:
+- Read `docs/governance/ORCHESTRATOR_CONTEXT.md`.
+- Read the files named by the task and any immediately referenced governance
+  documents.
+- Check `git status --short` and preserve unrelated user changes.
+- Identify whether the task is operational, strategic, or both. Escalate
+  strategic ambiguity before implementing behavior changes.
+
+Required validation before final response:
+- For documentation-only work: run `git diff --check` and relevant grep/link
+  sanity checks.
+- For Python/runtime work: run targeted pytest for touched behavior, relevant
+  `py_compile`, and any task-specific validation.
+- For execution-adjacent changes: run execution integrity, lifecycle/timeline,
+  MCP/status, and focused fixture tests unless the task explicitly narrows
+  validation.
+
+Git hygiene:
+- Keep commits scoped to the task.
+- Do not stage unrelated modified files.
+- Prefer git revert over ad hoc rollback for deployed changes.
+- Do not push, deploy, or fast-forward the VM unless the user explicitly asks.
+
 > SOURCE OF TRUTH (added 2026-06-08): Before creating or editing any strategy,
 > FR, or governance document, read `docs/governance/CURRENT_RESEARCH_ROADMAP.md`
 > and `config/research/strategy_registry.json`. That roadmap holds the canonical
@@ -9,6 +68,10 @@
 > execution/broker/cron behavior as part of documentation work. The strategy state
 > below this banner predates the FR-050..FR-053 research wave and is retained as
 > history — defer to the canonical roadmap where they differ.
+>
+> Canonical doctrine: `docs/governance/caerus_investment_doctrine.md` is the
+> strategic doctrine for strategy, sleeve, promotion, and portfolio-construction
+> work. Defer to it unless an explicit amendment is recorded.
 
 CURRENT STRATEGY STATE
 
@@ -79,7 +142,13 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
   - use for coding, tests, diagnostics, dashboard generation, artifact review
   - venv: `.venv/` at repo root
 - **Scheduler VM**
-  - host: `brettolson@34.61.147.38`
+  - canonical host: `alpha-stack-scheduler`
+  - canonical project: `alpha-stack-490922`
+  - canonical zone: `us-central1-a`
+  - canonical access: `gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a`
+  - direct external IPs are ephemeral and non-authoritative
+  - if direct SSH is required, resolve the current external IP first with
+    `gcloud compute instances describe alpha-stack-scheduler --zone us-central1-a --format="get(networkInterfaces[0].accessConfigs[0].natIP)"`
   - path: `~/quant-daily-report`
   - venv: `source venv/bin/activate`
   - secrets: `~/quant-daily-report/.env`

@@ -9,7 +9,7 @@ cd "${REPO_ROOT}"
 
 export TZ="America/New_York"
 
-REMOTE_HOST="${CAERUS_REMOTE_HOST:-brettolson@34.61.147.38}"
+REMOTE_HOST="${CAERUS_REMOTE_HOST:-brettolson@alpha-stack-scheduler}"
 REMOTE_REPO="${CAERUS_REMOTE_REPO:-~/quant-daily-report}"
 LOG_DIR="${REPO_ROOT}/logs"
 LOG_FILE="${LOG_DIR}/auto_shadow_health_recovery.log"

@@ -797,7 +797,17 @@ Full rebuild is always available via `--full-rebuild` flag.
 
 ### Current VM State
 
-The existing GCP VM (`34.61.147.38`) runs:
+The existing GCP VM is `alpha-stack-scheduler` in project `alpha-stack-490922`
+and zone `us-central1-a`. Access it with:
+
+```bash
+gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a
+```
+
+Static external IPs are non-authoritative; resolve the current address only
+when a direct SSH path is unavoidable.
+
+The VM runs:
 - Cron-scheduled trading pipeline (Phases 0–3)
 - Shadow evaluation
 - Dashboard generation

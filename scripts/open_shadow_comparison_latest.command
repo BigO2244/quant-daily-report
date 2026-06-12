@@ -18,7 +18,7 @@ set -euo pipefail
 #   Revert this script or copy an older version back to Orion.command. No cron,
 #   broker, execution, dashboard, or promotion behavior depends on this launcher.
 
-VM="${ORION_VM:-${SHADOW_VM:-brettolson@34.61.147.38}}"
+VM="${ORION_VM:-${SHADOW_VM:-brettolson@alpha-stack-scheduler}}"
 REMOTE_REPO="${ORION_REMOTE_REPO:-~/quant-daily-report}"
 LOCAL_DIR="${ORION_LOCAL_DIR:-$HOME/Downloads/caerus_research_packets/latest}"
 REQUESTED_TRADE_DATE="${ORION_TRADE_DATE:-}"

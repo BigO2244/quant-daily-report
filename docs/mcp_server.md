@@ -269,7 +269,7 @@ After review, deploy by the normal deterministic source flow:
 
 ```bash
 git push origin main
-ssh brettolson@34.61.147.38
+gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a
 cd ~/quant-daily-report
 git status --short
 git pull --ff-only origin main
@@ -284,6 +284,13 @@ python3 scripts/research_registry_mcp_server.py smoke \
 ```
 
 Do not install cron or deploy services as part of Phase 7.
+
+Direct SSH by external IP is ephemeral and non-authoritative. If a direct
+connection is unavoidable, resolve the current IP first:
+
+```bash
+gcloud compute instances describe alpha-stack-scheduler --zone us-central1-a --format="get(networkInterfaces[0].accessConfigs[0].natIP)"
+```
 
 ## Security Boundary
 

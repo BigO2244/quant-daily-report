@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REMOTE_HOST="${REMOTE_HOST:-brettolson@34.61.147.38}"
+REMOTE_HOST="${REMOTE_HOST:-brettolson@alpha-stack-scheduler}"
 REMOTE_REPO="${REMOTE_REPO:-/home/brettolson/quant-daily-report}"
 REMOTE_WEB="${REMOTE_WEB:-${REMOTE_REPO}/web/dashboard}"
 REMOTE_ENV="${REMOTE_ENV:-/home/brettolson/.caerus/alpaca.env}"

@@ -18,7 +18,7 @@ set -euo pipefail
 #   Revert this script or remove the copied MCP.command launcher. No cron,
 #   broker, execution, dashboard, or strategy behavior depends on this launcher.
 
-VM="${MCP_VM:-${CAERUS_VM:-brettolson@34.61.147.38}}"
+VM="${MCP_VM:-${CAERUS_VM:-brettolson@alpha-stack-scheduler}}"
 REMOTE_REPO="${MCP_REMOTE_REPO:-~/quant-daily-report}"
 PY="${MCP_REMOTE_PY:-}"
 DB_PATH="${MCP_DB_PATH:-/tmp/caerus-mcp-operator.db}"

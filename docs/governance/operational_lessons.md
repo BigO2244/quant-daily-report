@@ -30,6 +30,16 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
 - Runtime evidence should be preserved during rollback. Deleting artifacts or
   logs to make a state look clean is not a rollback strategy.
 
+## 2026-06-12 — GCP Billing Suspension and VM External IP Drift
+
+- Billing suspension caused `alpha-stack-scheduler` to become unreachable and
+  enter `TERMINATED` state.
+- After restart, the external IP changed.
+- Agent validation failed because it used the stale IP `34.61.147.38`.
+- Required practice: use `gcloud compute ssh` by instance name and zone.
+- Direct IPs should be resolved dynamically and must not be embedded into
+  governance prompts or runbooks.
+
 ## Execution Reliability Lessons
 
 - On 2026-05-26, the paper run halted `PARTIAL` after four sell orders were
