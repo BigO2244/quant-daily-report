@@ -196,6 +196,21 @@ python3 -m http.server 8765
 - `http://localhost:8765/web/dashboard/quant_daily_executive.html?data=dashboard_data.json`
 - `http://localhost:8765/web/dashboard/quant_daily_executive.html?data=dashboard_data.json&refresh=60`
 
+## VM Dashboard Access
+
+On the scheduler VM, the dashboard is served by nginx on port 80 at:
+
+- `/dashboard/`
+- `/dashboardDEV/`
+
+Both routes use nginx basic auth with the credential file
+`/etc/nginx/.htpasswd_dashboard`.
+
+If the login is lost or needs rotation, run
+`scripts/reset_dashboard_auth.sh` on the VM checkout. The script prompts for a
+new username and password, updates the htpasswd file in place, and reloads
+nginx. It does not print or commit secrets.
+
 How `?data=` is resolved:
 
 - `?data=dashboard_data.json` loads `web/dashboard/dashboard_data.json` relative to the dashboard HTML path.

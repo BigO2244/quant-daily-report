@@ -452,6 +452,8 @@ with clearer axis labels and scale markers.
 - Refresh service: `deploy/caerus-dashboard-refresh.service`
 - Refresh timer: `deploy/caerus-dashboard-refresh.timer`
 - Deploy script: `scripts/deploy_dashboard_vm.sh`
+- Dashboard auth reset: `scripts/reset_dashboard_auth.sh`
+- Protected routes use nginx basic auth via `/etc/nginx/.htpasswd_dashboard`
 
 **Dashboard operational notes**
 
