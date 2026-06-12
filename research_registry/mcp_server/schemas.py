@@ -114,6 +114,35 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "execution_target_attainment",
+        "description": (
+            "Read-only execution target-attainment diagnostic. Distinguishes "
+            "operational/reconciliation success from economic target deployment "
+            "by comparing target cash, achieved posttrade cash, post-sell "
+            "rebudget expectations, submitted/filled side counts, and skipped "
+            "or deferred buy notional. Returns OK_TARGET_ATTAINED, "
+            "WARN_CASH_DRIFT, WARN_RECONCILED_BUT_UNDERDEPLOYED, "
+            "FAIL_EXECUTION_INCOMPLETE, or UNKNOWN_INSUFFICIENT_ARTIFACTS."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "outputs_root": {"type": "string", "default": "outputs"},
+                "trade_date": {"type": "string"},
+                "run_id": {"type": "string"},
+                "cash_weight_drift_tolerance": {
+                    "type": "number",
+                    "default": 0.02,
+                    "description": "Cash-weight tolerance in decimal weight units; default is 2 percentage points.",
+                },
+                "notional_drift_tolerance": {
+                    "type": "number",
+                    "description": "Optional absolute dollar tolerance; default is max($25, 0.25% of equity).",
+                },
+            },
+        },
+    },
+    {
         "name": "morning_cio_brief",
         "description": "Return a compact artifact-backed operator intelligence brief.",
         "inputSchema": {

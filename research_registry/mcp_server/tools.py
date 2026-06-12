@@ -67,6 +67,7 @@ from research_registry.research.timing_summary import (
     timing_summary_to_dict,
 )
 from research.operational_drag import load_latest_operational_drag_summary
+from core.execution_target_attainment import build_execution_target_attainment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -117,6 +118,7 @@ def _tool_dispatch_table() -> dict[str, Any]:
         "anomaly_report": anomaly_report,
         "execution_timing_by_vix_regime": execution_timing_by_vix_regime,
         "execution_timing_summary": execution_timing_summary,
+        "execution_target_attainment": execution_target_attainment,
         "shadow_comparison": shadow_comparison,
         "attribution_analysis": attribution_analysis,
         "stable_window_evaluation": stable_window_evaluation,
@@ -570,6 +572,38 @@ def artifact_drilldown(
         family=family_name,
         drilldown=probes,
         note="Compact file probes only; raw artifact payloads are not included.",
+    )
+
+
+def execution_target_attainment(
+    *,
+    context: ToolContext | None = None,
+    outputs_root: str | None = None,
+    trade_date: str | None = None,
+    run_id: str | None = None,
+    cash_weight_drift_tolerance: float | None = None,
+    notional_drift_tolerance: float | None = None,
+) -> dict[str, Any]:
+    context = context or ToolContext()
+    payload = build_execution_target_attainment(
+        outputs_root=outputs_root or "outputs",
+        trade_date=trade_date,
+        run_id=run_id,
+        cash_weight_drift_tolerance=(
+            float(cash_weight_drift_tolerance)
+            if cash_weight_drift_tolerance is not None
+            else 0.02
+        ),
+        notional_drift_tolerance=notional_drift_tolerance,
+    )
+    status = str(payload.pop("status", "UNKNOWN_INSUFFICIENT_ARTIFACTS"))
+    warnings = list(payload.pop("warnings", []) or [])
+    return _response(
+        status,
+        context.db_path,
+        warnings=warnings,
+        diagnostic_status=status,
+        **payload,
     )
 
 

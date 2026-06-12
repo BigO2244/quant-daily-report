@@ -145,6 +145,7 @@ def test_mcp_server_imports_cleanly_and_lists_expected_tools() -> None:
         "artifact_status",
         "operator_daily_summary",
         "artifact_drilldown",
+        "execution_target_attainment",
         "morning_cio_brief",
         "promotion_readiness",
         "anomaly_report",
@@ -534,6 +535,183 @@ def test_artifact_drilldown_omits_raw_large_payloads_and_is_read_only(tmp_path: 
     markdown = capsys.readouterr().out
     assert "# MCP Artifact Drilldown" in markdown
     assert secret not in markdown
+
+
+def _execution_target_attainment_fixture(
+    tmp_path: Path,
+    *,
+    achieved_cash_weight: float = 0.1936,
+    actual_cash: float = 2080.68,
+    expected_cash: float = 551.17,
+    include_rebudget: bool = True,
+) -> Path:
+    outputs = tmp_path / "outputs"
+    trade_date = "2026-06-12"
+    run_id = "2026-06-12T093506-0400_8f010b2"
+    run = outputs / "runs" / run_id
+    order_lifecycle = [
+        {"ticker": "OLD1", "side": "SELL", "quantity": 1, "price": 100.0, "latest_status": "FILLED", "filled_qty": 1},
+        {"ticker": "OLD2", "side": "SELL", "quantity": 2, "price": 100.0, "latest_status": "FILLED", "filled_qty": 2},
+        {"ticker": "OLD3", "side": "SELL", "quantity": 3, "price": 100.0, "latest_status": "FILLED", "filled_qty": 3},
+        {"ticker": "NEW1", "side": "BUY", "quantity": 10, "price": 100.0, "latest_status": "FILLED", "filled_qty": 10},
+        {"ticker": "NEW2", "side": "BUY", "quantity": 5, "price": 150.0, "latest_status": "FILLED", "filled_qty": 5},
+    ]
+    _write_json(
+        run / "execution_payload.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "execution_status": "RECONCILED_SUCCESS",
+            "operator_execution_status": "reconciled_success",
+            "submitted_count": 5,
+            "accepted_count": 5,
+            "rejected_count": 0,
+            "submitted_buy_count": 2,
+            "submitted_sell_count": 3,
+            "cash_target_weight": 0.05,
+            "achieved_cash_weight": achieved_cash_weight,
+            "order_lifecycle": order_lifecycle,
+        },
+    )
+    _write_json(
+        run / "execution_results.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "status": "RECONCILED_SUCCESS",
+            "submitted_count": 5,
+            "accepted_count": 5,
+            "rejected_count": 0,
+            "broker_responses": order_lifecycle,
+        },
+    )
+    _write_json(
+        run / "operator_summary.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "terminal_status": "success",
+            "post_execution_recon_status": "OK_RECONCILED",
+        },
+    )
+    _write_json(
+        run / "audit" / "execution_integrity.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "status": "WARN" if achieved_cash_weight > 0.07 else "OK",
+            "cash_target_weight": 0.05,
+            "achieved_cash_weight": achieved_cash_weight,
+            "cash_drift_warning": achieved_cash_weight > 0.07,
+            "missing_buy_orders": [],
+            "findings": [{"code": "cash_target_drift", "severity": "WARN"}] if achieved_cash_weight > 0.07 else [],
+        },
+    )
+    _write_json(run / "execution_timeline.json", {"run_id": run_id, "trade_date": trade_date, "status": "OK"})
+    _write_json(
+        run / "broker" / f"recon_posttrade_{trade_date}.json",
+        {
+            "trade_date": trade_date,
+            "status": "OK_RECONCILED",
+            "broker_cash": actual_cash,
+            "broker_equity": actual_cash / achieved_cash_weight,
+        },
+    )
+    _write_json(
+        run / "broker" / "posttrade_account_snapshot.json",
+        {
+            "cash": actual_cash,
+            "equity": actual_cash / achieved_cash_weight,
+        },
+    )
+    _write_json(
+        run / "broker" / f"intended_orders_{trade_date}.json",
+        {
+            "report_date": trade_date,
+            "orders_intended": [
+                {"ticker": "NEW1", "side": "BUY", "quantity": 10, "price": 100.0},
+                {"ticker": "NEW2", "side": "BUY", "quantity": 5, "price": 150.0},
+            ],
+        },
+    )
+    if include_rebudget:
+        _write_json(
+            run / "broker" / f"post_sell_rebudget_{trade_date}.json",
+            {
+                "trade_date": trade_date,
+                "status": "REBUILT",
+                "target_cash_weight": 0.05,
+                "pre_sell_cash": 480.0,
+                "post_sell_cash": 3000.0,
+                "estimated_ending_cash": expected_cash,
+                "ending_cash": actual_cash,
+                "final_submitted_buy_notional": 2448.83,
+                "final_buy_orders_submitted": [
+                    {"ticker": "NEW1", "side": "BUY", "quantity": 10, "price": 100.0},
+                    {"ticker": "NEW2", "side": "BUY", "quantity": 5, "price": 150.0},
+                ],
+                "skipped_buy_orders": [],
+            },
+        )
+    return outputs
+
+
+def test_execution_target_attainment_flags_reconciled_underdeployment(tmp_path: Path) -> None:
+    outputs = _execution_target_attainment_fixture(tmp_path)
+
+    payload = call_tool(
+        "execution_target_attainment",
+        {"outputs_root": str(outputs), "trade_date": "2026-06-12"},
+    )
+
+    assert payload["status"] == "WARN_RECONCILED_BUT_UNDERDEPLOYED"
+    assert payload["diagnostic_status"] == "WARN_RECONCILED_BUT_UNDERDEPLOYED"
+    assert payload["reconciliation_passed"] is True
+    assert payload["submitted_count"] == 5
+    assert payload["accepted_count"] == 5
+    assert payload["rejected_count"] == 0
+    assert payload["submitted_buy_count"] == 2
+    assert payload["filled_buy_count"] == 2
+    assert payload["submitted_sell_count"] == 3
+    assert payload["filled_sell_count"] == 3
+    assert payload["target_cash_weight"] == 0.05
+    assert payload["achieved_cash_weight"] == 0.1936
+    assert payload["cash_target_drift"] == 0.1436
+    assert payload["cash_drift_warning"] is True
+    assert payload["expected_post_buy_cash"] == 551.17
+    assert payload["actual_posttrade_cash"] == 2080.68
+    assert payload["reconciled_but_target_miss"] is True
+
+
+def test_execution_target_attainment_ok_when_cash_within_tolerance(tmp_path: Path) -> None:
+    outputs = _execution_target_attainment_fixture(
+        tmp_path,
+        achieved_cash_weight=0.052,
+        actual_cash=552.0,
+        expected_cash=551.17,
+    )
+
+    payload = call_tool(
+        "execution_target_attainment",
+        {"outputs_root": str(outputs), "trade_date": "2026-06-12"},
+    )
+
+    assert payload["status"] == "OK_TARGET_ATTAINED"
+    assert payload["cash_drift_warning"] is False
+    assert payload["reconciled_but_target_miss"] is False
+
+
+def test_execution_target_attainment_unknown_when_required_artifacts_missing(tmp_path: Path) -> None:
+    outputs = _execution_target_attainment_fixture(tmp_path, include_rebudget=False)
+
+    payload = call_tool(
+        "execution_target_attainment",
+        {"outputs_root": str(outputs), "trade_date": "2026-06-12"},
+    )
+
+    assert payload["status"] == "UNKNOWN_INSUFFICIENT_ARTIFACTS"
+    assert "post_sell_rebudget" in payload["insufficient_artifacts"]
+    assert "cash_target_drift" not in payload["warnings"]
 
 
 def test_morning_cio_brief_ok_state_and_cli_formats(tmp_path: Path, capsys) -> None:
