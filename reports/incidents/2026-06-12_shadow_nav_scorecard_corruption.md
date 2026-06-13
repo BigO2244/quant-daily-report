@@ -74,6 +74,39 @@ Required if production artifacts remain corrupt:
 - Recompound NAV forward from the valid anchor.
 - Write a recovery/restatement manifest before replacing any production artifact.
 
+## VM Evidence and Deploy Update — 2026-06-13
+
+VM evidence was preserved before code deployment.
+
+- VM original SHA: `e4abc6044dc2f0bd63c4ce683b3155f19330f051`
+- Deployed fix SHA: `491aef6a70e92ff4724f82445324c0d19ccccca9`
+- Evidence backup root: `outputs/recovery_backups/shadow_nav_incident_20260613T181114Z`
+- Evidence manifest SHA-256: `fe69dddbb3845066ba65fe118a1a9eaf7622974a763a1f0b4d4f98f377b1805c`
+- Preserved files: 240
+
+VM artifact findings:
+
+- `shadow_nav_series.csv` rows: 3,129
+- Date range: `2014-01-02` through `2026-06-12`
+- Last valid CSV row: `2026-06-05`
+- First invalid CSV row: `2026-06-09`
+- Discontinuity: simultaneous model and SPY NAV reset on `2026-06-09`
+- Reset ratios versus `2026-06-05`: Polaris `0.03978521420421215`, Orion `0.010222370872810641`, Lyra `0.010548005695364534`, SPY `0.2547091139110989`
+
+Post-deploy validation:
+
+- VM `HEAD` equals `origin/main` at `491aef6a70e92ff4724f82445324c0d19ccccca9`.
+- VM targeted Shadow tests passed: `46 passed`.
+- Scorecard dry-run now reports `Fresh but corrupt`.
+- Rankings, cumulative returns, and promotion signals are suppressed.
+- Strict health reports `FAIL` with `performance_integrity.reason_code=SHADOW_NAV_CHAIN_RESET`.
+
+Recovery status:
+
+- No production artifact recovery was performed.
+- Recovery did not pass the daily-return validation gate during this deploy task.
+- A future recovery must independently recompute and validate daily returns from dated holdings/weights and price inputs before recompounding NAV from the `2026-06-05` anchor.
+
 ## Governance
 
 - FR-070 remains `DEPLOYED_OBSERVING` and highest immediate operational observation priority.

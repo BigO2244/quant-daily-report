@@ -1,0 +1,67 @@
+{
+  "schema_version": "caerus_vm_deploy_recovery_validation_v1",
+  "run_date": "2026-06-13",
+  "local_main_sha": "491aef6a70e92ff4724f82445324c0d19ccccca9",
+  "origin_main_sha": "491aef6a70e92ff4724f82445324c0d19ccccca9",
+  "vm_original_sha": "e4abc6044dc2f0bd63c4ce683b3155f19330f051",
+  "vm_deployed_sha": "491aef6a70e92ff4724f82445324c0d19ccccca9",
+  "evidence_backup_root": "outputs/recovery_backups/shadow_nav_incident_20260613T181114Z",
+  "evidence_manifest_sha256": "fe69dddbb3845066ba65fe118a1a9eaf7622974a763a1f0b4d4f98f377b1805c",
+  "results": [
+    {
+      "command": "python3 -m pytest <required local suites>",
+      "status": "FAILED_ENVIRONMENT",
+      "detail": "System Python had incompatible x86_64 NumPy on arm64 and missing networkx."
+    },
+    {
+      "command": "./.venv/bin/python3 -m pytest Tests/test_shadow_scorecard_refresh_continuity.py Tests/test_shadow_tracking.py Tests/test_shadow_cio_report.py Tests/test_shadow_scorecard_health.py Tests/test_shadow_backfill_artifacts.py Tests/test_shadow_promotion_readiness.py Tests/test_research_registry_shadow_comparison.py Tests/test_research_registry_strategy_behavior_differentiation.py -q",
+      "status": "PASSED",
+      "detail": "95 passed"
+    },
+    {
+      "command": "./.venv/bin/python3 -m pytest Tests/test_research_registry_mcp_server.py Tests/test_sleeve_manifest.py Tests/test_strategy_registry.py Tests/test_research_registry_promotion_readiness.py -q",
+      "status": "PASSED",
+      "detail": "67 passed"
+    },
+    {
+      "command": "./.venv/bin/python3 -m pytest Tests/test_execution_integrity.py Tests/test_reconciliation.py Tests/test_execution_pipeline_hardening.py Tests/test_execution_payload_audit.py Tests/test_execution_summary.py -q",
+      "status": "PASSED",
+      "detail": "76 passed"
+    },
+    {
+      "command": "./.venv/bin/python3 -m py_compile research/shadow_tracking/run.py scripts/refresh_shadow_scorecard_artifacts.py scripts/send_shadow_cio_report.py scripts/check_shadow_scorecard_health.py",
+      "status": "PASSED",
+      "detail": "No compile errors."
+    },
+    {
+      "command": "./.venv/bin/python3 scripts/research/validate_sleeve_manifest.py",
+      "status": "PASSED",
+      "detail": "error_count=0"
+    },
+    {
+      "command": "git diff --check",
+      "status": "PASSED",
+      "detail": "No whitespace errors."
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 -m pytest Tests/test_shadow_scorecard_refresh_continuity.py Tests/test_shadow_tracking.py Tests/test_shadow_cio_report.py Tests/test_shadow_scorecard_health.py Tests/test_shadow_backfill_artifacts.py -q",
+      "status": "PASSED",
+      "detail": "46 passed, 22 warnings"
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 -m py_compile research/shadow_tracking/run.py scripts/refresh_shadow_scorecard_artifacts.py scripts/send_shadow_cio_report.py scripts/check_shadow_scorecard_health.py",
+      "status": "PASSED",
+      "detail": "No compile errors."
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 scripts/send_shadow_cio_report.py --dry-run",
+      "status": "PASSED_FAIL_CLOSED",
+      "detail": "Reported Fresh but corrupt; suppressed rankings, cumulative returns, and promotion signals."
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-06-05 --baseline-valid-days 0 --expected-date 2026-06-12 --diagnostics-dir /tmp/caerus_shadow_health_check --strict",
+      "status": "FAILED_EXPECTED_CORRUPT_CHAIN",
+      "detail": "Exit code 1; performance_integrity.status=CORRUPT; reason_code=SHADOW_NAV_CHAIN_RESET."
+    }
+  ]
+}

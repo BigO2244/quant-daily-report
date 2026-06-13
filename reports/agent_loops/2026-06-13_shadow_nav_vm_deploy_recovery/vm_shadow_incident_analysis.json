@@ -1,0 +1,463 @@
+{
+  "dated_status": {
+    "2026-06-05": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": null,
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": "OK",
+      "performance_data_status": "OK",
+      "performance_previous_trade_date": "2026-06-04",
+      "performance_status": "OK",
+      "shadow_dir_exists": true
+    },
+    "2026-06-06": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": null,
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": null,
+      "performance_data_status": null,
+      "performance_previous_trade_date": null,
+      "performance_status": null,
+      "shadow_dir_exists": false
+    },
+    "2026-06-08": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": null,
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": "OK",
+      "performance_data_status": "OK",
+      "performance_previous_trade_date": "2026-06-05",
+      "performance_status": "OK",
+      "shadow_dir_exists": true
+    },
+    "2026-06-09": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": null,
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": "OK",
+      "performance_data_status": "OK",
+      "performance_previous_trade_date": "2026-06-08",
+      "performance_status": "OK",
+      "shadow_dir_exists": true
+    },
+    "2026-06-10": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": "OK",
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": "OK",
+      "performance_data_status": "OK",
+      "performance_previous_trade_date": "2026-06-09",
+      "performance_status": "OK",
+      "shadow_dir_exists": true
+    },
+    "2026-06-11": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": "OK",
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": "OK",
+      "performance_data_status": "OK",
+      "performance_previous_trade_date": "2026-06-10",
+      "performance_status": "OK",
+      "shadow_dir_exists": true
+    },
+    "2026-06-12": {
+      "evaluation_status": null,
+      "hydration_shadow_refresh": "OK",
+      "hydration_shadow_refresh_reason": null,
+      "hydration_status": "OK",
+      "performance_data_status": "OK",
+      "performance_previous_trade_date": "2026-06-11",
+      "performance_status": "OK",
+      "shadow_dir_exists": true
+    }
+  },
+  "discontinuities": [
+    {
+      "date": "2026-06-09",
+      "previous_date": "2026-06-05",
+      "ratios": {
+        "caerus_lyra": 0.010548005695364534,
+        "caerus_orion": 0.010222370872810641,
+        "caerus_polaris": 0.03978521420421215,
+        "spy_benchmark": 0.2547091139110989
+      },
+      "reset_slugs": [
+        "caerus_polaris",
+        "caerus_orion",
+        "caerus_lyra",
+        "spy_benchmark"
+      ]
+    }
+  ],
+  "duplicates": [],
+  "first_date": "2014-01-02",
+  "first_invalid_candidate": "2026-06-09",
+  "last_date": "2026-06-12",
+  "last_valid_candidate": "2026-06-08",
+  "missing_fields": [],
+  "nav_path": "/home/brettolson/quant-daily-report/outputs/shadow_candidates/performance/shadow_nav_series.csv",
+  "non_numeric": [],
+  "non_positive": [],
+  "performance_compares": [
+    {
+      "data_status": "OK",
+      "date": "2026-06-04",
+      "performance_status": "OK",
+      "previous_csv_date": "2026-06-03",
+      "reason_code": null,
+      "slugs": {
+        "caerus_lyra": {
+          "csv_expected_from_daily_return": 173.04127437155503,
+          "csv_minus_expected": -14.073834152837037,
+          "csv_nav": 158.967440218718,
+          "csv_prior_nav": 178.31419347245998,
+          "daily_return": -0.0295709444,
+          "performance_nav": 1.9526563502,
+          "performance_previous_nav": 2.0121577553,
+          "previous_nav_minus_csv_prior": -176.30203571715998
+        },
+        "caerus_orion": {
+          "csv_expected_from_daily_return": 171.8248028959667,
+          "csv_minus_expected": -13.662943493115307,
+          "csv_nav": 158.1618594028514,
+          "csv_prior_nav": 177.2797524129368,
+          "daily_return": -0.0307702907,
+          "performance_nav": 1.852026041,
+          "performance_previous_nav": 1.9108226081,
+          "previous_nav_minus_csv_prior": -175.3689298048368
+        },
+        "caerus_polaris": {
+          "csv_expected_from_daily_return": 39.00457623417393,
+          "csv_minus_expected": -2.8852322509732176,
+          "csv_nav": 36.119343983200714,
+          "csv_prior_nav": 39.74951468629778,
+          "daily_return": -0.0187408188,
+          "performance_nav": 1.6198829985,
+          "performance_previous_nav": 1.6508207307,
+          "previous_nav_minus_csv_prior": -38.09869395559778
+        },
+        "spy_benchmark": {
+          "csv_expected_from_daily_return": 5.114749607902914,
+          "csv_minus_expected": -0.1507659556671168,
+          "csv_nav": 4.963983652235798,
+          "csv_prior_nav": 5.095495327479057,
+          "daily_return": 0.0037786867,
+          "performance_nav": 1.3073603603,
+          "performance_previous_nav": 1.3024388519,
+          "previous_nav_minus_csv_prior": -3.793056475579057
+        }
+      }
+    },
+    {
+      "data_status": "OK",
+      "date": "2026-06-05",
+      "performance_status": "OK",
+      "previous_csv_date": "2026-06-04",
+      "reason_code": null,
+      "slugs": {
+        "caerus_lyra": {
+          "csv_expected_from_daily_return": 141.7124016699308,
+          "csv_minus_expected": 28.591641376750374,
+          "csv_nav": 170.3040430466812,
+          "csv_prior_nav": 158.967440218718,
+          "daily_return": -0.1085444826,
+          "performance_nav": 1.740706277,
+          "performance_previous_nav": 1.9526563502,
+          "previous_nav_minus_csv_prior": -157.014783868518
+        },
+        "caerus_orion": {
+          "csv_expected_from_daily_return": 141.09831064682265,
+          "csv_minus_expected": 28.921131625881372,
+          "csv_nav": 170.01944227270403,
+          "csv_prior_nav": 158.1618594028514,
+          "daily_return": -0.1078866221,
+          "performance_nav": 1.6522172074,
+          "performance_previous_nav": 1.852026041,
+          "previous_nav_minus_csv_prior": -156.30983336185142
+        },
+        "caerus_polaris": {
+          "csv_expected_from_daily_return": 32.819865398744724,
+          "csv_minus_expected": 5.4022690000943925,
+          "csv_nav": 38.22213439883912,
+          "csv_prior_nav": 36.119343983200714,
+          "daily_return": -0.0913493497,
+          "performance_nav": 1.47190774,
+          "performance_previous_nav": 1.6198829985,
+          "previous_nav_minus_csv_prior": -34.49946098470071
+        },
+        "spy_benchmark": {
+          "csv_expected_from_daily_return": 4.8358662145473765,
+          "csv_minus_expected": 0.16102904120789852,
+          "csv_nav": 4.996895255755275,
+          "csv_prior_nav": 4.963983652235798,
+          "daily_return": -0.0258093996,
+          "performance_nav": 1.2736181743,
+          "performance_previous_nav": 1.3073603603,
+          "previous_nav_minus_csv_prior": -3.656623291935798
+        }
+      }
+    },
+    {
+      "data_status": "OK",
+      "date": "2026-06-09",
+      "performance_status": "OK",
+      "previous_csv_date": "2026-06-05",
+      "reason_code": null,
+      "slugs": {
+        "caerus_lyra": {
+          "csv_expected_from_daily_return": 164.83740096200688,
+          "csv_minus_expected": -163.04103294600688,
+          "csv_nav": 1.796368016,
+          "csv_prior_nav": 170.3040430466812,
+          "daily_return": -0.0320993089,
+          "performance_nav": 1.796368016,
+          "performance_previous_nav": 1.8559424872,
+          "previous_nav_minus_csv_prior": -168.4481005594812
+        },
+        "caerus_orion": {
+          "csv_expected_from_daily_return": 167.31184329501033,
+          "csv_minus_expected": -165.57384150051033,
+          "csv_nav": 1.7380017945,
+          "csv_prior_nav": 170.01944227270403,
+          "daily_return": -0.0159252315,
+          "performance_nav": 1.7380017945,
+          "performance_previous_nav": 1.7661277884,
+          "previous_nav_minus_csv_prior": -168.253314484304
+        },
+        "caerus_polaris": {
+          "csv_expected_from_daily_return": 37.39468217066221,
+          "csv_minus_expected": -35.87400636626221,
+          "csv_nav": 1.5206758044,
+          "csv_prior_nav": 38.22213439883912,
+          "daily_return": -0.0216485092,
+          "performance_nav": 1.5206758044,
+          "performance_previous_nav": 1.5543246151,
+          "previous_nav_minus_csv_prior": -36.667809783739116
+        },
+        "spy_benchmark": {
+          "csv_expected_from_daily_return": 4.9822268517431825,
+          "csv_minus_expected": -3.7094720888431825,
+          "csv_nav": 1.2727547629,
+          "csv_prior_nav": 4.996895255755275,
+          "daily_return": -0.0029355036,
+          "performance_nav": 1.2727547629,
+          "performance_previous_nav": 1.2765019389,
+          "previous_nav_minus_csv_prior": -3.720393316855275
+        }
+      }
+    },
+    {
+      "data_status": "OK",
+      "date": "2026-06-10",
+      "performance_status": "OK",
+      "previous_csv_date": "2026-06-09",
+      "reason_code": null,
+      "slugs": {
+        "caerus_lyra": {
+          "csv_expected_from_daily_return": 1.7327032536649882,
+          "csv_minus_expected": 3.501177125997401e-11,
+          "csv_nav": 1.7327032537,
+          "csv_prior_nav": 1.796368016,
+          "daily_return": -0.0354408238,
+          "performance_nav": 1.7327032537,
+          "performance_previous_nav": 1.796368016,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "caerus_orion": {
+          "csv_expected_from_daily_return": 1.6822414114951827,
+          "csv_minus_expected": 4.817257703848554e-12,
+          "csv_nav": 1.6822414115,
+          "csv_prior_nav": 1.7380017945,
+          "daily_return": -0.0320830411,
+          "performance_nav": 1.6822414115,
+          "performance_previous_nav": 1.7380017945,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "caerus_polaris": {
+          "csv_expected_from_daily_return": 1.4715566305759957,
+          "csv_minus_expected": 2.4004354060025435e-11,
+          "csv_nav": 1.4715566306,
+          "csv_prior_nav": 1.5206758044,
+          "daily_return": -0.0323008847,
+          "performance_nav": 1.4715566306,
+          "performance_previous_nav": 1.5206758044,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "spy_benchmark": {
+          "csv_expected_from_daily_return": 1.2526890897751584,
+          "csv_minus_expected": 2.4841684265197728e-11,
+          "csv_nav": 1.2526890898,
+          "csv_prior_nav": 1.2727547629,
+          "daily_return": -0.0157655455,
+          "performance_nav": 1.2526890898,
+          "performance_previous_nav": 1.2727547629,
+          "previous_nav_minus_csv_prior": 0.0
+        }
+      }
+    },
+    {
+      "data_status": "OK",
+      "date": "2026-06-11",
+      "performance_status": "OK",
+      "previous_csv_date": "2026-06-10",
+      "reason_code": null,
+      "slugs": {
+        "caerus_lyra": {
+          "csv_expected_from_daily_return": 1.8723372021775424,
+          "csv_minus_expected": 2.2457591342117666e-11,
+          "csv_nav": 1.8723372022,
+          "csv_prior_nav": 1.7327032537,
+          "daily_return": 0.0805873413,
+          "performance_nav": 1.8723372022,
+          "performance_previous_nav": 1.7327032537,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "caerus_orion": {
+          "csv_expected_from_daily_return": 1.8436169390976245,
+          "csv_minus_expected": 2.375433183487985e-12,
+          "csv_nav": 1.8436169391,
+          "csv_prior_nav": 1.6822414115,
+          "daily_return": 0.0959288759,
+          "performance_nav": 1.8436169391,
+          "performance_previous_nav": 1.6822414115,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "caerus_polaris": {
+          "csv_expected_from_daily_return": 1.5915345496830557,
+          "csv_minus_expected": 1.694422380182914e-11,
+          "csv_nav": 1.5915345497,
+          "csv_prior_nav": 1.4715566306,
+          "daily_return": 0.0815312959,
+          "performance_nav": 1.5915345497,
+          "performance_previous_nav": 1.4715566306,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "spy_benchmark": {
+          "csv_expected_from_daily_return": 1.2739808450774628,
+          "csv_minus_expected": 2.2537305355285753e-11,
+          "csv_nav": 1.2739808451,
+          "csv_prior_nav": 1.2526890898,
+          "daily_return": 0.0169968394,
+          "performance_nav": 1.2739808451,
+          "performance_previous_nav": 1.2526890898,
+          "previous_nav_minus_csv_prior": 0.0
+        }
+      }
+    },
+    {
+      "data_status": "OK",
+      "date": "2026-06-12",
+      "performance_status": "OK",
+      "previous_csv_date": "2026-06-11",
+      "reason_code": null,
+      "slugs": {
+        "caerus_lyra": {
+          "csv_expected_from_daily_return": 1.947911694341146,
+          "csv_minus_expected": -4.1145975515632927e-11,
+          "csv_nav": 1.9479116943,
+          "csv_prior_nav": 1.8723372022,
+          "daily_return": 0.0403637187,
+          "performance_nav": 1.9479116943,
+          "performance_previous_nav": 1.8723372022,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "caerus_orion": {
+          "csv_expected_from_daily_return": 1.9168611004756715,
+          "csv_minus_expected": 2.432853918321598e-11,
+          "csv_nav": 1.9168611005,
+          "csv_prior_nav": 1.8436169391,
+          "daily_return": 0.039728514,
+          "performance_nav": 1.9168611005,
+          "performance_previous_nav": 1.8436169391,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "caerus_polaris": {
+          "csv_expected_from_daily_return": 1.6412482403023114,
+          "csv_minus_expected": -2.311484337269576e-12,
+          "csv_nav": 1.6412482403,
+          "csv_prior_nav": 1.5915345497,
+          "daily_return": 0.0312363251,
+          "performance_nav": 1.6412482403,
+          "performance_previous_nav": 1.5915345497,
+          "previous_nav_minus_csv_prior": 0.0
+        },
+        "spy_benchmark": {
+          "csv_expected_from_daily_return": 1.2808708513685219,
+          "csv_minus_expected": 3.1478153417197063e-11,
+          "csv_nav": 1.2808708514,
+          "csv_prior_nav": 1.2739808451,
+          "daily_return": 0.0054082495,
+          "performance_nav": 1.2808708514,
+          "performance_previous_nav": 1.2739808451,
+          "previous_nav_minus_csv_prior": 0.0
+        }
+      }
+    }
+  ],
+  "recent_rows": [
+    {
+      "caerus_lyra": "177.444889289323",
+      "caerus_orion": "175.65590198261424",
+      "caerus_polaris": "39.209648616927915",
+      "date": "2026-06-01",
+      "spy_benchmark": "5.1107056165965545"
+    },
+    {
+      "caerus_lyra": "183.74779094412335",
+      "caerus_orion": "182.90788290340822",
+      "caerus_polaris": "40.50868072591649",
+      "date": "2026-06-02",
+      "spy_benchmark": "5.076313529052461"
+    },
+    {
+      "caerus_lyra": "178.31419347245998",
+      "caerus_orion": "177.2797524129368",
+      "caerus_polaris": "39.74951468629778",
+      "date": "2026-06-03",
+      "spy_benchmark": "5.095495327479057"
+    },
+    {
+      "caerus_lyra": "158.967440218718",
+      "caerus_orion": "158.1618594028514",
+      "caerus_polaris": "36.119343983200714",
+      "date": "2026-06-04",
+      "spy_benchmark": "4.963983652235798"
+    },
+    {
+      "caerus_lyra": "170.3040430466812",
+      "caerus_orion": "170.01944227270403",
+      "caerus_polaris": "38.22213439883912",
+      "date": "2026-06-05",
+      "spy_benchmark": "4.996895255755275"
+    },
+    {
+      "caerus_lyra": "1.796368016",
+      "caerus_orion": "1.7380017945",
+      "caerus_polaris": "1.5206758044",
+      "date": "2026-06-09",
+      "spy_benchmark": "1.2727547629"
+    },
+    {
+      "caerus_lyra": "1.7327032537",
+      "caerus_orion": "1.6822414115",
+      "caerus_polaris": "1.4715566306",
+      "date": "2026-06-10",
+      "spy_benchmark": "1.2526890898"
+    },
+    {
+      "caerus_lyra": "1.8723372022",
+      "caerus_orion": "1.8436169391",
+      "caerus_polaris": "1.5915345497",
+      "date": "2026-06-11",
+      "spy_benchmark": "1.2739808451"
+    },
+    {
+      "caerus_lyra": "1.9479116943",
+      "caerus_orion": "1.9168611005",
+      "caerus_polaris": "1.6412482403",
+      "date": "2026-06-12",
+      "spy_benchmark": "1.2808708514"
+    }
+  ],
+  "row_count": 3129
+}
