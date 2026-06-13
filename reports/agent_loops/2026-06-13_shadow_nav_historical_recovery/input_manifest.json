@@ -1,0 +1,42 @@
+{
+  "audit_date": "2026-06-13",
+  "status": "PRESERVED_AND_INVENTORIED",
+  "vm": {
+    "instance": "alpha-stack-scheduler",
+    "project": "alpha-stack-490922",
+    "zone": "us-central1-a",
+    "repo_path": "/home/brettolson/quant-daily-report",
+    "branch": "main",
+    "head": "75b51c6223921c69b4625b0e31a3abe2a32733f5",
+    "origin_main": "75b51c6223921c69b4625b0e31a3abe2a32733f5",
+    "tracked_worktree": "clean"
+  },
+  "incident_backup": {
+    "path": "outputs/recovery_backups/shadow_nav_incident_20260613T181114Z/",
+    "manifest_path": "outputs/recovery_backups/shadow_nav_incident_20260613T181114Z/evidence_manifest.json",
+    "manifest_sha256": "fe69dddbb3845066ba65fe118a1a9eaf7622974a763a1f0b4d4f98f377b1805c",
+    "original_shadow_nav_series_sha256": "5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f",
+    "original_shadow_summary_sha256": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a"
+  },
+  "active_artifacts_at_audit_start": {
+    "shadow_nav_series_sha256": "5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f",
+    "shadow_summary_sha256": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a",
+    "scorecard_data_health": "Fresh but corrupt",
+    "integrity_reason_code": "SHADOW_NAV_CHAIN_RESET",
+    "offending_date": "2026-06-09"
+  },
+  "input_hashes": {
+    "price_panel_path": "outputs/research/flow_detection_v1/price_panel.parquet",
+    "price_panel_sha256": "a81559032d48a8c504784461afab3f0cff1b74d0d3e7488974693cf03452cb97",
+    "strategy_registry_path": "config/research/strategy_registry.json",
+    "strategy_registry_sha256": "8a30c7ae153d4b87c358e641a4bd61fa7aa9b027d8350ff34a2b040f13db078c"
+  },
+  "aiops": {
+    "spec": "specs/2026-06-13_shadow_nav_historical_recovery.md",
+    "run_id": "20260613_161841_75b51c6",
+    "run_dir": "reports/ai_runs/20260613_161841_75b51c6/",
+    "status": "FAILED",
+    "exit_code": 5,
+    "dispatch_exit_code": 1
+  }
+}

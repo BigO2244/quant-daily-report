@@ -107,6 +107,38 @@ Recovery status:
 - Recovery did not pass the daily-return validation gate during this deploy task.
 - A future recovery must independently recompute and validate daily returns from dated holdings/weights and price inputs before recompounding NAV from the `2026-06-05` anchor.
 
+## Historical Recovery Attempt Update — 2026-06-13
+
+Recovery branch: `codex/shadow-nav-historical-recovery`
+
+Additional VM validation independently reconstructed dated Shadow daily returns from point-in-time price inputs and dated target weights.
+
+Confirmed:
+
+- Active VM HEAD still matched `origin/main` at `75b51c6223921c69b4625b0e31a3abe2a32733f5`.
+- Incident backup remained intact.
+- Evidence manifest SHA-256 remained `fe69dddbb3845066ba65fe118a1a9eaf7622974a763a1f0b4d4f98f377b1805c`.
+- Active corrupt `shadow_nav_series.csv` hash remained `5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f`.
+- Active corrupt `shadow_summary.json` hash remained `86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a`.
+- Dated `shadow_performance.json` daily returns for `2026-06-08` through `2026-06-12` exactly matched reconstructed same-day weighted returns for Polaris, Orion, Lyra, and SPY.
+
+Recovery was not performed.
+
+Blocking findings:
+
+- The active CSV has no `2026-06-08` trading-day row despite complete dated artifacts and price coverage.
+- The active CSV resumes on `2026-06-09` on the local dated-performance NAV scale, producing the known simultaneous reset.
+- Repository code uses the same `weights_as_of_t` label for two distinct conventions:
+  - dated `shadow_performance.json`: same-date target weights applied to previous-close-to-current-close returns;
+  - full historical CSV writer: same-date target weights applied to current-close-to-next-close returns, with backtest turnover-cost treatment for model strategies.
+- The `2026-06-05` CSV row remains the last pre-reset row, but it is not proven as a safe recovery anchor because its ratio versus `2026-06-04` does not match the reconstructed dated same-day convention or the reconstructed forward-return convention within deterministic tolerance.
+
+Operational status:
+
+- Active Shadow cumulative performance remains non-decision-grade.
+- Current code should continue to classify the active series as `Fresh but corrupt` with `SHADOW_NAV_CHAIN_RESET`.
+- Rankings, seven-day, YTD, promotion, and retirement signals should remain suppressed until the owner approves a canonical CSV convention and restatement/recovery path.
+
 ## Governance
 
 - FR-070 remains `DEPLOYED_OBSERVING` and highest immediate operational observation priority.

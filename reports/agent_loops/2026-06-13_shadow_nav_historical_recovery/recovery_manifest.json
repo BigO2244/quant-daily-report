@@ -1,0 +1,44 @@
+{
+  "audit_date": "2026-06-13",
+  "status": "NOT_EXECUTED",
+  "decision": "NEEDS_OPERATOR",
+  "reason": "Active artifact replacement is blocked because the 2026-06-05 anchor and active shadow_nav_series.csv row convention cannot be proven from a single deterministic PIT-safe methodology.",
+  "anchor": {
+    "date": "2026-06-05",
+    "status": "NOT_PROVEN_FOR_RECOVERY",
+    "active_csv_values": {
+      "caerus_polaris": 38.2221343988,
+      "caerus_orion": 170.0194422727,
+      "caerus_lyra": 170.3040430467,
+      "spy_benchmark": 4.9968952558
+    }
+  },
+  "repair_range_considered": {
+    "start": "2026-06-08",
+    "end": "2026-06-12",
+    "first_invalid_active_csv_row": "2026-06-09",
+    "missing_active_csv_trading_row": "2026-06-08"
+  },
+  "validated_daily_returns": {
+    "source": "reports/agent_loops/2026-06-13_shadow_nav_historical_recovery/return_reconstruction.json",
+    "status": "EXACT_MATCH_FOR_DATED_SHADOW_PERFORMANCE",
+    "dates": [
+      "2026-06-08",
+      "2026-06-09",
+      "2026-06-10",
+      "2026-06-11",
+      "2026-06-12"
+    ]
+  },
+  "files_rewritten": [],
+  "staged_artifacts": [],
+  "active_artifacts_replaced": false,
+  "original_artifact_hashes": {
+    "shadow_nav_series.csv": "5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f",
+    "shadow_summary.json": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a"
+  },
+  "rollback": {
+    "required": false,
+    "reason": "No active artifact replacement occurred."
+  }
+}

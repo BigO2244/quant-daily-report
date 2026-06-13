@@ -1,0 +1,48 @@
+{
+  "audit_date": "2026-06-13",
+  "overall_status": "NEEDS_OPERATOR",
+  "commands": [
+    {
+      "command": "python3 -m aiops run-all --spec specs/2026-06-13_shadow_nav_historical_recovery.md --mode HARDEN",
+      "location": "local",
+      "result": "failed as expected for environment; parse and plan passed, dispatch failed",
+      "exit_code": 5,
+      "run_id": "20260613_161841_75b51c6"
+    },
+    {
+      "command": "gcloud compute ssh brettolson@alpha-stack-scheduler --project alpha-stack-490922 --zone us-central1-a --ssh-key-file ~/.ssh/id_ed25519 --command '<VM state/hash/cron inspection>'",
+      "location": "vm",
+      "result": "VM HEAD matched origin/main; tracked tree clean; backup and active artifact hashes matched expected corrupt originals; cron inspected read-only"
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-06-05 --baseline-valid-days 0 --expected-date 2026-06-12 --diagnostics-dir /tmp/caerus_shadow_health_probe --strict",
+      "location": "vm",
+      "result": "failed closed with Fresh but corrupt / SHADOW_NAV_CHAIN_RESET / offending_date=2026-06-09",
+      "exit_code": 1
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 /tmp/caerus_shadow_recovery_probe.py --repo-root . --output /tmp/caerus_shadow_recovery_probe.json",
+      "location": "vm",
+      "result": "completed; dated daily returns matched independent same-day reconstruction exactly; CSV anchor/convention failed recovery gate",
+      "exit_code": 0
+    },
+    {
+      "command": "~/.venvs/quant-daily-report/bin/python3 -m research.shadow_tracking.run --trade-date 2026-06-12 --end-date 2026-06-12 --output-dir /tmp/caerus_shadow_full_rebuild_<timestamp> --price-cache-path outputs/research/flow_detection_v1/price_panel.parquet",
+      "location": "vm",
+      "result": "temporary optional full-history rebuild exceeded practical validation window and was stopped; no active artifacts modified",
+      "exit_code": "interrupted"
+    }
+  ],
+  "validation_gates": {
+    "vm_head_matches_origin_main": true,
+    "vm_tracked_tree_clean": true,
+    "incident_backup_hashes_match": true,
+    "active_artifacts_preserved": true,
+    "dated_daily_returns_reconstruct_exactly": true,
+    "anchor_convention_proven": false,
+    "staged_recovery_built": false,
+    "active_artifacts_replaced": false,
+    "cron_changed": false,
+    "broker_or_trading_invoked": false
+  }
+}
