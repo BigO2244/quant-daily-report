@@ -767,6 +767,7 @@ def build_shadow_performance_payload(
         previous_trade_date=previous_trade_date,
     )
     prior_navs = (prior_payload or {}).get("strategies") or {}
+    prior_reason_code = (prior_payload or {}).get("reason_code")
     returns_by_ticker = compute_returns_for_trade_date(panel=panel, trade_date=trade_date)
     chain_state = prior_chain_state
     if chain_state == "BROKEN_CHAIN":
@@ -823,6 +824,7 @@ def build_shadow_performance_payload(
         "trade_date": trade_date,
         "previous_trade_date": previous_trade_date,
         "status": chain_state,
+        "reason_code": prior_reason_code,
         "data_status": data_status,
         "data_reason": data_reason,
         "return_convention": "weights_as_of_t",
@@ -835,10 +837,19 @@ def load_prior_shadow_performance(*, output_root: Path, previous_trade_date: str
         return "NO_PRIOR", None
     previous_dir = output_root / previous_trade_date
     if not previous_dir.exists():
+        if _nav_series_has_established_history(output_root):
+            return "BROKEN_CHAIN", {
+                "reason_code": "SHADOW_PRIOR_ARTIFACT_MISSING",
+                "missing_prior_date": previous_trade_date,
+            }
         return "NO_PRIOR", None
     path = previous_dir / "shadow_performance.json"
     if not path.exists():
-        return "BROKEN_CHAIN", None
+        return "BROKEN_CHAIN", {
+            "reason_code": "SHADOW_PRIOR_ARTIFACT_MISSING",
+            "missing_prior_date": previous_trade_date,
+            "missing_prior_path": str(path),
+        }
     try:
         payload = json.loads(path.read_text())
     except Exception:
@@ -849,6 +860,19 @@ def load_prior_shadow_performance(*, output_root: Path, previous_trade_date: str
     if any(v.get("nav") is None for v in strategies.values() if isinstance(v, dict)):
         return "BROKEN_CHAIN", None
     return "OK", payload
+
+
+def _nav_series_has_established_history(output_root: Path) -> bool:
+    path = output_root / "performance" / "shadow_nav_series.csv"
+    if not path.exists():
+        return False
+    try:
+        import csv
+
+        with path.open(newline="", encoding="utf-8") as handle:
+            return any(bool(row.get("date")) for row in csv.DictReader(handle))
+    except Exception:
+        return False
 
 
 def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> dict:

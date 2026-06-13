@@ -146,6 +146,35 @@ def test_shadow_scorecard_health_valid_day_regression_fails(tmp_path: Path) -> N
     assert any(check["name"] == "valid_days_advanced" and not check["passed"] for check in payload["checks"])
 
 
+def test_shadow_scorecard_health_simultaneous_scale_reset_is_corrupt(tmp_path: Path) -> None:
+    _write_artifacts(tmp_path)
+    nav_path = tmp_path / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv"
+    nav_path.write_text(
+        "\n".join(
+            [
+                "date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark",
+                "2026-05-11,38.0,170.0,171.0,5.0",
+                "2026-05-12,1.2,1.25,1.3,1.05",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = build_health_payload(
+        repo_root=tmp_path,
+        baseline_date="2026-05-11",
+        baseline_valid_days=16,
+        expected_date="2026-05-12",
+        strict=True,
+    )
+
+    assert payload["status"] == "FAIL"
+    assert payload["performance_integrity"]["status"] == "CORRUPT"
+    assert payload["performance_integrity"]["reason_code"] == "SHADOW_NAV_CHAIN_RESET"
+    assert any(check["name"] == "performance_integrity_valid" and not check["passed"] for check in payload["checks"])
+
+
 def test_shadow_scorecard_health_equal_baseline_ok_when_no_new_date_expected(tmp_path: Path) -> None:
     _write_artifacts(tmp_path, trade_date="2026-05-11", valid_days=16, max_cache_date="2026-05-11")
 

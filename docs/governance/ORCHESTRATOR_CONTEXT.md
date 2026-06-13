@@ -60,8 +60,12 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Current Priority Stack
 
-1. FR-069 research lab modular sleeve architecture, design/Phase A only.
-2. FR-070 execution integrity / target attainment observation.
+1. FR-070 execution integrity / target attainment observation is the highest
+   immediate operational priority until the next live-run validation gates
+   pass or produce a classified failure.
+2. FR-069 research lab modular sleeve architecture is the next major
+   architecture workstream; it remains research-only unless a separately
+   governed implementation phase is approved.
 3. Continued Orion/Lyra evaluation before any retirement decision.
 4. FR-063 remains deprioritized behind FR-069; no retirement decision is
    approved, and any Orion/Lyra disposition belongs inside FR-069.

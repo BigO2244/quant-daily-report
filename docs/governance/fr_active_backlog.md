@@ -105,10 +105,12 @@ procedures are proven.
 
 ## Current Priority Order
 
-1. FR-069 modular sleeve / research-lab architecture aligned to the Caerus
-   Investment Doctrine.
-2. Observe FR-070 target-attainment and post-buy artifact timing through the
-   next live/paper execution gates.
+1. Observe FR-070 target-attainment and post-buy artifact timing through the
+   next live/paper execution gates. This is the highest immediate operational
+   priority until the next run validates the deployed remediation or produces a
+   classified failure.
+2. FR-069 modular sleeve / research-lab architecture aligned to the Caerus
+   Investment Doctrine is the next major architecture workstream.
 3. FR-070 implementation work only if diagnostics produce a classified failure.
 4. Orion/Lyra continued evaluation as part of sleeve architecture, not as a
    standalone immediate retirement decision.
@@ -117,10 +119,10 @@ procedures are proven.
 ## Priority Decision Note — 2026-06-12
 
 - FR-070 remediation is deployed and moves to observation/monitoring. It is not
-  complete until next-run evidence satisfies the validation gates, but it no
-  longer blocks the active roadmap as the primary engineering focus.
-- FR-069 is now the primary active architecture workstream because the
-  Investment Doctrine requires a modular sleeve architecture.
+  complete until next-run evidence satisfies the validation gates and remains
+  the highest immediate operational observation priority.
+- FR-069 is the next major architecture workstream because the Investment
+  Doctrine requires a modular sleeve architecture.
 - Orion and Lyra are likely redundant / highly correlated, but the final
   retain/retire decision remains data-driven.
 - No immediate retirement of Orion or Lyra is approved.

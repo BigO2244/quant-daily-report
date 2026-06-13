@@ -1,0 +1,77 @@
+{
+  "schema_version": "caerus_validation_results_v1",
+  "run_date": "2026-06-13",
+  "branch": "codex/audit-shadow-nav-context",
+  "results": [
+    {
+      "command": "python3 -m aiops run-all --spec specs/2026-06-13_shadow_nav_context_audit.md --mode HARDEN",
+      "status": "FAILED",
+      "detail": "Exit code 5; dispatch failed before run/verify. Artifacts preserved under reports/ai_runs/20260613_111834_34fdd42/."
+    },
+    {
+      "command": "pytest Tests/test_shadow_scorecard_refresh_continuity.py Tests/test_shadow_scorecard_health.py::test_shadow_scorecard_health_simultaneous_scale_reset_is_corrupt Tests/test_shadow_cio_report.py::test_shadow_cio_report_suppresses_windows_and_rankings_when_nav_chain_resets Tests/test_shadow_tracking.py::test_shadow_performance_missing_prior_artifact_in_established_chain_fails_closed Tests/test_shadow_tracking.py::test_shadow_performance_legitimate_inception_still_starts_at_one -q",
+      "status": "PASSED",
+      "detail": "8 passed"
+    },
+    {
+      "command": "python3 -m py_compile scripts/send_shadow_cio_report.py scripts/check_shadow_scorecard_health.py scripts/refresh_shadow_scorecard_artifacts.py research/shadow_tracking/run.py",
+      "status": "PASSED",
+      "detail": "No compile errors."
+    },
+    {
+      "command": "python3 scripts/send_shadow_cio_report.py --dry-run",
+      "status": "PASSED",
+      "detail": "Local report is stale but not corrupt; data through 2026-06-05 with credible local YTD windows."
+    },
+    {
+      "command": "python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-06-04 --baseline-valid-days 0 --expected-date 2026-06-05 --strict",
+      "status": "FAILED_EXPECTED_LOCAL_STALENESS",
+      "detail": "Exit code 1 due local scorecard freshness/shadow_refresh checks; performance_integrity.status=OK and continuity checks passed. Generated local diagnostics were not staged."
+    },
+    {
+      "command": "pytest Tests/test_research_registry_mcp_server.py -k 'execution_target_attainment or lists_expected_tools' -q",
+      "status": "PASSED",
+      "detail": "6 passed, 20 deselected"
+    },
+    {
+      "command": "pytest Tests/test_execution_lifecycle_timeline.py Tests/test_latest_execution_timeline_status.py Tests/test_target_attainment.py -q",
+      "status": "PASSED",
+      "detail": "16 passed"
+    },
+    {
+      "command": "pytest Tests/test_broker_authoritative_phase4.py Tests/test_run_precomputed_alpaca_execution_fast.py -q",
+      "status": "PASSED",
+      "detail": "26 passed"
+    },
+    {
+      "command": "pytest Tests/test_shadow_scorecard_refresh_continuity.py Tests/test_shadow_tracking.py Tests/test_shadow_cio_report.py Tests/test_shadow_scorecard_health.py Tests/test_shadow_backfill_artifacts.py Tests/test_shadow_promotion_readiness.py Tests/test_research_registry_shadow_comparison.py Tests/test_research_registry_strategy_behavior_differentiation.py -q",
+      "status": "PASSED",
+      "detail": "95 passed"
+    },
+    {
+      "command": "pytest Tests/test_research_registry_mcp_server.py Tests/test_sleeve_manifest.py Tests/test_strategy_registry.py Tests/test_research_registry_promotion_readiness.py -q",
+      "status": "PASSED",
+      "detail": "67 passed"
+    },
+    {
+      "command": "pytest Tests/test_execution_integrity.py Tests/test_reconciliation.py Tests/test_execution_pipeline_hardening.py Tests/test_execution_payload_audit.py Tests/test_execution_summary.py -q",
+      "status": "PASSED",
+      "detail": "76 passed"
+    },
+    {
+      "command": "python3 scripts/research/validate_sleeve_manifest.py",
+      "status": "PASSED",
+      "detail": "error_count=0"
+    },
+    {
+      "command": "python3 -m py_compile research_registry/sleeves/manifest.py scripts/research/validate_sleeve_manifest.py research_registry/mcp_server/tools.py research_registry/mcp_server/schemas.py core/execution_target_attainment.py core/execution_lifecycle_timeline.py scripts/run_precomputed_alpaca_execution.py",
+      "status": "PASSED",
+      "detail": "No compile errors."
+    },
+    {
+      "command": "git diff --check",
+      "status": "PASSED",
+      "detail": "No whitespace errors."
+    }
+  ]
+}

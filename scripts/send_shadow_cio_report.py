@@ -76,6 +76,14 @@ class PeriodReturn:
     end_date: str | None
 
 
+@dataclass(frozen=True)
+class PerformanceIntegrity:
+    status: str
+    reason_code: str | None
+    detail: str
+    offending_date: str | None = None
+
+
 def _load_dotenv(repo_root: Path) -> None:
     env_path = repo_root / ".env"
     if not env_path.exists():
@@ -137,6 +145,46 @@ def _load_nav_history(path: Path) -> dict[str, list[tuple[str, float]]]:
     except Exception:
         return {slug: [] for slug in MODEL_ORDER}
     return history
+
+
+def assess_nav_history_integrity(nav_history: dict[str, list[tuple[str, float]]]) -> PerformanceIntegrity:
+    populated = {slug: points for slug, points in nav_history.items() if points}
+    if not populated:
+        return PerformanceIntegrity("INSUFFICIENT_EVIDENCE", "SHADOW_PERFORMANCE_SUPPRESSED", "shadow_nav_series.csv has no usable rows")
+    missing = [slug for slug in MODEL_ORDER if not nav_history.get(slug)]
+    if missing:
+        return PerformanceIntegrity("CORRUPT", "SHADOW_NAV_SCHEMA_MISMATCH", f"missing NAV history for: {', '.join(missing)}")
+    common_dates = sorted(set.intersection(*(set(date for date, _ in nav_history[slug]) for slug in MODEL_ORDER)))
+    if len(common_dates) < 2:
+        return PerformanceIntegrity("INSUFFICIENT_EVIDENCE", "SHADOW_PERFORMANCE_SUPPRESSED", "fewer than two common NAV dates")
+    values = {slug: dict(nav_history[slug]) for slug in MODEL_ORDER}
+    for previous_date, current_date in zip(common_dates, common_dates[1:]):
+        reset_slugs: list[str] = []
+        mismatch_slugs: list[str] = []
+        for slug in MODEL_ORDER:
+            prior = values[slug].get(previous_date)
+            current = values[slug].get(current_date)
+            if prior is None or current is None or prior <= 0 or current <= 0:
+                mismatch_slugs.append(slug)
+                continue
+            ratio = current / prior
+            if ratio < 0.5 or ratio > 1.5:
+                reset_slugs.append(slug)
+        if mismatch_slugs:
+            return PerformanceIntegrity(
+                "CORRUPT",
+                "SHADOW_NAV_SCHEMA_MISMATCH",
+                f"non-positive or missing NAV value on {current_date}: {', '.join(mismatch_slugs)}",
+                current_date,
+            )
+        if len(reset_slugs) >= 2:
+            return PerformanceIntegrity(
+                "CORRUPT",
+                "SHADOW_NAV_CHAIN_RESET",
+                f"simultaneous implausible NAV ratio on {current_date}: {', '.join(reset_slugs)}",
+                current_date,
+            )
+    return PerformanceIntegrity("OK", None, "shadow_nav_series.csv continuity checks passed")
 
 
 def _latest_valid_shadow_performance_date(nav_history: dict[str, list[tuple[str, float]]]) -> str | None:
@@ -251,6 +299,7 @@ def _build_model_snapshots(
     evaluation: dict[str, Any] | None,
     nav_history: dict[str, list[tuple[str, float]]],
     as_of_date: str,
+    suppress_performance: bool = False,
 ) -> list[ModelSnapshot]:
     strategies = _strategy_payloads(evaluation)
     period_by_slug: dict[str, PeriodReturn] = {}
@@ -288,15 +337,15 @@ def _build_model_snapshots(
             ModelSnapshot(
                 slug=slug,
                 name=DISPLAY_NAMES[slug],
-                daily_return=daily_return,
-                seven_day_return=seven_day.value,
+                daily_return=None if suppress_performance else daily_return,
+                seven_day_return=None if suppress_performance else seven_day.value,
                 seven_day_start_date=seven_day.start_date,
                 seven_day_end_date=seven_day.end_date,
-                period_return=period_return,
+                period_return=None if suppress_performance else period_return,
                 period_label=period_label,
                 period_start_date=period_start_date,
                 period_end_date=period_end_date,
-                excess_vs_spy_period=excess_vs_spy,
+                excess_vs_spy_period=None if suppress_performance else excess_vs_spy,
                 valid_day_count=_as_int(payload.get("rolling_count_of_valid_days")),
                 data_status=payload.get("data_status"),
                 data_reason=payload.get("data_reason"),
@@ -368,7 +417,13 @@ def _promotion_signal(
     return signal, reason
 
 
-def _takeaway(models: list[ModelSnapshot]) -> str:
+def _takeaway(models: list[ModelSnapshot], *, data_health: str, data_health_reason: str) -> str:
+    if "corrupt" in data_health.lower():
+        return (
+            "Shadow performance is unavailable because of artifact corruption. "
+            f"Reason: {data_health_reason}. Do not use rankings, promotion signals, "
+            "YTD returns, or seven-day returns until the NAV chain is repaired."
+        )
     polaris = _model_by_slug(models, BASELINE_SLUG)
     spy = _model_by_slug(models, BENCHMARK_SLUG)
     ranked_candidates = [model for model in _rankable_models(models) if model.slug != BENCHMARK_SLUG]
@@ -480,23 +535,29 @@ def render_email_body(
         )
 
     lines.extend(["", "=== RANKING ===", ""])
-    rank = 1
-    for model in ranked_models:
-        lines.append(f"{rank}. {model.name} -> {_fmt_pct(model.period_return)} {model.period_label}")
-        rank += 1
-    if spy:
-        lines.append(f"SPY -> {_fmt_pct(spy.period_return)} {spy.period_label}")
+    performance_corrupt = "corrupt" in data_health.lower()
+    if performance_corrupt:
+        lines.append("N/A - SHADOW_PERFORMANCE_SUPPRESSED")
+    else:
+        rank = 1
+        for model in ranked_models:
+            lines.append(f"{rank}. {model.name} -> {_fmt_pct(model.period_return)} {model.period_label}")
+            rank += 1
+        if spy:
+            lines.append(f"SPY -> {_fmt_pct(spy.period_return)} {spy.period_label}")
 
     lines.extend(["", "=== PROMOTION SIGNAL ===", ""])
-    if polaris:
+    if performance_corrupt:
+        lines.append("- N/A: SHADOW_PERFORMANCE_SUPPRESSED - performance is unavailable because of artifact corruption.")
+    elif polaris:
         signal, reason = _promotion_signal(polaris, polaris, spy, data_health=data_health, data_health_reason=data_health_reason)
         lines.append(f"- Polaris: {signal} - {reason}")
-    for slug in PROMOTION_SLUGS:
-        model = _model_by_slug(models, slug)
-        if not model:
-            continue
-        signal, reason = _promotion_signal(model, polaris, spy, data_health=data_health, data_health_reason=data_health_reason)
-        lines.append(f"- {model.name}: {signal} - {reason}")
+        for slug in PROMOTION_SLUGS:
+            model = _model_by_slug(models, slug)
+            if not model:
+                continue
+            signal, reason = _promotion_signal(model, polaris, spy, data_health=data_health, data_health_reason=data_health_reason)
+            lines.append(f"- {model.name}: {signal} - {reason}")
 
     lines.extend(
         [
@@ -519,7 +580,7 @@ def render_email_body(
             "",
             "=== CIO TAKEAWAY ===",
             "",
-            _takeaway(models),
+            _takeaway(models, data_health=data_health, data_health_reason=data_health_reason),
         ]
     )
     return "\n".join(lines)
@@ -540,6 +601,7 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
     )
     nav_history = _load_nav_history(repo_root / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv")
     as_of_date = _latest_valid_shadow_performance_date(nav_history) or trade_date
+    integrity = assess_nav_history_integrity(nav_history)
     hydration_status = _read_json(repo_root / "outputs" / "price_hydration" / trade_date / "status.json")
     data_health, data_health_reason = _collect_data_reasons(
         evaluation=evaluation,
@@ -549,10 +611,15 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
         trade_date=trade_date,
         as_of_date=as_of_date,
     )
+    suppress_performance = integrity.status == "CORRUPT"
+    if suppress_performance:
+        data_health = "Fresh but corrupt" if data_health == "Fresh" else f"{data_health} and corrupt"
+        data_health_reason = f"{integrity.reason_code}: {integrity.detail}"
     models = _build_model_snapshots(
         evaluation=evaluation,
         nav_history=nav_history,
         as_of_date=as_of_date,
+        suppress_performance=suppress_performance,
     )
     subject = f"Caerus Model Scorecard \u2014 {trade_date}"
     body = render_email_body(

@@ -1,0 +1,1428 @@
+{
+  "affected_date_range": "suspected through 2026-06-12; local artifact range recorded below",
+  "aiops_run_id": "20260613_111834_34fdd42",
+  "aiops_status": "FAILED_DISPATCH_EXIT_1",
+  "backup_root": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup",
+  "created_at_utc": "2026-06-13T15:19:27Z",
+  "entries": [
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/performance/shadow_nav_series.csv",
+      "byte_size": 254090,
+      "mtime_utc": "2026-06-09T00:10:09.624451Z",
+      "original_path": "outputs/shadow_candidates/performance/shadow_nav_series.csv",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e19066a3c2f6814f7883cd29dadbf02a566789f7428479de683e2023d8e800f1"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/performance/shadow_summary.json",
+      "byte_size": 4745,
+      "mtime_utc": "2026-06-09T00:10:09.625185Z",
+      "original_path": "outputs/shadow_candidates/performance/shadow_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/latest/comparison.json",
+      "byte_size": 11788,
+      "mtime_utc": "2026-06-09T00:09:14.214803Z",
+      "original_path": "outputs/shadow_candidates/latest/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d658d7d19de9a834c677d175e8af8fa1427e01b0dee79d9b0a6f20c6397aca9e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/latest/comparison.md",
+      "byte_size": 3822,
+      "mtime_utc": "2026-06-09T00:09:14.214727Z",
+      "original_path": "outputs/shadow_candidates/latest/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "c190aea5eba886f7d738c257eba298ebebe1b3b469feb1080ae2489314660ea7"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/latest/delta.json",
+      "byte_size": 2123,
+      "mtime_utc": "2026-06-09T00:09:14.214921Z",
+      "original_path": "outputs/shadow_candidates/latest/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "3d5f45b5329bdf32b8dfbf580f75fc84f88330fe902e6f8c9140eeccd8259614"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/latest/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:09:14.215054Z",
+      "original_path": "outputs/shadow_candidates/latest/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "626959e35a31bb41569d418bc7da70b2b594694df8b3080d41dd1783d899d23e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/latest/shadow_evaluation.json",
+      "byte_size": 2298,
+      "mtime_utc": "2026-06-09T00:09:14.214991Z",
+      "original_path": "outputs/shadow_candidates/latest/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "8c57bbfa83472e9e40a1a7d03618b6f337f1ab50581784e2cb533c915e529aa1"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/caerus_lyra.json",
+      "byte_size": 4304,
+      "mtime_utc": "2026-06-09T00:10:09.469113Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/caerus_lyra.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "f4ca7582c85c1ad01aad0d5fd1c3cdc2293994b5786cbcabc37c9f9ad5fd249e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/caerus_orion.json",
+      "byte_size": 4338,
+      "mtime_utc": "2026-06-09T00:10:03.999990Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/caerus_orion.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "dec45bf924d30939f1eb90a77298eb6c8394849f5ec7d12fdc44768f1420398c"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/caerus_polaris.json",
+      "byte_size": 5247,
+      "mtime_utc": "2026-06-09T00:09:53.102716Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/caerus_polaris.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0ceb0b33cc1b4e30625b72c9635d3089f5991b8c5d199b9016a5e9f3c4d132fb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/comparison.json",
+      "byte_size": 11789,
+      "mtime_utc": "2026-06-09T00:10:09.474098Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a414910c2877958a7ecdd7c57ff1d0710bfe66c1c12d970f384e07e221818927"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/comparison.md",
+      "byte_size": 3823,
+      "mtime_utc": "2026-06-09T00:10:09.550799Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "aa851f832701f5abc19b87f92e12702262278ada1d6900e3422b41ed52ee84bb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/delta.json",
+      "byte_size": 2123,
+      "mtime_utc": "2026-06-09T00:10:09.470959Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "3d5f45b5329bdf32b8dfbf580f75fc84f88330fe902e6f8c9140eeccd8259614"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:10:09.606575Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "626959e35a31bb41569d418bc7da70b2b594694df8b3080d41dd1783d899d23e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/longitudinal_metrics.json",
+      "byte_size": 5212,
+      "mtime_utc": "2026-06-09T00:10:09.547189Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/longitudinal_metrics.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "04f842e15ac2df253aebb3d04af2ea722e247c5b9c515bb69f7487181e9b0e97"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/lyra/attribution.json",
+      "byte_size": 1463,
+      "mtime_utc": "2026-06-09T00:10:09.606006Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/lyra/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "fe49d3f48e86adbbbe6918190c1f420d5277c02a574211b75bd383f7a2c1aaa8"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/lyra/decision_trace.json",
+      "byte_size": 1532,
+      "mtime_utc": "2026-06-09T00:10:09.605773Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/lyra/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a950d2f85b2d3814493380ac08adb2ea79855aeb609ac44a90dde9b7ecba4509"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/lyra/regime_performance.json",
+      "byte_size": 442,
+      "mtime_utc": "2026-06-09T00:10:09.606390Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/lyra/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "76a0306a88172847fef7634e0f0271111985b72c2c77c91331c33902e6c61d7c"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/lyra/stability_analysis.json",
+      "byte_size": 709,
+      "mtime_utc": "2026-06-09T00:10:09.606230Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/lyra/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "42903bb1c3114a9abe24cc1617531c8afd74f570fccc238112adefb9e3939ca5"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/orion/attribution.json",
+      "byte_size": 1465,
+      "mtime_utc": "2026-06-09T00:10:09.599326Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/orion/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "9d904364b07d2f93e2e1110c5fd6d40340d85f997b0573054b3c4073e74afba5"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/orion/decision_trace.json",
+      "byte_size": 1535,
+      "mtime_utc": "2026-06-09T00:10:09.599120Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/orion/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "12bce987c949088fdef0db2e186dd7b6b2bf1423542a00a4305188e941b643d3"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/orion/regime_performance.json",
+      "byte_size": 443,
+      "mtime_utc": "2026-06-09T00:10:09.599607Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/orion/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "9265bc3f28a1cdbf9d8a90f181d1fedb0e8bf2a09ede1b47c15456d4abe32d39"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/orion/stability_analysis.json",
+      "byte_size": 712,
+      "mtime_utc": "2026-06-09T00:10:09.599475Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/orion/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0857382f03780834f46611412d2fb2091decf0834b63b4169dbfb3b68effab0d"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/polaris/attribution.json",
+      "byte_size": 2456,
+      "mtime_utc": "2026-06-09T00:10:09.591834Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/polaris/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "dbaca79cab00ae9e5e9a0e017de27733ed36d854e0c9defecb40b3d954490f0e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/polaris/decision_trace.json",
+      "byte_size": 2510,
+      "mtime_utc": "2026-06-09T00:10:09.591239Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/polaris/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d57229219f41aaec73f6a1c0ec688eec28deb38238153b453799bdf72a1e1a71"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/polaris/regime_performance.json",
+      "byte_size": 445,
+      "mtime_utc": "2026-06-09T00:10:09.592333Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/polaris/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "25795d263eb46a171a1d3c7dd09570077dbf58ac952544725f8d79ee65a007bd"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/polaris/stability_analysis.json",
+      "byte_size": 715,
+      "mtime_utc": "2026-06-09T00:10:09.592095Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/polaris/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "530960f3b5d0f3848988a391e5864656c0441a2c9c27dc15ba1457ed65f462f0"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/promotion_readiness.json",
+      "byte_size": 1827,
+      "mtime_utc": "2026-06-09T00:10:09.547390Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/promotion_readiness.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a1258dca4e0449107ae2f124ad5641350f15df68885b95ed56d7dd7488c3292b"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/promotion_readiness.md",
+      "byte_size": 764,
+      "mtime_utc": "2026-06-09T00:10:09.547452Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/promotion_readiness.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "04bef36acb29d08bcd3f4af57a6758d3f92e11cd0f67aeb1fd286d97e91b41d4"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/shadow_evaluation.json",
+      "byte_size": 2298,
+      "mtime_utc": "2026-06-09T00:10:09.528860Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "8c57bbfa83472e9e40a1a7d03618b6f337f1ab50581784e2cb533c915e529aa1"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/shadow_performance.json",
+      "byte_size": 969,
+      "mtime_utc": "2026-06-09T00:10:09.512386Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/shadow_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "7f10b64f65f7b5a0581f422f402c3e1a451a972e7cd4d48d0081eb74cc0e7c9e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/stability_surface.json",
+      "byte_size": 1656,
+      "mtime_utc": "2026-06-09T00:10:09.547304Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/stability_surface.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "6dbf6b1f022e1ba0cc2f3bf7997226c543a24da0a4ee4aaf1709915a0987f5cc"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-08/summary.json",
+      "byte_size": 11789,
+      "mtime_utc": "2026-06-09T00:10:09.473791Z",
+      "original_path": "outputs/shadow_candidates/2026-06-08/summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a414910c2877958a7ecdd7c57ff1d0710bfe66c1c12d970f384e07e221818927"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/caerus_lyra.json",
+      "byte_size": 3500,
+      "mtime_utc": "2026-06-09T00:09:13.201318Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/caerus_lyra.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "6c959d61d4f613b892485a6d60ee14fa8dd8c71e495d39c1491f4ceaaad95a4a"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/caerus_orion.json",
+      "byte_size": 3513,
+      "mtime_utc": "2026-06-09T00:09:13.063019Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/caerus_orion.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "60fef0c20c20a70b9e2fd3b1111b368bee4b01fdc03887a53578633902aa3d5f"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/caerus_polaris.json",
+      "byte_size": 4427,
+      "mtime_utc": "2026-06-09T00:09:12.806431Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/caerus_polaris.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "bcb1d70a49fd3119052483ed29a58c10b43df27d7358d9b3a6721988d0c22906"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/comparison.json",
+      "byte_size": 11784,
+      "mtime_utc": "2026-06-09T00:09:13.219115Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a6bc9926c1b9ce3a470c0d897f7f538850b5975f88077d71002a37d380932230"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/comparison.md",
+      "byte_size": 3830,
+      "mtime_utc": "2026-06-09T00:09:13.233960Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "6d6da10a942d3ef9e68ba02f5c05f0d844fc5b2078462a6a90d99b39adf516a7"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/delta.json",
+      "byte_size": 2123,
+      "mtime_utc": "2026-06-09T00:09:13.218502Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "2f67765c5829547c377137b234cc77985bbe6ea7446fb3021c75ad80eb9c3ca3"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:09:13.270160Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "7f238b3de7014aad0443c9ae11e7b4b6d557fb742b752629ce522ea6dde1fb45"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/lyra/attribution.json",
+      "byte_size": 1475,
+      "mtime_utc": "2026-06-09T00:09:13.269934Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/lyra/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "588a404d5c538a5e87271a73f76824a1deb25040307beba05587f9888a659527"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/lyra/decision_trace.json",
+      "byte_size": 1532,
+      "mtime_utc": "2026-06-09T00:09:13.269845Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/lyra/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e3826d0e83db472e3ef293daa2eada8b1a12f50166b88a0e1f7255f6411bf925"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/lyra/regime_performance.json",
+      "byte_size": 433,
+      "mtime_utc": "2026-06-09T00:09:13.270076Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/lyra/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "95c3c5d12fba2968845da3d9e108f4d63039ac5a14917805a8d58c421f00d1ac"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/lyra/stability_analysis.json",
+      "byte_size": 711,
+      "mtime_utc": "2026-06-09T00:09:13.270005Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/lyra/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "eaaadde2a7d6bb6e96129aa86bc827634bbbbd93bc376977bef7ebef17b67312"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/orion/attribution.json",
+      "byte_size": 1477,
+      "mtime_utc": "2026-06-09T00:09:13.263481Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/orion/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "384326bd1fc71bc97760a67f4ade3f5b60dcb7f561b852573bebaa8786343581"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/orion/decision_trace.json",
+      "byte_size": 1534,
+      "mtime_utc": "2026-06-09T00:09:13.263388Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/orion/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "972fed08cf7286598643e4427fd266725fc9704ae4bf6fa03baee2de39cb7f43"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/orion/regime_performance.json",
+      "byte_size": 434,
+      "mtime_utc": "2026-06-09T00:09:13.263628Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/orion/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "c93d7a04f16578982a260faab60196e77c81c4d527b1d22af785a008e6afef10"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/orion/stability_analysis.json",
+      "byte_size": 712,
+      "mtime_utc": "2026-06-09T00:09:13.263554Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/orion/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "69416c4bcfe9b2be57f5ca8a5b90bd68c3c4a85b28375b3b9eecac8de1e3d393"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/polaris/attribution.json",
+      "byte_size": 2481,
+      "mtime_utc": "2026-06-09T00:09:13.257538Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/polaris/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4f4873824bb5d2f4223f238e67c894f14b817737685f1a775cff6833c3ddcd99"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/polaris/decision_trace.json",
+      "byte_size": 2508,
+      "mtime_utc": "2026-06-09T00:09:13.257407Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/polaris/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "b86a75e24fe7fa4d83743a797d3d558eae48064c2575b0ee6cb1a4575adea9b4"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/polaris/regime_performance.json",
+      "byte_size": 436,
+      "mtime_utc": "2026-06-09T00:09:13.257697Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/polaris/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "001b789ae1cf1795f2a3e1a013e872a7f034c28a6c44f861549ac2370fd8dd1d"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/polaris/stability_analysis.json",
+      "byte_size": 716,
+      "mtime_utc": "2026-06-09T00:09:13.257617Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/polaris/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e6aabc809a3ad8e63d9e0339b68d918adfe0d9f35d2498310c4e72711dd3b5bb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/shadow_evaluation.json",
+      "byte_size": 2300,
+      "mtime_utc": "2026-06-09T00:09:13.230633Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4712f99037dcf636ae25a56da6639c9af37fb23de1e465127788df6609b535bb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/shadow_performance.json",
+      "byte_size": 974,
+      "mtime_utc": "2026-06-09T00:09:13.219191Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/shadow_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "2c8d2225bf1bb982ddfde564c3315fc822905bc6781acc6ec0cc40125563f0be"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-05/summary.json",
+      "byte_size": 11784,
+      "mtime_utc": "2026-06-09T00:09:13.218827Z",
+      "original_path": "outputs/shadow_candidates/2026-06-05/summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a6bc9926c1b9ce3a470c0d897f7f538850b5975f88077d71002a37d380932230"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/caerus_lyra.json",
+      "byte_size": 3500,
+      "mtime_utc": "2026-06-09T00:09:12.300758Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/caerus_lyra.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e682f5aeffb5a805ed8a2ca19156dd19d2c04bfc465276fca17e447d0eb92f2c"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/caerus_orion.json",
+      "byte_size": 3514,
+      "mtime_utc": "2026-06-09T00:09:12.143706Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/caerus_orion.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "9a4601f43d10aaddf4f7bf6bb02d4bc99f55bcaecab389cfcffee90b493a2824"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/caerus_polaris.json",
+      "byte_size": 4429,
+      "mtime_utc": "2026-06-09T00:09:11.864860Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/caerus_polaris.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e82f7f8d81646df3fe09f947f97aecb95397b8794f77f6ce5d0f80e15fe1f2ce"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/comparison.json",
+      "byte_size": 11787,
+      "mtime_utc": "2026-06-09T00:09:12.318768Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0c1be9d9f34d5732a53bf088c1d94141ac047c341ba2e24012b02ceecf06c340"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/comparison.md",
+      "byte_size": 3827,
+      "mtime_utc": "2026-06-09T00:09:12.335870Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e5f850346bf9280258bff98c57d1839729ecf550824fb4bea5bf92541a895d11"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/delta.json",
+      "byte_size": 2123,
+      "mtime_utc": "2026-06-09T00:09:12.318136Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "100b0f6d8f28817a70807c0cd55c420f3cf521efcc7a6d5fa75b9f0a698924ee"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:09:12.387031Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e78918e4556699143cab774d99f9a1005b6129a3412accf29d79a6eda677785a"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/lyra/attribution.json",
+      "byte_size": 1472,
+      "mtime_utc": "2026-06-09T00:09:12.386784Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/lyra/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e767704a915073f92067b13b4c5557e3029d9f65d956504ef9e41b6ea3f9e144"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/lyra/decision_trace.json",
+      "byte_size": 1532,
+      "mtime_utc": "2026-06-09T00:09:12.386675Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/lyra/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "fe3b784588e65220461353e2be9b65769350b6d4ce6f54c18b0d2b2b9f8f5131"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/lyra/regime_performance.json",
+      "byte_size": 433,
+      "mtime_utc": "2026-06-09T00:09:12.386933Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/lyra/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "2f58407244e938df481e08e98505e728d82628d56d24ad7c161cd0de64c1c012"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/lyra/stability_analysis.json",
+      "byte_size": 710,
+      "mtime_utc": "2026-06-09T00:09:12.386859Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/lyra/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a8e8b72d762cfbbf12b386ce25c21a4206d04fffca53af3e1c0218d6c271acca"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/orion/attribution.json",
+      "byte_size": 1474,
+      "mtime_utc": "2026-06-09T00:09:12.375142Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/orion/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "155450dff5ac93706582c4e07c36f075209c96142e1bd5a3b8b1f2716832e981"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/orion/decision_trace.json",
+      "byte_size": 1535,
+      "mtime_utc": "2026-06-09T00:09:12.375027Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/orion/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "451fb33b6ee2cc892618b8c6de7d904ea54aeb6e175743b828549512717ff0dd"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/orion/regime_performance.json",
+      "byte_size": 434,
+      "mtime_utc": "2026-06-09T00:09:12.375292Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/orion/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "b8f268fef3286bb38023198d98c7df5795398958a148d4e6f2b88c539e6d6729"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/orion/stability_analysis.json",
+      "byte_size": 712,
+      "mtime_utc": "2026-06-09T00:09:12.375221Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/orion/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "605259e6be643ad9247fe8a0e8e3852692e51d33edf2a192658c948a541d4867"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/polaris/attribution.json",
+      "byte_size": 2452,
+      "mtime_utc": "2026-06-09T00:09:12.364267Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/polaris/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "50f953a1276bf41a731b0a7f27a85a6aa56ea65813d75528032f6b37dbfe0501"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/polaris/decision_trace.json",
+      "byte_size": 2510,
+      "mtime_utc": "2026-06-09T00:09:12.364138Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/polaris/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "5983edc16477de91165e5a1905375c726003d2e260b6d38955c7f5804e8ee376"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/polaris/regime_performance.json",
+      "byte_size": 436,
+      "mtime_utc": "2026-06-09T00:09:12.364446Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/polaris/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "2a6cb684b5b8cf8a33eac31467dc99962e6559b5d23b11a16ffad591403154b6"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/polaris/stability_analysis.json",
+      "byte_size": 715,
+      "mtime_utc": "2026-06-09T00:09:12.364376Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/polaris/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "671031be03d7ef36f4e162283931bc39a0675c7a9986533b20d2d51e537c600b"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/shadow_evaluation.json",
+      "byte_size": 2301,
+      "mtime_utc": "2026-06-09T00:09:12.332080Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e85d2adc6aa43ed42d3fa720563bde6ba6e63af6796876823a92803ca19e3bde"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/shadow_performance.json",
+      "byte_size": 972,
+      "mtime_utc": "2026-06-09T00:09:12.318848Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/shadow_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4814d6dd575671820d1e7eb3a255bf0545c3ca47409eb5bca015aa66e4b1aa1f"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-04/summary.json",
+      "byte_size": 11787,
+      "mtime_utc": "2026-06-09T00:09:12.318474Z",
+      "original_path": "outputs/shadow_candidates/2026-06-04/summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0c1be9d9f34d5732a53bf088c1d94141ac047c341ba2e24012b02ceecf06c340"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/caerus_lyra.json",
+      "byte_size": 3500,
+      "mtime_utc": "2026-06-09T00:09:11.327397Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/caerus_lyra.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d97a83d485ce6224f28cee80cb48b15d89fb0810c84ef0f00880355d4548cb72"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/caerus_orion.json",
+      "byte_size": 3514,
+      "mtime_utc": "2026-06-09T00:09:11.171490Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/caerus_orion.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "7ccc1e1a375113471de1c8cae923a5b841f5b0da9f7d36512d35490a7698a2ff"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/caerus_polaris.json",
+      "byte_size": 4429,
+      "mtime_utc": "2026-06-09T00:09:10.906258Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/caerus_polaris.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a5f97ffc38f676ed969cb898436ab126314b8d2b4ac36abfcdff0c3a8d80de6a"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/comparison.json",
+      "byte_size": 11787,
+      "mtime_utc": "2026-06-09T00:09:11.345585Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "ab4bd4e07c5c9fedf58aeeb87b8b589bd6a136e3a8f94a047dd74120af7bbe63"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/comparison.md",
+      "byte_size": 3822,
+      "mtime_utc": "2026-06-09T00:09:11.363178Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "f30d23e307b8f5fc99d97973d26ec3ce86741ab3c339036e17ed4698b5963ede"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/delta.json",
+      "byte_size": 2123,
+      "mtime_utc": "2026-06-09T00:09:11.344975Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "3540a7735277c69216c668fd11b2a9c00cc4f89f6a4ac953331276e5be3364a5"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:09:11.399217Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "b126cd9c652f6c6b73a6d7174c0cf60ab6e1913fa86c160f04e9ec34cf48f81e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/lyra/attribution.json",
+      "byte_size": 1464,
+      "mtime_utc": "2026-06-09T00:09:11.398965Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/lyra/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d7c18ec4ea8c3f7be6e5d4dbe9e4aa223ea1d5506210332d55f5c8fbeea7e434"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/lyra/decision_trace.json",
+      "byte_size": 1532,
+      "mtime_utc": "2026-06-09T00:09:11.398864Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/lyra/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "8a30150b30122a364035217a3712b29d26d38db3ddb346fbfb8c3a709fc32e4e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/lyra/regime_performance.json",
+      "byte_size": 433,
+      "mtime_utc": "2026-06-09T00:09:11.399132Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/lyra/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "c51342e6fc29e39e7321cce955c732be27e3becf26595415748d3bd0dcdf962d"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/lyra/stability_analysis.json",
+      "byte_size": 703,
+      "mtime_utc": "2026-06-09T00:09:11.399045Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/lyra/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d3588f9b1f2d0043cd9c887dc036d9b2905b35896643a9084d9592d9d5a74693"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/orion/attribution.json",
+      "byte_size": 1466,
+      "mtime_utc": "2026-06-09T00:09:11.392579Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/orion/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "913a53241a71fa3a6e011afbae945f1b17daf852691cc8cd706680a8db0cff47"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/orion/decision_trace.json",
+      "byte_size": 1535,
+      "mtime_utc": "2026-06-09T00:09:11.392467Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/orion/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "bff798f6d45e3cf9a0e7d09354e55625f3295adab618b4558e153061b0ea99a5"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/orion/regime_performance.json",
+      "byte_size": 434,
+      "mtime_utc": "2026-06-09T00:09:11.392739Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/orion/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "fc6ff61ea2bde7fdaa968707249b427fac8a515318a698d517768008c774dd34"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/orion/stability_analysis.json",
+      "byte_size": 703,
+      "mtime_utc": "2026-06-09T00:09:11.392657Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/orion/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4316d54536e016e7612d9520905ae4c29f503991c9a81287a1815dd215b95dc3"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/polaris/attribution.json",
+      "byte_size": 2461,
+      "mtime_utc": "2026-06-09T00:09:11.385973Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/polaris/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "33e9a52ffe6a24f904d97421d2e9a512828ba18b355ade76e8c63b05b008bad9"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/polaris/decision_trace.json",
+      "byte_size": 2510,
+      "mtime_utc": "2026-06-09T00:09:11.385823Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/polaris/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "bf2a7800ae445569f82626672c4090fbd381ec16f3daa557abae89c6c336f63f"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/polaris/regime_performance.json",
+      "byte_size": 436,
+      "mtime_utc": "2026-06-09T00:09:11.386140Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/polaris/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0c4a95e4b71bbd612bca877262790cb9e8fe929d61e2e7e4a38fc3b1c103ee72"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/polaris/stability_analysis.json",
+      "byte_size": 708,
+      "mtime_utc": "2026-06-09T00:09:11.386061Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/polaris/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "9b6b51223da31a0f4430a1486ab577fb82af3a792a20a461f16a429e7047deec"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/shadow_evaluation.json",
+      "byte_size": 2275,
+      "mtime_utc": "2026-06-09T00:09:11.359954Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "1d96314a4cd5c7a8be1a6856d025a9397e3ee4e5b74d212f83faaa1b715075ad"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/shadow_performance.json",
+      "byte_size": 970,
+      "mtime_utc": "2026-06-09T00:09:11.345686Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/shadow_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "bd8245bac9c21db7096cb7bb4b5da387127276a46df04b270bb82f33e3da15ef"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-03/summary.json",
+      "byte_size": 11787,
+      "mtime_utc": "2026-06-09T00:09:11.345302Z",
+      "original_path": "outputs/shadow_candidates/2026-06-03/summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "ab4bd4e07c5c9fedf58aeeb87b8b589bd6a136e3a8f94a047dd74120af7bbe63"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/caerus_lyra.json",
+      "byte_size": 3501,
+      "mtime_utc": "2026-06-09T00:09:10.453457Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/caerus_lyra.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "06c3f763625a0ffc661a2b42c6f917a467ccd7cf7616354cd754785a79185f07"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/caerus_orion.json",
+      "byte_size": 3515,
+      "mtime_utc": "2026-06-09T00:09:10.319226Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/caerus_orion.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "8141962093efc30712383c8b9b45528ed14a80b0546f3588a6ca410ba40a44bb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/caerus_polaris.json",
+      "byte_size": 4429,
+      "mtime_utc": "2026-06-09T00:09:10.052452Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/caerus_polaris.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d0ad53283c876d14a47827a5e73ac50e34ca25944c53b28f1797ad7549e70a11"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/comparison.json",
+      "byte_size": 11805,
+      "mtime_utc": "2026-06-09T00:09:10.471107Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4a85ee419fb6ed26ddba3f5d9d21f734ba564ad9113b183984c6a9332eebad4d"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/comparison.md",
+      "byte_size": 3830,
+      "mtime_utc": "2026-06-09T00:09:10.484543Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "85fd330b40df403f07e733bb710b4f92e0c759ff738776f552dea16e7fc11083"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/delta.json",
+      "byte_size": 2138,
+      "mtime_utc": "2026-06-09T00:09:10.470489Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d678840219695ff5e5948f929ddf4a0b8dd0da0dfeda0dd325b264a701782bbb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:09:10.517576Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e496ea00fda171d9ba67ad6f46d04f69c4cda67868899effa2dd806de882ba60"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/lyra/attribution.json",
+      "byte_size": 1462,
+      "mtime_utc": "2026-06-09T00:09:10.517320Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/lyra/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "7ae34c0393f1eb64eb7d42793cde639a4a4689c3a98fb72bf45bac9b729307c6"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/lyra/decision_trace.json",
+      "byte_size": 1532,
+      "mtime_utc": "2026-06-09T00:09:10.517230Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/lyra/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e9086a8bffabfef3fdf406479357bfef1644271d62fb5a2987d8fc5bc9ba47eb"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/lyra/regime_performance.json",
+      "byte_size": 433,
+      "mtime_utc": "2026-06-09T00:09:10.517475Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/lyra/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "82006382801052f35f4c75dff864cebb9c2fcae13bca11accba87eb5d62c3844"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/lyra/stability_analysis.json",
+      "byte_size": 709,
+      "mtime_utc": "2026-06-09T00:09:10.517400Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/lyra/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "2e639da369e674651a08ca452270f974a93cab8b1f036acf2c5ec27cef898dbc"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/orion/attribution.json",
+      "byte_size": 1464,
+      "mtime_utc": "2026-06-09T00:09:10.511566Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/orion/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "54b887c31b2c6f2bdb5237eddec71fe24b44ad72d14ca688e49dd4bd4a98e7c6"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/orion/decision_trace.json",
+      "byte_size": 1535,
+      "mtime_utc": "2026-06-09T00:09:10.511462Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/orion/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "cec8902b73c8220354c204621af109bfa6796bd4d4bb5b013d8102948f83f2db"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/orion/regime_performance.json",
+      "byte_size": 434,
+      "mtime_utc": "2026-06-09T00:09:10.511715Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/orion/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "cf69ffb08fcdbcceff66385bb413e2dc03462980b989185405ea13887e60f2bd"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/orion/stability_analysis.json",
+      "byte_size": 711,
+      "mtime_utc": "2026-06-09T00:09:10.511638Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/orion/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "f45183556829053b8de836f3fd0e7b42618a2f8f04cbeedff9f302c86620f9ba"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/polaris/attribution.json",
+      "byte_size": 2462,
+      "mtime_utc": "2026-06-09T00:09:10.506237Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/polaris/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "35a2a0b5015d5291c5ebed966fc9f414eec1b58f28c04d75c769b814123ca33c"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/polaris/decision_trace.json",
+      "byte_size": 2530,
+      "mtime_utc": "2026-06-09T00:09:10.506116Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/polaris/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d36c190d9611f9a546cbec54eda865563fb11b5de3cb4f8f7e0107b0f8ac058e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/polaris/regime_performance.json",
+      "byte_size": 436,
+      "mtime_utc": "2026-06-09T00:09:10.506386Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/polaris/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "ebc8d3f53c59f799664ef67398ae82dc4287f2370970c8124b0198927c8fbb49"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/polaris/stability_analysis.json",
+      "byte_size": 714,
+      "mtime_utc": "2026-06-09T00:09:10.506319Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/polaris/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "398d555206ee2aa54d87eb3dadd7b683a92c53aafddf068f98f291ac318d2372"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/shadow_evaluation.json",
+      "byte_size": 2298,
+      "mtime_utc": "2026-06-09T00:09:10.481294Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "197c24ac6551eab37becc37ec2e9304eaa5212f496543fdb076e11d1e4294caf"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/shadow_performance.json",
+      "byte_size": 971,
+      "mtime_utc": "2026-06-09T00:09:10.471184Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/shadow_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "382fbcee3f271f87dff3108461b309e9bb84d066a556d0be4204165daa7eea99"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-02/summary.json",
+      "byte_size": 11805,
+      "mtime_utc": "2026-06-09T00:09:10.470816Z",
+      "original_path": "outputs/shadow_candidates/2026-06-02/summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4a85ee419fb6ed26ddba3f5d9d21f734ba564ad9113b183984c6a9332eebad4d"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/caerus_lyra.json",
+      "byte_size": 3500,
+      "mtime_utc": "2026-06-09T00:09:09.546274Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/caerus_lyra.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "b608af04b5b636cb5dbe3894b9ccc47cf3d8aa4536fb4f0134ac552e833d3b67"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/caerus_orion.json",
+      "byte_size": 3514,
+      "mtime_utc": "2026-06-09T00:09:09.390598Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/caerus_orion.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e40145856db9fbb4729bc00dfc0a3d5db27935889700444c9665b02322d988da"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/caerus_polaris.json",
+      "byte_size": 4429,
+      "mtime_utc": "2026-06-09T00:09:09.134232Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/caerus_polaris.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "921fe7eabc0b35b9170b87686261af1cca27a81771e8b1c5716fabbd018d913e"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/comparison.json",
+      "byte_size": 11827,
+      "mtime_utc": "2026-06-09T00:09:09.565044Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/comparison.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "fb0033f9046ba193f12203e7ee43f86c511609b6060111a8fd39af22ecb1e931"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/comparison.md",
+      "byte_size": 3852,
+      "mtime_utc": "2026-06-09T00:09:09.580420Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/comparison.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "badedc689b630d0b2cd54835b48e0139f1bb4b31dfb14430dabd4f79b994d397"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/delta.json",
+      "byte_size": 2149,
+      "mtime_utc": "2026-06-09T00:09:09.564435Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/delta.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "cf11461e306ded1949ba0efbfa733fc05364ca979d8fd01a72eebd137444e07b"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/feedback_loop_summary.json",
+      "byte_size": 1044,
+      "mtime_utc": "2026-06-09T00:09:09.623820Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/feedback_loop_summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "b1597c5987140a4983e8d9d024f54348df7b18919342fdbd1f9c75f9be1c4a1c"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/lyra/attribution.json",
+      "byte_size": 1467,
+      "mtime_utc": "2026-06-09T00:09:09.623593Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/lyra/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "10c923c3c9278763fe6544db5dd53aaedee51b411946212e7b535b8096a04e2f"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/lyra/decision_trace.json",
+      "byte_size": 1531,
+      "mtime_utc": "2026-06-09T00:09:09.623499Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/lyra/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "4c3d1d30254ecd7b8b58dbe5b413b65288aca1d0cc377336b7b8d37720170b25"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/lyra/regime_performance.json",
+      "byte_size": 433,
+      "mtime_utc": "2026-06-09T00:09:09.623727Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/lyra/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "3d4da2beb788684f2581d3e375aad08eb195b18b555b14ea392e2c5aa1ed935b"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/lyra/stability_analysis.json",
+      "byte_size": 711,
+      "mtime_utc": "2026-06-09T00:09:09.623662Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/lyra/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "709f519b36ed211d91c2ac2b309e91dfba6bda5f7e764b21db5d192f31cff6e7"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/orion/attribution.json",
+      "byte_size": 1476,
+      "mtime_utc": "2026-06-09T00:09:09.612827Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/orion/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "a2c1f99983346fdb68fd3a3399b417e625ba0c8ed1254a55a6f6223f832ef8e4"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/orion/decision_trace.json",
+      "byte_size": 1555,
+      "mtime_utc": "2026-06-09T00:09:09.612693Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/orion/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "dce8ea229cd7c2583524f927a38ecb3c06d37e8c080cb877e21fbdf00738b03a"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/orion/regime_performance.json",
+      "byte_size": 434,
+      "mtime_utc": "2026-06-09T00:09:09.613035Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/orion/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "3b73dbc4739ff2b87f3022761041305eee5e2a331663c18b097c73c6f3055ce7"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/orion/stability_analysis.json",
+      "byte_size": 712,
+      "mtime_utc": "2026-06-09T00:09:09.612924Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/orion/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "8d1c82c810a691fa0fc8040c30b51f36d1120a165ba2e2219ff113d0ef5351a4"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/polaris/attribution.json",
+      "byte_size": 2476,
+      "mtime_utc": "2026-06-09T00:09:09.602944Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/polaris/attribution.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d57785e43bfa700e2f61aa187ae07dcc34b8e7f4680b3984c15ea2d343081287"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/polaris/decision_trace.json",
+      "byte_size": 2544,
+      "mtime_utc": "2026-06-09T00:09:09.602822Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/polaris/decision_trace.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "782d0ea02a2bc537af2684844787db5e5a0ba0ef4011be0ac61680bd6cb7b471"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/polaris/regime_performance.json",
+      "byte_size": 436,
+      "mtime_utc": "2026-06-09T00:09:09.603089Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/polaris/regime_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "534c798015e129e6deebf8b03c911e3093de3a0167672c75d93fc68f4cc87b4a"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/polaris/stability_analysis.json",
+      "byte_size": 713,
+      "mtime_utc": "2026-06-09T00:09:09.603018Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/polaris/stability_analysis.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0f4c88a96712d1fe2e38b19fad6e7ecd61e04fa7473cf1efa04fbb0ac1b289b7"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/shadow_evaluation.json",
+      "byte_size": 2300,
+      "mtime_utc": "2026-06-09T00:09:09.577126Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/shadow_evaluation.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "09d10496f7526bb18853cdb4eddd07acf9a5080623ae8617aa7184e363762772"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/shadow_performance.json",
+      "byte_size": 972,
+      "mtime_utc": "2026-06-09T00:09:09.565117Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/shadow_performance.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "fde14298f9fd2d7a8c334385d3899582542e1eed9a795e95027d3f5c03d135d7"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/shadow_candidates/2026-06-01/summary.json",
+      "byte_size": 11827,
+      "mtime_utc": "2026-06-09T00:09:09.564755Z",
+      "original_path": "outputs/shadow_candidates/2026-06-01/summary.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "fb0033f9046ba193f12203e7ee43f86c511609b6060111a8fd39af22ecb1e931"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/price_hydration/2026-06-08/status.json",
+      "byte_size": 1801,
+      "mtime_utc": "2026-06-08T15:33:59.075138Z",
+      "original_path": "outputs/price_hydration/2026-06-08/status.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "0664e751a6f92ff2c727f80bd604b21affebe372ecc2ea9e335fa6984c25df7d"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_backfill_dry_run_2026-06-08.md",
+      "byte_size": 684,
+      "mtime_utc": "2026-06-09T00:08:50.629956Z",
+      "original_path": "outputs/diagnostics/shadow_backfill_dry_run_2026-06-08.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "25a14da0dc3bf3e46d36576039cb21141981517e3749ebb3c142be4912b034f9"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_backfill_plan_2026-06-08.csv",
+      "byte_size": 2786,
+      "mtime_utc": "2026-06-09T00:08:50.629613Z",
+      "original_path": "outputs/diagnostics/shadow_backfill_plan_2026-06-08.csv",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "1545bfaa203549c8d184487da253c150df244414b9265695438135930ee6d2b4"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_backfill_plan_2026-06-08.md",
+      "byte_size": 3716,
+      "mtime_utc": "2026-06-09T00:08:50.629712Z",
+      "original_path": "outputs/diagnostics/shadow_backfill_plan_2026-06-08.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "f4d918d107cae567d3eb88085e8842ee16d0c2386c8c37ea5ef9b8fedc7fe442"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_backfill_result_2026-06-08.csv",
+      "byte_size": 6863,
+      "mtime_utc": "2026-06-09T00:09:14.223233Z",
+      "original_path": "outputs/diagnostics/shadow_backfill_result_2026-06-08.csv",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "b165b31cba0688fd365f0e3c4e6a732fb8065ea72ec92099a5f1d0381e64ec62"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_backfill_result_2026-06-08.md",
+      "byte_size": 7664,
+      "mtime_utc": "2026-06-09T00:09:14.223348Z",
+      "original_path": "outputs/diagnostics/shadow_backfill_result_2026-06-08.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "11b70457fecf8af87c472ff92308d3feebd3c035f0b12e68d12902c5ef0db755"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_promotion_readiness_2026-05-12T171707Z.json",
+      "byte_size": 4082,
+      "mtime_utc": "2026-05-12T17:17:07.601104Z",
+      "original_path": "outputs/diagnostics/shadow_promotion_readiness_2026-05-12T171707Z.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "2c358bfa89af67a7c366e75adf5ec11c5db61fd3220ed92bfab15ad2b4c3ba79"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_promotion_readiness_2026-05-12T171707Z.md",
+      "byte_size": 1006,
+      "mtime_utc": "2026-05-12T17:17:07.601196Z",
+      "original_path": "outputs/diagnostics/shadow_promotion_readiness_2026-05-12T171707Z.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "1de2b22d586dbd229d5725b4dc2b788dddb31bdbc69ab612187b029e1dddc9cc"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_scorecard_health_2026-05-12T211104Z.json",
+      "byte_size": 2100,
+      "mtime_utc": "2026-05-12T21:11:04.824000Z",
+      "original_path": "outputs/diagnostics/shadow_scorecard_health_2026-05-12T211104Z.json",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "d5aff54bb7cd8b27b7cf2bcbc4edfd1b747d4856882f3bca49ef0e23d63bcd41"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/outputs/diagnostics/shadow_scorecard_health_2026-05-12T211104Z.md",
+      "byte_size": 942,
+      "mtime_utc": "2026-05-12T21:11:04.824075Z",
+      "original_path": "outputs/diagnostics/shadow_scorecard_health_2026-05-12T211104Z.md",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "df6f11129e04b936ff8953920886777f926e1f07c6c865736036a0bb97725f1c"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/logs/auto_shadow_health_recovery.err",
+      "byte_size": 248,
+      "mtime_utc": "2026-05-20T17:04:37.053402Z",
+      "original_path": "logs/auto_shadow_health_recovery.err",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "7da4bec52bf79c478e3972fae092ebda08f5539be5126ea4ac86a71a91182710"
+    },
+    {
+      "backup_path": "reports/agent_loops/2026-06-13_codex_mini_context_audit/evidence_backup/logs/auto_shadow_health_recovery.out",
+      "byte_size": 0,
+      "mtime_utc": "2026-05-01T12:00:04.367874Z",
+      "original_path": "logs/auto_shadow_health_recovery.out",
+      "reason_for_preservation": "Shadow NAV scorecard corruption audit evidence",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "git_branch": "codex/audit-shadow-nav-context",
+  "git_diff": "",
+  "git_diff_cached": "",
+  "git_reflog_recent": [
+    "34fdd42 HEAD@{2026-06-13 11:17:17 -0400}: checkout: moving from codex/vm-access-policy to codex/audit-shadow-nav-context",
+    "34fdd42 HEAD@{2026-06-12 19:09:32 -0400}: commit: Add FR-069 Phase B sleeve manifest scaffolding",
+    "5943842 HEAD@{2026-06-12 19:00:15 -0400}: commit: Add FR-069 Phase A architecture package",
+    "b8478e6 HEAD@{2026-06-12 18:47:53 -0400}: commit: Promote FR-069 as active architecture workstream",
+    "e4abc60 HEAD@{2026-06-12 16:32:33 -0400}: commit: Update governance backlog and dashboard auth reset",
+    "981ee6c HEAD@{2026-06-12 16:10:27 -0400}: commit: add dashboard auth reset",
+    "22bedd0 HEAD@{2026-06-12 15:59:32 -0400}: commit: vm access policy",
+    "a1ddc68 HEAD@{2026-06-12 15:59:28 -0400}: checkout: moving from main to codex/vm-access-policy",
+    "a1ddc68 HEAD@{2026-06-12 11:05:31 -0400}: commit: Fix post-buy artifact timing diagnostics",
+    "4b426a0 HEAD@{2026-06-12 10:26:31 -0400}: commit: Add execution target attainment MCP diagnostic",
+    "80b680a HEAD@{2026-06-11 17:53:15 -0400}: commit: Add governance hygiene agent",
+    "c322418 HEAD@{2026-06-11 17:17:23 -0400}: commit: Clean up active governance backlog",
+    "b9d68d1 HEAD@{2026-06-11 17:09:02 -0400}: commit: Add Caerus investment doctrine",
+    "5e58d7b HEAD@{2026-06-11 12:34:20 -0400}: commit: Fix FR-070 registry path",
+    "4fcf8c4 HEAD@{2026-06-11 12:31:55 -0400}: commit: Organize governance FR documentation",
+    "0aab2e1 HEAD@{2026-06-11 10:28:42 -0400}: commit: Fix posttrade telemetry sequencing: capture snapshots after fill resolution",
+    "e764819 HEAD@{2026-06-10 17:14:36 -0400}: commit: Refresh docs post-PIT milestone; add Research Lab architecture design (FR-069)",
+    "139d128 HEAD@{2026-06-10 16:52:17 -0400}: commit: Rebaseline Polaris with PIT prices",
+    "494af78 HEAD@{2026-06-10 16:38:35 -0400}: commit: FR-068 Phase 2.5: confirm priced rebaseline UNBLOCKED (real artifacts)",
+    "ab7908b HEAD@{2026-06-10 16:10:25 -0400}: commit: FR-068 Phase 2.5: hydrate PIT large-cap data"
+  ],
+  "git_sha": "34fdd42fe5204e43e055b2c8271092559b912842",
+  "git_status_short": [
+    "?? docs/governance/AI_ORCHESTRATION_MODEL.md",
+    "?? docs/governance/CODEX_TASK_TEMPLATE.md",
+    "?? docs/governance/STRATEGIC_ESCALATION_POLICY.md",
+    "?? reports/agent_loops/",
+    "?? specs/2026-06-13_shadow_nav_context_audit.md"
+  ],
+  "missing_expected_paths": [
+    "outputs/shadow_candidates/2026-06-12",
+    "outputs/shadow_candidates/2026-06-11",
+    "outputs/shadow_candidates/2026-06-10",
+    "outputs/shadow_candidates/2026-06-09",
+    "outputs/price_hydration/2026-06-12",
+    "outputs/price_hydration/2026-06-11",
+    "outputs/price_hydration/2026-06-10",
+    "outputs/price_hydration/2026-06-09"
+  ],
+  "origin_main_sha": "a1ddc68351daccc0be7ff2f131a817479ef178d9",
+  "recent_log": [
+    "* 34fdd42 (HEAD -> codex/audit-shadow-nav-context, origin/codex/vm-access-policy, codex/vm-access-policy) Add FR-069 Phase B sleeve manifest scaffolding",
+    "* 5943842 Add FR-069 Phase A architecture package",
+    "* b8478e6 Promote FR-069 as active architecture workstream",
+    "* e4abc60 Update governance backlog and dashboard auth reset",
+    "* 981ee6c add dashboard auth reset",
+    "* 22bedd0 vm access policy",
+    "* a1ddc68 (origin/main, origin/HEAD, main) Fix post-buy artifact timing diagnostics",
+    "* 4b426a0 Add execution target attainment MCP diagnostic",
+    "* 80b680a Add governance hygiene agent",
+    "* c322418 Clean up active governance backlog",
+    "* b9d68d1 Add Caerus investment doctrine",
+    "* 5e58d7b Fix FR-070 registry path",
+    "* 4fcf8c4 Organize governance FR documentation",
+    "* 0aab2e1 Fix posttrade telemetry sequencing: capture snapshots after fill resolution",
+    "* e764819 Refresh docs post-PIT milestone; add Research Lab architecture design (FR-069)",
+    "* 139d128 Rebaseline Polaris with PIT prices",
+    "* 494af78 FR-068 Phase 2.5: confirm priced rebaseline UNBLOCKED (real artifacts)",
+    "* ab7908b FR-068 Phase 2.5: hydrate PIT large-cap data",
+    "* 03f8df1 Rebaseline Polaris on PIT universe",
+    "* b1cfc42 Assess PIT universe impact",
+    "* 32281a6 FR-068 Phase 1: PIT universe foundation from Sharadar",
+    "* 9971f3c Close Sharadar verification gate for PIT remediation",
+    "* e4b6201 Fix Sharadar coverage verifier scoring",
+    "* d3d9ad2 Assess Sharadar value for PIT remediation"
+  ],
+  "schema_version": "shadow_nav_audit_recovery_manifest_v1",
+  "shadow_nav_series_summary": {
+    "exists": true,
+    "first_date": "2014-01-02",
+    "first_rows": [
+      {
+        "caerus_lyra": "1.0",
+        "caerus_orion": "1.0",
+        "caerus_polaris": "1.0",
+        "date": "2014-01-02",
+        "spy_benchmark": "0.9998360951371194"
+      },
+      {
+        "caerus_lyra": "1.0",
+        "caerus_orion": "1.0",
+        "caerus_polaris": "1.0",
+        "date": "2014-01-03",
+        "spy_benchmark": "0.9969385940084763"
+      },
+      {
+        "caerus_lyra": "1.0",
+        "caerus_orion": "1.0",
+        "caerus_polaris": "1.0",
+        "date": "2014-01-06",
+        "spy_benchmark": "1.003061405991524"
+      }
+    ],
+    "header": [
+      "date",
+      "caerus_polaris",
+      "caerus_orion",
+      "caerus_lyra",
+      "spy_benchmark"
+    ],
+    "last_date": "2026-06-05",
+    "last_rows": [
+      {
+        "caerus_lyra": "170.77617972887379",
+        "caerus_orion": "164.75278016799012",
+        "caerus_polaris": "38.17778729938316",
+        "date": "2026-05-22",
+        "spy_benchmark": "5.051747928287736"
+      },
+      {
+        "caerus_lyra": "172.00608344555712",
+        "caerus_orion": "167.0809381331323",
+        "caerus_polaris": "38.03410409348117",
+        "date": "2026-05-26",
+        "spy_benchmark": "5.050872947440779"
+      },
+      {
+        "caerus_lyra": "170.5840737982514",
+        "caerus_orion": "167.10700427962814",
+        "caerus_polaris": "37.90470718935905",
+        "date": "2026-05-27",
+        "spy_benchmark": "5.078736363341359"
+      },
+      {
+        "caerus_lyra": "170.26610773500641",
+        "caerus_orion": "168.77407850151243",
+        "caerus_polaris": "37.75062216007126",
+        "date": "2026-05-28",
+        "spy_benchmark": "5.09138949012444"
+      },
+      {
+        "caerus_lyra": "172.66681272025517",
+        "caerus_orion": "173.74695480089173",
+        "caerus_polaris": "38.09054224446329",
+        "date": "2026-05-29",
+        "spy_benchmark": "5.10525403405197"
+      },
+      {
+        "caerus_lyra": "177.444889289323",
+        "caerus_orion": "175.65590198261424",
+        "caerus_polaris": "39.209648616927915",
+        "date": "2026-06-01",
+        "spy_benchmark": "5.1107056165965545"
+      },
+      {
+        "caerus_lyra": "183.74779094412335",
+        "caerus_orion": "182.90788290340822",
+        "caerus_polaris": "40.50868072591649",
+        "date": "2026-06-02",
+        "spy_benchmark": "5.076313529052461"
+      },
+      {
+        "caerus_lyra": "178.31419347245998",
+        "caerus_orion": "177.2797524129368",
+        "caerus_polaris": "39.74951468629778",
+        "date": "2026-06-03",
+        "spy_benchmark": "5.095495327479057"
+      },
+      {
+        "caerus_lyra": "158.967440218718",
+        "caerus_orion": "158.1618594028514",
+        "caerus_polaris": "36.119343983200714",
+        "date": "2026-06-04",
+        "spy_benchmark": "4.963983652235798"
+      },
+      {
+        "caerus_lyra": "170.3040430466812",
+        "caerus_orion": "170.01944227270403",
+        "caerus_polaris": "38.22213439883912",
+        "date": "2026-06-05",
+        "spy_benchmark": "4.996895255755275"
+      }
+    ],
+    "row_count": 3125
+  }
+}

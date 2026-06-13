@@ -19,14 +19,15 @@ portfolio-construction work unless explicitly amended.
 Priority note 2026-06-12: FR-070 cash-gating / post-sell buy-budget remediation
 is deployed and moves to observation/monitoring. The June 12 live-run
 investigation classified the discrepancy as `ARTIFACT_TIMING_FAILURE` and left
-post-buy snapshot validation open until the next live run, but FR-070 no longer
-blocks the active roadmap as the primary engineering focus. FR-069 modular
-sleeve / research-lab architecture is now the primary active architecture
-workstream and must align with the doctrine. The Orion/Lyra retain-or-retire
-decision is deferred to the data-driven sleeve architecture review; no immediate
-retirement or Lyra-name reuse is approved. Phoenix remains the next major
-sleeve-design focus after the architecture is settled. Dashboard auth cleanup
-remains operational hygiene, not a research priority.
+post-buy snapshot validation open until the next live run. FR-070 remains the
+highest immediate operational observation priority until those gates pass or
+produce a classified failure. FR-069 modular sleeve / research-lab architecture
+is the next major architecture workstream and must align with the doctrine. The
+Orion/Lyra retain-or-retire decision is deferred to the data-driven sleeve
+architecture review; no immediate retirement or Lyra-name reuse is approved.
+Phoenix remains the next major sleeve-design focus after the architecture is
+settled. Dashboard auth cleanup remains operational hygiene, not a research
+priority.
 
 ---
 

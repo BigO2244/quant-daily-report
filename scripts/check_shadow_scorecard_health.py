@@ -21,7 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.send_shadow_cio_report import MODEL_ORDER, build_report  # noqa: E402
+from scripts.send_shadow_cio_report import MODEL_ORDER, assess_nav_history_integrity, build_report, _load_nav_history  # noqa: E402
 from core.strategy_registry import active_shadow_security_selection_ids  # noqa: E402
 
 
@@ -130,7 +130,9 @@ def build_health_payload(
     hydration_path = repo_root / "outputs" / "price_hydration" / str(report.latest_source_date or report.trade_date) / "status.json"
     hydration = _read_json(hydration_path) or {}
     shadow_refresh = hydration.get("shadow_refresh") or {}
-    nav_dates = _load_nav_dates(repo_root / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv")
+    nav_path = repo_root / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv"
+    nav_dates = _load_nav_dates(nav_path)
+    performance_integrity = assess_nav_history_integrity(_load_nav_history(nav_path))
     valid_days = {
         slug: (_model_by_slug(report, slug).valid_day_count if _model_by_slug(report, slug) else None)
         for slug in MODEL_SLUGS
@@ -149,6 +151,11 @@ def build_health_payload(
     add_check("max_cache_current", str(hydration.get("max_cache_date") or "") >= expected_date, f"max_cache_date={hydration.get('max_cache_date')}; expected={expected_date}")
     add_check("data_through_expected", report.as_of_date == expected_date, f"data_through={report.as_of_date}; expected={expected_date}")
     add_check("nav_not_regressed", (nav_dates[-1] if nav_dates else "") >= baseline_date, f"nav_series_latest_date={nav_dates[-1] if nav_dates else None}; baseline={baseline_date}")
+    add_check(
+        "performance_integrity_valid",
+        performance_integrity.status != "CORRUPT",
+        f"{performance_integrity.reason_code}: {performance_integrity.detail}",
+    )
     new_trading_day_available = expected_date > baseline_date
     min_valid = min((value for value in valid_days.values() if value is not None), default=None)
     if new_trading_day_available:
@@ -195,6 +202,12 @@ def build_health_payload(
         "shadow_refresh_status": shadow_refresh.get("status"),
         "shadow_refresh_reason": shadow_refresh.get("reason"),
         "nav_series_latest_date": nav_dates[-1] if nav_dates else None,
+        "performance_integrity": {
+            "status": performance_integrity.status,
+            "reason_code": performance_integrity.reason_code,
+            "detail": performance_integrity.detail,
+            "offending_date": performance_integrity.offending_date,
+        },
         "valid_days": valid_days,
         "post_baseline_issues": post_baseline_issues,
         "checks": checks,

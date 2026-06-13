@@ -105,6 +105,24 @@ def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any])
                 date = str(existing.get("date") or "")
                 if date:
                     rows[date] = dict(existing)
+    if trade_date in rows:
+        return {
+            "status": "REJECTED",
+            "reason_code": "SHADOW_EXISTING_DATE_RESTATEMENT_BLOCKED",
+            "reason": f"shadow_nav_series already contains date {trade_date}; use explicit recovery/restatement workflow",
+            "path": str(path),
+            "latest_date": max(rows) if rows else None,
+        }
+    continuity_error = _validate_nav_append_continuity(rows=rows, row=row, shadow_performance=shadow_performance)
+    if continuity_error:
+        return {
+            "status": "REJECTED",
+            "reason_code": continuity_error["reason_code"],
+            "reason": continuity_error["reason"],
+            "path": str(path),
+            "latest_date": max(rows) if rows else None,
+            "offending_date": trade_date,
+        }
     rows[trade_date] = row
     fieldnames = ["date", *MODEL_SLUGS]
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -113,6 +131,54 @@ def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any])
         for date in sorted(rows):
             writer.writerow({field: rows[date].get(field, "") for field in fieldnames})
     return {"status": "OK", "path": str(path), "rows": len(rows), "latest_date": trade_date}
+
+
+def _validate_nav_append_continuity(
+    *,
+    rows: dict[str, dict[str, str]],
+    row: dict[str, str],
+    shadow_performance: dict[str, Any],
+) -> dict[str, str] | None:
+    if not rows:
+        return None
+    trade_date = str(row.get("date") or "")
+    prior_dates = sorted(date for date in rows if date < trade_date)
+    if not prior_dates:
+        return {
+            "reason_code": "SHADOW_NAV_CONTINUITY_MISMATCH",
+            "reason": f"established NAV history exists but no prior row is available before {trade_date}",
+        }
+    previous = rows[prior_dates[-1]]
+    strategies = shadow_performance.get("strategies") or {}
+    for slug in MODEL_SLUGS:
+        try:
+            prior_csv_nav = float(previous[slug])
+            candidate_nav = float(row[slug])
+            reported_daily_return = float((strategies.get(slug) or {}).get("daily_return"))
+            reported_previous_nav = float((strategies.get(slug) or {}).get("previous_nav"))
+        except (KeyError, TypeError, ValueError):
+            return {
+                "reason_code": "SHADOW_NAV_SCHEMA_MISMATCH",
+                "reason": f"missing or non-numeric continuity fields for {slug}",
+            }
+        expected_nav = prior_csv_nav * (1.0 + reported_daily_return)
+        if abs(reported_previous_nav - prior_csv_nav) > max(1e-8, abs(prior_csv_nav) * 1e-8):
+            return {
+                "reason_code": "SHADOW_NAV_CONTINUITY_MISMATCH",
+                "reason": (
+                    f"{slug} previous_nav={reported_previous_nav} does not match "
+                    f"prior CSV NAV={prior_csv_nav} from {prior_dates[-1]}"
+                ),
+            }
+        if abs(candidate_nav - expected_nav) > max(1e-8, abs(expected_nav) * 1e-8):
+            return {
+                "reason_code": "SHADOW_NAV_CONTINUITY_MISMATCH",
+                "reason": (
+                    f"{slug} candidate NAV={candidate_nav} does not equal prior "
+                    f"NAV compounded by daily_return ({expected_nav})"
+                ),
+            }
+    return None
 
 
 def _remove_nav_series_date(*, output_root: Path, trade_date: str, reason: str) -> dict[str, Any]:

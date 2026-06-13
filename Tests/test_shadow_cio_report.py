@@ -217,3 +217,28 @@ def test_shadow_cio_report_anchors_all_windows_to_latest_valid_nav_date(tmp_path
     assert "Model | Daily | 7-Day (through 2026-01-13) | YTD (from 2026-01-02) through 2026-01-13 | Excess vs SPY (YTD)" in report.body
     assert "Polaris | +1.85% | +8.91% | +10.00% | +7.00%" in report.body
     assert "N/A (stale)" not in report.body
+
+
+def test_shadow_cio_report_suppresses_windows_and_rankings_when_nav_chain_resets(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path)
+    performance_path = tmp_path / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv"
+    performance_path.write_text(
+        "\n".join(
+            [
+                "date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark",
+                "2026-01-09,38.0,170.0,171.0,5.0",
+                "2026-01-12,38.2,170.2,171.2,5.01",
+                "2026-01-13,1.10,1.05,1.12,1.03",
+            ]
+        )
+        + "\n"
+    )
+
+    report = build_report(tmp_path)
+
+    assert report.data_health == "Fresh but corrupt"
+    assert "SHADOW_NAV_CHAIN_RESET" in report.data_health_reason
+    assert "Polaris | N/A | N/A | N/A | N/A" in report.body
+    assert "=== RANKING ===\n\nSPY" not in report.body
+    assert "PROMOTE_CANDIDATE" not in report.body
+    assert "performance is unavailable because of artifact corruption" in report.body

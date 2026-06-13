@@ -13,6 +13,7 @@ from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.shadow_tracking.run import (
     build_comparison_markdown,
     build_longitudinal_metrics_payload,
+    build_shadow_performance_payload,
     build_phase_c_promotion_readiness_payload,
     build_stability_surface_payload,
     classify_no_data_reason,
@@ -63,6 +64,12 @@ def _make_panel() -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _write_nav_series(path: Path, rows: list[dict[str, float | str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(rows)
+    frame.to_csv(path, index=False)
 
 
 def test_strategy_names_and_slugs_map_correctly() -> None:
@@ -169,6 +176,76 @@ def test_trade_date_helpers_are_explicit() -> None:
     assert trade_date_has_data(signals, trade_date="2023-03-31") is True
     assert trade_date_has_data(signals, trade_date="2023-04-02") is False
     assert find_previous_trading_date(signals, trade_date="2023-03-31") == "2023-03-30"
+
+
+def test_shadow_performance_missing_prior_artifact_in_established_chain_fails_closed(tmp_path: Path) -> None:
+    output_root = tmp_path / "shadow"
+    _write_nav_series(
+        output_root / "performance" / "shadow_nav_series.csv",
+        [
+            {
+                "date": "2026-06-04",
+                "caerus_polaris": 36.0,
+                "caerus_orion": 158.0,
+                "caerus_lyra": 159.0,
+                "spy_benchmark": 4.96,
+            }
+        ],
+    )
+    panel = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-06-05"), "ticker": "AAA", "close": 101.0},
+            {"date": pd.Timestamp("2026-06-04"), "ticker": "AAA", "close": 100.0},
+            {"date": pd.Timestamp("2026-06-05"), "ticker": "SPY", "close": 501.0},
+            {"date": pd.Timestamp("2026-06-04"), "ticker": "SPY", "close": 500.0},
+        ]
+    )
+
+    payload = build_shadow_performance_payload(
+        panel=panel,
+        output_root=output_root,
+        trade_date="2026-06-05",
+        previous_trade_date="2026-06-04",
+        strategy_payloads={
+            "caerus_polaris": {"target_weights": {"AAA": 1.0}},
+            "caerus_orion": {"target_weights": {"AAA": 1.0}},
+            "caerus_lyra": {"target_weights": {"AAA": 1.0}},
+        },
+        data_status="OK",
+    )
+
+    assert payload["status"] == "BROKEN_CHAIN"
+    assert payload["reason_code"] == "SHADOW_PRIOR_ARTIFACT_MISSING"
+    assert payload["strategies"]["caerus_polaris"]["previous_nav"] is None
+    assert payload["strategies"]["caerus_polaris"]["nav"] is None
+
+
+def test_shadow_performance_legitimate_inception_still_starts_at_one(tmp_path: Path) -> None:
+    panel = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-02"), "ticker": "AAA", "close": 101.0},
+            {"date": pd.Timestamp("2026-01-01"), "ticker": "AAA", "close": 100.0},
+            {"date": pd.Timestamp("2026-01-02"), "ticker": "SPY", "close": 202.0},
+            {"date": pd.Timestamp("2026-01-01"), "ticker": "SPY", "close": 200.0},
+        ]
+    )
+
+    payload = build_shadow_performance_payload(
+        panel=panel,
+        output_root=tmp_path / "shadow",
+        trade_date="2026-01-02",
+        previous_trade_date=None,
+        strategy_payloads={
+            "caerus_polaris": {"target_weights": {"AAA": 1.0}},
+            "caerus_orion": {"target_weights": {"AAA": 1.0}},
+            "caerus_lyra": {"target_weights": {"AAA": 1.0}},
+        },
+        data_status="OK",
+    )
+
+    assert payload["status"] == "NO_PRIOR"
+    assert payload["strategies"]["caerus_polaris"]["previous_nav"] == 1.0
+    assert payload["strategies"]["caerus_polaris"]["nav"] == 1.01
 
 
 def test_shadow_no_data_marks_stale_price_cache(tmp_path: Path) -> None:
