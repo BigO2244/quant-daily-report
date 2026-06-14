@@ -47,3 +47,11 @@ The owner should choose and document the canonical `shadow_nav_series.csv` conve
 1. Keep historical/backtest forward-return convention and rebuild/restate affected rows accordingly.
 2. Convert the CSV to dated same-day performance convention and restate the full series with manifest.
 3. Supersede the legacy CSV with a new versioned artifact and mark old cumulative performance non-decision-grade.
+
+## Owner Decision Received
+
+After this report, the owner approved Option 3 with dated same-day returns as
+the canonical operational Shadow observation methodology. Follow-up recovery
+work must use `dated_same_day_close_to_close_v1`, preserve the legacy corrupted
+CSV as superseded evidence, and replace active artifacts only through a staged
+backup/manifest workflow.

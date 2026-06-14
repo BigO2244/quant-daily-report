@@ -31,6 +31,50 @@ Relevant recovery commits:
 - `a8f15cd fix(shadow): preserve signal lookback during backfill`
 - `1f527b2 fix(shadow): seed backfill anchor from nav series`
 
+## Canonical Operational NAV Convention
+
+Owner decision on 2026-06-13:
+
+- The operational Shadow scorecard must use dated same-day close-to-close
+  observations as the canonical methodology:
+  `dated_same_day_close_to_close_v1`.
+- Legacy full-history/backtest-style `shadow_nav_series.csv` lineage is
+  superseded for operational scorecards.
+- Recovery must not fabricate pre-observation history. It may restate the
+  operational NAV series from dated `shadow_performance.json` only after
+  daily returns are independently validated against dated strategy weights and
+  point-in-time price inputs.
+
+Use the governed restatement utility for this path:
+
+```bash
+python3 scripts/restate_shadow_nav_same_day.py \
+  --staging-dir outputs/recovery_staging/shadow_nav_same_day_<UTC_TIMESTAMP>
+```
+
+Replace active artifacts only after staging validation passes and expected
+current artifact hashes match:
+
+```bash
+python3 scripts/restate_shadow_nav_same_day.py \
+  --replace-active \
+  --expected-existing-nav-sha256 <current-shadow_nav_series-sha256> \
+  --expected-existing-summary-sha256 <current-shadow_summary-sha256>
+```
+
+The utility writes:
+
+- staged `performance/shadow_nav_series.csv`;
+- staged `performance/shadow_summary.json`;
+- `daily_return_validation.json`;
+- `recovery_manifest.json`;
+- a pre-replacement backup under `outputs/recovery_backups/` when
+  `--replace-active` is used;
+- active `performance/shadow_nav_restatement_manifest.json` after replacement.
+
+Do not use full historical backtest output as the operational scorecard repair
+unless a future owner decision supersedes this convention.
+
 ## Post-Recovery Guardrail Recap
 
 After the 2026-05-12 backfill restored the scorecard, the follow-up work added

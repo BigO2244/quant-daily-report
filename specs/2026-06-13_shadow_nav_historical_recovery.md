@@ -43,4 +43,5 @@ OBJECTIVE: Validate point-in-time Shadow daily returns, stage deterministic NAV 
 - Active VM artifacts are replaced only after staging and independent review pass.
 - Original corrupt artifacts, backups, hashes, and recovery manifests remain preserved.
 - Reports are written under `reports/agent_loops/2026-06-13_shadow_nav_historical_recovery/`.
+- Owner-approved canonical operational methodology is `dated_same_day_close_to_close_v1`; legacy full-history/backtest-style CSV lineage is superseded for operational scorecards after the 2026-06-13 owner decision.
 - No broker, trading, execution, allocation, model, strategy, promotion, retirement, cron, live-capital, or secret behavior changes.

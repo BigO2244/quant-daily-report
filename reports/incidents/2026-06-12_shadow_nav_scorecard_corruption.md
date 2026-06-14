@@ -139,6 +139,17 @@ Operational status:
 - Current code should continue to classify the active series as `Fresh but corrupt` with `SHADOW_NAV_CHAIN_RESET`.
 - Rankings, seven-day, YTD, promotion, and retirement signals should remain suppressed until the owner approves a canonical CSV convention and restatement/recovery path.
 
+Owner decision:
+
+- On 2026-06-13, the owner approved Option 3.
+- Canonical operational Shadow observation methodology is
+  `dated_same_day_close_to_close_v1`.
+- Legacy full-history/backtest-style `shadow_nav_series.csv` lineage is
+  superseded for operational scorecards.
+- Active artifact replacement must be staged, independently validated against
+  dated strategy weights and point-in-time prices, backed up, and recorded in a
+  restatement manifest.
+
 ## Governance
 
 - FR-070 remains `DEPLOYED_OBSERVING` and highest immediate operational observation priority.
