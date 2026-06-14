@@ -73,6 +73,20 @@ def _write_dated_artifacts(output_root: Path, *, bad_return: bool = False) -> No
         )
 
 
+def _write_no_data_artifact(output_root: Path, date: str) -> None:
+    _write_json(
+        output_root / date / "shadow_performance.json",
+        {
+            "trade_date": date,
+            "previous_trade_date": "2026-06-03",
+            "status": "OK",
+            "data_status": "NO_DATA",
+            "data_reason": "NO_DATA_FOR_TRADE_DATE",
+            "strategies": {},
+        },
+    )
+
+
 def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
@@ -100,6 +114,33 @@ def test_build_restatement_reconstructs_same_day_operational_nav(tmp_path: Path)
     assert summary["legacy_shadow_nav_series_status"] == "SUPERSEDED_BY_OWNER_DECISION"
     assert manifest["daily_return_validation_status"] == "PASS"
     assert {row["status"] for row in validation_rows} == {"EXACT_MATCH"}
+
+
+def test_build_restatement_skips_non_trading_no_data_artifact(tmp_path: Path) -> None:
+    output_root = tmp_path / "outputs" / "shadow_candidates"
+    price_path = tmp_path / "outputs" / "research" / "flow_detection_v1" / "price_panel.parquet"
+    _write_price_panel(price_path)
+    _write_dated_artifacts(output_root)
+    _write_no_data_artifact(output_root, "2026-06-04")
+
+    rows, _summary, manifest, _validation_rows = build_restatement(
+        repo_root=tmp_path,
+        output_root=output_root,
+        price_cache_path=price_path,
+        start_date=None,
+        end_date=None,
+        tolerance=1e-9,
+    )
+
+    assert [row["date"] for row in rows] == ["2026-06-02", "2026-06-03"]
+    assert manifest["skipped_records"] == [
+        {
+            "date": "2026-06-04",
+            "status": "OK",
+            "data_status": "NO_DATA",
+            "reason": "non-trading NO_DATA artifact skipped; no price returns for date",
+        }
+    ]
 
 
 def test_build_restatement_blocks_when_daily_return_is_not_pit_reconstructable(tmp_path: Path) -> None:

@@ -248,6 +248,7 @@ def build_restatement(
     validation_rows: list[dict[str, Any]] = []
     previous_nav: dict[str, float] = {}
     input_records: list[dict[str, Any]] = []
+    skipped_records: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
 
     for dated_dir in dirs:
@@ -261,6 +262,16 @@ def build_restatement(
                 "shadow_performance_sha256": sha256_file(performance_path),
             }
         )
+        if performance.get("data_status") == "NO_DATA" and trade_date not in returns_by_date:
+            skipped_records.append(
+                {
+                    "date": trade_date,
+                    "status": performance.get("status"),
+                    "data_status": performance.get("data_status"),
+                    "reason": "non-trading NO_DATA artifact skipped; no price returns for date",
+                }
+            )
+            continue
         if performance.get("status") != "OK" or performance.get("data_status") != "OK":
             blocked.append(
                 {
@@ -342,6 +353,7 @@ def build_restatement(
         "row_count": len(rows),
         "price_input": price_metadata,
         "input_records": input_records,
+        "skipped_records": skipped_records,
         "daily_return_validation_count": len(validation_rows),
         "daily_return_validation_status": "PASS",
         "preexisting_active_artifacts": {
