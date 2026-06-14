@@ -23,6 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.send_shadow_cio_report import MODEL_ORDER, assess_nav_history_integrity, build_report, _load_nav_history  # noqa: E402
 from core.strategy_registry import active_shadow_security_selection_ids  # noqa: E402
+from paper.trading_calendar import is_trading_day, prev_trading_day  # noqa: E402
 
 
 MODEL_SLUGS = active_shadow_security_selection_ids()
@@ -47,33 +48,38 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _business_days_after(start_date: str, end_date: str) -> list[str]:
+def _calendar_days_after(start_date: str, end_date: str) -> list[str]:
     start = dt.date.fromisoformat(start_date)
     end = dt.date.fromisoformat(end_date)
     days: list[str] = []
     current = start + dt.timedelta(days=1)
     while current <= end:
-        if current.weekday() < 5:
-            days.append(current.isoformat())
+        days.append(current.isoformat())
         current += dt.timedelta(days=1)
     return days
 
 
-def _previous_business_day(day: dt.date) -> dt.date:
-    current = day - dt.timedelta(days=1)
-    while current.weekday() >= 5:
-        current -= dt.timedelta(days=1)
-    return current
+def _trading_days_after(start_date: str, end_date: str) -> list[str]:
+    return [day for day in _calendar_days_after(start_date, end_date) if is_trading_day(day)]
+
+
+def _expected_non_trading_dates_after(start_date: str, end_date: str) -> list[dict[str, str]]:
+    return [
+        {"date": day, "reason": "EXPECTED_NON_TRADING_DATE"}
+        for day in _calendar_days_after(start_date, end_date)
+        if not is_trading_day(day)
+    ]
 
 
 def _expected_completed_trading_day(now: dt.datetime | None = None) -> str:
     current = now or dt.datetime.now(ZoneInfo("America/New_York"))
     day = current.date()
-    if day.weekday() >= 5:
-        return _previous_business_day(day).isoformat()
+    day_str = day.isoformat()
+    if not is_trading_day(day_str):
+        return prev_trading_day(day_str)
     if current.time() < dt.time(18, 0):
-        return _previous_business_day(day).isoformat()
-    return day.isoformat()
+        return prev_trading_day(day_str)
+    return day_str
 
 
 def _load_nav_dates(path: Path) -> list[str]:
@@ -86,7 +92,7 @@ def _load_nav_dates(path: Path) -> list[str]:
 def _scan_post_baseline_artifacts(repo_root: Path, *, baseline_date: str, expected_date: str) -> list[dict[str, str]]:
     root = repo_root / "outputs" / "shadow_candidates"
     issues: list[dict[str, str]] = []
-    for day in _business_days_after(baseline_date, expected_date):
+    for day in _trading_days_after(baseline_date, expected_date):
         dated_dir = root / day
         if not dated_dir.exists():
             issues.append({"date": day, "reason": "missing-shadow-dir"})
@@ -140,6 +146,7 @@ def build_health_payload(
     seven_day_through = next((model.seven_day_end_date for model in report.models if model.slug in MODEL_ORDER and model.seven_day_end_date), None)
     ytd_through = next((model.period_end_date for model in report.models if model.slug in MODEL_ORDER and model.period_end_date), None)
     post_baseline_issues = _scan_post_baseline_artifacts(repo_root, baseline_date=baseline_date, expected_date=expected_date)
+    post_baseline_non_trading_dates = _expected_non_trading_dates_after(baseline_date, expected_date)
 
     checks: list[dict[str, Any]] = []
 
@@ -173,7 +180,7 @@ def build_health_payload(
     add_check(
         "no_post_baseline_bad_reasons",
         not post_baseline_issues,
-        f"issues={post_baseline_issues}",
+        f"issues={post_baseline_issues}; skipped_non_trading_dates={post_baseline_non_trading_dates}",
     )
 
     failed = [check for check in checks if not check["passed"] and check["severity"] == "FAIL"]
@@ -210,6 +217,7 @@ def build_health_payload(
         },
         "valid_days": valid_days,
         "post_baseline_issues": post_baseline_issues,
+        "post_baseline_non_trading_dates": post_baseline_non_trading_dates,
         "checks": checks,
         "operator_recommendation": recommendation,
     }

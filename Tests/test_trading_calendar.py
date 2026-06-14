@@ -20,3 +20,22 @@ def test_good_friday_is_market_closed() -> None:
     assert status.is_open_now is False
     assert status.reason == "MARKET_CLOSED_DAY"
     assert status.next_open_et.isoformat() == "2026-04-06T09:30:00-04:00"
+
+
+def test_2026_memorial_day_and_adjacent_sessions() -> None:
+    assert trading_calendar.is_trading_day("2026-05-22") is True
+    assert trading_calendar.is_trading_day("2026-05-25") is False
+    assert trading_calendar.is_trading_day("2026-05-26") is True
+    assert trading_calendar.prev_trading_day("2026-05-26") == "2026-05-22"
+    assert trading_calendar.next_trading_day("2026-05-22") == "2026-05-26"
+
+
+def test_juneteenth_and_observed_fixed_holidays_are_market_closed() -> None:
+    assert trading_calendar.is_trading_day("2026-06-19") is False
+    assert trading_calendar.is_trading_day("2026-07-03") is False
+    assert trading_calendar.is_trading_day("2027-12-24") is False
+
+
+def test_early_close_dates_remain_trading_sessions() -> None:
+    assert trading_calendar.is_trading_day("2026-11-27") is True
+    assert trading_calendar.is_trading_day("2026-12-24") is True
