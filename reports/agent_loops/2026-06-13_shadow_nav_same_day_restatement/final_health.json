@@ -1,0 +1,82 @@
+{
+  "baseline_date": "2026-06-05",
+  "baseline_valid_days": 0,
+  "checks": [
+    {
+      "detail": "Shadow artifacts are current.",
+      "name": "scorecard_fresh",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "shadow_refresh.status=OK; reason=None",
+      "name": "shadow_refresh_ok",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "max_cache_date=2026-06-12; expected=2026-06-12",
+      "name": "max_cache_current",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "data_through=2026-06-12; expected=2026-06-12",
+      "name": "data_through_expected",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "nav_series_latest_date=2026-06-12; baseline=2026-06-05",
+      "name": "nav_not_regressed",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "None: shadow_nav_series.csv continuity checks passed",
+      "name": "performance_integrity_valid",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "min_valid_days=39; baseline=0; expected_date=2026-06-12",
+      "name": "valid_days_advanced",
+      "passed": true,
+      "severity": "FAIL"
+    },
+    {
+      "detail": "issues=[]",
+      "name": "no_post_baseline_bad_reasons",
+      "passed": true,
+      "severity": "FAIL"
+    }
+  ],
+  "data_through_date": "2026-06-12",
+  "expected_latest_completed_trading_day": "2026-06-12",
+  "generated_at": "2026-06-14T02:00:09.106015+00:00",
+  "hydration_status": "OK",
+  "latest_source_date": "2026-06-12",
+  "max_cache_date": "2026-06-12",
+  "nav_series_latest_date": "2026-06-12",
+  "operator_recommendation": "Scorecard is fresh and recovery appears to be holding.",
+  "performance_integrity": {
+    "detail": "shadow_nav_series.csv continuity checks passed",
+    "offending_date": null,
+    "reason_code": null,
+    "status": "OK"
+  },
+  "post_baseline_issues": [],
+  "scorecard_data_health": "Fresh",
+  "scorecard_data_health_reason": "Shadow artifacts are current.",
+  "seven_day_through_date": "2026-06-12",
+  "shadow_refresh_reason": null,
+  "shadow_refresh_status": "OK",
+  "status": "OK",
+  "strict": true,
+  "valid_days": {
+    "caerus_lyra": 39,
+    "caerus_orion": 39,
+    "caerus_polaris": 39
+  },
+  "ytd_through_date": "2026-06-12"
+}

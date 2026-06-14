@@ -150,6 +150,62 @@ Owner decision:
   dated strategy weights and point-in-time prices, backed up, and recorded in a
   restatement manifest.
 
+## Same-Day Operational Restatement — 2026-06-14 UTC
+
+Active VM artifacts were replaced after staged validation under the approved
+same-day operational methodology.
+
+Replacement inputs:
+
+- VM HEAD: `0884a2a6b1ff6f3f09cae977864473aa06f73c8a`
+- Staging directory:
+  `outputs/recovery_staging/shadow_nav_same_day_20260613T2101Z`
+- Observation window: `2026-05-12` through `2026-06-12`
+- NAV rows: `23`
+- Daily-return validations: `92`
+- Skipped non-trading `NO_DATA` artifact: `2026-05-25`
+
+Pre-replacement hashes:
+
+- `shadow_nav_series.csv`:
+  `5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f`
+- `shadow_summary.json`:
+  `86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a`
+
+Post-replacement hashes:
+
+- `shadow_nav_series.csv`:
+  `6a48b74c1c4b5a7af0a22210e21b70522bb24c0b84f6cd12dc11d1668a1b2de2`
+- `shadow_summary.json`:
+  `266314b2abffbd49afc7b0eeb9dcb11dbc4f0fdd52b296228abd63786d4d2c7c`
+- `shadow_nav_restatement_manifest.json`:
+  `76cf50519e414772b1cfb8ab06967d979bb29f331e1691975fe94c837f999d81`
+
+Immediate replacement backup:
+
+- Backup directory:
+  `outputs/recovery_backups/shadow_nav_same_day_restatement_20260614T015954Z`
+- Backup manifest SHA-256:
+  `0ffca3f2a8ad8844bdb802702183f021ae4b053828321b6b14fef6d2ad53c6a9`
+
+Final health:
+
+- Scorecard health: `Fresh`
+- Performance integrity: `OK`
+- NAV latest date: `2026-06-12`
+- Data through: `2026-06-12`
+- `SHADOW_NAV_CHAIN_RESET`: cleared
+
+Corrected scorecard dry-run:
+
+- Polaris: daily `+3.12%`, 7-day `+1.32%`, YTD from `2026-05-12` `+11.41%`
+- Orion: daily `+3.97%`, 7-day `+3.50%`, YTD from `2026-05-12` `+19.19%`
+- Lyra: daily `+4.04%`, 7-day `-0.24%`, YTD from `2026-05-12` `+12.58%`
+- SPY: daily `+0.54%`, 7-day `-2.03%`, YTD from `2026-05-12` `+0.48%`
+
+No model promotion, retirement, allocation, strategy, execution, broker, or
+cron behavior changed as part of this recovery.
+
 ## Governance
 
 - FR-070 remains `DEPLOYED_OBSERVING` and highest immediate operational observation priority.

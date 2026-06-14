@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-06-14T01:59:54.450159+00:00",
+  "reason": "2026-06-13 owner decision: Option 3 approved; dated same-day returns are the canonical operational Shadow observation methodology.",
+  "records": [
+    {
+      "backup_path": "outputs/recovery_backups/shadow_nav_same_day_restatement_20260614T015954Z/outputs/shadow_candidates/performance/shadow_nav_series.csv",
+      "bytes": 257471,
+      "mtime": "2026-06-12T22:30:42.157034+00:00",
+      "original_path": "outputs/shadow_candidates/performance/shadow_nav_series.csv",
+      "sha256": "5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f"
+    },
+    {
+      "backup_path": "outputs/recovery_backups/shadow_nav_same_day_restatement_20260614T015954Z/outputs/shadow_candidates/performance/shadow_summary.json",
+      "bytes": 4745,
+      "mtime": "2026-06-09T00:24:29.302212+00:00",
+      "original_path": "outputs/shadow_candidates/performance/shadow_summary.json",
+      "sha256": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a"
+    }
+  ],
+  "schema_version": "shadow_operational_same_day_pre_replacement_backup_v1"
+}

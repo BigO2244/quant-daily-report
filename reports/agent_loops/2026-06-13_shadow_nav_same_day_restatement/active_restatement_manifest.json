@@ -1,0 +1,165 @@
+{
+  "daily_return_validation_count": 92,
+  "daily_return_validation_status": "PASS",
+  "generated_at": "2026-06-14T01:59:54.392886+00:00",
+  "input_records": [
+    {
+      "date": "2026-05-12",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-12/shadow_performance.json",
+      "shadow_performance_sha256": "89b94e8d9071a727ace29efb37062a4a5b2f9b9f286bedcd30335aef86aac369"
+    },
+    {
+      "date": "2026-05-13",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-13/shadow_performance.json",
+      "shadow_performance_sha256": "d4ec3c91d3f4e829c1cf46e2ef1ca274730d735afa0103a0a9b13d532d2aadb2"
+    },
+    {
+      "date": "2026-05-14",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-14/shadow_performance.json",
+      "shadow_performance_sha256": "66a74ce5a85698d278ed0de66621c4c9607da3755d50a465ffa9bf8dba6f598c"
+    },
+    {
+      "date": "2026-05-15",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-15/shadow_performance.json",
+      "shadow_performance_sha256": "187acd43b991a47d9b6597a2a11f40189774eda4d0948e67698b424186ffe75d"
+    },
+    {
+      "date": "2026-05-18",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-18/shadow_performance.json",
+      "shadow_performance_sha256": "01e666d0caa191fce6f7c13efec769d0b718f81939e596e0bcd7b81c6002bde7"
+    },
+    {
+      "date": "2026-05-19",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-19/shadow_performance.json",
+      "shadow_performance_sha256": "41f09362f7533727fb933b36bf4572dede0466f920497c4f42a63a7053efca1a"
+    },
+    {
+      "date": "2026-05-20",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-20/shadow_performance.json",
+      "shadow_performance_sha256": "1c403af0c26e66f515ba9c0391aa4af3caef32fc4500051cabaabc08eacc0626"
+    },
+    {
+      "date": "2026-05-21",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-21/shadow_performance.json",
+      "shadow_performance_sha256": "c93a6553ce131d63f99b543e37a1c438dc7e11a78787ad50f92f694c025daca1"
+    },
+    {
+      "date": "2026-05-22",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-22/shadow_performance.json",
+      "shadow_performance_sha256": "43e7462c52328f05bfe723cc3712fc56b9f41ae3eff4695030447eb0ff793f41"
+    },
+    {
+      "date": "2026-05-25",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-25/shadow_performance.json",
+      "shadow_performance_sha256": "11f2d641a6c2ccc2d14cee2492c7a970580300af27cdce29fc0d20010be1b961"
+    },
+    {
+      "date": "2026-05-26",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-26/shadow_performance.json",
+      "shadow_performance_sha256": "41be9202c510620283cdcd554e59f041be3c1333f221ff17aed912fd759fb3f3"
+    },
+    {
+      "date": "2026-05-27",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-27/shadow_performance.json",
+      "shadow_performance_sha256": "99689bf65522aa053c326844a3db030c05b2cc8f0e144aab4240d16e759cf673"
+    },
+    {
+      "date": "2026-05-28",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-28/shadow_performance.json",
+      "shadow_performance_sha256": "2aa95ce0123a7d668ab3ef599aae0bd761a5e2c5515f2b30cce4b1157a55b389"
+    },
+    {
+      "date": "2026-05-29",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-05-29/shadow_performance.json",
+      "shadow_performance_sha256": "6635fd4a4fcc06e3c122111c13c9a9d378ce1088d107f63f36776f93b739cb28"
+    },
+    {
+      "date": "2026-06-01",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-01/shadow_performance.json",
+      "shadow_performance_sha256": "e68a1fe6b687bcd63866693bc409e3bfc6837a892ce616ff4cfa41be1a2d3f44"
+    },
+    {
+      "date": "2026-06-02",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-02/shadow_performance.json",
+      "shadow_performance_sha256": "08fe8e35440a1ae8b1dbff47a779408c711ab10b7222e1f66697382d42ea6519"
+    },
+    {
+      "date": "2026-06-03",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-03/shadow_performance.json",
+      "shadow_performance_sha256": "d4dfc3c712617bef2b4d4235631f8e61475b181cfff8f7362fbab1404a51a610"
+    },
+    {
+      "date": "2026-06-04",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-04/shadow_performance.json",
+      "shadow_performance_sha256": "3aef0207815b50b78f2628dbd47f6f8cfe64b910d223856e903ea56f3bd0124e"
+    },
+    {
+      "date": "2026-06-05",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-05/shadow_performance.json",
+      "shadow_performance_sha256": "c01faa77dc339ec114ef4f5e68c3ac09ca72bbb8f8be75e65937886605684330"
+    },
+    {
+      "date": "2026-06-08",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-08/shadow_performance.json",
+      "shadow_performance_sha256": "1ef0768bf0dacccdfa347340c8cf631f0144532ce55604a1194306154feb39c3"
+    },
+    {
+      "date": "2026-06-09",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-09/shadow_performance.json",
+      "shadow_performance_sha256": "040a0b7c57084c81a6b6251e98b1b6acd95219a06e69c5b65cf511fd74761713"
+    },
+    {
+      "date": "2026-06-10",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-10/shadow_performance.json",
+      "shadow_performance_sha256": "cc1c4ee5470b75fbdee0d143fca02e5cc903d995d824491e15c68e7a035a5918"
+    },
+    {
+      "date": "2026-06-11",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-11/shadow_performance.json",
+      "shadow_performance_sha256": "0fed84fd185dcc44ffbe0f0f0231bed9f4b0ea3a7d54213802fc5251d3e853de"
+    },
+    {
+      "date": "2026-06-12",
+      "shadow_performance_path": "outputs/shadow_candidates/2026-06-12/shadow_performance.json",
+      "shadow_performance_sha256": "ebe98d801b2080b20a78fe7acf4eb9ffa764d8614b46779584a2617d6d64d663"
+    }
+  ],
+  "methodology": "canonical_operational_shadow_observation",
+  "observation_end_date": "2026-06-12",
+  "observation_start_date": "2026-05-12",
+  "owner_decision": "2026-06-13 owner decision: Option 3 approved; dated same-day returns are the canonical operational Shadow observation methodology.",
+  "preexisting_active_artifacts": {
+    "shadow_nav_series.csv": "5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f",
+    "shadow_summary.json": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a"
+  },
+  "price_input": {
+    "max_date": "2026-06-12",
+    "min_date": "2014-01-02",
+    "path": "/home/brettolson/quant-daily-report/outputs/research/flow_detection_v1/price_panel.parquet",
+    "rows": 605364,
+    "sha256": "a81559032d48a8c504784461afab3f0cff1b74d0d3e7488974693cf03452cb97",
+    "tickers": 200
+  },
+  "replacement": {
+    "active_artifacts_replaced": true,
+    "active_nav_after_sha256": "6a48b74c1c4b5a7af0a22210e21b70522bb24c0b84f6cd12dc11d1668a1b2de2",
+    "active_nav_before_sha256": "5d59c987c07198c590a287e189a1224f2f783ba8bd55d5fdcb39d1de9e84dc1f",
+    "active_summary_after_sha256": "266314b2abffbd49afc7b0eeb9dcb11dbc4f0fdd52b296228abd63786d4d2c7c",
+    "active_summary_before_sha256": "86a793550a73db81c8dedfe9c96618f4a08a788a150f1354c6542b5a6a65d67a",
+    "backup_dir": "outputs/recovery_backups/shadow_nav_same_day_restatement_20260614T015954Z",
+    "backup_manifest_sha256": "0ffca3f2a8ad8844bdb802702183f021ae4b053828321b6b14fef6d2ad53c6a9"
+  },
+  "repo_head": "0884a2a6b1ff6f3f09cae977864473aa06f73c8a",
+  "return_convention": "dated_same_day_close_to_close_v1",
+  "row_count": 23,
+  "schema_version": "shadow_operational_same_day_restatement_manifest_v1",
+  "skipped_records": [
+    {
+      "data_status": "NO_DATA",
+      "date": "2026-05-25",
+      "reason": "non-trading NO_DATA artifact skipped; no price returns for date",
+      "status": "OK"
+    }
+  ],
+  "source": "dated shadow_performance.json daily_return validated against dated strategy weights and PIT price panel"
+}
