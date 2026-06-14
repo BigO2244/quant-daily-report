@@ -1,0 +1,79 @@
+{
+  "schema_version": "active_fr_reconciliation_validation_v1",
+  "generated_at": "2026-06-14T14:03:31Z",
+  "branch": "codex/active-fr-governance-reconciliation",
+  "results": [
+    {
+      "command": "python3 -m pytest Tests/test_shadow_cio_report.py Tests/test_shadow_scorecard_health.py -q",
+      "status": "PASS",
+      "summary": "18 passed in 0.21s"
+    },
+    {
+      "command": "python3 -m py_compile scripts/send_shadow_cio_report.py scripts/check_shadow_scorecard_health.py",
+      "status": "PASS"
+    },
+    {
+      "command": "python3 scripts/research/validate_sleeve_manifest.py --inventory",
+      "status": "PASS",
+      "summary": "status=OK"
+    },
+    {
+      "command": "python3 -m pytest Tests/test_sleeve_manifest.py -q",
+      "status": "PASS",
+      "summary": "7 passed in 0.04s"
+    },
+    {
+      "command": "python3 -m pytest Tests/test_sleeve_manifest.py Tests/test_strategy_registry.py -q",
+      "status": "BLOCKED_LOCAL_ENV",
+      "summary": "Local numpy C-extension architecture incompatible with local Python; VM validation used instead."
+    },
+    {
+      "command": "python3 -m pytest Tests/test_research_registry_mcp_server.py -q",
+      "status": "BLOCKED_LOCAL_ENV",
+      "summary": "Local networkx dependency missing; VM validation used instead."
+    },
+    {
+      "command": "VM ~/.venvs/quant-daily-report/bin/python3 -m pytest Tests/test_sleeve_manifest.py Tests/test_research_registry_mcp_server.py Tests/test_strategy_registry.py -q",
+      "status": "PASS",
+      "summary": "39 passed in 3.66s"
+    },
+    {
+      "command": "git diff --check",
+      "status": "PASS"
+    },
+    {
+      "command": "changed-file forbidden area check",
+      "status": "PASS",
+      "summary": "No forbidden execution, broker, cron, allocation, model, strategy registry, or trading files changed."
+    },
+    {
+      "command": "git diff -- scripts/crontab.txt core/strategy_registry.py config/research/strategy_registry.json paper scripts/run_precomputed_alpaca_execution.py scripts/execute_alpaca_orders.py",
+      "status": "PASS",
+      "summary": "No diff."
+    },
+    {
+      "command": "python3 -m json.tool reports/agent_loops/2026-06-14_active_fr_reconciliation/audit_manifest.json",
+      "status": "PASS"
+    },
+    {
+      "command": "audit-report whitespace check",
+      "status": "PASS"
+    }
+  ],
+  "intentional_remaining_matches": [
+    "Tests/test_shadow_cio_report.py keeps a negative assertion for YTD (from 2026-05-12).",
+    "docs/governance/fr_archive/fr_067_stage0_source_comparison.md preserves historical pre-approval trial-key language.",
+    "FR-057, FR-059, and FR-060 retain status_review_needed because deployment evidence is not conclusive."
+  ],
+  "safety": {
+    "execution_changed": false,
+    "broker_changed": false,
+    "cron_changed": false,
+    "allocation_changed": false,
+    "model_logic_changed": false,
+    "strategy_logic_changed": false,
+    "registry_lifecycle_changed": false,
+    "promotion_or_retirement_changed": false,
+    "secrets_committed": false
+  }
+}

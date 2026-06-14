@@ -1,5 +1,5 @@
 ---
-last_reviewed: 2026-05-22
+last_reviewed: 2026-06-14
 owner: governance
 category: artifact_ownership_matrix
 criticality: high
@@ -20,7 +20,7 @@ Detailed semantics live in `docs/artifact_registry.md`.
 | Workflow status artifacts | Workflow observability | Cron wrappers, recovery validators, shadow wrapper | Operators, health aggregator | MEDIUM | Same workflow date. | MEDIUM when step, producer, and status are explicit. | Missing status means unknown, not healthy. |
 | Shadow dated artifacts | Shadow research | `research.shadow_tracking.run`, shadow wrapper | Shadow CIO report, promotion review | MEDIUM | Same evaluated trade date or explicit stale/fallback reason. | MEDIUM for complete dated artifacts; LOW for repaired/backfilled/stale outputs. | Shadow-only; not broker-authoritative. |
 | Shadow latest publication | Shadow publication | `scripts/run_shadow_candidates_daily.sh`, hydration refresh tooling | Dashboard, operators | LOW | Must identify dated source and publication timestamp. | LOW without freshness manifest; MEDIUM only as pointer to validated dated source. | Convenience publication only. |
-| Shadow performance series | Shadow research | Shadow tracking and refresh tooling | CIO report, promotion audits | MEDIUM | Latest NAV date should align with evaluation date or state stale reason. | LOW to MEDIUM depending on continuity, repairs, and timing assumptions. | Do not blend with broker NAV. |
+| Shadow performance series | Shadow research | Shadow tracking, refresh tooling, governed restatement tooling | CIO report, promotion audits | MEDIUM | Latest NAV date should align with evaluation date or state stale reason. | MEDIUM when the active operational series is continuous under `dated_same_day_close_to_close_v1`; LOW for legacy mixed-convention lineage, stale, or unreconciled repairs. | Do not blend with broker NAV or legacy mixed-convention Shadow history. |
 | VIX / regime artifacts | Regime intelligence | Regime/VIX audit scripts | Regime diagnostics, research review | MEDIUM | Data-through date should cover expected market date. | MEDIUM when input dates and source are explicit. | Research/diagnostic surface. |
 | Hydration status | Data hydration | `scripts.hydrate_price_cache_only` | Shadow health, operators | MEDIUM | Same post-close hydration date; cache max date must be explicit. | MEDIUM if coverage and max date are clear; LOW on failure/lag. | Telemetry only; should not mutate execution. |
 | Price cache | Data/hydration | Data loader and hydration scripts | Shadow, research, reporting | MEDIUM | Coverage should reach expected completed trading date. | MEDIUM when coverage metadata exists; LOW/UNKNOWN without it. | Parquet/cache is data substrate, not operator summary. |

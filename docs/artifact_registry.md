@@ -1,5 +1,5 @@
 ---
-last_reviewed: 2026-05-22
+last_reviewed: 2026-06-14
 owner: governance
 category: artifact_registry
 criticality: high
@@ -51,7 +51,7 @@ This registry is the canonical prose layer. The quick-reference table lives in
 |---|---|---|---|---|---|---|
 | Execution run roots | `scripts.run_precomputed_alpaca_execution`, execution runtime | `outputs/runs/<RUN_ID>/*` | Confirmation email, posttrade review, operators | Run id, stage, and trade date must align with execution workflow evidence. | HIGH | HIGH only when run id, precompute source, execution status, and broker/reconciliation evidence align. |
 | Trading day summary | Daily report / confirmation flow | `outputs/trading_day_summary.json` | Operators, reports, historical review | Must identify trade date and source run. Latest-only summary is insufficient for audit. | MEDIUM | MEDIUM when source run is clear; LOW if source run or trade date is ambiguous. |
-| Shadow candidate dated artifacts | `research.shadow_tracking.run`, shadow wrapper | `outputs/shadow_candidates/YYYY-MM-DD/*` | Shadow CIO report, promotion review, operators | File date must match evaluation trade date or carry fallback/stale reason. | MEDIUM | MEDIUM for dated complete artifacts; LOW when repaired/backfilled/stale or timing assumptions remain unresolved. |
+| Shadow candidate dated artifacts | `research.shadow_tracking.run`, shadow wrapper | `outputs/shadow_candidates/YYYY-MM-DD/*` | Shadow CIO report, promotion review, operators | File date must match evaluation trade date or carry fallback/stale reason. | MEDIUM | MEDIUM for dated complete artifacts under the canonical `dated_same_day_close_to_close_v1` observation method; LOW when repaired/backfilled/stale or outside the canonical observation lineage. |
 | Shadow latest publication | Shadow wrapper and hydration refresh tooling | `outputs/shadow_candidates/latest/*` | Dashboard, operators, health checks | Must identify source dated artifact and publication time before being treated as current. | LOW | LOW unless paired with freshness manifest and source date. |
 | VIX/regime artifacts | Regime classification and VIX audit tooling | `outputs/vix_regime/*`, `outputs/regime_*/*` | Regime diagnostics, allocation review, research | Must identify data-through date and regime source. | MEDIUM | MEDIUM when date and source inputs are explicit; LOW if cached/stale inputs are unknown. |
 | Research outputs | Research and analysis scripts | `outputs/research/*`, `research/analysis/*` | Research review, future strategy work | Experiment date and data-through date should be explicit. | LOW | LOW to MEDIUM depending on provenance, PIT safety, and reproducibility. |
@@ -130,8 +130,9 @@ Operational downgrade examples:
 - Missing dated source behind `latest` -> UNKNOWN or LOW.
 - Broker snapshot missing -> UNKNOWN.
 - Reconciliation drift -> LOW until resolved.
-- Shadow timing semantics unresolved -> LOW for operational shadow performance
-  claims.
+- Legacy mixed-convention Shadow history superseded by the owner-approved
+  `dated_same_day_close_to_close_v1` observation series -> LOW / lineage-only
+  for operational shadow performance claims.
 - Backfilled/repaired artifact without explicit repair metadata -> LOW.
 - Generated report without source artifact references -> LOW.
 

@@ -394,3 +394,34 @@ Non-blocking follow-up:
 Orion/Lyra PIT rebaselines; DAILY-marketcap PIT large-cap family (current
 scalemarketcap is PIT-approximate); index membership families. Modular sleeve
 architecture to standardize PIT-first evidence is designed in FR-069.
+
+## 2026-06-14 — Shadow NAV Same-Day Observation Restatement
+
+## Status: RESOLVED / GOVERNANCE AND PRESENTATION FOLLOW-UP
+
+Issue:
+The Shadow scorecard incident that reported impossible cumulative performance
+was resolved through a governed restatement of the operational Shadow NAV series.
+The owner approved the dated same-day close-to-close convention as the canonical
+operational Shadow observation methodology.
+
+Canonical state:
+- Methodology: `dated_same_day_close_to_close_v1`.
+- Observation inception: `2026-05-12`.
+- Recovered observation window: `2026-05-12` through `2026-06-12`.
+- Recovered NAV rows: `23`.
+- Scorecard health after recovery: Fresh.
+- NAV integrity after recovery: OK.
+
+Lesson:
+Operational Shadow observation is not calendar-year YTD, and it is not the same
+truth surface as FR-066 broker-authoritative portfolio NAV. Legacy
+mixed-convention Shadow history is lineage-only and non-decision-grade. Future
+promotion, retirement, differentiation, or Orion/Lyra disposition evidence must
+not combine the superseded legacy series with the canonical observation series.
+
+Operational implication:
+Operator-facing scorecards and governance docs should say "Since Observation
+Inception (2026-05-12)" for the recovered observation window rather than "YTD
+from 2026-05-12". Presentation labels must not imply a promotion, retirement,
+allocation, or strategy lifecycle decision.

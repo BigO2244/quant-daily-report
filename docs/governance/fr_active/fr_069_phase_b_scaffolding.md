@@ -2,7 +2,7 @@
 
 Status: PHASE_B_IMPLEMENTED_RESEARCH_ONLY
 Owner: Caerus Research Program
-Last Updated: 2026-06-12
+Last Updated: 2026-06-14
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
@@ -149,6 +149,8 @@ Phase C must not begin until:
 - targeted manifest and MCP tests pass;
 - no execution, broker, allocation, portfolio construction, strategy, model,
   cron, or live-capital behavior has changed.
+- a separate owner-approved Phase C task authorizes the next implementation
+  boundary.
 
 FR-070 remains observation-monitoring. It does not block FR-069 unless the next
 live run produces a classified failure requiring renewed remediation.

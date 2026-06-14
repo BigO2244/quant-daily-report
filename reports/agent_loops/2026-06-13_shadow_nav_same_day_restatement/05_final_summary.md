@@ -29,7 +29,7 @@ Active scorecard health after replacement:
 
 From post-replacement dry run:
 
-| Model | Daily | 7-Day | YTD from 2026-05-12 | Excess vs SPY |
+| Model | Daily | 7-Day | Since Observation Inception (2026-05-12) | Excess vs SPY |
 |---|---:|---:|---:|---:|
 | Polaris | +3.12% | +1.32% | +11.41% | +10.93% |
 | Orion | +3.97% | +3.50% | +19.19% | +18.70% |

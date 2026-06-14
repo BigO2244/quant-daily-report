@@ -1,15 +1,17 @@
 # FR-069 Phase A Architecture Package
 
-Status: ACTIVE_PHASE_A
+Status: PHASE_A_COMPLETE_PHASE_B_IMPLEMENTED_RESEARCH_ONLY
 Owner: Caerus Research Program
-Last Updated: 2026-06-12
+Last Updated: 2026-06-14
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
-This package is the Phase A operating architecture for FR-069. It is
-documentation and planning only. It does not change trading, broker submission,
-execution, portfolio construction, allocation, model logic, strategy logic,
-cron, live-capital behavior, holdout access, or production registry semantics.
+This package is the completed Phase A operating architecture for FR-069. Phase B
+research-only scaffolding is now implemented and deployed; Phase C still
+requires separate owner approval. This package is documentation and planning
+only. It does not change trading, broker submission, execution, portfolio
+construction, allocation, model logic, strategy logic, cron, live-capital
+behavior, holdout access, or production registry semantics.
 
 FR-070 remains `DEPLOYED_OBSERVING` / `observation_monitoring`. New FR-070
 implementation work should reopen only for classified evidence from the next

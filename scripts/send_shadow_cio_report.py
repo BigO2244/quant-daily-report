@@ -224,10 +224,11 @@ def _period_return(points: list[tuple[str, float]], trade_date: str) -> PeriodRe
     ytd_points = [point for point in points if point[0].startswith(year)]
     if len(ytd_points) >= 2:
         window = ytd_points
-        label = "YTD"
+        first_ytd_date = ytd_points[0][0]
+        label = "YTD" if first_ytd_date.startswith(f"{year}-01-") else "Since Observation Inception"
     else:
         window = points
-        label = "Since Shadow Inception"
+        label = "Since Observation Inception"
     start = window[0][1]
     end = window[-1][1]
     if start == 0:
@@ -546,7 +547,14 @@ def render_email_body(
         if spy:
             lines.append(f"SPY -> {_fmt_pct(spy.period_return)} {spy.period_label}")
 
-    lines.extend(["", "=== PROMOTION SIGNAL ===", ""])
+    lines.extend(
+        [
+            "",
+            "=== PROMOTION SIGNAL ===",
+            "",
+            "Advisory research labels only; no promotion, retirement, allocation, or lifecycle action is authorized by this report.",
+        ]
+    )
     if performance_corrupt:
         lines.append("- N/A: SHADOW_PERFORMANCE_SUPPRESSED - performance is unavailable because of artifact corruption.")
     elif polaris:

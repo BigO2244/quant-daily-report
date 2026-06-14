@@ -29,9 +29,9 @@ Archived copies are retained for auditability.
 | FR-035 | Execution contract documentation hardening | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
 | FR-036 | MCP Phase 7 — research-question capability router | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current MCP surface tracked in the active backlog. |
 | FR-036a | MCP conformance audit vs frozen semantics layer | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Documentation-only audit tracked in the active backlog. |
-| FR-036b | MCP `attribution_analysis` capability promotion | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability promotion tracked in the active backlog. |
-| FR-036c | MCP `stable_window_evaluation` capability promotion | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability promotion tracked in the active backlog. |
-| FR-036d | MCP strategy-aware promotion readiness drill-down | `PROPOSED` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability drill-down tracked in the active backlog. |
+| FR-036b | MCP `attribution_analysis` capability promotion | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability is implemented and deployed as a read-only MCP tool. |
+| FR-036c | MCP `stable_window_evaluation` capability promotion | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Capability is implemented and deployed as a read-only MCP tool. |
+| FR-036d | MCP strategy-aware promotion readiness drill-down | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Strategy-aware `promotion_readiness` input/output is implemented and deployed. |
 | FR-050 | Phoenix Historical Behavior Review | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_050_phoenix_research_spec.md` | ARCHIVED | Archived copy retained; active work and current evidence live in the registry/backlog. |
 | FR-051 | Cygnus v0 event-reaction / Wave 1 | `SHELVED` | `docs/governance/fr_archive/fr_051_cygnus_research_spec.md` | ARCHIVED | Archived spec copy retained for auditability; holdout-preserved v0 governance remains in registry. |
 | FR-052 | Cassiopeia event-driven spec | `DRAFT_RESEARCH` | `docs/governance/fr_archive/fr_052_cassiopeia_research_spec.md` | ARCHIVED | Archived spec copy retained; canonical role is still spec-only / event-driven. |
@@ -45,13 +45,13 @@ Archived copies are retained for auditability.
 | FR-060 | Intended NAV True Mark-to-Market | `IN_PROGRESS` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-telemetry work tracked in the active backlog. |
 | FR-061 | Operational Drag Reporting Cleanup | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work tracked in the active backlog. |
 | FR-062 | Reconciliation Drift Investigation and Patch | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Open operational-drag work tracked in the active backlog. |
-| FR-063 | Strategy Differentiation Deep Dive | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ARCHIVED | Archived spec copy retained while backlog state is deprioritized pending FR-069 architecture-level Orion/Lyra disposition; not closed. |
+| FR-063 | Strategy Differentiation Deep Dive | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ARCHIVED | Archived spec copy retained; FR-063 remains active supporting differentiation evidence under FR-069 and is not a retirement action. |
 | FR-064 | Multi-Asset Research Framework | `DRAFT_RESEARCH` | `docs/governance/fr_archive/fr_064_multi_asset_research_framework.md` | ARCHIVED | Archived draft retained for auditability and linkage. |
 | FR-065 | Dashboard Decision-Grade Consolidation | `ACTIVE_RESEARCH` | `docs/governance/fr_archive/fr_065_dashboard_decision_grade_consolidation.md` | ARCHIVED | Archived spec copy retained; current dashboard work is tracked in the active backlog. |
 | FR-066 | Canonical NAV Track Record Integrity | `DEPLOYED_OBSERVING` | `docs/governance/fr_archive/fr_066_canonical_nav_track_record_spec.md` | ARCHIVED | Historical spec copy retained; deployed-observing state remains in the registry and backlog. |
 | FR-067 | Vela Stage 0 source comparison | `CLOSED_PASS` | `docs/governance/fr_archive/fr_067_stage0_source_comparison.md` | ARCHIVED | Archived comparison spec retained; paired evidence with `docs/governance/fr_archive/fr_067_vela_research_spec.md`. |
 | FR-068 | PIT universe + survivorship rebaseline | `PHASES_1_3_COMPLETE` | `research/pit_universe_architecture_2026-06-10.md` | ACTIVE | Current design and results live in the research artifact; the supporting FR spec has been archived. |
-| FR-069 | Research Lab / modular sleeve architecture | `PHASE_B_IMPLEMENTED_RESEARCH_ONLY` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Primary active architecture/research workstream; Phase B scaffold at `docs/governance/fr_active/fr_069_phase_b_scaffolding.md` adds the research-only sleeve manifest, validator, MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, and future sleeve onboarding placeholders. No production refactor or runtime behavior change. |
+| FR-069 | Research Lab / modular sleeve architecture | `PHASE_B_IMPLEMENTED_RESEARCH_ONLY` | `docs/governance/fr_active/fr_069_research_lab_modular_sleeve_architecture.md` | ACTIVE | Next major architecture/research workstream; Phase B scaffold at `docs/governance/fr_active/fr_069_phase_b_scaffolding.md` adds the research-only sleeve manifest, validator, MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, and future sleeve onboarding placeholders. Phase C requires separate owner approval. No production refactor or runtime behavior change. |
 | FR-070 | Cash Gating and Post-Sell Buy Budget Reconciliation | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_070_cash_gating_post_sell_budget_reconciliation.md` | ACTIVE | Observation/monitoring; June 12 remediation is deployed, the discrepancy was artifact timing failure rather than failed rebudgeting, and new implementation reopens only for classified next-run failure evidence. |
 | FR-071 | Governance Doctrine Integration | `READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
 | FR-072 | Governance Hygiene Agent | `READY` | `docs/governance/fr_active/fr_072_governance_hygiene_agent.md` | ACTIVE | Read-only governance auditor; output artifacts only, no auto-patch or auto-commit. Phase B scheduling requires separate approval. |
@@ -115,6 +115,23 @@ None of these change execution, broker submission, cron execution-phase,
 order generation, allocation, the strategy registry, or promotion state. The
 FR-066 cron line is installed on the VM as telemetry only and writes to
 `logs/portfolio_history.cron.log`.
+
+## Shadow NAV Observation Restatement
+
+On 2026-06-14, active Shadow scorecard artifacts were restated under the
+owner-approved operational observation methodology
+`dated_same_day_close_to_close_v1`.
+
+- Observation inception: `2026-05-12`
+- Observation through: `2026-06-12`
+- Recovery observation count: `23` NAV rows
+- Scorecard health after recovery: Fresh
+- NAV integrity after recovery: OK
+
+Legacy mixed-convention Shadow NAV history is superseded for operational
+scorecards and non-decision-grade for promotion, retirement, or allocation
+evidence. This restatement is separate from FR-066 canonical portfolio NAV and
+from FR-070 execution target-attainment observation.
 
 ## Wave Summary
 

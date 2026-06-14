@@ -198,10 +198,14 @@ Final health:
 
 Corrected scorecard dry-run:
 
-- Polaris: daily `+3.12%`, 7-day `+1.32%`, YTD from `2026-05-12` `+11.41%`
-- Orion: daily `+3.97%`, 7-day `+3.50%`, YTD from `2026-05-12` `+19.19%`
-- Lyra: daily `+4.04%`, 7-day `-0.24%`, YTD from `2026-05-12` `+12.58%`
-- SPY: daily `+0.54%`, 7-day `-2.03%`, YTD from `2026-05-12` `+0.48%`
+- Polaris: daily `+3.12%`, 7-day `+1.32%`, since observation inception
+  (`2026-05-12`) `+11.41%`
+- Orion: daily `+3.97%`, 7-day `+3.50%`, since observation inception
+  (`2026-05-12`) `+19.19%`
+- Lyra: daily `+4.04%`, 7-day `-0.24%`, since observation inception
+  (`2026-05-12`) `+12.58%`
+- SPY: daily `+0.54%`, 7-day `-2.03%`, since observation inception
+  (`2026-05-12`) `+0.48%`
 
 No model promotion, retirement, allocation, strategy, execution, broker, or
 cron behavior changed as part of this recovery.
@@ -211,4 +215,4 @@ cron behavior changed as part of this recovery.
 - FR-070 remains `DEPLOYED_OBSERVING` and highest immediate operational observation priority.
 - FR-069 remains research-only and the next major architecture workstream.
 - Orion and Lyra remain under evaluation.
-- FR-063 was not retired or reclassified.
+- FR-063 remains active supporting differentiation evidence and was not retired.

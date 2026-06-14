@@ -90,6 +90,7 @@ def test_shadow_cio_report_renders_readable_scorecard(tmp_path: Path) -> None:
     assert "Requested/report date: 2026-01-13" in report.body
     assert "Lyra | +0.90% | +9.80% | +12.00% | +9.00%" in report.body
     assert "SPY -> +3.00%" in report.body
+    assert "Advisory research labels only; no promotion, retirement, allocation, or lifecycle action is authorized by this report." in report.body
     assert "{" not in report.body
     assert "}" not in report.body
 
@@ -196,8 +197,35 @@ def test_shadow_cio_report_labels_since_inception_when_ytd_history_unavailable(t
     body = build_report(tmp_path).body
 
     assert "Data through: 2025-12-31" in body
-    assert "YTD (from 2025-12-30) through 2025-12-31" in body
-    assert "Excess vs SPY (YTD)" in body
+    assert "Since Observation Inception (from 2025-12-30) through 2025-12-31" in body
+    assert "Excess vs SPY (Since Observation Inception)" in body
+
+
+def test_shadow_cio_report_labels_may_observation_window_as_since_inception(tmp_path: Path) -> None:
+    latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
+    evaluation = _evaluation(valid_days=23)
+    evaluation["trade_date"] = "2026-06-12"
+    _write_json(latest / "shadow_evaluation.json", evaluation)
+    _write_json(latest / "comparison.json", {"trade_date": "2026-06-12", "status": "OK"})
+    performance = tmp_path / "outputs" / "shadow_candidates" / "performance"
+    performance.mkdir(parents=True, exist_ok=True)
+    (performance / "shadow_nav_series.csv").write_text(
+        "\n".join(
+            [
+                "date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark",
+                "2026-05-12,1.00,1.00,1.00,1.00",
+                "2026-06-11,1.08,1.12,1.09,1.00",
+                "2026-06-12,1.10,1.19,1.12,1.01",
+            ]
+        )
+        + "\n"
+    )
+
+    body = build_report(tmp_path).body
+
+    assert "YTD (from 2026-05-12)" not in body
+    assert "Model | Daily | 7-Day | Since Observation Inception (from 2026-05-12) | Excess vs SPY (Since Observation Inception)" in body
+    assert "Daily, 7-Day, and Since Observation Inception are anchored to Data through: 2026-06-12." in body
 
 
 def test_shadow_cio_report_anchors_all_windows_to_latest_valid_nav_date(tmp_path: Path) -> None:

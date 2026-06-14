@@ -2,7 +2,7 @@
 
 Status: PHASE_B_IMPLEMENTED_RESEARCH_ONLY (research-only scaffold — no production refactor in this FR)
 Owner: Caerus Research Program
-Last Updated: 2026-06-12
+Last Updated: 2026-06-14
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes nothing that runs — no
 code, execution, broker, cron, registry, allocation, or paper/live behavior)
@@ -178,7 +178,8 @@ auditable; `universe_method` makes survivorship status machine-checkable.
 
 ## 5. Phase A Orchestrated Work Plan
 
-FR-069 is now the primary active architecture/research workstream. Phase A is
+FR-069 is the next major architecture/research workstream after FR-070
+operational observation. Phase A is
 specification, file-area assignment, and test planning only. It does not change
 production strategy behavior, execution, broker submission, allocation, model
 logic, cron, or the live strategy registry.
@@ -202,7 +203,7 @@ not change execution, broker, allocation, portfolio construction, model,
 strategy, cron, live-capital behavior, or production registry semantics.
 
 Phase C must not begin until manifest, validator, MCP inventory, and targeted
-tests pass. Phase C still requires separate approval for any implementation
+tests pass, and still requires separate owner approval for any implementation
 beyond research-only scaffolding.
 
 ### Agent Roles
@@ -304,7 +305,8 @@ deployment/governance approval.
 ## 8. Phase A Acceptance Criteria
 
 - Current Polaris, Orion, and Lyra behavior remains unchanged.
-- FR-063 remains deprioritized behind FR-069, not retired.
+- FR-063 remains active supporting differentiation evidence under FR-069, not
+  retired.
 - Orion and Lyra remain under evaluation; no retirement, promotion, rename, or
   Lyra-name reuse is approved.
 - Strategy/sleeve lifecycle terms are documented.

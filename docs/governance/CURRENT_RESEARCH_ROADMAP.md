@@ -2,13 +2,12 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-12 (governance file locations updated to fr_active/ and
-fr_archive/; FR-066 VM backfill/cron deployed; FR-051 Cygnus v0 Stage 2 FAIL
-recorded and v0 shelved; FR-067 Sharadar gate CLOSED_PASS; FR-068 PIT
-remediation Phases 1-3 complete — Polaris priced rebaseline MATERIAL; FR-069
-Research Lab / modular sleeve architecture promoted to primary active
-architecture workstream; FR-070 June 12 investigation classed the cash
-discrepancy as artifact timing failure and moved to observation/monitoring)
+Last Updated: 2026-06-14 (local/origin/main/VM verified at `e1792cd`; Shadow
+NAV incident recovered under `dated_same_day_close_to_close_v1`; canonical
+Shadow observation inception is 2026-05-12 with 23 NAV rows through
+2026-06-12; legacy mixed-convention Shadow history is superseded and
+non-decision-grade; FR-070 remains highest immediate operational observation
+priority; FR-069 remains the next major research-only architecture workstream)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -54,13 +53,15 @@ editing code or specs.
 
 ---
 
-## 1. Verified state (as of 2026-06-08)
+## 1. Verified state (as of 2026-06-14)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
-- **Local HEAD:** `216ac5f` — "Integrate investment confidence sections into model quality packet" (branch `main`)
+- **Local HEAD / origin/main / VM HEAD:** `e1792cde79b8d7f2dcd8324451b2258910824bd0`
 - **Production posture:** paper only, US long-only equities + options overlay, Alpaca paper broker. No shorting, no leverage, no real capital.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
 - **Shadow (non-blocking):** Caerus Orion, Caerus Lyra. SPY = benchmark.
+- **Shadow observation methodology:** `dated_same_day_close_to_close_v1`; canonical operational observation window begins `2026-05-12`.
+- **Shadow scorecard health:** Fresh; NAV integrity OK as of recovered artifacts through `2026-06-12`.
 - **Promotion ladder:** research → backtest → shadow → paper → live. No automated promotion. Promotion is conservative and research-only.
 - **Hard rule:** do not change production trading, broker submission, or cron timing casually.
 
@@ -78,13 +79,13 @@ editing code or specs.
 | FR-055 | — | Registry surface cleanup audit | `fr_archive/fr_055_registry_surface_cleanup_audit.md` | Audit | n/a | n/a |
 | FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | `fr_archive/fr_056_cygnus_design_spec.md` | RETIRED 2026-06-10 (owner-approved) → FR-051 | Retired | none | n/a |
 | FR-057 | Argo | *(design draft — CONFLICTS with FR-053)* | `fr_archive/fr_057_argo_design_spec.md` | superseded/quarantined → FR-053 | Design Only | none | n/a |
-| FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH | `strategy_differentiation_deep_dive.py` | n/a |
+| FR-063 | Cross-strategy | Strategy differentiation deep dive | `fr_archive/fr_063_strategy_differentiation_deep_dive.md` | ACTIVE_RESEARCH — supporting differentiation evidence; no Orion/Lyra retirement decision | `strategy_differentiation_deep_dive.py` | n/a |
 | FR-064 | Portfolio research | Multi-asset research framework | `fr_archive/fr_064_multi_asset_research_framework.md` | DRAFT_RESEARCH | `multi_asset_research_framework.py` | n/a |
 | FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_archive/fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
 | FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_archive/fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
 | FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_archive/fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
 | FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md` | PHASES 1-3 COMPLETE 2026-06-10 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra rebaselines pending | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py` | n/a |
-| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (research-only scaffold; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md`; Phase A package: `fr_active/fr_069_phase_a_architecture_package.md`; Phase B scaffold: `fr_active/fr_069_phase_b_scaffolding.md` | PHASE_B_IMPLEMENTED_RESEARCH_ONLY 2026-06-12 — research-only sleeve manifest, validator, read-only MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, and future sleeve onboarding placeholders; Phase C blocked until scaffold validation/tests pass | `research_registry/sleeves/manifest.json`, `scripts/research/validate_sleeve_manifest.py`, `fr069_sleeve_inventory` | research-only |
+| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (research-only scaffold; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md`; Phase A package: `fr_active/fr_069_phase_a_architecture_package.md`; Phase B scaffold: `fr_active/fr_069_phase_b_scaffolding.md` | PHASE_B_IMPLEMENTED_RESEARCH_ONLY — research-only sleeve manifest, validator, read-only MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, and future sleeve onboarding placeholders; Phase C requires separate owner approval even after scaffold validation/tests pass | `research_registry/sleeves/manifest.json`, `scripts/research/validate_sleeve_manifest.py`, `fr069_sleeve_inventory` | research-only |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
@@ -192,10 +193,15 @@ or fold FR-056 — now done.
   account captures rather than the same EOD portfolio-history source. The Apr 8
   canonical row is `$9,751.97`; the older `$9,715.45` baseline is not used as
   source truth.
-- **FR-067 vendor gate** — Sharadar is owner-conditional pending a trial-key
-  coverage audit. The verifier exists at
-  `scripts/research/verify_sharadar_coverage.py` but has not been run because no
-  trial key is available.
+- **FR-067 vendor gate** — CLOSED_PASS on 2026-06-10. Sharadar coverage
+  verification passed and is the approved PIT price/security-history source for
+  FR-068. Remaining caveats are index-membership supplementation and the separate
+  Cygnus v1 consensus/EPS-surprise dependency.
+- **Shadow NAV observation reset** — the operational Shadow scorecard now uses
+  the owner-approved `dated_same_day_close_to_close_v1` observation series from
+  2026-05-12 forward. Legacy mixed-convention Shadow performance remains
+  lineage-only and must not be combined with the canonical observation series for
+  promotion or retirement evidence.
 - **Post-submit snapshot baseline failures** — known unrelated validation backlog.
 - **MCP full-suite order pollution** — known unrelated full-suite ordering backlog.
 

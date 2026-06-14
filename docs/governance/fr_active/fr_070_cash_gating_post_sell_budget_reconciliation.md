@@ -373,14 +373,35 @@ Weekend maintenance window.
 
 ## Current Status
 
-Research not started.
+Remediation implementation is deployed and FR-070 is in observation/monitoring.
 
-No production action required.
+The June 12 cash discrepancy was classified as `ARTIFACT_TIMING_FAILURE`, not
+failed sell-first rebudgeting. Post-sell rebudgeting correctly used confirmed
+sell proceeds; the stale cash miss came from posttrade artifacts captured after
+buy submission but before buy fills. The post-buy timing patch now delays final
+posttrade artifacts until buy fills reach a terminal observation or timeout.
 
-Current live system remains:
+This execution-artifact timing issue is separate from the resolved Shadow NAV
+scorecard incident and from FR-066 canonical portfolio NAV.
 
-- operational
-- reconciled
-- trading normally
+No new implementation work is active. Future FR-070 implementation should reopen
+only if next-run diagnostics show:
 
-FR-070 exists to determine whether the remaining validation failures represent test drift or a genuine execution-control defect.
+- stale/pre-buy posttrade snapshot
+- buy timeout/failure
+- unclassified cash drift
+- reconciliation/target-attainment contradiction
+- achieved cash materially outside tolerance without a classified reason
+
+Next live-run validation gates:
+
+- `buy_phase_status=BUY_PHASE_COMPLETED` or a properly classified terminal
+  timeout/fail state
+- `posttrade_snapshot_stage=post_buy` when buys fill
+- `pending_buy_count=0` when buys fill
+- `achieved_cash_weight` within tolerance of `target_cash_weight`
+- MCP target-attainment status `OK_TARGET_ATTAINED` or a properly classified
+  warning
+
+No production action is required unless those gates produce classified failure
+evidence.

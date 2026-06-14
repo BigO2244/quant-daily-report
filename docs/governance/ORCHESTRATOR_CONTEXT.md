@@ -31,9 +31,14 @@ artifacts and an explicit research-to-production promotion ladder.
 - Execution integrity and target attainment are in observation after the June
   12 FR-070 remediation. New FR-070 implementation work requires classified
   evidence from the next run.
-- FR-069 research architecture is now the primary active workstream and is
-  moving toward a modular sleeve model aligned with the Caerus Investment
-  Doctrine.
+- Shadow NAV recovery is resolved under the owner-approved
+  `dated_same_day_close_to_close_v1` operational observation methodology.
+  The canonical Shadow observation window begins on 2026-05-12; legacy
+  mixed-convention Shadow history is superseded and non-decision-grade for
+  promotion or retirement evidence.
+- FR-069 research architecture is the next major architecture workstream and
+  is moving toward a modular sleeve model aligned with the Caerus Investment
+  Doctrine. It remains research-only; Phase C requires separate approval.
 - The live dashboard is nginx-protected with basic auth; recovery uses
   `scripts/reset_dashboard_auth.sh` and does not change trading, execution,
   allocation, or cron behavior.
@@ -67,8 +72,9 @@ artifacts and an explicit research-to-production promotion ladder.
    architecture workstream; it remains research-only unless a separately
    governed implementation phase is approved.
 3. Continued Orion/Lyra evaluation before any retirement decision.
-4. FR-063 remains deprioritized behind FR-069; no retirement decision is
-   approved, and any Orion/Lyra disposition belongs inside FR-069.
+4. FR-063 remains active supporting differentiation evidence under FR-069; no
+   retirement decision is approved, and any Orion/Lyra disposition belongs
+   inside FR-069 after sufficient canonical new-series evidence exists.
 5. Dashboard auth cleanup remains operational hygiene, not a research priority.
 
 ## Operational vs Strategic Changes
