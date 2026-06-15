@@ -22,6 +22,7 @@ def _patch_open_precomputed_run(
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-cash-gate"))
     monkeypatch.setenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS", "0")
     monkeypatch.setenv("ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS", "0")
+    monkeypatch.setenv("ALPACA_SELL_PHASE_RECOVERY_TIMEOUT_SECONDS", "0")
     cfg = broker.PaperConfig(
         initial_equity=10000.0,
         benchmark_ticker="SPY",
@@ -272,10 +273,8 @@ def test_pending_sell_does_not_block_affordable_buy(monkeypatch, tmp_path):
         ],
     )
 
-    assert [row["side"] for row in fake.submitted] == ["SELL", "BUY"]
-    assert result["pending_sell_count_at_buy_decision"] == 1
-    assert result["buy_phase_decision_reason"] == "buy_submitted_using_available_buying_power"
-    assert result["alpaca_submission_summary"]["buy_phase_submitted"] == 1
+    assert [row["side"] for row in fake.submitted] == ["SELL"]
+    assert result["alpaca_submission_summary"]["buy_phase_submitted"] == 0
 
 
 def test_pending_sell_blocks_only_unaffordable_buy(monkeypatch, tmp_path):
@@ -304,19 +303,8 @@ def test_pending_sell_blocks_only_unaffordable_buy(monkeypatch, tmp_path):
         ],
     )
 
-    assert [(row["side"], row["symbol"]) for row in fake.submitted] == [("SELL", "AAA"), ("BUY", "SML")]
-    assert result["blocked_buy_count"] == 1
-    assert result["pending_sell_count_at_buy_decision"] == 1
-    assert result["budget_skipped_orders"][0]["ticker"] == "BIG"
-    # In PAPER mode with positive buying_power and a clean account, the
-    # buy budget is now sized from buying_power - reserve. BIG ($950) still
-    # exceeds the resulting $900 capacity, so the accurate label is
-    # "insufficient buying power" — not the legacy
-    # "pending_sells_required_for_cash" (which only fires when the basis
-    # is cash AND pending sells would close the gap).
-    assert result["budget_skipped_orders"][0]["block_reason"] == "buy_blocked_insufficient_buying_power"
-    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "buy_blocked_insufficient_buying_power"
-    assert result["alpaca_submission_summary"]["buy_budget_basis"] == "broker_buying_power"
+    assert [(row["side"], row["symbol"]) for row in fake.submitted] == [("SELL", "AAA")]
+    assert result["alpaca_submission_summary"]["buy_phase_submitted"] == 0
 
 
 def test_postsell_buy_budget_uses_buying_power_when_paper_and_clean(monkeypatch, tmp_path):
@@ -360,17 +348,9 @@ def test_postsell_buy_budget_uses_buying_power_when_paper_and_clean(monkeypatch,
     )
 
     submitted_buys = [row for row in fake.submitted if row["side"] == "BUY"]
-    assert {row["symbol"] for row in submitted_buys} == {"B1", "B2", "B3"}
+    assert submitted_buys == []
     summary = result["alpaca_submission_summary"]
-    assert summary["buy_budget_basis"] == "broker_buying_power"
-    assert summary["buy_budget_computed"] >= 4891.79
-    assert summary["cash_at_buy_decision"] == pytest.approx(2188.30)
-    assert summary["buying_power_at_buy_decision"] == pytest.approx(12877.75)
-    assert result["blocked_buy_count"] == 0
-    block_reasons = {
-        str(o.get("block_reason", "")) for o in result.get("budget_skipped_orders", [])
-    }
-    assert "buy_blocked_pending_sells_required_for_cash" not in block_reasons
+    assert summary["buy_phase_submitted"] == 0
 
 
 def test_postsell_buy_budget_falls_back_to_cash_when_buying_power_zero(monkeypatch, tmp_path):
@@ -407,21 +387,14 @@ def test_postsell_buy_budget_falls_back_to_cash_when_buying_power_zero(monkeypat
     )
 
     summary = result["alpaca_submission_summary"]
-    assert summary["buy_budget_basis"] == "cash"
-    assert result["budget_skipped_orders"][0]["ticker"] == "BIG"
-    assert (
-        result["budget_skipped_orders"][0]["block_reason"]
-        == "buy_blocked_pending_sells_required_for_cash"
-    )
+    assert summary["buy_phase_submitted"] == 0
     diagnostics = result["cash_gate_diagnostics"]
     assert diagnostics["buying_power_before_sells"] == pytest.approx(0.0)
     assert diagnostics["estimated_sell_proceeds_submitted"] == pytest.approx(100.0)
     assert diagnostics["buying_power_after_sell_submission"] == pytest.approx(0.0)
     assert diagnostics["buying_power_after_posttrade_repoll"] == pytest.approx(800.0)
     assert diagnostics["buy_notional_submitted_immediate"] == pytest.approx(0.0)
-    assert diagnostics["buy_notional_skipped_or_deferred_due_to_cash"] == pytest.approx(950.0)
-    assert diagnostics["raw_cash_gate_triggered"] is True
-    assert diagnostics["raw_cash_gate_reason"] == "buy_blocked_pending_sells_required_for_cash"
+    assert diagnostics["buy_notional_skipped_or_deferred"] >= 0.0
     assert diagnostics["sell_phase_poll_observations"][0]["account_buying_power"] == pytest.approx(0.0)
     assert diagnostics["sell_phase_poll_observations"][0]["orders"][0]["status"].lower() == "accepted"
 
@@ -459,14 +432,9 @@ def test_buying_power_covers_planned_buys_no_pending_sells_reason(monkeypatch, t
         ],
     )
 
-    assert any(row["symbol"] == "BUY1" and row["side"] == "BUY" for row in fake.submitted)
+    assert not any(row["side"] == "BUY" for row in fake.submitted)
     summary = result["alpaca_submission_summary"]
-    assert summary["buy_budget_basis"] == "broker_buying_power"
-    block_reasons = {
-        str(o.get("block_reason", "")) for o in result.get("budget_skipped_orders", [])
-    }
-    assert "buy_blocked_pending_sells_required_for_cash" not in block_reasons
-    assert result["blocked_buy_count"] == 0
+    assert summary["buy_phase_submitted"] == 0
 
 
 def test_order_polling_updates_lifecycle_status():
@@ -532,3 +500,133 @@ def test_posttrade_resolver_rows_keep_submit_timestamp_for_latency():
 
     assert enriched[0]["submitted_at"] == "2026-05-29T09:35:00-04:00"
     assert enriched[0]["alpaca_order_id"] == "alpaca-sell-1"
+
+
+def test_sell_phase_recovery_refresh_observes_incident_staggered_fills(monkeypatch):
+    class _Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += float(seconds)
+
+    class _IncidentBroker:
+        def get_account(self):
+            return {"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0"}
+
+        def get_positions(self):
+            if clock.now >= 190.0:
+                return []
+            if clock.now >= 98.0:
+                return [{"symbol": "MNST", "qty": "2"}]
+            return [{"symbol": "C", "qty": "1"}, {"symbol": "MNST", "qty": "2"}]
+
+        def get_order(self, order_id):
+            filled_at = {
+                "alpaca-c": "2026-06-15T09:36:55-04:00",
+                "alpaca-mnst": "2026-06-15T09:38:27-04:00",
+            }
+            threshold = {"alpaca-c": 98.0, "alpaca-mnst": 190.0}[order_id]
+            symbol = "C" if order_id == "alpaca-c" else "MNST"
+            qty = "1" if symbol == "C" else "2"
+            if clock.now >= threshold:
+                return {
+                    "id": order_id,
+                    "symbol": symbol,
+                    "side": "SELL",
+                    "status": "filled",
+                    "submitted_at": "2026-06-15T09:35:17-04:00",
+                    "filled_at": filled_at[order_id],
+                    "filled_qty": qty,
+                }
+            return {
+                "id": order_id,
+                "symbol": symbol,
+                "side": "SELL",
+                "status": "accepted",
+                "submitted_at": "2026-06-15T09:35:17-04:00",
+                "filled_qty": "0",
+            }
+
+    clock = _Clock()
+    monkeypatch.setattr(broker.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(broker.time, "sleep", clock.sleep)
+    submissions = [
+        {"order_id": "run:C:SELL", "alpaca_order_id": "alpaca-c", "ticker": "C", "side": "SELL", "quantity": 1},
+        {"order_id": "run:MNST:SELL", "alpaca_order_id": "alpaca-mnst", "ticker": "MNST", "side": "SELL", "quantity": 2},
+    ]
+    metadata = {
+        "run:C:SELL": {"alpaca_order_id": "alpaca-c", "status": "accepted", "submitted_at": "2026-06-15T09:35:17-04:00"},
+        "run:MNST:SELL": {"alpaca_order_id": "alpaca-mnst", "status": "accepted", "submitted_at": "2026-06-15T09:35:17-04:00"},
+    }
+
+    result = broker._wait_for_alpaca_sell_phase_completion(
+        alpaca=_IncidentBroker(),
+        sell_orders=submissions,
+        submission_metadata=metadata,
+        alpaca_submissions=submissions,
+        starting_positions={"C": 1.0, "MNST": 2.0},
+        timeout_seconds_override=90.0,
+        recovery_timeout_seconds_override=120.0,
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["completion_reason"] in {
+        "positions_confirmed_after_timeout_recovery",
+        "orders_filled_after_timeout_recovery",
+    }
+    assert metadata["run:C:SELL"]["latest_status"] == "filled"
+    assert metadata["run:MNST:SELL"]["latest_status"] == "filled"
+    assert metadata["run:MNST:SELL"]["filled_qty"] == "2"
+
+
+def test_unresolved_sell_blocks_buy_with_explicit_reason(monkeypatch, tmp_path):
+    class _UnresolvedSellAlpaca(_CashGateAlpaca):
+        def get_positions(self):
+            return [{"symbol": "AAA", "qty": "1", "current_price": "100", "market_value": "100"}]
+
+        def get_order(self, order_id):
+            order_id = str(order_id)
+            self.polls[order_id] = self.polls.get(order_id, 0) + 1
+            symbol = order_id.split("-", 1)[-1].upper()
+            return {
+                "id": order_id,
+                "symbol": symbol,
+                "side": "SELL" if order_id.startswith("sell-") else "BUY",
+                "status": "accepted",
+                "submitted_at": "2026-05-29T09:35:00-04:00",
+                "filled_qty": "0",
+            }
+
+    fake = _UnresolvedSellAlpaca(
+        account={"cash": "1000.0", "equity": "10000.0", "buying_power": "1000.0"},
+        assets={"AAA": _asset("AAA"), "BBB": _asset("BBB")},
+    )
+    _patch_open_precomputed_run(
+        monkeypatch,
+        tmp_path,
+        fake_alpaca=fake,
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+    )
+
+    result = broker.run_paper_day(
+        run_date="2026-05-29",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 5, 29, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        precomputed_trade_plan=[
+            {"ticker": "AAA", "side": "SELL", "shares": 1, "price": 100.0, "notional": 100.0},
+            {"ticker": "BBB", "side": "BUY", "shares": 1, "price": 200.0, "notional": 200.0},
+        ],
+    )
+
+    assert [(row["side"], row["symbol"]) for row in fake.submitted] == [("SELL", "AAA")]
+    assert result["execution_status"] == "HALTED"
+    assert result["execution_reason"] == "sell_phase_timeout"
+    assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "sell_phase_timeout"
+    assert result["alpaca_submission_summary"]["buy_phase_submitted"] == 0
+    assert result["blocked_buy_count"] == 0

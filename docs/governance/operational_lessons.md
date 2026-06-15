@@ -168,6 +168,20 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   gaps: reason codes, source paths, source dates, stale inputs, blocking
   components, top drift contributors, and confidence. A single green
   reconciliation status is not enough for deployment-integrity monitoring.
+- On 2026-06-15, Alpaca filled both submitted sell orders after the original
+  sell observation boundary, but Caerus persisted zero fills, did not advance to
+  post-sell buy submission, and surfaced an `EXECUTED` label. Sell observation
+  must include a bounded authoritative recovery refresh by stable broker order
+  ID before suppressing buys or producing final operator reporting.
+- A sell-first lifecycle may only proceed to post-sell rebudgeting when sell
+  terminality is established authoritatively or by an explicitly documented
+  safe fallback. If the sell phase remains unresolved after bounded recovery,
+  the buy phase must be skipped with an explicit reason such as
+  `sell_phase_timeout`; accepted-only activity is not a completed execution.
+- Confirmation emails and target-attainment diagnostics must agree with the
+  lifecycle: planned-but-unsubmitted buys, recovered broker state, unresolved
+  sell state, and target-attainment uncertainty are separate facts and must not
+  be collapsed into a green headline.
 
 ## Artifact Lessons
 

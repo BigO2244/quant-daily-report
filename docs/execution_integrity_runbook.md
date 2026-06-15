@@ -199,6 +199,18 @@ The helper is read-only. It only prints recommended paper repair actions from th
 - Review `reason_codes` before treating excess cash as intentional target cash.
 - Do not assume proceeds from rejected, timed-out, or partially unresolved
   sells; only confirmed cash should release buy capacity.
+- Confirm every submitted sell has a stable `alpaca_order_id` and that
+  `order_lifecycle` or `sell_phase_poll_observations` show a terminal broker
+  state. If sells remain `accepted`, `new`, or otherwise nonterminal after the
+  recovery window, the buy leg must show an explicit skip reason
+  (`sell_phase_timeout`, `sell_state_unresolved`, or
+  `broker_status_refresh_failed`) and the run must not be treated as a clean
+  execution.
+- If Alpaca later shows filled sell orders that Caerus did not persist, treat
+  the run as an execution-integrity incident: preserve artifacts, compare the
+  broker fill timestamps to sell-phase polls, and do not regenerate
+  confirmation email from stale local state without a broker-authoritative
+  recovery pass.
 
 ### Daily deployment monitoring
 

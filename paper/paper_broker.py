@@ -58,6 +58,7 @@ CAPITAL_RESERVE_EQUITY_PCT = float(os.getenv("CAPITAL_RESERVE_EQUITY_PCT", "0.00
 CAPITAL_SELL_PROCEEDS_HAIRCUT = 0.95
 ALPACA_SELL_PHASE_TIMEOUT_SECONDS = 90.0
 ALPACA_SELL_PHASE_POLL_INTERVAL_SECONDS = 3.0
+ALPACA_SELL_PHASE_RECOVERY_TIMEOUT_SECONDS = 240.0
 ALPACA_BUY_FILL_TIMEOUT_SECONDS = 60.0
 ALPACA_BUY_FILL_POLL_INTERVAL_SECONDS = 3.0
 PRETRADE_ASSET_VALIDATION_FAILED = "pretrade_asset_validation_failed"
@@ -2414,6 +2415,13 @@ def _sell_phase_poll_interval_seconds() -> float:
     return max(0.0, float(raw))
 
 
+def _sell_phase_recovery_timeout_seconds() -> float:
+    raw = _coerce_float(os.getenv("ALPACA_SELL_PHASE_RECOVERY_TIMEOUT_SECONDS"), None)
+    if raw is None:
+        return float(ALPACA_SELL_PHASE_RECOVERY_TIMEOUT_SECONDS)
+    return max(0.0, float(raw))
+
+
 def _buy_fill_timeout_seconds() -> float:
     raw = _coerce_float(os.getenv("ALPACA_BUY_FILL_TIMEOUT_SECONDS"), None)
     if raw is None:
@@ -2435,6 +2443,20 @@ def _is_buy_order(order: Mapping[str, object]) -> bool:
 def _is_buy_observation_terminal(status: str) -> bool:
     normalized = str(status or "").upper().replace("ORDERSTATUS.", "")
     return normalized in ORDER_TERMINAL_STATUSES or normalized == "PARTIALLY_FILLED"
+
+
+def _sell_phase_block_reason(status: str | None, completion_reason: str | None) -> str:
+    normalized = str(status or "").upper().strip()
+    reason = str(completion_reason or "").strip().lower()
+    if normalized == "TIMEOUT" or "timeout" in reason:
+        return "sell_phase_timeout"
+    if normalized == "REFRESH_FAILED" or "refresh_failed" in reason:
+        return "broker_status_refresh_failed"
+    if normalized == "FAILED" or "terminal_nonfill" in reason:
+        return "sell_phase_terminal_failure"
+    if normalized:
+        return f"sell_state_unresolved:{normalized.lower()}"
+    return "sell_state_unresolved"
 
 
 def _refresh_submitted_order_lifecycle(
@@ -2613,11 +2635,17 @@ def _wait_for_alpaca_sell_phase_completion(
     alpaca_submissions: List[Dict[str, object]],
     starting_positions: Dict[str, float],
     timeout_seconds_override: float | None = None,
+    recovery_timeout_seconds_override: float | None = None,
 ) -> Dict[str, object]:
     timeout_seconds = (
         _sell_phase_timeout_seconds()
         if timeout_seconds_override is None
         else max(0.0, float(timeout_seconds_override))
+    )
+    recovery_timeout_seconds = (
+        _sell_phase_recovery_timeout_seconds()
+        if recovery_timeout_seconds_override is None
+        else max(0.0, float(recovery_timeout_seconds_override))
     )
     poll_interval_seconds = _sell_phase_poll_interval_seconds()
     tracked_symbols = sorted(
@@ -2789,20 +2817,118 @@ def _wait_for_alpaca_sell_phase_completion(
 
         remaining_seconds = deadline - time.monotonic()
         if remaining_seconds <= 0:
+            if recovery_timeout_seconds > 0.0:
+                recovery_deadline = time.monotonic() + float(recovery_timeout_seconds)
+                logger.warning(
+                    "[ALPACA][SELL_PHASE] primary timeout reached; entering recovery refresh window polls=%d recovery_timeout=%.1fs observed_statuses=%s",
+                    polls,
+                    float(recovery_timeout_seconds),
+                    json.dumps(observed_statuses, sort_keys=True),
+                )
+                while True:
+                    recovery_remaining = recovery_deadline - time.monotonic()
+                    if recovery_remaining <= 0.0:
+                        break
+                    if poll_interval_seconds > 0:
+                        time.sleep(min(float(poll_interval_seconds), float(recovery_remaining)))
+                    polls += 1
+                    try:
+                        account, positions, observed_statuses, observed_orders = _snapshot_state()
+                    except Exception as exc:
+                        logger.warning("[ALPACA][SELL_PHASE] recovery_refresh_failed polls=%d error=%s", polls, exc)
+                        return {
+                            "status": "REFRESH_FAILED",
+                            "completion_reason": f"recovery_refresh_failed:{exc}",
+                            "polls": polls,
+                            "account": last_account,
+                            "positions": last_positions,
+                            "observed_statuses": last_observed_statuses,
+                            "observed_orders": last_observed_orders,
+                            "poll_observations": poll_observations,
+                        }
+                    last_account = account
+                    last_positions = positions
+                    last_observed_statuses = observed_statuses
+                    last_observed_orders = observed_orders
+                    poll_observations.append(
+                        _sell_phase_poll_observation(
+                            poll=polls,
+                            account=account,
+                            observed_statuses=observed_statuses,
+                            sell_orders=sell_orders,
+                            submission_metadata=submission_metadata,
+                        )
+                    )
+                    actual_positions = _positions_to_quantity_map(positions)
+                    positions_confirmed = _positions_match_expected_after_sells(
+                        actual_positions,
+                        expected_positions,
+                        tracked_symbols,
+                    )
+                    terminal_failures = sorted(
+                        {
+                            status
+                            for status in observed_statuses.values()
+                            if str(status).upper() in terminal_failure_statuses
+                        }
+                    )
+                    all_filled = bool(observed_statuses) and all(
+                        str(status).upper() == "FILLED" for status in observed_statuses.values()
+                    )
+                    if positions_confirmed or all_filled:
+                        completion_reason = (
+                            "positions_confirmed_after_timeout_recovery"
+                            if positions_confirmed
+                            else "orders_filled_after_timeout_recovery"
+                        )
+                        logger.info(
+                            "[ALPACA][SELL_PHASE] recovery completed polls=%d reason=%s observed_statuses=%s",
+                            polls,
+                            completion_reason,
+                            json.dumps(observed_statuses, sort_keys=True),
+                        )
+                        return {
+                            "status": "COMPLETED",
+                            "completion_reason": completion_reason,
+                            "polls": polls,
+                            "account": account,
+                            "positions": positions,
+                            "observed_statuses": observed_statuses,
+                            "observed_orders": observed_orders,
+                            "poll_observations": poll_observations,
+                        }
+                    if terminal_failures:
+                        completion_reason = f"terminal_nonfill:{','.join(terminal_failures)}"
+                        logger.warning(
+                            "[ALPACA][SELL_PHASE] recovery failed polls=%d reason=%s observed_statuses=%s",
+                            polls,
+                            completion_reason,
+                            json.dumps(observed_statuses, sort_keys=True),
+                        )
+                        return {
+                            "status": "FAILED",
+                            "completion_reason": completion_reason,
+                            "polls": polls,
+                            "account": account,
+                            "positions": positions,
+                            "observed_statuses": observed_statuses,
+                            "observed_orders": observed_orders,
+                            "poll_observations": poll_observations,
+                        }
             logger.warning(
                 "[ALPACA][SELL_PHASE] timeout polls=%d tracked_symbols=%s observed_statuses=%s",
                 polls,
                 ",".join(tracked_symbols) or "none",
-                json.dumps(observed_statuses, sort_keys=True),
+                json.dumps(last_observed_statuses or observed_statuses, sort_keys=True),
             )
             return {
                 "status": "TIMEOUT",
                 "completion_reason": "timeout_waiting_for_sell_completion",
                 "polls": polls,
-                "account": account,
-                "positions": positions,
-                "observed_statuses": observed_statuses,
-                "observed_orders": observed_orders,
+                "account": last_account or account,
+                "positions": last_positions or positions,
+                "observed_statuses": last_observed_statuses or observed_statuses,
+                "observed_orders": last_observed_orders or observed_orders,
                 "poll_observations": poll_observations,
             }
 
@@ -4996,6 +5122,10 @@ def run_paper_day(
                 alpaca_submission_summary["sell_phase_poll_observations"] = list(
                     sell_phase_poll_observations
                 )
+                sell_phase_allows_buy = str(sell_phase_status or "").upper() in {
+                    "COMPLETED",
+                    "NO_SELLS",
+                }
 
                 pending_sell_order_ids = [
                     order_id
@@ -5374,6 +5504,69 @@ def run_paper_day(
                     alpaca_submission_summary["pending_sell_count_at_buy_decision"] = pending_sell_count_at_buy_decision
                     alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
                     alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
+
+                if sell_orders and not sell_phase_allows_buy and execution_outcome is None:
+                    buy_phase_block_reason = _sell_phase_block_reason(
+                        sell_phase_status,
+                        sell_phase_completion_reason,
+                    )
+                    execution_outcome = EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT
+                    execution_reason = buy_phase_block_reason
+                    cash_rebalance_status = CASH_REBALANCE_INCOMPLETE
+                    execution_halt_reason = (
+                        f"{execution_outcome}:{execution_reason}:{CASH_REBALANCE_INCOMPLETE}"
+                    )
+                    halt_remaining_buys = True
+                    budget_skipped_orders = list(buy_orders)
+                    skipped_buy_count = int(len(budget_skipped_orders))
+                    blocked_buy_count = int(len(budget_skipped_orders))
+                    buy_orders = []
+                    post_sell_rebudget.update(
+                        {
+                            "status": "SKIPPED",
+                            "reason_codes": sorted(
+                                set(
+                                    list(post_sell_rebudget.get("reason_codes") or [])
+                                    + [buy_phase_block_reason]
+                                )
+                            ),
+                            "buy_budget_after_safeguards": 0.0,
+                            "final_submitted_buy_notional": 0.0,
+                            "final_buy_orders_submitted": [],
+                            "skipped_buy_orders": list(budget_skipped_orders),
+                            "sell_phase_status": sell_phase_status,
+                            "sell_phase_completion_reason": sell_phase_completion_reason,
+                            "sell_phase_observed_statuses": dict(sell_phase_observed_statuses),
+                        }
+                    )
+                    try:
+                        post_sell_rebudget_path = _write_post_sell_rebudget_artifact(
+                            run_date=run_date,
+                            payload=post_sell_rebudget,
+                        )
+                        post_sell_rebudget["artifact_path"] = post_sell_rebudget_path
+                    except Exception:
+                        pass
+                    alpaca_submission_summary["execution_outcome"] = execution_outcome
+                    alpaca_submission_summary["execution_reason"] = execution_reason
+                    alpaca_submission_summary["cash_rebalance_status"] = cash_rebalance_status
+                    alpaca_submission_summary["halt_remaining_buys"] = halt_remaining_buys
+                    alpaca_submission_summary["buy_phase_block_reason"] = buy_phase_block_reason
+                    alpaca_submission_summary["budget_skipped_orders"] = int(len(budget_skipped_orders))
+                    alpaca_submission_summary["skipped_buy_count"] = int(skipped_buy_count)
+                    alpaca_submission_summary["blocked_buy_count"] = int(blocked_buy_count)
+                    alpaca_submission_summary["buy_phase_planned"] = 0
+                    alpaca_submission_summary["buy_phase_submitted"] = 0
+                    alpaca_submission_summary["post_sell_rebudget"] = dict(post_sell_rebudget)
+                    alpaca_submission_summary["post_sell_rebudget_artifact_path"] = post_sell_rebudget_path
+                    blocked_reasons.append(execution_halt_reason)
+                    logger.warning(
+                        "[ALPACA][BUY_PHASE] blocked reason=%s sell_status=%s sell_reason=%s planned_orders=%d",
+                        buy_phase_block_reason,
+                        sell_phase_status,
+                        sell_phase_completion_reason,
+                        len(budget_skipped_orders),
+                    )
 
                 buy_phase_block_reason = execution_reason if execution_outcome else None
                 if execution_outcome == EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE:
