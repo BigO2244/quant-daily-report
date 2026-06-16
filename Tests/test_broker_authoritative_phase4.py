@@ -518,6 +518,53 @@ def test_posttrade_capture_waits_for_delayed_buy_fill_before_snapshot(tmp_path, 
     assert state["pending_buy_count"] == 0
 
 
+def test_posttrade_observed_buy_lifecycle_rewrites_broker_orders_csv(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-buy-fill"))
+    submissions = [
+        {
+            "trade_date": "2026-06-16",
+            "order_id": "day:BBB:BUY",
+            "client_order_id": "caerus-day-bbb-buy",
+            "alpaca_order_id": "buy-bbb",
+            "ticker": "BBB",
+            "side": "BUY",
+            "quantity": 2,
+            "status": "PENDING_NEW",
+            "latest_status": "PENDING_NEW",
+            "filled_qty": "0",
+            "filled_at": "",
+            "submitted_at": "2026-06-16T13:36:01+00:00",
+            "mode": "alpaca",
+        }
+    ]
+    observed = [
+        {
+            "order_id": "day:BBB:BUY",
+            "alpaca_order_id": "buy-bbb",
+            "ticker": "BBB",
+            "side": "BUY",
+            "quantity": 2,
+            "latest_status": "filled",
+            "filled_qty": "2",
+            "filled_at": "2026-06-16T13:36:09+00:00",
+            "submitted_at": "2026-06-16T13:36:01+00:00",
+            "last_polled_at": "2026-06-16T13:36:10+00:00",
+            "seconds_to_fill": 8.0,
+        }
+    ]
+
+    broker._merge_observed_order_lifecycle(submissions, observed)
+    orders_path = broker._write_alpaca_orders("2026-06-16", submissions)
+    rows = pd.read_csv(orders_path)
+
+    assert rows.loc[0, "status"] == "filled"
+    assert rows.loc[0, "latest_status"] == "filled"
+    assert float(rows.loc[0, "filled_qty"]) == pytest.approx(2.0)
+    assert rows.loc[0, "filled_at"] == "2026-06-16T13:36:09+00:00"
+    assert rows.loc[0, "last_polled_at"] == "2026-06-16T13:36:10+00:00"
+
+
 def test_posttrade_capture_marks_buy_timeout_and_unresolved_recon(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     submitted = [

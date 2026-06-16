@@ -588,6 +588,32 @@ def test_buy_continuation_plan_hydrates_only_buys_from_intended_orders(tmp_path)
     assert round(float(plan[0]["price"]), 2) == 389.88
 
 
+def test_buy_observation_contract_blocks_ok_recon_when_fields_missing(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    payload = {
+        "submitted_buy_count": 2,
+        "pending_buy_count": 0,
+        "posttrade_recon_status": "OK_RECONCILED",
+    }
+    paper_summary = {
+        "posttrade_recon_status": "OK_RECONCILED",
+        "posttrade_recon_path": "broker/recon_posttrade_2026-06-16.json",
+        "posttrade_account_snapshot_path": "broker/posttrade_account_snapshot.json",
+    }
+
+    live_exec._enforce_buy_observation_contract(payload, paper_summary)
+
+    assert payload["buy_phase_status"] == "BUY_STATUS_UNKNOWN"
+    assert payload["buy_phase_completion_reason"] == "buy_fill_observation_missing"
+    assert payload["buy_fill_poll_count"] == 0
+    assert payload["buy_fill_observation_window_seconds"] == 0.0
+    assert payload["filled_buy_count"] == 0
+    assert payload["pending_buy_count"] == 2
+    assert payload["posttrade_recon_status"] == "NOT_COMPARABLE"
+    assert payload["posttrade_unresolved_orders_count"] == 2
+    assert paper_summary["posttrade_recon_status"] == "NOT_COMPARABLE"
+
+
 def test_main_pending_buy_leg_does_not_report_clean_success(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-05-27")

@@ -2028,6 +2028,42 @@ def _enrich_submitted_orders_with_lifecycle(
     return enriched
 
 
+def _merge_observed_order_lifecycle(
+    alpaca_submissions: List[Dict[str, object]],
+    observed_orders: List[Dict[str, object]],
+) -> None:
+    """Update submit-time rows with lifecycle fields observed by posttrade polling."""
+    observed_by_order_id = {
+        str(row.get("order_id") or ""): dict(row)
+        for row in observed_orders or []
+        if isinstance(row, dict) and str(row.get("order_id") or "").strip()
+    }
+    if not observed_by_order_id:
+        return
+    lifecycle_keys = (
+        "latest_status",
+        "status",
+        "filled_qty",
+        "filled_at",
+        "last_polled_at",
+        "seconds_to_fill",
+        "submitted_at",
+        "alpaca_order_id",
+    )
+    for row in alpaca_submissions or []:
+        if not isinstance(row, dict):
+            continue
+        observed = observed_by_order_id.get(str(row.get("order_id") or ""))
+        if not observed:
+            continue
+        for key in lifecycle_keys:
+            value = observed.get(key)
+            if value not in (None, ""):
+                row[key] = value
+        if str(row.get("latest_status") or "").strip():
+            row["status"] = row["latest_status"]
+
+
 def _first_fill_latency_seconds(observations: List[Dict[str, object]]) -> float | None:
     latencies = [
         _coerce_float(item.get("seconds_to_fill"), None)
@@ -5814,6 +5850,7 @@ def run_paper_day(
                 failed_buy_count = int(posttrade_state.get("failed_buy_count") or 0)
                 partial_buy_count = int(posttrade_state.get("partial_buy_count") or 0)
                 observed_buy_orders = list(posttrade_state.get("observed_buy_orders") or [])
+                _merge_observed_order_lifecycle(alpaca_submissions, observed_buy_orders)
                 if posttrade_unresolved_orders:
                     alpaca_submission_summary["posttrade_unresolved_orders_count"] = int(
                         len(posttrade_unresolved_orders)

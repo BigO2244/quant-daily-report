@@ -820,6 +820,63 @@ def _operator_execution_status(execution_payload: dict[str, object]) -> str:
     return "skipped"
 
 
+def _enforce_buy_observation_contract(
+    execution_payload: dict[str, object],
+    paper_summary: dict[str, object],
+) -> None:
+    submitted_buy_count = int(execution_payload.get("submitted_buy_count") or 0)
+    if submitted_buy_count <= 0:
+        return
+
+    has_posttrade_evidence = any(
+        (paper_summary or {}).get(key)
+        for key in (
+            "posttrade_account_snapshot_path",
+            "posttrade_positions_snapshot_path",
+            "posttrade_recon_path",
+            "posttrade_recon_status",
+        )
+    )
+    if not has_posttrade_evidence:
+        return
+
+    required = (
+        "buy_fill_poll_count",
+        "buy_fill_observation_window_seconds",
+        "filled_buy_count",
+    )
+    missing = [key for key in required if execution_payload.get(key) is None]
+    if not missing:
+        return
+
+    execution_payload["buy_phase_status"] = (
+        execution_payload.get("buy_phase_status") or "BUY_STATUS_UNKNOWN"
+    )
+    execution_payload["buy_phase_completion_reason"] = (
+        execution_payload.get("buy_phase_completion_reason")
+        or "buy_fill_observation_missing"
+    )
+    execution_payload["buy_fill_poll_count"] = int(execution_payload.get("buy_fill_poll_count") or 0)
+    execution_payload["buy_fill_observation_window_seconds"] = float(
+        execution_payload.get("buy_fill_observation_window_seconds") or 0.0
+    )
+    execution_payload["filled_buy_count"] = int(execution_payload.get("filled_buy_count") or 0)
+    execution_payload["pending_buy_count"] = max(
+        int(execution_payload.get("pending_buy_count") or 0),
+        submitted_buy_count,
+    )
+    execution_payload["posttrade_recon_status"] = "NOT_COMPARABLE"
+    execution_payload["posttrade_unresolved_orders_count"] = max(
+        int(execution_payload.get("posttrade_unresolved_orders_count") or 0),
+        submitted_buy_count,
+    )
+    execution_payload["buy_fill_observation_missing_fields"] = missing
+    paper_summary["posttrade_recon_status"] = "NOT_COMPARABLE"
+    paper_summary["posttrade_unresolved_orders_count"] = execution_payload[
+        "posttrade_unresolved_orders_count"
+    ]
+
+
 def _write_execution_email_payload(trade_date: str, payload: dict[str, object]) -> Path:
     out_dir = Path("outputs/execution_email")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1538,6 +1595,7 @@ def main(argv: list[str] | None = None) -> int:
             execution_payload["continuation_source"] = "intended_orders"
         if args.continuation_mode != "none":
             execution_payload["continuation_mode"] = str(args.continuation_mode)
+        _enforce_buy_observation_contract(execution_payload, paper_summary)
         execution_payload["operator_execution_status"] = _operator_execution_status(execution_payload)
 
         # Final-state reconciliation override. A broker-abort PARTIAL is raised at
