@@ -1,8 +1,8 @@
 # FR-072 — Governance Hygiene Agent
 
-Status: READY (read-only audit first; proposed findings only)
+Status: DEPLOYED_OBSERVING (read-only audit; proposed findings only)
 Owner: Caerus Research Program
-Last Updated: 2026-06-11
+Last Updated: 2026-06-16
 Governance Label: GOVERNANCE_AUTOMATION / OPERATIONAL_RISK_REDUCTION
 Execution Impact: NON_EXECUTIONAL (this FR does not change trading, broker,
 cron, allocation, strategy-selection, or paper/live behavior)
@@ -13,9 +13,9 @@ Governance drift is now a program risk. The doctrine, registry, active backlog,
 active/archive FR specs, roadmap, and AGENTS instructions all need to stay in
 sync without relying on Brett as a manual reconciliation layer.
 
-FR-072 creates a **read-only daily governance hygiene agent** that audits those
-documents, inspects recent repo state, and emits deterministic review artifacts.
-The agent proposes findings only. It does not patch files, commit changes, push
+FR-072 creates a **read-only governance hygiene agent** that audits those
+documents, inspects repo state, and emits deterministic review artifacts. The
+agent proposes findings only. It does not patch files, commit changes, push
 changes, or install cron. Future phases may generate patch proposals, but those
 proposals must remain un-applied until an explicit operator approval step.
 
@@ -104,7 +104,7 @@ Outputs are written under:
 
 `outputs/governance_hygiene/<YYYY-MM-DD>/`
 
-Planned files:
+Files:
 
 - `governance_hygiene.json`
 - `governance_hygiene.md`
@@ -138,7 +138,18 @@ Exit behavior:
    consistency checks.
 5. Phase B scheduling remains explicit and separately approved.
 
-## 8. Rollback
+## 8. Implementation Evidence
+
+Implementation files:
+
+- `scripts/governance_hygiene_agent.py`
+- `Tests/test_governance_hygiene_agent.py`
+
+The tests cover registry/backlog gaps, duplicate FR IDs, path drift,
+deterministic output, no source mutation, and explicit fail-on-fail behavior.
+This remains non-executional and unscheduled.
+
+## 9. Rollback
 
 Delete `scripts/governance_hygiene_agent.py`, remove the FR-072 spec and backlog
 references, and delete generated `outputs/governance_hygiene/<date>/` artifacts.

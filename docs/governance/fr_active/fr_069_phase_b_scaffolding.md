@@ -2,7 +2,7 @@
 
 Status: PHASE_B_IMPLEMENTED_RESEARCH_ONLY
 Owner: Caerus Research Program
-Last Updated: 2026-06-14
+Last Updated: 2026-06-16
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
@@ -20,6 +20,7 @@ cron, live-capital behavior, holdout access, or production registry semantics.
 | Manifest designer | Encode current and future sleeves with explicit lifecycle and behavior-change controls. | `research_registry/sleeves/manifest.json` is the canonical Phase B sleeve manifest. |
 | MCP read-only tool planner | Expose manifest inventory through existing MCP dispatch without mutation. | `fr069_sleeve_inventory` returns compact metadata and validation state. |
 | Test/scaffold planner | Add deterministic tests for manifest validation, semantic failures, and MCP inventory. | Targeted tests verify required sleeves, placeholder controls, duplicate IDs, missing fields, and JSON-RPC access. |
+| Evidence-envelope planner | Add a static research-only evidence validator for sleeve promotion packets. | Phase B2 validates metadata completeness, PIT/holdout decision-grade markers, and non-executional impact without running backtests. |
 | Final reviewer | Check that the package is additive and does not touch production behavior. | Phase B gates Phase C; it does not authorize production refactors. |
 
 ## Research-Only Sleeve Manifest
@@ -105,6 +106,46 @@ The tool is read-only. It loads static manifest metadata and does not mutate
 files, call brokers, generate artifacts, change `config/research/strategy_registry.json`,
 or alter production strategy behavior.
 
+## Phase B2 Evidence-Envelope Validator
+
+Validator module:
+
+`research_registry/sleeves/evidence.py`
+
+CLI:
+
+`scripts/research/validate_sleeve_evidence.py`
+
+The validator checks static evidence-envelope metadata only:
+
+- required evidence fields such as `sleeve_id`, `name`, `thesis`, `status`,
+  `owner`, `source`, `hypothesis_class`, `data_requirements`, `artifact_paths`,
+  `benchmark`, `evaluation_window`, `metrics_required`, `known_bias_risks`,
+  `promotion_blockers`, `production_impact`, `decision_state`, and
+  `evidence_last_updated`;
+- sleeve membership against `research_registry/sleeves/manifest.json`;
+- `production_impact` limited to `none` or `research_only`;
+- `decision_state` limited to `draft`, `research_ready`,
+  `shadow_candidate`, or `blocked`;
+- PIT/holdout decision-grade markers: `universe_method=pit_universe`,
+  non-empty `universe_snapshot_hash`, `holdout_excluded=true`,
+  `governance_label=RESEARCH_ONLY`, and
+  `execution_impact=NON_EXECUTIONAL`.
+
+Missing required fields fail validation. Legacy current-universe evidence can
+remain readable but is classified as non-decision-grade. Optional PIT/holdout
+gaps warn and demote decision-grade status.
+
+Example:
+
+```bash
+python3 scripts/research/validate_sleeve_evidence.py --artifact path/to/evidence.json
+```
+
+The CLI emits deterministic JSON and returns nonzero only when the envelope is
+invalid. It does not run backtests, read broker state, generate production
+artifacts, alter allocations, or change production strategy behavior.
+
 ## Polaris Parity Harness Scaffold
 
 Plan:
@@ -145,8 +186,10 @@ Phase C must not begin until:
 
 - `research_registry/sleeves/manifest.json` validates cleanly;
 - `scripts/research/validate_sleeve_manifest.py` passes;
+- `scripts/research/validate_sleeve_evidence.py` validates candidate evidence
+  envelopes before they are used for promotion/retirement review;
 - `fr069_sleeve_inventory` is listed and callable through MCP;
-- targeted manifest and MCP tests pass;
+- targeted manifest, evidence, and MCP tests pass;
 - no execution, broker, allocation, portfolio construction, strategy, model,
   cron, or live-capital behavior has changed.
 - a separate owner-approved Phase C task authorizes the next implementation

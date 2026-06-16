@@ -395,10 +395,18 @@ only if next-run diagnostics show:
 
 Next live-run validation gates:
 
+- VM HEAD is `2e1c3f1` or later.
+- `buy_fill_observation_window_seconds` is non-null when buys are submitted.
+- `buy_fill_poll_count >= 1` when buys are submitted.
+- `filled_buy_count` is non-null when buys are submitted.
+- `broker/orders_YYYY-MM-DD.csv` buy rows are terminal with `filled_qty` and
+  `filled_at` populated when buys fill.
 - `buy_phase_status=BUY_PHASE_COMPLETED` or a properly classified terminal
   timeout/fail state
 - `posttrade_snapshot_stage=post_buy` when buys fill
 - `pending_buy_count=0` when buys fill
+- posttrade cash is near the risk target after buy fills
+- reconciliation status is `OK_RECONCILED` only after terminal buy observation
 - `achieved_cash_weight` within tolerance of `target_cash_weight`
 - MCP target-attainment status `OK_TARGET_ATTAINED` or a properly classified
   warning
