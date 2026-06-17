@@ -813,3 +813,78 @@ def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypat
     assert rebudget["status"] == "BLOCKED"
     assert "buy_budget_exhausted" in rebudget["reason_codes"]
     assert [order["ticker"] for order in rebudget["skipped_buy_orders"]][:1] == ["BBB"]
+
+
+def test_phase3_reports_risk_cash_target_when_postsell_cash_below_target(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-risk-cash"))
+    trades = pd.DataFrame(
+        [
+            {
+                "ticker": "AAA",
+                "side": "SELL",
+                "shares": 1.0,
+                "quantity": 1.0,
+                "price": 5000.0,
+                "notional": 5000.0,
+                "slippage_cost": 0.0,
+                "reason": "trim",
+            },
+            {
+                "ticker": "BBB",
+                "side": "BUY",
+                "shares": 10.0,
+                "quantity": 10.0,
+                "price": 100.0,
+                "notional": 1000.0,
+                "slippage_cost": 0.0,
+                "reason": "add",
+            },
+        ]
+    )
+    _mock_open_market(
+        monkeypatch,
+        trades_df=trades,
+        trade_meta={"target_investable_dollars": 4000.0, "scaled_tickers": [], "overspend_prevented": False},
+        holdings=pd.DataFrame([{"ticker": "AAA", "sleeve": "core", "shares": 1.0}]),
+        target_rows=[{"ticker": "BBB", "target_weight": 0.1, "sleeve": "core"}],
+        cash_target_weight=0.6,
+        prev_close_rows=[
+            {"ticker": "AAA", "prev_close": 5000.0, "price_date": "2026-03-10"},
+            {"ticker": "BBB", "prev_close": 100.0, "price_date": "2026-03-10"},
+            {"ticker": "SPY", "prev_close": 500.0, "price_date": "2026-03-10"},
+        ],
+    )
+    fake = _SequencedAlpaca(
+        account_sequence=[
+            {"cash": "500.0", "equity": "10000.0", "buying_power": "500.0", "status": "ACTIVE"},
+            {"cash": "5500.0", "equity": "10000.0", "buying_power": "5500.0", "status": "ACTIVE"},
+            {"cash": "5500.0", "equity": "10000.0", "buying_power": "5500.0", "status": "ACTIVE"},
+        ],
+        positions_sequence=[
+            [{"symbol": "AAA", "qty": "1", "current_price": "5000.0", "market_value": "5000.0"}],
+            [],
+            [],
+        ],
+    )
+    monkeypatch.setattr(_SequencedAlpaca, "from_env", classmethod(lambda cls: fake), raising=False)
+    monkeypatch.setattr(broker, "AlpacaBroker", _SequencedAlpaca)
+
+    result = broker.run_paper_day(
+        run_date="2026-03-11",
+        signals_path="signals.json",
+        ledger_path="ledger.csv",
+        trades_path="trades.csv",
+        config_path="config.json",
+        now_et=dt.datetime(2026, 3, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
+    assert float(result["buy_budget_computed"]) == pytest.approx(0.0)
+    rebudget = result["post_sell_rebudget"]
+    assert rebudget["status"] == "BLOCKED"
+    assert float(rebudget["post_sell_cash"]) == pytest.approx(5500.0)
+    assert float(rebudget["risk_cash_target"]) == pytest.approx(6000.0)
+    assert float(rebudget["risk_cash_target_buy_budget"]) == pytest.approx(0.0)
+    assert "buy_blocked_risk_cash_target" in rebudget["reason_codes"]
+    assert rebudget["skipped_buy_orders"][0]["block_reason"] == "buy_blocked_risk_cash_target"

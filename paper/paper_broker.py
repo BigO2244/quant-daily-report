@@ -64,6 +64,7 @@ ALPACA_BUY_FILL_POLL_INTERVAL_SECONDS = 3.0
 PRETRADE_ASSET_VALIDATION_FAILED = "pretrade_asset_validation_failed"
 BUY_SUBMITTED_USING_AVAILABLE_BUYING_POWER = "buy_submitted_using_available_buying_power"
 BUY_BLOCKED_INSUFFICIENT_BUYING_POWER = "buy_blocked_insufficient_buying_power"
+BUY_BLOCKED_RISK_CASH_TARGET = "buy_blocked_risk_cash_target"
 BUY_BLOCKED_ASSET_VALIDATION_FAILED = "buy_blocked_asset_validation_failed"
 BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH = "buy_blocked_pending_sells_required_for_cash"
 ORDER_TERMINAL_STATUSES = {
@@ -3385,6 +3386,7 @@ def _rebuild_post_sell_buy_trades(
     buy_budget: float,
     cfg: PaperConfig,
     max_buy_orders: int | None = None,
+    zero_budget_block_reason: str | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, object], List[Dict[str, object]]]:
     cols = ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
     reason_codes: List[str] = []
@@ -3517,7 +3519,13 @@ def _rebuild_post_sell_buy_trades(
 
         allowed_notional = allowed_shares * price
         if allowed_shares <= 1e-12:
-            skipped.append({**candidate, "block_reason": BUY_BLOCKED_INSUFFICIENT_BUYING_POWER})
+            skipped.append(
+                {
+                    **candidate,
+                    "block_reason": zero_budget_block_reason
+                    or BUY_BLOCKED_INSUFFICIENT_BUYING_POWER,
+                }
+            )
             continue
         if allowed_notional + 1e-9 < float(cfg.min_trade_dollars):
             skipped.append(
@@ -3540,7 +3548,7 @@ def _rebuild_post_sell_buy_trades(
     requested_total = float(sum(float(item["notional"]) for item in candidates))
     status = "REBUILT" if kept_rows else ("NO_BUYS" if not candidates else "BLOCKED")
     if not kept_rows and candidates:
-        reason_codes.append("buy_budget_exhausted")
+        reason_codes.append(zero_budget_block_reason or "buy_budget_exhausted")
     meta = {
         "status": status,
         "reason_codes": sorted(set(reason_codes)),
@@ -5287,6 +5295,16 @@ def run_paper_day(
                                 0,
                                 int(cfg.max_trades_per_day or 0) - int(len(sell_orders)),
                             )
+                            zero_budget_block_reason = None
+                            if float(buy_budget_computed or 0.0) <= 1e-9:
+                                if (
+                                    float(
+                                        post_sell_budget_meta.get("risk_cash_target_buy_budget")
+                                        or 0.0
+                                    )
+                                    <= 1e-9
+                                ):
+                                    zero_budget_block_reason = BUY_BLOCKED_RISK_CASH_TARGET
                             rebuilt_buy_trades, rebudget_trade_meta, rebudget_skipped_orders = (
                                 _rebuild_post_sell_buy_trades(
                                     holdings=post_sell_holdings,
@@ -5298,6 +5316,7 @@ def run_paper_day(
                                     buy_budget=float(buy_budget_computed or 0.0),
                                     cfg=cfg,
                                     max_buy_orders=max_rebudget_buy_orders,
+                                    zero_budget_block_reason=zero_budget_block_reason,
                                 )
                             )
                             if rebuilt_buy_trades is not None and not rebuilt_buy_trades.empty:
