@@ -1,0 +1,251 @@
+{
+  "argo_role": "evidence_consumer_only",
+  "artifact_paths": {
+    "json": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/argo/argo_phase_a_evidence_framework_2026-06-17.json",
+    "markdown": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/argo/argo_phase_a_evidence_framework_2026-06-17.md"
+  },
+  "behavior_change_allowed": false,
+  "evidence_inventory": {
+    "consumable_now": [
+      "orion_lyra_matched_pit",
+      "orion_lyra_disposition",
+      "phoenix_crisis_recovery",
+      "phoenix_phase_b_risk_shaping",
+      "phoenix_phase_c_blocker",
+      "fr069_sleeve_manifest"
+    ],
+    "ignored_by_design": [
+      "live broker state",
+      "execution artifacts",
+      "allocation targets",
+      "order lifecycle data",
+      "post-hoc non-PIT evidence"
+    ],
+    "sources_inspected": [
+      "FR-069 sleeve manifest and onboarding packets",
+      "Orion/Lyra PIT rebaseline and disposition packet",
+      "Phoenix crisis/recovery, Phase B risk-shaping, and Phase C liquidity/capacity artifacts",
+      "FR-069 evidence envelope templates"
+    ]
+  },
+  "execution_impact": "NON_EXECUTIONAL",
+  "explicit_non_goals": [
+    "no allocation",
+    "no capital routing",
+    "no execution",
+    "no broker interaction",
+    "no promotion",
+    "no runtime behavior change"
+  ],
+  "governance_label": "RESEARCH_ONLY",
+  "production_impact": "research_only",
+  "reason_codes": [
+    "research_only_no_runtime_change",
+    "argo_evidence_consumer_only",
+    "phoenix_external_dependency_blocked",
+    "nasdaq_data_link_qelx06_temporary_disablement"
+  ],
+  "recommendations": [
+    {
+      "action": "hold until Sharadar SEP OHLCV access is restored, then rebuild liquidity evidence.",
+      "classification": "EXTERNAL_DEPENDENCY_BLOCKED",
+      "item": "phoenix"
+    },
+    {
+      "action": "treat as one redundant core-momentum family pending any owner-approved merge/redeploy decision.",
+      "classification": "EVIDENCE_READY_FOR_GOVERNANCE_REVIEW",
+      "item": "orion_lyra"
+    },
+    {
+      "action": "use Phase A as an evidence inventory/scoring surface only.",
+      "classification": "RESEARCH_READY",
+      "item": "argo"
+    }
+  ],
+  "schema_version": "caerus_argo_phase_a_evidence_framework_v1",
+  "scoring_framework": {
+    "classifications": [
+      "NOT_READY",
+      "RESEARCH_READY",
+      "EVIDENCE_READY",
+      "SHADOW_CANDIDATE",
+      "PROMOTION_CANDIDATE",
+      "EXTERNAL_DEPENDENCY_BLOCKED"
+    ],
+    "governance_control": "SHADOW_CANDIDATE and PROMOTION_CANDIDATE are descriptive research labels only; owner approval is required before any lifecycle transition.",
+    "inputs": [
+      "evidence_quality",
+      "pit_readiness",
+      "differentiation",
+      "drawdown_or_risk_evidence",
+      "turnover_or_cost_sensitivity",
+      "readiness_blockers"
+    ]
+  },
+  "sleeve_scores": [
+    {
+      "blockers": [],
+      "classification": "EVIDENCE_READY",
+      "differentiated": true,
+      "notes": [
+        "Current paper baseline.",
+        "FR-068 PIT priced rebaseline exists and is material; use as baseline evidence input."
+      ],
+      "pit_ready": true,
+      "score": 90,
+      "sleeve_id": "polaris",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_rebaseline/polaris_priced_2026-06-10.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_phase_c_readiness.md"
+        }
+      ]
+    },
+    {
+      "blockers": [],
+      "classification": "EVIDENCE_READY",
+      "differentiated": false,
+      "notes": [
+        "Matched PIT evidence exists.",
+        "Disposition analysis treats Orion/Lyra as variations of one sleeve family; Orion has lower turnover and lower drawdown in the PIT artifact."
+      ],
+      "pit_ready": true,
+      "score": 85,
+      "sleeve_id": "orion",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_068_phase_c_disposition_analysis.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "merge_watch_redundancy"
+      ],
+      "classification": "NOT_READY",
+      "differentiated": false,
+      "notes": [
+        "Matched PIT evidence exists, but paired t-stat does not support a statistically meaningful Lyra lead.",
+        "Disposition packet places Lyra on redeployment/merge-watch rather than promotion."
+      ],
+      "pit_ready": true,
+      "score": 73,
+      "sleeve_id": "lyra",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_068_phase_c_disposition_analysis.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "external_dependency_blocked",
+        "nasdaq_data_link_qelx06_temporary_disablement",
+        "pit_liquidity_ohlcv_unavailable"
+      ],
+      "classification": "EXTERNAL_DEPENDENCY_BLOCKED",
+      "differentiated": true,
+      "notes": [
+        "Phoenix is differentiated and risk-shaped, but Phase C liquidity/capacity remains blocked.",
+        "Blocker owner: Brett.",
+        "Unblock condition: vendor confirms Sharadar SEP OHLCV access restored after Nasdaq Data Link QELx06 temporary disablement."
+      ],
+      "pit_ready": false,
+      "score": 42,
+      "sleeve_id": "phoenix",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_crisis_recovery_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "decision_grade_evidence_missing",
+        "event_contract_missing",
+        "research_spec_only"
+      ],
+      "classification": "NOT_READY",
+      "differentiated": true,
+      "notes": [
+        "Governed Research-stage onboarding exists; no implementation evidence yet."
+      ],
+      "pit_ready": false,
+      "score": 0,
+      "sleeve_id": "cassiopeia",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_cassiopeia_onboarding_packet.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "decision_grade_evidence_missing",
+        "eps_surprise_consensus_vendor_missing",
+        "v0_shelved"
+      ],
+      "classification": "NOT_READY",
+      "differentiated": true,
+      "notes": [
+        "V0 is shelved; v1 remains vendor-gated on PIT consensus/surprise data."
+      ],
+      "pit_ready": false,
+      "score": 5,
+      "sleeve_id": "cygnus",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_cygnus_onboarding_packet.md"
+        }
+      ]
+    },
+    {
+      "blockers": [],
+      "classification": "RESEARCH_READY",
+      "differentiated": true,
+      "notes": [
+        "Argo Phase A consumes sleeve evidence and emits research classifications only.",
+        "No allocation, promotion, order, or runtime decision is authorized."
+      ],
+      "pit_ready": true,
+      "score": 80,
+      "sleeve_id": "argo",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_argo_onboarding_packet.md"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_argo_evidence_envelope_template.json"
+        }
+      ]
+    }
+  ],
+  "trade_date": "2026-06-17"
+}

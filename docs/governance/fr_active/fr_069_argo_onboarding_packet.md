@@ -29,6 +29,10 @@ Current state:
 - Existing research module emits non-executing regime-selection artifacts.
 - Evidence envelope template:
   `docs/governance/fr_active/fr_069_argo_evidence_envelope_template.json`.
+- Phase A evidence-consumer framework:
+  `docs/governance/fr_active/fr_069_argo_phase_a_evidence_framework.md`.
+- Current Phase A artifact:
+  `outputs/research/argo/argo_phase_a_evidence_framework_2026-06-17.json`.
 
 Governance conclusion: Argo is the right home for regime allocation and
 model-selection research, but it must remain reporting-only until member-sleeve
@@ -58,8 +62,26 @@ Argo is not:
 | Existing spec | `docs/governance/fr_archive/fr_053_argo_research_spec.md`. |
 | Existing research module | `research_registry/research/argo.py` and Phase B validation outputs. |
 | Phase C evidence template | `docs/governance/fr_active/fr_069_argo_evidence_envelope_template.json`. |
+| Phase A evidence framework | `docs/governance/fr_active/fr_069_argo_phase_a_evidence_framework.md`; artifact `outputs/research/argo/argo_phase_a_evidence_framework_2026-06-17.json`. |
 
 Argo remains Research-stage after this packet.
+
+## Phase A Evidence Consumer
+
+Phase A implements Argo as a research-only evidence consumer. It evaluates
+sleeve health, evidence quality, PIT readiness, differentiation, drawdown,
+turnover, cost sensitivity, and readiness blockers. It does not select
+securities, allocate capital, submit trades, promote sleeves, or change live or
+paper behavior.
+
+Current Phase A classification:
+
+- Phoenix: `EXTERNAL_DEPENDENCY_BLOCKED` because Sharadar SEP OHLCV access is
+  blocked by Nasdaq Data Link `QELx06`.
+- Orion/Lyra: evidence-ready for governance review as a redundant core-momentum
+  family, not independently promotion-ready sleeves.
+- Cassiopeia/Cygnus: not ready; still missing decision-grade inputs.
+- Argo: `RESEARCH_READY` as an observer only.
 
 ## Distinctiveness Assessment
 

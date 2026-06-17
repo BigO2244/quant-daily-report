@@ -1,6 +1,6 @@
 # FR-069 Phoenix Phase C Onboarding Packet
 
-Status: RESEARCH_STAGE_ONBOARDED
+Status: EXTERNAL_DEPENDENCY_BLOCKED
 Owner: Caerus Research Program
 Last Updated: 2026-06-17
 Governance Label: RESEARCH_ONLY
@@ -31,9 +31,20 @@ Current state:
   `docs/governance/fr_active/fr_069_phoenix_evidence_envelope_template.json`.
 
 Governance conclusion: Phoenix is distinct enough by thesis to deserve
-Research-stage onboarding, but not sufficiently proven for Shadow. It remains
-blocked from Shadow until crisis-window definitions, PIT evidence, passive
-forward-return observation, and improved risk/return evidence are complete.
+Research-stage onboarding and Phase B risk-shaping evidence is promising, but
+Phoenix is now formally on external-dependency hold. It remains blocked from
+Shadow until PIT liquidity/capacity evidence can be rebuilt from Sharadar SEP
+OHLCV data.
+
+Formal hold state:
+
+- **Classification:** `EXTERNAL_DEPENDENCY_BLOCKED`
+- **Blocker:** Nasdaq Data Link `QELx06` temporary API disablement prevents
+  verification/rebuild of Sharadar SEP OHLCV access.
+- **Owner:** Brett
+- **Unblock condition:** Vendor confirms Sharadar SEP OHLCV access restored.
+- **Next action after unblock:** rebuild OHLCV cache, build PIT liquidity panel,
+  re-run Phoenix Phase C, then run a Shadow-readiness assessment.
 
 ## Phoenix Thesis
 
@@ -62,9 +73,12 @@ Phoenix is not intended to be:
 | Existing research module | `research_registry/research/phoenix.py` and `research/phoenix/`. |
 | Existing tests | `Tests/test_research_registry_phoenix.py`. |
 | Existing artifacts | `outputs/model_quality/2026-06-08/phoenix_*.json` and `outputs/research/phoenix/2026-06-08/*`. |
+| Current evidence artifacts | `outputs/research/phoenix_evidence/phoenix_crisis_recovery_2026-06-17.json`, `outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json`, `outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json`. |
+| Current blocker | `EXTERNAL_DEPENDENCY_BLOCKED`: Nasdaq Data Link `QELx06` temporary disablement; Sharadar SEP OHLCV access must be restored before PIT liquidity/capacity validation. |
 | Phase C evidence template | `docs/governance/fr_active/fr_069_phoenix_evidence_envelope_template.json`. |
 
-Phoenix remains Research-stage after this packet.
+Phoenix remains Research-stage and external-dependency blocked after this
+packet.
 
 ## Distinctiveness Assessment
 
@@ -246,6 +260,22 @@ not permitted without a separate governance decision.
 6. Run cost/liquidity/falling-knife sensitivity.
 7. Produce a Shadow-readiness packet only if Research evidence is
    decision-grade.
+
+## External Dependency Hold
+
+Phoenix is formally on hold as of 2026-06-17.
+
+| Field | Value |
+|---|---|
+| Classification | `EXTERNAL_DEPENDENCY_BLOCKED` |
+| Blocker | Nasdaq Data Link `QELx06` temporary disablement |
+| Owner | Brett |
+| Unblock condition | Vendor confirms Sharadar SEP OHLCV access restored |
+| Next action after unblock | Rebuild OHLCV cache; build PIT liquidity panel; re-run Phoenix Phase C; run Shadow-readiness assessment |
+
+No Phoenix logic, thresholds, research outputs, live signals, allocation,
+execution, broker behavior, risk controls, promotion thresholds, or cron
+behavior are changed by this hold state.
 
 ## Acceptance Criteria For This Onboarding
 
