@@ -2,7 +2,7 @@
 
 Status: ACTIVE_RESEARCH
 Owner: Caerus Research Program
-Last Updated: 2026-06-16
+Last Updated: 2026-06-17
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 
@@ -23,6 +23,14 @@ window are incomplete.
 
 All final disposition decisions belong inside the FR-069 sleeve architecture and
 promotion/retirement framework, not as an isolated FR-063 shortcut.
+
+Current FR-069 governance packet:
+`docs/governance/fr_active/fr_069_orion_lyra_redundancy_packet.md`.
+
+The 2026-06-17 packet classifies Orion/Lyra as
+`REDUNDANT_CONTINUE_OBSERVING`: redundancy evidence is strong enough for focused
+review, Lyra is the current low-confidence watch-list leader, and neither
+sleeve is approved for retirement, promotion, rename, or allocation change.
 
 ## Study Window Requirements
 

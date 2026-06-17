@@ -47,6 +47,7 @@ approval.
 | MCP inventory | `fr069_sleeve_inventory` | Read-only manifest inventory surface. |
 | Polaris parity plan | `docs/governance/fr_active/fr_069_polaris_parity_harness_plan.md` | Future harness parity requirements. |
 | Orion/Lyra PIT plan | `docs/governance/fr_active/fr_069_orion_lyra_pit_evidence_plan.md` | Differentiation evidence before disposition. |
+| Orion/Lyra redundancy packet | `docs/governance/fr_active/fr_069_orion_lyra_redundancy_packet.md` | Research-only current disposition packet; no promotion or retirement action. |
 
 ## Lifecycle Gate Matrix
 
@@ -64,8 +65,8 @@ approval.
 | Sleeve | Current role | Present artifacts | Phase C gap | Minimum next action |
 |---|---|---|---|---|
 | Polaris | Paper baseline/reference sleeve | Manifest row, parity plan, existing production behavior | Generalized harness parity is not implemented. | Keep production behavior unchanged; define fixture parity before any harness migration. |
-| Orion | Shadow challenger | Manifest row, Orion/Lyra PIT plan, shadow artifacts | PIT rebaseline and redundancy evidence incomplete. | Generate research-only PIT evidence packet; no retirement decision. |
-| Lyra | Shadow challenger | Manifest row, Orion/Lyra PIT plan, shadow artifacts | PIT rebaseline and redundancy evidence incomplete. | Generate research-only PIT evidence packet; no promotion/retirement decision. |
+| Orion | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, shadow artifacts | PIT rebaseline and decision-grade disposition evidence incomplete. | Continue observing; no retirement decision. |
+| Lyra | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, shadow artifacts | PIT rebaseline and decision-grade disposition evidence incomplete. | Continue observing as current low-confidence watch-list leader; no promotion/retirement decision. |
 | Phoenix | Future crisis-reversal sleeve | Manifest placeholder and archived spec | Evidence envelope and crisis-window artifact set missing. | Create research-only evidence envelope and crisis-window definition. |
 | Cygnus | Shelved earnings-drift sleeve | Manifest placeholder and v0 shelved evidence | v1 consensus/EPS-surprise data dependency unresolved. | Keep shelved; define vendor/data requirements before new evidence. |
 | Cassiopeia | Future event-driven sleeve | Manifest placeholder and spec-only role | Event taxonomy and PIT event tape missing. | Define event contract and required PIT event tape. |
