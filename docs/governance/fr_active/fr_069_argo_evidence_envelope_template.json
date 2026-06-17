@@ -1,0 +1,88 @@
+{
+  "artifact_paths": [
+    "outputs/research/argo/<date>/argo_regime.json",
+    "outputs/research/argo/<date>/argo_indicator_snapshot.parquet",
+    "outputs/research/argo/<date>/argo_transition_trace.json",
+    "outputs/research/argo/<date>/argo_regime_selection.json",
+    "outputs/research/argo/<date>/argo_no_live_switching_attestation.json"
+  ],
+  "benchmark": "SPY",
+  "data_requirements": [
+    "pit_member_sleeve_evidence",
+    "pit_adjusted_ohlcv",
+    "spy_benchmark",
+    "vix_or_realized_volatility_proxy",
+    "breadth_inputs",
+    "credit_liquidity_proxy",
+    "frozen_member_sleeve_inputs"
+  ],
+  "decision_state": "draft",
+  "evaluation_window": {
+    "end": "<research_window_end>",
+    "start": "<research_window_start>"
+  },
+  "evidence_last_updated": "2026-06-17",
+  "execution_impact": "NON_EXECUTIONAL",
+  "family": "regime_overlay",
+  "governance_label": "RESEARCH_ONLY",
+  "holdout_excluded": true,
+  "hypothesis_class": "regime_model_selection_overlay",
+  "known_bias_risks": [
+    "look_ahead_regime_labeling",
+    "member_sleeve_survivorship_bias",
+    "overfit_regime_boundaries",
+    "shadow_performance_leakage",
+    "allocation_feedback_loop",
+    "stale_member_sleeve_inputs"
+  ],
+  "lifecycle_status": "research",
+  "metrics_required": [
+    "regime_classification_stability",
+    "transition_false_positive_rate",
+    "selection_return_vs_static_baseline",
+    "drawdown_reduction",
+    "turnover_of_recommendations",
+    "member_sleeve_input_freshness",
+    "overfit_diagnostics",
+    "correlation_adjusted_recommendation_quality",
+    "no_live_switching_attestation"
+  ],
+  "metrics": [
+    "regime_classification_stability",
+    "transition_false_positive_rate",
+    "selection_return_vs_static_baseline",
+    "drawdown_reduction",
+    "turnover_of_recommendations",
+    "member_sleeve_input_freshness",
+    "overfit_diagnostics",
+    "correlation_adjusted_recommendation_quality",
+    "no_live_switching_attestation"
+  ],
+  "name": "Caerus Argo",
+  "owner": "Caerus Research Program",
+  "price_source": "pit_adjusted_ohlcv",
+  "production_impact": "research_only",
+  "promotion_blockers": [
+    "member_sleeve_inputs_not_decision_grade",
+    "no_live_switching_attestation_missing",
+    "regime_label_pit_validation_incomplete",
+    "overfit_diagnostics_missing",
+    "paper_allocation_approval_missing"
+  ],
+  "reason_codes": [
+    "phase_c_onboarding_template",
+    "research_only_no_runtime_change",
+    "canonical_regime_overlay_role_preserved"
+  ],
+  "schema_version": "caerus_sleeve_evidence_v1",
+  "sleeve_id": "argo",
+  "sleeve_type": "meta_model",
+  "source": "docs/governance/fr_active/fr_069_argo_onboarding_packet.md",
+  "spec_version": "fr069-argo-phase-c-onboarding-2026-06-17",
+  "status": "research_placeholder",
+  "strategy_id": "caerus_argo",
+  "thesis": "Research-only regime and model-selection overlay intended to study when Caerus sleeve families should be trusted, without routing capital.",
+  "universe_family": "derived_from_member_sleeves",
+  "universe_method": "pit_universe",
+  "universe_snapshot_hash": "template_requires_real_hash_before_decision_grade"
+}

@@ -49,6 +49,9 @@ approval.
 | Orion/Lyra PIT plan | `docs/governance/fr_active/fr_069_orion_lyra_pit_evidence_plan.md` | Differentiation evidence before disposition. |
 | Orion/Lyra redundancy packet | `docs/governance/fr_active/fr_069_orion_lyra_redundancy_packet.md` | Research-only current disposition packet; no promotion or retirement action. |
 | Phoenix onboarding packet | `docs/governance/fr_active/fr_069_phoenix_onboarding_packet.md` | First Phase C research-stage onboarding packet; no Shadow or runtime activation. |
+| Cassiopeia onboarding packet | `docs/governance/fr_active/fr_069_cassiopeia_onboarding_packet.md` | Research-stage event-driven onboarding packet; no Shadow or runtime activation. |
+| Cygnus onboarding packet | `docs/governance/fr_active/fr_069_cygnus_onboarding_packet.md` | Research-stage earnings-drift onboarding packet; v0 remains shelved and no Shadow or runtime activation is authorized. |
+| Argo onboarding packet | `docs/governance/fr_active/fr_069_argo_onboarding_packet.md` | Research-stage regime/model-selection onboarding packet; no allocation switching or runtime activation. |
 
 ## Lifecycle Gate Matrix
 
@@ -69,9 +72,9 @@ approval.
 | Orion | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, shadow artifacts | PIT rebaseline and decision-grade disposition evidence incomplete. | Continue observing; no retirement decision. |
 | Lyra | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, shadow artifacts | PIT rebaseline and decision-grade disposition evidence incomplete. | Continue observing as current low-confidence watch-list leader; no promotion/retirement decision. |
 | Phoenix | Research-stage crisis-reversal sleeve candidate | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, existing research artifacts | Decision-grade crisis-window evidence and Shadow-readiness packet missing. | Continue Research-stage evidence collection; no Shadow activation. |
-| Cygnus | Shelved earnings-drift sleeve | Manifest placeholder and v0 shelved evidence | v1 consensus/EPS-surprise data dependency unresolved. | Keep shelved; define vendor/data requirements before new evidence. |
-| Cassiopeia | Future event-driven sleeve | Manifest placeholder and spec-only role | Event taxonomy and PIT event tape missing. | Define event contract and required PIT event tape. |
-| Argo | Regime/meta-model overlay | Manifest placeholder and Phase B validation work | Member-sleeve inputs and no-live-switching attestation missing. | Keep overlay research-only; consume only frozen sleeve evidence. |
+| Cygnus | Research-stage earnings-drift sleeve; v0 shelved | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, v0 shelved evidence | v1 consensus/EPS-surprise data dependency unresolved. | Keep shelved; approve vendor/data requirements before new evidence. |
+| Cassiopeia | Research-stage event-driven sleeve candidate | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template | Event taxonomy and PIT event tape missing. | Define event contract and required PIT event tape. |
+| Argo | Research-stage regime/meta-model overlay | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, Phase B validation work | Member-sleeve inputs and no-live-switching attestation missing. | Keep overlay research-only; consume only frozen sleeve evidence. |
 
 ## Minimum Evidence Envelope
 

@@ -77,9 +77,9 @@ editing code or specs.
 | FR | Strategy | Canonical role (intended) | Canonical spec (authoritative) | Status in spec | Code module? | Registry status |
 |----|----------|---------------------------|--------------------------------|----------------|--------------|-----------------|
 | FR-050 | Phoenix | Crisis reversal | `fr_archive/fr_050_phoenix_research_spec.md`; Phase C onboarding: `fr_active/fr_069_phoenix_onboarding_packet.md` | ACTIVE_RESEARCH — Phase C research-stage onboarded; not Shadow-active | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
-| FR-051 | Cygnus | Earnings / post-earnings drift | `fr_archive/fr_051_cygnus_research_spec.md` | V0_SHELVED — Stage 2 validation FAIL; v1 vendor-gated | `research/cygnus/` research-only modules | research (`earnings_drift`) |
-| FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_archive/fr_052_cassiopeia_research_spec.md` | Draft / spec-only | none | research (`event_driven`) |
-| FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_archive/fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
+| FR-051 | Cygnus | Earnings / post-earnings drift | `fr_archive/fr_051_cygnus_research_spec.md`; Phase C onboarding: `fr_active/fr_069_cygnus_onboarding_packet.md` | V0_SHELVED — Phase C research-stage onboarded; v1 vendor-gated; not Shadow-active | `research/cygnus/` research-only modules | research (`earnings_drift`) |
+| FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_archive/fr_052_cassiopeia_research_spec.md`; Phase C onboarding: `fr_active/fr_069_cassiopeia_onboarding_packet.md` | ACTIVE_RESEARCH — Phase C research-stage onboarded; spec-only; not Shadow-active | none | research (`event_driven`) |
+| FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_archive/fr_053_argo_research_spec.md`; Phase C onboarding: `fr_active/fr_069_argo_onboarding_packet.md` | ACTIVE_RESEARCH — Phase C research-stage onboarded; no allocation switching | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
 | FR-054 | — | Dynamic strategy registry audit | `fr_archive/fr_054_dynamic_strategy_registry_audit.md` | Audit | n/a | n/a |
 | FR-055 | — | Registry surface cleanup audit | `fr_archive/fr_055_registry_surface_cleanup_audit.md` | Audit | n/a | n/a |
 | FR-056 | Cygnus | *(design draft — DUPLICATE of FR-051)* | `fr_archive/fr_056_cygnus_design_spec.md` | RETIRED 2026-06-10 (owner-approved) → FR-051 | Retired | none | n/a |
@@ -190,7 +190,14 @@ or fold FR-056 — now done.
 - **Cygnus v0 validation** — FR-051 Stage 2 verdict is FAIL (4/6 criteria).
   The tune window also failed; v0 is shelved and must not be re-tuned. The
   2025-forward holdout remains untouched and preserved. Cygnus v1 is gated on
-  EPS-surprise / consensus data vendor selection.
+  EPS-surprise / consensus data vendor selection. The FR-069 Phase C onboarding
+  packet keeps Cygnus governed Research-stage only.
+- **Cassiopeia needs event-contract evidence** before any shadow/promotion
+  consideration. The FR-069 Phase C onboarding packet preserves Cassiopeia as
+  the canonical event-driven sleeve and does not activate runtime behavior.
+- **Argo needs frozen member-sleeve inputs and no-live-switching evidence**
+  before any shadow/promotion consideration. The FR-069 Phase C onboarding
+  packet keeps Argo research-only and does not authorize allocation switching.
 - **FR-066 NAV provenance** — VM backfill/write and cron install completed
   2026-06-10. The corrected Alpaca portfolio-history series is continuous from
   2026-03-03, clean versus existing `nav.csv`, and includes SPY/beta columns;

@@ -1,0 +1,92 @@
+{
+  "artifact_paths": [
+    "outputs/research/cygnus/<date>/cygnus_event_tape.json",
+    "outputs/research/cygnus/<date>/cygnus_consensus_surprise_inputs.json",
+    "outputs/research/cygnus/<date>/cygnus_coverage_report.json",
+    "outputs/research/cygnus/<date>/cygnus_backtest_summary.json",
+    "outputs/research/cygnus/<date>/cygnus_cost_sensitivity.json"
+  ],
+  "benchmark": "SPY",
+  "data_requirements": [
+    "pit_universe",
+    "pit_adjusted_ohlcv",
+    "spy_benchmark",
+    "earnings_event_tape",
+    "consensus_eps_surprise_data",
+    "estimate_revision_history",
+    "announcement_time_availability",
+    "liquidity_filters"
+  ],
+  "decision_state": "draft",
+  "evaluation_window": {
+    "end": "<research_window_end>",
+    "start": "<research_window_start>"
+  },
+  "evidence_last_updated": "2026-06-17",
+  "execution_impact": "NON_EXECUTIONAL",
+  "family": "earnings_drift",
+  "governance_label": "RESEARCH_ONLY",
+  "holdout_excluded": true,
+  "hypothesis_class": "earnings_drift",
+  "known_bias_risks": [
+    "look_ahead_announcement_timestamp",
+    "survivorship_bias",
+    "vendor_revision_restatement",
+    "holdout_leakage",
+    "sparse_earnings_sample",
+    "transaction_cost_understatement",
+    "post_failure_retuning"
+  ],
+  "lifecycle_status": "research",
+  "metrics_required": [
+    "rank_ic_10d",
+    "rank_ic_20d",
+    "rank_ic_60d",
+    "net_ir_vs_spy",
+    "event_coverage",
+    "cost_sensitivity",
+    "turnover",
+    "max_drawdown",
+    "excess_correlation_vs_polaris_orion_lyra",
+    "holdout_excluded_attestation"
+  ],
+  "metrics": [
+    "rank_ic_10d",
+    "rank_ic_20d",
+    "rank_ic_60d",
+    "net_ir_vs_spy",
+    "event_coverage",
+    "cost_sensitivity",
+    "turnover",
+    "max_drawdown",
+    "excess_correlation_vs_polaris_orion_lyra",
+    "holdout_excluded_attestation"
+  ],
+  "name": "Caerus Cygnus",
+  "owner": "Caerus Research Program",
+  "price_source": "pit_adjusted_ohlcv",
+  "production_impact": "research_only",
+  "promotion_blockers": [
+    "v0_stage2_failed_holdout_preserved",
+    "consensus_eps_surprise_vendor_missing",
+    "estimate_revision_lineage_missing",
+    "v1_research_plan_not_approved",
+    "shadow_integration_not_approved"
+  ],
+  "reason_codes": [
+    "phase_c_onboarding_template",
+    "research_only_no_runtime_change",
+    "canonical_earnings_drift_role_preserved"
+  ],
+  "schema_version": "caerus_sleeve_evidence_v1",
+  "sleeve_id": "cygnus",
+  "sleeve_type": "event_driven",
+  "source": "docs/governance/fr_active/fr_069_cygnus_onboarding_packet.md",
+  "spec_version": "fr069-cygnus-phase-c-onboarding-2026-06-17",
+  "status": "research_placeholder",
+  "strategy_id": "caerus_cygnus",
+  "thesis": "Post-earnings drift sleeve intended to test whether surprise, guidance, estimate revisions, and reaction confirmation produce persistent forward returns.",
+  "universe_family": "event_eligible_large_cap",
+  "universe_method": "pit_universe",
+  "universe_snapshot_hash": "template_requires_real_hash_before_decision_grade"
+}

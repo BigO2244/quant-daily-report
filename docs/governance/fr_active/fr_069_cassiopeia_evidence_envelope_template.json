@@ -1,0 +1,91 @@
+{
+  "artifact_paths": [
+    "outputs/research/cassiopeia/<date>/cassiopeia_event_contract.json",
+    "outputs/research/cassiopeia/<date>/cassiopeia_event_tape.json",
+    "outputs/research/cassiopeia/<date>/cassiopeia_candidate_universe.json",
+    "outputs/research/cassiopeia/<date>/cassiopeia_backtest_summary.json",
+    "outputs/research/cassiopeia/<date>/cassiopeia_sparse_sample_diagnostics.json"
+  ],
+  "benchmark": "SPY",
+  "data_requirements": [
+    "pit_universe",
+    "pit_adjusted_ohlcv",
+    "spy_benchmark",
+    "event_contract",
+    "event_tape_with_availability_timestamp",
+    "ticker_mapping_lineage",
+    "liquidity_filters"
+  ],
+  "decision_state": "draft",
+  "evaluation_window": {
+    "end": "<research_window_end>",
+    "start": "<research_window_start>"
+  },
+  "evidence_last_updated": "2026-06-17",
+  "execution_impact": "NON_EXECUTIONAL",
+  "family": "event_driven",
+  "governance_label": "RESEARCH_ONLY",
+  "holdout_excluded": true,
+  "hypothesis_class": "event_driven_catalyst",
+  "known_bias_risks": [
+    "look_ahead_event_timestamp",
+    "survivorship_bias",
+    "post_event_selection_bias",
+    "sparse_event_sample",
+    "ticker_mapping_drift",
+    "transaction_cost_understatement",
+    "event_source_restatement"
+  ],
+  "lifecycle_status": "research",
+  "metrics_required": [
+    "event_window_return",
+    "post_event_drift_return",
+    "excess_return_vs_spy",
+    "hit_rate",
+    "max_drawdown",
+    "turnover",
+    "cost_sensitivity",
+    "event_coverage",
+    "candidate_overlap",
+    "correlation_vs_polaris_orion_lyra_phoenix_cygnus"
+  ],
+  "metrics": [
+    "event_window_return",
+    "post_event_drift_return",
+    "excess_return_vs_spy",
+    "hit_rate",
+    "max_drawdown",
+    "turnover",
+    "cost_sensitivity",
+    "event_coverage",
+    "candidate_overlap",
+    "correlation_vs_polaris_orion_lyra_phoenix_cygnus"
+  ],
+  "name": "Caerus Cassiopeia",
+  "owner": "Caerus Research Program",
+  "price_source": "pit_adjusted_ohlcv",
+  "production_impact": "research_only",
+  "promotion_blockers": [
+    "event_taxonomy_not_owner_approved",
+    "pit_event_tape_missing",
+    "availability_timestamp_lineage_missing",
+    "sparse_sample_diagnostics_missing",
+    "shadow_integration_not_approved"
+  ],
+  "reason_codes": [
+    "phase_c_onboarding_template",
+    "research_only_no_runtime_change",
+    "canonical_event_driven_role_preserved"
+  ],
+  "schema_version": "caerus_sleeve_evidence_v1",
+  "sleeve_id": "cassiopeia",
+  "sleeve_type": "event_driven",
+  "source": "docs/governance/fr_active/fr_069_cassiopeia_onboarding_packet.md",
+  "spec_version": "fr069-cassiopeia-phase-c-onboarding-2026-06-17",
+  "status": "research_placeholder",
+  "strategy_id": "caerus_cassiopeia",
+  "thesis": "Timestamp-aware event-driven sleeve intended to harvest persistent return effects after discrete corporate or market catalysts.",
+  "universe_family": "event_eligible_large_cap",
+  "universe_method": "pit_universe",
+  "universe_snapshot_hash": "template_requires_real_hash_before_decision_grade"
+}
