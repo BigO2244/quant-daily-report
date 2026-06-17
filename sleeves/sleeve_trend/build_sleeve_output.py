@@ -20,6 +20,11 @@ from typing import Optional
 import pandas as pd
 
 from core.portfolio_alloc import SleeveOutput, create_sleeve_output, WEIGHT_TOLERANCE
+from core.sleeve_numeric_diagnostics import (
+    REASON_SLEEVE_STRENGTH_NON_FINITE,
+    diagnostic_event,
+    is_finite_number,
+)
 from sleeves.sleeve_trend.selection import select_and_weight, TOP_N
 
 logger = logging.getLogger(__name__)
@@ -109,7 +114,23 @@ def build_trend_sleeve_output(
         end_eq   = float(equity_df["equity"].iloc[-1])
         if start_eq > 0:
             sleeve_return = (end_eq / start_eq) - 1.0
-            strength = min(1.0, base_strength * max(0.5, min(1.5, 1.0 + sleeve_return)))
+            candidate_strength = min(1.0, base_strength * max(0.5, min(1.5, 1.0 + sleeve_return)))
+            if is_finite_number(candidate_strength):
+                strength = candidate_strength
+            else:
+                diagnostics = list(equity_df.attrs.get("numeric_diagnostics") or [])
+                diagnostics.append(
+                    diagnostic_event(
+                        sleeve_id="sleeve_trend",
+                        calculation_stage="build_sleeve_output",
+                        reason_code=REASON_SLEEVE_STRENGTH_NON_FINITE,
+                        field="strength",
+                        value=candidate_strength,
+                        source_artifact="equity_df",
+                        downstream_effect="sleeve output strength left at base strength; validation still checks terminal equity",
+                    )
+                )
+                equity_df.attrs["numeric_diagnostics"] = diagnostics
 
     n_pos      = len(positions)
     top_ticker = positions[0]["ticker"] if positions else "—"

@@ -77,6 +77,13 @@ from core.operator_summary import (
 from core.step_summary import append_step_summary
 from core.strategy_identity import strategy_identity_metadata
 from core.trade_count_contract import compute_trade_count_contract
+from core.sleeve_numeric_diagnostics import (
+    REASON_NAN_TRACE_MISSING,
+    REASON_SLEEVE_TERMINAL_EQUITY_NAN,
+    build_trace_payload,
+    is_finite_number,
+    trace_artifact_name,
+)
 from core.trading_mode import (
     canonical_trading_mode,
     canonical_trading_mode_label,
@@ -2068,8 +2075,11 @@ def build_execution_email_payload(
         "Executed turnover ($)": f"${turnover_dollars:,.2f}" if turnover_dollars is not None else "unavailable",
         "Executed turnover (%)": f"{turnover_pct * 100:.2f}%" if turnover_pct is not None else "unavailable",
         "Target cash weight (%)": f"{target_cash_weight * 100:.2f}%" if target_cash_weight is not None else "unavailable",
+        "Target gross exposure (%)": f"{(1.0 - target_cash_weight) * 100:.2f}%" if target_cash_weight is not None else "unavailable",
         "Achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%" if achieved_cash_weight is not None else "unavailable",
+        "Current achieved cash weight (%)": f"{achieved_cash_weight * 100:.2f}%" if achieved_cash_weight is not None else "unavailable",
         "Gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "unavailable",
+        "Current achieved gross exposure (%)": f"{gross_exposure * 100:.2f}%" if gross_exposure is not None else "unavailable",
         "Net exposure (%)": f"{net_exposure * 100:.2f}%" if net_exposure is not None else "unavailable",
         "# positions": str(position_count) if position_count is not None else "unavailable",
         "Max position weight (%)": f"{max_position_weight * 100:.2f}%" if max_position_weight is not None else "unavailable",
@@ -2351,6 +2361,10 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
     inception_metrics = snapshot.get("inception_metrics", {}) or {}
     alloc_diag = snapshot.get("allocation_diagnostics", {}) or {}
     sleeve1_diag = alloc_diag.get("sleeve_1", {}) or {}
+    sleeve_cash_routes = [
+        route for route in list(sleeve1_diag.get("cash_routing") or [])
+        if isinstance(route, dict)
+    ]
     def _sleeve_state_status(name: str) -> str:
         state = sleeve_states.get(name, {}) if isinstance(sleeve_states, dict) else {}
         if bool(state.get("active")):
@@ -2438,6 +2452,22 @@ def create_snapshot_email(snapshot: dict, execution_payload: dict | None = None)
         "",
         "ALPHA ATTRIBUTION VS SPY",
     ]
+    if sleeve_cash_routes:
+        insert_at = lines.index("")
+        # Use the blank line immediately before ALPHA ATTRIBUTION.
+        for idx, item in enumerate(lines):
+            if item == "ALPHA ATTRIBUTION VS SPY":
+                insert_at = max(0, idx - 1)
+                break
+        route_lines = [
+            "• Cash route: "
+            f"{route.get('sleeve_id', 'unknown')} "
+            f"{_fmt_pct(route.get('routed_weight'))} "
+            f"reason={route.get('invalid_reason', route.get('reason_code', 'unknown'))} "
+            f"diagnostic={route.get('diagnostic_artifact') or 'unavailable'}"
+            for route in sleeve_cash_routes
+        ]
+        lines[insert_at:insert_at] = route_lines
     if alpha and alpha.get("ok"):
         summary = alpha.get("summary", {}) or {}
         lines.extend(
@@ -2814,7 +2844,45 @@ def filter_sleeve2_cash_proxy(trades: pd.DataFrame) -> pd.DataFrame:
 # ============================================================
 # Sleeve health check
 # ============================================================
-def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
+def _write_sleeve_numeric_trace(
+    *,
+    sleeve_id: str,
+    equity_df: pd.DataFrame,
+    invalid_reason: str,
+    reason_code: str,
+    downstream_effect: str,
+) -> str | None:
+    trade_date = _RUN_CONTEXT.report_date if _RUN_CONTEXT is not None else None
+    if not trade_date and _RUN_CONTEXT is not None:
+        trade_date = _RUN_CONTEXT.report_date_env
+    diagnostics = []
+    if isinstance(equity_df, pd.DataFrame):
+        diagnostics = list(equity_df.attrs.get("numeric_diagnostics") or [])
+    payload = build_trace_payload(
+        sleeve_id=sleeve_id,
+        trade_date=trade_date,
+        reason_code=reason_code,
+        invalid_reason=invalid_reason,
+        events=diagnostics,
+        source_artifact="sleeve_runtime",
+        downstream_effect=downstream_effect,
+        run_id=_RUN_CONTEXT.run_id if _RUN_CONTEXT is not None else None,
+    )
+    path = _canonical_artifact_path("audit", trace_artifact_name(sleeve_id, trade_date))
+    safe_write_text(
+        path,
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        allow_overwrite=bool(_RUN_CONTEXT and _RUN_CONTEXT.allow_overwrite),
+    )
+    return str(path)
+
+
+def _sleeve_is_valid(
+    equity_df: pd.DataFrame,
+    *,
+    sleeve_id: str | None = None,
+    write_trace: bool = False,
+) -> tuple[bool, str]:
     """
     Check whether a sleeve produced valid results.
     Returns (is_valid, reason) where reason is empty string if valid.
@@ -2827,7 +2895,24 @@ def _sleeve_is_valid(equity_df: pd.DataFrame) -> tuple[bool, str]:
     if len(equity_df) < 1:
         return False, "zero rows"
     last_eq = equity_df["equity"].iloc[-1]
-    if pd.isna(last_eq) or last_eq <= 0:
+    if pd.isna(last_eq) or not is_finite_number(last_eq):
+        reason = f"invalid terminal equity ({last_eq})"
+        if write_trace and sleeve_id:
+            try:
+                trace_path = _write_sleeve_numeric_trace(
+                    sleeve_id=sleeve_id,
+                    equity_df=equity_df,
+                    invalid_reason=reason,
+                    reason_code=REASON_SLEEVE_TERMINAL_EQUITY_NAN,
+                    downstream_effect="sleeve allocation forced to cash",
+                )
+                equity_df.attrs["numeric_trace_path"] = trace_path
+                return False, f"{reason}; diagnostic={trace_path}"
+            except Exception as exc:
+                logger.warning("[SLEEVE_NUMERIC_TRACE] failed for %s: %s", sleeve_id, exc)
+                return False, f"{reason}; diagnostic={REASON_NAN_TRACE_MISSING}"
+        return False, reason
+    if last_eq <= 0:
         return False, f"invalid terminal equity ({last_eq})"
     return True, ""
 
@@ -4896,6 +4981,19 @@ def build_html_report(
             {"Metric": "Limiting constraint", "Value": sleeve1_diag.get("limiting_constraint", "n/a")},
         ]
     )
+    for route in list(sleeve1_diag.get("cash_routing") or []):
+        if not isinstance(route, dict):
+            continue
+        alloc_diag_items.append(
+            {
+                "Metric": f"Cash route: {route.get('sleeve_id', 'unknown')}",
+                "Value": (
+                    f"{_fmt_pct(route.get('routed_weight'))}; "
+                    f"reason={route.get('invalid_reason', route.get('reason_code', 'unknown'))}; "
+                    f"diagnostic={route.get('diagnostic_artifact') or 'unavailable'}"
+                ),
+            }
+        )
     alloc_diag_rows = pd.DataFrame(alloc_diag_items)
     alloc_diag_section = f'<div class="card">{html_table(alloc_diag_rows, "Allocation Diagnostics")}</div>'
     holdings_html = (
@@ -5739,7 +5837,11 @@ def main(argv: list[str] | None = None):
     # ── Sleeve health checks ─────────────────────────────────────
     # Validate each sleeve BEFORE allocation.  Invalid sleeves get
     # their weight routed to CASH, never to another sleeve.
-    trend_valid, trend_reason = _sleeve_is_valid(st_equity)
+    trend_valid, trend_reason = _sleeve_is_valid(
+        st_equity,
+        sleeve_id="sleeve_trend",
+        write_trace=True,
+    )
     # s2 validity derived from SleeveOutput positions (not legacy equity_df)
     _s2_pos_df = _val_output_direct.positions_df if _val_output_direct is not None else None
     s2_valid = _s2_pos_df is not None and not _s2_pos_df.empty
@@ -5750,7 +5852,7 @@ def main(argv: list[str] | None = None):
     )
     defensive_valid = False
     defensive_reason = ""
-    cm_valid, cm_reason = _sleeve_is_valid(cm_equity)
+    cm_valid, cm_reason = _sleeve_is_valid(cm_equity, sleeve_id="charlie_munger")
     if not trend_valid:
         logger.warning("sleeve_trend inactive: %s -> routed to CASH", trend_reason)
     if not s2_valid:
@@ -5969,12 +6071,27 @@ def main(argv: list[str] | None = None):
     # the freed weight to CASH (never to another sleeve).
     patched = False
     freed_weight = 0.0
+    sleeve_cash_routes: list[dict[str, object]] = []
     if (
         not trend_valid
         and alloc_result.sleeve_allocations.get("sleeve_trend", 0.0) > WEIGHT_TOLERANCE
     ):
-        freed_weight += alloc_result.sleeve_allocations["sleeve_trend"]
+        routed_weight = float(alloc_result.sleeve_allocations["sleeve_trend"])
+        freed_weight += routed_weight
         alloc_result.sleeve_allocations["sleeve_trend"] = 0.0
+        sleeve_cash_routes.append(
+            {
+                "sleeve_id": "sleeve_trend",
+                "invalid_reason": trend_reason,
+                "reason_code": REASON_SLEEVE_TERMINAL_EQUITY_NAN
+                if "terminal equity" in str(trend_reason)
+                else "sleeve_invalid",
+                "routed_weight": routed_weight,
+                "diagnostic_artifact": st_equity.attrs.get("numeric_trace_path")
+                if isinstance(st_equity, pd.DataFrame)
+                else None,
+            }
+        )
         patched = True
     if (
         not s2_valid
@@ -6014,6 +6131,14 @@ def main(argv: list[str] | None = None):
             "[ALLOCATION] Freed %.1f%% from inactive sleeve(s) -> CASH",
             freed_weight * 100,
         )
+        for route in sleeve_cash_routes:
+            logger.warning(
+                "[ALLOCATION][CASH_ROUTE] sleeve=%s reason=%s weight=%.1f%% diagnostic=%s",
+                route.get("sleeve_id"),
+                route.get("invalid_reason"),
+                float(route.get("routed_weight") or 0.0) * 100,
+                route.get("diagnostic_artifact") or "unavailable",
+            )
     # ── Validate allocation ───────────────────────────────────────
     errors = validate_allocation_result(alloc_result)
     if errors:
@@ -6050,6 +6175,7 @@ def main(argv: list[str] | None = None):
             "selected_names": int(cap_fill_diag.get("selected_names", 0)),
             "min_required_names": cap_fill_diag.get("min_required_names"),
             "limiting_constraint": cap_fill_diag.get("constraint", "none"),
+            "cash_routing": sleeve_cash_routes,
         }
     }
     # ── Build daily snapshot context ───────────────────────────────

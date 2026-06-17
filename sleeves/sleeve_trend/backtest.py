@@ -25,11 +25,20 @@ from core.quant_report import (  # noqa: E402
     TICKERS,
     download_prices,
 )
+from core.sleeve_numeric_diagnostics import (  # noqa: E402
+    REASON_INPUT_PRICE_NAN,
+    REASON_MTM_EQUITY_NON_FINITE,
+    REASON_TRADE_PNL_NON_FINITE,
+    diagnostic_event,
+    first_non_finite_in_frame,
+    is_finite_number,
+)
 
 from . import config as cfg  # noqa: E402
 from .indicators import compute_trend_indicators  # noqa: E402
 
 BACKTEST_VERSION = "Sleeve-Trend-v1-2026-01-26-RevB"
+SLEEVE_ID = "sleeve_trend"
 assert __name__.startswith("sleeves.sleeve_trend"), "Invalid import context for Sleeve Trend"
 
 # ============================================================
@@ -291,7 +300,21 @@ def prepare_data(
     ).clip(0, 100)
 
     signals["date"] = pd.to_datetime(signals["date"])
-    return signals.sort_values(["date", "ticker"])
+    signals = signals.sort_values(["date", "ticker"])
+    diagnostics = []
+    first_bad_price = first_non_finite_in_frame(
+        signals,
+        sleeve_id=SLEEVE_ID,
+        fields=["open", "high", "low", "close", "volume"],
+        calculation_stage="prepare_data",
+        reason_code=REASON_INPUT_PRICE_NAN,
+        source_artifact="prices",
+        downstream_effect="may invalidate trend sleeve equity",
+    )
+    if first_bad_price:
+        diagnostics.append(first_bad_price)
+    signals.attrs["numeric_diagnostics"] = diagnostics
+    return signals
 
 
 # ============================================================
@@ -463,6 +486,7 @@ def backtest(signals_df: pd.DataFrame = None) -> Tuple[pd.DataFrame, pd.DataFram
     # Output collectors
     equity_curve = []
     trades = []
+    numeric_diagnostics = list(signals_df.attrs.get("numeric_diagnostics") or [])
 
     # Pending orders (signal at t, execute at t+1)
     pending_entries: List[Tuple] = []  # (ticker, direction, score, atr, sector)
@@ -489,6 +513,20 @@ def backtest(signals_df: pd.DataFrame = None) -> Tuple[pd.DataFrame, pd.DataFram
                 exit_price = row["open"]  # Execute at OPEN
             except KeyError:
                 continue
+            if not is_finite_number(exit_price):
+                numeric_diagnostics.append(
+                    diagnostic_event(
+                        sleeve_id=SLEEVE_ID,
+                        calculation_stage="exit_execution",
+                        reason_code=REASON_INPUT_PRICE_NAN,
+                        ticker=ticker,
+                        date=current_date,
+                        field="open",
+                        value=exit_price,
+                        source_artifact="signals_df",
+                        downstream_effect="exit pnl may become non-finite",
+                    )
+                )
 
             # Calculate realized P&L
             if pos.direction == 1:
@@ -502,6 +540,20 @@ def backtest(signals_df: pd.DataFrame = None) -> Tuple[pd.DataFrame, pd.DataFram
             # Apply slippage
             slippage_cost = pos.shares * exit_price * cfg.SLIPPAGE_PCT
             pnl -= slippage_cost
+            if not is_finite_number(pnl):
+                numeric_diagnostics.append(
+                    diagnostic_event(
+                        sleeve_id=SLEEVE_ID,
+                        calculation_stage="exit_pnl",
+                        reason_code=REASON_TRADE_PNL_NON_FINITE,
+                        ticker=ticker,
+                        date=current_date,
+                        field="pnl",
+                        value=pnl,
+                        source_artifact="signals_df",
+                        downstream_effect="realized equity may become non-finite",
+                    )
+                )
 
             equity += pnl
 
@@ -641,6 +693,20 @@ def backtest(signals_df: pd.DataFrame = None) -> Tuple[pd.DataFrame, pd.DataFram
                 current_price = row["close"]
             except KeyError:
                 current_price = pos.entry_price
+            if not is_finite_number(current_price):
+                numeric_diagnostics.append(
+                    diagnostic_event(
+                        sleeve_id=SLEEVE_ID,
+                        calculation_stage="mark_to_market",
+                        reason_code=REASON_INPUT_PRICE_NAN,
+                        ticker=ticker,
+                        date=current_date,
+                        field="close",
+                        value=current_price,
+                        source_artifact="signals_df",
+                        downstream_effect="mtm equity may become non-finite",
+                    )
+                )
 
             if pos.direction == 1:
                 # Long: current value
@@ -655,6 +721,19 @@ def backtest(signals_df: pd.DataFrame = None) -> Tuple[pd.DataFrame, pd.DataFram
         # MTM adjustment = positions_mtm - sum(entry_notional)
         entry_notional_sum = sum(p.shares * p.entry_price for p in positions.values())
         mtm_equity = equity + (positions_mtm - entry_notional_sum)
+        if not is_finite_number(mtm_equity):
+            numeric_diagnostics.append(
+                diagnostic_event(
+                    sleeve_id=SLEEVE_ID,
+                    calculation_stage="mark_to_market",
+                    reason_code=REASON_MTM_EQUITY_NON_FINITE,
+                    date=current_date,
+                    field="equity",
+                    value=mtm_equity,
+                    source_artifact="signals_df",
+                    downstream_effect="terminal sleeve equity may become non-finite",
+                )
+            )
 
         # Update risk manager
         daily_return = (mtm_equity / prev_equity - 1) if prev_equity > 0 else 0.0
@@ -746,6 +825,8 @@ def backtest(signals_df: pd.DataFrame = None) -> Tuple[pd.DataFrame, pd.DataFram
             ]
         )
     )
+    equity_df.attrs["numeric_diagnostics"] = numeric_diagnostics
+    trades_df.attrs["numeric_diagnostics"] = numeric_diagnostics
 
     return equity_df, trades_df
 
