@@ -195,5 +195,12 @@ Phase C must not begin until:
 - a separate owner-approved Phase C task authorizes the next implementation
   boundary.
 
+Phase C readiness is documented in
+`docs/governance/fr_active/fr_069_phase_c_readiness.md`. That packet defines
+the lifecycle gate matrix, sleeve gap matrix, minimum evidence envelope,
+promotion/redundancy rules, and acceptance criteria for future sleeve
+onboarding. It remains research-only and does not authorize production harness
+migration, sleeve activation, allocation changes, or execution changes.
+
 FR-070 remains observation-monitoring. It does not block FR-069 unless the next
 live run produces a classified failure requiring renewed remediation.

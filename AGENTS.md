@@ -28,13 +28,15 @@ Safety boundaries:
 ## VM Access Policy
 
 - Do not assume a static external IP address for the scheduler VM.
-- Canonical access command:
-  `gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a`
+- Canonical direct SSH alias:
+  `ssh caerus-vm`
 - External IPs may change after stop/start, billing suspension, maintenance, or
   VM recreation.
-- If direct SSH is needed, resolve the current external IP first:
-  `gcloud compute instances describe alpha-stack-scheduler --zone us-central1-a --format="get(networkInterfaces[0].accessConfigs[0].natIP)"`
 - Treat direct SSH by external IP as ephemeral and non-authoritative.
+- Do not use `gcloud compute ssh` in Codex tasks when the `caerus-vm` SSH alias
+  is available.
+- Canonical non-interactive VM validation:
+  `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'`
 
 Required pre-work before editing:
 - Read `docs/governance/ORCHESTRATOR_CONTEXT.md`.
@@ -143,14 +145,18 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
   - venv: `.venv/` at repo root
 - **Scheduler VM**
   - canonical host: `alpha-stack-scheduler`
+  - canonical SSH alias: `caerus-vm`
   - canonical project: `alpha-stack-490922`
   - canonical zone: `us-central1-a`
-  - canonical access: `gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a`
+  - canonical access for Codex tasks: `ssh caerus-vm`
   - direct external IPs are ephemeral and non-authoritative
-  - if direct SSH is required, resolve the current external IP first with
-    `gcloud compute instances describe alpha-stack-scheduler --zone us-central1-a --format="get(networkInterfaces[0].accessConfigs[0].natIP)"`
+  - do not use `gcloud compute ssh` when the `caerus-vm` alias is available
   - path: `~/quant-daily-report`
-  - venv: `source venv/bin/activate`
+  - validation venv:
+    `/home/brettolson/.venvs/quant-daily-report/bin/python`
+    and `/home/brettolson/.venvs/quant-daily-report/bin/pytest`
+  - canonical validation:
+    `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'`
   - secrets: `~/quant-daily-report/.env`
   - web routes:
     - `/` → landing page with links to dashboard and golf bot
@@ -554,6 +560,8 @@ Canonical validation commands:
   `python3 -m pytest Tests/test_execution_pipeline_integration.py Tests/test_precompute_bundle_validation.py -q`
 - Governance check:
   `python3 scripts/operational_validation.py`
+- VM validation:
+  `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'`
 - Cron-adjacent shell syntax:
   `bash -n scripts/cron_precompute.sh` and `bash -n scripts/cron_execute.sh`
 

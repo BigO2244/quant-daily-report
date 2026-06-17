@@ -48,7 +48,13 @@ Before push:
 After VM fast-forward:
 
 ```bash
-/home/brettolson/.venvs/quant-daily-report/bin/python scripts/operational_validation.py
+./scripts/ops/run_vm_validation.sh
+```
+
+From a local shell, run the same VM validation non-interactively with:
+
+```bash
+ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'
 ```
 
 When Python behavior changed, add the targeted test slice:
@@ -64,6 +70,16 @@ On the VM, use the project virtual environment explicitly:
 ```bash
 /home/brettolson/.venvs/quant-daily-report/bin/pytest <targeted-test-files> -q
 ```
+
+`scripts/ops/run_vm_validation.sh` already uses the VM project virtual
+environment:
+
+- `/home/brettolson/.venvs/quant-daily-report/bin/python`
+- `/home/brettolson/.venvs/quant-daily-report/bin/pytest`
+
+It fails fast if either binary is missing, prints git hash and working-tree
+state, runs the read-only operational validator, compiles the FR-069 sleeve
+validators, and runs a small no-broker targeted test slice.
 
 For cron-adjacent changes:
 

@@ -48,9 +48,11 @@ artifacts and an explicit research-to-production promotion ladder.
 - Canonical host: `alpha-stack-scheduler`
 - Canonical project: `alpha-stack-490922`
 - Canonical zone: `us-central1-a`
-- Canonical access method: `gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a`
-- Static IPs are non-authoritative. Resolve the current external IP only when
-  a direct SSH path is unavoidable.
+- Canonical access method for Codex tasks: `ssh caerus-vm`
+- Do not use `gcloud compute ssh` when the `caerus-vm` SSH alias is available.
+- Static IPs are non-authoritative.
+- Canonical non-interactive VM validation:
+  `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'`
 
 ## Canonical Governance References
 

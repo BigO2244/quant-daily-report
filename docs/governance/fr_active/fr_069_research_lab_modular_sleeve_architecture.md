@@ -206,6 +206,15 @@ Phase C must not begin until manifest, validator, MCP inventory, and targeted
 tests pass, and still requires separate owner approval for any implementation
 beyond research-only scaffolding.
 
+Canonical Phase C readiness packet:
+`docs/governance/fr_active/fr_069_phase_c_readiness.md`.
+
+The readiness packet defines the future Research, Shadow, Paper, Pilot Capital,
+Production, and Retired lifecycle gates; sleeve gap matrix; evidence-envelope
+minimums; Orion/Lyra redundancy rules; and future onboarding criteria for
+Phoenix, Cygnus, Cassiopeia, and Argo. It remains research-only and does not
+authorize sleeve activation or production behavior changes.
+
 ### Agent Roles
 
 1. **Governance auditor** — reconcile `fr_active_backlog.md`, `fr_registry.md`,
