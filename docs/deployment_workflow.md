@@ -51,7 +51,7 @@ Use this sequence for normal source deployments:
 8. Validate:
    - `git status`
    - `git log -1 --oneline`
-   - `python3 scripts/operational_validation.py`
+   - `/home/brettolson/.venvs/quant-daily-report/bin/python scripts/operational_validation.py`
    - targeted syntax/tests based on changed files
 9. Observe wave-specific runtime artifacts before closing the deployment:
    - shadow orchestration: `outputs/workflow/<date>/shadow*.json`
@@ -86,7 +86,7 @@ Minimum validation after a source fast-forward:
 - `git status` reports a clean working tree.
 - `git log -1 --oneline` matches the expected `origin/main` commit.
 - `git branch --show-current` is `main`.
-- `python3 scripts/operational_validation.py` reports no `FAIL` checks.
+- `/home/brettolson/.venvs/quant-daily-report/bin/python scripts/operational_validation.py` reports no `FAIL` checks.
 - Shell scripts touched by the deployment pass `bash -n`.
 - Targeted pytest slices pass when Python behavior changed.
 
@@ -118,7 +118,7 @@ git revert <commit>
 git push origin main
 VM: git fetch origin
 VM: git pull --ff-only origin main
-VM: python3 scripts/operational_validation.py
+VM: /home/brettolson/.venvs/quant-daily-report/bin/python scripts/operational_validation.py
 ```
 
 Runtime artifacts created before rollback are evidence. Do not delete
@@ -228,7 +228,7 @@ SCP-only source must not remain the production truth.
 
 - [ ] VM HEAD matches expected `origin/main`.
 - [ ] VM working tree is clean.
-- [ ] `python3 scripts/operational_validation.py` has no `FAIL` checks.
+- [ ] `/home/brettolson/.venvs/quant-daily-report/bin/python scripts/operational_validation.py` has no `FAIL` checks.
 - [ ] Relevant syntax checks passed.
 - [ ] Targeted pytest slices passed if required.
 - [ ] Cron/service state verified if changed.

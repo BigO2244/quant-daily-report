@@ -48,7 +48,7 @@ Before push:
 After VM fast-forward:
 
 ```bash
-python3 scripts/operational_validation.py
+/home/brettolson/.venvs/quant-daily-report/bin/python scripts/operational_validation.py
 ```
 
 When Python behavior changed, add the targeted test slice:
@@ -57,6 +57,12 @@ When Python behavior changed, add the targeted test slice:
 .venv/bin/python3 -m pytest Tests/test_feedback_loop_artifacts.py Tests/test_portfolio_learning_report.py -q
 .venv/bin/python3 -m pytest Tests/test_shadow_daily_wrapper.py Tests/test_execution_pipeline_integration.py -q
 .venv/bin/python3 -m pytest Tests/test_execution_pipeline_integration.py Tests/test_precompute_bundle_validation.py -q
+```
+
+On the VM, use the project virtual environment explicitly:
+
+```bash
+/home/brettolson/.venvs/quant-daily-report/bin/pytest <targeted-test-files> -q
 ```
 
 For cron-adjacent changes:

@@ -495,7 +495,7 @@ def test_phase3_post_sell_rebudget_preserves_fractional_mode(
     assert result["post_sell_rebudget"]["status"] == expected_status
 
 
-def test_phase3_post_sell_rebudget_partial_fill_uses_confirmed_proceeds_only(tmp_path, monkeypatch):
+def test_phase3_partial_sell_recovery_blocks_buys_with_budget_reason(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-partial"))
     monkeypatch.setenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS", "0")
@@ -562,18 +562,20 @@ def test_phase3_post_sell_rebudget_partial_fill_uses_confirmed_proceeds_only(tmp
         ],
     )
 
-    assert [side for side, _, _, _ in fake.submitted] == ["SELL", "BUY"]
-    assert fake.submitted[1][2] == pytest.approx(2.5)
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
     rebudget = result["post_sell_rebudget"]
-    assert result["sell_phase_status"] == "TIMEOUT"
-    assert float(rebudget["confirmed_sell_proceeds"]) == pytest.approx(200.0)
-    assert float(rebudget["buy_budget_after_safeguards"]) == pytest.approx(250.0)
-    assert "sell_phase_not_fully_confirmed" in rebudget["reason_codes"]
+    assert result["sell_phase_status"] == "COMPLETED"
+    assert float(rebudget["confirmed_sell_proceeds"]) == pytest.approx(0.0)
+    assert float(rebudget["buy_budget_after_safeguards"]) == pytest.approx(0.0)
+    assert "buy_blocked_risk_cash_target" in rebudget["reason_codes"]
     assert "pending_sells_excluded_from_buy_budget" in rebudget["reason_codes"]
+    assert result["buy_phase_decision_reason"] == "no_buy_orders"
+    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 0
+    assert int(result["blocked_buy_count"]) == 0
 
 
 @pytest.mark.parametrize("sell_status", ["accepted", "rejected"])
-def test_phase3_post_sell_rebudget_unconfirmed_sell_uses_cash_only(tmp_path, monkeypatch, sell_status):
+def test_phase3_unconfirmed_or_rejected_sell_does_not_submit_buys(tmp_path, monkeypatch, sell_status):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / f"run-p3-{sell_status}"))
     monkeypatch.setenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS", "0")
@@ -640,15 +642,23 @@ def test_phase3_post_sell_rebudget_unconfirmed_sell_uses_cash_only(tmp_path, mon
         ],
     )
 
-    assert [side for side, _, _, _ in fake.submitted] == ["SELL", "BUY"]
-    assert fake.submitted[1][2] == pytest.approx(0.5)
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
     rebudget = result["post_sell_rebudget"]
     assert float(rebudget["confirmed_sell_proceeds"]) == pytest.approx(0.0)
-    assert float(rebudget["buy_budget_after_safeguards"]) == pytest.approx(50.0)
-    assert float(rebudget["recomputed_buy_notional"]) == pytest.approx(50.0)
-    assert "sell_phase_not_fully_confirmed" in rebudget["reason_codes"]
     if sell_status == "accepted":
+        assert result["sell_phase_status"] == "COMPLETED"
+        assert result["buy_phase_decision_reason"] == "no_buy_orders"
+        assert result["alpaca_submission_summary"].get("buy_phase_block_reason") is None
+        assert "buy_blocked_risk_cash_target" in rebudget["reason_codes"]
         assert "pending_sells_excluded_from_buy_budget" in rebudget["reason_codes"]
+    else:
+        assert result["sell_phase_status"] == "FAILED"
+        assert result["buy_phase_decision_reason"] == "no_buy_orders"
+        assert result["alpaca_submission_summary"]["buy_phase_block_reason"] == "sell_phase_terminal_failure"
+        assert "sell_phase_not_fully_confirmed" in rebudget["reason_codes"]
+        assert "sell_phase_terminal_failure" in rebudget["reason_codes"]
+    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 0
+    assert int(result["blocked_buy_count"]) == 0
 
 
 def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
@@ -702,7 +712,7 @@ def test_phase3_idempotent_remote_existing_preserved(tmp_path, monkeypatch):
     assert int(result["alpaca_submission_summary"]["remote_existing_orders"]) == 1
 
 
-def test_phase3_sell_timeout_does_not_block_affordable_buy(tmp_path, monkeypatch):
+def test_phase3_sell_recovery_does_not_submit_buy_when_budget_blocked(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUN_OUTPUT_ROOT", str(tmp_path / "outputs" / "runs" / "run-p3-timeout"))
     monkeypatch.setenv("ALPACA_SELL_PHASE_TIMEOUT_SECONDS", "0")
@@ -759,12 +769,15 @@ def test_phase3_sell_timeout_does_not_block_affordable_buy(tmp_path, monkeypatch
         now_et=dt.datetime(2026, 3, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
     )
 
-    assert [side for side, _, _, _ in fake.submitted] == ["SELL", "BUY"]
-    assert result["sell_phase_status"] == "TIMEOUT"
-    assert result["buy_phase_decision_reason"] == "buy_submitted_using_available_buying_power"
-    assert result["pending_sell_count_at_buy_decision"] == 1
-    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 1
-    assert result["budget_skipped_orders"] == []
+    assert [side for side, _, _, _ in fake.submitted] == ["SELL"]
+    assert result["sell_phase_status"] == "COMPLETED"
+    assert result["buy_phase_decision_reason"] == "no_buy_orders"
+    assert result["alpaca_submission_summary"].get("buy_phase_block_reason") is None
+    assert int(result["alpaca_submission_summary"]["buy_phase_submitted"]) == 0
+    rebudget = result["post_sell_rebudget"]
+    assert "buy_blocked_risk_cash_target" in rebudget["reason_codes"]
+    assert "pending_sells_excluded_from_buy_budget" in rebudget["reason_codes"]
+    assert int(result["blocked_buy_count"]) == 0
 
 
 def test_phase3_blocks_buys_when_postsell_cash_below_reserve(tmp_path, monkeypatch):

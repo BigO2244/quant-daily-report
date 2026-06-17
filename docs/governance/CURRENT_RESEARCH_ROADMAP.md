@@ -2,12 +2,12 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-14 (local/origin/main/VM verified at `e1792cd`; Shadow
-NAV incident recovered under `dated_same_day_close_to_close_v1`; canonical
-Shadow observation inception is 2026-05-12 with 23 NAV rows through
-2026-06-12; legacy mixed-convention Shadow history is superseded and
-non-decision-grade; FR-070 remains highest immediate operational observation
-priority; FR-069 remains the next major research-only architecture workstream)
+Last Updated: 2026-06-17 (pre-triage deployed baseline `efd193d`; Shadow NAV
+incident remains recovered under `dated_same_day_close_to_close_v1`; FR-070
+remains observe-only for execution target-attainment and post-buy artifact
+timing; FR-073 sleeve numeric diagnostics are deployed-observing after the
+trend-sleeve terminal-equity NaN incident; FR-069 remains the next major
+research-only architecture workstream)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -15,18 +15,19 @@ The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md
 is the canonical strategic north star for strategy, sleeve, promotion, and
 portfolio-construction work unless explicitly amended.
 
-Priority note 2026-06-12: FR-070 cash-gating / post-sell buy-budget remediation
-is deployed and moves to observation/monitoring. The June 12 live-run
-investigation classified the discrepancy as `ARTIFACT_TIMING_FAILURE` and left
-post-buy snapshot validation open until the next live run. FR-070 remains the
-highest immediate operational observation priority until those gates pass or
-produce a classified failure. FR-069 modular sleeve / research-lab architecture
-is the next major architecture workstream and must align with the doctrine. The
-Orion/Lyra retain-or-retire decision is deferred to the data-driven sleeve
-architecture review; no immediate retirement or Lyra-name reuse is approved.
-Phoenix remains the next major sleeve-design focus after the architecture is
-settled. Dashboard auth cleanup remains operational hygiene, not a research
-priority.
+Priority note 2026-06-17: FR-070 cash-gating / post-sell buy-budget remediation
+remains in observation/monitoring. The 2026-06-17 high-cash target was not an
+execution defect; the trend sleeve was invalidated for non-finite terminal
+equity and the allocation engine correctly routed freed weight to CASH. FR-073
+adds diagnostic-only numeric traces at
+`outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json`
+when a run context is available. FR-069 modular sleeve / research-lab
+architecture is still the next major architecture workstream and must align
+with the doctrine. The Orion/Lyra retain-or-retire decision is deferred to the
+data-driven sleeve architecture review; no immediate retirement or Lyra-name
+reuse is approved. Phoenix remains the next major sleeve-design focus after the
+architecture is settled. Dashboard auth cleanup remains operational hygiene,
+not a research priority.
 
 ---
 
@@ -53,10 +54,10 @@ editing code or specs.
 
 ---
 
-## 1. Verified state (as of 2026-06-14)
+## 1. Verified state (as of 2026-06-17)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
-- **Local HEAD / origin/main / VM HEAD:** `e1792cde79b8d7f2dcd8324451b2258910824bd0`
+- **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
 - **Production posture:** paper only, US long-only equities + options overlay, Alpaca paper broker. No shorting, no leverage, no real capital.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
 - **Shadow (non-blocking):** Caerus Orion, Caerus Lyra. SPY = benchmark.
@@ -64,6 +65,10 @@ editing code or specs.
 - **Shadow scorecard health:** Fresh; NAV integrity OK as of recovered artifacts through `2026-06-12`.
 - **Promotion ladder:** research → backtest → shadow → paper → live. No automated promotion. Promotion is conservative and research-only.
 - **Hard rule:** do not change production trading, broker submission, or cron timing casually.
+- **FR-073 observability:** invalid sleeve numeric states should emit a
+  run-root `sleeve_numeric_trace_*` artifact and cash-routing report line when
+  a run context is available; this is diagnostic-only and does not alter
+  allocation, execution, or risk controls.
 
 ---
 

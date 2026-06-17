@@ -69,6 +69,7 @@ architecture should align with it unless explicitly amended.
 | HOTFIX-2026-06-15-FR070 execution fill observation | HOTFIX / Execution Integrity | `DEPLOYED_OBSERVING` | HIGH | FR-070, FR-031, broker-authoritative Alpaca order state, sell-first lifecycle | observing_next_buy_capable_run | 2026-06-15 paper run `2026-06-15T093505-0400_c68a22d` reported submitted=2, accepted=2, filled=0, `NOT_COMPARABLE`, no halt/skip reason, and `EXECUTED`; operator-supplied Alpaca truth shows C SELL 1 filled at 09:36:55 ET and MNST SELL 2 filled at 09:38:27 ET. Root cause: sell observation used a 90s primary window with no bounded recovery window before lifecycle/reporting decisions; incomplete sell terminality could suppress buys while reporting semantics remained too green. Patch is deployed through execution fix `2e1c3f1` and VM validation passed; observe the next buy-capable run for terminal sell/buy state, post-buy artifacts, and target-attainment consistency. | Revert the hotfix commit only if the observation invariant regresses; restore prior sell observation timeout behavior. Do not delete incident artifacts or execution history. |
 | FR-071 Governance Doctrine Integration | Governance Documentation | `READY` | NONE | `docs/governance/caerus_investment_doctrine.md` | not_started | Documentation-only task to ensure doctrine is referenced from README, roadmap, registry, AGENTS.md, and future FR workflow. | Revert documentation links only. |
 | FR-072 Governance Hygiene Agent | Governance Automation / Operational Risk Reduction | `DEPLOYED_OBSERVING` | NONE | `docs/governance/caerus_investment_doctrine.md`, `docs/governance/fr_registry.md`, `docs/governance/fr_active_backlog.md`, `docs/governance/CURRENT_RESEARCH_ROADMAP.md`, `docs/governance/README.md`, `AGENTS.md` | read_only_observing | Read-only governance audit is implemented with deterministic checks and tests. It proposes findings only, has no automatic writes, no auto-patch, and no cron install. Phase B scheduling still requires separate explicit approval. | Revert docs and script only; delete output artifacts if needed. |
+| FR-073 Sleeve Numeric Diagnostics and Cash-Routing Explainability | Allocation Observability / Numeric Diagnostics | `DEPLOYED_OBSERVING` | LOW | FR-070 target-attainment distinction, sleeve validity checks, run-root audit artifacts | observing_next_invalid_sleeve_event | Diagnostic-only patch deployed at `efd193d` after the 2026-06-17 trend-sleeve terminal-equity NaN incident. Invalid sleeve numeric states now write run-root traces at `outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json` when a run context is available, and cash-routing diagnostics/reporting include invalid sleeve, reason, routed weight, and trace path. The patch preserves cash routing, allocation decisions, execution, broker behavior, sizing, ranking, and risk thresholds. | Revert `efd193d` only if trace generation or reporting causes runtime failure; cash-routing safety should remain governed by sleeve validity. |
 
 Recently closed Phase 4 work now lives in `docs/governance/fr_registry.md`:
 FR-015, FR-017, FR-018, FR-023, FR-024, FR-025, FR-026, FR-027, and FR-030
@@ -107,9 +108,9 @@ procedures are proven.
 ## Current Priority Order
 
 1. Observe FR-070 target-attainment and post-buy artifact timing through the
-   next live/paper execution gates. This is the highest immediate operational
-   priority until the next run validates the deployed remediation or produces a
-   classified failure.
+   next live/paper execution gates, and observe FR-073 trace coverage on any
+   future invalid-sleeve event. These are operational observation lanes, not
+   implementation lanes, unless they produce classified failure evidence.
 2. FR-069 modular sleeve / research-lab architecture aligned to the Caerus
    Investment Doctrine is the next major architecture workstream.
 3. FR-070 implementation work only if diagnostics produce a classified failure.

@@ -182,6 +182,21 @@ scope, rollout sequencing, validation, rollback, and observation criteria.
   lifecycle: planned-but-unsubmitted buys, recovered broker state, unresolved
   sell state, and target-attainment uncertainty are separate facts and must not
   be collapsed into a green headline.
+- On 2026-06-17, the high-cash target was not an execution defect. The trend
+  sleeve was invalidated because terminal equity was non-finite, and the
+  allocation engine correctly routed the inactive sleeve weight, approximately
+  55.8%, to CASH. Execution then followed the risk-controlled target.
+- The 2026-06-17 incident also showed that a terminal-equity NaN without a
+  persisted first-bad-stage trace is hard to audit after cached inputs no
+  longer reproduce the failure. FR-073 deployed diagnostic-only sleeve numeric
+  traces at
+  `outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json`
+  when a run context is available.
+- Future large allocation-to-cash events must surface invalid sleeve, reason
+  code, routed weight, and diagnostic artifact path in operator reporting. The
+  report must distinguish current achieved gross/cash exposure from target
+  gross/cash exposure so a prior 95% achieved gross state is not confused with
+  a new 44% target gross state.
 
 ## Artifact Lessons
 
