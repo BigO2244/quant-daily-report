@@ -76,7 +76,7 @@ editing code or specs.
 
 | FR | Strategy | Canonical role (intended) | Canonical spec (authoritative) | Status in spec | Code module? | Registry status |
 |----|----------|---------------------------|--------------------------------|----------------|--------------|-----------------|
-| FR-050 | Phoenix | Crisis reversal | `fr_archive/fr_050_phoenix_research_spec.md` | ACTIVE_RESEARCH — Phase B review | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
+| FR-050 | Phoenix | Crisis reversal | `fr_archive/fr_050_phoenix_research_spec.md`; Phase C onboarding: `fr_active/fr_069_phoenix_onboarding_packet.md` | ACTIVE_RESEARCH — Phase C research-stage onboarded; not Shadow-active | `research_registry/research/phoenix.py` + `phoenix_evidence_tracker.py` + `phoenix_phase_b_review.py` | research |
 | FR-051 | Cygnus | Earnings / post-earnings drift | `fr_archive/fr_051_cygnus_research_spec.md` | V0_SHELVED — Stage 2 validation FAIL; v1 vendor-gated | `research/cygnus/` research-only modules | research (`earnings_drift`) |
 | FR-052 | Cassiopeia | Event-driven (catalysts) | `fr_archive/fr_052_cassiopeia_research_spec.md` | Draft / spec-only | none | research (`event_driven`) |
 | FR-053 | Argo | Regime allocation overlay / model-selection layer | `fr_archive/fr_053_argo_research_spec.md` | ACTIVE_RESEARCH — Phase B validation | `research_registry/research/argo.py` + `argo_phase_b_validation.py` | research (`meta_model`, `regime_overlay`, `selector`) |
@@ -184,7 +184,7 @@ or fold FR-056 — now done.
 - **Portfolio history stale** — freshness audit added (`portfolio_history_freshness.py`, untracked); confirms staleness needs resolution before promotion-grade evaluation.
 - **Security master auth / missing artifact** — `security_master_diagnostics.py` / `audit_security_master_refresh.py` (untracked) flag auth or missing-artifact gaps blocking PIT-safe alias resolution.
 - **BK → BNY universe migration** — pending; do NOT migrate `universe.csv` without explicit approval.
-- **Phoenix needs passive (out-of-sample) evidence** before any shadow/promotion consideration.
+- **Phoenix needs passive (out-of-sample) evidence** before any shadow/promotion consideration. The FR-069 Phase C onboarding packet makes Phoenix a governed Research-stage candidate only; it does not activate Shadow or allocation behavior.
 - **Cygnus definition drift** — RESOLVED 2026-06-10 (owner-approved): Cygnus is
   earnings-drift (canonical FR-051); FR-056 retired. See Section 4, Conflict B.
 - **Cygnus v0 validation** — FR-051 Stage 2 verdict is FAIL (4/6 criteria).

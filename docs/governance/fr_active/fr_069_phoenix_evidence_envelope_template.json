@@ -1,0 +1,88 @@
+{
+  "artifact_paths": [
+    "outputs/model_quality/<date>/phoenix_research.json",
+    "outputs/model_quality/<date>/phoenix_phase_b_review.json",
+    "outputs/model_quality/<date>/phoenix_evidence_tracker.json",
+    "outputs/research/phoenix/<date>/phoenix_decision_trace.json",
+    "outputs/research/phoenix/<date>/phoenix_backtest_summary.json"
+  ],
+  "benchmark": "SPY",
+  "data_requirements": [
+    "pit_universe",
+    "pit_adjusted_ohlcv",
+    "spy_benchmark",
+    "crisis_window_definition",
+    "liquidity_filters",
+    "sector_map_optional"
+  ],
+  "decision_state": "draft",
+  "evaluation_window": {
+    "end": "<research_window_end>",
+    "start": "<research_window_start>"
+  },
+  "evidence_last_updated": "2026-06-17",
+  "execution_impact": "NON_EXECUTIONAL",
+  "family": "crisis_reversal",
+  "governance_label": "RESEARCH_ONLY",
+  "holdout_excluded": true,
+  "hypothesis_class": "crisis_reversal",
+  "known_bias_risks": [
+    "look_ahead_crisis_labeling",
+    "survivorship_bias",
+    "post_event_selection_bias",
+    "sparse_crisis_sample",
+    "falling_knife_false_positive",
+    "transaction_cost_understatement"
+  ],
+  "lifecycle_status": "research",
+  "metrics_required": [
+    "crisis_window_return",
+    "recovery_window_return",
+    "correlation_vs_polaris_orion_lyra",
+    "drawdown_capture",
+    "max_drawdown",
+    "turnover",
+    "hit_rate",
+    "cost_sensitivity",
+    "candidate_overlap",
+    "regime_activation_precision"
+  ],
+  "metrics": [
+    "crisis_window_return",
+    "recovery_window_return",
+    "correlation_vs_polaris_orion_lyra",
+    "drawdown_capture",
+    "max_drawdown",
+    "turnover",
+    "hit_rate",
+    "cost_sensitivity",
+    "candidate_overlap",
+    "regime_activation_precision"
+  ],
+  "name": "Caerus Phoenix",
+  "owner": "Caerus Research Program",
+  "price_source": "pit_adjusted_ohlcv",
+  "production_impact": "research_only",
+  "promotion_blockers": [
+    "decision_grade_pit_rebaseline_missing",
+    "crisis_window_definition_not_owner_approved",
+    "sparse_active_day_history",
+    "negative_phase_b_backtest_summary",
+    "shadow_integration_not_approved"
+  ],
+  "reason_codes": [
+    "phase_c_onboarding_template",
+    "research_only_no_runtime_change"
+  ],
+  "schema_version": "caerus_sleeve_evidence_v1",
+  "sleeve_id": "phoenix",
+  "sleeve_type": "security_selection",
+  "source": "docs/governance/fr_active/fr_069_phoenix_onboarding_packet.md",
+  "spec_version": "fr069-phoenix-phase-c-onboarding-2026-06-17",
+  "status": "research_placeholder",
+  "strategy_id": "caerus_phoenix",
+  "thesis": "Contrarian crisis-reversal sleeve intended to buy panic-driven dislocations and recovery opportunities after broad or local stress.",
+  "universe_family": "caerus_large_cap",
+  "universe_method": "pit_universe",
+  "universe_snapshot_hash": "template_requires_real_hash_before_decision_grade"
+}
