@@ -48,7 +48,8 @@ approval.
 | Polaris parity plan | `docs/governance/fr_active/fr_069_polaris_parity_harness_plan.md` | Future harness parity requirements. |
 | Orion/Lyra PIT plan | `docs/governance/fr_active/fr_069_orion_lyra_pit_evidence_plan.md` | Differentiation evidence before disposition. |
 | Orion/Lyra redundancy packet | `docs/governance/fr_active/fr_069_orion_lyra_redundancy_packet.md` | Research-only current disposition packet; no promotion or retirement action. |
-| Orion/Lyra PIT audit packet | `docs/governance/fr_active/fr_068_orion_lyra_pit_rebaseline_packet.md` | Research-only matched evidence audit; no statistically meaningful Lyra lead, actual PIT rebaseline artifacts still pending. |
+| Orion/Lyra matched PIT artifact | `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json` | Research-only matched PIT evidence; 2,767 observations, no statistically meaningful Lyra lead. |
+| Orion/Lyra PIT packet | `docs/governance/fr_active/fr_068_orion_lyra_pit_rebaseline_packet.md` | Research-only evidence packet for the generated matched PIT artifact; no promotion or retirement action. |
 | Phoenix onboarding packet | `docs/governance/fr_active/fr_069_phoenix_onboarding_packet.md` | First Phase C research-stage onboarding packet; no Shadow or runtime activation. |
 | Cassiopeia onboarding packet | `docs/governance/fr_active/fr_069_cassiopeia_onboarding_packet.md` | Research-stage event-driven onboarding packet; no Shadow or runtime activation. |
 | Cygnus onboarding packet | `docs/governance/fr_active/fr_069_cygnus_onboarding_packet.md` | Research-stage earnings-drift onboarding packet; v0 remains shelved and no Shadow or runtime activation is authorized. |
@@ -70,8 +71,8 @@ approval.
 | Sleeve | Current role | Present artifacts | Phase C gap | Minimum next action |
 |---|---|---|---|---|
 | Polaris | Paper baseline/reference sleeve | Manifest row, parity plan, existing production behavior | Generalized harness parity is not implemented. | Keep production behavior unchanged; define fixture parity before any harness migration. |
-| Orion | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, PIT audit packet, shadow artifacts | PIT rebaseline artifact and decision-grade disposition evidence incomplete. | Continue observing; no retirement decision. |
-| Lyra | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, PIT audit packet, shadow artifacts | PIT rebaseline artifact and decision-grade disposition evidence incomplete; available matched evidence does not prove Lyra superiority. | Continue observing as current low-confidence watch-list leader; no promotion/retirement decision. |
+| Orion | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, matched PIT artifact, PIT packet, shadow artifacts | FR-069 evidence envelope and owner disposition thresholds incomplete. | Continue observing; no retirement decision. |
+| Lyra | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, matched PIT artifact, PIT packet, shadow artifacts | FR-069 evidence envelope and owner disposition thresholds incomplete; matched PIT evidence does not prove Lyra superiority. | Continue observing as current low-confidence watch-list leader; no promotion/retirement decision. |
 | Phoenix | Research-stage crisis-reversal sleeve candidate | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, existing research artifacts | Decision-grade crisis-window evidence and Shadow-readiness packet missing. | Continue Research-stage evidence collection; no Shadow activation. |
 | Cygnus | Research-stage earnings-drift sleeve; v0 shelved | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, v0 shelved evidence | v1 consensus/EPS-surprise data dependency unresolved. | Keep shelved; approve vendor/data requirements before new evidence. |
 | Cassiopeia | Research-stage event-driven sleeve candidate | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template | Event taxonomy and PIT event tape missing. | Define event contract and required PIT event tape. |

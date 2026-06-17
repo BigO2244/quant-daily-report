@@ -1,17 +1,17 @@
 # FR-068 Orion/Lyra PIT Rebaseline Packet
 
-Status: RESEARCH_EVIDENCE_PACKET
+Status: RESEARCH_EVIDENCE_GENERATED
 Owner: Caerus Research Program
 Last Updated: 2026-06-17
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 Decision Status: REDUNDANT_CONTINUE_OBSERVING
 
-This packet audits the available FR-068 / FR-069 evidence for Orion and Lyra
-and tests whether Lyra's apparent lead is statistically meaningful. It does not
-retire Orion, retire Lyra, promote either sleeve, change allocations, change
-strategy selection, alter risk controls, submit broker orders, install cron, or
-change paper/live trading behavior.
+This packet records the FR-068 / FR-069 evidence for Orion and Lyra and the
+generated PIT matched rebaseline artifact. It does not retire Orion, retire
+Lyra, promote either sleeve, change allocations, change strategy selection,
+alter risk controls, submit broker orders, install cron, or change paper/live
+trading behavior.
 
 RESEARCH_ONLY
 NO_RUNTIME_CHANGE
@@ -20,20 +20,25 @@ NO_RUNTIME_CHANGE
 
 Lyra is not proven better than Orion.
 
-The available matched-window evidence supports three conclusions:
+The generated PIT matched rebaseline evidence supports three conclusions:
 
 1. Orion and Lyra are materially redundant core-momentum sleeves.
 2. Lyra's current apparent lead is not statistically meaningful.
-3. The actual Orion/Lyra PIT rebaseline is still missing, so no promotion,
-   retirement, or allocation decision is decision-grade.
+3. The new PIT artifact provides decision-grade redundancy evidence, but no
+   promotion, retirement, or allocation action is authorized by this packet.
 
 Current governance classification remains:
 
 `REDUNDANT_CONTINUE_OBSERVING`
 
 Lyra may remain the low-confidence watch-list leader because some governance
-surfaces rank it first, but the statistical evidence does not justify treating
+surfaces rank it first, but the generated PIT evidence does not justify treating
 Lyra as materially superior.
+
+Generated artifact:
+
+- `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json`
+- `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.md`
 
 ## 2. Evidence Inventory
 
@@ -41,8 +46,7 @@ Lyra as materially superior.
 |---|---|---|---|
 | PIT universe readiness | `outputs/research/pit_rebaseline/fr068_phase_2_5_readiness.json` | Decision-grade infrastructure evidence | PIT large-cap family built; SEP hydration complete; no unresolved blockers. |
 | Polaris PIT priced rebaseline | `outputs/research/pit_rebaseline/polaris_priced_2026-06-10.json` | Decision-grade for Polaris | Legacy current-universe results are materially distorted; promotion evidence must use PIT. |
-| Orion PIT rebaseline | `outputs/research/pit_rebaseline/` | Missing | No Orion PIT rebaseline artifact exists. |
-| Lyra PIT rebaseline | `outputs/research/pit_rebaseline/` | Missing | No Lyra PIT rebaseline artifact exists. |
+| Orion/Lyra matched PIT rebaseline | `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json` | Generated | 2,767 matched PIT observations; no statistically meaningful Lyra lead. |
 | Orion/Lyra redundancy packet | `docs/governance/fr_active/fr_069_orion_lyra_redundancy_packet.md` | Governance evidence | Current state is `REDUNDANT_CONTINUE_OBSERVING`; no retirement/promotion. |
 | PIT evidence plan | `docs/governance/fr_active/fr_069_orion_lyra_pit_evidence_plan.md` | Required protocol | Requires PIT universe hashes, matched windows, overlap, risk, cost, and regime evidence. |
 | Deep differentiation | `outputs/research/strategy_differentiation/2026-06-08/strategy_differentiation_deep.json` | Useful, not final PIT disposition | Orion/Lyra verdict `WEAK_DIFFERENTIATION`, confidence `MEDIUM`. |
@@ -65,12 +69,11 @@ The required decision-grade protocol is defined in FR-068 and FR-069:
   factor/sector exposure, cost sensitivity, and regime behavior;
 - preserve explicit reason codes and source artifact paths.
 
-The PIT foundation is ready, but the Orion and Lyra PIT rebaseline artifacts
-are not present. Therefore this packet separates:
+The PIT foundation is ready and the Orion/Lyra matched PIT rebaseline artifact
+has been generated. The artifact uses the canonical shadow definitions:
 
-- **available matched-window shadow evidence**, which can classify the current
-  observed relationship; from
-- **missing PIT rebaseline evidence**, which is required before any disposition.
+- Orion: `h2_rank_decay_exit_h6_top5`;
+- Lyra: `h1_weekly_h6_top5`.
 
 ## 4. Matched Window Results
 
@@ -234,46 +237,30 @@ Governance actions not authorized:
 - no strategy selection change;
 - no Argo allocation input change.
 
-## 12. Missing Evidence
+## 12. Remaining Evidence Gaps
 
-The blocking gaps are:
+The PIT matched artifact now exists. Remaining gaps are no longer blockers to
+the redundancy conclusion, but they are still blockers to promotion or
+retirement action:
 
-1. Orion PIT rebaseline artifact with `universe_method=pit_universe`.
-2. Lyra PIT rebaseline artifact with `universe_method=pit_universe`.
-3. Universe snapshot hashes for both sleeves.
-4. Matched PIT daily return series for Orion, Lyra, Polaris, and SPY.
-5. PIT holdings overlap, active share, sector, and factor exposure series.
-6. PIT turnover and explicit transaction-cost sensitivity.
-7. PIT drawdown decomposition and tail-loss co-movement.
-8. Regime decomposition from the PIT rebaseline outputs.
-9. FR-069 evidence envelopes for Orion and Lyra.
-10. Owner-reviewed disposition thresholds for retirement-watch versus continue.
+1. PIT sector map for sector-overlap decomposition.
+2. PIT factor exposure model for factor-overlap decomposition.
+3. FR-069 evidence envelopes for Orion and Lyra.
+4. Owner-reviewed disposition thresholds for retirement-watch versus continue.
 
 ## 13. Recommended Next Evidence Generation
 
-Do not stop at "insufficient evidence." The smallest next packet that can
-resolve uncertainty is:
+Do not stop at "insufficient evidence." The artifact has been generated. The
+smallest next packet that can further improve disposition quality is:
 
-**FR-068 Orion/Lyra PIT Matched Rebaseline Artifact Generation**
+**FR-069 Orion/Lyra Evidence Envelope Pair**
 
 Scope:
 
-1. Reuse the existing FR-068 PIT large-cap family and Sharadar SEP price cache.
-2. Run Orion and Lyra over the same pre-holdout PIT window used by the Polaris
-   priced rebaseline.
-3. Emit one machine-readable packet:
-   `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-XX.json`.
-4. Include:
-   - universe hash;
-   - price-source manifest hash;
-   - strategy parameters;
-   - matched daily returns;
-   - return/drawdown/volatility/turnover/cost metrics;
-   - overlap/active-share/sector/factor metrics;
-   - paired daily return-difference test;
-   - regime decomposition;
-   - reason codes and decision-grade flags.
-5. Produce companion FR-069 evidence envelopes for Orion and Lyra.
+1. Convert the generated matched PIT artifact into separate FR-069 evidence
+   envelopes for Orion and Lyra.
+2. Add PIT sector map and PIT factor exposure inputs if available.
+3. Record owner-reviewed retirement-watch thresholds.
 
 Go/no-go criteria for disposition after that packet:
 
