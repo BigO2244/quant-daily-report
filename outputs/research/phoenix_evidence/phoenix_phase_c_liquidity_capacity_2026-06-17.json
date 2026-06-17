@@ -1,0 +1,1424 @@
+{
+  "artifact_date": "2026-06-17",
+  "candidate_inventory": {
+    "average_candidate_vol_20d_ann": 1.0320801627,
+    "average_event_turnover": 1.6,
+    "average_gross_exposure": 0.8,
+    "candidate_row_count": 80,
+    "candidate_rows_sample": [
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CHKAQ",
+        "vol_20d_ann_at_entry": 1.6806690465,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "DATA",
+        "vol_20d_ann_at_entry": 1.8434115256,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "LNKD",
+        "vol_20d_ann_at_entry": 1.6197777822,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "MPLX",
+        "vol_20d_ann_at_entry": 1.2378160559,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SRPT",
+        "vol_20d_ann_at_entry": 2.0387601648,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SPLK",
+        "vol_20d_ann_at_entry": 0.9830490732,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ALKS",
+        "vol_20d_ann_at_entry": 1.6763849586,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CIEIQ",
+        "vol_20d_ann_at_entry": 1.2631834167,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ESI",
+        "vol_20d_ann_at_entry": 0.9603262496,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2016-02-11",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "WES",
+        "vol_20d_ann_at_entry": 1.322460614,
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "NBR",
+        "vol_20d_ann_at_entry": 0.5518435863,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PRGO",
+        "vol_20d_ann_at_entry": 1.0476214182,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CHKAQ",
+        "vol_20d_ann_at_entry": 0.6648060925,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "VALPQ",
+        "vol_20d_ann_at_entry": 0.7374027139,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "RADCQ",
+        "vol_20d_ann_at_entry": 0.562678172,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CAG",
+        "vol_20d_ann_at_entry": 0.6493308663,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "RRC",
+        "vol_20d_ann_at_entry": 0.3906207742,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ELF",
+        "vol_20d_ann_at_entry": 0.5361597697,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PR",
+        "vol_20d_ann_at_entry": 0.4987256371,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2018-12-24",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SIG",
+        "vol_20d_ann_at_entry": 0.6956364261,
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CHKAQ",
+        "vol_20d_ann_at_entry": 1.3836997682,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "FLR",
+        "vol_20d_ann_at_entry": 1.1179604226,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "GRPN",
+        "vol_20d_ann_at_entry": 1.6403314219,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "W",
+        "vol_20d_ann_at_entry": 0.7176203233,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "NTNX",
+        "vol_20d_ann_at_entry": 1.0908651865,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CLR",
+        "vol_20d_ann_at_entry": 0.8181028161,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "AAL",
+        "vol_20d_ann_at_entry": 0.6448457155,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "DY",
+        "vol_20d_ann_at_entry": 1.1495252885,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ENBL",
+        "vol_20d_ann_at_entry": 0.4251374348,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2020-02-28",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "OVV",
+        "vol_20d_ann_at_entry": 0.8814695917,
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "WULF",
+        "vol_20d_ann_at_entry": 1.2396844709,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "VEON",
+        "vol_20d_ann_at_entry": 3.1554514669,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "EPAM",
+        "vol_20d_ann_at_entry": 1.9325372742,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "VRT",
+        "vol_20d_ann_at_entry": 1.3902819484,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "BMBL",
+        "vol_20d_ann_at_entry": 0.9162236914,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SE",
+        "vol_20d_ann_at_entry": 1.33159945,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "AFRM",
+        "vol_20d_ann_at_entry": 1.422451016,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "DNA",
+        "vol_20d_ann_at_entry": 0.9793100165,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SHOP",
+        "vol_20d_ann_at_entry": 0.8936298248,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-03-08",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SKLZ",
+        "vol_20d_ann_at_entry": 1.2383468987,
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PGY",
+        "vol_20d_ann_at_entry": 1.5141305041,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SNAP",
+        "vol_20d_ann_at_entry": 1.8016940658,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "RCL",
+        "vol_20d_ann_at_entry": 0.8525032698,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ZEN",
+        "vol_20d_ann_at_entry": 0.9017813907,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CGC",
+        "vol_20d_ann_at_entry": 0.9910100711,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CCL",
+        "vol_20d_ann_at_entry": 0.8980225307,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "NCLH",
+        "vol_20d_ann_at_entry": 1.0186860681,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PTON",
+        "vol_20d_ann_at_entry": 0.7659461106,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "TLRY",
+        "vol_20d_ann_at_entry": 0.6861555585,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-06-16",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "UPST",
+        "vol_20d_ann_at_entry": 1.3360729556,
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PGY",
+        "vol_20d_ann_at_entry": 2.4759037049,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "NKLAQ",
+        "vol_20d_ann_at_entry": 0.7768981665,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "AMC",
+        "vol_20d_ann_at_entry": 1.0237476408,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ZLAB",
+        "vol_20d_ann_at_entry": 0.8520559472,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "FIVN",
+        "vol_20d_ann_at_entry": 0.9603219425,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "NIO",
+        "vol_20d_ann_at_entry": 0.7142941443,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "OPTU",
+        "vol_20d_ann_at_entry": 0.7013567317,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "GRPN",
+        "vol_20d_ann_at_entry": 0.767509801,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "XPEV",
+        "vol_20d_ann_at_entry": 0.7389822221,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2022-10-12",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "BILI",
+        "vol_20d_ann_at_entry": 0.6491176307,
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "HBI",
+        "vol_20d_ann_at_entry": 1.1181147387,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "MSPR",
+        "vol_20d_ann_at_entry": 0.8561849896,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "TAL",
+        "vol_20d_ann_at_entry": 0.6257595299,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "YMM",
+        "vol_20d_ann_at_entry": 0.7096116733,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SIRI",
+        "vol_20d_ann_at_entry": 0.3989551508,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "BILI",
+        "vol_20d_ann_at_entry": 0.6769658265,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ZLAB",
+        "vol_20d_ann_at_entry": 0.8328226135,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "YSG",
+        "vol_20d_ann_at_entry": 0.686815066,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CHGG",
+        "vol_20d_ann_at_entry": 0.6788490339,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-02-06",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "ROIV",
+        "vol_20d_ann_at_entry": 0.5834936652,
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "MSPR",
+        "vol_20d_ann_at_entry": 0.938867591,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "CTLT",
+        "vol_20d_ann_at_entry": 1.403857937,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "FHN",
+        "vol_20d_ann_at_entry": 1.2773909209,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SITM",
+        "vol_20d_ann_at_entry": 0.8285916433,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PSKY",
+        "vol_20d_ann_at_entry": 1.0824600327,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "SPR",
+        "vol_20d_ann_at_entry": 0.9444002453,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "PTON",
+        "vol_20d_ann_at_entry": 0.7680625955,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "WOLF2",
+        "vol_20d_ann_at_entry": 0.8116891555,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "BHC",
+        "vol_20d_ann_at_entry": 0.8088094759,
+        "window_id": "spy_drawdown_8"
+      },
+      {
+        "adv_participation": null,
+        "entry_date": "2023-05-09",
+        "implementation_shortfall": null,
+        "liquidity_fields_available": false,
+        "position_dollar_capacity": null,
+        "reason_codes": [
+          "pit_volume_source_missing"
+        ],
+        "target_weight": 0.08,
+        "ticker": "DISH",
+        "vol_20d_ann_at_entry": 0.7787823063,
+        "window_id": "spy_drawdown_8"
+      }
+    ],
+    "event_count": 8,
+    "max_candidate_vol_20d_ann": 3.1554514669,
+    "unique_ticker_count": 72,
+    "unique_tickers_sample": [
+      "AAL",
+      "AFRM",
+      "ALKS",
+      "AMC",
+      "BHC",
+      "BILI",
+      "BMBL",
+      "CAG",
+      "CCL",
+      "CGC",
+      "CHGG",
+      "CHKAQ",
+      "CIEIQ",
+      "CLR",
+      "CTLT",
+      "DATA",
+      "DISH",
+      "DNA",
+      "DY",
+      "ELF",
+      "ENBL",
+      "EPAM",
+      "ESI",
+      "FHN",
+      "FIVN",
+      "FLR",
+      "GRPN",
+      "HBI",
+      "LNKD",
+      "MPLX",
+      "MSPR",
+      "NBR",
+      "NCLH",
+      "NIO",
+      "NKLAQ",
+      "NTNX",
+      "OPTU",
+      "OVV",
+      "PGY",
+      "PR",
+      "PRGO",
+      "PSKY",
+      "PTON",
+      "RADCQ",
+      "RCL",
+      "ROIV",
+      "RRC",
+      "SE",
+      "SHOP",
+      "SIG"
+    ]
+  },
+  "capacity_limits": {
+    "decision_grade": false,
+    "minimum_required_inputs": [
+      "PIT daily volume",
+      "PIT adjusted close",
+      "ADV20/ADV60",
+      "spread or spread proxy",
+      "target capital assumption",
+      "max ADV participation policy"
+    ],
+    "reason_codes": [
+      "adv_missing"
+    ]
+  },
+  "classification": {
+    "classification": "PENDING_LIQUIDITY",
+    "is_not_viable": false,
+    "is_shadow_ready": false,
+    "phase_b_context": {
+      "classification": "PHOENIX_RISK_SHAPING_CANDIDATE_PENDING_LIQUIDITY",
+      "is_shadow_eligible": false,
+      "reason_codes": [
+        "candidate_variant_found",
+        "pit_liquidity_source_missing"
+      ],
+      "shadow_readiness_work_justified": true
+    },
+    "rationale": "Phase B found risk-shaped Phoenix candidates, but ADV participation, capacity, crisis liquidity degradation, slippage, and implementation shortfall cannot be measured from the repo-local close-only PIT cache.",
+    "reason_codes": [
+      "pit_volume_source_missing",
+      "capacity_not_decision_grade"
+    ]
+  },
+  "decision_state": "liquidity_capacity_validated",
+  "execution_impact": "NON_EXECUTIONAL",
+  "generated_at": "2026-06-17T20:12:15.652130+00:00",
+  "governance_label": "RESEARCH_ONLY",
+  "measurements": {
+    "adv_participation": {
+      "detail": "PIT volume/dollar-volume source missing",
+      "metric": "adv_participation",
+      "reason_codes": [
+        "pit_volume_source_missing"
+      ],
+      "status": "BLOCKED",
+      "value": null
+    },
+    "capacity_limits": {
+      "detail": "PIT volume/dollar-volume source missing",
+      "metric": "capacity_limits",
+      "reason_codes": [
+        "pit_volume_source_missing"
+      ],
+      "status": "BLOCKED",
+      "value": null
+    },
+    "crisis_period_liquidity_degradation": {
+      "detail": "PIT volume/dollar-volume source missing",
+      "metric": "crisis_period_liquidity_degradation",
+      "reason_codes": [
+        "pit_volume_source_missing"
+      ],
+      "status": "BLOCKED",
+      "value": null
+    },
+    "implementation_shortfall": {
+      "detail": "PIT volume/dollar-volume source missing",
+      "metric": "implementation_shortfall",
+      "reason_codes": [
+        "pit_volume_source_missing"
+      ],
+      "status": "BLOCKED",
+      "value": null
+    },
+    "position_liquidity": {
+      "detail": "PIT volume/dollar-volume source missing",
+      "metric": "position_liquidity",
+      "reason_codes": [
+        "pit_volume_source_missing"
+      ],
+      "status": "BLOCKED",
+      "value": null
+    },
+    "slippage_sensitivity": {
+      "detail": "PIT volume/dollar-volume source missing",
+      "metric": "slippage_sensitivity",
+      "reason_codes": [
+        "pit_volume_source_missing"
+      ],
+      "status": "BLOCKED",
+      "value": null
+    },
+    "turnover": {
+      "detail": "Turnover measured as Phase B event basket entry/exit turnover; not ADV-normalized.",
+      "metric": "turnover",
+      "reason_codes": [
+        "phase_b_event_turnover_available"
+      ],
+      "status": "MEASURED_FROM_PHASE_B",
+      "value": 1.6
+    }
+  },
+  "non_goals": [
+    "no Phoenix activation",
+    "no live signals",
+    "no allocation changes",
+    "no execution changes",
+    "no broker behavior changes",
+    "no promotion threshold changes"
+  ],
+  "output": "PENDING_LIQUIDITY",
+  "phase_b_input": {
+    "best_variant_id": "stop_loss_10pct",
+    "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json",
+    "phase_b_classification": "PHOENIX_RISK_SHAPING_CANDIDATE_PENDING_LIQUIDITY",
+    "sha256": "4415780dc7c047d4bf538b1bc126c88f821fd8e3b9852c46f61ca04dc9db8611"
+  },
+  "pit_safe_inputs": {
+    "source": "repo-local Sharadar SEP cache and FR-068 PIT large-cap family lineage",
+    "source_column_inventory": {
+      "cache_dir": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/data/research_cache/sharadar_sep",
+      "decision_grade_liquidity_available": false,
+      "missing_required_liquidity_fields": [
+        "volume",
+        "dollar_volume",
+        "adv_20d",
+        "adv_60d"
+      ],
+      "observed_columns": [
+        "close",
+        "closeadj",
+        "date"
+      ],
+      "required_liquidity_fields": [
+        "volume",
+        "dollar_volume",
+        "adv_20d",
+        "adv_60d"
+      ],
+      "sample_columns_by_file": {
+        "A.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "AA.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "AAL.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "AAOI.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "AAON.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "AAP.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "AAPL.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "ABBNY.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "ABBV.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ],
+        "ABCL.csv": [
+          "date",
+          "closeadj",
+          "close"
+        ]
+      },
+      "sampled_file_count": 500,
+      "total_file_count": 1600
+    },
+    "source_hash_sample": {
+      "A.csv": "632ba1835d538d646da20a72a704d43f54f38286c4c805e4b07ea7feba9c11c3",
+      "AA.csv": "a4efcf09a911bd1422fb4c9ef27918d411d43318d64557b8d268e15ae7e57277",
+      "AAL.csv": "33e1fbf4208014167e22427e8356ec182ef82f9e547146d62c1ce60352b452db",
+      "AAOI.csv": "35a724754794a74657bda9ff9257b52d8697793f9d50bfc0d7d15403ff1a8539",
+      "AAON.csv": "0701366003a2c290bb03862ea97f7df1ab269525363e21d75dbdb5cef7888b44",
+      "AAP.csv": "5bcfbcbde7c35d23b763081c06265e46b54642db1a40fe85cf3071cd4c65cecf",
+      "AAPL.csv": "d3d0f4f663d10a2decebbfa47bfa73424db450fd88efd64b88dc923af9e8de75",
+      "ABBNY.csv": "b443bf82b37022d7b77ff98c9765238a67856276e9297a917fe20e41236b8e86",
+      "ABBV.csv": "ca98b92d91aee9e93c001c3b12c026b1274e9589cc524808437fe2d696999d7b",
+      "ABCL.csv": "ac774b13e99b7b748f9455dd286771a986f4157df08011cae28e7b45f26015cd",
+      "ABEV.csv": "fcfeeb1ce07443320c2a2f39aaaef3ecd6749e2f97ec485766c33acb920abc53",
+      "ABMD.csv": "1ba92e7edb7c28de8fdc801cdd9c8921f79f0544cfc67f4ca71a53b7f958dc30",
+      "ABNB.csv": "2eff0257e80b7fb4ece25381408320b477dbe2f8d6b4b27b667de98fe9236577",
+      "ABT.csv": "76ba3c3d83a0febc8ba098c79f6dd51b2bf1835e4967c9bdaf1fc89364751526",
+      "ACGL.csv": "e41fcb4b6f28f04687c0cd0e910a431e02ecff99dd45dc2031115a429aef1bd0",
+      "ACI.csv": "75e84eedb712c0c6b0469e9ea56f298de12f74663c3574bfdccb02c4d31eb386",
+      "ACIIQ.csv": "486de6ab84e115c938dffad7c0c390e5c2330537f4c09a1aefc4cc33fa5c3c0d",
+      "ACM.csv": "1d5c3b78fa32990692194384095f781f7d50ff8bf91918fb8f8720c7b47e09ee",
+      "ACN.csv": "a555739bf0b5d2e4816ec47476a7b16a0b503d74496b0c99107ac76e1a5b6e3a",
+      "ACTA.csv": "a8e3138944069e7687353c438b1e1c78abef6532bee4fe2ecfb48ab904fa2a49",
+      "ADBE.csv": "899cf94470c6185ca3e6d9f36cdd7ed9fc940bdbf53fe0a1457ca570a23cd97c",
+      "ADI.csv": "78b4852abda3dd81fa4dba2ea3b09deed4249f164d2d0232012df617e3e7b010",
+      "ADM.csv": "4cc2b8fb990bd3f0bf85cdd402f8bf1dfe050c038e98698190b96f95304474bb",
+      "ADP.csv": "5da17a4cab90089b8f19d6264f7127f3d625a3e2d778a4e21508b683c5f1c312",
+      "ADSK.csv": "2f28d85c4431d7dc5fc999c7b949ea67a0a54df0389ec58e1dfc5744003efe90"
+    }
+  },
+  "production_impact": "none",
+  "schema_version": "caerus_phoenix_phase_c_liquidity_capacity_v1",
+  "slippage_sensitivity": {
+    "decision_grade": false,
+    "note": "Cost-bps variants exist in Phase B, but implementation shortfall cannot be tied to ADV/spread without PIT volume and spread proxies.",
+    "reason_codes": [
+      "adv_participation_missing",
+      "spread_model_missing"
+    ],
+    "tested_bps_grid": [
+      10,
+      25,
+      50,
+      100
+    ]
+  }
+}
