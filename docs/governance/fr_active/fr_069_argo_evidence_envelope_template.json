@@ -5,7 +5,8 @@
     "outputs/research/argo/<date>/argo_transition_trace.json",
     "outputs/research/argo/<date>/argo_regime_selection.json",
     "outputs/research/argo/<date>/argo_no_live_switching_attestation.json",
-    "outputs/research/argo/argo_phase_a_evidence_framework_<date>.json"
+    "outputs/research/argo/argo_phase_a_evidence_framework_<date>.json",
+    "outputs/research/argo/argo_phase_b_research_priority_<date>.json"
   ],
   "benchmark": "SPY",
   "data_requirements": [
@@ -74,7 +75,8 @@
     "phase_c_onboarding_template",
     "research_only_no_runtime_change",
     "canonical_regime_overlay_role_preserved",
-    "phase_a_evidence_consumer_only"
+    "phase_a_evidence_consumer_only",
+    "phase_b_research_priority_advisory_only"
   ],
   "schema_version": "caerus_sleeve_evidence_v1",
   "sleeve_id": "argo",

@@ -1,0 +1,363 @@
+{
+  "argo_role": "research_prioritization_engine_advisory_only",
+  "artifact_paths": {
+    "json": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/argo/argo_phase_b_research_priority_2026-06-17.json",
+    "markdown": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/argo/argo_phase_b_research_priority_2026-06-17.md"
+  },
+  "behavior_change_allowed": false,
+  "biggest_platform_blocker": {
+    "affected_work": [
+      "Phoenix Phase C",
+      "PIT liquidity infrastructure",
+      "capacity analysis",
+      "future Shadow readiness"
+    ],
+    "blocker": "Sharadar SEP OHLCV access unavailable due to Nasdaq Data Link QELx06 temporary disablement."
+  },
+  "dependency_map": {
+    "argo": [
+      "future evidence packet history",
+      "reviewer challenge log"
+    ],
+    "cassiopeia": [
+      "owner-approved event taxonomy",
+      "PIT event tape",
+      "availability timestamps"
+    ],
+    "cygnus": [
+      "PIT consensus/EPS-surprise vendor",
+      "v1 holdout-preserving plan"
+    ],
+    "lyra": [
+      "owner disposition decision",
+      "redeployment thesis if retained under new purpose"
+    ],
+    "orion": [
+      "owner disposition decision",
+      "optional sector/factor overlap diagnostic"
+    ],
+    "phoenix": [
+      "Sharadar SEP OHLCV access",
+      "OHLCV cache rebuild",
+      "PIT liquidity panel",
+      "Phase C rerun"
+    ],
+    "polaris": [
+      "baseline monitoring",
+      "FR-070 observation"
+    ]
+  },
+  "evidence_inventory": {
+    "external_blockers": [
+      "Nasdaq Data Link QELx06 disables Sharadar SEP OHLCV restoration for Phoenix liquidity/capacity.",
+      "Cygnus v1 requires PIT consensus/EPS-surprise vendor data."
+    ],
+    "ignored_by_design": [
+      "live broker state",
+      "execution artifacts",
+      "allocation targets",
+      "order lifecycle data",
+      "promotion status as an automatic action"
+    ],
+    "phase_a_available": true,
+    "sources_inspected": [
+      "Argo Phase A evidence framework",
+      "FR-069 evidence envelope templates and onboarding packets",
+      "Orion/Lyra PIT rebaseline and disposition analysis",
+      "Phoenix crisis/recovery, Phase B risk-shaping, and Phase C liquidity/capacity artifacts",
+      "Current research roadmap"
+    ]
+  },
+  "execution_impact": "NON_EXECUTIONAL",
+  "explicit_non_goals": [
+    "no allocation",
+    "no capital routing",
+    "no execution",
+    "no broker interaction",
+    "no promotion",
+    "no retirement",
+    "no runtime behavior change"
+  ],
+  "governance_label": "RESEARCH_ONLY",
+  "highest_roi_research_task": {
+    "reason": "It resolves the single largest blocker on the most differentiated risk-shaped sleeve and unlocks a Shadow-readiness decision.",
+    "sleeve_id": "phoenix",
+    "task": "Restore Sharadar SEP OHLCV access and rebuild PIT liquidity/capacity evidence."
+  },
+  "priority_methodology": {
+    "classifications": [
+      "RESEARCH_PRIORITY_HIGH",
+      "RESEARCH_PRIORITY_MEDIUM",
+      "RESEARCH_PRIORITY_LOW",
+      "BLOCKED_EXTERNAL",
+      "BLOCKED_EVIDENCE",
+      "BLOCKED_DATA",
+      "READY_FOR_NEXT_RESEARCH"
+    ],
+    "inputs": [
+      "differentiation",
+      "evidence_gap",
+      "uncertainty_reduction",
+      "dependency_impact",
+      "implementation_readiness",
+      "governance_readiness",
+      "external_blocker_penalty"
+    ],
+    "interpretation": "Higher score means higher expected value for the next unit of research effort; it does not authorize capital allocation or lifecycle promotion.",
+    "score_name": "research_priority_score",
+    "score_range": [
+      0,
+      100
+    ]
+  },
+  "production_impact": "research_only",
+  "reason_codes": [
+    "research_only_no_runtime_change",
+    "argo_advisory_only",
+    "forced_research_priority_ranking",
+    "phoenix_external_dependency_blocked",
+    "stop_independent_lyra_research"
+  ],
+  "research_priority_ranking": [
+    {
+      "blockers": [
+        "external_dependency_blocked",
+        "nasdaq_data_link_qelx06_temporary_disablement",
+        "pit_liquidity_ohlcv_unavailable"
+      ],
+      "inputs": {
+        "dependency_impact": 20,
+        "differentiation": 20,
+        "evidence_gap": 18,
+        "external_blocker_penalty": 3,
+        "governance_readiness": 12,
+        "implementation_readiness": 16,
+        "uncertainty_reduction": 20
+      },
+      "next_research_action": "Restore Sharadar SEP OHLCV access, rebuild PIT liquidity panel, rerun Phoenix Phase C, then reassess Shadow readiness.",
+      "priority_classification": "BLOCKED_EXTERNAL",
+      "rationale": [
+        "Phoenix is the most differentiated candidate versus the momentum family.",
+        "Phase B risk-shaping candidate is SHADOW_SPEC_CANDIDATE_RESEARCH_ONLY.",
+        "Phase C liquidity classification is {'classification': 'PENDING_LIQUIDITY', 'is_not_viable': False, 'is_shadow_ready': False, 'phase_b_context': {'classification': 'PHOENIX_RISK_SHAPING_CANDIDATE_PENDING_LIQUIDITY', 'is_shadow_eligible': False, 'reason_codes': ['candidate_variant_found', 'pit_liquidity_source_missing'], 'shadow_readiness_work_justified': True}, 'rationale': 'Phase B found risk-shaped Phoenix candidates, but ADV participation, capacity, crisis liquidity degradation, slippage, and implementation shortfall cannot be measured from the repo-local close-only PIT cache.', 'reason_codes': ['pit_volume_source_missing', 'capacity_not_decision_grade']}, so research effort should attack the data dependency first."
+      ],
+      "research_priority_rank": 1,
+      "research_priority_score": 100,
+      "research_to_stop": "Stop additional Phoenix alpha tuning until liquidity and capacity evidence exists.",
+      "sleeve_id": "phoenix",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_crisis_recovery_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "decision_grade_evidence_missing",
+        "event_contract_missing",
+        "event_tape_missing"
+      ],
+      "inputs": {
+        "dependency_impact": 14,
+        "differentiation": 18,
+        "evidence_gap": 20,
+        "external_blocker_penalty": 0,
+        "governance_readiness": 8,
+        "implementation_readiness": 8,
+        "uncertainty_reduction": 16
+      },
+      "next_research_action": "Build a PIT-safe event taxonomy and event-tape contract for analyst upgrades, index events, and activist 13D filings.",
+      "priority_classification": "BLOCKED_DATA",
+      "rationale": [
+        "Cassiopeia is unblocked by the OHLCV vendor issue and attacks a non-momentum return driver.",
+        "The largest uncertainty is binary and platform-useful: can Caerus build a PIT-safe event tape?",
+        "A minimal event contract would also support later Argo evidence comparisons."
+      ],
+      "research_priority_rank": 2,
+      "research_priority_score": 84,
+      "research_to_stop": "Do not implement event signals before the event contract proves timestamp availability and source lineage.",
+      "sleeve_id": "cassiopeia",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_cassiopeia_onboarding_packet.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "merge_watch_owner_decision_missing"
+      ],
+      "inputs": {
+        "dependency_impact": 12,
+        "differentiation": 6,
+        "evidence_gap": 6,
+        "external_blocker_penalty": 0,
+        "governance_readiness": 16,
+        "implementation_readiness": 15,
+        "uncertainty_reduction": 10
+      },
+      "next_research_action": "Prepare an owner-facing Orion/Lyra merge-watch packet selecting the canonical retained implementation and rollback criteria.",
+      "priority_classification": "BLOCKED_DATA",
+      "rationale": [
+        "Matched PIT evidence is already decision-grade for disposition triage.",
+        "Paired t-stat is None; active share is 0.1919045898.",
+        "The next useful work is governance disposition, not another generic comparison."
+      ],
+      "research_priority_rank": 3,
+      "research_priority_score": 65,
+      "research_to_stop": "Stop open-ended Orion versus Lyra performance comparisons unless new holdout or sector/factor evidence is added.",
+      "sleeve_id": "orion",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_068_phase_c_disposition_analysis.md"
+        }
+      ]
+    },
+    {
+      "blockers": [],
+      "inputs": {
+        "dependency_impact": 14,
+        "differentiation": 14,
+        "evidence_gap": 8,
+        "external_blocker_penalty": 0,
+        "governance_readiness": 8,
+        "implementation_readiness": 8,
+        "uncertainty_reduction": 10
+      },
+      "next_research_action": "Accumulate Phase A/B scoring history across future evidence packets and add reviewer notes when rankings change.",
+      "priority_classification": "RESEARCH_PRIORITY_MEDIUM",
+      "rationale": [
+        "Argo improves research throughput by ranking uncertainty, dependencies, and stop-work candidates.",
+        "Phase B should remain advisory and non-executing."
+      ],
+      "research_priority_rank": 4,
+      "research_priority_score": 62,
+      "research_to_stop": "Do not turn Argo scores into allocation, promotion, or retirement rules.",
+      "sleeve_id": "argo",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/argo/argo_phase_a_evidence_framework_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_argo_phase_a_evidence_framework.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "decision_grade_evidence_missing",
+        "eps_surprise_consensus_vendor_missing",
+        "v0_shelved"
+      ],
+      "inputs": {
+        "dependency_impact": 9,
+        "differentiation": 14,
+        "evidence_gap": 18,
+        "external_blocker_penalty": 15,
+        "governance_readiness": 8,
+        "implementation_readiness": 6,
+        "uncertainty_reduction": 12
+      },
+      "next_research_action": "Defer until a PIT consensus/EPS-surprise vendor path is selected; then draft a v1 holdout-preserving research plan.",
+      "priority_classification": "BLOCKED_DATA",
+      "rationale": [
+        "Cygnus is differentiated but vendor-gated and less immediately actionable than Phoenix liquidity or Cassiopeia event contracts.",
+        "Retuning v0 would violate the existing governance state."
+      ],
+      "research_priority_rank": 5,
+      "research_priority_score": 52,
+      "research_to_stop": "Stop v0 retuning; the holdout remains preserved and v0 is shelved.",
+      "sleeve_id": "cygnus",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_069_cygnus_onboarding_packet.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "baseline_monitoring_only"
+      ],
+      "inputs": {
+        "dependency_impact": 8,
+        "differentiation": 4,
+        "evidence_gap": 5,
+        "external_blocker_penalty": 0,
+        "governance_readiness": 12,
+        "implementation_readiness": 12,
+        "uncertainty_reduction": 6
+      },
+      "next_research_action": "Use Polaris as the control sleeve for comparisons; spend new research effort elsewhere unless production monitoring fails.",
+      "priority_classification": "RESEARCH_PRIORITY_LOW",
+      "rationale": [
+        "Polaris is the paper baseline and should remain stable.",
+        "Research ROI is lower than differentiated or unresolved sleeves."
+      ],
+      "research_priority_rank": 6,
+      "research_priority_score": 47,
+      "research_to_stop": "Stop feature expansion on Polaris while execution and target-attainment remain observe-first.",
+      "sleeve_id": "polaris",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_rebaseline/polaris_priced_2026-06-10.json"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "merge_watch_redundancy",
+        "redeployment_watch"
+      ],
+      "inputs": {
+        "dependency_impact": 6,
+        "differentiation": 3,
+        "evidence_gap": 4,
+        "external_blocker_penalty": 0,
+        "governance_readiness": 8,
+        "implementation_readiness": 8,
+        "uncertainty_reduction": 4
+      },
+      "next_research_action": "Do not fund independent Lyra research; only include Lyra in the Orion/Lyra disposition packet or a future redeployment thesis.",
+      "priority_classification": "RESEARCH_PRIORITY_LOW",
+      "rationale": [
+        "Lyra has not shown statistically meaningful superiority versus Orion.",
+        "The disposition packet places Lyra on redeployment/merge watch."
+      ],
+      "research_priority_rank": 7,
+      "research_priority_score": 33,
+      "research_to_stop": "Stop treating Lyra as a separate promotion candidate.",
+      "sleeve_id": "lyra",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_068_phase_c_disposition_analysis.md"
+        }
+      ]
+    }
+  ],
+  "schema_version": "caerus_argo_phase_b_research_priority_v1",
+  "trade_date": "2026-06-17"
+}

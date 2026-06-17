@@ -33,6 +33,10 @@ Current state:
   `docs/governance/fr_active/fr_069_argo_phase_a_evidence_framework.md`.
 - Current Phase A artifact:
   `outputs/research/argo/argo_phase_a_evidence_framework_2026-06-17.json`.
+- Phase B research-priority framework:
+  `docs/governance/fr_active/fr_069_argo_phase_b_research_priority_framework.md`.
+- Current Phase B artifact:
+  `outputs/research/argo/argo_phase_b_research_priority_2026-06-17.json`.
 
 Governance conclusion: Argo is the right home for regime allocation and
 model-selection research, but it must remain reporting-only until member-sleeve
@@ -82,6 +86,27 @@ Current Phase A classification:
   family, not independently promotion-ready sleeves.
 - Cassiopeia/Cygnus: not ready; still missing decision-grade inputs.
 - Argo: `RESEARCH_READY` as an observer only.
+
+## Phase B Research Priority Engine
+
+Phase B implements Argo as a research-only prioritization engine. It consumes
+the Phase A evidence inventory, Phoenix evidence, Orion/Lyra disposition
+evidence, and sleeve onboarding packets to rank where Caerus should spend the
+next unit of research effort.
+
+Current Phase B ranking:
+
+1. Phoenix: restore Sharadar SEP OHLCV access and rebuild PIT liquidity/capacity
+   evidence.
+2. Cassiopeia: build a PIT-safe event taxonomy and event-tape contract.
+3. Orion: prepare an owner-facing Orion/Lyra merge-watch disposition packet.
+4. Argo: accumulate advisory scoring history.
+5. Cygnus: defer until PIT consensus/EPS-surprise vendor data exists.
+6. Polaris: keep as baseline/control.
+7. Lyra: stop independent Lyra promotion research.
+
+The Phase B ranking is advisory only. It is a research queue, not an allocation
+queue, promotion queue, retirement command, or production decision rule.
 
 ## Distinctiveness Assessment
 
