@@ -4,7 +4,8 @@
     "outputs/model_quality/<date>/phoenix_phase_b_review.json",
     "outputs/model_quality/<date>/phoenix_evidence_tracker.json",
     "outputs/research/phoenix/<date>/phoenix_decision_trace.json",
-    "outputs/research/phoenix/<date>/phoenix_backtest_summary.json"
+    "outputs/research/phoenix/<date>/phoenix_backtest_summary.json",
+    "outputs/research/phoenix_evidence/phoenix_crisis_recovery_<date>.json"
   ],
   "benchmark": "SPY",
   "data_requirements": [
@@ -64,7 +65,8 @@
   "price_source": "pit_adjusted_ohlcv",
   "production_impact": "research_only",
   "promotion_blockers": [
-    "decision_grade_pit_rebaseline_missing",
+    "pit_liquidity_source_missing",
+    "event_drawdown_too_deep",
     "crisis_window_definition_not_owner_approved",
     "sparse_active_day_history",
     "negative_phase_b_backtest_summary",

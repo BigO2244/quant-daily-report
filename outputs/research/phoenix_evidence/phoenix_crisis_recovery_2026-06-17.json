@@ -1,0 +1,1140 @@
+{
+  "artifact_date": "2026-06-17",
+  "candidate_construction_methodology": {
+    "limitations": [
+      "repo-local Sharadar SEP cache contains closeadj/close only, so volume/liquidity filters are unavailable",
+      "this is a research evidence harness and not the live Phoenix signal implementation",
+      "SPY crisis trough labels are ex-post evaluation windows, not production triggers"
+    ],
+    "lookahead_control": "Selection uses only closes through the trough date; forward recovery returns are evaluation only.",
+    "method": "At each SPY drawdown trough, rank PIT large-cap names by close-only 20d/5d/252d dislocation score using prices available through the trough date; equal-weight top 10 at max 80% gross and evaluate forward 20d/60d recovery.",
+    "strategy_id": "caerus_phoenix"
+  },
+  "cost_sensitivity": {
+    "0_bps": {
+      "average_turnover": 0.8,
+      "cost_bps": 0.0,
+      "cumulative_return": 0.4308339551,
+      "max_drawdown": -0.4489335088
+    },
+    "10_bps": {
+      "average_turnover": 0.8,
+      "cost_bps": 10.0,
+      "cumulative_return": 0.41227626,
+      "max_drawdown": -0.4498128057
+    },
+    "25_bps": {
+      "average_turnover": 0.8,
+      "cost_bps": 25.0,
+      "cumulative_return": 0.3848623145,
+      "max_drawdown": -0.4511304348
+    },
+    "50_bps": {
+      "average_turnover": 0.8,
+      "cost_bps": 50.0,
+      "cumulative_return": 0.3402780852,
+      "max_drawdown": -0.4533229729
+    }
+  },
+  "crisis_window_definitions": {
+    "min_separation_days": 90,
+    "source": "SPY close from alpha_stack_cache price matrix",
+    "threshold": -0.12,
+    "windows": [
+      {
+        "crisis_start": "2015-07-20",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.0567623836,
+        "phoenix_recovery_20d_return": 0.3972009082,
+        "phoenix_recovery_60d_return": 0.4337345963,
+        "recovery_20d_end": "2016-03-11",
+        "recovery_60d_end": "2016-05-09",
+        "selected": [
+          {
+            "close_at_trough": 356.0,
+            "phoenix_dislocation_score": 0.5338640778,
+            "return_20d_at_trough": -0.510989011,
+            "return_252d_at_trough": -0.9107435215,
+            "return_5d_at_trough": -0.4539877301,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CHKAQ"
+          },
+          {
+            "close_at_trough": 39.98,
+            "phoenix_dislocation_score": 0.5203062594,
+            "return_20d_at_trough": -0.5133292757,
+            "return_252d_at_trough": -0.5902429025,
+            "return_5d_at_trough": -0.5109480122,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "DATA"
+          },
+          {
+            "close_at_trough": 103.47,
+            "phoenix_dislocation_score": 0.4943168775,
+            "return_20d_at_trough": -0.4906217693,
+            "return_252d_at_trough": -0.6138026277,
+            "return_5d_at_trough": -0.4618785105,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "LNKD"
+          },
+          {
+            "close_at_trough": 6.663,
+            "phoenix_dislocation_score": 0.4167640767,
+            "return_20d_at_trough": -0.4458121933,
+            "return_252d_at_trough": -0.7782695507,
+            "return_5d_at_trough": -0.2381660188,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "MPLX"
+          },
+          {
+            "close_at_trough": 11.73,
+            "phoenix_dislocation_score": 0.397638605,
+            "return_20d_at_trough": -0.6336664585,
+            "return_252d_at_trough": -0.051738076,
+            "return_5d_at_trough": -0.0408830744,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SRPT"
+          },
+          {
+            "close_at_trough": 30.86,
+            "phoenix_dislocation_score": 0.384142644,
+            "return_20d_at_trough": -0.3861149791,
+            "return_252d_at_trough": -0.4907590759,
+            "return_5d_at_trough": -0.3446591633,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SPLK"
+          },
+          {
+            "close_at_trough": 29.824,
+            "phoenix_dislocation_score": 0.381773555,
+            "return_20d_at_trough": -0.5115223978,
+            "return_252d_at_trough": -0.5575927492,
+            "return_5d_at_trough": -0.0636694713,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ALKS"
+          },
+          {
+            "close_at_trough": 34.95,
+            "phoenix_dislocation_score": 0.3763069902,
+            "return_20d_at_trough": -0.3581267218,
+            "return_252d_at_trough": -0.7324913892,
+            "return_5d_at_trough": -0.2939393939,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CIEIQ"
+          },
+          {
+            "close_at_trough": 5.143,
+            "phoenix_dislocation_score": 0.3425643779,
+            "return_20d_at_trough": -0.3044360292,
+            "return_252d_at_trough": -0.7560246679,
+            "return_5d_at_trough": -0.2810009786,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ESI"
+          },
+          {
+            "close_at_trough": 8.657,
+            "phoenix_dislocation_score": 0.3387350286,
+            "return_20d_at_trough": -0.3208065275,
+            "return_252d_at_trough": -0.6497268865,
+            "return_5d_at_trough": -0.2709280782,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "WES"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.1302289591,
+        "spy_drawdown_at_trough": -0.1302289591,
+        "trough_date": "2016-02-11",
+        "window_id": "spy_drawdown_1"
+      },
+      {
+        "crisis_start": "2018-09-20",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.0448753993,
+        "phoenix_recovery_20d_return": 0.1944385773,
+        "phoenix_recovery_60d_return": 0.2198621659,
+        "recovery_20d_end": "2019-01-24",
+        "recovery_60d_end": "2019-03-22",
+        "selected": [
+          {
+            "close_at_trough": 90.765,
+            "phoenix_dislocation_score": 0.4352283721,
+            "return_20d_at_trough": -0.5013460059,
+            "return_252d_at_trough": -0.6969125249,
+            "return_5d_at_trough": -0.2157650535,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "NBR"
+          },
+          {
+            "close_at_trough": 28.089,
+            "phoenix_dislocation_score": 0.4033992563,
+            "return_20d_at_trough": -0.3998718086,
+            "return_252d_at_trough": -0.5769346628,
+            "return_5d_at_trough": -0.3526090163,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PRGO"
+          },
+          {
+            "close_at_trough": 346.0,
+            "phoenix_dislocation_score": 0.3947574405,
+            "return_20d_at_trough": -0.4507936508,
+            "return_252d_at_trough": -0.5494791667,
+            "return_5d_at_trough": -0.2311111111,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CHKAQ"
+          },
+          {
+            "close_at_trough": 13.047,
+            "phoenix_dislocation_score": 0.3782630863,
+            "return_20d_at_trough": -0.4767385899,
+            "return_252d_at_trough": -0.4119264401,
+            "return_5d_at_trough": -0.1700909611,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "VALPQ"
+          },
+          {
+            "close_at_trough": 13.56,
+            "phoenix_dislocation_score": 0.3483044489,
+            "return_20d_at_trough": -0.3836363636,
+            "return_252d_at_trough": -0.6592964824,
+            "return_5d_at_trough": -0.1739766082,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "RADCQ"
+          },
+          {
+            "close_at_trough": 15.128,
+            "phoenix_dislocation_score": 0.3476718956,
+            "return_20d_at_trough": -0.3684825715,
+            "return_252d_at_trough": -0.4333657952,
+            "return_5d_at_trough": -0.2774859108,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CAG"
+          },
+          {
+            "close_at_trough": 8.945,
+            "phoenix_dislocation_score": 0.3285238931,
+            "return_20d_at_trough": -0.3951994591,
+            "return_252d_at_trough": -0.4259770262,
+            "return_5d_at_trough": -0.1626883834,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "RRC"
+          },
+          {
+            "close_at_trough": 7.85,
+            "phoenix_dislocation_score": 0.3280088165,
+            "return_20d_at_trough": -0.3463780183,
+            "return_252d_at_trough": -0.6549450549,
+            "return_5d_at_trough": -0.1822916667,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ELF"
+          },
+          {
+            "close_at_trough": 8.791,
+            "phoenix_dislocation_score": 0.3266830993,
+            "return_20d_at_trough": -0.3736373352,
+            "return_252d_at_trough": -0.4939266594,
+            "return_5d_at_trough": -0.177026774,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PR"
+          },
+          {
+            "close_at_trough": 25.157,
+            "phoenix_dislocation_score": 0.3252348417,
+            "return_20d_at_trough": -0.4315059206,
+            "return_252d_at_trough": -0.4585351155,
+            "return_5d_at_trough": -0.0682592593,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SIG"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.1934891367,
+        "spy_drawdown_at_trough": -0.1934891367,
+        "trough_date": "2018-12-24",
+        "window_id": "spy_drawdown_2"
+      },
+      {
+        "crisis_start": "2020-02-19",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.4257462555,
+        "phoenix_recovery_20d_return": -0.2945763719,
+        "phoenix_recovery_60d_return": 0.0183483706,
+        "recovery_20d_end": "2020-03-27",
+        "recovery_60d_end": "2020-05-26",
+        "selected": [
+          {
+            "close_at_trough": 55.0,
+            "phoenix_dislocation_score": 0.4944714245,
+            "return_20d_at_trough": -0.4798562512,
+            "return_252d_at_trough": -0.9070945946,
+            "return_5d_at_trough": -0.3861607143,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CHKAQ"
+          },
+          {
+            "close_at_trough": 9.32,
+            "phoenix_dislocation_score": 0.4787280016,
+            "return_20d_at_trough": -0.4938083858,
+            "return_252d_at_trough": -0.7415992015,
+            "return_5d_at_trough": -0.3609434997,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "FLR"
+          },
+          {
+            "close_at_trough": 26.8,
+            "phoenix_dislocation_score": 0.4437634215,
+            "return_20d_at_trough": -0.5472972973,
+            "return_252d_at_trough": -0.5902140673,
+            "return_5d_at_trough": -0.1878787879,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "GRPN"
+          },
+          {
+            "close_at_trough": 63.21,
+            "phoenix_dislocation_score": 0.3571183552,
+            "return_20d_at_trough": -0.386489372,
+            "return_252d_at_trough": -0.6184814099,
+            "return_5d_at_trough": -0.2112553032,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "W"
+          },
+          {
+            "close_at_trough": 23.84,
+            "phoenix_dislocation_score": 0.3291438255,
+            "return_20d_at_trough": -0.2836538462,
+            "return_252d_at_trough": -0.5240566979,
+            "return_5d_at_trough": -0.3551528266,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "NTNX"
+          },
+          {
+            "close_at_trough": 18.479,
+            "phoenix_dislocation_score": 0.3288901981,
+            "return_20d_at_trough": -0.3270330311,
+            "return_252d_at_trough": -0.5737549881,
+            "return_5d_at_trough": -0.2509829354,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CLR"
+          },
+          {
+            "close_at_trough": 19.05,
+            "phoenix_dislocation_score": 0.3266119126,
+            "return_20d_at_trough": -0.3103573109,
+            "return_252d_at_trough": -0.4582527585,
+            "return_5d_at_trough": -0.3152408339,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "AAL"
+          },
+          {
+            "close_at_trough": 29.56,
+            "phoenix_dislocation_score": 0.3210578689,
+            "return_20d_at_trough": -0.3052878966,
+            "return_252d_at_trough": -0.3442768412,
+            "return_5d_at_trough": -0.344858156,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "DY"
+          },
+          {
+            "close_at_trough": 5.137,
+            "phoenix_dislocation_score": 0.320658699,
+            "return_20d_at_trough": -0.3400565262,
+            "return_252d_at_trough": -0.5295356718,
+            "return_5d_at_trough": -0.2122373869,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ENBL"
+          },
+          {
+            "close_at_trough": 9.579,
+            "phoenix_dislocation_score": 0.3171105614,
+            "return_20d_at_trough": -0.280801862,
+            "return_252d_at_trough": -0.676614564,
+            "return_5d_at_trough": -0.2698932927,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "OVV"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.1243719407,
+        "spy_drawdown_at_trough": -0.1243719407,
+        "trough_date": "2020-02-28",
+        "window_id": "spy_drawdown_3"
+      },
+      {
+        "crisis_start": "2022-01-03",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.0549543495,
+        "phoenix_recovery_20d_return": 0.3388416675,
+        "phoenix_recovery_60d_return": 0.0782468412,
+        "recovery_20d_end": "2022-04-05",
+        "recovery_60d_end": "2022-06-02",
+        "selected": [
+          {
+            "close_at_trough": 5.19,
+            "phoenix_dislocation_score": 0.5545923487,
+            "return_20d_at_trough": -0.6007692308,
+            "return_252d_at_trough": -0.3452756402,
+            "return_5d_at_trough": -0.5320108206,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "WULF"
+          },
+          {
+            "close_at_trough": 9.445,
+            "phoenix_dislocation_score": 0.5162512534,
+            "return_20d_at_trough": -0.7262318841,
+            "return_252d_at_trough": -0.787752809,
+            "return_5d_at_trough": -0.0057894737,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "VEON"
+          },
+          {
+            "close_at_trough": 186.75,
+            "phoenix_dislocation_score": 0.4315442977,
+            "return_20d_at_trough": -0.5832310473,
+            "return_252d_at_trough": -0.4686299616,
+            "return_5d_at_trough": -0.1158089106,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "EPAM"
+          },
+          {
+            "close_at_trough": 10.148,
+            "phoenix_dislocation_score": 0.4239540184,
+            "return_20d_at_trough": -0.5286795783,
+            "return_252d_at_trough": -0.495601173,
+            "return_5d_at_trough": -0.1906205136,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "VRT"
+          },
+          {
+            "close_at_trough": 16.66,
+            "phoenix_dislocation_score": 0.3961428664,
+            "return_20d_at_trough": -0.3941818182,
+            "return_252d_at_trough": -0.7368088468,
+            "return_5d_at_trough": -0.286509636,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "BMBL"
+          },
+          {
+            "close_at_trough": 91.53,
+            "phoenix_dislocation_score": 0.3911027829,
+            "return_20d_at_trough": -0.4137202152,
+            "return_252d_at_trough": -0.5993784742,
+            "return_5d_at_trough": -0.2764426877,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SE"
+          },
+          {
+            "close_at_trough": 34.28,
+            "phoenix_dislocation_score": 0.3878183261,
+            "return_20d_at_trough": -0.4560456998,
+            "return_252d_at_trough": -0.5696711022,
+            "return_5d_at_trough": -0.1907459868,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "AFRM"
+          },
+          {
+            "close_at_trough": 139.2,
+            "phoenix_dislocation_score": 0.3809188799,
+            "return_20d_at_trough": -0.4295081967,
+            "return_252d_at_trough": -0.6657060519,
+            "return_5d_at_trough": -0.1888111888,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "DNA"
+          },
+          {
+            "close_at_trough": 51.495,
+            "phoenix_dislocation_score": 0.3686501971,
+            "return_20d_at_trough": -0.4059799975,
+            "return_252d_at_trough": -0.5445902683,
+            "return_5d_at_trough": -0.2353439059,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SHOP"
+          },
+          {
+            "close_at_trough": 48.8,
+            "phoenix_dislocation_score": 0.3665943148,
+            "return_20d_at_trough": -0.3711340206,
+            "return_252d_at_trough": -0.903785489,
+            "return_5d_at_trough": -0.1784511785,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SKLZ"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.1286553886,
+        "spy_drawdown_at_trough": -0.1286553886,
+        "trough_date": "2022-03-08",
+        "window_id": "spy_drawdown_4"
+      },
+      {
+        "crisis_start": "2022-01-03",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.1869105492,
+        "phoenix_recovery_20d_return": -0.0116556612,
+        "phoenix_recovery_60d_return": 0.1873354914,
+        "recovery_20d_end": "2022-07-18",
+        "recovery_60d_end": "2022-09-13",
+        "selected": [
+          {
+            "close_at_trough": 66.0,
+            "phoenix_dislocation_score": 0.4431621873,
+            "return_20d_at_trough": -0.4427558257,
+            "return_252d_at_trough": -0.4300518135,
+            "return_5d_at_trough": -0.4483450351,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PGY"
+          },
+          {
+            "close_at_trough": 12.22,
+            "phoenix_dislocation_score": 0.3978127921,
+            "return_20d_at_trough": -0.4623845139,
+            "return_252d_at_trough": -0.803820838,
+            "return_5d_at_trough": -0.1333333333,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SNAP"
+          },
+          {
+            "close_at_trough": 34.184,
+            "phoenix_dislocation_score": 0.3917034422,
+            "return_20d_at_trough": -0.4100714458,
+            "return_252d_at_trough": -0.5931057468,
+            "return_5d_at_trough": -0.2878333333,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "RCL"
+          },
+          {
+            "close_at_trough": 54.53,
+            "phoenix_dislocation_score": 0.3854057462,
+            "return_20d_at_trough": -0.4335134012,
+            "return_252d_at_trough": -0.6224729992,
+            "return_5d_at_trough": -0.2101680185,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ZEN"
+          },
+          {
+            "close_at_trough": 32.6,
+            "phoenix_dislocation_score": 0.3824290088,
+            "return_20d_at_trough": -0.4168157424,
+            "return_252d_at_trough": -0.8636553743,
+            "return_5d_at_trough": -0.1532467532,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CGC"
+          },
+          {
+            "close_at_trough": 8.657,
+            "phoenix_dislocation_score": 0.3660868229,
+            "return_20d_at_trough": -0.3677791572,
+            "return_252d_at_trough": -0.6921079774,
+            "return_5d_at_trough": -0.254028436,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CCL"
+          },
+          {
+            "close_at_trough": 10.38,
+            "phoenix_dislocation_score": 0.3484774412,
+            "return_20d_at_trough": -0.3471698113,
+            "return_252d_at_trough": -0.664836939,
+            "return_5d_at_trough": -0.2456395349,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "NCLH"
+          },
+          {
+            "close_at_trough": 9.45,
+            "phoenix_dislocation_score": 0.3431652098,
+            "return_20d_at_trough": -0.3446601942,
+            "return_252d_at_trough": -0.9131513648,
+            "return_5d_at_trough": -0.1501798561,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PTON"
+          },
+          {
+            "close_at_trough": 31.1,
+            "phoenix_dislocation_score": 0.3356116738,
+            "return_20d_at_trough": -0.3507306889,
+            "return_252d_at_trough": -0.8219805381,
+            "return_5d_at_trough": -0.1432506887,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "TLRY"
+          },
+          {
+            "close_at_trough": 32.08,
+            "phoenix_dislocation_score": 0.3338211458,
+            "return_20d_at_trough": -0.3363673976,
+            "return_252d_at_trough": -0.7460216927,
+            "return_5d_at_trough": -0.1913284598,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "UPST"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.2300996742,
+        "spy_drawdown_at_trough": -0.2300996742,
+        "trough_date": "2022-06-16",
+        "window_id": "spy_drawdown_5"
+      },
+      {
+        "crisis_start": "2022-01-03",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.1002504963,
+        "phoenix_recovery_20d_return": -0.095671113,
+        "phoenix_recovery_60d_return": 0.0815654945,
+        "recovery_20d_end": "2022-11-09",
+        "recovery_60d_end": "2023-01-09",
+        "selected": [
+          {
+            "close_at_trough": 17.16,
+            "phoenix_dislocation_score": 0.6585157862,
+            "return_20d_at_trough": -0.8779863481,
+            "return_252d_at_trough": -0.8557013118,
+            "return_5d_at_trough": -0.1538461538,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PGY"
+          },
+          {
+            "close_at_trough": 90.0,
+            "phoenix_dislocation_score": 0.3951527753,
+            "return_20d_at_trough": -0.4413407821,
+            "return_252d_at_trough": -0.735915493,
+            "return_5d_at_trough": -0.1891891892,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "NKLAQ"
+          },
+          {
+            "close_at_trough": 58.5,
+            "phoenix_dislocation_score": 0.3799297935,
+            "return_20d_at_trough": -0.4096871847,
+            "return_252d_at_trough": -0.7354449499,
+            "return_5d_at_trough": -0.2019099591,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "AMC"
+          },
+          {
+            "close_at_trough": 29.13,
+            "phoenix_dislocation_score": 0.3795286072,
+            "return_20d_at_trough": -0.4075655888,
+            "return_252d_at_trough": -0.7073244248,
+            "return_5d_at_trough": -0.2141893715,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ZLAB"
+          },
+          {
+            "close_at_trough": 54.65,
+            "phoenix_dislocation_score": 0.3776252327,
+            "return_20d_at_trough": -0.3655676805,
+            "return_252d_at_trough": -0.6255823513,
+            "return_5d_at_trough": -0.3190879641,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "FIVN"
+          },
+          {
+            "close_at_trough": 12.88,
+            "phoenix_dislocation_score": 0.3705974078,
+            "return_20d_at_trough": -0.4129443938,
+            "return_252d_at_trough": -0.6372852718,
+            "return_5d_at_trough": -0.1970074813,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "NIO"
+          },
+          {
+            "close_at_trough": 5.25,
+            "phoenix_dislocation_score": 0.3658876806,
+            "return_20d_at_trough": -0.4087837838,
+            "return_252d_at_trough": -0.7022121384,
+            "return_5d_at_trough": -0.1679873217,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "OPTU"
+          },
+          {
+            "close_at_trough": 7.37,
+            "phoenix_dislocation_score": 0.3582081835,
+            "return_20d_at_trough": -0.4094551282,
+            "return_252d_at_trough": -0.6696548633,
+            "return_5d_at_trough": -0.1518987342,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "GRPN"
+          },
+          {
+            "close_at_trough": 9.55,
+            "phoenix_dislocation_score": 0.3563057121,
+            "return_20d_at_trough": -0.4038701623,
+            "return_252d_at_trough": -0.7467515248,
+            "return_5d_at_trough": -0.1310282075,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "XPEV"
+          },
+          {
+            "close_at_trough": 12.49,
+            "phoenix_dislocation_score": 0.3522382283,
+            "return_20d_at_trough": -0.3234019502,
+            "return_252d_at_trough": -0.8189855072,
+            "return_5d_at_trough": -0.2543283582,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "BILI"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.2449637483,
+        "spy_drawdown_at_trough": -0.2449637483,
+        "trough_date": "2022-10-12",
+        "window_id": "spy_drawdown_6"
+      },
+      {
+        "crisis_start": "2022-01-03",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.0535465178,
+        "phoenix_recovery_20d_return": -0.0209646282,
+        "phoenix_recovery_60d_return": -0.1842939749,
+        "recovery_20d_end": "2023-03-07",
+        "recovery_60d_end": "2023-05-03",
+        "selected": [
+          {
+            "close_at_trough": 6.08,
+            "phoenix_dislocation_score": 0.2419003052,
+            "return_20d_at_trough": -0.1816958277,
+            "return_252d_at_trough": -0.5862538278,
+            "return_5d_at_trough": -0.2475247525,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "HBI"
+          },
+          {
+            "close_at_trough": 4987.505,
+            "phoenix_dislocation_score": 0.2227722292,
+            "return_20d_at_trough": -0.2191780329,
+            "return_252d_at_trough": -0.886567164,
+            "return_5d_at_trough": -0.0086956435,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "MSPR"
+          },
+          {
+            "close_at_trough": 6.17,
+            "phoenix_dislocation_score": 0.2177202161,
+            "return_20d_at_trough": -0.2775175644,
+            "return_252d_at_trough": 1.1802120141,
+            "return_5d_at_trough": -0.1706989247,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "TAL"
+          },
+          {
+            "close_at_trough": 6.923,
+            "phoenix_dislocation_score": 0.1877119454,
+            "return_20d_at_trough": -0.241647497,
+            "return_252d_at_trough": -0.0926605505,
+            "return_5d_at_trough": -0.1115246407,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "YMM"
+          },
+          {
+            "close_at_trough": 44.048,
+            "phoenix_dislocation_score": 0.1662857679,
+            "return_20d_at_trough": -0.1669566533,
+            "return_252d_at_trough": -0.2113725069,
+            "return_5d_at_trough": -0.1499150841,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SIRI"
+          },
+          {
+            "close_at_trough": 23.33,
+            "phoenix_dislocation_score": 0.1634273944,
+            "return_20d_at_trough": -0.1856893543,
+            "return_252d_at_trough": -0.2843558282,
+            "return_5d_at_trough": -0.0785939968,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "BILI"
+          },
+          {
+            "close_at_trough": 39.0,
+            "phoenix_dislocation_score": 0.1445729706,
+            "return_20d_at_trough": -0.1582128211,
+            "return_252d_at_trough": -0.2313756405,
+            "return_5d_at_trough": -0.0883590463,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ZLAB"
+          },
+          {
+            "close_at_trough": 7.35,
+            "phoenix_dislocation_score": 0.1346179105,
+            "return_20d_at_trough": -0.1741573034,
+            "return_252d_at_trough": -0.0067567568,
+            "return_5d_at_trough": -0.0981595092,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "YSG"
+          },
+          {
+            "close_at_trough": 21.03,
+            "phoenix_dislocation_score": 0.125674594,
+            "return_20d_at_trough": -0.1810747664,
+            "return_252d_at_trough": -0.1560995185,
+            "return_5d_at_trough": -0.0047326077,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CHGG"
+          },
+          {
+            "close_at_trough": 7.66,
+            "phoenix_dislocation_score": 0.1249269027,
+            "return_20d_at_trough": -0.1718918919,
+            "return_252d_at_trough": 0.0896159317,
+            "return_5d_at_trough": -0.0726392252,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "ROIV"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.1281763598,
+        "spy_drawdown_at_trough": -0.1281763598,
+        "trough_date": "2023-02-06",
+        "window_id": "spy_drawdown_7"
+      },
+      {
+        "crisis_start": "2022-01-03",
+        "definition": "SPY drawdown <= 12%; trough separated by >= 90 calendar days",
+        "event_turnover": 1.6,
+        "phoenix_20d_max_drawdown": -0.0452055891,
+        "phoenix_recovery_20d_return": 0.1255955388,
+        "phoenix_recovery_60d_return": 0.1372308839,
+        "recovery_20d_end": "2023-06-07",
+        "recovery_60d_end": "2023-08-04",
+        "selected": [
+          {
+            "close_at_trough": 1968.752,
+            "phoenix_dislocation_score": 0.4627300677,
+            "return_20d_at_trough": -0.5137763835,
+            "return_252d_at_trough": -0.955357142,
+            "return_5d_at_trough": -0.1964284111,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "MSPR"
+          },
+          {
+            "close_at_trough": 35.04,
+            "phoenix_dislocation_score": 0.4275102381,
+            "return_20d_at_trough": -0.4645476773,
+            "return_252d_at_trough": -0.6454517859,
+            "return_5d_at_trough": -0.2807881773,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "CTLT"
+          },
+          {
+            "close_at_trough": 9.46,
+            "phoenix_dislocation_score": 0.397462938,
+            "return_20d_at_trough": -0.4024005054,
+            "return_252d_at_trough": -0.5169279477,
+            "return_5d_at_trough": -0.3477661335,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "FHN"
+          },
+          {
+            "close_at_trough": 83.87,
+            "phoenix_dislocation_score": 0.3346479994,
+            "return_20d_at_trough": -0.3589390813,
+            "return_252d_at_trough": -0.5567124736,
+            "return_5d_at_trough": -0.2120443442,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SITM"
+          },
+          {
+            "close_at_trough": 15.745,
+            "phoenix_dislocation_score": 0.2888730074,
+            "return_20d_at_trough": -0.2775203047,
+            "return_252d_at_trough": -0.3806545512,
+            "return_5d_at_trough": -0.2809845648,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PSKY"
+          },
+          {
+            "close_at_trough": 24.26,
+            "phoenix_dislocation_score": 0.2755607259,
+            "return_20d_at_trough": -0.3127478754,
+            "return_252d_at_trough": -0.3083589919,
+            "return_5d_at_trough": -0.1902536716,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "SPR"
+          },
+          {
+            "close_at_trough": 7.83,
+            "phoenix_dislocation_score": 0.2684278043,
+            "return_20d_at_trough": -0.318537859,
+            "return_252d_at_trough": -0.5012738854,
+            "return_5d_at_trough": -0.0905923345,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "PTON"
+          },
+          {
+            "close_at_trough": 40.86,
+            "phoenix_dislocation_score": 0.2634402375,
+            "return_20d_at_trough": -0.304036791,
+            "return_252d_at_trough": -0.4948071217,
+            "return_5d_at_trough": -0.1051248357,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "WOLF2"
+          },
+          {
+            "close_at_trough": 5.86,
+            "phoenix_dislocation_score": 0.2628653379,
+            "return_20d_at_trough": -0.2309711286,
+            "return_252d_at_trough": -0.6346633416,
+            "return_5d_at_trough": -0.2027210884,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "BHC"
+          },
+          {
+            "close_at_trough": 6.46,
+            "phoenix_dislocation_score": 0.2611138538,
+            "return_20d_at_trough": -0.2757847534,
+            "return_252d_at_trough": -0.7092709271,
+            "return_5d_at_trough": -0.0823863636,
+            "selection_reason": "pit_close_dislocation_recovery_candidate",
+            "target_weight": 0.08,
+            "ticker": "DISH"
+          }
+        ],
+        "selected_count": 10,
+        "spy_crisis_return": -0.1225001425,
+        "spy_drawdown_at_trough": -0.1225001425,
+        "trough_date": "2023-05-09",
+        "window_id": "spy_drawdown_8"
+      }
+    ]
+  },
+  "decision_state": "research_evidence_generated",
+  "drawdown_behavior": {
+    "existing_sleeves": {
+      "caerus_lyra": {
+        "max_drawdown": -0.6418630025
+      },
+      "caerus_orion": {
+        "max_drawdown": -0.5794984562
+      },
+      "caerus_polaris": {
+        "max_drawdown": -0.5443004491
+      }
+    },
+    "phoenix_event_net_25bps_max_drawdown": -0.4511304348
+  },
+  "execution_impact": "NON_EXECUTIONAL",
+  "failure_modes": [
+    "falling_knife_exposure_if_trough_identification_is_early",
+    "missing_pit_volume_prevents_liquidity_capacity_validation",
+    "close_only_data_cannot_validate_intraday_gap_or_range_risk",
+    "crisis_windows_are_sparse_and_may_not_cover_all_future_stress_types",
+    "event_returns_are_sensitive_to_transaction_cost_and_entry_timing"
+  ],
+  "generated_at": "2026-06-17T19:43:13.614788+00:00",
+  "governance_label": "RESEARCH_ONLY",
+  "inputs": {
+    "membership_path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/data/pit_universe/membership_universe_large_cap.csv",
+    "membership_sha256": "a73c8352f0e8485fd0e3d289ce00c4266da4228cea022e0b3165f5e03b121cb8",
+    "membership_ticker_count": 1600,
+    "missing_from_sep_count": 20,
+    "missing_from_sep_sample": [
+      "AMRZ",
+      "BMNR",
+      "CHYM",
+      "CRCL",
+      "CRWV",
+      "EMA",
+      "FIG",
+      "FRMI",
+      "GLXY",
+      "JBS",
+      "KLAR",
+      "KRMN",
+      "MDLN",
+      "NMAX",
+      "Q",
+      "SAIL",
+      "SFD",
+      "SNDK",
+      "SOLS",
+      "VG"
+    ],
+    "price_matrix_path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/alpha_stack_cache/prices/_matrix_prices_2007_2026.parquet",
+    "price_matrix_sha256": "d98994aa46252dc4fcc68602c5d2c38a5c09cdbae0dede754fbc1b3ee9b8ffcc",
+    "price_source": "sharadar_sep_closeadj",
+    "priced_ticker_count": 1580,
+    "sep_cache_path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/data/research_cache/sharadar_sep",
+    "universe_family": "caerus_large_cap",
+    "universe_method": "pit_universe",
+    "volume_source_available": false,
+    "volume_source_reason": "repo_local_sharadar_sep_cache_contains_closeadj_close_only"
+  },
+  "liquidity": {
+    "available": false,
+    "note": "Liquidity/capacity cannot be decision-grade until PIT volume or dollar-volume source is added.",
+    "reason_codes": [
+      "volume_source_missing_from_repo_local_pit_price_cache"
+    ]
+  },
+  "matched_pit_date_range": {
+    "end": "2024-12-31",
+    "holdout_2025_forward": "excluded",
+    "matched_return_observations": 2768,
+    "start": "2014-01-02",
+    "warmup_start": "2012-06-01"
+  },
+  "overlap_correlation_vs_existing_sleeves": {
+    "average_active_share": {
+      "caerus_lyra": 0.88,
+      "caerus_orion": 0.89,
+      "caerus_polaris": 0.88
+    },
+    "average_holdings_overlap": {
+      "caerus_lyra": 0.02,
+      "caerus_orion": 0.01,
+      "caerus_polaris": 0.02
+    },
+    "daily_return_correlation": {
+      "caerus_lyra": -0.0010659242,
+      "caerus_orion": 0.0029345064,
+      "caerus_polaris": -0.0016923531
+    }
+  },
+  "production_impact": "none",
+  "readiness_classification": {
+    "blockers": [
+      "event_drawdown_too_deep"
+    ],
+    "classification": "RESEARCH_ONLY_NOT_SHADOW_READY",
+    "reason_codes": [
+      "event_drawdown_too_deep"
+    ],
+    "warnings": []
+  },
+  "reason_codes": [
+    "research_only_no_runtime_change",
+    "holdout_2025_forward_excluded"
+  ],
+  "returns_during_crisis_and_recovery_windows": {
+    "average_phoenix_recovery_20d_return": 0.0791511147,
+    "average_phoenix_recovery_60d_return": 0.1215037336,
+    "event_count": 8
+  },
+  "schema_version": "caerus_phoenix_crisis_recovery_evidence_v1",
+  "strategy_summaries": {
+    "caerus_lyra": {
+      "avg_turnover": 0.0791470907,
+      "cumulative_return": 41.6262799537,
+      "max_drawdown": -0.6418630025,
+      "trading_days": 2767,
+      "volatility": 0.5153377121
+    },
+    "caerus_orion": {
+      "avg_turnover": 0.0448861583,
+      "cumulative_return": 42.1362034224,
+      "max_drawdown": -0.5794984562,
+      "trading_days": 2767,
+      "volatility": 0.5018745643
+    },
+    "caerus_phoenix_event_net_25bps": {
+      "avg_turnover": null,
+      "cumulative_return": 0.3848623145,
+      "max_drawdown": -0.4511304348,
+      "trading_days": 2768,
+      "volatility": 0.1755993236
+    },
+    "caerus_polaris": {
+      "avg_turnover": 0.1752078063,
+      "cumulative_return": 18.1158829811,
+      "max_drawdown": -0.5443004491,
+      "trading_days": 2767,
+      "volatility": 0.4188775839
+    }
+  },
+  "turnover": {
+    "existing_sleeves": {
+      "caerus_lyra": {
+        "average_turnover": 0.0791470907
+      },
+      "caerus_orion": {
+        "average_turnover": 0.0448861583
+      },
+      "caerus_polaris": {
+        "average_turnover": 0.1752078063
+      }
+    },
+    "phoenix_event_average_turnover": 0.8
+  }
+}
