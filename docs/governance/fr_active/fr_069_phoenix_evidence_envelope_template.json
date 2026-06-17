@@ -5,7 +5,8 @@
     "outputs/model_quality/<date>/phoenix_evidence_tracker.json",
     "outputs/research/phoenix/<date>/phoenix_decision_trace.json",
     "outputs/research/phoenix/<date>/phoenix_backtest_summary.json",
-    "outputs/research/phoenix_evidence/phoenix_crisis_recovery_<date>.json"
+    "outputs/research/phoenix_evidence/phoenix_crisis_recovery_<date>.json",
+    "outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_<date>.json"
   ],
   "benchmark": "SPY",
   "data_requirements": [
