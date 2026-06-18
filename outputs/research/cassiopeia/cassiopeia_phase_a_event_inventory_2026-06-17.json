@@ -1,0 +1,349 @@
+{
+  "schema_version": "caerus_sleeve_evidence_v1",
+  "sleeve_id": "cassiopeia",
+  "name": "Caerus Cassiopeia",
+  "thesis": "Timestamp-aware event-driven sleeve intended to test whether discrete public catalysts produce persistent long-only forward returns after the event is available to the decision process.",
+  "status": "research_placeholder",
+  "owner": "Caerus Research Program",
+  "source": "docs/governance/fr_active/fr_069_cassiopeia_phase_a_evidence.md",
+  "hypothesis_class": "event_driven_catalyst",
+  "data_requirements": [
+    "pit_universe",
+    "pit_adjusted_ohlcv",
+    "spy_benchmark",
+    "event_contract",
+    "event_tape_with_availability_timestamp",
+    "ticker_mapping_lineage",
+    "liquidity_filters",
+    "source_payload_hashes"
+  ],
+  "artifact_paths": [
+    "outputs/research/cassiopeia/cassiopeia_phase_a_event_inventory_2026-06-17.json",
+    "outputs/research/cassiopeia/cassiopeia_phase_a_event_inventory_2026-06-17.md",
+    "docs/governance/fr_active/fr_069_cassiopeia_phase_a_evidence.md"
+  ],
+  "benchmark": "SPY",
+  "evaluation_window": {
+    "start": "2016-01-04",
+    "end": "2026-06-17"
+  },
+  "metrics_required": [
+    "event_coverage",
+    "event_frequency",
+    "event_persistence",
+    "event_window_return",
+    "post_event_drift_return",
+    "excess_return_vs_spy",
+    "hit_rate",
+    "max_drawdown",
+    "turnover",
+    "cost_sensitivity",
+    "candidate_overlap",
+    "correlation_vs_polaris_orion_lyra_phoenix"
+  ],
+  "known_bias_risks": [
+    "look_ahead_event_timestamp",
+    "survivorship_bias",
+    "post_event_selection_bias",
+    "sparse_event_sample",
+    "ticker_mapping_drift",
+    "transaction_cost_understatement",
+    "event_source_restatement",
+    "event_outcome_leakage",
+    "current_constituent_index_membership_leakage"
+  ],
+  "promotion_blockers": [
+    "owner_approved_event_taxonomy_missing",
+    "cassiopeia_pit_event_tape_missing",
+    "analyst_event_vendor_timestamp_tape_missing",
+    "index_provider_announcement_timestamp_tape_missing",
+    "activist_13d_parser_not_built",
+    "cassiopeia_backtest_summary_missing",
+    "sparse_sample_diagnostics_missing",
+    "overlap_study_vs_existing_sleeves_missing"
+  ],
+  "production_impact": "research_only",
+  "decision_state": "blocked",
+  "evidence_last_updated": "2026-06-17",
+  "strategy_id": "caerus_cassiopeia",
+  "family": "event_driven",
+  "sleeve_type": "event_driven",
+  "lifecycle_status": "spec_only",
+  "universe_family": "event_eligible_large_cap",
+  "universe_method": "pit_universe",
+  "universe_snapshot_hash": "sha256:1636af2fdd819d4546841fe73733eeaef25c091b60f899fe6ebe7360acce4ea4",
+  "price_source": "pit_adjusted_ohlcv_required_not_used_for_phase_a_inventory",
+  "holdout_excluded": true,
+  "spec_version": "fr069-cassiopeia-phase-a-event-inventory-2026-06-17",
+  "metrics": {
+    "classification": "BLOCKED_DATA",
+    "readiness_classification": "BLOCKED_DATA",
+    "event_coverage": {
+      "repo_local_security_events_rows": 14790,
+      "repo_local_security_event_types": {
+        "DELISTING": 14790
+      },
+      "repo_local_security_event_sources": {
+        "sharadar_tickers": 14790
+      },
+      "cygnus_earnings_8k_event_rows": 7267,
+      "cygnus_unique_tickers": 199,
+      "cygnus_missing_timestamp_count": 0,
+      "cygnus_look_ahead_safe": true,
+      "cassiopeia_specific_event_tape_rows": 0
+    },
+    "event_frequency": {
+      "earnings_8k_item_202": {
+        "count": 7267,
+        "classification": "LIMITED",
+        "reason": "Available as Cygnus-owned SEC 8-K earnings tape with acceptanceDateTime lineage; useful for event-timing pattern reuse, not Cassiopeia alpha unless ownership is explicitly carved out."
+      },
+      "security_delisting": {
+        "count": 14790,
+        "classification": "LIMITED_EXCLUSION_ONLY",
+        "reason": "Available from security master events and useful for survivorship controls or negative exclusions; not a long-only positive catalyst class."
+      },
+      "analyst_actions": {
+        "count": 0,
+        "classification": "UNAVAILABLE",
+        "reason": "No repo-local analyst upgrade or target-change tape with publication timestamps was found."
+      },
+      "index_inclusion_exclusion": {
+        "count": 0,
+        "classification": "UNAVAILABLE",
+        "reason": "No repo-local official index announcement tape with announcement timestamps was found."
+      },
+      "activist_13d": {
+        "count": 0,
+        "classification": "SUPPORTED_DATA_SOURCE_LIMITED_IMPLEMENTATION",
+        "reason": "EDGAR acceptance timestamps are available as a source pattern, but no Cassiopeia 13D extraction tape exists yet."
+      }
+    },
+    "event_persistence": {
+      "measured": false,
+      "reason": "No Cassiopeia candidate event tape or forward-return panel exists. Persistence cannot be measured without building the PIT event tape first.",
+      "initial_windows_to_test": [
+        "1_to_5_trading_days",
+        "1_to_20_trading_days",
+        "1_to_40_trading_days",
+        "1_to_60_trading_days"
+      ]
+    },
+    "overlap_with_existing_sleeves": {
+      "measured": false,
+      "expected_overlap": {
+        "polaris": "MEDIUM",
+        "orion": "MEDIUM",
+        "lyra": "MEDIUM",
+        "phoenix": "LOW_TO_MEDIUM"
+      },
+      "reason": "No Cassiopeia holdings are generated. Differentiation is thesis-supported but not yet empirically proven."
+    },
+    "potential_alpha_characteristics": [
+      "Delayed post-public-event incorporation rather than pure price momentum.",
+      "Event-family attribution can identify analyst, index, activist, and corporate-action drivers separately.",
+      "Holding windows can be short and event-specific, creating a different turnover and catalyst profile from Polaris, Orion, and Lyra.",
+      "SEC acceptance timestamps provide a defensible PIT source for EDGAR-derived events."
+    ],
+    "implementation_risks": [
+      "Missing or inferred publication timestamps would create look-ahead bias.",
+      "Analyst and index events require source-specific tapes; effective dates alone are insufficient.",
+      "Ticker mapping and delisting controls must be joined before forward returns are measured.",
+      "M&A and dividend events can leak future outcomes if completed status or revised metadata is used.",
+      "Existing Cygnus earnings events should not be double-counted as Cassiopeia alpha without an explicit ownership decision."
+    ]
+  },
+  "holdings": [],
+  "attribution": [
+    {
+      "agent": "Event Auditor",
+      "conclusion": "Immediately testable source families are narrow: SEC acceptance-timestamped events can be audited now, but general Cassiopeia analyst and index event tapes are absent."
+    },
+    {
+      "agent": "Event Architect",
+      "conclusion": "Taxonomy should separate SUPPORTED, LIMITED, UNAVAILABLE, and EXCLUDED event classes and fail closed when availability timestamp or source lineage is missing."
+    },
+    {
+      "agent": "Evidence Builder",
+      "conclusion": "First artifact is an event inventory and PIT feasibility decision, not a performance backtest. It preserves RESEARCH_ONLY and NO_RUNTIME_CHANGE."
+    },
+    {
+      "agent": "Differentiation Analyst",
+      "conclusion": "Cassiopeia is conceptually differentiated from momentum and crisis sleeves, but empirical differentiation remains unmeasured until a candidate event tape generates holdings."
+    },
+    {
+      "agent": "Reviewer",
+      "conclusion": "Shadow readiness is invalidated by missing Cassiopeia event tape, missing source-specific timestamps for MVP analyst/index classes, and missing overlap/backtest diagnostics."
+    }
+  ],
+  "reason_codes": [
+    "research_only_no_runtime_change",
+    "phase_a_event_inventory_generated",
+    "cassiopeia_specific_event_tape_missing",
+    "supported_sec_timestamp_pattern_available",
+    "analyst_and_index_tapes_unavailable",
+    "blocked_data_before_shadow"
+  ],
+  "governance_label": "RESEARCH_ONLY",
+  "execution_impact": "NON_EXECUTIONAL",
+  "event_inventory": [
+    {
+      "event_family": "earnings",
+      "examples": [
+        "8-K Item 2.02 earnings releases"
+      ],
+      "classification": "LIMITED",
+      "pit_feasibility": "HIGH_FOR_TIMING_LOW_FOR_CASSIOPEIA_OWNERSHIP",
+      "available_evidence": "outputs/research/cygnus/2026-06-10/cygnus_event_tape.csv has 7267 rows, 199 unique tickers, zero missing timestamps, and EDGAR acceptanceDateTime lineage.",
+      "immediate_testability": "Do not use as Cassiopeia MVP alpha by default; use as timing-contract reference or only with explicit Cygnus carve-out.",
+      "exclude_reason": "Cygnus owns earnings drift; Cassiopeia should avoid double-counting unless approved."
+    },
+    {
+      "event_family": "guidance",
+      "examples": [
+        "8-K guidance language",
+        "forecast updates"
+      ],
+      "classification": "LIMITED",
+      "pit_feasibility": "MEDIUM",
+      "available_evidence": "8-K source lineage exists, but no parsed positive or negative guidance signal exists in the repo-local event tape.",
+      "immediate_testability": "Only event-timing audit is immediate; alpha test requires guidance extraction."
+    },
+    {
+      "event_family": "dividend_changes",
+      "examples": [
+        "dividend initiation",
+        "dividend increase",
+        "dividend cut"
+      ],
+      "classification": "UNAVAILABLE",
+      "pit_feasibility": "MEDIUM_IF_SOURCE_TIMESTAMPS_EXIST",
+      "available_evidence": "No repo-local dividend-change event tape with announcement availability timestamps was found.",
+      "immediate_testability": "No."
+    },
+    {
+      "event_family": "index_inclusion_exclusion",
+      "examples": [
+        "S&P 500 additions",
+        "Russell reconstitution",
+        "Nasdaq index changes"
+      ],
+      "classification": "UNAVAILABLE",
+      "pit_feasibility": "HIGH_IF_OFFICIAL_ANNOUNCEMENT_TAPE_EXISTS",
+      "available_evidence": "No repo-local official index-provider announcement tape was found.",
+      "immediate_testability": "No; build official announcement-date/timestamp tape first."
+    },
+    {
+      "event_family": "mergers_acquisitions",
+      "examples": [
+        "announced acquisition",
+        "deal termination",
+        "rumors"
+      ],
+      "classification": "EXCLUDED",
+      "pit_feasibility": "LOW_FOR_MVP",
+      "available_evidence": "No repo-local deal tape with announcement, revision, completion, and termination lineage was found.",
+      "immediate_testability": "No.",
+      "exclude_reason": "Outcome leakage and deal-risk behavior are too easy to contaminate before a stricter event contract exists."
+    },
+    {
+      "event_family": "analyst_actions",
+      "examples": [
+        "upgrades",
+        "target-price increases",
+        "initiations",
+        "downgrades"
+      ],
+      "classification": "UNAVAILABLE",
+      "pit_feasibility": "HIGH_IF_PUBLICATION_TIMESTAMP_VENDOR_EXISTS",
+      "available_evidence": "No repo-local analyst action tape with source publication timestamps was found.",
+      "immediate_testability": "No; this remains a high-value MVP class once a PIT vendor/news tape exists."
+    },
+    {
+      "event_family": "corporate_actions",
+      "examples": [
+        "delistings",
+        "ticker changes",
+        "spin-offs"
+      ],
+      "classification": "LIMITED",
+      "pit_feasibility": "MEDIUM",
+      "available_evidence": "data/pit_universe/security_events.csv has 14790 Sharadar delisting rows with effective dates.",
+      "immediate_testability": "Use for exclusions, survivorship controls, and ticker lineage. Do not treat as a positive long-only catalyst."
+    },
+    {
+      "event_family": "macro_events",
+      "examples": [
+        "VIX shocks",
+        "credit spreads",
+        "rates",
+        "unemployment",
+        "CPI"
+      ],
+      "classification": "LIMITED",
+      "pit_feasibility": "MEDIUM",
+      "available_evidence": "Repo-local macro parquet files exist, but they are not single-name event catalysts and require release timestamp validation.",
+      "immediate_testability": "Better suited as overlay/context than Cassiopeia MVP security selection."
+    },
+    {
+      "event_family": "activist_13d",
+      "examples": [
+        "Schedule 13D filing",
+        "13D amendment",
+        "board nomination disclosure"
+      ],
+      "classification": "SUPPORTED",
+      "pit_feasibility": "HIGH_FOR_EDGAR_TIMING_MEDIUM_FOR_EXTRACTION",
+      "available_evidence": "EDGAR acceptanceDateTime source pattern is already proven by Cygnus, but a 13D-specific event tape has not been built.",
+      "immediate_testability": "Yes for a tape-build and timestamp audit; not yet for alpha."
+    }
+  ],
+  "differentiation_assessment": {
+    "polaris": {
+      "classification": "MEDIUM",
+      "rationale": "Polaris is core momentum; Cassiopeia would select securities from event availability and event freshness. Empirical holdings overlap is missing."
+    },
+    "orion": {
+      "classification": "MEDIUM",
+      "rationale": "Orion is a rank-decay momentum challenger; Cassiopeia has a different trigger, but price confirmation could create momentum overlap."
+    },
+    "lyra": {
+      "classification": "MEDIUM",
+      "rationale": "Lyra is a holding-period momentum challenger; Cassiopeia should differ in event windows, but no candidate holdings exist yet."
+    },
+    "phoenix": {
+      "classification": "HIGH",
+      "rationale": "Phoenix is crisis reversal, while Cassiopeia is catalyst/event availability driven. Overlap may occur only around crisis-linked corporate events."
+    }
+  },
+  "missing_data": [
+    {
+      "item": "Cassiopeia PIT event contract",
+      "why_it_matters": "Defines allowed event fields, availability rules, dedupe, and fail-closed behavior."
+    },
+    {
+      "item": "Cassiopeia event tape with availability_timestamp",
+      "why_it_matters": "Required before any forward-return or holdings-based alpha evidence."
+    },
+    {
+      "item": "Analyst action source with publication timestamps",
+      "why_it_matters": "Needed for the originally proposed analyst-upgrade MVP class."
+    },
+    {
+      "item": "Official index announcement timestamp tape",
+      "why_it_matters": "Needed to test index additions without using future effective membership."
+    },
+    {
+      "item": "13D extraction and ticker mapping lineage",
+      "why_it_matters": "Fastest repo-compatible path to a PIT-safe Cassiopeia-specific event tape."
+    },
+    {
+      "item": "Forward-return event study and overlap diagnostics",
+      "why_it_matters": "Needed to prove alpha persistence and differentiation."
+    }
+  ],
+  "explicit_statement": [
+    "RESEARCH_ONLY",
+    "NO_RUNTIME_CHANGE"
+  ]
+}
