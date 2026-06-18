@@ -14,7 +14,7 @@ Argo Phase A consumes existing sleeve evidence and emits research-only readiness
 | polaris | EVIDENCE_READY | 90 | none |
 | orion | EVIDENCE_READY | 85 | none |
 | lyra | NOT_READY | 73 | merge_watch_redundancy |
-| phoenix | EXTERNAL_DEPENDENCY_BLOCKED | 42 | external_dependency_blocked, nasdaq_data_link_qelx06_temporary_disablement, pit_liquidity_ohlcv_unavailable |
+| phoenix | NOT_VIABLE_CURRENT_PHASE_B | 67 | capacity_below_5pct_adv_policy, liquidity_capacity_failed |
 | cassiopeia | NOT_READY | 0 | decision_grade_evidence_missing, event_contract_missing, research_spec_only |
 | cygnus | NOT_READY | 5 | decision_grade_evidence_missing, eps_surprise_consensus_vendor_missing, v0_shelved |
 | argo | RESEARCH_READY | 80 | none |
@@ -28,6 +28,6 @@ Argo Phase A consumes existing sleeve evidence and emits research-only readiness
 
 ## Recommendations
 
-- `phoenix`: `EXTERNAL_DEPENDENCY_BLOCKED` - hold until Sharadar SEP OHLCV access is restored, then rebuild liquidity evidence.
+- `phoenix`: `NOT_VIABLE_CURRENT_PHASE_B` - hold current candidate after measured Phase C capacity failure; no Shadow-readiness review without new evidence or owner-approved capacity policy change.
 - `orion_lyra`: `EVIDENCE_READY_FOR_GOVERNANCE_REVIEW` - treat as one redundant core-momentum family pending any owner-approved merge/redeploy decision.
 - `argo`: `RESEARCH_READY` - use Phase A as an evidence inventory/scoring surface only.

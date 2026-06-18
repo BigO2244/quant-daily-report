@@ -1,0 +1,46 @@
+{
+  "columns": [
+    "ticker",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "closeadj",
+    "volume",
+    "dollar_volume",
+    "ADV_20",
+    "ADV_60",
+    "dollar_ADV_20",
+    "dollar_ADV_60"
+  ],
+  "coverage": {
+    "first_date": "1997-12-31",
+    "last_date": "2026-06-18",
+    "row_count": 7845012,
+    "ticker_count": 1600
+  },
+  "diagnostics_path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_liquidity/pit_liquidity_diagnostics.json",
+  "execution_impact": "NON_EXECUTIONAL",
+  "failed_or_empty_tickers": [],
+  "generated_at": "2026-06-18T21:07:48.519074+00:00",
+  "governance_label": "RESEARCH_ONLY",
+  "null_counts": {
+    "ADV_20": 0,
+    "ADV_60": 0,
+    "close": 0,
+    "closeadj": 0,
+    "dollar_ADV_20": 0,
+    "dollar_ADV_60": 0,
+    "dollar_volume": 0,
+    "high": 0,
+    "low": 0,
+    "open": 0,
+    "volume": 0
+  },
+  "panel_path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_liquidity/pit_liquidity_panel.csv",
+  "panel_sha256": "dcb3aaceae4bc10db036ff3245ab75285a3787a706144de0c88a199834237c63",
+  "schema_version": "caerus_pit_liquidity_panel_v1",
+  "source": "SHARADAR/SEP OHLCV cache",
+  "source_cache_dir": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/data/research_cache/sharadar_sep_ohlcv"
+}

@@ -42,13 +42,12 @@
   "reason_codes": [
     "research_only_no_runtime_change",
     "argo_evidence_consumer_only",
-    "phoenix_external_dependency_blocked",
-    "nasdaq_data_link_qelx06_temporary_disablement"
+    "phoenix_liquidity_capacity_failed"
   ],
   "recommendations": [
     {
-      "action": "hold until Sharadar SEP OHLCV access is restored, then rebuild liquidity evidence.",
-      "classification": "EXTERNAL_DEPENDENCY_BLOCKED",
+      "action": "hold current candidate after measured Phase C capacity failure; no Shadow-readiness review without new evidence or owner-approved capacity policy change.",
+      "classification": "NOT_VIABLE_CURRENT_PHASE_B",
       "item": "phoenix"
     },
     {
@@ -153,19 +152,18 @@
     },
     {
       "blockers": [
-        "external_dependency_blocked",
-        "nasdaq_data_link_qelx06_temporary_disablement",
-        "pit_liquidity_ohlcv_unavailable"
+        "capacity_below_5pct_adv_policy",
+        "liquidity_capacity_failed"
       ],
-      "classification": "EXTERNAL_DEPENDENCY_BLOCKED",
+      "classification": "NOT_VIABLE_CURRENT_PHASE_B",
       "differentiated": true,
       "notes": [
-        "Phoenix is differentiated and risk-shaped, but Phase C liquidity/capacity remains blocked.",
-        "Blocker owner: Brett.",
-        "Unblock condition: vendor confirms Sharadar SEP OHLCV access restored after Nasdaq Data Link QELx06 temporary disablement."
+        "Phoenix is differentiated and risk-shaped, but Phase C liquidity/capacity evidence is adverse.",
+        "Nasdaq Data Link QELx06 is cleared; the blocker is measured capacity, not vendor access.",
+        "Do not run Shadow-readiness review for the current Phase B candidate."
       ],
-      "pit_ready": false,
-      "score": 42,
+      "pit_ready": true,
+      "score": 67,
       "sleeve_id": "phoenix",
       "source_artifacts": [
         {

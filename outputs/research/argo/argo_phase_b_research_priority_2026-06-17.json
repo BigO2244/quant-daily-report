@@ -7,12 +7,11 @@
   "behavior_change_allowed": false,
   "biggest_platform_blocker": {
     "affected_work": [
-      "Phoenix Phase C",
-      "PIT liquidity infrastructure",
-      "capacity analysis",
-      "future Shadow readiness"
+      "Cassiopeia Phase C",
+      "event-driven validation",
+      "future event-sleeve Shadow readiness"
     ],
-    "blocker": "Sharadar SEP OHLCV access unavailable due to Nasdaq Data Link QELx06 temporary disablement."
+    "blocker": "PIT event taxonomy and event-tape contract missing for event-driven research."
   },
   "dependency_map": {
     "argo": [
@@ -37,10 +36,7 @@
       "optional sector/factor overlap diagnostic"
     ],
     "phoenix": [
-      "Sharadar SEP OHLCV access",
-      "OHLCV cache rebuild",
-      "PIT liquidity panel",
-      "Phase C rerun"
+      "new candidate evidence or owner-approved capacity policy change"
     ],
     "polaris": [
       "baseline monitoring",
@@ -49,7 +45,6 @@
   },
   "evidence_inventory": {
     "external_blockers": [
-      "Nasdaq Data Link QELx06 disables Sharadar SEP OHLCV restoration for Phoenix liquidity/capacity.",
       "Cygnus v1 requires PIT consensus/EPS-surprise vendor data."
     ],
     "ignored_by_design": [
@@ -80,9 +75,9 @@
   ],
   "governance_label": "RESEARCH_ONLY",
   "highest_roi_research_task": {
-    "reason": "It resolves the single largest blocker on the most differentiated risk-shaped sleeve and unlocks a Shadow-readiness decision.",
-    "sleeve_id": "phoenix",
-    "task": "Restore Sharadar SEP OHLCV access and rebuild PIT liquidity/capacity evidence."
+    "reason": "Phoenix's vendor blocker is cleared and its current candidate failed capacity; Cassiopeia is now the largest unresolved research-data contract.",
+    "sleeve_id": "cassiopeia",
+    "task": "Build a PIT-safe event taxonomy and event-tape contract."
   },
   "priority_methodology": {
     "classifications": [
@@ -115,51 +110,10 @@
     "research_only_no_runtime_change",
     "argo_advisory_only",
     "forced_research_priority_ranking",
-    "phoenix_external_dependency_blocked",
+    "phoenix_liquidity_capacity_failed",
     "stop_independent_lyra_research"
   ],
   "research_priority_ranking": [
-    {
-      "blockers": [
-        "external_dependency_blocked",
-        "nasdaq_data_link_qelx06_temporary_disablement",
-        "pit_liquidity_ohlcv_unavailable"
-      ],
-      "inputs": {
-        "dependency_impact": 20,
-        "differentiation": 20,
-        "evidence_gap": 18,
-        "external_blocker_penalty": 3,
-        "governance_readiness": 12,
-        "implementation_readiness": 16,
-        "uncertainty_reduction": 20
-      },
-      "next_research_action": "Restore Sharadar SEP OHLCV access, rebuild PIT liquidity panel, rerun Phoenix Phase C, then reassess Shadow readiness.",
-      "priority_classification": "BLOCKED_EXTERNAL",
-      "rationale": [
-        "Phoenix is the most differentiated candidate versus the momentum family.",
-        "Phase B risk-shaping candidate is SHADOW_SPEC_CANDIDATE_RESEARCH_ONLY.",
-        "Phase C liquidity classification is {'classification': 'PENDING_LIQUIDITY', 'is_not_viable': False, 'is_shadow_ready': False, 'phase_b_context': {'classification': 'PHOENIX_RISK_SHAPING_CANDIDATE_PENDING_LIQUIDITY', 'is_shadow_eligible': False, 'reason_codes': ['candidate_variant_found', 'pit_liquidity_source_missing'], 'shadow_readiness_work_justified': True}, 'rationale': 'Phase B found risk-shaped Phoenix candidates, but ADV participation, capacity, crisis liquidity degradation, slippage, and implementation shortfall cannot be measured from the repo-local close-only PIT cache.', 'reason_codes': ['pit_volume_source_missing', 'capacity_not_decision_grade']}, so research effort should attack the data dependency first."
-      ],
-      "research_priority_rank": 1,
-      "research_priority_score": 100,
-      "research_to_stop": "Stop additional Phoenix alpha tuning until liquidity and capacity evidence exists.",
-      "sleeve_id": "phoenix",
-      "source_artifacts": [
-        {
-          "exists": true,
-          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_crisis_recovery_2026-06-17.json"
-        },
-        {
-          "exists": true,
-          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json"
-        },
-        {
-          "exists": true,
-          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json"
-        }
-      ]
-    },
     {
       "blockers": [
         "decision_grade_evidence_missing",
@@ -182,7 +136,7 @@
         "The largest uncertainty is binary and platform-useful: can Caerus build a PIT-safe event tape?",
         "A minimal event contract would also support later Argo evidence comparisons."
       ],
-      "research_priority_rank": 2,
+      "research_priority_rank": 1,
       "research_priority_score": 84,
       "research_to_stop": "Do not implement event signals before the event contract proves timestamp availability and source lineage.",
       "sleeve_id": "cassiopeia",
@@ -213,7 +167,7 @@
         "Paired t-stat is None; active share is 0.1919045898.",
         "The next useful work is governance disposition, not another generic comparison."
       ],
-      "research_priority_rank": 3,
+      "research_priority_rank": 2,
       "research_priority_score": 65,
       "research_to_stop": "Stop open-ended Orion versus Lyra performance comparisons unless new holdout or sector/factor evidence is added.",
       "sleeve_id": "orion",
@@ -225,6 +179,48 @@
         {
           "exists": true,
           "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/docs/governance/fr_active/fr_068_phase_c_disposition_analysis.md"
+        }
+      ]
+    },
+    {
+      "blockers": [
+        "capacity_below_5pct_adv_policy",
+        "liquidity_capacity_failed",
+        "liquidity_evidence_failed",
+        "not_shadow_readiness_eligible"
+      ],
+      "inputs": {
+        "dependency_impact": 8,
+        "differentiation": 20,
+        "evidence_gap": 8,
+        "external_blocker_penalty": 0,
+        "governance_readiness": 12,
+        "implementation_readiness": 10,
+        "uncertainty_reduction": 6
+      },
+      "next_research_action": "Do not run Shadow-readiness review for the current Phoenix Phase B candidate; revisit only with new candidate evidence or owner-approved capacity policy change.",
+      "priority_classification": "BLOCKED_EVIDENCE",
+      "rationale": [
+        "Phoenix is the most differentiated candidate versus the momentum family.",
+        "Phase B risk-shaping candidate is SHADOW_SPEC_CANDIDATE_RESEARCH_ONLY.",
+        "Phase C liquidity classification is {'classification': 'NOT_VIABLE', 'is_not_viable': True, 'is_shadow_ready': False, 'phase_b_context': {'classification': 'PHOENIX_RISK_SHAPING_CANDIDATE_PENDING_LIQUIDITY', 'is_shadow_eligible': False, 'reason_codes': ['candidate_variant_found', 'pit_liquidity_source_missing'], 'shadow_readiness_work_justified': True}, 'rationale': 'Measured PIT liquidity indicates at least one selected Phoenix position cannot support the reference capital at 5% ADV.', 'reason_codes': ['capacity_below_5pct_adv_policy']}; the vendor dependency is cleared but measured capacity is adverse."
+      ],
+      "research_priority_rank": 3,
+      "research_priority_score": 64,
+      "research_to_stop": "Stop additional Phoenix alpha tuning and Shadow-readiness work for the current candidate after Phase C capacity failure.",
+      "sleeve_id": "phoenix",
+      "source_artifacts": [
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_crisis_recovery_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json"
+        },
+        {
+          "exists": true,
+          "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json"
         }
       ]
     },

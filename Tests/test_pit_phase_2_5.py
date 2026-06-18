@@ -106,6 +106,14 @@ def test_sep_rows_to_series_sorted_dedup() -> None:
     assert s[-1]["closeadj"] == 11.5  # last write wins on dup date
 
 
+def test_sep_rows_to_series_ohlcv_columns() -> None:
+    rows = [{"ticker": "AAPL", "date": "2024-01-02", "open": 1, "high": 2, "low": 0.5,
+             "close": 1.5, "closeadj": 1.4, "volume": 100}]
+    s = sep_rows_to_series(rows, "ticker,date,open,high,low,close,closeadj,volume")
+    assert s == [{"date": "2024-01-02", "open": 1, "high": 2, "low": 0.5,
+                  "close": 1.5, "closeadj": 1.4, "volume": 100}]
+
+
 def test_coverage_through_delist_date() -> None:
     series = [{"date": "2022-10-25"}, {"date": "2022-10-27"}]
     assert coverage_through(series, "2022-10-27") is True
@@ -136,6 +144,28 @@ def test_hydrate_with_injected_fetch_and_resume(tmp_path: Path) -> None:
     m2 = hydrate(["TWTR", "DEAD"], api_key="x", cache_dir=cache, get_fn=fake_get, sleep_s=0,
                  retrieved_at="2026-06-10T00:00:00+00:00")
     assert m2["skipped_existing"] == 1
+    assert m2["per_ticker"]["TWTR"]["status"] == "skipped_existing"
+
+
+def test_hydrate_ohlcv_manifest_contract(tmp_path: Path) -> None:
+    payload = {"datatable": {"columns": [
+        {"name": "ticker"}, {"name": "date"}, {"name": "open"}, {"name": "high"},
+        {"name": "low"}, {"name": "close"}, {"name": "closeadj"}, {"name": "volume"},
+    ], "data": [["AAPL", "2024-01-02", 180, 181, 179, 180.5, 178.5, 1000]]}}
+
+    def fake_get(table, params):
+        assert params["qopts.columns"] == "ticker,date,open,high,low,close,closeadj,volume"
+        return payload
+
+    cache = tmp_path / "sep_ohlcv"
+    m = hydrate(["AAPL"], api_key="x", cache_dir=cache, get_fn=fake_get, sleep_s=0,
+                columns="ticker,date,open,high,low,close,closeadj,volume",
+                retrieved_at="2026-06-18T00:00:00+00:00")
+    assert m["requested_columns"] == ["ticker", "date", "open", "high", "low", "close", "closeadj", "volume"]
+    assert m["ticker_count"] == 1
+    assert m["total_rows"] == 1
+    assert m["null_counts"]["volume"] == 0
+    assert m["per_ticker"]["AAPL"]["sha256"]
 
 
 def test_hydrate_no_fallback_to_universe_csv(tmp_path: Path) -> None:

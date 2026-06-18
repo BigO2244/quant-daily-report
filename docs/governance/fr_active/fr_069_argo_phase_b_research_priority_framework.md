@@ -28,20 +28,18 @@ Current forced research priority ranking:
 
 | Rank | Sleeve | Classification | Research action |
 |---:|---|---|---|
-| 1 | Phoenix | BLOCKED_EXTERNAL | Restore Sharadar SEP OHLCV access, rebuild PIT liquidity panel, rerun Phoenix Phase C, and reassess Shadow readiness. |
-| 2 | Cassiopeia | BLOCKED_DATA | Build a PIT-safe event taxonomy and event-tape contract. |
-| 3 | Orion | BLOCKED_DATA | Prepare an owner-facing Orion/Lyra merge-watch disposition packet. |
+| 1 | Cassiopeia | BLOCKED_DATA | Build a PIT-safe event taxonomy and event-tape contract. |
+| 2 | Orion | BLOCKED_DATA | Prepare an owner-facing Orion/Lyra merge-watch disposition packet. |
+| 3 | Phoenix | BLOCKED_EVIDENCE | Hold the current candidate after Phase C capacity failure; revisit only with new candidate evidence or owner-approved capacity policy change. |
 | 4 | Argo | RESEARCH_PRIORITY_MEDIUM | Accumulate advisory scoring history and reviewer notes. |
 | 5 | Cygnus | BLOCKED_DATA | Defer until PIT consensus/EPS-surprise data is selected. |
 | 6 | Polaris | RESEARCH_PRIORITY_LOW | Keep as baseline/control; avoid new feature work. |
 | 7 | Lyra | RESEARCH_PRIORITY_LOW | Stop independent Lyra promotion research; use only in disposition or redeployment work. |
 
-Highest-ROI task: restore Sharadar SEP OHLCV access and rebuild PIT
-liquidity/capacity evidence for Phoenix.
+Highest-ROI task: build Cassiopeia PIT event taxonomy and event-tape contract.
 
-Biggest platform blocker: Nasdaq Data Link `QELx06` temporary disablement,
-which blocks PIT liquidity infrastructure, capacity analysis, Phoenix Phase C,
-and Phoenix Shadow-readiness assessment.
+Biggest platform blocker: PIT event taxonomy and event-tape contract missing
+for event-driven research.
 
 ## Evidence Inventory
 
@@ -96,13 +94,12 @@ large platform decision. That is why Phoenix ranks first despite being
 
 ### 1. Phoenix
 
-Phoenix is the highest-ROI research target because it is differentiated,
-risk-shaped, and blocked by a single platform dependency. Restoring Sharadar
-SEP OHLCV access would unlock PIT liquidity/capacity validation, Phoenix Phase
-C, and a Shadow-readiness decision.
+Phoenix remains differentiated and risk-shaped, but it is no longer blocked by
+vendor access. Sharadar SEP OHLCV was restored and Phase C liquidity/capacity
+evidence is decision-grade but adverse for the current candidate.
 
-Research to stop: do not tune Phoenix alpha further until liquidity and
-capacity evidence exists.
+Research to stop: do not tune Phoenix alpha further or run a Shadow-readiness
+review for the current candidate after Phase C capacity failure.
 
 ### 2. Cassiopeia
 
@@ -142,7 +139,7 @@ Orion/Lyra disposition work or a future owner-approved redeployment thesis.
 
 | Sleeve | Dependencies |
 |---|---|
-| Phoenix | Sharadar SEP OHLCV access, OHLCV cache rebuild, PIT liquidity panel, Phase C rerun. |
+| Phoenix | New candidate evidence or owner-approved capacity policy change after measured Phase C capacity failure. |
 | Cassiopeia | Owner-approved event taxonomy, PIT event tape, availability timestamps. |
 | Orion | Owner disposition decision, optional sector/factor overlap diagnostic. |
 | Lyra | Owner disposition decision, redeployment thesis if retained under a new purpose. |
@@ -152,18 +149,14 @@ Orion/Lyra disposition work or a future owner-approved redeployment thesis.
 
 ## Blocker Analysis
 
-The largest blocker is platform-level PIT liquidity data. It affects Phoenix
-directly and any future capacity-aware sleeve evaluation indirectly.
-
-The second major blocker is missing PIT event data. Cassiopeia can attack this
-without waiting for Sharadar OHLCV restoration, but it should start with an
-event contract, not signals.
+The largest remaining research-data blocker is missing PIT event data.
+Cassiopeia can attack this with an event contract, not signals.
 
 ## Recommended Next Research Tasks
 
-1. Restore Sharadar SEP OHLCV access and rebuild PIT liquidity/capacity evidence.
-2. Build Cassiopeia PIT event taxonomy and event-tape contract.
-3. Prepare owner-facing Orion/Lyra merge-watch disposition packet.
+1. Build Cassiopeia PIT event taxonomy and event-tape contract.
+2. Prepare owner-facing Orion/Lyra merge-watch disposition packet.
+3. Hold current Phoenix candidate after measured Phase C capacity failure.
 4. Add Argo scoring-history notes when future evidence packets change ranks.
 
 ## Governance Controls
@@ -182,9 +175,9 @@ allocation. The artifact and this packet explicitly prevent that: Argo Phase B
 does not allocate, promote, retire, select securities, submit trades, or change
 runtime behavior.
 
-The second challenge is that Phoenix is externally blocked. The ranking handles
-that directly: Phoenix is first because unblocking OHLCV evidence is the
-highest-value uncertainty, not because Phoenix is ready for Shadow.
+The second challenge is that Phoenix is differentiated but capacity-failed. The
+ranking handles that directly: Phoenix is evidence-blocked, not externally
+blocked, and is not ready for Shadow.
 
 ## Decision Status
 
@@ -192,10 +185,10 @@ highest-value uncertainty, not because Phoenix is ready for Shadow.
 
 Allowed next work:
 
-- restore Sharadar SEP OHLCV access;
-- rebuild PIT liquidity/capacity evidence;
 - build Cassiopeia event-contract evidence;
 - prepare Orion/Lyra disposition governance.
+- revisit Phoenix only with new candidate evidence or owner-approved capacity
+  policy change.
 
 Disallowed from this packet:
 

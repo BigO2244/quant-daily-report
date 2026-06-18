@@ -55,7 +55,7 @@ architecture should align with it unless explicitly amended.
 | FR-060 Intended NAV True Mark-to-Market | Performance Provenance / Operational Telemetry | `IN_PROGRESS` | LOW | FR-055, FR-058, daily precompute plan snapshots, hydrated/historical price store | implementation_started | Fix intended-NAV so `intended_return_daily` is not mechanically 0.0: mark the carried intended holdings to market at each day's prices to derive the rebalance basis, so price moves since the last rebalance flow into the intended return instead of being erased by a same-day target reconstruction. Carry holdings forward between rebalances; no look-ahead; no fabricated prices; keep the same-day reconstruction as a clearly-labeled fallback when carried holdings cannot be priced. status_review_needed; no deployment evidence in this backlog. | Revert FR-060 patch; intended NAV reverts to same-day reconstruction (drag = 0 − actual). No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-061 Operational Drag Reporting Cleanup | Performance Provenance / Operational Telemetry | `DEPLOYED_OBSERVING` | LOW | FR-055..FR-060, `research/review_packet.py` operational-drag section | observing | Operational-drag output now classifies reason codes into current-date, historical, window, material, and non-material groups, plus `current_date_status`, `decision_grade`, and a decision-grade explanation. June 9 output is decision-grade with MEDIUM confidence while preserving historical caveats. | Revert FR-061 patch; consumers fall back to the flat `reason_codes` list. No execution, broker, allocation, strategy, or promotion behavior changes are in scope. |
 | FR-062 Reconciliation Drift Investigation and Patch | Performance Provenance / Operational Telemetry | `DEPLOYED_OBSERVING` | LOW | FR-059..FR-061, run-scoped broker/reconciliation artifacts | observing | Current-date operational-drag reconciliation blockers now distinguish true broker/model drift from artifact selection/parser over-classification. Split account/position artifacts and `normalized_positions` dictionaries are parsed; gross exposure can be derived from cash/equity when direct exposure is absent. | Revert FR-062 diagnostic/parser patch; ignore the date-scoped reconciliation drift diagnostic artifact. No execution, broker submission, allocation, strategy, or promotion behavior changes are in scope. |
-| FR-050 Phoenix Phase B Historical Behavior Review | Investment Confidence / Research Evidence | `EXTERNAL_DEPENDENCY_BLOCKED` | LOW | Existing Phoenix research artifacts, VIX/regime data, price panels, shadow snapshots, FR-069 Phase C onboarding, Sharadar SEP OHLCV access | pending_vendor_access | Phoenix is differentiated and Phase B risk-shaping evidence is promising, but Phase C liquidity/capacity validation is blocked. Formal blocker: Nasdaq Data Link `QELx06` temporary disablement. Owner: Brett. Unblock condition: vendor confirms Sharadar SEP OHLCV access restored. Next action after unblock: rebuild OHLCV cache, build PIT liquidity panel, re-run Phoenix Phase C, then run Shadow-readiness assessment. Phoenix remains Research-stage; no logic, output, Shadow, allocation, execution, broker, risk, cron, or promotion behavior changes. | Revert the Phase B/Phase C research modules/CLI/tests/onboarding docs; ignore generated Phoenix evidence artifacts. No strategy, execution, broker, cron, allocation, or promotion behavior changes are in scope. |
+| FR-050 Phoenix Phase B Historical Behavior Review | Investment Confidence / Research Evidence | `NOT_VIABLE_CURRENT_PHASE_B` | LOW | Existing Phoenix research artifacts, VIX/regime data, price panels, shadow snapshots, FR-069 Phase C onboarding, Sharadar SEP OHLCV cache, PIT liquidity panel | liquidity_capacity_failed | Phoenix is differentiated and risk-shaped, and the prior Nasdaq Data Link `QELx06` blocker is cleared. The 2026-06-18 OHLCV rebuild hydrated 1,600 PIT large-cap tickers with 7,845,012 rows and no empty/failed tickers; Phase C measured 80/80 candidate rows but classified Phoenix `NOT_VIABLE` for `capacity_below_5pct_adv_policy` at `$1M` reference capital. Phoenix remains Research-stage; no logic, output, Shadow, allocation, execution, broker, risk, cron, or promotion behavior changes. | Revert the Phase B/Phase C research modules/CLI/tests/onboarding docs; ignore generated Phoenix evidence artifacts. No strategy, execution, broker, cron, allocation, or promotion behavior changes are in scope. |
 | FR-053 Argo Phase B Regime Selection Validation | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Existing Argo selection artifacts, model tournament, promotion readiness, VIX/regime data, FR-069 Phase C onboarding, Phase A evidence framework, Phase B research-priority framework | phase_b_research_priority_added | Validate Argo as a research-only regime overlay/model-selection layer, including stability, transition diagnostics, input freshness, no-lookahead checks, evidence consumption, and advisory research prioritization. Argo is now represented as a governed FR-069 Research-stage meta-model candidate via `docs/governance/fr_active/fr_069_argo_onboarding_packet.md`, evidence template `docs/governance/fr_active/fr_069_argo_evidence_envelope_template.json`, Phase A evidence-consumer framework `docs/governance/fr_active/fr_069_argo_phase_a_evidence_framework.md`, and Phase B research-priority framework `docs/governance/fr_active/fr_069_argo_phase_b_research_priority_framework.md`; this does not activate allocation switching, promotion, retirement, or runtime behavior. | Revert the Phase A/Phase B research frameworks, Phase B validation module/CLI/tests/onboarding docs; ignore generated `argo_phase_a_evidence_framework.*`, `argo_phase_b_research_priority.*`, and `argo_phase_b_validation.*` artifacts. No capital routing, promotion, retirement, or production selection behavior changes are in scope. |
 | FR-052 Cassiopeia Event-Driven Spec | Research / Event-Driven Strategy Spec | `ACTIVE_RESEARCH` | LOW | `docs/governance/fr_archive/fr_052_cassiopeia_research_spec.md`, FR-069 Phase C onboarding | phase_c_research_onboarded | Canonical event-driven strategy spec remains spec-only and active backlog maintenance is tracked here until an explicit implementation decision is made. Cassiopeia is now represented as a governed FR-069 Research-stage event-driven candidate via `docs/governance/fr_active/fr_069_cassiopeia_onboarding_packet.md` and evidence template `docs/governance/fr_active/fr_069_cassiopeia_evidence_envelope_template.json`; this does not activate Shadow or runtime behavior. | Revert documentation links/onboarding docs only. No strategy, execution, broker, cron, allocation, or promotion behavior changes are in scope. |
 | FR-063 Strategy Differentiation Deep Dive | Investment Confidence / Research Evidence | `ACTIVE_RESEARCH` | LOW | Shadow snapshots, attribution, model tournament, promotion readiness, strategy registry, FR-069 sleeve architecture | active_supporting_evidence | Active supporting differentiation evidence under FR-069. Historical and current artifacts suggest Orion and Lyra are highly correlated/redundant, with Lyra the current low-confidence watch-list leader, but no final retain/retire decision is approved. Future conclusions require sufficient canonical new-series history under `dated_same_day_close_to_close_v1`; disposition belongs inside FR-069's data-driven promotion/retirement framework. Research-only redundancy study spec added at `docs/governance/fr_active/fr_063_orion_lyra_redundancy_study.md`; current FR-069 governance packet lives at `docs/governance/fr_active/fr_069_orion_lyra_redundancy_packet.md`. | Revert the deep-dive module/CLI/tests/spec docs; ignore generated `strategy_differentiation_deep_dive.*` artifacts. No strategy retirement, promotion, Lyra-name reuse, or execution behavior changes are in scope. |
@@ -118,10 +118,13 @@ procedures are proven.
    standalone immediate retirement decision.
 5. FR-063 remains active supporting differentiation evidence and must use
    sufficient canonical new-series history before retirement conclusions.
-6. Phoenix is formally `EXTERNAL_DEPENDENCY_BLOCKED` until Nasdaq Data Link
-   `QELx06` is cleared and Sharadar SEP OHLCV access is restored; Cassiopeia,
-   Cygnus, and Argo remain Research-stage under FR-069 onboarding packets. Argo
-   Phase A may consume evidence for research classifications only.
+6. Phoenix is no longer externally blocked by Nasdaq Data Link `QELx06`;
+   Sharadar SEP OHLCV access was restored and rebuilt into PIT liquidity
+   evidence on 2026-06-18. The current Phase B candidate is
+   `NOT_VIABLE_CURRENT_PHASE_B` because Phase C capacity failed the 5% ADV
+   policy; Cassiopeia, Cygnus, and Argo remain Research-stage under FR-069
+   onboarding packets. Argo Phase A may consume evidence for research
+   classifications only.
 
 ## Priority Decision Note — 2026-06-12
 
@@ -509,7 +512,7 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
 - **FR number:** FR-050 Phase B
 - **Title:** Phoenix Historical Behavior Review
 - **Date started:** 2026-06-08
-- **Status:** `EXTERNAL_DEPENDENCY_BLOCKED`
+- **Status:** `NOT_VIABLE_CURRENT_PHASE_B`
 - **Problem statement:** Phoenix has an implemented research generator and an
   evidence tracker, but Caerus still needs a broader historical behavior review
   before Phoenix can be treated as a differentiated crisis-reversal candidate.
@@ -517,12 +520,15 @@ investment-confidence work to the next open IDs: FR-063, FR-064, and FR-065.
   reasons, candidate count distribution, top candidates, overlap versus
   Polaris/Orion/Lyra, regime summaries, drawdown/recovery context when
   available, confidence, and conservative decision-grade status.
-- **Current hold state:** Phoenix is differentiated and risk-shaped but blocked
-  on PIT liquidity/capacity validation. Blocker: Nasdaq Data Link `QELx06`
-  temporary disablement. Owner: Brett. Unblock condition: vendor confirms
-  Sharadar SEP OHLCV access restored. Next action after unblock: rebuild OHLCV
-  cache, build PIT liquidity panel, re-run Phoenix Phase C, then run a
-  Shadow-readiness assessment.
+- **Current hold state:** Phoenix is differentiated and risk-shaped, but
+  decision-grade PIT liquidity/capacity evidence now fails. Nasdaq Data Link
+  `QELx06` is cleared; the 2026-06-18 OHLCV rebuild hydrated 1,600 PIT
+  large-cap tickers / 7,845,012 rows with no empty or failed tickers. Phase C
+  measured 80/80 Phoenix candidate rows and classified `NOT_VIABLE` because
+  the weakest selected name cannot support the `$1M` reference portfolio at 5%
+  ADV (`capacity_below_5pct_adv_policy`; minimum 5% ADV capacity about
+  `$74.6k`). Phoenix is not eligible for Shadow readiness review without a new
+  research candidate or explicit owner-approved capacity policy change.
 - **Non-goals:** No Phoenix threshold tuning, no shadow promotion, no paper/live
   behavior changes, no broker calls, no cron changes, and no capital routing.
 - **Planned artifacts:** `outputs/model_quality/<date>/phoenix_phase_b_review.json`

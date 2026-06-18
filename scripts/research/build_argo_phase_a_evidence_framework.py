@@ -103,13 +103,25 @@ def build_argo_phase_a_evidence_framework(
     if isinstance(raw_phoenix_c_status, dict):
         raw_phoenix_c_status = raw_phoenix_c_status.get("classification")
     phoenix_c_status = str(raw_phoenix_c_status or "")
-    phoenix_blockers = [
-        "external_dependency_blocked",
-        "nasdaq_data_link_qelx06_temporary_disablement",
-        "pit_liquidity_ohlcv_unavailable",
-    ]
-    if phoenix_c_status and phoenix_c_status != "PENDING_LIQUIDITY":
-        phoenix_blockers.append(f"unexpected_phase_c_status:{phoenix_c_status}")
+    if phoenix_c_status == "PENDING_LIQUIDITY":
+        phoenix_blockers = ["pit_liquidity_source_missing"]
+        phoenix_readiness = "NOT_READY"
+        phoenix_notes = [
+            "Phoenix is differentiated and risk-shaped, but Phase C liquidity/capacity evidence is not decision-grade.",
+            "Rebuild PIT liquidity evidence before any Shadow-readiness review.",
+        ]
+    elif phoenix_c_status == "NOT_VIABLE":
+        phoenix_blockers = ["liquidity_capacity_failed", "capacity_below_5pct_adv_policy"]
+        phoenix_readiness = "NOT_VIABLE_CURRENT_PHASE_B"
+        phoenix_notes = [
+            "Phoenix is differentiated and risk-shaped, but Phase C liquidity/capacity evidence is adverse.",
+            "Nasdaq Data Link QELx06 is cleared; the blocker is measured capacity, not vendor access.",
+            "Do not run Shadow-readiness review for the current Phase B candidate.",
+        ]
+    else:
+        phoenix_blockers = [f"unexpected_phase_c_status:{phoenix_c_status or 'missing'}"]
+        phoenix_readiness = "NOT_READY"
+        phoenix_notes = ["Phoenix Phase C status is missing or unexpected; do not infer readiness."]
 
     sleeves = [
         _score_sleeve(
@@ -160,15 +172,11 @@ def build_argo_phase_a_evidence_framework(
         _score_sleeve(
             sleeve_id="phoenix",
             evidence_quality=62 if phoenix_crisis and phoenix_phase_b else 30,
-            pit_ready=False,
+            pit_ready=phoenix_c_status in {"NOT_VIABLE", "SHADOW_READY"},
             differentiated=True,
             blockers=phoenix_blockers,
-            readiness_hint="EXTERNAL_DEPENDENCY_BLOCKED",
-            notes=[
-                "Phoenix is differentiated and risk-shaped, but Phase C liquidity/capacity remains blocked.",
-                "Blocker owner: Brett.",
-                "Unblock condition: vendor confirms Sharadar SEP OHLCV access restored after Nasdaq Data Link QELx06 temporary disablement.",
-            ],
+            readiness_hint=phoenix_readiness,
+            notes=phoenix_notes,
             sources=[
                 _source(repo / "outputs" / "research" / "phoenix_evidence" / f"phoenix_crisis_recovery_{trade_date}.json"),
                 _source(repo / "outputs" / "research" / "phoenix_evidence" / f"phoenix_phase_b_risk_shaping_{trade_date}.json"),
@@ -273,8 +281,8 @@ def build_argo_phase_a_evidence_framework(
         "recommendations": [
             {
                 "item": "phoenix",
-                "classification": "EXTERNAL_DEPENDENCY_BLOCKED",
-                "action": "hold until Sharadar SEP OHLCV access is restored, then rebuild liquidity evidence.",
+                "classification": phoenix_readiness,
+                "action": "hold current candidate after measured Phase C capacity failure; no Shadow-readiness review without new evidence or owner-approved capacity policy change.",
             },
             {
                 "item": "orion_lyra",
@@ -290,8 +298,7 @@ def build_argo_phase_a_evidence_framework(
         "reason_codes": [
             "research_only_no_runtime_change",
             "argo_evidence_consumer_only",
-            "phoenix_external_dependency_blocked",
-            "nasdaq_data_link_qelx06_temporary_disablement",
+            "phoenix_liquidity_capacity_failed" if phoenix_c_status == "NOT_VIABLE" else "phoenix_liquidity_not_ready",
         ],
     }
     if write:

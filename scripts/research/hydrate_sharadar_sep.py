@@ -41,23 +41,33 @@ from scripts.research.verify_sharadar_coverage import (  # noqa: E402
     resolve_api_key,
 )
 
-SCHEMA_VERSION = "caerus_sharadar_sep_hydration_v1"
+SCHEMA_VERSION = "caerus_sharadar_sep_hydration_v2"
 DEFAULT_CACHE_DIR = "data/research_cache/sharadar_sep"
+DEFAULT_OHLCV_CACHE_DIR = "data/research_cache/sharadar_sep_ohlcv"
 SEP_COLUMNS = "ticker,date,closeadj,close"
+SEP_OHLCV_COLUMNS = "ticker,date,open,high,low,close,closeadj,volume"
 EDGAR_SLEEP_S = 0.34  # ~3 req/s, conservative under the API rate limit
 
 
 # --------------------------------------------------------------------------- #
 # Pure helpers (network-free; unit-tested)
 # --------------------------------------------------------------------------- #
-def sep_rows_to_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sorted, de-duplicated (date, closeadj, close) series from raw SEP rows."""
+def _column_list(columns: str | list[str] | tuple[str, ...]) -> list[str]:
+    if isinstance(columns, str):
+        return [c.strip() for c in columns.split(",") if c.strip()]
+    return [str(c).strip() for c in columns if str(c).strip()]
+
+
+def sep_rows_to_series(rows: list[dict[str, Any]], columns: str | list[str] | tuple[str, ...] = SEP_COLUMNS) -> list[dict[str, Any]]:
+    """Sorted, de-duplicated daily series from raw SEP rows."""
+    requested = _column_list(columns)
+    output_columns = [c for c in requested if c != "ticker"]
     by_date: dict[str, dict[str, Any]] = {}
     for r in rows:
         d = str(r.get("date") or "")[:10]
         if len(d) != 10:
             continue
-        by_date[d] = {"date": d, "closeadj": r.get("closeadj"), "close": r.get("close")}
+        by_date[d] = {c: (d if c == "date" else r.get(c)) for c in output_columns}
     return [by_date[d] for d in sorted(by_date)]
 
 
@@ -87,25 +97,73 @@ def load_tickers_from_family(path: Path, family: str | None = None) -> list[str]
     return sorted(set(out))
 
 
-def _write_series_csv(path: Path, series: list[dict[str, Any]]) -> str:
+def _null_counts(series: list[dict[str, Any]], fieldnames: list[str]) -> dict[str, int]:
+    return {
+        field: sum(1 for row in series if row.get(field) in (None, ""))
+        for field in fieldnames
+    }
+
+
+def _read_cached_series(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _series_stats(path: Path, series: list[dict[str, Any]], fieldnames: list[str]) -> dict[str, Any]:
+    if not series:
+        return {"rows": 0, "reason": "no_sep_rows_returned"}
+    dates = [str(row.get("date") or "") for row in series if row.get("date")]
+    return {
+        "rows": len(series),
+        "first": min(dates) if dates else None,
+        "last": max(dates) if dates else None,
+        "null_counts": _null_counts(series, fieldnames),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None,
+    }
+
+
+def _coverage_gaps(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from datetime import date
+
+    gaps: list[dict[str, Any]] = []
+    prev: date | None = None
+    for row in series:
+        try:
+            cur = date.fromisoformat(str(row.get("date"))[:10])
+        except ValueError:
+            continue
+        if prev is not None and (cur - prev).days > 7:
+            gaps.append({"from": prev.isoformat(), "to": cur.isoformat(), "calendar_days": (cur - prev).days})
+        prev = cur
+    return gaps[:25]
+
+
+def _write_series_csv(path: Path, series: list[dict[str, Any]], fieldnames: list[str] | None = None) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = fieldnames or ["date", "closeadj", "close"]
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["date", "closeadj", "close"])
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in series:
-            writer.writerow({k: row.get(k) for k in ("date", "closeadj", "close")})
+            writer.writerow({k: row.get(k) for k in fieldnames})
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # --------------------------------------------------------------------------- #
 # Fetch (injected in tests)
 # --------------------------------------------------------------------------- #
-def fetch_sep_series(ticker: str, api_key: str, *, get_fn: Callable[..., dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def fetch_sep_series(
+    ticker: str,
+    api_key: str,
+    *,
+    columns: str = SEP_COLUMNS,
+    get_fn: Callable[..., dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     getter = get_fn or (lambda table, params: _ndl_get(table, params, api_key=api_key))
     rows: list[dict[str, Any]] = []
     cursor = None
     for _ in range(200):  # safety cap
-        params: dict[str, Any] = {"ticker": ticker, "qopts.columns": SEP_COLUMNS}
+        params: dict[str, Any] = {"ticker": ticker, "qopts.columns": columns}
         if cursor:
             params["qopts.cursor_id"] = cursor
         payload = getter("SHARADAR/SEP", params)
@@ -126,36 +184,67 @@ def hydrate(
     get_fn: Callable[..., dict[str, Any]] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     retrieved_at: str | None = None,
+    columns: str = SEP_COLUMNS,
 ) -> dict[str, Any]:
     """Hydrate SEP series for `tickers` into the cache. Returns a manifest dict."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     retrieved_at = retrieved_at or datetime.now(tz=timezone.utc).isoformat()
+    requested_columns = _column_list(columns)
+    file_columns = [c for c in requested_columns if c != "ticker"]
     per_ticker: dict[str, dict[str, Any]] = {}
-    hydrated, skipped, empty = 0, 0, 0
+    hydrated, skipped, empty, failed = 0, 0, 0, 0
     for tk in tickers:
         path = cache_dir / f"{tk.replace('/', '_')}.csv"
         if resume and path.exists():
             skipped += 1
+            series = _read_cached_series(path)
+            stats = _series_stats(path, series, file_columns)
+            stats["status"] = "skipped_existing"
+            stats["coverage_gaps"] = _coverage_gaps(series)
+            per_ticker[tk] = stats
             continue
-        series = sep_rows_to_series(fetch_sep_series(tk, api_key, get_fn=get_fn))
+        try:
+            raw_rows = fetch_sep_series(tk, api_key, columns=columns, get_fn=get_fn)
+            series = sep_rows_to_series(raw_rows, requested_columns)
+        except Exception as exc:
+            failed += 1
+            per_ticker[tk] = {"rows": 0, "status": "failed", "reason": type(exc).__name__}
+            continue
         if not series:
             empty += 1
-            per_ticker[tk] = {"rows": 0, "reason": "no_sep_rows_returned"}
+            per_ticker[tk] = {"rows": 0, "status": "empty", "reason": "no_sep_rows_returned"}
         else:
-            sha = _write_series_csv(path, series)
+            sha = _write_series_csv(path, series, file_columns)
             hydrated += 1
             per_ticker[tk] = {"rows": len(series), "first": series[0]["date"],
-                              "last": series[-1]["date"], "sha256": sha}
+                              "last": series[-1]["date"], "sha256": sha,
+                              "null_counts": _null_counts(series, file_columns),
+                              "coverage_gaps": _coverage_gaps(series),
+                              "status": "hydrated"}
         if get_fn is None and sleep_s:
             sleep_fn(sleep_s)
 
     all_dates = [v["first"] for v in per_ticker.values() if "first" in v] + \
                 [v["last"] for v in per_ticker.values() if "last" in v]
+    row_counts = {tk: int(v.get("rows") or 0) for tk, v in per_ticker.items()}
+    null_counts: dict[str, int] = {field: 0 for field in file_columns}
+    coverage_gaps = {}
+    for tk, stats in per_ticker.items():
+        for field, count in (stats.get("null_counts") or {}).items():
+            null_counts[field] = null_counts.get(field, 0) + int(count or 0)
+        if stats.get("coverage_gaps"):
+            coverage_gaps[tk] = stats["coverage_gaps"]
     manifest = {
         "schema_version": SCHEMA_VERSION, "governance_label": "RESEARCH_ONLY",
         "execution_impact": "NON_EXECUTIONAL", "source_table": "SHARADAR/SEP",
-        "retrieved_at": retrieved_at, "requested": len(tickers),
-        "hydrated": hydrated, "skipped_existing": skipped, "empty": empty,
+        "retrieved_at": retrieved_at, "requested_columns": requested_columns,
+        "ticker_count": len(tickers), "requested": len(tickers),
+        "hydrated": hydrated, "skipped_existing": skipped, "empty": empty, "failed": failed,
+        "row_counts": row_counts, "total_rows": sum(row_counts.values()),
+        "null_counts": null_counts,
+        "failed_tickers": [tk for tk, v in per_ticker.items() if v.get("status") == "failed"],
+        "empty_tickers": [tk for tk, v in per_ticker.items() if v.get("status") == "empty"],
+        "coverage_gaps": coverage_gaps,
         "date_range": [min(all_dates), max(all_dates)] if all_dates else [None, None],
         "per_ticker": per_ticker,
     }
@@ -171,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--from-family", default=None, help="membership_universe.csv to read tickers from.")
     parser.add_argument("--family", default=None, help="Filter membership rows to this family.")
     parser.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR)
+    parser.add_argument("--columns", default=SEP_COLUMNS)
+    parser.add_argument("--ohlcv", action="store_true", help="Fetch OHLCV fields into the versioned OHLCV cache.")
     parser.add_argument("--no-resume", action="store_true", help="Re-fetch even if cached.")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--sleep", type=float, default=EDGAR_SLEEP_S)
@@ -196,10 +287,16 @@ def main(argv: list[str] | None = None) -> int:
         print("[SEP_HYDRATE][ERROR] no tickers (use --tickers or --from-family).", file=sys.stderr)
         return 1
 
-    manifest = hydrate(tickers, api_key=api_key, cache_dir=Path(args.cache_dir),
-                       resume=not args.no_resume, sleep_s=args.sleep)
+    cache_dir = Path(args.cache_dir)
+    columns = args.columns
+    if args.ohlcv:
+        columns = SEP_OHLCV_COLUMNS
+        if args.cache_dir == DEFAULT_CACHE_DIR:
+            cache_dir = Path(DEFAULT_OHLCV_CACHE_DIR)
+    manifest = hydrate(tickers, api_key=api_key, cache_dir=cache_dir,
+                       resume=not args.no_resume, sleep_s=args.sleep, columns=columns)
     print(json.dumps({k: manifest[k] for k in
-                      ("requested", "hydrated", "skipped_existing", "empty", "date_range")},
+                      ("ticker_count", "hydrated", "skipped_existing", "empty", "failed", "total_rows", "date_range")},
                      indent=2, sort_keys=True))
     return 0
 

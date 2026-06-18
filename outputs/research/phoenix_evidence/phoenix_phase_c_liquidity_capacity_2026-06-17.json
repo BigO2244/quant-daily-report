@@ -1,19 +1,31 @@
 {
   "artifact_date": "2026-06-17",
   "candidate_inventory": {
+    "adv_participation": {
+      "count": 80,
+      "max": 1.0419199835,
+      "mean": 0.0235014228,
+      "median": 0.0013055856,
+      "min": 5.23395e-05,
+      "p95": 0.0251463069
+    },
     "average_candidate_vol_20d_ann": 1.0320801627,
     "average_event_turnover": 1.6,
     "average_gross_exposure": 0.8,
     "candidate_row_count": 80,
     "candidate_rows_sample": [
       {
-        "adv_participation": null,
+        "adv_participation": 0.0013146431,
+        "capacity_at_10pct_adv": 120025210.36437501,
+        "capacity_at_5pct_adv": 60012605.182187505,
+        "crisis_liquidity_degradation": -0.1185263167,
+        "dollar_adv_participation": 0.0008331583,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.4432240801,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1200.2521036437,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CHKAQ",
@@ -21,13 +33,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0006270301,
+        "capacity_at_10pct_adv": 221738601.8125,
+        "capacity_at_5pct_adv": 110869300.90625,
+        "crisis_liquidity_degradation": 0.6240434061,
+        "dollar_adv_participation": 0.0004509815,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.0618162121,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2217.386018125,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "DATA",
@@ -35,13 +51,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0001320291,
+        "capacity_at_10pct_adv": 985466898.02875,
+        "capacity_at_5pct_adv": 492733449.014375,
+        "crisis_liquidity_degradation": 0.7603381495,
+        "dollar_adv_participation": 0.0001014747,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.5036733634,
+        "liquidity_fields_available": true,
+        "position_liquidity": 9854.6689802875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "LNKD",
@@ -49,13 +69,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0038274769,
+        "capacity_at_10pct_adv": 37651852.8125,
+        "capacity_at_5pct_adv": 18825926.40625,
+        "crisis_liquidity_degradation": -0.1373441569,
+        "dollar_adv_participation": 0.0026559118,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.5767769574,
+        "liquidity_fields_available": true,
+        "position_liquidity": 376.518528125,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "MPLX",
@@ -63,13 +87,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0024568754,
+        "capacity_at_10pct_adv": 49168322.448125,
+        "capacity_at_5pct_adv": 24584161.2240625,
+        "crisis_liquidity_degradation": -0.2234087251,
+        "dollar_adv_participation": 0.0020338298,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.2549001153,
+        "liquidity_fields_available": true,
+        "position_liquidity": 491.6832244812,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SRPT",
@@ -77,13 +105,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0008332016,
+        "capacity_at_10pct_adv": 158395137.625,
+        "capacity_at_5pct_adv": 79197568.8125,
+        "crisis_liquidity_degradation": 0.1083116049,
+        "dollar_adv_participation": 0.0006313325,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.2563165517,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1583.95137625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SPLK",
@@ -91,13 +123,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0010149135,
+        "capacity_at_10pct_adv": 114468910.7294375,
+        "capacity_at_5pct_adv": 57234455.36471875,
+        "crisis_liquidity_degradation": 0.2508367814,
+        "dollar_adv_participation": 0.0008735996,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.4778359575,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1144.6891072944,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ALKS",
@@ -105,13 +141,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0063140988,
+        "capacity_at_10pct_adv": 21561141.421875,
+        "capacity_at_5pct_adv": 10780570.7109375,
+        "crisis_liquidity_degradation": -0.2996474255,
+        "dollar_adv_participation": 0.0046379734,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 13.4051333975,
+        "liquidity_fields_available": true,
+        "position_liquidity": 215.6114142187,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CIEIQ",
@@ -119,13 +159,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0028927924,
+        "capacity_at_10pct_adv": 44095710.6875,
+        "capacity_at_5pct_adv": 22047855.34375,
+        "crisis_liquidity_degradation": -0.1382554106,
+        "dollar_adv_participation": 0.0022677943,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.3810681791,
+        "liquidity_fields_available": true,
+        "position_liquidity": 440.957106875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ESI",
@@ -133,13 +177,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0178038273,
+        "capacity_at_10pct_adv": 7105506.625,
+        "capacity_at_5pct_adv": 3552753.3125,
+        "crisis_liquidity_degradation": 0.0621537432,
+        "dollar_adv_participation": 0.0140735918,
         "entry_date": "2016-02-11",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 15.9316085154,
+        "liquidity_fields_available": true,
+        "position_liquidity": 71.05506625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "WES",
@@ -147,13 +195,17 @@
         "window_id": "spy_drawdown_1"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0019571445,
+        "capacity_at_10pct_adv": 78097216.75877,
+        "capacity_at_5pct_adv": 39048608.379385,
+        "crisis_liquidity_degradation": -0.083278998,
+        "dollar_adv_participation": 0.0012804554,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.789172548,
+        "liquidity_fields_available": true,
+        "position_liquidity": 780.9721675877,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "NBR",
@@ -161,13 +213,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0014230844,
+        "capacity_at_10pct_adv": 95469252.06250001,
+        "capacity_at_5pct_adv": 47734626.03125001,
+        "crisis_liquidity_degradation": -0.0704297381,
+        "dollar_adv_participation": 0.0010474577,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.6182225331,
+        "liquidity_fields_available": true,
+        "position_liquidity": 954.692520625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PRGO",
@@ -175,13 +231,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0010837866,
+        "capacity_at_10pct_adv": 130854484.550625,
+        "capacity_at_5pct_adv": 65427242.2753125,
+        "crisis_liquidity_degradation": -0.144891021,
+        "dollar_adv_participation": 0.0007642077,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.3822153091,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1308.5448455062,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CHKAQ",
@@ -189,13 +249,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0013763155,
+        "capacity_at_10pct_adv": 103797509.12160937,
+        "capacity_at_5pct_adv": 51898754.56080469,
+        "crisis_liquidity_degradation": -0.1204886948,
+        "dollar_adv_participation": 0.0009634143,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.5519457592,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1037.9750912161,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "VALPQ",
@@ -203,13 +267,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0086217115,
+        "capacity_at_10pct_adv": 15439437.05635625,
+        "capacity_at_5pct_adv": 7719718.528178125,
+        "crisis_liquidity_degradation": -0.0620490591,
+        "dollar_adv_participation": 0.0064769201,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 14.0239657326,
+        "liquidity_fields_available": true,
+        "position_liquidity": 154.3943705636,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "RADCQ",
@@ -217,13 +285,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0006960824,
+        "capacity_at_10pct_adv": 192830028.125,
+        "capacity_at_5pct_adv": 96415014.0625,
+        "crisis_liquidity_degradation": -0.1722549489,
+        "dollar_adv_participation": 0.0005185914,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.1386301307,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1928.30028125,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CAG",
@@ -231,13 +303,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0010671474,
+        "capacity_at_10pct_adv": 125773324.75,
+        "capacity_at_5pct_adv": 62886662.375,
+        "crisis_liquidity_degradation": -0.0997753202,
+        "dollar_adv_participation": 0.0007950812,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.4098591707,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1257.7332475,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "RRC",
@@ -245,13 +321,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0187328832,
+        "capacity_at_10pct_adv": 7243797.498749999,
+        "capacity_at_5pct_adv": 3621898.7493749997,
+        "crisis_liquidity_degradation": -0.0961688349,
+        "dollar_adv_participation": 0.0138049138,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 15.8747156936,
+        "liquidity_fields_available": true,
+        "position_liquidity": 72.4379749875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ELF",
@@ -259,13 +339,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0023781636,
+        "capacity_at_10pct_adv": 55827148.4375,
+        "capacity_at_5pct_adv": 27913574.21875,
+        "crisis_liquidity_degradation": -0.0044064347,
+        "dollar_adv_participation": 0.0017912432,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.1161540585,
+        "liquidity_fields_available": true,
+        "position_liquidity": 558.271484375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PR",
@@ -273,13 +357,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0013606732,
+        "capacity_at_10pct_adv": 98614575.6875,
+        "capacity_at_5pct_adv": 49307287.84375,
+        "crisis_liquidity_degradation": 0.2794110114,
+        "dollar_adv_participation": 0.0010140489,
         "entry_date": "2018-12-24",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.5922067075,
+        "liquidity_fields_available": true,
+        "position_liquidity": 986.145756875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SIG",
@@ -287,13 +375,17 @@
         "window_id": "spy_drawdown_2"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0033784181,
+        "capacity_at_10pct_adv": 44741687.61687501,
+        "capacity_at_5pct_adv": 22370843.808437504,
+        "crisis_liquidity_degradation": -0.2747918779,
+        "dollar_adv_participation": 0.002235052,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.3638168478,
+        "liquidity_fields_available": true,
+        "position_liquidity": 447.4168761688,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CHKAQ",
@@ -301,13 +393,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.001970233,
+        "capacity_at_10pct_adv": 75954802.2624375,
+        "capacity_at_5pct_adv": 37977401.13121875,
+        "crisis_liquidity_degradation": 0.3526901809,
+        "dollar_adv_participation": 0.0013165724,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.8142301733,
+        "liquidity_fields_available": true,
+        "position_liquidity": 759.5480226244,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "FLR",
@@ -315,13 +411,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0030248684,
+        "capacity_at_10pct_adv": 46324170.453125,
+        "capacity_at_5pct_adv": 23162085.2265625,
+        "crisis_liquidity_degradation": 0.4193933423,
+        "dollar_adv_participation": 0.0021587003,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.3230907676,
+        "liquidity_fields_available": true,
+        "position_liquidity": 463.2417045312,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "GRPN",
@@ -329,13 +429,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0004352532,
+        "capacity_at_10pct_adv": 292824577.69750005,
+        "capacity_at_5pct_adv": 146412288.84875003,
+        "crisis_liquidity_degradation": 0.1752362818,
+        "dollar_adv_participation": 0.0003415014,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.9239878096,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2928.245776975,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "W",
@@ -343,13 +447,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0009801222,
+        "capacity_at_10pct_adv": 129717216.81937501,
+        "capacity_at_5pct_adv": 64858608.409687504,
+        "crisis_liquidity_degradation": 0.1232816388,
+        "dollar_adv_participation": 0.0007709077,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.3882612238,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1297.1721681938,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "NTNX",
@@ -357,13 +465,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0011210734,
+        "capacity_at_10pct_adv": 111258779.4459375,
+        "capacity_at_5pct_adv": 55629389.72296875,
+        "crisis_liquidity_degradation": 0.1363877307,
+        "dollar_adv_participation": 0.0008988055,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.4990042312,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1112.5877944594,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CLR",
@@ -371,13 +483,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0003069427,
+        "capacity_at_10pct_adv": 431568213.0446875,
+        "capacity_at_5pct_adv": 215784106.52234375,
+        "crisis_liquidity_degradation": 0.2647971037,
+        "dollar_adv_participation": 0.0002317131,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.7611062348,
+        "liquidity_fields_available": true,
+        "position_liquidity": 4315.6821304469,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "AAL",
@@ -385,13 +501,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0041259946,
+        "capacity_at_10pct_adv": 30375834.380000003,
+        "capacity_at_5pct_adv": 15187917.190000001,
+        "crisis_liquidity_degradation": 0.2254985864,
+        "dollar_adv_participation": 0.0032920906,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.8688371505,
+        "liquidity_fields_available": true,
+        "position_liquidity": 303.7583438,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "DY",
@@ -399,13 +519,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0095656164,
+        "capacity_at_10pct_adv": 12770250.289375,
+        "capacity_at_5pct_adv": 6385125.1446875,
+        "crisis_liquidity_degradation": 0.1217621296,
+        "dollar_adv_participation": 0.0078307001,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 14.4245621487,
+        "liquidity_fields_available": true,
+        "position_liquidity": 127.7025028937,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ENBL",
@@ -413,13 +537,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0018930557,
+        "capacity_at_10pct_adv": 65634944.75,
+        "capacity_at_5pct_adv": 32817472.375,
+        "crisis_liquidity_degradation": -0.1584730459,
+        "dollar_adv_participation": 0.0015235786,
         "entry_date": "2020-02-28",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.9516522757,
+        "liquidity_fields_available": true,
+        "position_liquidity": 656.3494475,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "OVV",
@@ -427,13 +555,17 @@
         "window_id": "spy_drawdown_3"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0594945257,
+        "capacity_at_10pct_adv": 2701072.2618750003,
+        "capacity_at_5pct_adv": 1350536.1309375002,
+        "crisis_liquidity_degradation": 0.0644102523,
+        "dollar_adv_participation": 0.0370223342,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 19.6205943434,
+        "liquidity_fields_available": true,
+        "position_liquidity": 27.0107226187,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "WULF",
@@ -441,13 +573,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0040967869,
+        "capacity_at_10pct_adv": 33392055.551140003,
+        "capacity_at_5pct_adv": 16696027.775570001,
+        "crisis_liquidity_degradation": 1.0257051271,
+        "dollar_adv_participation": 0.0029947243,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.7362037088,
+        "liquidity_fields_available": true,
+        "position_liquidity": 333.9205555114,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "VEON",
@@ -455,13 +591,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0002045729,
+        "capacity_at_10pct_adv": 696138783.07375,
+        "capacity_at_5pct_adv": 348069391.536875,
+        "crisis_liquidity_degradation": 0.0415425108,
+        "dollar_adv_participation": 0.0001436495,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.5992693824,
+        "liquidity_fields_available": true,
+        "position_liquidity": 6961.3878307375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "EPAM",
@@ -469,13 +609,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.001038263,
+        "capacity_at_10pct_adv": 124902078.62500001,
+        "capacity_at_5pct_adv": 62451039.31250001,
+        "crisis_liquidity_degradation": 0.4388781789,
+        "dollar_adv_participation": 0.0008006272,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.414767815,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1249.02078625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "VRT",
@@ -483,13 +627,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0017502543,
+        "capacity_at_10pct_adv": 73975381.15187502,
+        "capacity_at_5pct_adv": 36987690.57593751,
+        "crisis_liquidity_degradation": 0.0804118159,
+        "dollar_adv_participation": 0.0013518011,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.8383423771,
+        "liquidity_fields_available": true,
+        "position_liquidity": 739.7538115188,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "BMBL",
@@ -497,13 +645,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 6.64226e-05,
+        "capacity_at_10pct_adv": 2132215407.9981253,
+        "capacity_at_5pct_adv": 1066107703.9990627,
+        "crisis_liquidity_degradation": 0.127161494,
+        "dollar_adv_participation": 4.68996e-05,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.342416328,
+        "liquidity_fields_available": true,
+        "position_liquidity": 21322.1540799813,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SE",
@@ -511,13 +663,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0001177968,
+        "capacity_at_10pct_adv": 1167050225.6137502,
+        "capacity_at_5pct_adv": 583525112.8068751,
+        "crisis_liquidity_degradation": 0.0365450519,
+        "dollar_adv_participation": 8.56861e-05,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.4628339744,
+        "liquidity_fields_available": true,
+        "position_liquidity": 11670.5022561375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "AFRM",
@@ -525,13 +681,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0021446098,
+        "capacity_at_10pct_adv": 62126362.513125,
+        "capacity_at_5pct_adv": 31063181.2565625,
+        "crisis_liquidity_degradation": -0.3528045117,
+        "dollar_adv_participation": 0.0016096226,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.0060051382,
+        "liquidity_fields_available": true,
+        "position_liquidity": 621.2636251313,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "DNA",
@@ -539,13 +699,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 5.23395e-05,
+        "capacity_at_10pct_adv": 2549054329.1124997,
+        "capacity_at_5pct_adv": 1274527164.5562499,
+        "crisis_liquidity_degradation": -0.0123575651,
+        "dollar_adv_participation": 3.92302e-05,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.3131702207,
+        "liquidity_fields_available": true,
+        "position_liquidity": 25490.543291125,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SHOP",
@@ -553,13 +717,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0020022913,
+        "capacity_at_10pct_adv": 69425495.49249999,
+        "capacity_at_5pct_adv": 34712747.746249996,
+        "crisis_liquidity_degradation": -0.2749889685,
+        "dollar_adv_participation": 0.001440393,
         "entry_date": "2022-03-08",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.8976255115,
+        "liquidity_fields_available": true,
+        "position_liquidity": 694.254954925,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SKLZ",
@@ -567,13 +735,17 @@
         "window_id": "spy_drawdown_4"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0286669592,
+        "capacity_at_10pct_adv": 5927468.9775975,
+        "capacity_at_5pct_adv": 2963734.48879875,
+        "crisis_liquidity_degradation": 1.2300887596,
+        "dollar_adv_participation": 0.0168706071,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 16.4943450523,
+        "liquidity_fields_available": true,
+        "position_liquidity": 59.274689776,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PGY",
@@ -581,13 +753,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 9.61485e-05,
+        "capacity_at_10pct_adv": 1232914676.5725002,
+        "capacity_at_5pct_adv": 616457338.2862501,
+        "crisis_liquidity_degradation": 0.0800177906,
+        "dollar_adv_participation": 8.11086e-05,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.4503016031,
+        "liquidity_fields_available": true,
+        "position_liquidity": 12329.146765725,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SNAP",
@@ -595,13 +771,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0004244475,
+        "capacity_at_10pct_adv": 328895144.5625,
+        "capacity_at_5pct_adv": 164447572.28125,
+        "crisis_liquidity_degradation": 0.1041627863,
+        "dollar_adv_participation": 0.0003040483,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.8718489991,
+        "liquidity_fields_available": true,
+        "position_liquidity": 3288.951445625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "RCL",
@@ -609,13 +789,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0004323647,
+        "capacity_at_10pct_adv": 331513877.69875,
+        "capacity_at_5pct_adv": 165756938.849375,
+        "crisis_liquidity_degradation": 0.0513952096,
+        "dollar_adv_participation": 0.0003016465,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.868398666,
+        "liquidity_fields_available": true,
+        "position_liquidity": 3315.1387769875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ZEN",
@@ -623,13 +807,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0037498693,
+        "capacity_at_10pct_adv": 36711165.37562501,
+        "capacity_at_5pct_adv": 18355582.687812503,
+        "crisis_liquidity_degradation": -0.3654542418,
+        "dollar_adv_participation": 0.0027239669,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.6095818237,
+        "liquidity_fields_available": true,
+        "position_liquidity": 367.1116537563,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CGC",
@@ -637,13 +825,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0001966509,
+        "capacity_at_10pct_adv": 689043095.8750001,
+        "capacity_at_5pct_adv": 344521547.93750006,
+        "crisis_liquidity_degradation": -0.0571533196,
+        "dollar_adv_participation": 0.0001451288,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.6023470831,
+        "liquidity_fields_available": true,
+        "position_liquidity": 6890.43095875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CCL",
@@ -651,13 +843,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0003218086,
+        "capacity_at_10pct_adv": 416704671.485625,
+        "capacity_at_5pct_adv": 208352335.7428125,
+        "crisis_liquidity_degradation": -0.0474061562,
+        "dollar_adv_participation": 0.0002399781,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.7745613456,
+        "liquidity_fields_available": true,
+        "position_liquidity": 4167.0467148563,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "NCLH",
@@ -665,13 +861,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0007404606,
+        "capacity_at_10pct_adv": 175929484.05312502,
+        "capacity_at_5pct_adv": 87964742.02656251,
+        "crisis_liquidity_degradation": -0.3278250728,
+        "dollar_adv_participation": 0.0005684096,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.1920670666,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1759.2948405313,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PTON",
@@ -679,13 +879,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0011237619,
+        "capacity_at_10pct_adv": 114118925.0,
+        "capacity_at_5pct_adv": 57059462.5,
+        "crisis_liquidity_degradation": -0.605273191,
+        "dollar_adv_participation": 0.0008762788,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.480100374,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1141.18925,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "TLRY",
@@ -693,13 +897,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.000269969,
+        "capacity_at_10pct_adv": 508096444.89437497,
+        "capacity_at_5pct_adv": 254048222.44718748,
+        "crisis_liquidity_degradation": -0.4515776312,
+        "dollar_adv_participation": 0.000196813,
         "entry_date": "2022-06-16",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.7014503338,
+        "liquidity_fields_available": true,
+        "position_liquidity": 5080.9644489437,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "UPST",
@@ -707,13 +915,17 @@
         "window_id": "spy_drawdown_5"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0186742865,
+        "capacity_at_10pct_adv": 8007985.755862485,
+        "capacity_at_5pct_adv": 4003992.8779312423,
+        "crisis_liquidity_degradation": -0.9150385912,
+        "dollar_adv_participation": 0.0124875347,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 15.5873819226,
+        "liquidity_fields_available": true,
+        "position_liquidity": 80.0798575586,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PGY",
@@ -721,13 +933,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0019875163,
+        "capacity_at_10pct_adv": 67303669.9032,
+        "capacity_at_5pct_adv": 33651834.9516,
+        "crisis_liquidity_degradation": -0.194669566,
+        "dollar_adv_participation": 0.0014858031,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.9273058135,
+        "liquidity_fields_available": true,
+        "position_liquidity": 673.036699032,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "NKLAQ",
@@ -735,13 +951,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0005353399,
+        "capacity_at_10pct_adv": 240694220.77374998,
+        "capacity_at_5pct_adv": 120347110.38687499,
+        "crisis_liquidity_degradation": -0.5510409291,
+        "dollar_adv_participation": 0.0004154649,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.0191478039,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2406.9422077375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "AMC",
@@ -749,13 +969,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0045937855,
+        "capacity_at_10pct_adv": 29482603.67625,
+        "capacity_at_5pct_adv": 14741301.838125,
+        "crisis_liquidity_degradation": 0.0598591828,
+        "dollar_adv_participation": 0.0033918307,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.9119712786,
+        "liquidity_fields_available": true,
+        "position_liquidity": 294.8260367625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ZLAB",
@@ -763,13 +987,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0009532009,
+        "capacity_at_10pct_adv": 130133294.20937502,
+        "capacity_at_5pct_adv": 65066647.10468751,
+        "crisis_liquidity_degradation": 0.0294755778,
+        "dollar_adv_participation": 0.0007684429,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.3860400914,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1301.3329420938,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "FIVN",
@@ -777,13 +1005,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0001351784,
+        "capacity_at_10pct_adv": 957304674.764375,
+        "capacity_at_5pct_adv": 478652337.3821875,
+        "crisis_liquidity_degradation": -0.0357823945,
+        "dollar_adv_participation": 0.00010446,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.5110282566,
+        "liquidity_fields_available": true,
+        "position_liquidity": 9573.0467476437,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "NIO",
@@ -791,13 +1023,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0022717487,
+        "capacity_at_10pct_adv": 54848583.75,
+        "capacity_at_5pct_adv": 27424291.875,
+        "crisis_liquidity_degradation": -0.0714117182,
+        "dollar_adv_participation": 0.0018232011,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.1349479691,
+        "liquidity_fields_available": true,
+        "position_liquidity": 548.4858375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "OPTU",
@@ -805,13 +1041,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0121665116,
+        "capacity_at_10pct_adv": 10234461.203750007,
+        "capacity_at_5pct_adv": 5117230.601875003,
+        "crisis_liquidity_degradation": -0.0816989041,
+        "dollar_adv_participation": 0.0097709101,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 14.942395691,
+        "liquidity_fields_available": true,
+        "position_liquidity": 102.3446120375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "GRPN",
@@ -819,13 +1059,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0003294494,
+        "capacity_at_10pct_adv": 397503148.13812506,
+        "capacity_at_5pct_adv": 198751574.06906253,
+        "crisis_liquidity_degradation": 0.1383217121,
+        "dollar_adv_participation": 0.0002515703,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.7930484453,
+        "liquidity_fields_available": true,
+        "position_liquidity": 3975.0314813813,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "XPEV",
@@ -833,13 +1077,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0012811027,
+        "capacity_at_10pct_adv": 97070689.719375,
+        "capacity_at_5pct_adv": 48535344.8596875,
+        "crisis_liquidity_degradation": -0.2397483141,
+        "dollar_adv_participation": 0.0010301771,
         "entry_date": "2022-10-12",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.6048185904,
+        "liquidity_fields_available": true,
+        "position_liquidity": 970.7068971938,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "BILI",
@@ -847,13 +1095,17 @@
         "window_id": "spy_drawdown_6"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.000959185,
+        "capacity_at_10pct_adv": 124306007.276875,
+        "capacity_at_5pct_adv": 62153003.6384375,
+        "crisis_liquidity_degradation": 0.2754956198,
+        "dollar_adv_participation": 0.0008044664,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.418155801,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1243.0600727687,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "HBI",
@@ -861,13 +1113,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.5346694723,
+        "capacity_at_10pct_adv": 211175.9975000002,
+        "capacity_at_5pct_adv": 105587.9987500001,
+        "crisis_liquidity_degradation": -0.3889533564,
+        "dollar_adv_participation": 0.4735386653,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 44.4070728667,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2.111759975,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "MSPR",
@@ -875,13 +1131,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0016623315,
+        "capacity_at_10pct_adv": 77035521.44687502,
+        "capacity_at_5pct_adv": 38517760.72343751,
+        "crisis_liquidity_degradation": -0.1939689543,
+        "dollar_adv_participation": 0.0012981025,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.8014594509,
+        "liquidity_fields_available": true,
+        "position_liquidity": 770.3552144688,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "TAL",
@@ -889,13 +1149,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0016176162,
+        "capacity_at_10pct_adv": 74861714.5625,
+        "capacity_at_5pct_adv": 37430857.28125,
+        "crisis_liquidity_degradation": -0.0711159596,
+        "dollar_adv_participation": 0.0013357963,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.8274273462,
+        "liquidity_fields_available": true,
+        "position_liquidity": 748.617145625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "YMM",
@@ -903,13 +1167,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0011182812,
+        "capacity_at_10pct_adv": 101368860.3125,
+        "capacity_at_5pct_adv": 50684430.15625,
+        "crisis_liquidity_degradation": 0.0526836571,
+        "dollar_adv_participation": 0.0009864962,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.5704268882,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1013.688603125,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SIRI",
@@ -917,13 +1185,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0004577614,
+        "capacity_at_10pct_adv": 245625443.411875,
+        "capacity_at_5pct_adv": 122812721.7059375,
+        "crisis_liquidity_degradation": -0.2102248771,
+        "dollar_adv_participation": 0.0004071239,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.008865634,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2456.2544341187,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "BILI",
@@ -931,13 +1203,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0027635147,
+        "capacity_at_10pct_adv": 40434557.613749996,
+        "capacity_at_5pct_adv": 20217278.806874998,
+        "crisis_liquidity_degradation": 0.1605208869,
+        "dollar_adv_participation": 0.002473132,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.4865297309,
+        "liquidity_fields_available": true,
+        "position_liquidity": 404.3455761375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ZLAB",
@@ -945,13 +1221,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0249610094,
+        "capacity_at_10pct_adv": 4391796.38375,
+        "capacity_at_5pct_adv": 2195898.191875,
+        "crisis_liquidity_degradation": 0.2651015837,
+        "dollar_adv_participation": 0.0227697259,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 17.5448203972,
+        "liquidity_fields_available": true,
+        "position_liquidity": 43.9179638375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "YSG",
@@ -959,13 +1239,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0012965281,
+        "capacity_at_10pct_adv": 78753025.97749999,
+        "capacity_at_5pct_adv": 39376512.988749996,
+        "crisis_liquidity_degradation": 0.4480641832,
+        "dollar_adv_participation": 0.0012697925,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.7817073819,
+        "liquidity_fields_available": true,
+        "position_liquidity": 787.530259775,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CHGG",
@@ -973,13 +1257,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0039240525,
+        "capacity_at_10pct_adv": 28877819.487499997,
+        "capacity_at_5pct_adv": 14438909.743749999,
+        "crisis_liquidity_degradation": 0.303609401,
+        "dollar_adv_participation": 0.0034628653,
         "entry_date": "2023-02-06",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.9423057851,
+        "liquidity_fields_available": true,
+        "position_liquidity": 288.778194875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "ROIV",
@@ -987,13 +1275,17 @@
         "window_id": "spy_drawdown_7"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 1.0419199835,
+        "capacity_at_10pct_adv": 149121.4731250002,
+        "capacity_at_5pct_adv": 74560.7365625001,
+        "crisis_liquidity_degradation": -0.1044162291,
+        "dollar_adv_participation": 0.6705942337,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 50.9449091375,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1.4912147313,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "MSPR",
@@ -1001,13 +1293,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0003338335,
+        "capacity_at_10pct_adv": 374946306.149375,
+        "capacity_at_5pct_adv": 187473153.0746875,
+        "crisis_liquidity_degradation": 0.7284925261,
+        "dollar_adv_participation": 0.0002667049,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.8165550417,
+        "liquidity_fields_available": true,
+        "position_liquidity": 3749.4630614938,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "CTLT",
@@ -1015,13 +1311,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0005826536,
+        "capacity_at_10pct_adv": 204963922.87500003,
+        "capacity_at_5pct_adv": 102481961.43750001,
+        "crisis_liquidity_degradation": -0.0209815065,
+        "dollar_adv_participation": 0.0004878907,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.1044124456,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2049.63922875,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "FHN",
@@ -1029,13 +1329,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0022693897,
+        "capacity_at_10pct_adv": 53348865.625,
+        "capacity_at_5pct_adv": 26674432.8125,
+        "crisis_liquidity_degradation": 0.3031744015,
+        "dollar_adv_participation": 0.0018744541,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 12.1647483121,
+        "liquidity_fields_available": true,
+        "position_liquidity": 533.48865625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SITM",
@@ -1043,13 +1347,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0003371758,
+        "capacity_at_10pct_adv": 348947466.125,
+        "capacity_at_5pct_adv": 174473733.0625,
+        "crisis_liquidity_degradation": 0.1275019361,
+        "dollar_adv_participation": 0.0002865761,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 10.8464279188,
+        "liquidity_fields_available": true,
+        "position_liquidity": 3489.47466125,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PSKY",
@@ -1057,13 +1365,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0007608871,
+        "capacity_at_10pct_adv": 153195143.50625002,
+        "capacity_at_5pct_adv": 76597571.75312501,
+        "crisis_liquidity_degradation": 0.5813398617,
+        "dollar_adv_participation": 0.0006527622,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.2774605739,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1531.9514350625,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "SPR",
@@ -1071,13 +1383,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0010868291,
+        "capacity_at_10pct_adv": 103390433.13250001,
+        "capacity_at_5pct_adv": 51695216.566250004,
+        "crisis_liquidity_degradation": -0.1592110647,
+        "dollar_adv_participation": 0.0009672075,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.5549979721,
+        "liquidity_fields_available": true,
+        "position_liquidity": 1033.904331325,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "PTON",
@@ -1085,13 +1401,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.000523455,
+        "capacity_at_10pct_adv": 224754919.375,
+        "capacity_at_5pct_adv": 112377459.6875,
+        "crisis_liquidity_degradation": 0.1514301586,
+        "dollar_adv_participation": 0.0004449291,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.0546671065,
+        "liquidity_fields_available": true,
+        "position_liquidity": 2247.54919375,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "WOLF2",
@@ -1099,13 +1419,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0049575514,
+        "capacity_at_10pct_adv": 23742973.785625,
+        "capacity_at_5pct_adv": 11871486.8928125,
+        "crisis_liquidity_degradation": -0.4800235722,
+        "dollar_adv_participation": 0.0042117723,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 13.244908446,
+        "liquidity_fields_available": true,
+        "position_liquidity": 237.4297378562,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "BHC",
@@ -1113,13 +1437,17 @@
         "window_id": "spy_drawdown_8"
       },
       {
-        "adv_participation": null,
+        "adv_participation": 0.0012784354,
+        "capacity_at_10pct_adv": 88801276.945625,
+        "capacity_at_5pct_adv": 44400638.4728125,
+        "crisis_liquidity_degradation": -0.0960322008,
+        "dollar_adv_participation": 0.0011261099,
         "entry_date": "2023-05-09",
-        "implementation_shortfall": null,
-        "liquidity_fields_available": false,
-        "position_dollar_capacity": null,
+        "implementation_shortfall_bps": 11.6778780741,
+        "liquidity_fields_available": true,
+        "position_liquidity": 888.0127694562,
         "reason_codes": [
-          "pit_volume_source_missing"
+          "ok"
         ],
         "target_weight": 0.08,
         "ticker": "DISH",
@@ -1127,8 +1455,50 @@
         "window_id": "spy_drawdown_8"
       }
     ],
+    "capacity_at_10pct_adv": {
+      "count": 80,
+      "max": 2549054329.1124997,
+      "mean": 237504004.65761137,
+      "median": 97842632.7034375,
+      "min": 149121.4731250002,
+      "p95": 994546064.4079994
+    },
+    "capacity_at_5pct_adv": {
+      "count": 80,
+      "max": 1274527164.5562499,
+      "mean": 118752002.32880569,
+      "median": 48921316.35171875,
+      "min": 74560.7365625001,
+      "p95": 497273032.2039997
+    },
+    "crisis_liquidity_degradation": {
+      "count": 80,
+      "max": 1.2300887596,
+      "mean": 0.0287022819,
+      "median": -0.0083819999,
+      "min": -0.9150385912,
+      "p95": 0.6292658621
+    },
+    "dollar_adv_participation": {
+      "count": 80,
+      "max": 0.6705942337,
+      "mean": 0.0170780845,
+      "median": 0.001022113,
+      "min": 3.92302e-05,
+      "p95": 0.017165563
+    },
     "event_count": 8,
+    "implementation_shortfall_bps": {
+      "count": 80,
+      "max": 50.9449091375,
+      "mean": 12.9584755394,
+      "median": 11.5985126489,
+      "min": 10.3131702207,
+      "p95": 16.5468688195
+    },
     "max_candidate_vol_20d_ann": 3.1554514669,
+    "measured_candidate_row_count": 80,
+    "measurement_coverage": 1.0,
     "unique_ticker_count": 72,
     "unique_tickers_sample": [
       "AAL",
@@ -1184,22 +1554,15 @@
     ]
   },
   "capacity_limits": {
-    "decision_grade": false,
-    "minimum_required_inputs": [
-      "PIT daily volume",
-      "PIT adjusted close",
-      "ADV20/ADV60",
-      "spread or spread proxy",
-      "target capital assumption",
-      "max ADV participation policy"
-    ],
+    "decision_grade": true,
     "reason_codes": [
-      "adv_missing"
-    ]
+      "capacity_at_5pct_and_10pct_adv_measured"
+    ],
+    "reference_capital": 1000000.0
   },
   "classification": {
-    "classification": "PENDING_LIQUIDITY",
-    "is_not_viable": false,
+    "classification": "NOT_VIABLE",
+    "is_not_viable": true,
     "is_shadow_ready": false,
     "phase_b_context": {
       "classification": "PHOENIX_RISK_SHAPING_CANDIDATE_PENDING_LIQUIDITY",
@@ -1210,70 +1573,140 @@
       ],
       "shadow_readiness_work_justified": true
     },
-    "rationale": "Phase B found risk-shaped Phoenix candidates, but ADV participation, capacity, crisis liquidity degradation, slippage, and implementation shortfall cannot be measured from the repo-local close-only PIT cache.",
+    "rationale": "Measured PIT liquidity indicates at least one selected Phoenix position cannot support the reference capital at 5% ADV.",
     "reason_codes": [
-      "pit_volume_source_missing",
-      "capacity_not_decision_grade"
+      "capacity_below_5pct_adv_policy"
     ]
   },
   "decision_state": "liquidity_capacity_validated",
   "execution_impact": "NON_EXECUTIONAL",
-  "generated_at": "2026-06-17T20:12:15.652130+00:00",
+  "generated_at": "2026-06-18T21:12:24.956976+00:00",
   "governance_label": "RESEARCH_ONLY",
   "measurements": {
     "adv_participation": {
-      "detail": "PIT volume/dollar-volume source missing",
       "metric": "adv_participation",
       "reason_codes": [
-        "pit_volume_source_missing"
+        "pit_liquidity_panel_available"
       ],
-      "status": "BLOCKED",
-      "value": null
+      "status": "MEASURED",
+      "value": {
+        "count": 80,
+        "max": 1.0419199835,
+        "mean": 0.0235014228,
+        "median": 0.0013055856,
+        "min": 5.23395e-05,
+        "p95": 0.0251463069
+      }
     },
     "capacity_limits": {
-      "detail": "PIT volume/dollar-volume source missing",
       "metric": "capacity_limits",
       "reason_codes": [
-        "pit_volume_source_missing"
+        "pit_liquidity_panel_available"
       ],
-      "status": "BLOCKED",
-      "value": null
+      "status": "MEASURED",
+      "value": {
+        "at_10pct_adv": {
+          "count": 80,
+          "max": 2549054329.1124997,
+          "mean": 237504004.65761137,
+          "median": 97842632.7034375,
+          "min": 149121.4731250002,
+          "p95": 994546064.4079994
+        },
+        "at_5pct_adv": {
+          "count": 80,
+          "max": 1274527164.5562499,
+          "mean": 118752002.32880569,
+          "median": 48921316.35171875,
+          "min": 74560.7365625001,
+          "p95": 497273032.2039997
+        }
+      }
     },
     "crisis_period_liquidity_degradation": {
-      "detail": "PIT volume/dollar-volume source missing",
       "metric": "crisis_period_liquidity_degradation",
       "reason_codes": [
-        "pit_volume_source_missing"
+        "adv20_vs_adv60"
       ],
-      "status": "BLOCKED",
-      "value": null
+      "status": "MEASURED",
+      "value": {
+        "count": 80,
+        "max": 1.2300887596,
+        "mean": 0.0287022819,
+        "median": -0.0083819999,
+        "min": -0.9150385912,
+        "p95": 0.6292658621
+      }
+    },
+    "dollar_adv_participation": {
+      "metric": "dollar_adv_participation",
+      "reason_codes": [
+        "pit_liquidity_panel_available"
+      ],
+      "status": "MEASURED",
+      "value": {
+        "count": 80,
+        "max": 0.6705942337,
+        "mean": 0.0170780845,
+        "median": 0.001022113,
+        "min": 3.92302e-05,
+        "p95": 0.017165563
+      }
     },
     "implementation_shortfall": {
-      "detail": "PIT volume/dollar-volume source missing",
       "metric": "implementation_shortfall",
       "reason_codes": [
-        "pit_volume_source_missing"
+        "sqrt_participation_proxy"
       ],
-      "status": "BLOCKED",
-      "value": null
+      "status": "MEASURED_PROXY",
+      "value": {
+        "count": 80,
+        "max": 50.9449091375,
+        "mean": 12.9584755394,
+        "median": 11.5985126489,
+        "min": 10.3131702207,
+        "p95": 16.5468688195
+      }
     },
     "position_liquidity": {
-      "detail": "PIT volume/dollar-volume source missing",
       "metric": "position_liquidity",
       "reason_codes": [
-        "pit_volume_source_missing"
+        "pit_liquidity_panel_available"
       ],
-      "status": "BLOCKED",
-      "value": null
+      "status": "MEASURED",
+      "value": {
+        "capacity_at_10pct_adv": {
+          "count": 80,
+          "max": 2549054329.1124997,
+          "mean": 237504004.65761137,
+          "median": 97842632.7034375,
+          "min": 149121.4731250002,
+          "p95": 994546064.4079994
+        },
+        "capacity_at_5pct_adv": {
+          "count": 80,
+          "max": 1274527164.5562499,
+          "mean": 118752002.32880569,
+          "median": 48921316.35171875,
+          "min": 74560.7365625001,
+          "p95": 497273032.2039997
+        }
+      }
     },
     "slippage_sensitivity": {
-      "detail": "PIT volume/dollar-volume source missing",
       "metric": "slippage_sensitivity",
       "reason_codes": [
-        "pit_volume_source_missing"
+        "sqrt_participation_proxy"
       ],
-      "status": "BLOCKED",
-      "value": null
+      "status": "MEASURED_PROXY",
+      "value": {
+        "count": 80,
+        "max": 50.9449091375,
+        "mean": 12.9584755394,
+        "median": 11.5985126489,
+        "min": 10.3131702207,
+        "p95": 16.5468688195
+      }
     },
     "turnover": {
       "detail": "Turnover measured as Phase B event basket entry/exit turnover; not ADV-normalized.",
@@ -1293,7 +1726,7 @@
     "no broker behavior changes",
     "no promotion threshold changes"
   ],
-  "output": "PENDING_LIQUIDITY",
+  "output": "NOT_VIABLE",
   "phase_b_input": {
     "best_variant_id": "stop_loss_10pct",
     "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json",
@@ -1301,124 +1734,54 @@
     "sha256": "4415780dc7c047d4bf538b1bc126c88f821fd8e3b9852c46f61ca04dc9db8611"
   },
   "pit_safe_inputs": {
-    "source": "repo-local Sharadar SEP cache and FR-068 PIT large-cap family lineage",
+    "liquidity_manifest": {
+      "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_liquidity/manifest.json",
+      "sha256": "dc8f040cf6db90abb2bb9cdc141b9f5aeeb90a2a2cdd13c62c1549076368e51d"
+    },
+    "liquidity_panel": {
+      "path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_liquidity/pit_liquidity_panel.csv",
+      "sha256": "dcb3aaceae4bc10db036ff3245ab75285a3787a706144de0c88a199834237c63"
+    },
+    "source": "repo-local Sharadar SEP OHLCV cache, PIT liquidity panel, and FR-068 PIT large-cap family lineage",
     "source_column_inventory": {
-      "cache_dir": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/data/research_cache/sharadar_sep",
-      "decision_grade_liquidity_available": false,
-      "missing_required_liquidity_fields": [
-        "volume",
-        "dollar_volume",
-        "adv_20d",
-        "adv_60d"
-      ],
+      "decision_grade_liquidity_available": true,
+      "missing_required_liquidity_fields": [],
       "observed_columns": [
+        "ADV_20",
+        "ADV_60",
         "close",
         "closeadj",
-        "date"
+        "date",
+        "dollar_ADV_20",
+        "dollar_ADV_60",
+        "dollar_volume",
+        "high",
+        "low",
+        "open",
+        "ticker",
+        "volume"
       ],
+      "panel_path": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/outputs/research/pit_liquidity/pit_liquidity_panel.csv",
       "required_liquidity_fields": [
         "volume",
         "dollar_volume",
-        "adv_20d",
-        "adv_60d"
+        "ADV_20",
+        "ADV_60",
+        "dollar_ADV_20",
+        "dollar_ADV_60"
       ],
-      "sample_columns_by_file": {
-        "A.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "AA.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "AAL.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "AAOI.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "AAON.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "AAP.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "AAPL.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "ABBNY.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "ABBV.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ],
-        "ABCL.csv": [
-          "date",
-          "closeadj",
-          "close"
-        ]
-      },
-      "sampled_file_count": 500,
-      "total_file_count": 1600
-    },
-    "source_hash_sample": {
-      "A.csv": "632ba1835d538d646da20a72a704d43f54f38286c4c805e4b07ea7feba9c11c3",
-      "AA.csv": "a4efcf09a911bd1422fb4c9ef27918d411d43318d64557b8d268e15ae7e57277",
-      "AAL.csv": "33e1fbf4208014167e22427e8356ec182ef82f9e547146d62c1ce60352b452db",
-      "AAOI.csv": "35a724754794a74657bda9ff9257b52d8697793f9d50bfc0d7d15403ff1a8539",
-      "AAON.csv": "0701366003a2c290bb03862ea97f7df1ab269525363e21d75dbdb5cef7888b44",
-      "AAP.csv": "5bcfbcbde7c35d23b763081c06265e46b54642db1a40fe85cf3071cd4c65cecf",
-      "AAPL.csv": "d3d0f4f663d10a2decebbfa47bfa73424db450fd88efd64b88dc923af9e8de75",
-      "ABBNY.csv": "b443bf82b37022d7b77ff98c9765238a67856276e9297a917fe20e41236b8e86",
-      "ABBV.csv": "ca98b92d91aee9e93c001c3b12c026b1274e9589cc524808437fe2d696999d7b",
-      "ABCL.csv": "ac774b13e99b7b748f9455dd286771a986f4157df08011cae28e7b45f26015cd",
-      "ABEV.csv": "fcfeeb1ce07443320c2a2f39aaaef3ecd6749e2f97ec485766c33acb920abc53",
-      "ABMD.csv": "1ba92e7edb7c28de8fdc801cdd9c8921f79f0544cfc67f4ca71a53b7f958dc30",
-      "ABNB.csv": "2eff0257e80b7fb4ece25381408320b477dbe2f8d6b4b27b667de98fe9236577",
-      "ABT.csv": "76ba3c3d83a0febc8ba098c79f6dd51b2bf1835e4967c9bdaf1fc89364751526",
-      "ACGL.csv": "e41fcb4b6f28f04687c0cd0e910a431e02ecff99dd45dc2031115a429aef1bd0",
-      "ACI.csv": "75e84eedb712c0c6b0469e9ea56f298de12f74663c3574bfdccb02c4d31eb386",
-      "ACIIQ.csv": "486de6ab84e115c938dffad7c0c390e5c2330537f4c09a1aefc4cc33fa5c3c0d",
-      "ACM.csv": "1d5c3b78fa32990692194384095f781f7d50ff8bf91918fb8f8720c7b47e09ee",
-      "ACN.csv": "a555739bf0b5d2e4816ec47476a7b16a0b503d74496b0c99107ac76e1a5b6e3a",
-      "ACTA.csv": "a8e3138944069e7687353c438b1e1c78abef6532bee4fe2ecfb48ab904fa2a49",
-      "ADBE.csv": "899cf94470c6185ca3e6d9f36cdd7ed9fc940bdbf53fe0a1457ca570a23cd97c",
-      "ADI.csv": "78b4852abda3dd81fa4dba2ea3b09deed4249f164d2d0232012df617e3e7b010",
-      "ADM.csv": "4cc2b8fb990bd3f0bf85cdd402f8bf1dfe050c038e98698190b96f95304474bb",
-      "ADP.csv": "5da17a4cab90089b8f19d6264f7127f3d625a3e2d778a4e21508b683c5f1c312",
-      "ADSK.csv": "2f28d85c4431d7dc5fc999c7b949ea67a0a54df0389ec58e1dfc5744003efe90"
+      "row_count": 7845012
     }
   },
   "production_impact": "none",
+  "reference_capital": 1000000.0,
   "schema_version": "caerus_phoenix_phase_c_liquidity_capacity_v1",
   "slippage_sensitivity": {
-    "decision_grade": false,
-    "note": "Cost-bps variants exist in Phase B, but implementation shortfall cannot be tied to ADV/spread without PIT volume and spread proxies.",
+    "decision_grade": true,
+    "proxy": "10bps base plus 50bps times square-root of dollar ADV participation",
     "reason_codes": [
-      "adv_participation_missing",
-      "spread_model_missing"
-    ],
-    "tested_bps_grid": [
-      10,
-      25,
-      50,
-      100
+      "adv_participation_proxy_available",
+      "spread_model_not_required_for_phase_c_gate"
     ]
   }
 }

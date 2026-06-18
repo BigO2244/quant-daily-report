@@ -1,8 +1,8 @@
 # FR-069 Phoenix Phase C Onboarding Packet
 
-Status: EXTERNAL_DEPENDENCY_BLOCKED
+Status: NOT_VIABLE_CURRENT_PHASE_B
 Owner: Caerus Research Program
-Last Updated: 2026-06-17
+Last Updated: 2026-06-18
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL
 Decision Status: RESEARCH_ONLY / NO_RUNTIME_CHANGE
@@ -32,19 +32,23 @@ Current state:
 
 Governance conclusion: Phoenix is distinct enough by thesis to deserve
 Research-stage onboarding and Phase B risk-shaping evidence is promising, but
-Phoenix is now formally on external-dependency hold. It remains blocked from
-Shadow until PIT liquidity/capacity evidence can be rebuilt from Sharadar SEP
-OHLCV data.
+Phoenix now has adverse decision-grade PIT liquidity/capacity evidence. The
+Nasdaq Data Link `QELx06` external dependency cleared, Sharadar SEP OHLCV was
+rebuilt, and Phase C measured the candidate basket. Phoenix remains blocked
+from Shadow because the current Phase B candidate fails capacity.
 
 Formal hold state:
 
-- **Classification:** `EXTERNAL_DEPENDENCY_BLOCKED`
-- **Blocker:** Nasdaq Data Link `QELx06` temporary API disablement prevents
-  verification/rebuild of Sharadar SEP OHLCV access.
+- **Classification:** `NOT_VIABLE_CURRENT_PHASE_B`
+- **Evidence reason:** Phase C classified `NOT_VIABLE` for
+  `capacity_below_5pct_adv_policy` after measuring 80/80 candidate rows.
 - **Owner:** Brett
-- **Unblock condition:** Vendor confirms Sharadar SEP OHLCV access restored.
-- **Next action after unblock:** rebuild OHLCV cache, build PIT liquidity panel,
-  re-run Phoenix Phase C, then run a Shadow-readiness assessment.
+- **Evidence:** OHLCV cache rebuilt 2026-06-18 with 1,600 PIT large-cap tickers,
+  7,845,012 rows, and no empty/failed tickers; PIT liquidity panel generated
+  under `outputs/research/pit_liquidity/`.
+- **Next action:** Do not run Shadow-readiness review for the current Phase B
+  candidate. Revisit only with a new research candidate or explicit
+  owner-approved capacity policy change.
 
 ## Phoenix Thesis
 
@@ -74,11 +78,11 @@ Phoenix is not intended to be:
 | Existing tests | `Tests/test_research_registry_phoenix.py`. |
 | Existing artifacts | `outputs/model_quality/2026-06-08/phoenix_*.json` and `outputs/research/phoenix/2026-06-08/*`. |
 | Current evidence artifacts | `outputs/research/phoenix_evidence/phoenix_crisis_recovery_2026-06-17.json`, `outputs/research/phoenix_evidence/phoenix_phase_b_risk_shaping_2026-06-17.json`, `outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json`. |
-| Current blocker | `EXTERNAL_DEPENDENCY_BLOCKED`: Nasdaq Data Link `QELx06` temporary disablement; Sharadar SEP OHLCV access must be restored before PIT liquidity/capacity validation. |
+| Current blocker | `NOT_VIABLE_CURRENT_PHASE_B`: PIT liquidity/capacity evidence is now decision-grade, but current Phoenix Phase B candidate fails 5% ADV capacity policy. |
 | Phase C evidence template | `docs/governance/fr_active/fr_069_phoenix_evidence_envelope_template.json`. |
 
-Phoenix remains Research-stage and external-dependency blocked after this
-packet.
+Phoenix remains Research-stage and blocked after this packet. The blocker is no
+longer vendor access; it is adverse measured liquidity/capacity evidence.
 
 ## Distinctiveness Assessment
 
@@ -261,17 +265,17 @@ not permitted without a separate governance decision.
 7. Produce a Shadow-readiness packet only if Research evidence is
    decision-grade.
 
-## External Dependency Hold
+## Liquidity/Capacity Hold
 
-Phoenix is formally on hold as of 2026-06-17.
+Phoenix is formally on measured liquidity/capacity hold as of 2026-06-18.
 
 | Field | Value |
 |---|---|
-| Classification | `EXTERNAL_DEPENDENCY_BLOCKED` |
-| Blocker | Nasdaq Data Link `QELx06` temporary disablement |
+| Classification | `NOT_VIABLE_CURRENT_PHASE_B` |
+| Blocker | Current Phoenix Phase B candidate fails 5% ADV capacity policy |
 | Owner | Brett |
-| Unblock condition | Vendor confirms Sharadar SEP OHLCV access restored |
-| Next action after unblock | Rebuild OHLCV cache; build PIT liquidity panel; re-run Phoenix Phase C; run Shadow-readiness assessment |
+| Evidence | `outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json`; `outputs/research/pit_liquidity/manifest.json` |
+| Next action | Do not promote or run Shadow-readiness review for current candidate; revisit only with new candidate evidence or explicit owner-approved capacity policy change |
 
 No Phoenix logic, thresholds, research outputs, live signals, allocation,
 execution, broker behavior, risk controls, promotion thresholds, or cron

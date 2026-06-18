@@ -80,8 +80,9 @@ paper behavior.
 
 Current Phase A classification:
 
-- Phoenix: `EXTERNAL_DEPENDENCY_BLOCKED` because Sharadar SEP OHLCV access is
-  blocked by Nasdaq Data Link `QELx06`.
+- Phoenix: `NOT_VIABLE_CURRENT_PHASE_B` because Sharadar SEP OHLCV access is
+  restored and decision-grade Phase C liquidity/capacity evidence fails the 5%
+  ADV policy for the current candidate.
 - Orion/Lyra: evidence-ready for governance review as a redundant core-momentum
   family, not independently promotion-ready sleeves.
 - Cassiopeia/Cygnus: not ready; still missing decision-grade inputs.
@@ -96,10 +97,10 @@ next unit of research effort.
 
 Current Phase B ranking:
 
-1. Phoenix: restore Sharadar SEP OHLCV access and rebuild PIT liquidity/capacity
-   evidence.
-2. Cassiopeia: build a PIT-safe event taxonomy and event-tape contract.
-3. Orion: prepare an owner-facing Orion/Lyra merge-watch disposition packet.
+1. Cassiopeia: build a PIT-safe event taxonomy and event-tape contract.
+2. Orion: prepare an owner-facing Orion/Lyra merge-watch disposition packet.
+3. Phoenix: hold current candidate after Phase C capacity failure; revisit only
+   with new candidate evidence or owner-approved capacity policy change.
 4. Argo: accumulate advisory scoring history.
 5. Cygnus: defer until PIT consensus/EPS-surprise vendor data exists.
 6. Polaris: keep as baseline/control.

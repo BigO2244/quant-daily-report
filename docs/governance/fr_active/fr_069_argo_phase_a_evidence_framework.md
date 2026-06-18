@@ -29,7 +29,7 @@ Current classification summary:
 | Polaris | EVIDENCE_READY | Current paper baseline with FR-068 PIT rebaseline lineage. |
 | Orion | EVIDENCE_READY | Matched PIT evidence exists; currently preferred canonical core-momentum variant if consolidation is approved. |
 | Lyra | NOT_READY / merge-watch | Matched PIT evidence exists, but differentiation is not statistically meaningful and governance recommends redeployment/merge watch. |
-| Phoenix | EXTERNAL_DEPENDENCY_BLOCKED | Differentiated and risk-shaped, but PIT liquidity/capacity validation is blocked by Nasdaq Data Link access. |
+| Phoenix | NOT_VIABLE_CURRENT_PHASE_B | Differentiated and risk-shaped, but PIT liquidity/capacity evidence now fails the 5% ADV capacity policy. |
 | Cassiopeia | NOT_READY | Spec/onboarding only; event contract and decision-grade evidence missing. |
 | Cygnus | NOT_READY | V0 shelved; v1 requires PIT consensus/surprise vendor data. |
 | Argo | RESEARCH_READY | Evidence-consumer framework is available for governance review only. |
@@ -85,8 +85,8 @@ required for any lifecycle transition.
 
 Argo Phase A makes three research-only recommendations:
 
-1. Treat Phoenix as `EXTERNAL_DEPENDENCY_BLOCKED` until Sharadar SEP OHLCV access
-   is restored and PIT liquidity/capacity evidence can be rebuilt.
+1. Treat Phoenix as `NOT_VIABLE_CURRENT_PHASE_B` after decision-grade PIT
+   liquidity/capacity evidence failed the 5% ADV capacity policy.
 2. Treat Orion/Lyra as one redundant core-momentum family for governance review,
    not as two independently proven production sleeves.
 3. Use Argo Phase A as an evidence inventory/scoring surface only.

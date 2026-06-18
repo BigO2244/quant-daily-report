@@ -66,22 +66,19 @@
   "owner": "Caerus Research Program",
   "price_source": "pit_adjusted_ohlcv",
   "production_impact": "research_only",
-  "external_dependency_hold": {
-    "classification": "EXTERNAL_DEPENDENCY_BLOCKED",
-    "blocker": "Nasdaq Data Link QELx06 temporary API disablement",
+  "liquidity_capacity_hold": {
+    "classification": "NOT_VIABLE_CURRENT_PHASE_B",
+    "blocker": "Current Phoenix Phase B candidate fails 5% ADV capacity policy.",
+    "evidence_artifact": "outputs/research/phoenix_evidence/phoenix_phase_c_liquidity_capacity_2026-06-17.json",
     "owner": "Brett",
-    "unblock_condition": "Vendor confirms Sharadar SEP OHLCV access restored.",
-    "next_action_after_unblock": [
-      "Rebuild OHLCV cache.",
-      "Build PIT liquidity panel.",
-      "Re-run Phoenix Phase C.",
-      "Run Shadow-readiness assessment."
+    "next_action": [
+      "Do not run Shadow-readiness review for the current Phase B candidate.",
+      "Revisit only with a new research candidate or owner-approved capacity policy change."
     ]
   },
   "promotion_blockers": [
-    "external_dependency_blocked",
-    "nasdaq_data_link_qelx06_temporary_disablement",
-    "pit_liquidity_source_missing",
+    "liquidity_capacity_failed",
+    "capacity_below_5pct_adv_policy",
     "event_drawdown_too_deep",
     "crisis_window_definition_not_owner_approved",
     "sparse_active_day_history",
