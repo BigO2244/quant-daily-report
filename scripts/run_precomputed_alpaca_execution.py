@@ -46,6 +46,9 @@ from core.execution_payload import (
     normalize_status,
     write_canonical_execution_payload,
 )
+from core.live_pilot_preflight import (
+    build_live_pilot_preflight_result_from_env,
+)
 from core.execution_summary import write_execution_artifacts
 from core.execution_target_attainment import build_execution_target_attainment
 from core.live_retry_policy import evaluate_live_retry
@@ -1135,6 +1138,35 @@ def _workflow_context() -> dict[str, object]:
     }
 
 
+def _write_live_pilot_preflight_artifact(*, run_root: Path) -> dict[str, object] | None:
+    try:
+        preflight = build_live_pilot_preflight_result_from_env().to_dict()
+    except Exception as exc:
+        preflight = {
+            "status": "BLOCKED",
+            "reason_code": "live_pilot_preflight_exception",
+            "live_orders_allowed": False,
+            "operator_action": f"Resolve live preflight exception before any pilot review: {exc}",
+        }
+    preflight["schema_version"] = "live_pilot_preflight.v1"
+    preflight["execution_impact"] = "NON_EXECUTIONAL"
+    preflight["orders_submitted"] = 0
+    artifact_path = run_root / "audit" / "live_pilot_preflight.json"
+    safe_write_text(
+        artifact_path,
+        json.dumps(preflight, indent=2, sort_keys=True, default=str) + "\n",
+        allow_overwrite=True,
+    )
+    write_operator_summary(
+        run_root,
+        live_pilot_preflight_status=preflight.get("status"),
+        live_pilot_preflight_reason=preflight.get("reason_code"),
+        live_pilot_preflight_artifact=str(artifact_path),
+        live_orders_allowed=False,
+    )
+    return preflight
+
+
 def _acquire_execution_lock(trade_date: str, *, allow_existing: bool = False) -> Path | None:
     """Atomic single-flight guard: only one execution process per trade date.
 
@@ -1280,6 +1312,9 @@ def main(argv: list[str] | None = None) -> int:
         run_id = get_run_id()
         run_root = get_run_dir(run_id)
         _init_run_root(run_root, trade_date, run_id)
+        if _execution_mode_label() == "LIVE_PREFLIGHT":
+            logger.warning("[LIVE_PREFLIGHT] observe-only mode active; live order submission is disabled")
+            _write_live_pilot_preflight_artifact(run_root=run_root)
 
         workflow_start_utc = _workflow_start_utc()
         workflow_start_et = workflow_start_utc.astimezone(ET) if workflow_start_utc else None

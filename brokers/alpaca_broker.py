@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from core.live_pilot_preflight import validate_alpaca_submission_guardrails
+
 logger = logging.getLogger(__name__)
 
 
@@ -586,6 +588,10 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
+        validate_alpaca_submission_guardrails(
+            broker_paper=bool(self.paper),
+            base_url=self.base_url,
+        )
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
@@ -645,6 +651,11 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
+        validate_alpaca_submission_guardrails(
+            broker_paper=bool(self.paper),
+            base_url=self.base_url,
+            order_notional=float(qty) * float(limit_price),
+        )
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
 

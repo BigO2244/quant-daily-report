@@ -35,6 +35,7 @@ from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
 from paper.reporting_consistency import compute_exposure
 from core.trading_mode import canonical_trading_mode, legacy_shadow_mode_requested
+from core.live_pilot_preflight import LIVE_PREFLIGHT_MODE, build_live_pilot_preflight_result
 from core.strategy_identity import strategy_identity_metadata
 from core.universe_v4 import is_allowed_etf_symbol
 from core.security_master import resolve_trade_plan_symbols
@@ -4306,9 +4307,12 @@ def run_paper_day(
     now_et = now_et.astimezone(ZoneInfo("America/New_York"))
     plan_only = bool(
         plan_only
+        or mode == LIVE_PREFLIGHT_MODE
         or legacy_shadow_requested
         or str(os.getenv("PLAN_ONLY", "")).strip().lower() in {"1", "true", "yes", "y"}
     )
+    if mode == LIVE_PREFLIGHT_MODE:
+        logger.warning("[LIVE_PREFLIGHT] forcing plan_only; order submission is disabled")
     if legacy_shadow_requested:
         logger.warning(
             "[MODE] legacy shadow alias detected; forcing plan_only under canonical paper mode"
@@ -5003,6 +5007,18 @@ def run_paper_day(
             orders_for_execution = list(orders)
             if paper_execution_requested:
                 alpaca = AlpacaBroker.from_env()
+                alpaca_base_url = getattr(alpaca, "base_url", None)
+                if alpaca_base_url is None:
+                    alpaca_base_url = "https://paper-api.alpaca.markets"
+                live_preflight_result = build_live_pilot_preflight_result(
+                    broker_paper=bool(getattr(alpaca, "paper", True)),
+                    base_url=alpaca_base_url,
+                )
+                if live_preflight_result.status != "PASS" or not bool(getattr(alpaca, "paper", True)):
+                    raise RuntimeError(
+                        "[INVARIANT] Paper execution requires Alpaca paper credentials and paper endpoint. "
+                        f"preflight={live_preflight_result.to_dict()}"
+                    )
                 broker_cls = alpaca.__class__
                 logger.info(
                     "[BROKER] selected=%s.%s mode=%s env_mode=%s env_trading_mode=%s",
