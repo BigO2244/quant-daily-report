@@ -286,6 +286,39 @@ def test_warn_reconciliation_does_not_halt(tmp_path) -> None:
     assert live_exec._precompute_reconciliation_halt_reason({"reconciliation_decision": "WARN"}) is None
 
 
+def test_nonempty_planned_payload_enables_exact_plan_by_default(tmp_path, monkeypatch) -> None:
+    live_exec = _load_module(tmp_path)
+    planned_payload = {
+        "trade_date": "2026-06-19",
+        "execution_status": "PLANNED",
+        "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1, "price": 100.0}],
+    }
+
+    monkeypatch.delenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", raising=False)
+    assert live_exec._exact_plan_enabled_for_payload(planned_payload) is True
+
+    monkeypatch.setenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "1")
+    assert live_exec._exact_plan_enabled_for_payload(planned_payload) is True
+
+
+def test_exact_plan_has_named_explicit_opt_out_and_empty_plan_no_action_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    live_exec = _load_module(tmp_path)
+    planned_payload = {
+        "trade_date": "2026-06-19",
+        "execution_status": "PLANNED",
+        "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1, "price": 100.0}],
+    }
+
+    monkeypatch.setenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "0")
+    assert live_exec._exact_plan_enabled_for_payload(planned_payload) is False
+
+    monkeypatch.delenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", raising=False)
+    assert live_exec._exact_plan_enabled_for_payload({"trade_date": "2026-06-19", "trades": []}) is False
+
+
 def test_cash_gate_diagnostics_mark_raw_gate_reconciled_success(tmp_path) -> None:
     live_exec = _load_module(tmp_path)
 

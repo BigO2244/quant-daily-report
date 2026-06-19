@@ -519,6 +519,25 @@ def _expected_planned_trade_count(planned_payload: dict[str, object]) -> int | N
     return None
 
 
+def _planned_payload_trade_count(planned_payload: dict[str, object] | None) -> int:
+    if not isinstance(planned_payload, dict):
+        return 0
+    expected = _expected_planned_trade_count(planned_payload)
+    if expected is not None and expected >= 0:
+        return int(expected)
+    trades = planned_payload.get("trades")
+    return int(len(trades)) if isinstance(trades, list) else 0
+
+
+def _exact_plan_enabled_for_payload(planned_payload: dict[str, object] | None) -> bool:
+    raw = str(os.getenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "")).strip().lower()
+    if raw in {"0", "false", "no", "n", "off", "disabled"}:
+        return False
+    if raw:
+        return _env_truthy("PRECOMPUTE_EXECUTE_EXACT_PLAN")
+    return _planned_payload_trade_count(planned_payload) > 0
+
+
 def _validate_exact_planned_payload(
     planned_payload: dict[str, object] | None,
     *,
@@ -956,6 +975,15 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "reconciled_to_target_state": bool(payload.get("reconciled_to_target_state")),
         "reconciliation_override_applied": bool(payload.get("reconciliation_override_applied")),
         "cash_gate_diagnostics": payload.get("cash_gate_diagnostics"),
+        "planned_payload_trade_count": int(payload.get("planned_payload_trade_count") or 0),
+        "executable_trades_count": int(
+            payload.get("execution_eligible_trades_count")
+            or payload.get("executable_trades_count")
+            or 0
+        ),
+        "exact_plan_enabled": bool(payload.get("exact_plan_enabled")),
+        "execution_source": payload.get("execution_source"),
+        "reason": payload.get("reason") or payload.get("execution_reason") or payload.get("halt_reason"),
     }
     out_path = run_root / "execution_results.json"
     safe_write_text(out_path, json.dumps(results, indent=2, default=str) + "\n", allow_overwrite=True)
@@ -1400,11 +1428,32 @@ def main(argv: list[str] | None = None) -> int:
         if args.continuation_mode == "buy_only":
             os.environ["ALLOW_PARTIAL_BUY_CONTINUATION"] = "1"
 
-        exact_precomputed_execution = _env_truthy("PRECOMPUTE_EXECUTE_EXACT_PLAN")
+        planned_payload_trade_count = _planned_payload_trade_count(planned_payload)
+        exact_precomputed_execution = (
+            _env_truthy("PRECOMPUTE_EXECUTE_EXACT_PLAN")
+            if args.continuation_mode == "buy_only"
+            else _exact_plan_enabled_for_payload(planned_payload)
+        )
         provenance = _planned_payload_provenance(
             planned_payload=planned_payload,
             exact_precomputed_execution=exact_precomputed_execution,
         )
+        if exact_precomputed_execution:
+            logger.info(
+                "PRECOMPUTE_EXACT_PLAN=enabled source=%s planned_payload_trade_count=%d",
+                (
+                    "env"
+                    if str(os.getenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "")).strip()
+                    else "default_nonempty_planned_payload"
+                ),
+                planned_payload_trade_count,
+            )
+        elif planned_payload_trade_count > 0:
+            logger.warning(
+                "PRECOMPUTE_EXACT_PLAN=disabled explicit_opt_out=PRECOMPUTE_EXECUTE_EXACT_PLAN "
+                "planned_payload_trade_count=%d execution will rebuild from signals",
+                planned_payload_trade_count,
+            )
         planned_execution_trades = None
         if exact_precomputed_execution:
             planned_execution_trades = _validate_exact_planned_payload(
@@ -1487,6 +1536,8 @@ def main(argv: list[str] | None = None) -> int:
             paper_summary=paper_summary,
         )
         execution_payload["run_id"] = run_id
+        execution_payload["planned_payload_trade_count"] = planned_payload_trade_count
+        execution_payload["exact_plan_enabled"] = bool(exact_precomputed_execution)
         execution_payload.update(timing)
         execution_payload.update(_workflow_context())
         execution_payload.update(provenance)
@@ -1495,6 +1546,38 @@ def main(argv: list[str] | None = None) -> int:
         submission_summary = dict((paper_summary or {}).get("alpaca_submission_summary") or {})
         submitted_count = int(submission_summary.get("submit_success") or 0)
         rejected_count = int(submission_summary.get("submit_failed") or 0)
+        executable_trades_count = int(
+            execution_payload.get("execution_eligible_trades_count")
+            or execution_payload.get("executable_trades_count")
+            or 0
+        )
+        if (
+            planned_payload_trade_count > 0
+            and (submitted_count == 0 or executable_trades_count == 0)
+            and not str(execution_payload.get("halt_reason") or "").strip()
+        ):
+            reason = "planned_payload_trades_dropped_before_execution"
+            execution_payload["execution_status"] = "HALTED"
+            execution_payload["halt_reason"] = reason
+            execution_payload["execution_reason"] = reason
+            execution_payload["reason"] = reason
+            execution_payload["planned_payload_drop_diagnostics"] = {
+                "planned_payload_trade_count": planned_payload_trade_count,
+                "executable_trades_count": executable_trades_count,
+                "submitted_count": submitted_count,
+                "exact_plan_enabled": bool(exact_precomputed_execution),
+                "execution_source": provenance.get("execution_source"),
+            }
+            logger.error(
+                "[LIVE_EXECUTION][INVARIANT] %s planned_payload_trade_count=%d "
+                "executable_trades_count=%d submitted_count=%d exact_plan_enabled=%s execution_source=%s",
+                reason,
+                planned_payload_trade_count,
+                executable_trades_count,
+                submitted_count,
+                bool(exact_precomputed_execution),
+                provenance.get("execution_source"),
+            )
         execution_payload["submitted_count"] = submitted_count
         execution_payload["accepted_count"] = submitted_count
         execution_payload["rejected_count"] = rejected_count

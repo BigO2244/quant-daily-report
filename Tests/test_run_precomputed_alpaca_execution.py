@@ -63,7 +63,7 @@ def test_run_pretrade_reconciliation_retries_once_after_self_heal(monkeypatch) -
 def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REPORT_DATE", "2026-03-26")
-    monkeypatch.setenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", "1")
+    monkeypatch.delenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", raising=False)
 
     run_id = "run-pass"
     run_root = tmp_path / "outputs" / "runs" / run_id
@@ -288,12 +288,156 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
     assert execution_payload["orders_submitted_count"] == 3
     assert execution_payload["operator_execution_status"] == "executed"
     assert execution_payload["execution_source"] == "planned_payload_exact"
+    assert execution_payload["exact_plan_enabled"] is True
+    assert execution_payload["planned_payload_trade_count"] == 3
     assert execution_payload["planning_price_basis"] == "PREV_CLOSE"
     assert execution_payload["pricing_asof"] == "2026-03-25"
     assert execution_payload["execution_price_requirement"] == "PRECOMPUTE_VALIDATED"
     assert execution_payload["price_freshness_scope"] == "precompute_bundle"
     assert execution_results["submitted_count"] == 3
     assert execution_results["status"] == "EXECUTED"
+    assert execution_results["exact_plan_enabled"] is True
+    assert execution_results["planned_payload_trade_count"] == 3
+
+
+def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPORT_DATE", "2026-06-19")
+    monkeypatch.delenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", raising=False)
+
+    run_id = "2026-06-19T093506-0400_071a61a"
+    run_root = tmp_path / "outputs" / "runs" / run_id
+    planned_trades = [
+        {"ticker": "AAPL", "side": "BUY", "shares": 1, "price": 100.0, "notional": 100.0},
+        {"ticker": "MSFT", "side": "BUY", "shares": 1, "price": 200.0, "notional": 200.0},
+        {"ticker": "GOOG", "side": "SELL", "shares": 1, "price": 150.0, "notional": 150.0},
+    ]
+    planned_payload = {
+        "trade_date": "2026-06-19",
+        "mode": "PAPER",
+        "execution_status": "PLANNED",
+        "pricing_source": "PREV_CLOSE",
+        "pricing_asof": "2026-06-18",
+        "trades_count": len(planned_trades),
+        "trades": planned_trades,
+    }
+    daily_snapshot = {
+        "holdings": [],
+        "risk_levels": [],
+        "proposed_trades": [dict(item) for item in planned_trades],
+        "signals_snapshot_path": str(tmp_path / "signals.json"),
+        "target_cash_weight": 0.05,
+        "performance_diagnostics": {"current_equity": 10000.0},
+    }
+    paper_summary = {
+        "trading_mode": "PAPER",
+        "market_status": "OPEN",
+        "execution_trades": [],
+        "trade_plan": [],
+        "execution_filter": {"raw": len(planned_trades), "kept": 0},
+        "alpaca_submissions": [],
+        "alpaca_submission_summary": {"submit_success": 0, "submit_failed": 0},
+        "execution_outcome": None,
+        "execution_reason": None,
+        "cash_rebalance_status": None,
+        "cash": 10000.0,
+        "alpaca_positions_snapshot": [],
+    }
+    observed_run_paper_day: dict[str, object] = {}
+
+    monkeypatch.setattr(live_exec, "_acquire_execution_lock", lambda _trade_date, allow_existing=False: None)
+    monkeypatch.setattr(live_exec, "get_run_id", lambda: run_id)
+    monkeypatch.setattr(live_exec, "get_run_dir", lambda _run_id: run_root)
+    monkeypatch.setattr(
+        live_exec,
+        "current_et",
+        lambda: dt.datetime(2026, 6, 19, 9, 35, 15, tzinfo=ZoneInfo("America/New_York")),
+    )
+    monkeypatch.setattr(
+        live_exec,
+        "classify_timing",
+        lambda **kwargs: {
+            "timing_status": "on_time",
+            "preferred_target_et": "2026-06-19T09:35:00-04:00",
+            "degraded_auto_trade_deadline_et": "2026-06-19T09:45:00-04:00",
+            "actual_workflow_start_et": "2026-06-19T09:34:00-04:00",
+            "actual_execution_start_et": "2026-06-19T09:35:15-04:00",
+            "first_submit_et": "",
+        },
+    )
+    monkeypatch.setattr(
+        live_exec,
+        "load_precompute_inputs",
+        lambda **kwargs: (daily_snapshot, planned_payload, {"version": 1}, None),
+    )
+    monkeypatch.setattr(live_exec, "fetch_pretrade_snapshot", lambda: {"ok": True, "positions": []})
+    monkeypatch.setattr(live_exec, "write_pretrade_snapshot_artifacts", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "summarize_pretrade_broker_policy", lambda snapshot: {})
+    monkeypatch.setattr(live_exec, "ensure_sent_ledger_exists", lambda path: None)
+    monkeypatch.setattr(
+        live_exec,
+        "ensure_paper_state_files",
+        lambda: (str(tmp_path / "ledger.csv"), str(tmp_path / "trades.csv")),
+    )
+    monkeypatch.setattr(live_exec, "pre_trade_reconcile_and_classify", lambda **kwargs: {"reconciliation_decision": "PASS"})
+    monkeypatch.setattr(live_exec, "_apply_pre_execution_risk_controls", lambda **kwargs: ("signals.json", 0.05))
+
+    def _fake_run_paper_day(**kwargs):
+        observed_run_paper_day.update(kwargs)
+        return dict(paper_summary)
+
+    monkeypatch.setattr(live_exec, "run_paper_day", _fake_run_paper_day)
+    monkeypatch.setattr(
+        live_exec.dqr,
+        "build_execution_email_payload",
+        lambda **kwargs: {
+            "trade_date": "2026-06-19",
+            "mode": "PAPER",
+            "execution_status": "NO_ACTION",
+            "halt_reason": None,
+            "execution_outcome": None,
+            "execution_reason": None,
+            "trades": [],
+            "planner_intended_trades_count": len(planned_trades),
+            "execution_eligible_trades_count": 0,
+            "executable_trades_count": 0,
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "orders_submitted_count": 0,
+        },
+    )
+    monkeypatch.setattr(live_exec, "evaluate_live_retry", lambda **kwargs: {"retry_allowed": False, "retry_reason": ""})
+    monkeypatch.setattr(live_exec, "write_planner_audit", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "write_operator_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(live_exec, "write_trading_day_summary", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "write_execution_artifacts", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "write_executor_audit", lambda **kwargs: None)
+    monkeypatch.setattr(live_exec, "load_operator_summary", lambda run_root: {})
+    monkeypatch.setattr(live_exec, "format_operator_summary_log", lambda summary: "")
+    monkeypatch.setattr(live_exec, "format_execution_health_banner", lambda summary: "")
+    monkeypatch.setattr(live_exec, "build_execution_email_text", lambda payload: ("subject", "body"))
+
+    exit_code = live_exec.main([])
+
+    payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
+    results = json.loads((run_root / "execution_results.json").read_text(encoding="utf-8"))
+    email_payload = json.loads((tmp_path / "outputs" / "execution_email" / "2026-06-19.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 1
+    assert observed_run_paper_day["precomputed_trade_plan"] == planned_trades
+    assert payload["execution_status"] == "HALTED"
+    assert payload["operator_execution_status"] == "failed"
+    assert payload["halt_reason"] == "planned_payload_trades_dropped_before_execution"
+    assert email_payload["halt_reason"] == "planned_payload_trades_dropped_before_execution"
+    assert results["status"] == "HALTED"
+    assert results["halt_reason"] == "planned_payload_trades_dropped_before_execution"
+    assert results["reason"] == "planned_payload_trades_dropped_before_execution"
+    assert results["planned_payload_trade_count"] == len(planned_trades)
+    assert results["executable_trades_count"] == 0
+    assert results["submitted_count"] == 0
+    assert results["exact_plan_enabled"] is True
+    assert results["execution_source"] == "planned_payload_exact"
 
 
 def test_main_stale_price_exception_finalizes_pointer_and_releases_lock(tmp_path, monkeypatch) -> None:
