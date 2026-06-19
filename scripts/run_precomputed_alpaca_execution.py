@@ -47,7 +47,9 @@ from core.execution_payload import (
     write_canonical_execution_payload,
 )
 from core.execution_summary import write_execution_artifacts
+from core.execution_target_attainment import build_execution_target_attainment
 from core.live_retry_policy import evaluate_live_retry
+from core.operational_invariants import write_execution_reliability_report
 from core.operator_summary import (
     format_execution_health_banner,
     format_operator_summary_log,
@@ -1917,6 +1919,49 @@ def main(argv: list[str] | None = None) -> int:
             )
         except Exception as exc:
             logger.warning("[EXECUTION_INTEGRITY] audit skipped: %s", exc)
+
+        try:
+            target_attainment_payload = build_execution_target_attainment(
+                outputs_root="outputs",
+                trade_date=trade_date,
+                run_id=run_id,
+            )
+            target_attainment_path = (
+                run_root / "audit" / f"execution_target_attainment_{trade_date}.json"
+            )
+            safe_write_text(
+                target_attainment_path,
+                json.dumps(target_attainment_payload, indent=2, sort_keys=True, default=str) + "\n",
+                allow_overwrite=True,
+            )
+            write_operator_summary(
+                run_root,
+                execution_target_attainment_status=target_attainment_payload.get("status"),
+                execution_target_attainment_artifact=str(target_attainment_path),
+            )
+        except Exception as exc:
+            logger.warning("[EXECUTION_TARGET_ATTAINMENT] audit skipped: %s", exc)
+
+        try:
+            reliability_path = write_execution_reliability_report(
+                run_root=run_root,
+                trade_date=trade_date,
+                run_id=run_id,
+            )
+            reliability_payload = json.loads(reliability_path.read_text(encoding="utf-8"))
+            write_operator_summary(
+                run_root,
+                execution_reliability_status=reliability_payload.get("overall_status"),
+                execution_reliability_score=reliability_payload.get("score"),
+                execution_reliability_top_reason=reliability_payload.get("top_failure_reason"),
+                execution_reliability_top_invariant=reliability_payload.get("top_failure_invariant_id"),
+                execution_reliability_artifact=str(reliability_path),
+                execution_reliability_actions=list(
+                    reliability_payload.get("recommended_operator_actions") or []
+                ),
+            )
+        except Exception as exc:
+            logger.warning("[EXECUTION_RELIABILITY] report skipped: %s", exc)
 
         print(format_operator_summary_log(load_operator_summary(run_root) or {}))
         print(format_execution_health_banner(load_operator_summary(run_root) or {}))

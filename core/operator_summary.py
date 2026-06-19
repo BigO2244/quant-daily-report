@@ -157,6 +157,8 @@ def format_operator_summary_log(summary: dict[str, Any]) -> str:
         f"confirmation_email={bool(summary.get('confirmation_email_sent'))} "
         f"post_recon={summary.get('post_execution_recon_status') or 'UNKNOWN'} "
         f"integrity={summary.get('execution_integrity_status') or 'UNKNOWN'} "
+        f"reliability={summary.get('execution_reliability_status') or 'UNKNOWN'} "
+        f"reliability_reason={summary.get('execution_reliability_top_reason') or 'none'} "
         f"authoritative={bool(summary.get('broker_authoritative_state'))}"
     )
 
@@ -172,6 +174,8 @@ def format_execution_health_banner(summary: dict[str, Any]) -> str:
     broker_reject_message = summary.get("broker_reject_message") or "none"
     integrity_status = summary.get("execution_integrity_status") or "UNKNOWN"
     integrity_findings = "; ".join(_normalize_list(summary.get("execution_integrity_findings"))) or "none"
+    reliability_status = summary.get("execution_reliability_status") or "UNKNOWN"
+    reliability_reason = summary.get("execution_reliability_top_reason") or "none"
     capital_constraint = (
         "TRIGGERED" if bool(summary.get("capital_constraint_triggered")) else "CLEAR"
     )
@@ -194,5 +198,7 @@ def format_execution_health_banner(summary: dict[str, Any]) -> str:
         f"allowed_buys={summary.get('allowed_buy_notional')} "
         f"integrity={integrity_status} "
         f"integrity_findings={integrity_findings} "
+        f"reliability={reliability_status} "
+        f"reliability_reason={reliability_reason} "
         f"state={authority}"
     )

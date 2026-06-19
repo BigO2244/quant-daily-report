@@ -422,6 +422,11 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
 
     payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
     results = json.loads((run_root / "execution_results.json").read_text(encoding="utf-8"))
+    reliability = json.loads(
+        (run_root / "audit" / "execution_reliability_report_2026-06-19.json").read_text(
+            encoding="utf-8"
+        )
+    )
     email_payload = json.loads((tmp_path / "outputs" / "execution_email" / "2026-06-19.json").read_text(encoding="utf-8"))
 
     assert exit_code == 1
@@ -438,6 +443,14 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
     assert results["submitted_count"] == 0
     assert results["exact_plan_enabled"] is True
     assert results["execution_source"] == "planned_payload_exact"
+    assert reliability["overall_status"] == "FAIL"
+    assert reliability["score"] < 100
+    planned_invariant = next(
+        item
+        for item in reliability["invariant_results"]
+        if item["invariant_id"] == "planned_payload_nonempty_zero_execution"
+    )
+    assert planned_invariant["reason_code"] == "planned_payload_trades_dropped_before_execution"
 
 
 def test_main_stale_price_exception_finalizes_pointer_and_releases_lock(tmp_path, monkeypatch) -> None:

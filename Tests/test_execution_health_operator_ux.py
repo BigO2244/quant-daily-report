@@ -25,6 +25,8 @@ def test_execution_health_banner_includes_duplicate_and_recon_details():
             "broker_pdt_flags": ["pattern_day_trader:true", "daytrading_buying_power_non_positive"],
             "broker_pdt_warning_message": "PDT risk signaled by broker account fields",
             "post_execution_recon_status": "UNEXPECTED_SHORT",
+            "execution_reliability_status": "FAIL",
+            "execution_reliability_top_reason": "model_broker_reconciliation_mismatch",
             "affected_symbols": ["HCA", "ROST"],
             "duplicate_fill_suspicions_count": 2,
             "repair_suggestions": ["BUY 1 HCA", "BUY 4 ROST"],
@@ -35,6 +37,8 @@ def test_execution_health_banner_includes_duplicate_and_recon_details():
     assert "duplicate_guard=BLOCKED_DUPLICATE_SUBMISSION" in banner
     assert "broker_pdt=WARN" in banner
     assert "post_execution_recon=UNEXPECTED_SHORT" in banner
+    assert "reliability=FAIL" in banner
+    assert "reliability_reason=model_broker_reconciliation_mismatch" in banner
     assert "affected_symbols=HCA,ROST" in banner
     assert "duplicate_fill_suspicions=2" in banner
     assert "repairs=BUY 1 HCA; BUY 4 ROST" in banner

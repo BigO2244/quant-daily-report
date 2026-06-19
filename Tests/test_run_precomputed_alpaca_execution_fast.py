@@ -28,7 +28,9 @@ def _load_module(tmp_path: Path):
         "core.execution_lifecycle_timeline",
         "core.execution_payload",
         "core.execution_summary",
+        "core.execution_target_attainment",
         "core.live_retry_policy",
+        "core.operational_invariants",
         "core.operator_summary",
         "core.precompute_contract",
         "core.run_pointer",
@@ -176,12 +178,36 @@ def _load_module(tmp_path: Path):
         "core.execution_summary",
         write_execution_artifacts=lambda **_kwargs: None,
     )
+    sys.modules["core.execution_target_attainment"] = _module(
+        "core.execution_target_attainment",
+        build_execution_target_attainment=lambda **_kwargs: {"status": "PASS"},
+    )
     sys.modules["core.live_retry_policy"] = _module(
         "core.live_retry_policy",
         evaluate_live_retry=lambda **_kwargs: {
             "retry_allowed": True,
             "retry_reason": "precompute_reconciliation_self_heal",
         },
+    )
+    sys.modules["core.operational_invariants"] = _module(
+        "core.operational_invariants",
+        write_execution_reliability_report=lambda **kwargs: _safe_write_text(
+            Path(kwargs["run_root"])
+            / "audit"
+            / f"execution_reliability_report_{kwargs['trade_date']}.json",
+            json.dumps(
+                {
+                    "overall_status": "PASS",
+                    "score": 100,
+                    "top_failure_reason": None,
+                    "top_failure_invariant_id": None,
+                    "recommended_operator_actions": [],
+                },
+                indent=2,
+            )
+            + "\n",
+            allow_overwrite=True,
+        ),
     )
     sys.modules["core.operator_summary"] = _module(
         "core.operator_summary",
