@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 
 from core.operational_invariants import (
+    RELIABILITY_GREEN,
+    RELIABILITY_RED,
+    RELIABILITY_YELLOW,
     build_execution_reliability_report,
+    compute_reliability_trend_metrics,
     write_execution_reliability_report,
 )
 
@@ -24,6 +28,13 @@ def _run_root(tmp_path: Path) -> Path:
     (root / "audit").mkdir(parents=True)
     (root / "broker").mkdir(parents=True)
     return root
+
+
+def _write_precompute(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "outputs" / "precompute" / TRADE_DATE / "planned_execution_payload.json",
+        {"trade_date": TRADE_DATE, "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}]},
+    )
 
 
 def _write_base_run(
@@ -163,6 +174,7 @@ def test_empty_planned_payload_zero_submitted_is_legitimate_no_action(tmp_path: 
     assert _result(report, "terminal_status_requires_reason")["status"] == "PASS"
     assert report["overall_status"] == "PASS"
     assert report["score"] == 100
+    assert report["classification"] == RELIABILITY_GREEN
 
 
 def test_submitted_orders_without_acceptance_fails_with_action(tmp_path: Path, monkeypatch) -> None:
@@ -210,10 +222,7 @@ def test_accepted_orders_zero_fills_with_unresolved_state_warns(tmp_path: Path, 
             "broker_responses": [{"ticker": "AAPL", "side": "BUY", "status": "ACCEPTED"}],
         },
     )
-    _write_json(
-        tmp_path / "outputs" / "precompute" / TRADE_DATE / "planned_execution_payload.json",
-        {"trade_date": TRADE_DATE, "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}]},
-    )
+    _write_precompute(tmp_path)
 
     report = build_execution_reliability_report(
         run_root=run_root,
@@ -225,6 +234,7 @@ def test_accepted_orders_zero_fills_with_unresolved_state_warns(tmp_path: Path, 
     assert invariant["status"] == "WARN"
     assert invariant["reason_code"] == "accepted_orders_unfilled_with_unresolved_status"
     assert report["top_failure_reason"] == "accepted_orders_unfilled_with_unresolved_status"
+    assert report["classification"] == RELIABILITY_YELLOW
 
 
 def test_target_cash_materially_above_intended_cash_warns_with_evidence(tmp_path: Path, monkeypatch) -> None:
@@ -280,6 +290,7 @@ def test_reconciliation_mismatch_fails_with_model_broker_fields(tmp_path: Path, 
     assert invariant["evidence"]["model_equity"] == 10000.0
     assert invariant["evidence"]["broker_equity"] == 9925.0
     assert invariant["operator_action"]
+    assert report["classification"] == RELIABILITY_RED
 
 
 def test_missing_reason_regression_fails_terminal_status_invariant(tmp_path: Path, monkeypatch) -> None:
@@ -360,10 +371,7 @@ def test_write_execution_reliability_report_writes_daily_audit_artifact(tmp_path
     monkeypatch.chdir(tmp_path)
     run_root = _run_root(tmp_path)
     _write_base_run(run_root)
-    _write_json(
-        tmp_path / "outputs" / "precompute" / TRADE_DATE / "planned_execution_payload.json",
-        {"trade_date": TRADE_DATE, "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}]},
-    )
+    _write_precompute(tmp_path)
 
     out_path = write_execution_reliability_report(
         run_root=run_root,
@@ -377,3 +385,121 @@ def test_write_execution_reliability_report_writes_daily_audit_artifact(tmp_path
     assert payload["trade_date"] == TRADE_DATE
     assert payload["score"] == 100
     assert payload["top_failure_reason"] is None
+    assert payload["classification"] == RELIABILITY_GREEN
+    assert payload["trend_metrics"]["clean_run_streak"] == 1
+
+
+def test_reliability_history_ledger_appends_runs(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_root = _run_root(tmp_path)
+    _write_base_run(run_root)
+    _write_precompute(tmp_path)
+
+    write_execution_reliability_report(
+        run_root=run_root,
+        trade_date=TRADE_DATE,
+        run_id=RUN_ID,
+    )
+    second_root = tmp_path / "outputs" / "runs" / "run-second"
+    (second_root / "audit").mkdir(parents=True)
+    (second_root / "broker").mkdir(parents=True)
+    _write_base_run(second_root)
+    write_execution_reliability_report(
+        run_root=second_root,
+        trade_date=TRADE_DATE,
+        run_id="run-second",
+    )
+
+    ledger = json.loads(
+        (tmp_path / "outputs" / "reliability" / "reliability_history.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [row["run_id"] for row in ledger["history"]] == [RUN_ID, "run-second"]
+    assert all(row["classification"] == RELIABILITY_GREEN for row in ledger["history"])
+
+
+def test_reliability_trend_metrics_and_clean_run_streak() -> None:
+    rows = [
+        {
+            "trade_date": "2026-06-15",
+            "run_id": "run-1",
+            "score": 100,
+            "classification": RELIABILITY_GREEN,
+            "fail_count": 0,
+            "warn_count": 0,
+            "top_failure_reason": None,
+        },
+        {
+            "trade_date": "2026-06-16",
+            "run_id": "run-2",
+            "score": 92,
+            "classification": RELIABILITY_YELLOW,
+            "fail_count": 0,
+            "warn_count": 1,
+            "top_failure_reason": "accepted_orders_unfilled_with_unresolved_status",
+        },
+        {
+            "trade_date": "2026-06-17",
+            "run_id": "run-3",
+            "score": 65,
+            "classification": RELIABILITY_RED,
+            "fail_count": 1,
+            "warn_count": 0,
+            "top_failure_reason": "model_broker_reconciliation_mismatch",
+        },
+        {
+            "trade_date": "2026-06-18",
+            "run_id": "run-4",
+            "score": 100,
+            "classification": RELIABILITY_GREEN,
+            "fail_count": 0,
+            "warn_count": 0,
+            "top_failure_reason": None,
+        },
+        {
+            "trade_date": "2026-06-19",
+            "run_id": "run-5",
+            "score": 100,
+            "classification": RELIABILITY_GREEN,
+            "fail_count": 0,
+            "warn_count": 0,
+            "top_failure_reason": None,
+        },
+    ]
+
+    metrics = compute_reliability_trend_metrics(rows)
+
+    assert metrics["trailing_5_day_score"] == 91.4
+    assert metrics["trailing_20_day_score"] == 91.4
+    assert metrics["fail_frequency"] == 0.2
+    assert metrics["warn_frequency"] == 0.2
+    assert metrics["clean_run_streak"] == 2
+    assert metrics["days_since_last_fail"] == 2
+    assert metrics["last_fail_reason"] == "model_broker_reconciliation_mismatch"
+
+
+def test_reliability_readiness_artifact_generation(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_root = _run_root(tmp_path)
+    _write_base_run(run_root)
+    _write_precompute(tmp_path)
+
+    report_path = write_execution_reliability_report(
+        run_root=run_root,
+        trade_date=TRADE_DATE,
+        run_id=RUN_ID,
+    )
+
+    readiness = json.loads(
+        (tmp_path / "outputs" / "reliability" / "reliability_readiness.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert readiness["current_classification"] == RELIABILITY_GREEN
+    assert readiness["current_score"] == 100
+    assert readiness["clean_run_streak"] == 1
+    assert readiness["days_since_last_fail"] is None
+    assert readiness["last_fail_reason"] is None
+    assert readiness["trailing_20_day_score"] == 100.0
+    assert readiness["reliability_report"] == str(report_path)

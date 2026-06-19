@@ -26,6 +26,9 @@ def test_execution_health_banner_includes_duplicate_and_recon_details():
             "broker_pdt_warning_message": "PDT risk signaled by broker account fields",
             "post_execution_recon_status": "UNEXPECTED_SHORT",
             "execution_reliability_status": "FAIL",
+            "execution_reliability_classification": "RELIABILITY_RED",
+            "execution_reliability_score": 65,
+            "execution_reliability_clean_run_streak": 0,
             "execution_reliability_top_reason": "model_broker_reconciliation_mismatch",
             "affected_symbols": ["HCA", "ROST"],
             "duplicate_fill_suspicions_count": 2,
@@ -38,6 +41,10 @@ def test_execution_health_banner_includes_duplicate_and_recon_details():
     assert "broker_pdt=WARN" in banner
     assert "post_execution_recon=UNEXPECTED_SHORT" in banner
     assert "reliability=FAIL" in banner
+    assert "Reliability Status:RELIABILITY_RED" in banner
+    assert "Reliability Score:65" in banner
+    assert "Clean Run Streak:0" in banner
+    assert "Top Failure Reason:model_broker_reconciliation_mismatch" in banner
     assert "reliability_reason=model_broker_reconciliation_mismatch" in banner
     assert "affected_symbols=HCA,ROST" in banner
     assert "duplicate_fill_suspicions=2" in banner

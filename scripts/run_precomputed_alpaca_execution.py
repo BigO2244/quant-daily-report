@@ -992,6 +992,33 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
     return out_path
 
 
+def _write_execution_results_reliability_metadata(
+    run_root: Path,
+    reliability_payload: dict[str, object],
+) -> None:
+    out_path = run_root / "execution_results.json"
+    if not out_path.exists():
+        return
+    try:
+        results = json.loads(out_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(results, dict):
+        return
+    trend = reliability_payload.get("trend_metrics")
+    trend = trend if isinstance(trend, dict) else {}
+    results.update(
+        {
+            "execution_reliability_classification": reliability_payload.get("classification"),
+            "execution_reliability_score": reliability_payload.get("score"),
+            "execution_reliability_status": reliability_payload.get("overall_status"),
+            "execution_reliability_top_reason": reliability_payload.get("top_failure_reason"),
+            "execution_reliability_clean_run_streak": trend.get("clean_run_streak"),
+        }
+    )
+    safe_write_text(out_path, json.dumps(results, indent=2, default=str) + "\n", allow_overwrite=True)
+
+
 def _finalize_cash_gate_diagnostics(
     diagnostics: object,
     final_status_meta: dict[str, object],
@@ -1949,12 +1976,23 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=run_id,
             )
             reliability_payload = json.loads(reliability_path.read_text(encoding="utf-8"))
+            trend_metrics = reliability_payload.get("trend_metrics")
+            trend_metrics = trend_metrics if isinstance(trend_metrics, dict) else {}
+            _write_execution_results_reliability_metadata(run_root, reliability_payload)
             write_operator_summary(
                 run_root,
                 execution_reliability_status=reliability_payload.get("overall_status"),
+                execution_reliability_classification=reliability_payload.get("classification"),
                 execution_reliability_score=reliability_payload.get("score"),
                 execution_reliability_top_reason=reliability_payload.get("top_failure_reason"),
                 execution_reliability_top_invariant=reliability_payload.get("top_failure_invariant_id"),
+                execution_reliability_clean_run_streak=trend_metrics.get("clean_run_streak"),
+                execution_reliability_readiness_artifact=str(
+                    Path("outputs") / "reliability" / "reliability_readiness.json"
+                ),
+                execution_reliability_history_artifact=str(
+                    Path("outputs") / "reliability" / "reliability_history.json"
+                ),
                 execution_reliability_artifact=str(reliability_path),
                 execution_reliability_actions=list(
                     reliability_payload.get("recommended_operator_actions") or []

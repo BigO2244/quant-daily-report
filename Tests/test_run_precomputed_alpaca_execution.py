@@ -443,7 +443,10 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
     assert results["submitted_count"] == 0
     assert results["exact_plan_enabled"] is True
     assert results["execution_source"] == "planned_payload_exact"
+    assert results["execution_reliability_classification"] == "RELIABILITY_RED"
+    assert results["execution_reliability_top_reason"] == "planned_payload_trades_dropped_before_execution"
     assert reliability["overall_status"] == "FAIL"
+    assert reliability["classification"] == "RELIABILITY_RED"
     assert reliability["score"] < 100
     planned_invariant = next(
         item

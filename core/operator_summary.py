@@ -158,6 +158,9 @@ def format_operator_summary_log(summary: dict[str, Any]) -> str:
         f"post_recon={summary.get('post_execution_recon_status') or 'UNKNOWN'} "
         f"integrity={summary.get('execution_integrity_status') or 'UNKNOWN'} "
         f"reliability={summary.get('execution_reliability_status') or 'UNKNOWN'} "
+        f"reliability_classification={summary.get('execution_reliability_classification') or 'UNKNOWN'} "
+        f"reliability_score={summary.get('execution_reliability_score') if summary.get('execution_reliability_score') is not None else 'UNKNOWN'} "
+        f"clean_run_streak={summary.get('execution_reliability_clean_run_streak') if summary.get('execution_reliability_clean_run_streak') is not None else 'UNKNOWN'} "
         f"reliability_reason={summary.get('execution_reliability_top_reason') or 'none'} "
         f"authoritative={bool(summary.get('broker_authoritative_state'))}"
     )
@@ -175,6 +178,11 @@ def format_execution_health_banner(summary: dict[str, Any]) -> str:
     integrity_status = summary.get("execution_integrity_status") or "UNKNOWN"
     integrity_findings = "; ".join(_normalize_list(summary.get("execution_integrity_findings"))) or "none"
     reliability_status = summary.get("execution_reliability_status") or "UNKNOWN"
+    reliability_classification = summary.get("execution_reliability_classification") or "UNKNOWN"
+    reliability_score = summary.get("execution_reliability_score")
+    reliability_score = reliability_score if reliability_score is not None else "UNKNOWN"
+    clean_run_streak = summary.get("execution_reliability_clean_run_streak")
+    clean_run_streak = clean_run_streak if clean_run_streak is not None else "UNKNOWN"
     reliability_reason = summary.get("execution_reliability_top_reason") or "none"
     capital_constraint = (
         "TRIGGERED" if bool(summary.get("capital_constraint_triggered")) else "CLEAR"
@@ -199,6 +207,10 @@ def format_execution_health_banner(summary: dict[str, Any]) -> str:
         f"integrity={integrity_status} "
         f"integrity_findings={integrity_findings} "
         f"reliability={reliability_status} "
+        f"Reliability Status:{reliability_classification} "
+        f"Reliability Score:{reliability_score} "
+        f"Clean Run Streak:{clean_run_streak} "
+        f"Top Failure Reason:{reliability_reason} "
         f"reliability_reason={reliability_reason} "
         f"state={authority}"
     )

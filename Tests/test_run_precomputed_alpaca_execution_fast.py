@@ -198,9 +198,11 @@ def _load_module(tmp_path: Path):
             json.dumps(
                 {
                     "overall_status": "PASS",
+                    "classification": "RELIABILITY_GREEN",
                     "score": 100,
                     "top_failure_reason": None,
                     "top_failure_invariant_id": None,
+                    "trend_metrics": {"clean_run_streak": 1},
                     "recommended_operator_actions": [],
                 },
                 indent=2,

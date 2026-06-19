@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -11,6 +12,10 @@ from paper.run_manager import safe_write_text
 STATUS_PASS = "PASS"
 STATUS_WARN = "WARN"
 STATUS_FAIL = "FAIL"
+
+RELIABILITY_GREEN = "RELIABILITY_GREEN"
+RELIABILITY_YELLOW = "RELIABILITY_YELLOW"
+RELIABILITY_RED = "RELIABILITY_RED"
 
 SEVERITY_INFO = "info"
 SEVERITY_WARNING = "warning"
@@ -349,6 +354,19 @@ def _top_non_pass_result(results: list[dict[str, Any]]) -> dict[str, Any] | None
     return None
 
 
+def classify_reliability_readiness(
+    *,
+    score: int,
+    invariant_results: list[Mapping[str, Any]],
+) -> str:
+    fail_count = sum(1 for row in invariant_results if row.get("status") == STATUS_FAIL)
+    if score < 80 or fail_count > 0:
+        return RELIABILITY_RED
+    if score >= 95:
+        return RELIABILITY_GREEN
+    return RELIABILITY_YELLOW
+
+
 def score_execution_integrity(invariant_results: list[Mapping[str, Any]]) -> int:
     score = 100
     for row in invariant_results:
@@ -363,12 +381,123 @@ def score_execution_integrity(invariant_results: list[Mapping[str, Any]]) -> int
     return max(0, min(100, score))
 
 
+def _history_path(outputs_root: str | Path = "outputs") -> Path:
+    return Path(outputs_root) / "reliability" / "reliability_history.json"
+
+
+def _read_history(path: Path) -> list[dict[str, Any]]:
+    payload = _read_json(path)
+    rows = payload.get("history") if isinstance(payload, Mapping) else None
+    if isinstance(rows, list):
+        return [dict(row) for row in rows if isinstance(row, Mapping)]
+    return []
+
+
+def _mean_score(rows: list[Mapping[str, Any]]) -> float | None:
+    scores = [
+        float(row["score"])
+        for row in rows
+        if isinstance(row.get("score"), (int, float))
+    ]
+    if not scores:
+        return None
+    return round(sum(scores) / len(scores), 2)
+
+
+def _parse_trade_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _history_entry_from_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    summary_counts = report.get("summary_counts") if isinstance(report.get("summary_counts"), Mapping) else {}
+    return {
+        "trade_date": str(report.get("trade_date") or ""),
+        "run_id": str(report.get("run_id") or ""),
+        "score": int(report.get("score") or 0),
+        "classification": str(report.get("classification") or ""),
+        "fail_count": _to_int(summary_counts.get("fail")),
+        "warn_count": _to_int(summary_counts.get("warn")),
+        "top_failure_reason": report.get("top_failure_reason"),
+    }
+
+
+def compute_reliability_trend_metrics(
+    history_rows: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    rows = [dict(row) for row in history_rows]
+    rows.sort(key=lambda row: (str(row.get("trade_date") or ""), str(row.get("run_id") or "")))
+    trailing_5 = rows[-5:]
+    trailing_20 = rows[-20:]
+
+    clean_run_streak = 0
+    for row in reversed(rows):
+        if row.get("classification") == RELIABILITY_GREEN:
+            clean_run_streak += 1
+        else:
+            break
+
+    last_fail: dict[str, Any] | None = None
+    for row in reversed(rows):
+        if _to_int(row.get("fail_count")) > 0 or row.get("classification") == RELIABILITY_RED:
+            last_fail = row
+            break
+
+    current_date = _parse_trade_date(rows[-1].get("trade_date")) if rows else None
+    last_fail_date = _parse_trade_date(last_fail.get("trade_date")) if last_fail else None
+    days_since_last_fail = (
+        (current_date - last_fail_date).days
+        if current_date is not None and last_fail_date is not None
+        else None
+    )
+
+    denominator = len(trailing_20)
+    fail_count = sum(1 for row in trailing_20 if _to_int(row.get("fail_count")) > 0)
+    warn_count = sum(
+        1
+        for row in trailing_20
+        if _to_int(row.get("warn_count")) > 0 and _to_int(row.get("fail_count")) == 0
+    )
+
+    return {
+        "trailing_5_day_score": _mean_score(trailing_5),
+        "trailing_20_day_score": _mean_score(trailing_20),
+        "fail_frequency": round(fail_count / denominator, 4) if denominator else 0.0,
+        "warn_frequency": round(warn_count / denominator, 4) if denominator else 0.0,
+        "clean_run_streak": clean_run_streak,
+        "days_since_last_fail": days_since_last_fail,
+        "last_fail_reason": last_fail.get("top_failure_reason") if last_fail else None,
+        "history_window_count": len(trailing_20),
+    }
+
+
+def build_reliability_readiness_payload(report: Mapping[str, Any]) -> dict[str, Any]:
+    trend = report.get("trend_metrics") if isinstance(report.get("trend_metrics"), Mapping) else {}
+    return {
+        "schema_version": "reliability_readiness.v1",
+        "trade_date": str(report.get("trade_date") or ""),
+        "run_id": str(report.get("run_id") or ""),
+        "current_classification": report.get("classification"),
+        "current_score": report.get("score"),
+        "clean_run_streak": trend.get("clean_run_streak"),
+        "days_since_last_fail": trend.get("days_since_last_fail"),
+        "last_fail_reason": trend.get("last_fail_reason"),
+        "trailing_20_day_score": trend.get("trailing_20_day_score"),
+        "reliability_report": report.get("source_artifact_paths", {}).get("execution_reliability_report")
+        if isinstance(report.get("source_artifact_paths"), Mapping)
+        else None,
+    }
+
+
 def build_execution_reliability_report(
     *,
     run_root: str | Path,
     trade_date: str,
     run_id: str,
     cash_weight_tolerance: float = DEFAULT_CASH_WEIGHT_TOLERANCE,
+    outputs_root: str | Path = "outputs",
 ) -> dict[str, Any]:
     root = Path(run_root)
     execution_payload_path = root / "execution_payload.json"
@@ -702,6 +831,10 @@ def build_execution_reliability_report(
         )
 
     score = score_execution_integrity(results)
+    classification = classify_reliability_readiness(
+        score=score,
+        invariant_results=results,
+    )
     if any(row["status"] == STATUS_FAIL for row in results):
         overall_status = STATUS_FAIL
     elif any(row["status"] == STATUS_WARN for row in results):
@@ -718,6 +851,19 @@ def build_execution_reliability_report(
             seen_actions.add(action)
             recommended_actions.append(action)
     top_result = _top_non_pass_result(results)
+    summary_counts = _summary_counts(results)
+    history_entry = {
+        "trade_date": str(trade_date),
+        "run_id": str(run_id),
+        "score": score,
+        "classification": classification,
+        "fail_count": summary_counts["fail"],
+        "warn_count": summary_counts["warn"],
+        "top_failure_reason": top_result.get("reason_code") if top_result else None,
+    }
+    trend_metrics = compute_reliability_trend_metrics(
+        _read_history(_history_path(outputs_root)) + [history_entry]
+    )
 
     source_artifacts = {
         "execution_payload": str(execution_payload_path),
@@ -735,12 +881,15 @@ def build_execution_reliability_report(
         "run_id": str(run_id),
         "trade_date": str(trade_date),
         "score": score,
+        "classification": classification,
+        "readiness_classification": classification,
         "overall_status": overall_status,
         "top_failure_invariant_id": top_result.get("invariant_id") if top_result else None,
         "top_failure_reason": top_result.get("reason_code") if top_result else None,
         "top_failure_summary": top_result.get("human_summary") if top_result else None,
         "invariant_results": results,
-        "summary_counts": _summary_counts(results),
+        "summary_counts": summary_counts,
+        "trend_metrics": trend_metrics,
         "recommended_operator_actions": recommended_actions,
         "source_artifact_paths": source_artifacts,
     }
@@ -752,17 +901,41 @@ def write_execution_reliability_report(
     trade_date: str,
     run_id: str,
     cash_weight_tolerance: float = DEFAULT_CASH_WEIGHT_TOLERANCE,
+    outputs_root: str | Path = "outputs",
 ) -> Path:
     report = build_execution_reliability_report(
         run_root=run_root,
         trade_date=trade_date,
         run_id=run_id,
         cash_weight_tolerance=cash_weight_tolerance,
+        outputs_root=outputs_root,
     )
     out_path = Path(run_root) / "audit" / f"execution_reliability_report_{trade_date}.json"
+    report["source_artifact_paths"]["execution_reliability_report"] = str(out_path)
     safe_write_text(
         out_path,
         json.dumps(report, indent=2, sort_keys=True, default=str) + "\n",
+        allow_overwrite=True,
+    )
+    history_path = _history_path(outputs_root)
+    history_rows = _read_history(history_path)
+    history_rows.append(_history_entry_from_report(report))
+    history_payload = {
+        "schema_version": "reliability_history.v1",
+        "history": history_rows,
+    }
+    safe_write_text(
+        history_path,
+        json.dumps(history_payload, indent=2, sort_keys=True, default=str) + "\n",
+        allow_overwrite=True,
+    )
+    readiness_path = Path(outputs_root) / "reliability" / "reliability_readiness.json"
+    readiness_payload = build_reliability_readiness_payload(report)
+    readiness_payload["reliability_report"] = str(out_path)
+    readiness_payload["reliability_history"] = str(history_path)
+    safe_write_text(
+        readiness_path,
+        json.dumps(readiness_payload, indent=2, sort_keys=True, default=str) + "\n",
         allow_overwrite=True,
     )
     return out_path
