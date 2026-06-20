@@ -4,6 +4,11 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from core.live_pilot_guardrails import (
+    LIVE_PILOT_MODE,
+    build_live_pilot_gate_result,
+    validate_live_pilot_submission_guardrails,
+)
 from core.trading_mode import canonical_trading_mode, raw_trading_mode
 
 
@@ -101,6 +106,27 @@ def build_live_pilot_preflight_result(
     live_host = "api.alpaca.markets" in base_url_norm.lower() and "paper-api" not in base_url_norm.lower()
     paper_host = "paper-api.alpaca.markets" in base_url_norm.lower()
 
+    if requested_mode == LIVE_PILOT_MODE:
+        pilot = build_live_pilot_gate_result(
+            broker_paper=broker_paper,
+            base_url=base_url_norm,
+            env=environ,
+            order_notional=order_notional,
+            submission_intent=False,
+        )
+        return LivePilotPreflightResult(
+            status=pilot.status,
+            reason_code=pilot.reason_code,
+            requested_mode=pilot.requested_mode,
+            broker_paper=pilot.broker_paper,
+            base_url=pilot.base_url,
+            live_trading_flag_set=pilot.approved,
+            capital_cap_usd=pilot.capital_cap_usd,
+            approved_pilot_sleeve_id=pilot.sleeve_id,
+            live_orders_allowed=pilot.live_orders_allowed,
+            operator_action=pilot.operator_action,
+        )
+
     if requested_mode == LIVE_PREFLIGHT_MODE:
         return LivePilotPreflightResult(
             status="BLOCKED",
@@ -113,6 +139,20 @@ def build_live_pilot_preflight_result(
             approved_pilot_sleeve_id=sleeve,
             live_orders_allowed=False,
             operator_action="Review preflight evidence only; do not submit live orders in LIVE_PREFLIGHT mode.",
+        )
+
+    if requested_mode == LIVE_MODE and not bool(broker_paper):
+        return LivePilotPreflightResult(
+            status="BLOCKED",
+            reason_code="legacy_live_mode_blocked_use_live_pilot",
+            requested_mode=requested_mode,
+            broker_paper=False,
+            base_url=base_url_norm,
+            live_trading_flag_set=live_flag,
+            capital_cap_usd=cap,
+            approved_pilot_sleeve_id=sleeve,
+            live_orders_allowed=False,
+            operator_action="Use TRADING_MODE=live_pilot with FR-104 guardrails; legacy live mode cannot submit orders.",
         )
 
     if bool(broker_paper):
@@ -282,6 +322,25 @@ def validate_alpaca_submission_guardrails(
         env=env,
         order_notional=order_notional,
     )
+    if result.requested_mode == LIVE_PILOT_MODE:
+        pilot = validate_live_pilot_submission_guardrails(
+            broker_paper=broker_paper,
+            base_url=base_url,
+            env=env,
+            order_notional=order_notional,
+        )
+        return LivePilotPreflightResult(
+            status=pilot.status,
+            reason_code=pilot.reason_code,
+            requested_mode=pilot.requested_mode,
+            broker_paper=pilot.broker_paper,
+            base_url=pilot.base_url,
+            live_trading_flag_set=pilot.approved,
+            capital_cap_usd=pilot.capital_cap_usd,
+            approved_pilot_sleeve_id=pilot.sleeve_id,
+            live_orders_allowed=pilot.live_orders_allowed,
+            operator_action=pilot.operator_action,
+        )
     if bool(broker_paper) and result.status == "PASS":
         return result
     if result.live_orders_allowed:

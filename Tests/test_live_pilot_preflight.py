@@ -77,40 +77,17 @@ def test_live_preflight_refuses_orders_even_with_live_approvals(
         )
 
 
-def test_live_mode_requires_explicit_flag_cap_and_sleeve(
+def test_legacy_live_mode_is_blocked_use_live_pilot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_live_env(monkeypatch)
     monkeypatch.setenv("TRADING_MODE", "live")
 
-    with pytest.raises(RuntimeError, match="missing_explicit_live_trading_flag"):
+    with pytest.raises(RuntimeError, match="legacy_live_mode_blocked_use_live_pilot"):
         validate_alpaca_submission_guardrails(
             broker_paper=False,
             base_url="https://api.alpaca.markets",
         )
-
-    monkeypatch.setenv(LIVE_TRADING_FLAG_ENV, "approve_live_pilot")
-    with pytest.raises(RuntimeError, match="missing_positive_live_capital_cap"):
-        validate_alpaca_submission_guardrails(
-            broker_paper=False,
-            base_url="https://api.alpaca.markets",
-        )
-
-    monkeypatch.setenv(LIVE_CAPITAL_CAP_ENV, "1000")
-    with pytest.raises(RuntimeError, match="missing_approved_pilot_sleeve_id"):
-        validate_alpaca_submission_guardrails(
-            broker_paper=False,
-            base_url="https://api.alpaca.markets",
-        )
-
-    monkeypatch.setenv(LIVE_PILOT_SLEEVE_ENV, "polaris")
-    result = validate_alpaca_submission_guardrails(
-        broker_paper=False,
-        base_url="https://api.alpaca.markets",
-    )
-
-    assert result.status == "PASS"
-    assert result.live_orders_allowed is True
 
 
 def test_mode_ambiguity_blocks_live_submission(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from typing import Iterable
 
-CANONICAL_TRADING_MODES = frozenset({"paper", "live", "live_preflight"})
+CANONICAL_TRADING_MODES = frozenset({"paper", "live", "live_preflight", "live_pilot"})
 LEGACY_TRADING_MODE_ALIASES = {
     "alpaca": "paper",
     "shadow": "paper",
     "live-preflight": "live_preflight",
     "preflight_live": "live_preflight",
     "preflight-live": "live_preflight",
+    "live-pilot": "live_pilot",
+    "pilot_live": "live_pilot",
+    "pilot-live": "live_pilot",
 }
 
 

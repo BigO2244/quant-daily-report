@@ -587,10 +587,12 @@ class AlpacaBroker:
         side: str,
         client_order_id: str,
         tif: str = "day",
+        estimated_notional: float | None = None,
     ) -> Dict[str, Any]:
         validate_alpaca_submission_guardrails(
             broker_paper=bool(self.paper),
             base_url=self.base_url,
+            order_notional=estimated_notional,
         )
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest

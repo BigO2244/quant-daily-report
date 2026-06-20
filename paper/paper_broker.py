@@ -35,6 +35,7 @@ from paper.trading_calendar import market_session_status
 from paper.trading_calendar import prev_trading_day
 from paper.reporting_consistency import compute_exposure
 from core.trading_mode import canonical_trading_mode, legacy_shadow_mode_requested
+from core.live_pilot_guardrails import LIVE_PILOT_MODE
 from core.live_pilot_preflight import LIVE_PREFLIGHT_MODE, build_live_pilot_preflight_result
 from core.strategy_identity import strategy_identity_metadata
 from core.universe_v4 import is_allowed_etf_symbol
@@ -4281,8 +4282,8 @@ def run_paper_day(
         raise RuntimeError(
             f"[INVARIANT] MODE={mode} and TRADING_MODE={trading_mode_env} must resolve to the same canonical mode"
         )
-    if mode == "live":
-        raise RuntimeError("TRADING_MODE=live is not implemented. Refusing to proceed.")
+    if mode in {"live", LIVE_PILOT_MODE}:
+        raise RuntimeError(f"TRADING_MODE={mode} is not implemented in paper_broker. Refusing to proceed.")
     cfg_legacy_shadow_requested = legacy_shadow_mode_requested(cfg.trading_mode)
     legacy_shadow_requested = legacy_shadow_mode_requested(env_mode, env_trading_mode)
     paper_execution_requested = mode == "paper" and not cfg_legacy_shadow_requested
