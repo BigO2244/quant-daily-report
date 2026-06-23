@@ -10,6 +10,10 @@ def test_dashboard_terminal_shell_present():
     assert 'id="positions-body"' in html
     assert 'id="fills-body"' in html
     assert 'id="decision-grade-summary"' in html
+    assert 'id="live-pilot-summary"' in html
+    assert 'id="sleeve-inventory-body"' in html
+    assert 'id="alpha-comparison-body"' in html
+    assert 'id="governance-state-list"' in html
 
 
 def test_dashboard_redirect_file_points_to_terminal_root():
@@ -30,3 +34,7 @@ def test_dashboard_js_current_render_contract():
     assert "function renderPerformanceMatrix" in js
     assert "function renderHealthMatrix" in js
     assert "function renderDecisionGrade" in js
+    assert "function renderLivePilot" in js
+    assert "function renderSleeveInventory" in js
+    assert "function renderAlphaComparison" in js
+    assert "function renderGovernanceState" in js

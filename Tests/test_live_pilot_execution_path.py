@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import datetime as dt
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from scripts.live_pilot_execute import refresh_live_pilot_reconciliation, run_live_pilot
+
+
+ET = ZoneInfo("America/New_York")
 
 
 class FakeBroker:
@@ -13,6 +18,7 @@ class FakeBroker:
     def __init__(self, *, order_status: str = "accepted") -> None:
         self.submit_calls = 0
         self.order_status = order_status
+        self.open_orders: list[dict[str, object]] = []
 
     def get_account(self):
         return {
@@ -43,6 +49,21 @@ class FakeBroker:
             "client_order_id": "client-refresh",
         }
 
+    def list_orders(self, status="open", limit=100):
+        return list(self.open_orders)
+
+    def submit_market_order(self, **kwargs):
+        self.submit_calls += 1
+        return {
+            "id": f"order-{self.submit_calls}",
+            "status": self.order_status,
+            "symbol": kwargs.get("symbol"),
+            "client_order_id": kwargs.get("client_order_id"),
+            "filled_avg_price": "50.10" if self.order_status == "filled" else None,
+            "submitted_at": "2026-03-17T13:35:00+00:00",
+            "filled_at": "2026-03-17T13:35:02+00:00" if self.order_status == "filled" else None,
+        }
+
     def submit_limit_order(self, **kwargs):
         self.submit_calls += 1
         return {
@@ -68,9 +89,13 @@ def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
 def _plan() -> dict[str, object]:
     return {
         "trades": [
-            {"ticker": "AAPL", "side": "BUY", "shares": 1, "limit_price": 50},
+            {"ticker": "AAPL", "side": "BUY", "shares": 1, "limit_price": 50, "order_type": "market"},
         ]
     }
+
+
+def _market_open_now() -> dt.datetime:
+    return dt.datetime(2026, 3, 17, 9, 35, tzinfo=ET)
 
 
 def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -> None:
@@ -93,7 +118,10 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     assert (run_root / "live_pilot_orders_submitted.json").exists()
     assert (run_root / "live_pilot_broker_snapshot_pre.json").exists()
     assert (run_root / "live_pilot_broker_snapshot_post.json").exists()
+    assert (run_root / "live_pilot_open_order_check.json").exists()
+    assert (run_root / "live_pilot_market_hours_gate.json").exists()
     assert (run_root / "live_pilot_reconciliation.json").exists()
+    assert (run_root / "live_pilot_evidence_metrics.json").exists()
     assert (run_root / "live_pilot_capital_usage.json").exists()
     assert (run_root / "live_pilot_operator_summary.json").exists()
     assert not (tmp_path / "outputs" / "runs").exists()
@@ -111,14 +139,24 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
         env=_env(dry_run="0"),
         run_id="run-submit",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-submit"
     assert result["terminal_status"] == "SUBMITTED"
     assert broker.submit_calls == 1
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert submitted["orders"][0]["submitted_order_type"] == "market"
+    assert submitted["orders"][0]["expected_price"] == 50
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
     assert reconciliation["status"] == "CLEAN"
     assert reconciliation["state"] == "CLEAN"
+    evidence = json.loads((run_root / "live_pilot_evidence_metrics.json").read_text())
+    assert evidence["submitted_count"] == 1
+    assert evidence["filled_count"] == 1
+    assert evidence["fill_rate"] == 1.0
+    assert evidence["average_time_to_fill_seconds"] == 2.0
+    assert evidence["slippage_bps"] is not None
     usage = json.loads((run_root / "live_pilot_capital_usage.json").read_text())
     assert usage["submitted_notional_usd"] == 50
 
@@ -132,6 +170,7 @@ def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path
         env=_env(dry_run="0"),
         run_id="run-blocked",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-blocked"
@@ -150,6 +189,7 @@ def test_rejected_order_produces_failed_reconciliation(tmp_path: Path) -> None:
         env=_env(dry_run="0"),
         run_id="run-rejected",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-rejected"
@@ -169,6 +209,7 @@ def test_accepted_open_order_produces_clean_reconciliation(tmp_path: Path) -> No
         env=_env(dry_run="0"),
         run_id="run-open",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-open"
@@ -190,6 +231,7 @@ def test_unknown_order_status_produces_failed_reconciliation(tmp_path: Path) -> 
         env=_env(dry_run="0"),
         run_id="run-unresolved",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-unresolved"
@@ -246,6 +288,7 @@ def test_partial_order_produces_partial_failed_reconciliation(tmp_path: Path) ->
         env=_env(dry_run="0"),
         run_id="run-partial",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-partial"
@@ -273,6 +316,7 @@ def test_unsupported_asset_class_does_not_submit(tmp_path: Path) -> None:
         env=_env(dry_run="0"),
         run_id="run-asset-blocked",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     assert result["terminal_status"] == "BLOCKED"
@@ -291,8 +335,59 @@ def test_account_mismatch_blocks_before_submit(tmp_path: Path) -> None:
         env=env,
         run_id="run-account-block",
         output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
     )
 
     assert result["terminal_status"] == "BLOCKED"
     assert result["reason_code"] == "account_id_mismatch"
     assert broker.submit_calls == 0
+
+
+def test_open_live_pilot_order_blocks_duplicate_submission(tmp_path: Path) -> None:
+    broker = FakeBroker()
+    broker.open_orders = [
+        {
+            "symbol": "AAPL",
+            "status": "new",
+            "client_order_id": "caerus-live-pilot-existing",
+        }
+    ]
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-open-order-block",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-open-order-block"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "BLOCKED_OPEN_PILOT_ORDER"
+    assert broker.submit_calls == 0
+    open_check = json.loads((run_root / "live_pilot_open_order_check.json").read_text())
+    assert open_check["block_submission"] is True
+    assert open_check["blocking_open_orders"][0]["duplicate_reason"] == "open_live_pilot_order"
+    evidence = json.loads((run_root / "live_pilot_evidence_metrics.json").read_text())
+    assert evidence["idle_cash_reason"] == "open_order_blocked_duplicate_exposure"
+
+
+def test_live_pilot_market_order_fails_closed_outside_market_hours(tmp_path: Path) -> None:
+    broker = FakeBroker()
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-market-closed",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=dt.datetime(2026, 3, 17, 8, 0, tzinfo=ET),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-market-closed"
+    assert result["terminal_status"] == "BLOCKED"
+    assert "live_pilot_market_closed" in result["reason_code"]
+    assert broker.submit_calls == 0
+    market_gate = json.loads((run_root / "live_pilot_market_hours_gate.json").read_text())
+    assert market_gate["status"] == "BLOCKED"

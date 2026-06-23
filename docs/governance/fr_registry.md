@@ -57,6 +57,7 @@ Archived copies are retained for auditability.
 | FR-071 | Governance Doctrine Integration | `READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Current work tracked in the active backlog. |
 | FR-072 | Governance Hygiene Agent | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_072_governance_hygiene_agent.md` | ACTIVE | Read-only governance auditor is implemented with deterministic tests; output artifacts only, no auto-patch, auto-commit, or cron. Phase B scheduling requires separate approval. |
 | FR-073 | Sleeve Numeric Diagnostics and Cash-Routing Explainability | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Diagnostic-only sleeve numeric trace and cash-route explainability. Produces `outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json` when available; no execution, allocation, sizing, ranking, or risk-threshold behavior change. |
+| FR-074 | Execution Reliability Framework | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_074_execution_reliability_framework.md` | ACTIVE | Phase A observe-first operational invariant framework. Produces `outputs/runs/<RUN_ID>/audit/execution_reliability_report_<TRADE_DATE>.json`, normalizes existing execution integrity, target-attainment, reconciliation, precompute, and sleeve numeric evidence, and surfaces deterministic reliability score/status in operator summary without changing strategy, sleeve, sizing, allocation, cash policy, or broker submission semantics. |
 
 ## FR Numbering Exceptions
 
@@ -104,14 +105,31 @@ and past their observation criteria:
   source for FR-068 Phase 1. Caveats: no S&P 600/Russell membership (use market-cap
   band/supplemental); Cygnus v1 consensus still separately blocked.
   RESEARCH_ONLY / NON_EXECUTIONAL.
-- FR-068: PIT universe + survivorship rebaseline (`PHASES_1_3_COMPLETE`) —
+- FR-068: PIT universe + survivorship rebaseline (`PHASES_1_4_COMPLETE`) —
   PIT universe (20,618 secs / 14,790 delisted) + `Universe(as_of_date)`;
-  caerus_large_cap family (1,600) + full SEP price hydration; Polaris priced
-  rebaseline **MATERIAL** (Sharpe 1.05→0.85, MaxDD −43%→−54%). Legacy backtests
-  non-decision-grade; promotion evidence now requires `universe_method=pit_universe`.
-  Orion/Lyra rebaselines pending. RESEARCH_ONLY / NON_EXECUTIONAL.
+  `caerus_large_cap` family (1,600 incl. 354 delisted) + full SEP price
+  hydration; canonical `Universe(as_of_date, "caerus_large_cap")` resolver
+  certified 2026-06-22 for the existing family artifact. Polaris priced
+  rebaseline **MATERIAL** (Sharpe 1.05→0.85, MaxDD −43%→−54%); Orion/Lyra
+  matched PIT artifact generated with no statistically meaningful Lyra lead.
+  Legacy backtests are non-decision-grade; promotion evidence now requires
+  `universe_method=pit_universe`. Remaining blocker for decision-grade allocator
+  replay: replace current-scale `scalemarketcap` with PIT-valid,
+  survivorship-free, security-id keyed, date-effective large-cap membership;
+  DAILY market cap is one acceptable implementation, not the sole approved path.
+  RESEARCH_ONLY / NON_EXECUTIONAL.
 - FR-069: Research Lab / modular sleeve architecture (`PHASE_B_IMPLEMENTED_RESEARCH_ONLY`) — research-only scaffold;
-  no production refactor. RESEARCH_ONLY / NON_EXECUTIONAL.
+  no production refactor. Child lane added 2026-06-22 for canonical PIT replay
+  panel, decision tapes, replay certification, allocator baseline, and
+  exposure-matched research framework. RESEARCH_ONLY / NON_EXECUTIONAL.
+- FR-100 through FR-104: capital-readiness and pilot-evidence governance —
+  FR-100/101/102/103 remain blockers for Level 3 pilot-capital conclusions,
+  scaling, and production-adjacent deployment. FR-104 defines a separate
+  Level 2.5 manual live-pilot evidence lane: tightly capped, explicitly
+  approved, dry-run-first, artifact-isolated, no cron, no dynamic allocation,
+  and non-promotional. FR-068 incompleteness blocks decision-grade historical
+  conclusions and promotions, not the collection of forward pilot evidence
+  under FR-104 controls.
 
 None of these change execution, broker submission, cron execution-phase,
 order generation, allocation, the strategy registry, or promotion state. The

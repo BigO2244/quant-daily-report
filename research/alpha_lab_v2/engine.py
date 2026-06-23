@@ -17,6 +17,7 @@ class StrategySpec:
     transaction_cost_bps: float = 10.0
     use_rank_decay_exit: bool = False
     exit_rank_multiple: float = 2.0
+    max_position_weight: float | None = None
 
 
 def run_backtest(signals: pd.DataFrame, spec: StrategySpec, *, start_date: str, end_date: str) -> dict:
@@ -150,6 +151,7 @@ def run_backtest_prepared(frame: pd.DataFrame, returns_matrix: pd.DataFrame, tra
                 "net_return": net_return,
                 "turnover": turnover_value,
                 "holdings_count": int(len(new_weights[new_weights > 0])),
+                "cash_weight": round(float(max(0.0, 1.0 - new_weights.sum())), 10),
             }
         )
         nav_records.append({"date": dt, "nav": nav})
@@ -180,6 +182,8 @@ def run_backtest_prepared(frame: pd.DataFrame, returns_matrix: pd.DataFrame, tra
             "transaction_cost_bps": float(spec.transaction_cost_bps),
             "use_rank_decay_exit": bool(spec.use_rank_decay_exit),
             "exit_rank_multiple": float(spec.exit_rank_multiple),
+            "max_position_weight": float(spec.max_position_weight) if spec.max_position_weight is not None else None,
+            "avg_cash_weight": round(float(daily_df["cash_weight"].mean()), 6) if "cash_weight" in daily_df.columns and not daily_df.empty else 0.0,
             "avg_turnover": round(float(avg_turnover(weights_df)) if not weights_df.empty else 0.0, 6),
             "avg_holding_period_days": round(sum(holding_periods) / len(holding_periods), 2) if holding_periods else None,
             "cumulative_return": round(float(nav_series.iloc[-1] - 1.0), 6) if not nav_series.empty else None,
@@ -216,6 +220,8 @@ def _select_portfolio(daily: pd.DataFrame, spec: StrategySpec, active_positions:
     if not selected:
         return pd.Series(dtype=float)
     weight = 1.0 / len(selected)
+    if spec.max_position_weight is not None:
+        weight = min(weight, float(spec.max_position_weight))
     return pd.Series(weight, index=pd.Index(selected, dtype=str), dtype=float)
 
 

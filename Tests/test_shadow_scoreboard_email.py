@@ -237,6 +237,8 @@ def test_trading_confirmation_includes_shadow_snapshot_and_preserves_execution_s
     assert "Submitted: 9" in body_text
     assert "Shadow Strategy Snapshot" in body_text
     assert "Orion:" in body_text
+    assert "Dynamic Sleeve Inventory" in body_text
+    assert "Live Pilot / Account" in body_text
     assert "Shadow Strategy Snapshot" in body_html
 
 

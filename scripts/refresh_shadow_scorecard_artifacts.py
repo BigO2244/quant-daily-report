@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 from core.feedback_loop_artifacts import write_feedback_loop_artifacts
-from core.strategy_registry import active_shadow_security_selection_ids
+from core.strategy_registry import load_strategy_registry
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot
 from research.flow_detection.data import ensure_price_panel, load_universe
@@ -19,7 +19,13 @@ from research.shadow_tracking.strategies import build_shadow_definitions
 
 
 BENCHMARK_SYMBOL = "SPY"
-MODEL_SLUGS = (*active_shadow_security_selection_ids(), "spy_benchmark")
+_REGISTRY = load_strategy_registry()
+OPTIONAL_PRE_INCEPTION_SLUGS = tuple(
+    entry.strategy_id
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
+    if (entry.shadow_tracking or {}).get("baseline_strategy_id")
+)
+MODEL_SLUGS = (*_REGISTRY.active_shadow_security_selection_ids(), "spy_benchmark")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +61,11 @@ def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: 
         "holdings_count": int(len(weights)),
         "max_weight": round(float(weights.max()), 6) if not weights.empty else 0.0,
         "top3_concentration": round(float(weights.head(3).sum()), 6) if not weights.empty else 0.0,
+        "top5_concentration": round(float(weights.head(5).sum()), 6) if not weights.empty else 0.0,
+        "gross_exposure": round(float(weights.sum()), 6) if not weights.empty else 0.0,
+        "cash_weight": round(float(max(0.0, 1.0 - weights.sum())), 6) if not weights.empty else 1.0,
+        "hhi": _weight_hhi(weights),
+        "effective_n": _effective_n(weights),
     }
     return {
         "strategy_name": definition.strategy_name,
@@ -69,9 +80,23 @@ def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: 
         "expected_turnover": snapshot["expected_turnover"],
         "estimated_holding_period_days": snapshot["estimated_holding_period_days"],
         "weight_concentration": concentration,
+        "alpha_per_dollar_deployed_proxy": None,
         "performance_summary": None,
         "scorecard_refresh_mode": "incremental_no_full_backtest",
     }
+
+
+def _weight_hhi(weights: pd.Series) -> float:
+    gross = float(weights.sum()) if not weights.empty else 0.0
+    if gross <= 0.0:
+        return 0.0
+    deployed_weights = weights.astype(float) / gross
+    return round(float((deployed_weights ** 2).sum()), 6)
+
+
+def _effective_n(weights: pd.Series) -> float:
+    hhi = _weight_hhi(weights)
+    return round(float(1.0 / hhi), 6) if hhi > 0.0 else 0.0
 
 
 def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any]) -> dict[str, Any]:
@@ -152,11 +177,19 @@ def _validate_nav_append_continuity(
     strategies = shadow_performance.get("strategies") or {}
     for slug in MODEL_SLUGS:
         try:
-            prior_csv_nav = float(previous[slug])
             candidate_nav = float(row[slug])
             reported_daily_return = float((strategies.get(slug) or {}).get("daily_return"))
             reported_previous_nav = float((strategies.get(slug) or {}).get("previous_nav"))
         except (KeyError, TypeError, ValueError):
+            return {
+                "reason_code": "SHADOW_NAV_SCHEMA_MISMATCH",
+                "reason": f"missing or non-numeric continuity fields for {slug}",
+            }
+        try:
+            prior_csv_nav = float(previous[slug])
+        except (KeyError, TypeError, ValueError):
+            if slug in OPTIONAL_PRE_INCEPTION_SLUGS and abs(reported_previous_nav - 1.0) <= 1e-8:
+                continue
             return {
                 "reason_code": "SHADOW_NAV_SCHEMA_MISMATCH",
                 "reason": f"missing or non-numeric continuity fields for {slug}",

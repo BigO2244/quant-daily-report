@@ -13,6 +13,11 @@ from paper.trading_calendar import is_trading_day, prev_trading_day
 
 _REGISTRY = load_strategy_registry()
 MODEL_SLUGS = _REGISTRY.active_shadow_security_selection_ids()
+OPTIONAL_PRE_INCEPTION_SLUGS = tuple(
+    entry.strategy_id
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
+    if (entry.shadow_tracking or {}).get("baseline_strategy_id")
+)
 BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 DISPLAY_NAMES = {
     entry.strategy_id: entry.display_name.replace("Caerus ", "")
@@ -152,6 +157,13 @@ def _strategy_block(slug: str, evaluation: dict[str, Any], comparison: dict[str,
     feedback_strategies = feedback.get("strategies") if isinstance(feedback.get("strategies"), dict) else {}
     feedback_payload = feedback_strategies.get(SUMMARY_KEYS[slug]) if isinstance(feedback_strategies.get(SUMMARY_KEYS[slug]), dict) else {}
     if not payload:
+        if slug in OPTIONAL_PRE_INCEPTION_SLUGS:
+            return [
+                f"{DISPLAY_NAMES[slug]}:",
+                "Artifact status: OK",
+                "Data status: PRE_INCEPTION",
+                "Diagnostic state: pre-inception shadow sleeve; no action required",
+            ]
         return [
             f"{DISPLAY_NAMES[slug]}:",
             "Artifact status: DEGRADED",

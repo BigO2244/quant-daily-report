@@ -25,6 +25,11 @@ INCOMPLETE_NEXT_ACTION = (
 )
 _REGISTRY = load_strategy_registry()
 STRATEGY_ORDER = active_shadow_security_selection_ids()
+OPTIONAL_PRE_INCEPTION_STRATEGIES = {
+    entry.strategy_id
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
+    if (entry.shadow_tracking or {}).get("baseline_strategy_id")
+}
 PROMOTION_CANDIDATES = set(_REGISTRY.promotion_candidate_ids())
 EXPOSURE_SOURCE_ARTIFACTS = (
     "exposures_snapshot.json",
@@ -326,6 +331,14 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         exposure_from_summary = exposure_summary.get(strategy_id, {}) if isinstance(exposure_summary, dict) else {}
         concentration_row = concentration.get(strategy_id, {})
         regime_row = regime_matrix.get(strategy_id, {}) if isinstance(regime_matrix, dict) else {}
+        optional_pre_inception = (
+            strategy_id in OPTIONAL_PRE_INCEPTION_STRATEGIES
+            and not perf
+            and not exposure
+            and not exposure_from_summary
+            and not concentration_row
+            and not regime_row
+        )
         top3 = _first_present(
             exposure.get("top3_concentration"),
             exposure_from_summary.get("top3_concentration"),
@@ -345,11 +358,11 @@ def _strategy_comparison(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             regime_row.get("max_sector_exposure"),
         )
         missing_sources = []
-        if top3 is None:
+        if top3 is None and not optional_pre_inception:
             missing_sources.append("top3_concentration from exposures_snapshot/concentration_monitor")
-        if max_position is None:
+        if max_position is None and not optional_pre_inception:
             missing_sources.append("max_position_weight from exposures_snapshot/concentration_monitor")
-        if max_sector is None:
+        if max_sector is None and not optional_pre_inception:
             missing_sources.append("max_sector_exposure from exposures_snapshot/concentration_monitor/regime_exposure_matrix")
         risk_flags = flags_by_strategy.get(strategy_id, [])
         main_risk = _main_risk(strategy_id, top3, max_position, max_sector, risk_flags, missing_sources)

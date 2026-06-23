@@ -9,6 +9,12 @@ import os
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from core.dynamic_daily_email import render_dynamic_email_sections
+
 
 def _load_json(path: Path) -> dict:
     if not path.exists():
@@ -113,6 +119,9 @@ def main() -> None:
         )
     else:
         lines.append(f"{turnover_label}: ${t_req:,.2f} (no cap applied)")
+
+    dynamic_sections = render_dynamic_email_sections(Path.cwd(), trade_date)
+    lines.append(dynamic_sections["text"].rstrip())
 
     print("\n".join(lines))
 

@@ -24,6 +24,7 @@ LIVE_PILOT_DRY_RUN_ENV = "CAERUS_LIVE_PILOT_DRY_RUN"
 LIVE_PILOT_CRON_APPROVED_ENV = "CAERUS_LIVE_PILOT_CRON_APPROVED"
 LIVE_PILOT_SELL_WHITELIST_ENV = "CAERUS_LIVE_PILOT_SELL_WHITELIST"
 LIVE_PILOT_ALLOW_FRACTIONAL_ENV = "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"
+LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV = "CAERUS_LIVE_PILOT_MAX_SLIPPAGE_BPS"
 
 LIVE_PILOT_MAX_CAP_USD = 100.0
 LIVE_ALLOWED_VALUES = frozenset({"1", "true", "yes", "y", "on", "approve_live_pilot"})
@@ -92,6 +93,7 @@ class LivePilotOrder:
     notional: float
     client_order_id: str
     order_type: str = "limit"
+    expected_price: float | None = None
     original_limit_price: float | None = None
     normalized_limit_price: float | None = None
 
@@ -103,6 +105,8 @@ class LivePilotOrder:
             "limit_price": self.limit_price,
             "original_limit_price": self.original_limit_price,
             "normalized_limit_price": self.normalized_limit_price,
+            "expected_price": self.expected_price,
+            "cap_enforcement_price": self.normalized_limit_price,
             "notional": self.notional,
             "client_order_id": self.client_order_id,
             "order_type": self.order_type,
@@ -423,7 +427,12 @@ def validate_live_pilot_plan(
         symbol = _clean_symbol(raw_trade.get("symbol") or raw_trade.get("ticker"))
         side = str(raw_trade.get("side") or "").strip().upper()
         qty = _safe_float(raw_trade.get("qty") or raw_trade.get("shares"))
-        limit_price = _safe_float(raw_trade.get("limit_price") or raw_trade.get("price"))
+        limit_price = _safe_float(
+            raw_trade.get("limit_price")
+            or raw_trade.get("price")
+            or raw_trade.get("expected_price")
+            or raw_trade.get("cap_enforcement_price")
+        )
         order_type = str(raw_trade.get("order_type") or "limit").strip().lower()
         if not symbol:
             errors.append(f"order_{index}:missing_symbol")
@@ -446,11 +455,11 @@ def validate_live_pilot_plan(
         if not fractional_allowed and abs(qty - round(qty)) > 1e-9:
             errors.append(f"{symbol}:fractional_qty_not_allowed")
             continue
-        if order_type != "limit":
-            errors.append(f"{symbol}:only_limit_orders_supported")
+        if order_type not in {"limit", "market"}:
+            errors.append(f"{symbol}:unsupported_order_type:{order_type or 'missing'}")
             continue
         if limit_price is None or limit_price <= 0:
-            errors.append(f"{symbol}:missing_positive_limit_price")
+            errors.append(f"{symbol}:missing_positive_cap_enforcement_price")
             continue
         original_limit_price = _safe_float(raw_trade.get("original_limit_price")) or float(limit_price)
         normalized_input = _safe_float(raw_trade.get("normalized_limit_price")) or float(limit_price)
@@ -468,6 +477,8 @@ def validate_live_pilot_plan(
                 limit_price=float(normalized_limit_price),
                 notional=notional,
                 client_order_id=f"caerus-live-pilot-{run_id}-{index}-{symbol}".lower()[:48],
+                order_type=order_type,
+                expected_price=float(normalized_limit_price),
                 original_limit_price=original_limit_price,
                 normalized_limit_price=float(normalized_limit_price),
             )

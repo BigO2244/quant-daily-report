@@ -21,18 +21,29 @@ def _read_dates(path: Path) -> list[str]:
 
 
 def _performance_payload(trade_date: str, *, nav: float, previous_nav: float, daily_return: float) -> dict:
+    strategies = {
+        slug: {
+            "nav": nav,
+            "previous_nav": previous_nav,
+            "daily_return": daily_return,
+        }
+        for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
+    }
+    strategies["caerus_polaris_alpha"] = {
+        "nav": nav,
+        "previous_nav": previous_nav,
+        "daily_return": daily_return,
+    }
+    strategies["caerus_orion_alpha"] = {
+        "nav": nav,
+        "previous_nav": previous_nav,
+        "daily_return": daily_return,
+    }
     return {
         "trade_date": trade_date,
         "status": "OK",
         "data_status": "OK",
-        "strategies": {
-            slug: {
-                "nav": nav,
-                "previous_nav": previous_nav,
-                "daily_return": daily_return,
-            }
-            for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
-        },
+        "strategies": strategies,
     }
 
 

@@ -68,6 +68,64 @@
       "behavior_change_allowed": false
     },
     {
+      "sleeve_id": "polaris_alpha",
+      "strategy_id": "caerus_polaris_alpha",
+      "display_name": "Polaris_Alpha",
+      "status": "current_shadow_challenger",
+      "lifecycle_stage": "shadow_observed",
+      "sleeve_type": "security_selection",
+      "family": "core_momentum",
+      "thesis": "Forward shadow concentration variant of Polaris intended to test whether top-4 momentum concentration improves alpha per deployed dollar without disproportionate drawdown.",
+      "intended_market_environment": "Broad large-cap equity regimes where Polaris-style cross-sectional momentum is strong enough that concentration may improve return capture.",
+      "universe_policy": {
+        "universe_family": "caerus_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Daily shadow observation only; no paper, live, broker, scheduler, allocator, or production behavior change.",
+      "holding_count_policy": "Top 4 highest-ranked Polaris momentum names, equal weighted with 20% max-position cap; residual cash is expected and measured.",
+      "risk_profile": "High-concentration core momentum challenger; compare return, drawdown, turnover, concentration, HHI/effective N, and alpha-per-dollar proxy versus Polaris.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "strategy_id",
+          "lifecycle_status",
+          "universe_family",
+          "universe_method",
+          "benchmark",
+          "window",
+          "metrics",
+          "holdings",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "shadow_candidates",
+          "shadow_evaluation",
+          "longitudinal_metrics",
+          "promotion_readiness",
+          "concentration_comparison"
+        ]
+      },
+      "promotion_requirements": [
+        "20 trading-day checkpoint: complete forward shadow chain, no execution impact, compare return/drawdown/turnover/concentration versus Polaris.",
+        "60 trading-day checkpoint: positive alpha-per-dollar proxy versus Polaris and SPY after costs with drawdown not disproportionate to concentration.",
+        "Decision-grade PIT evidence remains required before paper, pilot, or capital allocation promotion.",
+        "Owner approval required before any promotion, allocation, or production behavior change."
+      ],
+      "retirement_policy": "Retire or shelve if concentration fails to improve alpha-per-dollar proxy, materially worsens drawdown, or cannot maintain artifact continuity.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "existing_shadow_reference",
+      "behavior_change_allowed": false
+    },
+    {
       "sleeve_id": "orion",
       "strategy_id": "caerus_orion",
       "display_name": "Caerus Orion",
@@ -126,6 +184,64 @@
         "Owner approval before promotion, retirement, rename, or allocation changes."
       ],
       "retirement_policy": "No retirement decision is allowed in Phase B; future retirement requires owner-approved evidence threshold.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "existing_shadow_reference",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "orion_alpha",
+      "strategy_id": "caerus_orion_alpha",
+      "display_name": "Orion_Alpha",
+      "status": "current_shadow_challenger",
+      "lifecycle_stage": "shadow_observed",
+      "sleeve_type": "security_selection",
+      "family": "core_momentum",
+      "thesis": "Forward shadow concentration variant of Orion intended to test whether top-3 rank-decay momentum concentration improves alpha per deployed dollar while constraining drawdown.",
+      "intended_market_environment": "Large-cap momentum regimes where Orion rank-decay exits retain winners but a tighter top-3 portfolio may improve return capture.",
+      "universe_policy": {
+        "universe_family": "caerus_large_cap",
+        "universe_method_required": "pit_universe",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Daily shadow observation only; no paper, live, broker, scheduler, allocator, or production behavior change.",
+      "holding_count_policy": "Top 3 Orion rank-decay names, equal weighted with 25% max-position cap; residual cash is expected and measured.",
+      "risk_profile": "High-concentration core momentum challenger; compare return, drawdown, turnover, concentration, HHI/effective N, and alpha-per-dollar proxy versus Orion.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "strategy_id",
+          "lifecycle_status",
+          "universe_family",
+          "universe_method",
+          "benchmark",
+          "window",
+          "metrics",
+          "holdings",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "shadow_candidates",
+          "shadow_evaluation",
+          "longitudinal_metrics",
+          "promotion_readiness",
+          "concentration_comparison"
+        ]
+      },
+      "promotion_requirements": [
+        "20 trading-day checkpoint: complete forward shadow chain, no execution impact, compare return/drawdown/turnover/concentration versus Orion.",
+        "60 trading-day checkpoint: positive alpha-per-dollar proxy versus Orion and SPY after costs with drawdown not disproportionate to concentration.",
+        "Decision-grade PIT evidence remains required before paper, pilot, or capital allocation promotion.",
+        "Owner approval required before any promotion, allocation, or production behavior change."
+      ],
+      "retirement_policy": "Retire or shelve if concentration fails to improve alpha-per-dollar proxy, materially worsens drawdown, or cannot maintain artifact continuity.",
       "mcp_visibility": "visible_read_only",
       "implementation_status": "existing_shadow_reference",
       "behavior_change_allowed": false

@@ -251,9 +251,9 @@ def test_mcp_fr069_sleeve_inventory_returns_manifest_counts() -> None:
     assert payload["phase"] == "Phase B"
     assert payload["research_only"] is True
     assert payload["behavior_change_allowed"] is False
-    assert payload["sleeve_count"] == 7
+    assert payload["sleeve_count"] == 9
     assert payload["counts_by_status"]["research_placeholder"] == 4
-    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "orion", "lyra"}
+    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra"}
 
 
 def test_mcp_fr069_sleeve_inventory_jsonrpc_call() -> None:
@@ -279,6 +279,7 @@ def test_mcp_safety_boundaries(tmp_path: Path, monkeypatch) -> None:
         "scripts.run_precomputed_alpaca_execution",
         "scripts.cron_execute",
     ]:
+        sys.modules.pop(forbidden, None)
         assert forbidden not in sys.modules
 
     output_db = Path.cwd() / "outputs" / "mcp-server-test.db"

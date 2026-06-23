@@ -4,10 +4,15 @@ import argparse
 import csv
 import datetime as dt
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from core.strategy_registry import StrategyRegistryEntry, load_strategy_registry_for_repo
+REPO_CODE_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_CODE_ROOT))
+
+from core.strategy_registry import StrategyRegistryEntry, load_strategy_registry_for_repo, registry_path_for_repo
 
 
 def _read_json(path: Path) -> dict[str, Any] | list[Any] | None:
@@ -146,7 +151,13 @@ class DashboardV1Builder:
             {
                 "section": section,
                 "label": label,
-                "path": str(path.relative_to(self.repo_root)) if path is not None else "",
+                "path": (
+                    str(path.relative_to(self.repo_root))
+                    if path is not None and path.is_relative_to(self.repo_root)
+                    else str(path)
+                    if path is not None
+                    else ""
+                ),
                 "as_of": as_of,
                 "source_type": source_type,
                 "trust_level": trust_level,
@@ -739,6 +750,10 @@ class DashboardV1Builder:
                     "realized_volatility_ann": _to_float(raw.get("realized_volatility_ann")),
                     "avg_turnover": _to_float(raw.get("avg_turnover")),
                     "avg_top_3_concentration": _to_float(raw.get("avg_top_3_concentration")),
+                    "avg_cash_weight": _to_float(raw.get("avg_cash_weight")),
+                    "avg_hhi": _to_float(raw.get("avg_hhi")),
+                    "avg_effective_n": _to_float(raw.get("avg_effective_n")),
+                    "alpha_per_dollar_deployed_proxy": _to_float(raw.get("alpha_per_dollar_deployed_proxy")),
                     "valid_evaluation_days": int(valid_days) if valid_days is not None else None,
                     "promotion_readiness": readiness,
                     "failed_criteria": failed,
@@ -976,6 +991,554 @@ class DashboardV1Builder:
             "reason_codes": reason_codes,
         }
 
+    def _latest_live_pilot_run_dir(self) -> Path | None:
+        runs_root = self.repo_root / "outputs" / "live_pilot" / "runs"
+        if not runs_root.exists():
+            return None
+        run_dirs = [path for path in runs_root.iterdir() if path.is_dir()]
+        if not run_dirs:
+            return None
+        return max(run_dirs, key=lambda path: path.stat().st_mtime)
+
+    def _latest_live_pilot_plan_path(self) -> Path | None:
+        plans_root = self.repo_root / "outputs" / "live_pilot" / "plans"
+        direct = plans_root / f"live_pilot_plan_{self.report_date}.json"
+        if direct.exists():
+            return direct
+        return _latest_glob(plans_root, "live_pilot_plan_*.json")
+
+    def _build_live_pilot_status(self) -> dict[str, Any]:
+        run_root = self._latest_live_pilot_run_dir()
+        plan_path = self._latest_live_pilot_plan_path()
+
+        plan_payload = _read_json(plan_path) if plan_path is not None else None
+        preflight_path = run_root / "live_pilot_preflight.json" if run_root is not None else None
+        operator_path = run_root / "live_pilot_operator_summary.json" if run_root is not None else None
+        evidence_path = run_root / "live_pilot_evidence_metrics.json" if run_root is not None else None
+        capital_path = run_root / "live_pilot_capital_usage.json" if run_root is not None else None
+        recon_path = run_root / "live_pilot_reconciliation.json" if run_root is not None else None
+        submitted_path = run_root / "live_pilot_orders_submitted.json" if run_root is not None else None
+        open_order_path = run_root / "live_pilot_open_order_check.json" if run_root is not None else None
+        pre_snapshot_path = run_root / "live_pilot_broker_snapshot_pre.json" if run_root is not None else None
+        post_snapshot_path = run_root / "live_pilot_broker_snapshot_post.json" if run_root is not None else None
+
+        preflight = _read_json(preflight_path) if preflight_path is not None else None
+        operator = _read_json(operator_path) if operator_path is not None else None
+        evidence = _read_json(evidence_path) if evidence_path is not None else None
+        capital = _read_json(capital_path) if capital_path is not None else None
+        reconciliation = _read_json(recon_path) if recon_path is not None else None
+        submitted_payload = _read_json(submitted_path) if submitted_path is not None else None
+        open_order_check = _read_json(open_order_path) if open_order_path is not None else None
+        pre_snapshot = _read_json(pre_snapshot_path) if pre_snapshot_path is not None else None
+        post_snapshot = _read_json(post_snapshot_path) if post_snapshot_path is not None else None
+
+        for label, path, payload in (
+            ("live pilot plan", plan_path, plan_payload),
+            ("live pilot preflight", preflight_path, preflight),
+            ("live pilot operator summary", operator_path, operator),
+            ("live pilot evidence metrics", evidence_path, evidence),
+            ("live pilot reconciliation", recon_path, reconciliation),
+            ("live pilot submitted orders", submitted_path, submitted_payload),
+            ("live pilot open order check", open_order_path, open_order_check),
+            ("live pilot broker snapshot", post_snapshot_path, post_snapshot),
+        ):
+            self._record_source(
+                section="live_pilot",
+                label=label,
+                path=path,
+                source_type="live_pilot_artifact",
+                trust_level="runtime" if isinstance(payload, dict) else "missing",
+                as_of=(payload or {}).get("generated_at") if isinstance(payload, dict) else None,
+                used=isinstance(payload, dict),
+            )
+
+        if not isinstance(plan_payload, dict) and run_root is None:
+            self._mark(
+                _check(
+                    "live_pilot_artifacts_present",
+                    "warn",
+                    "non_blocking",
+                    "No live-pilot plan or run artifact is available; pilot evidence status is display-only unknown.",
+                )
+            )
+            return {
+                "as_of": None,
+                "is_stale": True,
+                "status": "NO_DATA",
+                "run_id": None,
+                "run_root": None,
+                "plan_path": None,
+                "policy": {
+                    "scope": "FR-104 LIVE_PILOT only",
+                    "order_type": None,
+                    "normal_market_hours_only": True,
+                    "capital_behavior_changed": False,
+                    "paper_or_production_impact": "none",
+                },
+                "account": {},
+                "positions": [],
+                "open_orders": [],
+                "submitted_orders": [],
+                "latest_submitted_order": None,
+                "latest_fill_status": None,
+                "reconciliation": {},
+                "metrics": {
+                    "submitted_count": 0,
+                    "accepted_count": 0,
+                    "filled_count": 0,
+                    "fill_rate": None,
+                    "average_time_to_fill_seconds": None,
+                    "slippage_bps": None,
+                    "rejected_count": 0,
+                    "reconciliation_clean_rate": None,
+                    "cash_deployment_rate": None,
+                    "idle_cash_reason": "live_pilot_artifacts_missing",
+                },
+            }
+
+        self._mark(_check("live_pilot_artifacts_present", "pass", "non_blocking", "Live-pilot plan or run artifacts loaded."))
+
+        submitted_orders = (
+            submitted_payload.get("orders")
+            if isinstance(submitted_payload, dict) and isinstance(submitted_payload.get("orders"), list)
+            else []
+        )
+        account_snapshot = post_snapshot if isinstance(post_snapshot, dict) else pre_snapshot if isinstance(pre_snapshot, dict) else {}
+        account = account_snapshot.get("account") if isinstance(account_snapshot.get("account"), dict) else {}
+        positions = account_snapshot.get("positions") if isinstance(account_snapshot.get("positions"), list) else []
+        open_orders = account_snapshot.get("open_orders") if isinstance(account_snapshot.get("open_orders"), list) else []
+        latest_submitted_order = submitted_orders[-1] if submitted_orders else None
+        selected_order = plan_payload.get("selected_order") if isinstance(plan_payload, dict) else None
+        policy = plan_payload.get("order_policy") if isinstance(plan_payload, dict) and isinstance(plan_payload.get("order_policy"), dict) else {}
+
+        terminal_status = (
+            operator.get("terminal_status")
+            if isinstance(operator, dict)
+            else plan_payload.get("status")
+            if isinstance(plan_payload, dict)
+            else "UNKNOWN"
+        )
+        run_id = (
+            operator.get("run_id")
+            if isinstance(operator, dict)
+            else run_root.name
+            if run_root is not None
+            else None
+        )
+        metrics = evidence if isinstance(evidence, dict) else {}
+        capital_usage = capital if isinstance(capital, dict) else {}
+        reconciliation_payload = reconciliation if isinstance(reconciliation, dict) else {}
+        open_order_payload = open_order_check if isinstance(open_order_check, dict) else {}
+        blocking_open_orders = (
+            open_order_payload.get("blocking_open_orders")
+            if isinstance(open_order_payload.get("blocking_open_orders"), list)
+            else []
+        )
+
+        return {
+            "as_of": (
+                operator.get("generated_at")
+                if isinstance(operator, dict)
+                else plan_payload.get("generated_at")
+                if isinstance(plan_payload, dict)
+                else None
+            ),
+            "is_stale": False,
+            "status": str(terminal_status or "UNKNOWN"),
+            "run_id": run_id,
+            "run_root": str(run_root.relative_to(self.repo_root)) if run_root is not None else None,
+            "plan_path": str(plan_path.relative_to(self.repo_root)) if plan_path is not None else None,
+            "plan_status": plan_payload.get("status") if isinstance(plan_payload, dict) else None,
+            "selected_order": selected_order,
+            "policy": {
+                "scope": policy.get("scope") or "FR-104 LIVE_PILOT only",
+                "order_type": policy.get("order_type") or (selected_order or {}).get("order_type"),
+                "time_in_force": policy.get("time_in_force") or (selected_order or {}).get("time_in_force"),
+                "normal_market_hours_only": policy.get("normal_market_hours_only", True),
+                "cap_enforced_before_submission": policy.get("cap_enforced_before_submission", True),
+                "duplicate_open_order_policy": policy.get("duplicate_open_order_policy") or "skip_if_open_live_pilot_order_detected",
+                "capital_behavior_changed": False,
+                "paper_or_production_impact": policy.get("paper_or_production_impact") or "none",
+            },
+            "account": {
+                "cash": _to_float(account.get("cash")),
+                "equity": _to_float(account.get("equity") or account.get("portfolio_value")),
+                "buying_power": _to_float(account.get("buying_power")),
+                "portfolio_value": _to_float(account.get("portfolio_value") or account.get("equity")),
+                "status": account.get("status"),
+                "account_id_hash": account.get("account_id_hash"),
+            },
+            "positions": [
+                {
+                    "ticker": str(row.get("symbol") or row.get("ticker") or "").strip().upper(),
+                    "qty": _to_float(row.get("qty")),
+                    "market_value": _to_float(row.get("market_value")),
+                }
+                for row in positions
+                if isinstance(row, dict)
+            ][:25],
+            "open_orders": open_orders,
+            "blocking_open_orders": blocking_open_orders,
+            "submitted_orders": submitted_orders,
+            "latest_submitted_order": latest_submitted_order,
+            "latest_fill_status": (
+                (latest_submitted_order or {}).get("status")
+                or ((latest_submitted_order or {}).get("order") or {}).get("status")
+                if isinstance(latest_submitted_order, dict)
+                else None
+            ),
+            "reconciliation": {
+                "status": reconciliation_payload.get("status"),
+                "state": reconciliation_payload.get("state"),
+                "operator_action": reconciliation_payload.get("operator_action"),
+                "open_count": reconciliation_payload.get("open_count"),
+                "unresolved_count": reconciliation_payload.get("unresolved_count"),
+                "rejected_count": reconciliation_payload.get("rejected_count"),
+            },
+            "metrics": {
+                "submitted_count": metrics.get("submitted_count") if metrics else (operator or {}).get("submitted_count") if isinstance(operator, dict) else None,
+                "accepted_count": metrics.get("accepted_count"),
+                "filled_count": metrics.get("filled_count") if metrics else (operator or {}).get("filled_count") if isinstance(operator, dict) else None,
+                "fill_rate": metrics.get("fill_rate") if metrics else (operator or {}).get("fill_rate") if isinstance(operator, dict) else None,
+                "average_time_to_fill_seconds": metrics.get("average_time_to_fill_seconds"),
+                "slippage_bps": metrics.get("slippage_bps"),
+                "rejected_count": metrics.get("rejected_count"),
+                "reconciliation_clean": metrics.get("reconciliation_clean"),
+                "reconciliation_clean_rate": metrics.get("reconciliation_clean_rate"),
+                "cash_deployment_rate": metrics.get("cash_deployment_rate") if metrics else capital_usage.get("cash_deployment_rate"),
+                "filled_notional_usd": metrics.get("filled_notional_usd") if metrics else capital_usage.get("filled_notional_usd"),
+                "capital_cap_usd": metrics.get("capital_cap_usd") if metrics else capital_usage.get("capital_cap_usd") or (plan_payload or {}).get("capital_cap") if isinstance(plan_payload, dict) else None,
+                "idle_cash_reason": metrics.get("idle_cash_reason") if metrics else (operator or {}).get("idle_cash_reason") if isinstance(operator, dict) else None,
+                "open_order_count": len(open_orders),
+                "blocking_open_order_count": len(blocking_open_orders),
+            },
+            "paper_live_comparability": {
+                "available": False,
+                "reason": "paper_live_divergence_artifact_not_available_for_live_pilot_section",
+            },
+        }
+
+    def _load_sleeve_manifest(self) -> tuple[dict[str, Any] | None, Path]:
+        path = self.repo_root / "research_registry" / "sleeves" / "manifest.json"
+        payload = _read_json(path)
+        return (payload if isinstance(payload, dict) else None), path
+
+    def _lifecycle_stage(self, entry: StrategyRegistryEntry, manifest_row: dict[str, Any] | None) -> str:
+        text = " ".join(
+            [
+                str(entry.status or ""),
+                str(entry.execution_impact or ""),
+                str((manifest_row or {}).get("lifecycle_stage") or ""),
+                str((manifest_row or {}).get("status") or ""),
+            ]
+        ).lower()
+        if "production" in text:
+            return "production"
+        if "pilot" in text or "live" in text:
+            return "pilot/live"
+        if "paper" in text:
+            return "paper"
+        if "shadow" in text:
+            return "shadow"
+        if entry.strategy_type in {"benchmark", "reference_portfolio"}:
+            return "reference"
+        return "research"
+
+    def _build_sleeve_inventory(self, shadow_section: dict[str, Any]) -> dict[str, Any]:
+        registry = load_strategy_registry_for_repo(self.repo_root)
+        manifest, manifest_path = self._load_sleeve_manifest()
+        manifest_rows = manifest.get("sleeves") if isinstance(manifest, dict) and isinstance(manifest.get("sleeves"), list) else []
+        manifest_by_strategy = {
+            str(row.get("strategy_id") or "").strip(): row
+            for row in manifest_rows
+            if isinstance(row, dict) and row.get("strategy_id")
+        }
+        shadow_metrics = {
+            str(row.get("slug") or "").strip(): row
+            for row in shadow_section.get("strategies", [])
+            if isinstance(row, dict) and row.get("slug")
+        }
+        self._record_source(
+            section="sleeve_inventory",
+            label="strategy registry",
+            path=registry_path_for_repo(self.repo_root),
+            source_type="strategy_registry",
+            trust_level="governance",
+            as_of=None,
+            used=True,
+        )
+        self._record_source(
+            section="sleeve_inventory",
+            label="sleeve manifest",
+            path=manifest_path,
+            source_type="sleeve_manifest",
+            trust_level="governance" if isinstance(manifest, dict) else "missing",
+            as_of=(manifest or {}).get("manifest_version") if isinstance(manifest, dict) else None,
+            used=isinstance(manifest, dict),
+        )
+
+        rows: list[dict[str, Any]] = []
+        counts: dict[str, int] = {}
+        for entry in registry.entries:
+            if entry.strategy_type in {"benchmark", "reference_portfolio"}:
+                continue
+            manifest_row = manifest_by_strategy.get(entry.strategy_id)
+            tracking = entry.shadow_tracking or {}
+            metrics = shadow_metrics.get(entry.strategy_id) or {}
+            lifecycle = self._lifecycle_stage(entry, manifest_row)
+            counts[lifecycle] = counts.get(lifecycle, 0) + 1
+            valid_days = metrics.get("valid_evaluation_days")
+            checkpoints = []
+            for checkpoint in tracking.get("review_checkpoints_trading_days") or []:
+                try:
+                    checkpoint_int = int(checkpoint)
+                except Exception:
+                    continue
+                observed = int(valid_days or 0)
+                checkpoints.append(
+                    {
+                        "trading_days": checkpoint_int,
+                        "observed_days": observed,
+                        "status": "READY_FOR_REVIEW" if observed >= checkpoint_int else "IN_PROGRESS",
+                    }
+                )
+            artifact_required = bool(entry.active_in_shadow_tracking or entry.status in {"paper", "shadow"})
+            artifact_status = "PRESENT" if metrics else "NOT_REQUIRED" if not artifact_required else "MISSING"
+            variant_class = (
+                "alpha"
+                if "alpha" in entry.strategy_id.lower() or "alpha" in entry.display_name.lower()
+                else "baseline"
+                if entry.role == "baseline"
+                else "standard"
+            )
+            rows.append(
+                {
+                    "strategy_id": entry.strategy_id,
+                    "sleeve_id": (manifest_row or {}).get("sleeve_id") or entry.compact_name(),
+                    "display_name": entry.display_name,
+                    "short_name": entry.compact_name(),
+                    "strategy_type": entry.strategy_type,
+                    "family": entry.family,
+                    "lifecycle_stage": lifecycle,
+                    "current_lifecycle_status": entry.status,
+                    "manifest_lifecycle_stage": (manifest_row or {}).get("lifecycle_stage"),
+                    "role": entry.role,
+                    "variant_class": variant_class,
+                    "baseline_strategy_id": tracking.get("baseline_strategy_id"),
+                    "execution_impact": entry.execution_impact,
+                    "eligible_for_shadow": entry.eligible_for_shadow,
+                    "eligible_for_promotion": entry.eligible_for_promotion,
+                    "promotion_readiness": metrics.get("promotion_readiness") or ("BASELINE" if entry.role == "baseline" else "RESEARCH" if lifecycle == "research" else "WATCHLIST"),
+                    "artifact_status": artifact_status,
+                    "data_status": metrics.get("data_status") or ("NO_DATA" if artifact_status == "MISSING" else "OK" if artifact_status == "PRESENT" else "NOT_REQUIRED"),
+                    "today_return": metrics.get("daily_return"),
+                    "since_inception_return": metrics.get("cumulative_return"),
+                    "drawdown": metrics.get("max_drawdown"),
+                    "turnover": metrics.get("avg_turnover"),
+                    "concentration": metrics.get("avg_top_3_concentration"),
+                    "effective_n": metrics.get("avg_effective_n"),
+                    "alpha_per_dollar_proxy": metrics.get("alpha_per_dollar_deployed_proxy"),
+                    "construction": tracking.get("construction") or {},
+                    "review_checkpoints": checkpoints,
+                    "source_variant": tracking.get("source_variant"),
+                }
+            )
+
+        missing_artifacts = [row["strategy_id"] for row in rows if row["artifact_status"] == "MISSING"]
+        if missing_artifacts:
+            self._mark(
+                _check(
+                    "sleeve_inventory_artifact_coverage",
+                    "warn",
+                    "non_blocking",
+                    "One or more paper/shadow sleeves lack current shadow evaluation metrics.",
+                    missing_strategies=missing_artifacts,
+                )
+            )
+        else:
+            self._mark(_check("sleeve_inventory_artifact_coverage", "pass", "non_blocking", "Registered sleeve inventory loaded."))
+
+        return {
+            "as_of": shadow_section.get("as_of"),
+            "is_stale": bool(shadow_section.get("is_stale")),
+            "status": "WARN" if missing_artifacts else "OK",
+            "summary": {
+                "total_registered": len(rows),
+                "by_lifecycle_stage": counts,
+                "alpha_variants": len([row for row in rows if row["variant_class"] == "alpha"]),
+                "paper_or_live_capital_behavior_changed": False,
+            },
+            "rows": rows,
+        }
+
+    def _build_baseline_alpha_comparison(self, sleeve_inventory: dict[str, Any]) -> dict[str, Any]:
+        rows_by_id = {
+            str(row.get("strategy_id") or ""): row
+            for row in sleeve_inventory.get("rows", [])
+            if isinstance(row, dict)
+        }
+        pairs: list[dict[str, Any]] = []
+        for alpha in sleeve_inventory.get("rows", []):
+            if not isinstance(alpha, dict) or alpha.get("variant_class") != "alpha":
+                continue
+            baseline_id = str(alpha.get("baseline_strategy_id") or "").strip()
+            baseline = rows_by_id.get(baseline_id)
+            if not baseline:
+                continue
+            return_delta = (
+                alpha.get("since_inception_return") - baseline.get("since_inception_return")
+                if alpha.get("since_inception_return") is not None and baseline.get("since_inception_return") is not None
+                else None
+            )
+            drawdown_delta = (
+                alpha.get("drawdown") - baseline.get("drawdown")
+                if alpha.get("drawdown") is not None and baseline.get("drawdown") is not None
+                else None
+            )
+            pairs.append(
+                {
+                    "baseline_strategy_id": baseline_id,
+                    "baseline_name": baseline.get("display_name"),
+                    "alpha_strategy_id": alpha.get("strategy_id"),
+                    "alpha_name": alpha.get("display_name"),
+                    "baseline_return": baseline.get("since_inception_return"),
+                    "alpha_return": alpha.get("since_inception_return"),
+                    "return_delta": return_delta,
+                    "baseline_drawdown": baseline.get("drawdown"),
+                    "alpha_drawdown": alpha.get("drawdown"),
+                    "drawdown_delta": drawdown_delta,
+                    "baseline_turnover": baseline.get("turnover"),
+                    "alpha_turnover": alpha.get("turnover"),
+                    "baseline_concentration": baseline.get("concentration"),
+                    "alpha_concentration": alpha.get("concentration"),
+                    "baseline_effective_n": baseline.get("effective_n"),
+                    "alpha_effective_n": alpha.get("effective_n"),
+                    "baseline_alpha_per_dollar_proxy": baseline.get("alpha_per_dollar_proxy"),
+                    "alpha_alpha_per_dollar_proxy": alpha.get("alpha_per_dollar_proxy"),
+                    "review_checkpoints": alpha.get("review_checkpoints") or [],
+                    "evidence_window_days": max(
+                        [checkpoint.get("observed_days") or 0 for checkpoint in alpha.get("review_checkpoints") or []] or [0]
+                    ),
+                    "status": "IN_PROGRESS",
+                }
+            )
+        return {
+            "as_of": sleeve_inventory.get("as_of"),
+            "is_stale": bool(sleeve_inventory.get("is_stale")),
+            "status": "OK" if pairs else "NO_DATA",
+            "summary": {
+                "pair_count": len(pairs),
+                "review_checkpoints": [20, 60],
+            },
+            "pairs": pairs,
+        }
+
+    def _build_account_layers(self, sections: dict[str, Any]) -> dict[str, Any]:
+        nav = sections.get("nav", {})
+        positions = sections.get("positions", {})
+        live_pilot = sections.get("live_pilot", {})
+        sleeve_inventory = sections.get("sleeve_inventory", {})
+        lifecycle_counts = (sleeve_inventory.get("summary") or {}).get("by_lifecycle_stage") or {}
+        rows = [
+            {
+                "layer": "Paper account",
+                "status": "PAPER_OBSERVED",
+                "cash": nav.get("cash"),
+                "equity": nav.get("equity"),
+                "buying_power": nav.get("buying_power"),
+                "positions_count": (positions.get("summary") or {}).get("positions_count"),
+                "source": "broker paper/account artifacts",
+                "capital_behavior": "paper only",
+            },
+            {
+                "layer": "Live pilot account",
+                "status": live_pilot.get("status") or "NO_DATA",
+                "cash": (live_pilot.get("account") or {}).get("cash"),
+                "equity": (live_pilot.get("account") or {}).get("equity"),
+                "buying_power": (live_pilot.get("account") or {}).get("buying_power"),
+                "positions_count": len(live_pilot.get("positions") or []),
+                "source": live_pilot.get("run_root") or live_pilot.get("plan_path") or "outputs/live_pilot",
+                "capital_behavior": "FR-104 capped pilot only",
+            },
+            {
+                "layer": "Shadow/research sleeves",
+                "status": "OBSERVED",
+                "cash": None,
+                "equity": None,
+                "buying_power": None,
+                "positions_count": lifecycle_counts.get("shadow", 0) + lifecycle_counts.get("research", 0),
+                "source": "strategy registry + sleeve manifest + shadow artifacts",
+                "capital_behavior": "non-capital shadow/research",
+            },
+        ]
+        return {
+            "as_of": self.generated_at.isoformat(),
+            "is_stale": False,
+            "status": "OK",
+            "rows": rows,
+        }
+
+    def _build_governance_state(self, sections: dict[str, Any]) -> dict[str, Any]:
+        live_pilot = sections.get("live_pilot", {})
+        live_status = str(live_pilot.get("status") or "NO_DATA").upper()
+        fr104_status = (
+            "ACTIVE"
+            if live_status in {"SUBMITTED", "DRY_RUN", "CLEAN"}
+            else "READY"
+            if live_status in {"READY_FOR_MANUAL_APPROVAL", "BLOCKED_NO_QUALIFYING_ORDER", "PLAN_ONLY"}
+            else "UNKNOWN"
+            if live_status == "NO_DATA"
+            else "BLOCKED"
+            if "BLOCKED" in live_status or "FAILED" in live_status
+            else live_status
+        )
+        rows = [
+            {
+                "name": "FR-104 pilot evidence collection",
+                "status": fr104_status,
+                "pilot_blocking": False,
+                "promotion_blocking": False,
+                "production_scaling_blocking": False,
+                "detail": "Level 2.5 capped live-pilot evidence can continue when approval, cap, account, market-hours, and reconciliation gates pass.",
+            },
+            {
+                "name": "FR-068 decision-grade PIT membership",
+                "status": "DEPENDENCY_BLOCKED",
+                "pilot_blocking": False,
+                "promotion_blocking": True,
+                "production_scaling_blocking": True,
+                "detail": "PIT date-effective large-cap membership authority remains unresolved; this blocks promotion and scaling, not FR-104 pilot evidence collection.",
+            },
+            {
+                "name": "Shadow alpha promotion",
+                "status": "BLOCKED",
+                "pilot_blocking": False,
+                "promotion_blocking": True,
+                "production_scaling_blocking": True,
+                "detail": "Polaris_Alpha and Orion_Alpha are SHADOW only until 20/60-day forward evidence and decision-grade PIT infrastructure are available.",
+            },
+            {
+                "name": "Production allocator replacement",
+                "status": "BLOCKED",
+                "pilot_blocking": False,
+                "promotion_blocking": True,
+                "production_scaling_blocking": True,
+                "detail": "No allocator, scheduler, broker, paper, live, or production behavior changes are authorized by dashboard reporting.",
+            },
+        ]
+        return {
+            "as_of": self.generated_at.isoformat(),
+            "is_stale": False,
+            "status": "OK",
+            "summary": {
+                "pilot_blocked": any(row["pilot_blocking"] for row in rows),
+                "promotion_blocked": any(row["promotion_blocking"] for row in rows),
+                "production_scaling_blocked": any(row["production_scaling_blocking"] for row in rows),
+                "fr068_pilot_blocking": False,
+            },
+            "rows": rows,
+        }
+
     def _build_terminal_view(self, sections: dict[str, Any]) -> dict[str, Any]:
         nav = sections["nav"]
         positions = sections["positions"]
@@ -1140,6 +1703,9 @@ class DashboardV1Builder:
         performance_section = self._build_performance_history(nav_section)
         shadow_section = self._build_shadow_command_center()
         regime_section = self._build_regime_market_state()
+        live_pilot_section = self._build_live_pilot_status()
+        sleeve_inventory_section = self._build_sleeve_inventory(shadow_section)
+        baseline_alpha_section = self._build_baseline_alpha_comparison(sleeve_inventory_section)
         sections = {
             "positions": positions_section,
             "nav": nav_section,
@@ -1147,7 +1713,14 @@ class DashboardV1Builder:
             "performance_history": performance_section,
             "shadow_command_center": shadow_section,
             "regime_market_state": regime_section,
+            "live_pilot": live_pilot_section,
+            "sleeve_inventory": sleeve_inventory_section,
+            "baseline_alpha_comparison": baseline_alpha_section,
         }
+        account_layers_section = self._build_account_layers(sections)
+        sections["account_layers"] = account_layers_section
+        governance_section = self._build_governance_state(sections)
+        sections["governance_state"] = governance_section
         decision_section = self._build_daily_decision_intelligence(sections)
         sections["daily_decision_intelligence"] = decision_section
         system_health_section = self._build_system_health_console(sections)

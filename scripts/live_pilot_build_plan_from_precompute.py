@@ -173,7 +173,11 @@ def _candidate_order(
         normalized_limit_price = normalize_live_pilot_limit_price(float(limit_price))
         source_notional = round(float(shares) * float(limit_price), 6)
         pre_normalization_qty = _floor_qty_for_cap(float(shares), cap=float(capital_cap), limit_price=float(limit_price))
-        final_qty = _floor_qty_for_cap(float(pre_normalization_qty), cap=float(capital_cap), limit_price=float(normalized_limit_price))
+        final_qty = _floor_qty_for_cap(
+            float(pre_normalization_qty),
+            cap=float(capital_cap),
+            limit_price=float(normalized_limit_price),
+        )
         scaled_to_pilot_cap = abs(float(final_qty) - float(shares)) > 1e-12
 
     if reasons:
@@ -187,10 +191,14 @@ def _candidate_order(
         "shares": float(final_qty or 0.0),
         "qty": float(final_qty or 0.0),
         "limit_price": float(normalized_limit_price or 0.0),
+        "expected_price": float(normalized_limit_price or 0.0),
+        "cap_enforcement_price": float(normalized_limit_price or 0.0),
         "original_limit_price": float(original_limit_price or 0.0),
         "normalized_limit_price": float(normalized_limit_price or 0.0),
         "notional": float(pilot_notional),
-        "order_type": "limit",
+        "order_type": "market",
+        "time_in_force": "day",
+        "order_policy": "fr104_live_pilot_market_order_normal_hours_only",
         "sleeve": sleeve,
         "source_precompute_index": index,
         "source_reason": trade.get("reason"),
@@ -315,6 +323,16 @@ def build_live_pilot_plan(
         "max_orders": int(max_orders),
         "allow_missing_sleeve": bool(allow_missing_sleeve),
         "allow_fractional": bool(allow_fractional),
+        "order_policy": {
+            "scope": "FR-104 LIVE_PILOT only",
+            "order_type": "market",
+            "time_in_force": "day",
+            "normal_market_hours_only": True,
+            "cap_enforced_before_submission": True,
+            "cap_enforcement_price": "normalized expected price from source precompute",
+            "duplicate_open_order_policy": "skip_if_open_live_pilot_order_detected",
+            "paper_or_production_impact": "none",
+        },
         "selected_order": selected[0] if selected else None,
         "rejected_orders_with_reasons": rejected,
         "required_dry_run_command": dry_run_command,
@@ -376,7 +394,8 @@ def render_markdown(plan: Mapping[str, Any], *, json_path: Path) -> str:
                 f"- Ticker: `{selected.get('ticker')}`",
                 f"- Side: `{selected.get('side')}`",
                 f"- Shares: `{selected.get('shares')}`",
-                f"- Limit Price: `{selected.get('limit_price')}`",
+                f"- Order Type: `{selected.get('order_type')}`",
+                f"- Expected/Cap Price: `{selected.get('expected_price') or selected.get('limit_price')}`",
                 f"- Notional: `${float(selected.get('notional') or 0.0):.2f}`",
             ]
         )

@@ -19,11 +19,18 @@ def test_default_registry_preserves_current_active_shadow_strategies() -> None:
 
     assert registry.active_shadow_security_selection_ids() == (
         "caerus_polaris",
+        "caerus_polaris_alpha",
         "caerus_orion",
+        "caerus_orion_alpha",
         "caerus_lyra",
     )
     assert registry.baseline_strategy_id() == "caerus_polaris"
-    assert registry.promotion_candidate_ids() == ("caerus_orion", "caerus_lyra")
+    assert registry.promotion_candidate_ids() == (
+        "caerus_polaris_alpha",
+        "caerus_orion",
+        "caerus_orion_alpha",
+        "caerus_lyra",
+    )
 
 
 def test_repo_registry_loader_prefers_repo_local_config(tmp_path: Path) -> None:
@@ -100,11 +107,24 @@ def test_shadow_definitions_are_registry_driven_without_changing_current_specs()
     definitions = build_shadow_definitions()
     by_slug = {definition.strategy_slug: definition for definition in definitions}
 
-    assert tuple(by_slug) == ("caerus_polaris", "caerus_orion", "caerus_lyra")
+    assert tuple(by_slug) == (
+        "caerus_polaris",
+        "caerus_polaris_alpha",
+        "caerus_orion",
+        "caerus_orion_alpha",
+        "caerus_lyra",
+    )
     assert by_slug["caerus_polaris"].strategy_name == "Caerus Polaris"
     assert by_slug["caerus_polaris"].spec.top_n == 10
+    assert by_slug["caerus_polaris_alpha"].strategy_name == "Polaris_Alpha"
+    assert by_slug["caerus_polaris_alpha"].spec.top_n == 4
+    assert by_slug["caerus_polaris_alpha"].spec.max_position_weight == 0.20
     assert by_slug["caerus_orion"].spec.top_n == 5
     assert by_slug["caerus_orion"].spec.use_rank_decay_exit is True
+    assert by_slug["caerus_orion_alpha"].strategy_name == "Orion_Alpha"
+    assert by_slug["caerus_orion_alpha"].spec.top_n == 3
+    assert by_slug["caerus_orion_alpha"].spec.use_rank_decay_exit is True
+    assert by_slug["caerus_orion_alpha"].spec.max_position_weight == 0.25
     assert by_slug["caerus_lyra"].spec.rebalance_mode == "weekly"
     assert by_slug["caerus_lyra"].spec.use_rank_decay_exit is False
 

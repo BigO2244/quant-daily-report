@@ -75,8 +75,15 @@ def _write_nav_series(path: Path, rows: list[dict[str, float | str]]) -> None:
 def test_strategy_names_and_slugs_map_correctly() -> None:
     lookup = build_strategy_lookup()
     assert lookup["caerus_polaris"].strategy_name == "Caerus Polaris"
+    assert lookup["caerus_polaris_alpha"].strategy_name == "Polaris_Alpha"
+    assert lookup["caerus_polaris_alpha"].spec.top_n == 4
+    assert lookup["caerus_polaris_alpha"].spec.max_position_weight == 0.20
     assert lookup["caerus_orion"].spec.use_rank_decay_exit is True
     assert lookup["caerus_orion"].spec.top_n == 5
+    assert lookup["caerus_orion_alpha"].strategy_name == "Orion_Alpha"
+    assert lookup["caerus_orion_alpha"].spec.use_rank_decay_exit is True
+    assert lookup["caerus_orion_alpha"].spec.top_n == 3
+    assert lookup["caerus_orion_alpha"].spec.max_position_weight == 0.25
     assert lookup["caerus_lyra"].spec.rebalance_mode == "weekly"
     assert lookup["caerus_lyra"].spec.use_rank_decay_exit is False
 
@@ -118,7 +125,9 @@ def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_p
     assert rc == 0
     dated_dir = out_dir / "2023-03-31"
     assert (dated_dir / "caerus_polaris.json").exists()
+    assert (dated_dir / "caerus_polaris_alpha.json").exists()
     assert (dated_dir / "caerus_orion.json").exists()
+    assert (dated_dir / "caerus_orion_alpha.json").exists()
     assert (dated_dir / "caerus_lyra.json").exists()
     assert (dated_dir / "summary.json").exists()
     assert (dated_dir / "comparison.json").exists()
@@ -136,7 +145,17 @@ def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_p
     readiness = json.loads((dated_dir / "promotion_readiness.json").read_text())
     assert readiness["governance_label"] == "RESEARCH_ONLY"
     assert readiness["execution_impact"] == "NON_EXECUTIONAL"
+    assert "caerus_polaris_alpha" in readiness["strategies"]
+    assert "caerus_orion_alpha" in readiness["strategies"]
     assert "caerus_lyra" in readiness["strategies"]
+    polaris_alpha = json.loads((dated_dir / "caerus_polaris_alpha.json").read_text())
+    orion_alpha = json.loads((dated_dir / "caerus_orion_alpha.json").read_text())
+    assert polaris_alpha["weight_concentration"]["holdings_count"] == 4
+    assert polaris_alpha["weight_concentration"]["max_weight"] == 0.2
+    assert polaris_alpha["weight_concentration"]["cash_weight"] == 0.2
+    assert orion_alpha["weight_concentration"]["holdings_count"] == 3
+    assert orion_alpha["weight_concentration"]["max_weight"] == 0.25
+    assert orion_alpha["weight_concentration"]["cash_weight"] == 0.25
 
 
 def test_compute_strategy_delta_partial_overlap() -> None:
@@ -246,6 +265,56 @@ def test_shadow_performance_legitimate_inception_still_starts_at_one(tmp_path: P
     assert payload["status"] == "NO_PRIOR"
     assert payload["strategies"]["caerus_polaris"]["previous_nav"] == 1.0
     assert payload["strategies"]["caerus_polaris"]["nav"] == 1.01
+
+
+def test_shadow_performance_new_shadow_sleeves_incept_without_breaking_prior_chain(tmp_path: Path) -> None:
+    output_root = tmp_path / "shadow"
+    _write_json(
+        output_root / "2026-01-01" / "shadow_performance.json",
+        {
+            "trade_date": "2026-01-01",
+            "status": "OK",
+            "data_status": "OK",
+            "strategies": {
+                "caerus_polaris": {"daily_return": 0.0, "nav": 2.0},
+                "caerus_orion": {"daily_return": 0.0, "nav": 3.0},
+                "caerus_lyra": {"daily_return": 0.0, "nav": 4.0},
+                "spy_benchmark": {"daily_return": 0.0, "nav": 5.0},
+            },
+        },
+    )
+    panel = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-01"), "ticker": "AAA", "close": 100.0},
+            {"date": pd.Timestamp("2026-01-02"), "ticker": "AAA", "close": 101.0},
+            {"date": pd.Timestamp("2026-01-01"), "ticker": "SPY", "close": 200.0},
+            {"date": pd.Timestamp("2026-01-02"), "ticker": "SPY", "close": 202.0},
+        ]
+    )
+
+    payload = build_shadow_performance_payload(
+        panel=panel,
+        output_root=output_root,
+        trade_date="2026-01-02",
+        previous_trade_date="2026-01-01",
+        strategy_payloads={
+            "caerus_polaris": {"target_weights": {"AAA": 1.0}},
+            "caerus_polaris_alpha": {"target_weights": {"AAA": 0.8}},
+            "caerus_orion": {"target_weights": {"AAA": 1.0}},
+            "caerus_orion_alpha": {"target_weights": {"AAA": 0.75}},
+            "caerus_lyra": {"target_weights": {"AAA": 1.0}},
+        },
+        data_status="OK",
+    )
+
+    assert payload["status"] == "OK"
+    assert payload["strategies"]["caerus_polaris"]["previous_nav"] == 2.0
+    assert payload["strategies"]["caerus_polaris"]["nav"] == 2.02
+    assert payload["strategies"]["caerus_polaris_alpha"]["previous_nav"] == 1.0
+    assert payload["strategies"]["caerus_polaris_alpha"]["daily_return"] == 0.008
+    assert payload["strategies"]["caerus_polaris_alpha"]["nav"] == 1.008
+    assert payload["strategies"]["caerus_orion_alpha"]["previous_nav"] == 1.0
+    assert payload["strategies"]["caerus_orion_alpha"]["daily_return"] == 0.0075
 
 
 def test_shadow_no_data_marks_stale_price_cache(tmp_path: Path) -> None:
@@ -405,7 +474,7 @@ def test_comparison_markdown_renders_decision_grade_summary(tmp_path: Path) -> N
     assert "- Best performer today: Caerus Orion (2.00%)" in markdown
     assert "- Best cumulative performer: Caerus Orion (5.00%)" in markdown
     assert "- Orion vs Polaris: +2.00% cumulative return difference" in markdown
-    assert "| Caerus Orion | OK | OK | 3 | 2.00% | 5.00% | 3.00% | 18.00% | -1.00% | 0.20 | 60.00% | 4 |" in markdown
+    assert "| Caerus Orion | OK | OK | 3 | 2.00% | 5.00% | 3.00% | N/A | 18.00% | -1.00% | 0.20 | 60.00% | 4 |" in markdown
     assert "- Status: DECISION_USEFUL" in markdown
     assert "- Delta status: OK" in markdown
     assert "- Diagnosis: Healthy; cumulative performance and day-over-day delta are available." in markdown

@@ -2,12 +2,11 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-17 (pre-triage deployed baseline `efd193d`; Shadow NAV
-incident remains recovered under `dated_same_day_close_to_close_v1`; FR-070
-remains observe-only for execution target-attainment and post-buy artifact
-timing; FR-073 sleeve numeric diagnostics are deployed-observing after the
-trend-sleeve terminal-equity NaN incident; FR-069 remains the next major
-research-only architecture workstream)
+Last Updated: 2026-06-23 (Polaris_Alpha and Orion_Alpha promoted to official
+SHADOW status for forward concentration evidence collection; Polaris and Orion
+baselines are preserved as comparison controls. This is non-capital,
+non-executing, and does not alter paper, live, allocator, broker, scheduler, or
+production behavior.)
 Governance Label: RESEARCH_ONLY
 Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
 
@@ -58,9 +57,19 @@ editing code or specs.
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
-- **Production posture:** paper only, US long-only equities + options overlay, Alpaca paper broker. No shorting, no leverage, no real capital.
+- **Production posture:** paper remains the production posture. A separate,
+  manual, tightly capped FR-104 Level 2.5 live-pilot evidence lane may collect
+  forward broker/operational evidence only when explicitly approved; it is not
+  production, not cron-enabled, not dynamic allocation, and not proof of
+  promotion readiness. No shorting, no leverage.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
-- **Shadow (non-blocking):** Caerus Orion, Caerus Lyra. SPY = benchmark.
+- **Shadow (non-blocking):** Caerus Orion, Caerus Lyra, Polaris_Alpha,
+  Orion_Alpha. SPY = benchmark.
+- **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
+  Orion_Alpha (`caerus_orion_alpha`) are forward shadow-only concentration
+  variants activated 2026-06-23. Polaris_Alpha is Top 4 / 20% cap versus the
+  preserved Polaris Top 10 baseline. Orion_Alpha is Top 3 / 25% cap versus the
+  preserved Orion Top 5 baseline. Review checkpoints are 20 and 60 trading days.
 - **Shadow observation methodology:** `dated_same_day_close_to_close_v1`; canonical operational observation window begins `2026-05-12`.
 - **Shadow scorecard health:** Fresh; NAV integrity OK as of recovered artifacts through `2026-06-12`.
 - **Promotion ladder:** research → backtest → shadow → paper → live. No automated promotion. Promotion is conservative and research-only.
@@ -89,8 +98,8 @@ editing code or specs.
 | FR-065 | Dashboard / model-quality evidence | Dashboard decision-grade consolidation | `fr_archive/fr_065_dashboard_decision_grade_consolidation.md` | ACTIVE_RESEARCH | dashboard data model + terminal panel | n/a |
 | FR-066 | — (operational) | Canonical NAV track record integrity (daily build, inception backfill, SPY/beta-adjusted scoreboard, fail-loud freshness) | `fr_archive/fr_066_canonical_nav_track_record_spec.md` | DEPLOYED_OBSERVING — VM backfill/write completed; cron installed | `scripts/backfill_portfolio_history.py`, `scripts/build_portfolio_history.py`, `core/portfolio_history_escalation.py` | n/a |
 | FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_archive/fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
-| FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md`; Orion/Lyra PIT artifact: `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json`; packet: `fr_active/fr_068_orion_lyra_pit_rebaseline_packet.md` | PHASES 1-4 COMPLETE 2026-06-17 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra matched PIT artifact generated with 2,767 observations and no statistically meaningful Lyra lead. | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py`, `scripts/research/build_orion_lyra_pit_rebaseline.py` | n/a |
-| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (research-only scaffold; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md`; Phase A package: `fr_active/fr_069_phase_a_architecture_package.md`; Phase B scaffold: `fr_active/fr_069_phase_b_scaffolding.md`; Phase C readiness: `fr_active/fr_069_phase_c_readiness.md` | PHASE_B_IMPLEMENTED_RESEARCH_ONLY — research-only sleeve manifest, manifest validator, evidence-envelope validator, read-only MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, future sleeve onboarding placeholders, and Phase C readiness lifecycle gates; Phase C implementation requires separate owner approval even after scaffold validation/tests pass | `research_registry/sleeves/manifest.json`, `research_registry/sleeves/evidence.py`, `scripts/research/validate_sleeve_manifest.py`, `scripts/research/validate_sleeve_evidence.py`, `fr069_sleeve_inventory` | research-only |
+| FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md`; Orion/Lyra PIT artifact: `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json`; packet: `fr_active/fr_068_orion_lyra_pit_rebaseline_packet.md`; resolver certification: `reports/pit_universe_certification.md` | PHASES 1-4 COMPLETE; resolver certification added 2026-06-22 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; `Universe(as_of_date, "caerus_large_cap")` now resolves the family artifact for canonical research access. Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra matched PIT artifact generated with 2,767 observations and no statistically meaningful Lyra lead. Remaining decision-grade blocker: current-scale `scalemarketcap` large-cap membership must be replaced by PIT-valid, survivorship-free, security-id keyed, date-effective membership; DAILY market cap is one acceptable implementation, not the sole approved path. | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py`, `scripts/research/build_orion_lyra_pit_rebaseline.py` | n/a |
+| FR-069 | — (architecture) | Research Lab / modular sleeve architecture (research-only scaffold; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md`; Phase A package: `fr_active/fr_069_phase_a_architecture_package.md`; Phase B scaffold: `fr_active/fr_069_phase_b_scaffolding.md`; Phase C readiness: `fr_active/fr_069_phase_c_readiness.md` | PHASE_B_IMPLEMENTED_RESEARCH_ONLY — research-only sleeve manifest, manifest validator, evidence-envelope validator, read-only MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, future sleeve onboarding placeholders, and Phase C readiness lifecycle gates. FR-069 child lane opened 2026-06-22 for canonical PIT replay panel, decision tapes, replay certification, allocator baseline, and exposure-matched framework. Phase C implementation requires separate owner approval even after scaffold validation/tests pass | `research_registry/sleeves/manifest.json`, `research_registry/sleeves/evidence.py`, `scripts/research/validate_sleeve_manifest.py`, `scripts/research/validate_sleeve_evidence.py`, `fr069_sleeve_inventory` | research-only |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
@@ -110,7 +119,9 @@ framework, and FR-065 dashboard decision-grade consolidation.
 | Strategy | Registry type / family | Registry status | Module | CLI | Shadow | Promotion-eligible | Actual state |
 |----------|------------------------|-----------------|--------|-----|--------|--------------------|--------------|
 | Polaris | security_selection / core_momentum | paper | growth_engine_v4 | yes | yes | no | paper_control |
+| Polaris_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 4 / 20% cap; compare only against preserved Polaris baseline; no capital |
 | Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_only |
+| Orion_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 3 / 25% cap; compare only against preserved Orion baseline; no capital |
 | Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
 | Phoenix | security_selection / crisis_reversal | research / not_viable_current_phase_b | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts; PIT liquidity evidence is decision-grade but current Phase B candidate fails 5% ADV capacity policy; not Shadow-readiness eligible |
 | Cygnus | security_selection / earnings_drift | research | research/cygnus | run_cygnus_research.py | no | no | v0_shelved_after_stage2_fail; v1_vendor_gated |
@@ -181,7 +192,12 @@ or fold FR-056 — now done.
   all promotion evidence must carry `universe_method = pit_universe`;
   current-universe backtests are retained as `legacy_current_universe` for lineage
   only. Orion/Lyra matched PIT artifact now finds no statistically meaningful
-  Lyra lead over 2,767 pre-holdout matched observations.
+  Lyra lead over 2,767 pre-holdout matched observations. Canonical
+  `Universe(as_of_date, "caerus_large_cap")` resolver wiring is certified, but
+  allocator and promotion replay remain blocked from decision-grade status until
+  the current-scale `scalemarketcap` large-cap family is replaced by PIT-valid,
+  survivorship-free, security-id keyed, date-effective membership and certified
+  replay artifacts.
 - **Portfolio history stale** — freshness audit added (`portfolio_history_freshness.py`, untracked); confirms staleness needs resolution before promotion-grade evaluation.
 - **Security master auth / missing artifact** — `security_master_diagnostics.py` / `audit_security_master_refresh.py` (untracked) flag auth or missing-artifact gaps blocking PIT-safe alias resolution.
 - **BK → BNY universe migration** — pending; do NOT migrate `universe.csv` without explicit approval.

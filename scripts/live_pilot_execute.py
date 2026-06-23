@@ -15,12 +15,14 @@ if str(REPO_ROOT) not in sys.path:
 from brokers.alpaca_broker import AlpacaBroker
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
+    LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV,
     account_id_hash,
     build_live_pilot_gate_result,
     expected_account_matches,
     validate_live_pilot_asset,
     validate_live_pilot_plan,
 )
+from paper.trading_calendar import ET_TZ, market_session_status
 from paper.run_manager import generate_run_id, safe_write_text
 
 
@@ -76,13 +78,131 @@ def _public_account(account: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+OPEN_ORDER_STATUSES = frozenset(
+    {
+        "accepted",
+        "accepted_for_bidding",
+        "calculated",
+        "done_for_day",
+        "held",
+        "new",
+        "partially_filled",
+        "pending_cancel",
+        "pending_new",
+        "pending_replace",
+    }
+)
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        numeric = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return numeric
+
+
+def _parse_time(value: object) -> dt.datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _list_open_orders(broker: Any) -> list[dict[str, Any]]:
+    if not hasattr(broker, "list_orders"):
+        return []
+    try:
+        orders = broker.list_orders(status="open", limit=100)
+    except Exception as exc:
+        return [{"status": "OPEN_ORDER_LOOKUP_FAILED", "error": str(exc)}]
+    if not isinstance(orders, list):
+        return []
+    return [dict(order) for order in orders if isinstance(order, Mapping)]
+
+
+def _order_status(order: Mapping[str, Any]) -> str:
+    return str(order.get("status") or "").strip().lower()
+
+
+def _is_open_order(order: Mapping[str, Any]) -> bool:
+    status = _order_status(order)
+    return status in OPEN_ORDER_STATUSES or status == "open" or not status
+
+
+def _client_order_id(order: Mapping[str, Any]) -> str:
+    return str(order.get("client_order_id") or order.get("client_order_id".upper()) or "").strip()
+
+
+def _symbol(order: Mapping[str, Any]) -> str:
+    return str(order.get("symbol") or order.get("ticker") or "").strip().upper()
+
+
+def _open_pilot_order_check(broker: Any, *, intended_symbols: set[str]) -> dict[str, Any]:
+    if not hasattr(broker, "list_orders"):
+        return {
+            "schema_version": "live_pilot_open_order_check.v1",
+            "generated_at": _now_utc(),
+            "status": "SKIPPED_NO_BROKER_SUPPORT",
+            "open_orders": [],
+            "blocking_open_orders": [],
+            "block_submission": False,
+            "operator_action": "Open-order lookup was unavailable on the injected broker; production Alpaca broker supports this check.",
+        }
+    open_orders = _list_open_orders(broker)
+    lookup_failed = any(str(order.get("status")) == "OPEN_ORDER_LOOKUP_FAILED" for order in open_orders)
+    if lookup_failed:
+        return {
+            "schema_version": "live_pilot_open_order_check.v1",
+            "generated_at": _now_utc(),
+            "status": "BLOCKED_LOOKUP_FAILED",
+            "open_orders": _json_safe(open_orders),
+            "blocking_open_orders": _json_safe(open_orders),
+            "block_submission": True,
+            "operator_action": "Open-order lookup failed; do not submit live pilot orders until broker truth is known.",
+        }
+    blocking: list[dict[str, Any]] = []
+    for order in open_orders:
+        if not _is_open_order(order):
+            continue
+        client_id = _client_order_id(order).lower()
+        symbol = _symbol(order)
+        is_pilot = client_id.startswith("caerus-live-pilot")
+        same_exposure = bool(symbol and symbol in intended_symbols)
+        if is_pilot or same_exposure:
+            row = dict(order)
+            row["duplicate_reason"] = "open_live_pilot_order" if is_pilot else "same_symbol_open_order"
+            blocking.append(row)
+    return {
+        "schema_version": "live_pilot_open_order_check.v1",
+        "generated_at": _now_utc(),
+        "status": "BLOCKED_OPEN_PILOT_ORDER" if blocking else "PASS",
+        "open_orders": _json_safe(open_orders),
+        "blocking_open_orders": _json_safe(blocking),
+        "block_submission": bool(blocking),
+        "operator_action": (
+            "Skip this live pilot attempt; leave existing open order untouched and review/cancel manually if needed."
+            if blocking
+            else "No open live-pilot or same-symbol order blocks this attempt."
+        ),
+    }
+
+
 def _broker_snapshot(broker: Any) -> dict[str, Any]:
     account = broker.get_account() if hasattr(broker, "get_account") else {}
     positions = broker.get_positions() if hasattr(broker, "get_positions") else []
+    open_orders = _list_open_orders(broker)
     return {
         "captured_at": _now_utc(),
         "account": _public_account(account),
         "positions": _json_safe(positions or []),
+        "open_orders": _json_safe(open_orders),
     }
 
 
@@ -179,6 +299,138 @@ def _reconcile(
     }
 
 
+def _normal_market_hours_gate(*, now_et: dt.datetime | None = None) -> dict[str, Any]:
+    current = now_et or dt.datetime.now(ET_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=ET_TZ)
+    current = current.astimezone(ET_TZ)
+    status = market_session_status(
+        run_date=current.date().isoformat(),
+        now_et=current,
+        cutoff_time_et="16:00",
+    )
+    return {
+        "schema_version": "live_pilot_market_hours_gate.v1",
+        "generated_at": _now_utc(),
+        "status": "PASS" if status.is_open_now else "BLOCKED",
+        "market_is_open": bool(status.is_open_now),
+        "reason_code": status.reason,
+        "now_et": current.isoformat(),
+        "session_open_et": status.session_open_et.isoformat() if status.session_open_et else None,
+        "session_close_et": status.session_close_et.isoformat() if status.session_close_et else None,
+        "operator_action": (
+            "Normal market hours confirmed for FR-104 live pilot submission."
+            if status.is_open_now
+            else "Do not submit FR-104 live pilot market orders outside normal market hours."
+        ),
+    }
+
+
+def _fill_price(row: Mapping[str, Any]) -> float | None:
+    order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
+    for key in ("filled_avg_price", "fill_price", "avg_fill_price", "price"):
+        value = _safe_float(row.get(key))
+        if value is not None and value > 0:
+            return value
+        value = _safe_float(order.get(key))
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _time_to_fill_seconds(row: Mapping[str, Any]) -> float | None:
+    order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
+    submitted_at = (
+        _parse_time(row.get("submitted_at"))
+        or _parse_time(order.get("submitted_at"))
+        or _parse_time(order.get("created_at"))
+    )
+    filled_at = _parse_time(row.get("filled_at")) or _parse_time(order.get("filled_at"))
+    if submitted_at is None or filled_at is None:
+        return None
+    return max((filled_at - submitted_at).total_seconds(), 0.0)
+
+
+def _slippage_bps(row: Mapping[str, Any]) -> float | None:
+    expected = _safe_float(row.get("expected_price") or row.get("cap_enforcement_price") or row.get("limit_price"))
+    fill = _fill_price(row)
+    if expected is None or expected <= 0 or fill is None:
+        return None
+    side = str(row.get("side") or "").strip().upper()
+    direction = 1.0 if side != "SELL" else -1.0
+    return direction * ((fill - expected) / expected) * 10000.0
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _build_evidence_metrics(
+    *,
+    dry_run: bool,
+    intended: list[dict[str, Any]],
+    submitted: list[dict[str, Any]],
+    reconciliation: Mapping[str, Any],
+    capital_cap_usd: float | None,
+    open_order_check: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    submitted_count = 0 if dry_run else len(submitted)
+    accepted_count = int(reconciliation.get("accepted_count") or 0)
+    filled_count = int(reconciliation.get("filled_count") or 0)
+    rejected_count = int(reconciliation.get("rejected_count") or 0)
+    fill_rate = (filled_count / submitted_count) if submitted_count else None
+    fill_seconds = [
+        value for value in (_time_to_fill_seconds(row) for row in submitted)
+        if value is not None
+    ]
+    slippage_values = [
+        value for value in (_slippage_bps(row) for row in submitted)
+        if value is not None
+    ]
+    filled_notional = 0.0
+    for row in submitted:
+        if str(row.get("status") or "").strip().lower() != "filled":
+            continue
+        fill = _fill_price(row)
+        qty = _safe_float(row.get("qty"))
+        if fill is not None and qty is not None:
+            filled_notional += fill * qty
+        else:
+            filled_notional += float(row.get("notional") or 0.0)
+    cap = float(capital_cap_usd or 0.0)
+    cash_deployment_rate = (filled_notional / cap) if cap > 0 else None
+    if dry_run:
+        idle_reason = "dry_run_no_capital_submitted"
+    elif open_order_check and bool(open_order_check.get("block_submission")):
+        idle_reason = "open_order_blocked_duplicate_exposure"
+    elif submitted_count == 0:
+        idle_reason = "no_live_pilot_submission"
+    elif filled_count == 0:
+        idle_reason = "submitted_not_filled"
+    elif cash_deployment_rate is not None and cash_deployment_rate < 0.99:
+        idle_reason = "partial_cap_deployment"
+    else:
+        idle_reason = "capital_deployed_within_cap"
+    return {
+        "schema_version": "live_pilot_evidence_metrics.v1",
+        "generated_at": _now_utc(),
+        "intended_count": len(intended),
+        "submitted_count": submitted_count,
+        "accepted_count": accepted_count,
+        "filled_count": filled_count,
+        "fill_rate": fill_rate,
+        "average_time_to_fill_seconds": _mean(fill_seconds),
+        "slippage_bps": _mean(slippage_values),
+        "rejected_count": rejected_count,
+        "reconciliation_clean": str(reconciliation.get("status") or "").upper() == "CLEAN",
+        "reconciliation_clean_rate": 1.0 if str(reconciliation.get("status") or "").upper() == "CLEAN" else 0.0,
+        "cash_deployment_rate": cash_deployment_rate,
+        "filled_notional_usd": round(filled_notional, 6),
+        "capital_cap_usd": capital_cap_usd,
+        "idle_cash_reason": idle_reason,
+    }
+
+
 def _write_blocked_artifacts(
     *,
     run_root: Path,
@@ -187,6 +439,7 @@ def _write_blocked_artifacts(
     operator_action: str,
     preflight: Mapping[str, Any],
     intended: list[dict[str, Any]] | None = None,
+    open_order_check: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     intended = intended or []
     submitted: list[dict[str, Any]] = []
@@ -223,6 +476,17 @@ def _write_blocked_artifacts(
         if not snapshot_path.exists():
             _write_json(snapshot_path, blocked_snapshot)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    _write_json(
+        run_root / "live_pilot_evidence_metrics.json",
+        _build_evidence_metrics(
+            dry_run=False,
+            intended=intended,
+            submitted=submitted,
+            reconciliation=reconciliation,
+            capital_cap_usd=_safe_float(preflight.get("capital_cap_usd")),
+            open_order_check=open_order_check,
+        ),
+    )
     _write_json(run_root / "live_pilot_capital_usage.json", {"capital_used_usd": 0.0})
     _write_json(run_root / "live_pilot_operator_summary.json", summary)
     _write_json(run_root / "live_pilot_preflight.json", dict(preflight))
@@ -237,6 +501,7 @@ def run_live_pilot(
     env: Mapping[str, str] | None = None,
     run_id: str | None = None,
     output_root: Path | str = Path("outputs/live_pilot"),
+    now_et: dt.datetime | None = None,
 ) -> dict[str, Any]:
     environ = env if env is not None else os.environ
     run_id = str(run_id or environ.get("RUN_ID") or generate_run_id())
@@ -267,6 +532,7 @@ def run_live_pilot(
         "plan_path": plan_path,
         "dry_run": bool(gate.dry_run),
         "paper_paths_touched": False,
+        "order_policy": "fr104_live_pilot_market_order_normal_hours_only",
     }
     _write_json(run_root / "live_pilot_execution_payload.json", payload)
 
@@ -346,8 +612,37 @@ def run_live_pilot(
             intended=intended,
         )
 
+    open_order_check = _open_pilot_order_check(
+        broker,
+        intended_symbols={order.symbol for order in plan_validation.orders},
+    )
+    _write_json(run_root / "live_pilot_open_order_check.json", open_order_check)
+    if bool(open_order_check.get("block_submission")):
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            reason_code=str(open_order_check.get("status") or "BLOCKED_OPEN_PILOT_ORDER"),
+            operator_action=str(open_order_check.get("operator_action") or "Open pilot order blocks duplicate submission."),
+            preflight=preflight,
+            intended=intended,
+            open_order_check=open_order_check,
+        )
+
+    market_hours_gate = _normal_market_hours_gate(now_et=now_et)
+    _write_json(run_root / "live_pilot_market_hours_gate.json", market_hours_gate)
+    if not gate.dry_run and market_hours_gate.get("status") != "PASS":
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            reason_code=f"live_pilot_market_closed:{market_hours_gate.get('reason_code')}",
+            operator_action=str(market_hours_gate.get("operator_action") or "Market is closed."),
+            preflight=preflight,
+            intended=intended,
+        )
+
     submitted: list[dict[str, Any]] = []
     submit_errors: list[str] = []
+    max_slippage_bps = _safe_float(environ.get(LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV))
     if gate.dry_run:
         submitted = [
             {
@@ -360,20 +655,42 @@ def run_live_pilot(
     else:
         for order in plan_validation.orders:
             try:
-                broker_result = broker.submit_limit_order(
-                    symbol=order.symbol,
-                    qty=order.qty,
-                    side=order.side,
-                    limit_price=order.limit_price,
-                    client_order_id=order.client_order_id,
-                    tif="day",
+                if order.order_type == "market":
+                    broker_result = broker.submit_market_order(
+                        symbol=order.symbol,
+                        qty=order.qty,
+                        side=order.side,
+                        client_order_id=order.client_order_id,
+                        tif="day",
+                        estimated_notional=order.notional,
+                    )
+                    submitted_price = None
+                else:
+                    broker_result = broker.submit_limit_order(
+                        symbol=order.symbol,
+                        qty=order.qty,
+                        side=order.side,
+                        limit_price=order.limit_price,
+                        client_order_id=order.client_order_id,
+                        tif="day",
+                    )
+                    submitted_price = order.limit_price
+                submitted_row = {
+                    **order.to_dict(),
+                    "status": str((broker_result or {}).get("status") or "accepted"),
+                    "order": broker_result,
+                    "submitted_order_type": order.order_type,
+                    "submitted_price": submitted_price,
+                    "fill_price": _fill_price({"order": broker_result}),
+                    "submission_policy": "fr104_live_pilot_market_order_normal_hours_only",
+                }
+                slip = _slippage_bps(submitted_row)
+                submitted_row["slippage_bps"] = slip
+                submitted_row["slippage_warning"] = (
+                    bool(max_slippage_bps is not None and slip is not None and abs(slip) > max_slippage_bps)
                 )
                 submitted.append(
-                    {
-                        **order.to_dict(),
-                        "status": str((broker_result or {}).get("status") or "accepted"),
-                        "order": broker_result,
-                    }
+                    submitted_row
                 )
             except Exception as exc:
                 submit_errors.append(f"{order.symbol}:broker_submit_failed:{exc}")
@@ -382,6 +699,8 @@ def run_live_pilot(
                         **order.to_dict(),
                         "status": "REJECTED",
                         "error": str(exc),
+                        "submitted_order_type": order.order_type,
+                        "submission_policy": "fr104_live_pilot_market_order_normal_hours_only",
                     }
                 )
 
@@ -405,6 +724,15 @@ def run_live_pilot(
         errors=submit_errors,
     )
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    evidence_metrics = _build_evidence_metrics(
+        dry_run=bool(gate.dry_run),
+        intended=intended,
+        submitted=submitted,
+        reconciliation=reconciliation,
+        capital_cap_usd=gate.capital_cap_usd,
+        open_order_check=open_order_check,
+    )
+    _write_json(run_root / "live_pilot_evidence_metrics.json", evidence_metrics)
     _write_json(
         run_root / "live_pilot_capital_usage.json",
         {
@@ -412,6 +740,8 @@ def run_live_pilot(
             "capital_cap_usd": gate.capital_cap_usd,
             "planned_notional_usd": plan_validation.total_notional,
             "submitted_notional_usd": 0.0 if gate.dry_run else sum(float(row.get("notional") or 0.0) for row in submitted if row.get("status") != "REJECTED"),
+            "filled_notional_usd": evidence_metrics.get("filled_notional_usd"),
+            "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
             "dry_run": bool(gate.dry_run),
         },
     )
@@ -432,6 +762,10 @@ def run_live_pilot(
         "dry_run": bool(gate.dry_run),
         "intended_count": len(intended),
         "submitted_count": 0 if gate.dry_run else len(submitted),
+        "filled_count": reconciliation.get("filled_count"),
+        "fill_rate": evidence_metrics.get("fill_rate"),
+        "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+        "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
     }

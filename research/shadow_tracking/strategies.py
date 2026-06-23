@@ -43,6 +43,14 @@ def _strategy_spec_for_variant(*, entry: StrategyRegistryEntry, source_variant: 
             top_n=10,
             rebalance_mode="daily",
         ),
+        "polaris_alpha_top4_cap20_daily": StrategySpec(
+            name="polaris_alpha_top4_cap20_daily",
+            hypothesis_id="CONCENTRATION_ALPHA",
+            description="Polaris_Alpha: official shadow concentration variant; top-4 daily momentum with 20% max position and residual cash.",
+            top_n=4,
+            rebalance_mode="daily",
+            max_position_weight=0.20,
+        ),
         "h2_rank_decay_exit_h6_top5": StrategySpec(
             name="h2_rank_decay_exit_h6_top5",
             hypothesis_id="COMBO",
@@ -50,6 +58,15 @@ def _strategy_spec_for_variant(*, entry: StrategyRegistryEntry, source_variant: 
             top_n=5,
             rebalance_mode="daily",
             use_rank_decay_exit=True,
+        ),
+        "orion_alpha_rank_decay_top3_cap25": StrategySpec(
+            name="orion_alpha_rank_decay_top3_cap25",
+            hypothesis_id="CONCENTRATION_ALPHA",
+            description="Orion_Alpha: official shadow concentration variant; top-3 Orion rank-decay exit with 25% max position and residual cash.",
+            top_n=3,
+            rebalance_mode="daily",
+            use_rank_decay_exit=True,
+            max_position_weight=0.25,
         ),
         "h1_weekly_h6_top5": StrategySpec(
             name="h1_weekly_h6_top5",

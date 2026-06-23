@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import datetime as dt
 from html import escape
+from pathlib import Path
 from typing import Any
 
+from core.dynamic_daily_email import render_dynamic_email_sections
 from paper.email_styles import wrap_email_html
 from paper.html_tables import render_card, render_html_table
 
@@ -27,6 +29,13 @@ def _fmt_est_notional(value: Any) -> str:
         return f"~${float(value):,.2f}"
     except Exception:
         return "n/a"
+
+
+def _dynamic_sections(payload: dict[str, Any], trade_date: str) -> dict[str, str]:
+    if payload.get("include_dynamic_sleeve_sections") is False:
+        return {"text": "", "html": ""}
+    repo_root = Path(str(payload.get("repo_root") or Path(__file__).resolve().parents[1]))
+    return render_dynamic_email_sections(repo_root, trade_date)
 
 
 
@@ -262,6 +271,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                 for note in execution_notes:
                     lines.append(f"• {note}")
         
+        dynamic = _dynamic_sections(payload, trade_date)
+        if dynamic["text"]:
+            lines.append(dynamic["text"].rstrip())
         return subject, "\n".join(lines)
 
     lines.append(f"Pricing Source: {pricing_source}")
@@ -441,6 +453,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         if blocked_ticker_summary_items:
             lines.extend(["", f"Blocked tickers: {', '.join(blocked_ticker_summary_items)}"])
         lines.extend(notes_lines)
+        dynamic = _dynamic_sections(payload, trade_date)
+        if dynamic["text"]:
+            lines.append(dynamic["text"].rstrip())
         return subject, "\n".join(lines)
 
     buys = sorted(
@@ -539,6 +554,9 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         ]
     )
     lines.extend(notes_lines)
+    dynamic = _dynamic_sections(payload, trade_date)
+    if dynamic["text"]:
+        lines.append(dynamic["text"].rstrip())
 
     return subject, "\n".join(lines)
 
@@ -722,6 +740,10 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
                 render_html_table(["Metric", "Value"], risk_rows, numeric_cols=set()),
             )
         )
+
+    dynamic = _dynamic_sections(payload, trade_date)
+    if dynamic["html"]:
+        cards.append(dynamic["html"])
 
     html = wrap_email_html("TRADE EXECUTION", "".join(cards))
     return subject, html

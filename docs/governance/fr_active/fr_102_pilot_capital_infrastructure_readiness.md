@@ -131,44 +131,56 @@ Operator summary fields:
 
 ## Is Live Pilot Currently Supported?
 
-No. FR-102 makes future live pilot setup safer, but Caerus still does not have an
-approved live pilot execution path.
+FR-102 by itself does not support live pilot execution. It makes future live
+pilot setup safer, but it is not a capital approval.
+
+The only permitted live-pilot execution lane is the separate FR-104 manual path,
+if and only if its cap, approval, dry-run, account, artifact isolation, and
+broker-truth controls pass.
 
 Reasons:
 
 - `paper_broker.run_paper_day` still refuses `TRADING_MODE=live`;
 - live artifacts are not yet mode/account partitioned;
 - no approved sleeve/cap/rollback/kill packet exists;
-- no real API keys should be added until FR-100/FR-101 evidence windows pass;
+- no real API keys should be added to scheduled or paper runtimes;
+- FR-104 may use externally supplied live credentials for an approved manual
+  Level 2.5 evidence-collection run, with no secrets in git and no cron;
 - no live executor has been designed, reviewed, or validated.
 
 ## Gaps Before API Key Setup
 
-1. Complete FR-101 forward `FULL_EVIDENCE` paper window.
-2. Add mode/account partitioning for all execution, broker, reconciliation,
+1. For Level 3 readiness, complete FR-101 forward `FULL_EVIDENCE` paper window.
+2. For any Level 2.5 FR-104 evidence run, enforce manual approval, cap,
+   dry-run-first sequencing, artifact isolation, and broker-truth capture.
+3. Add mode/account partitioning for all execution, broker, reconciliation,
    reliability, target-attainment, and performance artifacts.
-3. Produce a signed pilot packet naming sleeve, cap, account, allowed
+4. Produce a signed pilot packet naming sleeve, cap, account, allowed
    instruments, duration, rollback, kill criteria, and manual approvers.
-4. Add read-only live account preflight that hashes account identity and proves
+5. Add read-only live account preflight that hashes account identity and proves
    correct endpoint without exposing secrets.
-5. Add live-pilot dry-run tests that validate every live-bound order remains
+6. Add live-pilot dry-run tests that validate every live-bound order remains
    no-submit until explicit approval.
-6. Add an operator checklist that verifies `TRADING_MODE`, `ALPACA_PAPER`,
+7. Add an operator checklist that verifies `TRADING_MODE`, `ALPACA_PAPER`,
    endpoint, cap, sleeve, and run root before any future live submission path.
 
 ## Recommended Live Pilot Sequence
 
-1. Finish FR-101 evidence window and obtain `RELIABILITY_GREEN + FULL_EVIDENCE`
-   for the required paper run streak.
-2. Select exactly one pilot sleeve and dollar cap under FR-084.
-3. Add mode/account-separated artifact paths and tests.
-4. Run `TRADING_MODE=live_preflight` with read-only live credentials only after
+1. For Level 2.5 evidence collection, require FR-104 manual approval, cap,
+   dry-run, artifact isolation, and no cron.
+2. For Level 3 readiness, finish FR-101 evidence window and obtain
+   `RELIABILITY_GREEN + FULL_EVIDENCE` for the required paper run streak.
+3. Select exactly one pilot sleeve and dollar cap under FR-084 or FR-104,
+   depending on whether the purpose is readiness conclusion or evidence
+   collection.
+4. Add mode/account-separated artifact paths and tests.
+5. Run `TRADING_MODE=live_preflight` with read-only live credentials only after
    human approval to set up credentials outside git.
-5. Review preflight artifact, hashed account identity, cap, sleeve, and no-submit
+6. Review preflight artifact, hashed account identity, cap, sleeve, and no-submit
    proof.
-6. Build a separate live executor behind the same FR-102 guardrails only if
+7. Build a separate live executor behind the same FR-102 guardrails only if
    Brett/CIO signs the pilot packet.
-7. Start with one tiny manually reviewed order batch, preserve all broker truth,
+8. Start with one tiny manually reviewed order batch, preserve all broker truth,
    and demote immediately on any RED/YELLOW, artifact gap, recon mismatch, or
    target-attainment miss.
 

@@ -43,6 +43,13 @@ function fmtNum(v, decimals = 2) {
   return Number(v).toFixed(decimals);
 }
 
+function fmtBps(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(1)} bps`;
+}
+
 function fmtDateTime(value) {
   if (!value) return '—';
   const d = new Date(value);
@@ -73,8 +80,8 @@ function colorClass(value) {
 
 function statusClass(value) {
   const text = String(value || '').toUpperCase();
-  if (['PASS', 'OK', 'GREEN', 'CONTROL', 'PROMOTION_ELIGIBLE', 'HIGH', 'PRESENT', 'READY'].includes(text)) return 'pos';
-  if (['FAIL', 'ERROR', 'RED', 'NO_DATA', 'NO_PRIOR', 'BROKEN_CHAIN', 'NOT_READY', 'BLOCKED'].includes(text)) return 'neg';
+  if (['PASS', 'OK', 'GREEN', 'CONTROL', 'PROMOTION_ELIGIBLE', 'HIGH', 'PRESENT', 'READY', 'ACTIVE', 'BASELINE', 'SUBMITTED', 'CLEAN'].includes(text)) return 'pos';
+  if (['FAIL', 'ERROR', 'RED', 'NO_DATA', 'NO_PRIOR', 'BROKEN_CHAIN', 'NOT_READY', 'BLOCKED', 'DEPENDENCY_BLOCKED', 'FAILED_RECONCILIATION'].includes(text)) return 'neg';
   return 'neutral';
 }
 
@@ -230,6 +237,169 @@ function renderShadowCommand(payload) {
       <td class="${statusClass(row.promotion_readiness)}">${row.promotion_readiness || '—'}</td>
     </tr>
   `).join('');
+}
+
+function renderLivePilot(payload) {
+  const section = payload.sections?.live_pilot || {};
+  const account = section.account || {};
+  const metrics = section.metrics || {};
+  const recon = section.reconciliation || {};
+  const policy = section.policy || {};
+  setText(
+    'live-pilot-summary',
+    `${section.status || 'NO_DATA'} · run ${section.run_id || '—'}`,
+    statusClass(section.status)
+  );
+  setHTML('live-pilot-matrix', [
+    matrixItem('Cash', fmtMoney(account.cash), `equity ${fmtMoney(account.equity)}`, 'neutral'),
+    matrixItem('Buying Power', fmtMoney(account.buying_power), `positions ${(section.positions || []).length}`, 'neutral'),
+    matrixItem('Pilot Cap', fmtMoney(metrics.capital_cap_usd), `deployment ${fmtPct(metrics.cash_deployment_rate)}`, 'neutral'),
+    matrixItem('Fill Rate', fmtPct(metrics.fill_rate), `${metrics.filled_count ?? 0} filled / ${metrics.submitted_count ?? 0} submitted`, statusClass((metrics.filled_count || 0) > 0 ? 'PASS' : section.status)),
+    matrixItem('Slippage', fmtBps(metrics.slippage_bps), `avg fill time ${fmtNum(metrics.average_time_to_fill_seconds, 1)}s`, 'neutral'),
+    matrixItem('Recon', recon.status || '—', recon.operator_action || metrics.idle_cash_reason || '—', statusClass(recon.status || section.status)),
+    matrixItem('Open Orders', String(metrics.open_order_count ?? 0), `${metrics.blocking_open_order_count ?? 0} blocking`, (metrics.blocking_open_order_count || 0) ? 'neg' : 'pos'),
+    matrixItem('Policy', policy.order_type || '—', policy.scope || 'FR-104 LIVE_PILOT only', 'neutral'),
+  ].join(''));
+
+  const body = document.getElementById('live-pilot-orders-body');
+  if (!body) return;
+  const submitted = section.submitted_orders || [];
+  const openOrders = section.open_orders || [];
+  const rows = submitted.length ? submitted : openOrders.map(order => ({
+    symbol: order.symbol,
+    status: order.status,
+    order_type: order.type || order.order_type || 'open',
+    qty: order.qty,
+    expected_price: order.limit_price,
+    fill_price: order.filled_avg_price,
+  }));
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6">No live-pilot submitted or open orders available.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => {
+    const nested = row.order || {};
+    const symbol = row.symbol || row.ticker || nested.symbol || '—';
+    const status = row.status || nested.status || '—';
+    return `
+      <tr>
+        <td>${symbol}</td>
+        <td class="${statusClass(status)}">${status}</td>
+        <td>${row.submitted_order_type || row.order_type || nested.type || '—'}</td>
+        <td class="num">${fmtNum(row.qty || row.shares, 4)}</td>
+        <td class="num">${fmtMoney(row.expected_price || row.cap_enforcement_price || row.limit_price)}</td>
+        <td class="num">${fmtMoney(row.fill_price || nested.filled_avg_price)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderAccountLayers(payload) {
+  const rows = payload.sections?.account_layers?.rows || [];
+  const body = document.getElementById('account-layers-body');
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5">No account-layer data available.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => `
+    <tr>
+      <td>${row.layer || '—'}</td>
+      <td class="${statusClass(row.status)}">${row.status || '—'}</td>
+      <td class="num">${fmtMoney(row.cash)}</td>
+      <td class="num">${fmtMoney(row.equity)}</td>
+      <td class="num">${row.positions_count ?? '—'}</td>
+    </tr>
+  `).join('');
+}
+
+function renderSleeveInventory(payload) {
+  const section = payload.sections?.sleeve_inventory || {};
+  const summary = section.summary || {};
+  const counts = summary.by_lifecycle_stage || {};
+  setText(
+    'sleeve-inventory-summary',
+    `${summary.total_registered || 0} registered · ${counts.paper || 0} paper · ${counts.shadow || 0} shadow · ${counts.research || 0} research`,
+    statusClass(section.status)
+  );
+  const body = document.getElementById('sleeve-inventory-body');
+  if (!body) return;
+  const rows = section.rows || [];
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="7">No registered sleeves available.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => `
+    <tr>
+      <td>${row.display_name || row.sleeve_id || '—'}</td>
+      <td>${row.lifecycle_stage || '—'}</td>
+      <td>${row.variant_class || '—'}</td>
+      <td class="${statusClass(row.artifact_status)}">${row.artifact_status || '—'}</td>
+      <td class="num ${colorClass(row.since_inception_return)}">${fmtPct(row.since_inception_return)}</td>
+      <td class="num">${fmtPct(row.turnover)}</td>
+      <td class="${statusClass(row.promotion_readiness)}">${row.promotion_readiness || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+function renderAlphaComparison(payload) {
+  const section = payload.sections?.baseline_alpha_comparison || {};
+  setText('alpha-comparison-summary', `${section.summary?.pair_count || 0} alpha pairs · 20/60 day checkpoints`, statusClass(section.status));
+  const body = document.getElementById('alpha-comparison-body');
+  if (!body) return;
+  const rows = section.pairs || [];
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6">No baseline-vs-alpha pairs available.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => {
+    const checkpoints = row.review_checkpoints || [];
+    const windowText = checkpoints.length
+      ? checkpoints.map(check => `${check.observed_days}/${check.trading_days}`).join(' · ')
+      : `${row.evidence_window_days || 0}d`;
+    return `
+      <tr>
+        <td>${row.baseline_name || '—'} → ${row.alpha_name || '—'}</td>
+        <td class="num ${colorClass(row.return_delta)}">${fmtPct(row.return_delta)}</td>
+        <td class="num ${colorClass(-Number(row.drawdown_delta || 0))}">${fmtPct(row.drawdown_delta)}</td>
+        <td class="num">${fmtNum(row.alpha_effective_n, 1)}</td>
+        <td class="num">${fmtNum(row.alpha_alpha_per_dollar_proxy, 2)}</td>
+        <td>${windowText}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderGovernanceState(payload) {
+  const section = payload.sections?.governance_state || {};
+  const summary = section.summary || {};
+  setText(
+    'governance-state-summary',
+    `pilot blocked: ${summary.pilot_blocked ? 'yes' : 'no'} · promotion blocked: ${summary.promotion_blocked ? 'yes' : 'no'}`,
+    summary.pilot_blocked ? 'neg' : 'pos'
+  );
+  setHTML('governance-state-list', (section.rows || []).map(row => `
+    <div class="check-item ${statusClass(row.status)}">
+      <strong>${row.name || '—'}</strong>
+      <div class="matrix-value ${statusClass(row.status)}">${row.status || '—'}</div>
+      <div class="check-detail">${row.detail || '—'}</div>
+    </div>
+  `).join(''));
+}
+
+function renderEvidenceCollection(payload) {
+  const live = payload.sections?.live_pilot || {};
+  const metrics = live.metrics || {};
+  const alpha = payload.sections?.baseline_alpha_comparison || {};
+  const governance = payload.sections?.governance_state || {};
+  setHTML('evidence-collection-matrix', [
+    matrixItem('FR-104 Status', live.status || 'NO_DATA', metrics.idle_cash_reason || 'capped pilot evidence only', statusClass(live.status)),
+    matrixItem('Submitted', String(metrics.submitted_count ?? 0), `${metrics.accepted_count ?? 0} accepted · ${metrics.rejected_count ?? 0} rejected`, 'neutral'),
+    matrixItem('Clean Recon Rate', fmtPct(metrics.reconciliation_clean_rate), `latest ${live.reconciliation?.status || '—'}`, statusClass(live.reconciliation?.status)),
+    matrixItem('Cash Deploy Rate', fmtPct(metrics.cash_deployment_rate), `filled ${fmtMoney(metrics.filled_notional_usd)}`, 'neutral'),
+    matrixItem('Alpha Pairs', String(alpha.summary?.pair_count ?? 0), 'shadow-only forward evidence', statusClass(alpha.status)),
+    matrixItem('FR-068 Pilot Impact', governance.summary?.fr068_pilot_blocking ? 'pilot-blocking' : 'not pilot-blocking', 'promotion and scaling remain blocked', governance.summary?.fr068_pilot_blocking ? 'neg' : 'pos'),
+  ].join(''));
 }
 
 function renderPositioning(payload) {
@@ -520,6 +690,12 @@ async function boot() {
     renderSystemHealth(payload);
     renderRegime(payload);
     renderShadowCommand(payload);
+    renderLivePilot(payload);
+    renderAccountLayers(payload);
+    renderSleeveInventory(payload);
+    renderAlphaComparison(payload);
+    renderGovernanceState(payload);
+    renderEvidenceCollection(payload);
     renderDecisionIntelligence(payload);
     renderLiveReadiness(payload);
     renderDecisionGrade(payload);

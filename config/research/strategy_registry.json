@@ -28,6 +28,43 @@
       }
     },
     {
+      "strategy_id": "caerus_polaris_alpha",
+      "display_name": "Polaris_Alpha",
+      "short_name": "polaris_alpha",
+      "delta_summary_name": "Polaris_Alpha",
+      "strategy_type": "security_selection",
+      "family": "core_momentum",
+      "status": "shadow",
+      "role": "challenger",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": true,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 15,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": true,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": true,
+        "source_variant": "polaris_alpha_top4_cap20_daily",
+        "baseline_strategy_id": "caerus_polaris",
+        "construction": {
+          "top_n": 4,
+          "max_position_weight": 0.2,
+          "weighting": "equal",
+          "cash_residual_allowed": true
+        },
+        "review_checkpoints_trading_days": [
+          20,
+          60
+        ]
+      }
+    },
+    {
       "strategy_id": "caerus_orion",
       "display_name": "Caerus Orion",
       "short_name": "orion",
@@ -51,6 +88,44 @@
       "shadow_tracking": {
         "enabled": true,
         "source_variant": "h2_rank_decay_exit_h6_top5"
+      }
+    },
+    {
+      "strategy_id": "caerus_orion_alpha",
+      "display_name": "Orion_Alpha",
+      "short_name": "orion_alpha",
+      "delta_summary_name": "Orion_Alpha",
+      "strategy_type": "security_selection",
+      "family": "core_momentum",
+      "status": "shadow",
+      "role": "challenger",
+      "eligible_for_shadow": true,
+      "eligible_for_promotion": true,
+      "benchmark": "SPY",
+      "execution_impact": "NON_EXECUTIONAL",
+      "display_order": 25,
+      "capabilities": {
+        "produces_holdings": true,
+        "produces_nav": true,
+        "produces_attribution": true,
+        "produces_promotion_metrics": true,
+        "produces_regime_overlay": false
+      },
+      "shadow_tracking": {
+        "enabled": true,
+        "source_variant": "orion_alpha_rank_decay_top3_cap25",
+        "baseline_strategy_id": "caerus_orion",
+        "construction": {
+          "top_n": 3,
+          "max_position_weight": 0.25,
+          "weighting": "equal",
+          "cash_residual_allowed": true,
+          "rank_decay_exit": true
+        },
+        "review_checkpoints_trading_days": [
+          20,
+          60
+        ]
       }
     },
     {

@@ -7,13 +7,19 @@ import pytest
 
 from research.pit_universe import (
     DEFAULT_FAMILY,
+    DEFAULT_DATA_DIR,
     PITUniverseUnavailable,
     Universe,
 )
 from scripts.research.build_pit_universe_from_sharadar import DEMO_FIXTURE, map_ticker_rows
 
 
-def _seed(tmp: Path, master_rows: list[dict], membership_rows: list[dict] | None = None) -> Path:
+def _seed(
+    tmp: Path,
+    master_rows: list[dict],
+    membership_rows: list[dict] | None = None,
+    large_cap_rows: list[dict] | None = None,
+) -> Path:
     d = tmp / "data" / "pit_universe"
     d.mkdir(parents=True, exist_ok=True)
     master_fields = ["security_id", "permaticker", "ticker", "name", "exchange", "category",
@@ -30,6 +36,14 @@ def _seed(tmp: Path, master_rows: list[dict], membership_rows: list[dict] | None
             w = csv.DictWriter(f, fieldnames=mfields)
             w.writeheader()
             for r in membership_rows:
+                w.writerow({k: r.get(k) for k in mfields})
+    if large_cap_rows is not None:
+        mfields = ["security_id", "ticker", "membership_family", "membership_start_date",
+                   "membership_end_date", "scale_source", "source", "confidence"]
+        with (d / "membership_universe_large_cap.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=mfields)
+            w.writeheader()
+            for r in large_cap_rows:
                 w.writerow({k: r.get(k) for k in mfields})
     return d
 
@@ -110,6 +124,65 @@ def test_universe_uses_materialized_membership_when_present(tmp_path: Path) -> N
     )
     assert [r["ticker"] for r in Universe("2018-01-02", data_dir=d)] == ["TWTR"]
     assert Universe("2025-01-02", data_dir=d) == []
+
+
+def test_universe_loads_registered_family_artifact_when_not_in_canonical_membership(tmp_path: Path) -> None:
+    d = _seed(
+        tmp_path,
+        [
+            _master("SHARADAR:1", "AAPL", "1998-01-02", "2026-03-06", "N", category="Domestic Common Stock"),
+            _master("SHARADAR:2", "TWTR", "2013-11-07", "2022-10-27", "Y", category="Domestic Common Stock"),
+            _master("SHARADAR:3", "SPY", "1998-01-02", "2026-03-06", "N", category="Exchange Traded Fund"),
+        ],
+        membership_rows=[
+            {"security_id": "SHARADAR:1", "ticker": "AAPL",
+             "membership_family": DEFAULT_FAMILY, "membership_start_date": "1998-01-02",
+             "membership_end_date": "", "source": "fixture", "confidence": "DEMO"},
+        ],
+        large_cap_rows=[
+            {"security_id": "SHARADAR:1", "ticker": "AAPL",
+             "membership_family": "caerus_large_cap", "membership_start_date": "1998-01-02",
+             "membership_end_date": "", "scale_source": "scalemarketcap", "source": "fixture",
+             "confidence": "DEMO"},
+            {"security_id": "SHARADAR:2", "ticker": "TWTR",
+             "membership_family": "caerus_large_cap", "membership_start_date": "2013-11-07",
+             "membership_end_date": "2022-10-27", "scale_source": "scalemarketcap",
+             "source": "fixture", "confidence": "DEMO"},
+            {"security_id": "SHARADAR:3", "ticker": "SPY",
+             "membership_family": "caerus_large_cap", "membership_start_date": "1998-01-02",
+             "membership_end_date": "", "scale_source": "scalemarketcap", "source": "fixture",
+             "confidence": "DEMO"},
+        ],
+    )
+    res = Universe("2018-01-02", "caerus_large_cap", data_dir=d)
+    assert [r["ticker"] for r in res] == ["AAPL", "TWTR"]
+    assert {r["scale_source"] for r in res} == {"scalemarketcap"}
+    assert [r["ticker"] for r in Universe("2025-01-02", "caerus_large_cap", data_dir=d)] == ["AAPL"]
+
+
+def test_universe_unknown_family_fails_loudly(tmp_path: Path) -> None:
+    d = _seed(
+        tmp_path,
+        [_master("SHARADAR:1", "AAPL", "1998-01-02", "2026-03-06", "N")],
+        membership_rows=[{"security_id": "SHARADAR:1", "ticker": "AAPL",
+                          "membership_family": DEFAULT_FAMILY, "membership_start_date": "1998-01-02",
+                          "membership_end_date": "", "source": "fixture", "confidence": "DEMO"}],
+    )
+    with pytest.raises(PITUniverseUnavailable, match="no family-specific artifact is registered"):
+        Universe("2018-01-02", "unknown_family", data_dir=d)
+
+
+def test_real_caerus_large_cap_family_certification_counts() -> None:
+    expected = {
+        "2014-01-02": 1197,
+        "2020-01-02": 1243,
+        "2026-01-02": 1260,
+    }
+    for as_of_date, count in expected.items():
+        rows = Universe(as_of_date, "caerus_large_cap", data_dir=DEFAULT_DATA_DIR)
+        assert len(rows) == count
+        assert {row["membership_family"] for row in rows} == {"caerus_large_cap"}
+        assert all(row["security_id"].startswith("SHARADAR:") for row in rows)
 
 
 # --------------------------------------------------------------------------- #

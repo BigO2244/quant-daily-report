@@ -24,6 +24,7 @@ if _env_path.exists():
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 from core.email_governance import EmailEvent
+from core.dynamic_daily_email import render_dynamic_email_sections
 from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED, STATUS_SKIPPED_DUPLICATE
 from core.operator_summary import write_operator_summary, load_operator_summary, format_operator_summary_log
 from core.quant_report import send_email
@@ -604,6 +605,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     shadow_text = shadow_scoreboard["text"]
     shadow_html = shadow_scoreboard["html"]
     shadow_healthy = str(shadow_scoreboard.get("status") or "").upper() == "OK" and "Artifact status: DEGRADED" not in shadow_text
+    dynamic_sections = render_dynamic_email_sections(_REPO_ROOT, trade_date)
 
     # ------------------------------------------------------------------ #
     # Assemble body
@@ -630,6 +632,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         f"{recon_text}\n"
         f"{perf_text}"
         f"{shadow_text}"
+        f"{dynamic_sections['text']}"
         f"\n{operator_text}"
     )
     body_html = (
@@ -643,6 +646,8 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         f"{perf_html}"
         f"<hr>"
         f"{shadow_html}"
+        f"<hr>"
+        f"{dynamic_sections['html']}"
         f"<hr>"
         f"{operator_html}"
         "</body></html>"

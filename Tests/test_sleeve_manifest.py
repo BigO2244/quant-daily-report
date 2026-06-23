@@ -7,7 +7,7 @@ from pathlib import Path
 from research_registry.sleeves import DEFAULT_MANIFEST_PATH, load_sleeve_manifest, sleeve_inventory_payload, validate_sleeve_manifest
 
 
-REQUIRED_SLEEVES = {"polaris", "orion", "lyra", "phoenix", "cygnus", "cassiopeia", "argo"}
+REQUIRED_SLEEVES = {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra", "phoenix", "cygnus", "cassiopeia", "argo"}
 FUTURE_PLACEHOLDERS = {"phoenix", "cygnus", "cassiopeia", "argo"}
 
 
@@ -89,10 +89,10 @@ def test_inventory_payload_returns_expected_counts_without_mutation() -> None:
     payload = sleeve_inventory_payload()
 
     assert payload["status"] == "OK"
-    assert payload["sleeve_count"] == 7
+    assert payload["sleeve_count"] == 9
     assert payload["counts_by_status"]["current_paper_baseline"] == 1
-    assert payload["counts_by_status"]["current_shadow_challenger"] == 2
+    assert payload["counts_by_status"]["current_shadow_challenger"] == 4
     assert payload["counts_by_status"]["research_placeholder"] == 4
-    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "orion", "lyra"}
+    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra"}
     assert {item["sleeve_id"] for item in payload["future_placeholders"]} == FUTURE_PLACEHOLDERS
     assert DEFAULT_MANIFEST_PATH.read_bytes() == before

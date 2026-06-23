@@ -21,7 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.send_shadow_cio_report import MODEL_ORDER, assess_nav_history_integrity, build_report, _load_nav_history  # noqa: E402
+from scripts.send_shadow_cio_report import ESTABLISHED_MODEL_ORDER, MODEL_ORDER, assess_nav_history_integrity, build_report, _load_nav_history  # noqa: E402
 from core.strategy_registry import active_shadow_security_selection_ids  # noqa: E402
 from paper.trading_calendar import is_trading_day, prev_trading_day  # noqa: E402
 
@@ -164,7 +164,12 @@ def build_health_payload(
         f"{performance_integrity.reason_code}: {performance_integrity.detail}",
     )
     new_trading_day_available = expected_date > baseline_date
-    min_valid = min((value for value in valid_days.values() if value is not None), default=None)
+    established_valid_days = {
+        slug: valid_days.get(slug)
+        for slug in ESTABLISHED_MODEL_ORDER
+        if slug != "spy_benchmark"
+    }
+    min_valid = min((value for value in established_valid_days.values() if value is not None), default=None)
     if new_trading_day_available:
         add_check(
             "valid_days_advanced",

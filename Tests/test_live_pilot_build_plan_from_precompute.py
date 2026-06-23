@@ -61,6 +61,8 @@ def test_over_cap_buy_is_scaled_to_pilot_cap(tmp_path: Path) -> None:
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
     selected = plan["selected_order"]
     assert selected["ticker"] == "AAPL"
+    assert selected["order_type"] == "market"
+    assert selected["order_policy"] == "fr104_live_pilot_market_order_normal_hours_only"
     assert selected["scaled_to_pilot_cap"] is True
     assert selected["source_order_qty"] == 2
     assert selected["source_notional"] == 120
@@ -92,6 +94,8 @@ def test_scaled_buy_uses_normalized_limit_price_for_final_qty(tmp_path: Path) ->
     assert selected["original_limit_price"] == 228.38999938964844
     assert selected["normalized_limit_price"] == 228.39
     assert selected["limit_price"] == 228.39
+    assert selected["expected_price"] == 228.39
+    assert selected["cap_enforcement_price"] == 228.39
     assert selected["original_qty"] == 3
     assert selected["pre_normalization_qty"] == 0.437847542
     assert selected["final_qty"] == 0.437847541
@@ -260,6 +264,8 @@ def test_output_plan_matches_live_pilot_execute_schema(tmp_path: Path) -> None:
     assert written["approved_sleeve"] == "polaris"
     assert written["capital_cap"] == 100
     assert written["selected_order"]["limit_price"] == 50
+    assert written["selected_order"]["order_type"] == "market"
+    assert written["order_policy"]["scope"] == "FR-104 LIVE_PILOT only"
     assert "scripts/live_pilot_execute.py --plan" in written["required_dry_run_command"]
     assert "CAERUS_LIVE_PILOT_DRY_RUN=0" in written["required_live_command"]
 

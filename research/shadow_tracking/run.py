@@ -230,7 +230,18 @@ def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_
         "holdings_count": int(len(weights)),
         "max_weight": round(float(weights.max()), 6) if not weights.empty else 0.0,
         "top3_concentration": round(float(weights.head(3).sum()), 6) if not weights.empty else 0.0,
+        "top5_concentration": round(float(weights.head(5).sum()), 6) if not weights.empty else 0.0,
+        "gross_exposure": round(float(weights.sum()), 6) if not weights.empty else 0.0,
+        "cash_weight": round(float(max(0.0, 1.0 - weights.sum())), 6) if not weights.empty else 1.0,
+        "hhi": _weight_hhi(weights),
+        "effective_n": _effective_n(weights),
     }
+    performance_summary = dict(backtest["summary"])
+    performance_summary["alpha_per_dollar_deployed_proxy"] = _alpha_per_dollar_deployed_proxy(
+        performance_summary.get("excess_return_vs_spy"),
+        performance_summary.get("avg_cash_weight"),
+        concentration.get("gross_exposure"),
+    )
     return {
         "strategy_name": definition.strategy_name,
         "strategy_slug": definition.strategy_slug,
@@ -244,7 +255,8 @@ def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_
         "expected_turnover": snapshot["expected_turnover"],
         "estimated_holding_period_days": snapshot["estimated_holding_period_days"],
         "weight_concentration": concentration,
-        "performance_summary": backtest["summary"],
+        "alpha_per_dollar_deployed_proxy": performance_summary["alpha_per_dollar_deployed_proxy"],
+        "performance_summary": performance_summary,
     }
 
 
@@ -294,6 +306,7 @@ def build_comparison_payload(strategy_payloads: dict[str, dict], *, trade_date: 
                 "expected_turnover": payload["expected_turnover"],
                 "estimated_holding_period_days": payload["estimated_holding_period_days"],
                 "weight_concentration": payload["weight_concentration"],
+                "alpha_per_dollar_deployed_proxy": payload.get("alpha_per_dollar_deployed_proxy"),
                 "holdings": payload["holdings"],
             }
             for slug, payload in strategy_payloads.items()
@@ -367,20 +380,21 @@ def build_comparison_markdown(comparison: dict, *, dated_dir: Path | None = None
             ]
         )
         return "\n".join(lines) + "\n"
-    for left_slug, right_slug in combinations(_model_strategy_slugs(), 2):
+    rendered_slugs = _comparison_strategy_slugs(comparison)
+    for left_slug, right_slug in combinations(rendered_slugs, 2):
         lines.extend(["", f"## {_heading_label(left_slug)} vs {_heading_label(right_slug)}"])
         lines.extend(_pairwise_lines(comparison, left_slug, right_slug))
     lines.extend(["", "## Current Top Holdings"])
-    for slug in _model_strategy_slugs():
+    for slug in rendered_slugs:
         payload = strategies[slug]
         top = ", ".join(f"{item['ticker']} ({item['target_weight']:.2%})" for item in payload["holdings"][:5])
         lines.append(f"- {payload['strategy_name']}: {top}")
     lines.extend(["", "## Turnover / Concentration Summary"])
-    for slug in _model_strategy_slugs():
+    for slug in rendered_slugs:
         payload = strategies[slug]
         conc = payload["weight_concentration"]
         lines.append(
-            f"- {payload['strategy_name']}: turnover {payload['expected_turnover']}, max weight {conc['max_weight']}, top-3 concentration {conc['top3_concentration']}, est. holding period {payload['estimated_holding_period_days']}"
+            f"- {payload['strategy_name']}: turnover {payload['expected_turnover']}, max weight {conc['max_weight']}, top-3 concentration {conc['top3_concentration']}, cash {conc.get('cash_weight', 0.0)}, alpha/deployed-dollar proxy {payload.get('alpha_per_dollar_deployed_proxy')}, est. holding period {payload['estimated_holding_period_days']}"
         )
     broker_context = comparison.get("broker_context") or {}
     if broker_context:
@@ -389,7 +403,7 @@ def build_comparison_markdown(comparison: dict, *, dated_dir: Path | None = None
         lines.append(
             f"- Snapshot as of {broker_context.get('as_of') or 'unknown'} with {broker_context.get('positions_count') or 0} broker positions."
         )
-        for slug in _model_strategy_slugs():
+        for slug in rendered_slugs:
             overlap = (broker_context.get("strategy_overlap") or {}).get(slug) or {}
             lines.append(
                 f"- {comparison['strategies'][slug]['strategy_name']} overlap with broker: {overlap.get('overlap_names_count', 0)} names; broker-only names: {', '.join(overlap.get('broker_only_names') or []) or 'None'}"
@@ -410,6 +424,15 @@ def _heading_label(slug: str) -> str:
 
 def _model_strategy_slugs() -> tuple[str, ...]:
     return load_strategy_registry().active_shadow_security_selection_ids()
+
+
+def _comparison_strategy_slugs(comparison: dict) -> tuple[str, ...]:
+    strategies = comparison.get("strategies") if isinstance(comparison.get("strategies"), dict) else {}
+    if not strategies:
+        return ()
+    ordered = [slug for slug in _model_strategy_slugs() if slug in strategies]
+    extras = [slug for slug in strategies if slug not in set(ordered)]
+    return tuple(ordered + sorted(extras))
 
 
 def _baseline_strategy_slug() -> str:
@@ -449,6 +472,34 @@ def _as_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _weight_hhi(weights: pd.Series) -> float:
+    gross = float(weights.sum()) if not weights.empty else 0.0
+    if gross <= 0.0:
+        return 0.0
+    deployed_weights = weights.astype(float) / gross
+    return round(float((deployed_weights ** 2).sum()), 6)
+
+
+def _effective_n(weights: pd.Series) -> float:
+    hhi = _weight_hhi(weights)
+    return round(float(1.0 / hhi), 6) if hhi > 0.0 else 0.0
+
+
+def _alpha_per_dollar_deployed_proxy(
+    excess_return_vs_spy: object,
+    avg_cash_weight: object,
+    current_gross_exposure: object,
+) -> float | None:
+    excess = _as_float(excess_return_vs_spy)
+    if excess is None:
+        return None
+    avg_cash = _as_float(avg_cash_weight)
+    deployed = 1.0 - avg_cash if avg_cash is not None else _as_float(current_gross_exposure)
+    if deployed is None or deployed <= 0.0:
+        return None
+    return round(float(excess / deployed), 6)
 
 
 def _fmt_pct(value: object) -> str:
@@ -577,8 +628,8 @@ def _performance_scoreboard_lines(evaluation: dict | None) -> list[str]:
         return ["Performance scoreboard unavailable: shadow_evaluation.json missing"]
     strategies = _evaluation_strategies(evaluation)
     lines = [
-        "| Strategy | Data Status | Chain Status | Valid Days | Daily Return | Cumulative Return | Excess vs SPY | Vol Ann | Max Drawdown | Avg Turnover | Top-3 Conc. | Constituent Changes |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Strategy | Data Status | Chain Status | Valid Days | Daily Return | Cumulative Return | Excess vs SPY | Alpha/Deployed Proxy | Vol Ann | Max Drawdown | Avg Turnover | Top-3 Conc. | Constituent Changes |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for slug in _scoreboard_slugs(evaluation):
         payload = strategies.get(slug) or {}
@@ -593,6 +644,7 @@ def _performance_scoreboard_lines(evaluation: dict | None) -> list[str]:
                     _fmt_pct(payload.get("daily_return")),
                     _fmt_pct(payload.get("cumulative_return")),
                     _fmt_pct(payload.get("excess_return_vs_spy")),
+                    _fmt_pct(payload.get("alpha_per_dollar_deployed_proxy")),
                     _fmt_pct(payload.get("realized_volatility_ann")),
                     _fmt_pct(payload.get("max_drawdown")),
                     _fmt_decimal(payload.get("avg_turnover")),
@@ -603,7 +655,7 @@ def _performance_scoreboard_lines(evaluation: dict | None) -> list[str]:
             + " |"
         )
     if BENCHMARK_SLUG not in strategies:
-        lines.append("| SPY | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |")
+        lines.append("| SPY | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |")
         lines.append("")
         lines.append("SPY benchmark unavailable in evaluation artifact")
     return lines
@@ -775,7 +827,10 @@ def build_shadow_performance_payload(
 
     strategies = {}
     for slug in _model_strategy_slugs():
-        prev_nav_raw = (prior_navs.get(slug) or {}).get("nav", 1.0 if chain_state == "NO_PRIOR" else None)
+        prior_strategy = prior_navs.get(slug) or {}
+        prev_nav_raw = prior_strategy.get("nav")
+        if prev_nav_raw is None and chain_state in {"NO_PRIOR", "OK"}:
+            prev_nav_raw = 1.0
         prev_nav = float(prev_nav_raw) if prev_nav_raw is not None else None
         if chain_state == "BROKEN_CHAIN":
             daily_return = 0.0 if data_status == "NO_DATA" else round(
@@ -918,7 +973,11 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
         nav_history = extract_chain_nav_history(performance_history=performance_history, strategy_slug=slug)
         turnover_history = extract_strategy_metric_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="expected_turnover")
         concentration_history = extract_strategy_top3_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        cash_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="cash_weight")
+        hhi_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="hhi")
+        effective_n_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="effective_n")
         constituent_change_count = extract_constituent_change_count(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        avg_cash_weight = round(sum(cash_history) / len(cash_history), 10) if cash_history else None
         evaluation["strategies"][slug] = {
             "strategy_name": strategy_name,
             "status": chain_state,
@@ -934,6 +993,10 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
             "max_drawdown": compute_max_drawdown(nav_history),
             "avg_turnover": round(sum(turnover_history) / len(turnover_history), 10) if turnover_history else None,
             "avg_top_3_concentration": round(sum(concentration_history) / len(concentration_history), 10) if concentration_history else None,
+            "avg_cash_weight": avg_cash_weight,
+            "avg_hhi": round(sum(hhi_history) / len(hhi_history), 10) if hhi_history else None,
+            "avg_effective_n": round(sum(effective_n_history) / len(effective_n_history), 10) if effective_n_history else None,
+            "alpha_per_dollar_deployed_proxy": _alpha_per_dollar_deployed_proxy(excess_return_vs_spy, avg_cash_weight, None),
             "constituent_change_count": constituent_change_count,
         }
     return evaluation
@@ -967,6 +1030,9 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
         top3_history = extract_strategy_top3_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
         top5_history = extract_strategy_top_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, top_n=5)
         avg_position_history = extract_strategy_average_position_size_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
+        cash_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="cash_weight")
+        hhi_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="hhi")
+        effective_n_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="effective_n")
         constituent_change_count = extract_constituent_change_count(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
         strategy_returns = {f"{window}D": _rolling_sum(daily_returns, window) for window in (5, 10, 20)}
         strategy_returns["cumulative"] = evaluation.get("cumulative_return")
@@ -992,6 +1058,10 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
                 "avg_top_3_concentration": _mean_or_none(top3_history),
                 "avg_top_5_concentration": _mean_or_none(top5_history),
                 "avg_position_size": _mean_or_none(avg_position_history),
+                "avg_cash_weight": _mean_or_none(cash_history),
+                "avg_hhi": _mean_or_none(hhi_history),
+                "avg_effective_n": _mean_or_none(effective_n_history),
+                "alpha_per_dollar_deployed_proxy": evaluation.get("alpha_per_dollar_deployed_proxy"),
             },
             "valid_observation_windows": len(daily_returns),
             "available_observation_windows": len(history_dates),
@@ -1218,31 +1288,51 @@ def safe_read_json(path: Path) -> dict | None:
 
 def extract_valid_daily_returns(*, performance_history: list[tuple[str, dict | None]], strategy_slug: str) -> list[float]:
     returns: list[float] = []
+    seen_strategy = False
     for _, payload in performance_history:
         if not payload:
-            break
+            if seen_strategy:
+                break
+            continue
         if payload.get("status") == "BROKEN_CHAIN":
             return []
         if payload.get("data_status") != "OK":
             continue
         strategy = ((payload.get("strategies") or {}).get(strategy_slug) or {})
+        if not strategy:
+            if seen_strategy:
+                return []
+            continue
         if strategy.get("nav") is None:
-            return []
+            if seen_strategy:
+                return []
+            continue
+        seen_strategy = True
         returns.append(float(strategy.get("daily_return") or 0.0))
     return returns
 
 
 def extract_chain_nav_history(*, performance_history: list[tuple[str, dict | None]], strategy_slug: str) -> list[float] | None:
     navs: list[float] = []
+    seen_strategy = False
     for _, payload in performance_history:
         if not payload:
-            return None
+            if seen_strategy:
+                return None
+            continue
         if payload.get("status") == "BROKEN_CHAIN":
             return None
         strategy = ((payload.get("strategies") or {}).get(strategy_slug) or {})
+        if not strategy:
+            if seen_strategy:
+                return None
+            continue
         nav = strategy.get("nav")
         if nav is None:
-            return None
+            if seen_strategy:
+                return None
+            continue
+        seen_strategy = True
         navs.append(float(nav))
     return navs
 
@@ -1266,6 +1356,18 @@ def extract_strategy_top3_concentration_history(*, output_root: Path, history_da
         if not payload:
             continue
         value = ((payload.get("weight_concentration") or {}).get("top3_concentration"))
+        if value is not None:
+            values.append(float(value))
+    return values
+
+
+def extract_strategy_concentration_field_history(*, output_root: Path, history_dates: list[str], strategy_slug: str, field: str) -> list[float]:
+    values = []
+    for date in history_dates:
+        payload = safe_read_json(output_root / date / f"{strategy_slug}.json")
+        if not payload:
+            continue
+        value = ((payload.get("weight_concentration") or {}).get(field))
         if value is not None:
             values.append(float(value))
     return values

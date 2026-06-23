@@ -1,14 +1,15 @@
 """FR-068 Phase 1 — Point-in-Time universe reader (RESEARCH_ONLY / NON_EXECUTIONAL).
 
 `Universe(as_of_date)` is the canonical research universe interface. Phase 1
-implements the `sharadar_security_existence` family: a security is eligible on a
-date when it existed and traded on that date (firstpricedate <= as_of <=
-lastpricedate, lastpricedate open for active names), filtered to common stock.
-Identity is the stable `security_id` (rooted in Sharadar `permaticker`); ticker
-changes preserve identity.
+implements the `sharadar_security_existence` family plus materialized research
+families such as `caerus_large_cap`: a security is eligible on a date when its
+membership_start_date <= as_of <= membership_end_date (membership_end_date open
+for active names), filtered to common stock. Identity is the stable `security_id`
+(rooted in Sharadar `permaticker`); ticker changes preserve identity.
 
-This is **security-existence** PIT, not historical *index* membership — index
-families (sp500_proxy, small_cap_band) are added in later phases.
+This is **security-existence** PIT plus explicit materialized families, not
+historical *index* membership — index families (sp500_proxy, small_cap_band) are
+added in later phases.
 
 Hard rules: this module never falls back to `data/universe.csv`. If the PIT
 artifacts are missing it raises `PITUniverseUnavailable` with a clear message.
@@ -27,6 +28,9 @@ DEFAULT_DATA_DIR = REPO_ROOT / "data" / "pit_universe"
 DEFAULT_FAMILY = "sharadar_security_existence"
 SECURITY_MASTER_FILE = "security_master.csv"
 MEMBERSHIP_FILE = "membership_universe.csv"
+FAMILY_MEMBERSHIP_FILES = {
+    "caerus_large_cap": "membership_universe_large_cap.csv",
+}
 
 _CONFIDENCE_RANK = {"LOW": 0, "DEMO": 0, "MEDIUM": 1, "HIGH": 2}
 
@@ -69,6 +73,63 @@ def load_security_master(data_dir: Path | str = DEFAULT_DATA_DIR) -> list[dict[s
     return _read_csv(path)
 
 
+def _load_membership_rows(root: Path, membership_family: str, master_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    membership_path = root / MEMBERSHIP_FILE
+    if membership_path.exists():
+        rows = [
+            r for r in _read_csv(membership_path)
+            if str(r.get("membership_family")) == membership_family
+        ]
+        if rows or membership_family == DEFAULT_FAMILY:
+            return rows
+
+    family_file = FAMILY_MEMBERSHIP_FILES.get(membership_family)
+    if family_file:
+        family_path = root / family_file
+        if not family_path.exists():
+            raise PITUniverseUnavailable(
+                f"PIT membership family {membership_family!r} expected at {family_path}, "
+                "but the artifact is missing. Refusing to fall back to data/universe.csv."
+            )
+        rows = [
+            r for r in _read_csv(family_path)
+            if str(r.get("membership_family")) == membership_family
+        ]
+        if rows:
+            return rows
+        raise PITUniverseUnavailable(
+            f"PIT membership family {membership_family!r} had no rows in {family_path}. "
+            "Refusing to fall back to data/universe.csv."
+        )
+
+    if membership_path.exists():
+        raise PITUniverseUnavailable(
+            f"PIT membership family {membership_family!r} not found in {membership_path} "
+            "and no family-specific artifact is registered. Refusing to fall back to "
+            "data/universe.csv."
+        )
+
+    # Derive the security-existence family from the master if the materialized
+    # membership view is absent (still no universe.csv fallback).
+    if membership_family != DEFAULT_FAMILY:
+        raise PITUniverseUnavailable(
+            f"membership_universe.csv not found at {membership_path} and family "
+            f"{membership_family!r} cannot be derived from the security master."
+        )
+    return [
+        {
+            "security_id": r.get("security_id"),
+            "ticker": r.get("ticker"),
+            "membership_family": DEFAULT_FAMILY,
+            "membership_start_date": r.get("firstpricedate"),
+            "membership_end_date": "" if str(r.get("isdelisted")).upper().startswith("N")
+            else r.get("lastpricedate"),
+            "confidence": r.get("confidence"),
+        }
+        for r in master_rows
+    ]
+
+
 def Universe(
     as_of_date: str,
     membership_family: str = DEFAULT_FAMILY,
@@ -92,30 +153,7 @@ def Universe(
     master_rows = load_security_master(root)
     master_by_id = {str(r.get("security_id")): r for r in master_rows}
 
-    membership_path = root / MEMBERSHIP_FILE
-    if membership_path.exists():
-        membership_rows = [r for r in _read_csv(membership_path)
-                           if str(r.get("membership_family")) == membership_family]
-    else:
-        # Derive the security-existence family from the master if the materialized
-        # membership view is absent (still no universe.csv fallback).
-        if membership_family != DEFAULT_FAMILY:
-            raise PITUniverseUnavailable(
-                f"membership_universe.csv not found at {membership_path} and family "
-                f"{membership_family!r} cannot be derived from the security master."
-            )
-        membership_rows = [
-            {
-                "security_id": r.get("security_id"),
-                "ticker": r.get("ticker"),
-                "membership_family": DEFAULT_FAMILY,
-                "membership_start_date": r.get("firstpricedate"),
-                "membership_end_date": "" if str(r.get("isdelisted")).upper().startswith("N")
-                else r.get("lastpricedate"),
-                "confidence": r.get("confidence"),
-            }
-            for r in master_rows
-        ]
+    membership_rows = _load_membership_rows(root, membership_family, master_rows)
 
     min_rank = _CONFIDENCE_RANK.get(str(min_confidence).upper(), 0)
     out: list[dict[str, Any]] = []
@@ -143,6 +181,7 @@ def Universe(
                 "membership_family": membership_family,
                 "membership_start_date": row.get("membership_start_date"),
                 "membership_end_date": row.get("membership_end_date") or None,
+                "scale_source": row.get("scale_source"),
                 "is_active_on_date": end is None,
                 "relatedtickers": master.get("relatedtickers"),
                 "source": master.get("source"),

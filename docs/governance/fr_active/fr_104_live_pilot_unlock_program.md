@@ -1,6 +1,6 @@
 # FR-104 LIVE_PILOT Unlock Program
 
-Status: `ENGINEERING_READY_LOCAL_NOT_OPERATIONALLY_APPROVED`  
+Status: `LEVEL_2_5_PILOT_EVIDENCE_COLLECTION_READY_WITH_MANUAL_APPROVAL`
 Date: `2026-06-19`  
 Execution Impact: `DISABLED_BY_DEFAULT`  
 Capital Impact: `$0`  
@@ -9,9 +9,13 @@ Pilot Engineering Cap: `$100`
 ## Objective
 
 FR-104 adds a code-supported, test-covered `LIVE_PILOT` execution path for a
-tightly capped `$100` pilot. It does not approve capital, add credentials,
-enable cron, change strategy selection, alter sizing/allocation, or submit live
-orders during this task.
+tightly capped `$100` pilot evidence-collection lane. It does not approve
+capital scaling, add credentials to git or scheduled runtimes, enable cron,
+change strategy selection, alter sizing/allocation, or make any promotion or
+production claim.
+
+FR-104 is Level 2.5 under FR-100: forward evidence collection before perfect
+certainty exists. It is not Level 3 pilot-capital readiness.
 
 ## Routing Decision
 
@@ -38,22 +42,27 @@ Live pilot submission requires all of the following:
 - `CAERUS_LIVE_PILOT_KILL_SWITCH` not set
 - `CAERUS_LIVE_PILOT_DRY_RUN=0` only for actual live submission
 - no cron context unless `CAERUS_LIVE_PILOT_CRON_APPROVED=1`
-- every order has explicit notional through limit price and quantity
+- every order has explicit pre-submit notional through quantity and an
+  expected/cap-enforcement price
 
 Any failed control blocks before Alpaca SDK submission.
 
 ## Order Policy
 
-Initial FR-104 policy:
+Current FR-104 policy:
 
-- long-only US equity limit orders only;
-- no market orders without explicit estimated notional;
+- long-only US equity market orders during normal market hours only;
+- market orders require explicit estimated notional before submission;
+- estimated notional must be computed from normalized expected/cap-enforcement
+  price and final quantity before any broker call;
 - no options, crypto, margin, or shorting;
 - no fractional quantities unless `CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL=1`;
 - sells blocked unless explicitly whitelisted by
   `CAERUS_LIVE_PILOT_SELL_WHITELIST`;
 - aggregate submitted notional must be `<=` configured cap;
 - order count must be `<= CAERUS_LIVE_PILOT_MAX_ORDERS`.
+- open live-pilot orders or open same-symbol orders block duplicate submission;
+- cancel/replace is manual only and is not performed by FR-104 automation.
 
 ## Artifact Isolation
 
@@ -69,7 +78,10 @@ Required artifacts:
 - `live_pilot_orders_submitted.json`
 - `live_pilot_broker_snapshot_pre.json`
 - `live_pilot_broker_snapshot_post.json`
+- `live_pilot_open_order_check.json`
+- `live_pilot_market_hours_gate.json`
 - `live_pilot_reconciliation.json`
+- `live_pilot_evidence_metrics.json`
 - `live_pilot_capital_usage.json`
 - `live_pilot_operator_summary.json`
 
@@ -91,11 +103,12 @@ or correction order.
 
 ## Engineering Status
 
-`LIVE_PILOT_ENGINEERING_READY_LOCAL`
+`LEVEL_2_5_PILOT_EVIDENCE_COLLECTION_READY_WITH_MANUAL_APPROVAL`
 
-This means the local code path and tests support a disabled-by-default,
-explicitly approved, tightly capped pilot path. It does not mean pilot capital
-is investment-ready, credential-ready, deployed to VM, or approved for Monday.
+This means the code path and tests support a disabled-by-default, explicitly
+approved, tightly capped pilot evidence-collection path. It does not mean pilot
+capital is investment-ready for scaling, deployed to cron, production-ready, or
+approved without a per-run or per-window operator decision.
 
 ## Remaining Non-Code Gates
 
@@ -105,7 +118,8 @@ is investment-ready, credential-ready, deployed to VM, or approved for Monday.
 - VM deployment and validation.
 - Read-only live account preflight.
 - Human operator checklist.
-- FR-100/FR-101 capital-readiness evidence if investment readiness is required.
+- FR-100/FR-101 capital-readiness evidence before any Level 3 conclusion,
+  scaling, or production-adjacent use.
 
 ## Rollback
 

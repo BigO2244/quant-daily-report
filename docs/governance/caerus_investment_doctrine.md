@@ -230,6 +230,26 @@ Purpose:
 
 Pilot capital should be intentionally limited.
 
+Pilot Capital includes a narrow evidence-collection mode before production-grade
+certainty exists. A capped, manually approved pilot may collect forward
+broker/operational evidence when its purpose is learning and validation, not
+promotion, scaling, or production allocation.
+
+Historical replay infrastructure gaps, including incomplete decision-grade
+FR-068 replay, correctly block research conclusions and promotions. They should
+not by themselves block a segregated, de minimis, explicitly approved pilot
+whose purpose is to create forward evidence.
+
+Pilot evidence collection must remain:
+
+- capped;
+- manual;
+- reversible;
+- broker-truth reconciled;
+- artifact-isolated;
+- non-cron by default;
+- non-promotional until separate promotion gates pass.
+
 Example range:
 
 ```text
@@ -389,6 +409,22 @@ Their future status will be determined through:
 - Operational evidence
 
 The data will determine which strategy survives.
+
+---
+
+## Polaris_Alpha and Orion_Alpha
+
+Concentrated variants may be promoted to Shadow when research evidence supports
+forward observation and when baseline sleeves remain preserved for comparison.
+
+Polaris_Alpha and Orion_Alpha are Shadow-only concentration tests. They exist to
+measure whether fewer holdings improve alpha capture and alpha per deployed
+dollar without creating unacceptable drawdown, turnover, concentration, or cash
+drag.
+
+They do not replace Polaris or Orion. They receive no capital while in Shadow.
+Their first review checkpoints are 20 and 60 trading days, and any promotion
+beyond Shadow requires separate owner approval and decision-grade evidence.
 
 ---
 

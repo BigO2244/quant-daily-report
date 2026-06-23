@@ -68,6 +68,114 @@
     <section class="terminal-grid terminal-grid--dual">
       <article class="terminal-panel">
         <div class="panel-head">
+          <h2>Live Pilot / Account</h2>
+          <span id="live-pilot-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="live-pilot-matrix" class="matrix-grid"></div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Qty</th>
+                <th>Expected</th>
+                <th>Fill</th>
+              </tr>
+            </thead>
+            <tbody id="live-pilot-orders-body"></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Account Layers</h2>
+          <span class="panel-kicker">paper / live pilot / shadow</span>
+        </div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Status</th>
+                <th>Cash</th>
+                <th>Equity</th>
+                <th>Positions</th>
+              </tr>
+            </thead>
+            <tbody id="account-layers-body"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--dual">
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Sleeve Inventory</h2>
+          <span id="sleeve-inventory-summary" class="panel-kicker">—</span>
+        </div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Sleeve</th>
+                <th>Lifecycle</th>
+                <th>Variant</th>
+                <th>Artifact</th>
+                <th>SI Return</th>
+                <th>Turnover</th>
+                <th>Readiness</th>
+              </tr>
+            </thead>
+            <tbody id="sleeve-inventory-body"></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Governance State</h2>
+          <span id="governance-state-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="governance-state-list" class="check-list"></div>
+      </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--dual">
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Baseline vs Alpha</h2>
+          <span id="alpha-comparison-summary" class="panel-kicker">—</span>
+        </div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th>Return Δ</th>
+                <th>Drawdown Δ</th>
+                <th>Alpha N</th>
+                <th>Alpha $</th>
+                <th>Window</th>
+              </tr>
+            </thead>
+            <tbody id="alpha-comparison-body"></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Evidence Collection</h2>
+          <span class="panel-kicker">pilot and shadow constraints</span>
+        </div>
+        <div id="evidence-collection-matrix" class="matrix-grid"></div>
+      </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--dual">
+      <article class="terminal-panel">
+        <div class="panel-head">
           <h2>Performance Matrix</h2>
           <span class="panel-kicker">portfolio trajectory</span>
         </div>

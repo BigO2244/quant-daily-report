@@ -262,13 +262,69 @@ def test_plan_validation_blocks_over_cap_and_too_many_orders(monkeypatch: pytest
     assert "live_pilot_total_notional_exceeds_cap" in result.reason_codes
 
 
+def test_plan_validation_normalizes_limit_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL", "1")
+
+    assert normalize_live_pilot_limit_price(228.38999938964844) == 228.39
+    assert normalize_live_pilot_limit_price(0.123456) == 0.1235
+
+    result = validate_live_pilot_plan(
+        [
+            {
+                "ticker": "JNJ",
+                "side": "BUY",
+                "shares": 0.437847541,
+                "limit_price": 228.38999938964844,
+            }
+        ],
+        capital_cap_usd=100,
+        max_orders=1,
+        run_id="run-1",
+    )
+
+    assert result.status == "PASS"
+    order = result.orders[0]
+    assert order.original_limit_price == 228.38999938964844
+    assert order.normalized_limit_price == 228.39
+    assert order.limit_price == 228.39
+    assert order.notional <= 100
+
+
+def test_plan_validation_allows_fr104_market_order_with_cap_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+
+    result = validate_live_pilot_plan(
+        [
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 1,
+                "order_type": "market",
+                "expected_price": 50,
+            }
+        ],
+        capital_cap_usd=100,
+        max_orders=1,
+        run_id="run-1",
+    )
+
+    assert result.status == "PASS"
+    order = result.orders[0]
+    assert order.order_type == "market"
+    assert order.expected_price == 50
+    assert order.notional == 50
+
+
 @pytest.mark.parametrize(
     ("trade", "reason"),
     [
         ({"ticker": "AAPL", "side": "SELL", "shares": 1, "limit_price": 10}, "AAPL:sell_not_whitelisted"),
         ({"ticker": "AAPL", "side": "BUY", "shares": -1, "limit_price": 10}, "AAPL:non_positive_qty"),
         ({"ticker": "BTCUSD", "side": "BUY", "shares": 1, "limit_price": 10}, "BTCUSD:unsupported_crypto_symbol"),
-        ({"ticker": "AAPL", "side": "BUY", "shares": 1, "order_type": "market", "price": 10}, "AAPL:only_limit_orders_supported"),
+        ({"ticker": "AAPL", "side": "BUY", "shares": 1, "order_type": "stop", "price": 10}, "AAPL:unsupported_order_type:stop"),
     ],
 )
 def test_plan_validation_blocks_unsupported_orders(

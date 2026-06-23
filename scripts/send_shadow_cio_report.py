@@ -24,6 +24,14 @@ from core.strategy_registry import load_strategy_registry  # noqa: E402
 
 _REGISTRY = load_strategy_registry()
 MODEL_ORDER = [*_REGISTRY.active_shadow_security_selection_ids(), "spy_benchmark"]
+ESTABLISHED_MODEL_ORDER = [
+    *(
+        entry.strategy_id
+        for entry in _REGISTRY.active_shadow_security_selection_entries()
+        if not (entry.shadow_tracking or {}).get("baseline_strategy_id")
+    ),
+    "spy_benchmark",
+]
 PROMOTION_SLUGS = list(reversed(_REGISTRY.promotion_candidate_ids()))
 BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 BENCHMARK_SLUG = "spy_benchmark"
@@ -151,17 +159,17 @@ def assess_nav_history_integrity(nav_history: dict[str, list[tuple[str, float]]]
     populated = {slug: points for slug, points in nav_history.items() if points}
     if not populated:
         return PerformanceIntegrity("INSUFFICIENT_EVIDENCE", "SHADOW_PERFORMANCE_SUPPRESSED", "shadow_nav_series.csv has no usable rows")
-    missing = [slug for slug in MODEL_ORDER if not nav_history.get(slug)]
+    missing = [slug for slug in ESTABLISHED_MODEL_ORDER if not nav_history.get(slug)]
     if missing:
         return PerformanceIntegrity("CORRUPT", "SHADOW_NAV_SCHEMA_MISMATCH", f"missing NAV history for: {', '.join(missing)}")
-    common_dates = sorted(set.intersection(*(set(date for date, _ in nav_history[slug]) for slug in MODEL_ORDER)))
+    common_dates = sorted(set.intersection(*(set(date for date, _ in nav_history[slug]) for slug in ESTABLISHED_MODEL_ORDER)))
     if len(common_dates) < 2:
         return PerformanceIntegrity("INSUFFICIENT_EVIDENCE", "SHADOW_PERFORMANCE_SUPPRESSED", "fewer than two common NAV dates")
-    values = {slug: dict(nav_history[slug]) for slug in MODEL_ORDER}
+    values = {slug: dict(nav_history[slug]) for slug in ESTABLISHED_MODEL_ORDER}
     for previous_date, current_date in zip(common_dates, common_dates[1:]):
         reset_slugs: list[str] = []
         mismatch_slugs: list[str] = []
-        for slug in MODEL_ORDER:
+        for slug in ESTABLISHED_MODEL_ORDER:
             prior = values[slug].get(previous_date)
             current = values[slug].get(current_date)
             if prior is None or current is None or prior <= 0 or current <= 0:
@@ -188,7 +196,7 @@ def assess_nav_history_integrity(nav_history: dict[str, list[tuple[str, float]]]
 
 
 def _latest_valid_shadow_performance_date(nav_history: dict[str, list[tuple[str, float]]]) -> str | None:
-    date_sets = [set(points_date for points_date, _ in nav_history.get(slug, [])) for slug in MODEL_ORDER]
+    date_sets = [set(points_date for points_date, _ in nav_history.get(slug, [])) for slug in ESTABLISHED_MODEL_ORDER]
     if not date_sets or any(not dates for dates in date_sets):
         return None
     common_dates = set.intersection(*date_sets)
