@@ -1,18 +1,18 @@
 {
   "environment": "paper",
-  "generated_at": "2026-06-23T19:19:25+00:00",
+  "generated_at": "2026-06-23T19:48:57+00:00",
   "report_date": "2026-06-23",
   "schema_version": "dashboard-v2-prototype",
   "sections": {
     "account_layers": {
-      "as_of": "2026-06-23T19:19:25+00:00",
+      "as_of": "2026-06-23T19:48:57+00:00",
       "is_stale": false,
       "rows": [
         {
-          "buying_power": 31338.51,
+          "buying_power": 31362.91,
           "capital_behavior": "paper only",
           "cash": 552.51,
-          "equity": 10955.54,
+          "equity": 10964.25,
           "layer": "Paper account",
           "positions_count": 25,
           "source": "broker paper/account artifacts",
@@ -130,38 +130,38 @@
         {
           "avg_entry_price": 397.29926698375897,
           "cost_basis": 643.695647,
-          "last_price": 387.16,
-          "market_value": 627.268227,
+          "last_price": 386.43,
+          "market_value": 626.085497,
           "qty": 1.62017829,
           "side": "positionside.long",
           "ticker": "MAR",
-          "unrealized_pnl": -16.42742,
-          "unrealized_pnl_pct": -0.02552,
-          "weight": 0.0572558018135117
+          "unrealized_pnl": -17.61015,
+          "unrealized_pnl_pct": -0.02736,
+          "weight": 0.057102446314157375
         },
         {
           "avg_entry_price": 80.3917039690212,
           "cost_basis": 837.685792,
-          "last_price": 79.105,
-          "market_value": 824.278269,
+          "last_price": 79.29,
+          "market_value": 826.205979,
           "qty": 10.4200527,
           "side": "positionside.long",
           "ticker": "GM",
-          "unrealized_pnl": -13.407523,
-          "unrealized_pnl_pct": -0.01601,
-          "weight": 0.07523848838122082
+          "unrealized_pnl": -11.479813,
+          "unrealized_pnl_pct": -0.0137,
+          "weight": 0.0753545366988166
         },
         {
           "avg_entry_price": 364.12,
           "cost_basis": 364.12,
-          "last_price": 356.1,
-          "market_value": 356.1,
+          "last_price": 355.105,
+          "market_value": 355.105,
           "qty": 1.0,
           "side": "positionside.long",
           "ticker": "GE",
-          "unrealized_pnl": -8.02,
-          "unrealized_pnl_pct": -0.02203,
-          "weight": 0.03250410294700216
+          "unrealized_pnl": -9.015,
+          "unrealized_pnl_pct": -0.02476,
+          "weight": 0.0323875322069453
         }
       ],
       "largest_decreases": [],
@@ -170,50 +170,50 @@
         {
           "avg_entry_price": 706.3942863793549,
           "cost_basis": 875.151904,
-          "last_price": 1032.43,
-          "market_value": 1279.07756,
+          "last_price": 1038.73,
+          "market_value": 1286.88263,
           "qty": 1.238900032,
           "side": "positionside.long",
           "ticker": "STX",
-          "unrealized_pnl": 403.925656,
-          "unrealized_pnl_pct": 0.46155,
-          "weight": 0.11675166719303656
+          "unrealized_pnl": 411.730726,
+          "unrealized_pnl_pct": 0.47047,
+          "weight": 0.11737078505141711
         },
         {
           "avg_entry_price": 130.035,
           "cost_basis": 780.21,
-          "last_price": 146.97,
-          "market_value": 881.82,
+          "last_price": 147.19,
+          "market_value": 883.14,
           "qty": 6.0,
           "side": "positionside.long",
           "ticker": "FTNT",
-          "unrealized_pnl": 101.61,
-          "unrealized_pnl_pct": 0.13023,
-          "weight": 0.08049078365831351
+          "unrealized_pnl": 102.93,
+          "unrealized_pnl_pct": 0.13193,
+          "weight": 0.0805472330528764
         },
         {
           "avg_entry_price": 91.7543149833832,
           "cost_basis": 996.639723,
-          "last_price": 93.47,
-          "market_value": 1015.275575,
+          "last_price": 93.765,
+          "market_value": 1018.479879,
           "qty": 10.862047449,
           "side": "positionside.long",
           "ticker": "MNST",
-          "unrealized_pnl": 18.635852,
-          "unrealized_pnl_pct": 0.0187,
-          "weight": 0.09267234431164506
+          "unrealized_pnl": 21.840156,
+          "unrealized_pnl_pct": 0.02191,
+          "weight": 0.09289097557972502
         }
       ],
       "notes": [
         {
           "kind": "return",
           "label": "Portfolio daily return",
-          "value": -0.01390634057123108
+          "value": -0.013122364995985736
         }
       ],
       "summary": {
         "buy_count": 0,
-        "latest_daily_return": -0.01390634057123108,
+        "latest_daily_return": -0.013122364995985736,
         "sell_count": 0,
         "turnover_proxy_notional": 0
       }
@@ -255,7 +255,7 @@
       ]
     },
     "governance_state": {
-      "as_of": "2026-06-23T19:19:25+00:00",
+      "as_of": "2026-06-23T19:48:57+00:00",
       "is_stale": false,
       "rows": [
         {
@@ -511,7 +511,7 @@
       ]
     },
     "live_readiness": {
-      "as_of": "2026-06-23T19:19:25+00:00",
+      "as_of": "2026-06-23T19:48:57+00:00",
       "criteria": [
         {
           "detail": "0 blocking errors",
@@ -544,19 +544,138 @@
       }
     },
     "nav": {
-      "as_of": "2026-06-23T19:14:58.885352+00:00",
-      "buying_power": 31338.51,
+      "as_of": "2026-06-23T19:45:32.402428+00:00",
+      "buying_power": 31362.91,
       "cash": 552.51,
-      "day_pnl": -154.5,
-      "day_return": -0.013906612457858514,
-      "equity": 10955.54,
-      "gross_exposure": 0.9495716322518104,
+      "day_pnl": -145.79,
+      "day_return": -0.013122637098771595,
+      "equity": 10964.25,
+      "gross_exposure": 0.9496080443258773,
       "is_stale": false,
-      "long_market_value": 10403.07,
-      "net_exposure": 0.9495716322518104,
+      "long_market_value": 10411.74,
+      "net_exposure": 0.9496080443258773,
       "short_market_value": 0.0,
       "source_type": "broker_account",
       "trust_level": "canonical"
+    },
+    "operator_control_tower": {
+      "as_of": "2026-06-23T19:48:57+00:00",
+      "cards": [
+        {
+          "detail": "Day return -0.013122637098771595",
+          "id": "paper_nav",
+          "label": "Paper NAV / Return",
+          "status": "OK",
+          "value": 10964.25,
+          "value_format": "money"
+        },
+        {
+          "detail": "Cash 500.0 \u00b7 Equity 500.0",
+          "id": "live_capital",
+          "label": "Live Pilot Capital",
+          "status": "ACTIVE",
+          "value": 0.0,
+          "value_format": "percent"
+        },
+        {
+          "detail": "NEE BUY 1.161710012 limit",
+          "id": "latest_order",
+          "label": "Latest Live Order",
+          "status": "OrderStatus.PENDING_NEW",
+          "value": "OrderStatus.PENDING_NEW",
+          "value_format": "text"
+        },
+        {
+          "detail": "paper 1 \u00b7 research 4 \u00b7 shadow 4",
+          "id": "sleeves",
+          "label": "Sleeves by Lifecycle",
+          "status": "OK",
+          "value": 9,
+          "value_format": "integer"
+        },
+        {
+          "detail": "0 fail \u00b7 2 warn",
+          "id": "validation",
+          "label": "Validation Status",
+          "status": "WARNING",
+          "value": "WARNING",
+          "value_format": "text"
+        },
+        {
+          "detail": "Live pilot order open",
+          "id": "operator_action",
+          "label": "Operator Action",
+          "status": "ACTION_REQUIRED",
+          "value": "REQUIRED",
+          "value_format": "text"
+        }
+      ],
+      "is_stale": false,
+      "latest_order": {
+        "expected_price": 86.08,
+        "fill_price": null,
+        "filled_qty": 0.0,
+        "order_type": "limit",
+        "qty": 1.161710012,
+        "side": "BUY",
+        "status": "OrderStatus.PENDING_NEW",
+        "ticker": "NEE"
+      },
+      "operator_actions": [
+        {
+          "blocks_pilot": false,
+          "detail": "Latest FR-104 live-pilot order is still open or pending broker terminal state.",
+          "expected_artifact": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb",
+          "operator_action": "Monitor broker truth and do not submit duplicate exposure.",
+          "severity": "action",
+          "status": "ACTION_REQUIRED",
+          "title": "Live pilot order open"
+        },
+        {
+          "blocks_pilot": false,
+          "detail": "Shadow NAV latest date lags the latest shadow evaluation date.",
+          "expected_artifact": "outputs/shadow_candidates/performance/shadow_nav_series.csv",
+          "operator_action": "Refresh shadow scorecard artifacts before judging alpha-vs-baseline evidence.",
+          "severity": "watch",
+          "status": "WATCH",
+          "title": "Shadow NAV stale"
+        },
+        {
+          "blocks_pilot": false,
+          "detail": "PIT date-effective membership remains a promotion/scaling blocker only.",
+          "expected_artifact": "reports/fr068_requirement_replacement_remediation_2026-06-23.md",
+          "operator_action": "Continue FR-104 evidence collection; do not promote or scale.",
+          "severity": "info",
+          "status": "INFO",
+          "title": "FR-068 blocked but not pilot-blocking"
+        },
+        {
+          "blocks_pilot": false,
+          "detail": "MODEL_QUALITY_DATE_DIFFERS_FROM_REPORT_DATE, NO_DECISION_GRADE_RECOMMENDATION, NO_DECISION_GRADE_STRATEGY_CHANGE",
+          "expected_artifact": "outputs/model_quality/<date>/",
+          "operator_action": "Use this as a promotion-readiness warning, not a pilot stop.",
+          "severity": "watch",
+          "status": "PARTIAL",
+          "title": "Decision-grade evidence incomplete"
+        }
+      ],
+      "status": "ACTION_REQUIRED",
+      "summary": {
+        "alpha_pair_count": 2,
+        "fr068_pilot_blocking": false,
+        "latest_order_status": "OrderStatus.PENDING_NEW",
+        "live_pilot_deployed_pct": 0.0,
+        "live_pilot_open_orders": 0,
+        "live_pilot_state": "ACTIVE",
+        "operator_action_required": true,
+        "primary_action": "Live pilot order open",
+        "sleeve_count_by_lifecycle": {
+          "paper": 1,
+          "research": 4,
+          "shadow": 4
+        },
+        "validation_status": "WARNING"
+      }
     },
     "performance_history": {
       "_bench_rows": [
@@ -947,8 +1066,8 @@
         },
         {
           "date": "2026-06-23",
-          "spy_close": 734.4500122070312,
-          "spy_return": -0.01335321840137893
+          "spy_close": 734.5349731445312,
+          "spy_return": -0.013239083423977172
         }
       ],
       "_nav_rows": [
@@ -1339,8 +1458,8 @@
         },
         {
           "date": "2026-06-23",
-          "equity": 10955.54,
-          "return_1d": -0.01390634057123108
+          "equity": 10964.25,
+          "return_1d": -0.013122364995985736
         }
       ],
       "as_of": "2026-06-23",
@@ -1653,7 +1772,7 @@
           },
           {
             "date": "2026-06-23",
-            "value": -0.01390634057123108
+            "value": -0.013122364995985736
           }
         ],
         "drawdown": [
@@ -1967,7 +2086,7 @@
           },
           {
             "date": "2026-06-23",
-            "value": -0.01390634057123108
+            "value": -0.013122364995985736
           }
         ],
         "excess_return_cumulative": [
@@ -2277,7 +2396,7 @@
           },
           {
             "date": "2026-06-23",
-            "value": 0.016004378848945677
+            "value": 0.016750496901411394
           }
         ],
         "nav": [
@@ -2591,7 +2710,7 @@
           },
           {
             "date": "2026-06-23",
-            "value": 10955.54
+            "value": 10964.25
           }
         ],
         "nav_indexed": [
@@ -2905,7 +3024,7 @@
           },
           {
             "date": "2026-06-23",
-            "value": 109.55540000000002
+            "value": 109.6425
           }
         ],
         "spy_close": [
@@ -3219,7 +3338,7 @@
           },
           {
             "date": "2026-06-23",
-            "value": 734.4500122070312
+            "value": 734.5349731445312
           }
         ],
         "spy_indexed": [
@@ -3533,334 +3652,334 @@
           },
           {
             "date": "2026-06-23",
-            "value": 107.95496211510545
+            "value": 107.96745030985883
           }
         ]
       },
       "source_type": "alpaca_portfolio_history",
       "summary": {
-        "excess_since_inception_return": 0.016004378848945677,
+        "excess_since_inception_return": 0.016750496901411616,
         "inception_date": "2026-03-03",
-        "latest_nav": 10955.54,
+        "latest_nav": 10964.25,
         "max_drawdown": -0.05016799999999999,
-        "since_inception_return": 0.09555400000000014,
-        "spy_since_inception_return": 0.07954962115105446
+        "since_inception_return": 0.09642499999999998,
+        "spy_since_inception_return": 0.07967450309858837
       },
       "trust_level": "canonical"
     },
     "positions": {
-      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "as_of": "2026-06-23T19:45:32.402428+00:00",
       "is_stale": false,
       "rows": [
         {
           "avg_entry_price": 706.3942863793549,
           "cost_basis": 875.151904,
-          "last_price": 1032.43,
-          "market_value": 1279.07756,
+          "last_price": 1038.73,
+          "market_value": 1286.88263,
           "qty": 1.238900032,
           "side": "positionside.long",
           "ticker": "STX",
-          "unrealized_pnl": 403.925656,
-          "unrealized_pnl_pct": 0.46155,
-          "weight": 0.11675166719303656
+          "unrealized_pnl": 411.730726,
+          "unrealized_pnl_pct": 0.47047,
+          "weight": 0.11737078505141711
         },
         {
           "avg_entry_price": 91.7543149833832,
           "cost_basis": 996.639723,
-          "last_price": 93.47,
-          "market_value": 1015.275575,
+          "last_price": 93.765,
+          "market_value": 1018.479879,
           "qty": 10.862047449,
           "side": "positionside.long",
           "ticker": "MNST",
-          "unrealized_pnl": 18.635852,
-          "unrealized_pnl_pct": 0.0187,
-          "weight": 0.09267234431164506
+          "unrealized_pnl": 21.840156,
+          "unrealized_pnl_pct": 0.02191,
+          "weight": 0.09289097557972502
         },
         {
           "avg_entry_price": 130.035,
           "cost_basis": 780.21,
-          "last_price": 146.97,
-          "market_value": 881.82,
+          "last_price": 147.19,
+          "market_value": 883.14,
           "qty": 6.0,
           "side": "positionside.long",
           "ticker": "FTNT",
-          "unrealized_pnl": 101.61,
-          "unrealized_pnl_pct": 0.13023,
-          "weight": 0.08049078365831351
+          "unrealized_pnl": 102.93,
+          "unrealized_pnl_pct": 0.13193,
+          "weight": 0.0805472330528764
         },
         {
           "avg_entry_price": 80.3917039690212,
           "cost_basis": 837.685792,
-          "last_price": 79.105,
-          "market_value": 824.278269,
+          "last_price": 79.29,
+          "market_value": 826.205979,
           "qty": 10.4200527,
           "side": "positionside.long",
           "ticker": "GM",
-          "unrealized_pnl": -13.407523,
-          "unrealized_pnl_pct": -0.01601,
-          "weight": 0.07523848838122082
+          "unrealized_pnl": -11.479813,
+          "unrealized_pnl_pct": -0.0137,
+          "weight": 0.0753545366988166
         },
         {
           "avg_entry_price": 1100.9859997524675,
           "cost_basis": 759.451512,
-          "last_price": 1122.86,
-          "market_value": 774.540026,
+          "last_price": 1121.135,
+          "market_value": 773.350134,
           "qty": 0.689792161,
           "side": "positionside.long",
           "ticker": "EQIX",
-          "unrealized_pnl": 15.088514,
-          "unrealized_pnl_pct": 0.01987,
-          "weight": 0.07069848003840978
+          "unrealized_pnl": 13.898622,
+          "unrealized_pnl_pct": 0.0183,
+          "weight": 0.0705337924618647
         },
         {
           "avg_entry_price": 240.44933694447803,
           "cost_basis": 661.122575,
-          "last_price": 244.26,
-          "market_value": 671.600106,
+          "last_price": 243.76,
+          "market_value": 670.225341,
           "qty": 2.749529624,
           "side": "positionside.long",
           "ticker": "KLAC",
-          "unrealized_pnl": 10.477531,
-          "unrealized_pnl_pct": 0.01585,
-          "weight": 0.06130232795462386
+          "unrealized_pnl": 9.102766,
+          "unrealized_pnl_pct": 0.01377,
+          "weight": 0.061128243245092
         },
         {
           "avg_entry_price": 99.04295692856739,
           "cost_basis": 616.319532,
-          "last_price": 101.37,
-          "market_value": 630.800139,
+          "last_price": 101.485,
+          "market_value": 631.515755,
           "qty": 6.222749715,
           "side": "positionside.long",
           "ticker": "CVS",
-          "unrealized_pnl": 14.480607,
-          "unrealized_pnl_pct": 0.0235,
-          "weight": 0.05757818774793391
+          "unrealized_pnl": 15.196223,
+          "unrealized_pnl_pct": 0.02466,
+          "weight": 0.057597715758031784
         },
         {
           "avg_entry_price": 397.29926698375897,
           "cost_basis": 643.695647,
-          "last_price": 387.16,
-          "market_value": 627.268227,
+          "last_price": 386.43,
+          "market_value": 626.085497,
           "qty": 1.62017829,
           "side": "positionside.long",
           "ticker": "MAR",
-          "unrealized_pnl": -16.42742,
-          "unrealized_pnl_pct": -0.02552,
-          "weight": 0.0572558018135117
+          "unrealized_pnl": -17.61015,
+          "unrealized_pnl_pct": -0.02736,
+          "weight": 0.057102446314157375
         },
         {
           "avg_entry_price": 146.87094507731067,
           "cost_basis": 617.114218,
-          "last_price": 145.13,
-          "market_value": 609.799211,
+          "last_price": 144.96,
+          "market_value": 609.084915,
           "qty": 4.20174472,
           "side": "positionside.long",
           "ticker": "C",
-          "unrealized_pnl": -7.315007,
-          "unrealized_pnl_pct": -0.01185,
-          "weight": 0.05566126462045686
+          "unrealized_pnl": -8.029303,
+          "unrealized_pnl_pct": -0.01301,
+          "weight": 0.0555518995827348
         },
         {
           "avg_entry_price": 221.2216479662892,
           "cost_basis": 589.156996,
-          "last_price": 226.43,
-          "market_value": 603.027867,
+          "last_price": 226.29,
+          "market_value": 602.65502,
           "qty": 2.663197754,
           "side": "positionside.long",
           "ticker": "MS",
-          "unrealized_pnl": 13.870871,
-          "unrealized_pnl_pct": 0.02354,
-          "weight": 0.05504318974692256
+          "unrealized_pnl": 13.498024,
+          "unrealized_pnl_pct": 0.02291,
+          "weight": 0.054965457737647355
         },
         {
           "avg_entry_price": 204.8543528691729,
           "cost_basis": 456.592469,
-          "last_price": 203.65,
-          "market_value": 453.90813,
+          "last_price": 203.595,
+          "market_value": 453.785543,
           "qty": 2.228863886,
           "side": "positionside.long",
           "ticker": "QCOM",
-          "unrealized_pnl": -2.684339,
-          "unrealized_pnl_pct": -0.00588,
-          "weight": 0.041431835400171965
+          "unrealized_pnl": -2.806926,
+          "unrealized_pnl_pct": -0.00615,
+          "weight": 0.04138774134117701
         },
         {
           "avg_entry_price": 364.12,
           "cost_basis": 364.12,
-          "last_price": 356.1,
-          "market_value": 356.1,
+          "last_price": 355.105,
+          "market_value": 355.105,
           "qty": 1.0,
           "side": "positionside.long",
           "ticker": "GE",
-          "unrealized_pnl": -8.02,
-          "unrealized_pnl_pct": -0.02203,
-          "weight": 0.03250410294700216
+          "unrealized_pnl": -9.015,
+          "unrealized_pnl_pct": -0.02476,
+          "weight": 0.0323875322069453
         },
         {
           "avg_entry_price": 398.66614170564924,
           "cost_basis": 239.46755,
-          "last_price": 395.91,
-          "market_value": 237.812013,
+          "last_price": 395.055,
+          "market_value": 237.298439,
           "qty": 0.600671903,
           "side": "positionside.long",
           "ticker": "ELV",
-          "unrealized_pnl": -1.655537,
-          "unrealized_pnl_pct": -0.00691,
-          "weight": 0.02170700969555129
+          "unrealized_pnl": -2.169111,
+          "unrealized_pnl_pct": -0.00906,
+          "weight": 0.021642924869462114
         },
         {
           "avg_entry_price": 229.4870591329288,
           "cost_basis": 223.743997,
-          "last_price": 238.23,
-          "market_value": 232.26814,
+          "last_price": 239.125,
+          "market_value": 233.140742,
           "qty": 0.974974353,
           "side": "positionside.long",
           "ticker": "JNJ",
-          "unrealized_pnl": 8.524143,
-          "unrealized_pnl_pct": 0.0381,
-          "weight": 0.021200975944590587
+          "unrealized_pnl": 9.396745,
+          "unrealized_pnl_pct": 0.042,
+          "weight": 0.021263719999087945
         },
         {
           "avg_entry_price": 406.20999975214903,
           "cost_basis": 198.933133,
-          "last_price": 408.72,
-          "market_value": 200.162355,
+          "last_price": 407.82,
+          "market_value": 199.721598,
           "qty": 0.489729778,
           "side": "positionside.long",
           "ticker": "UNH",
-          "unrealized_pnl": 1.229222,
-          "unrealized_pnl_pct": 0.00618,
-          "weight": 0.018270423456990707
+          "unrealized_pnl": 0.788465,
+          "unrealized_pnl_pct": 0.00396,
+          "weight": 0.018215709966481974
         },
         {
           "avg_entry_price": 223.8400002877967,
           "cost_basis": 191.269509,
-          "last_price": 230.71,
-          "market_value": 197.139869,
+          "last_price": 230.9199,
+          "market_value": 197.319227,
           "qty": 0.854492087,
           "side": "positionside.long",
           "ticker": "ALL",
-          "unrealized_pnl": 5.87036,
-          "unrealized_pnl_pct": 0.03069,
-          "weight": 0.017994536919220778
+          "unrealized_pnl": 6.049718,
+          "unrealized_pnl_pct": 0.03163,
+          "weight": 0.017996600497070026
         },
         {
           "avg_entry_price": 214.00000044528946,
           "cost_basis": 191.273338,
-          "last_price": 216.405,
-          "market_value": 193.422928,
+          "last_price": 215.87,
+          "market_value": 192.944745,
           "qty": 0.893800643,
           "side": "positionside.long",
           "ticker": "SPG",
-          "unrealized_pnl": 2.14959,
-          "unrealized_pnl_pct": 0.01124,
-          "weight": 0.017655261904022987
+          "unrealized_pnl": 1.671407,
+          "unrealized_pnl_pct": 0.00874,
+          "weight": 0.017597623640467887
         },
         {
           "avg_entry_price": 141.2999998580857,
           "cost_basis": 134.216489,
-          "last_price": 145.715,
-          "market_value": 138.410161,
+          "last_price": 145.085,
+          "market_value": 137.811743,
           "qty": 0.949868996,
           "side": "positionside.long",
           "ticker": "PLD",
-          "unrealized_pnl": 4.193672,
-          "unrealized_pnl_pct": 0.03125,
-          "weight": 0.01263380545367914
+          "unrealized_pnl": 3.595254,
+          "unrealized_pnl_pct": 0.02679,
+          "weight": 0.012569190140684498
         },
         {
           "avg_entry_price": 69.50000027591653,
           "cost_basis": 121.787738,
-          "last_price": 71.315,
-          "market_value": 124.968237,
+          "last_price": 71.605,
+          "market_value": 125.476416,
           "qty": 1.752341547,
           "side": "positionside.long",
           "ticker": "MO",
-          "unrealized_pnl": 3.180499,
-          "unrealized_pnl_pct": 0.02612,
-          "weight": 0.01140685324502489
+          "unrealized_pnl": 3.688678,
+          "unrealized_pnl_pct": 0.03029,
+          "weight": 0.011444140365278063
         },
         {
           "avg_entry_price": 85.89999996633473,
           "cost_basis": 107.166811,
-          "last_price": 86.415,
-          "market_value": 107.809313,
+          "last_price": 86.55,
+          "market_value": 107.977736,
           "qty": 1.24757638,
           "side": "positionside.long",
           "ticker": "NEE",
-          "unrealized_pnl": 0.642502,
-          "unrealized_pnl_pct": 0.006,
-          "weight": 0.009840620635769666
+          "unrealized_pnl": 0.810925,
+          "unrealized_pnl_pct": 0.00757,
+          "weight": 0.00984816435232688
         },
         {
           "avg_entry_price": 142.60999956566707,
           "cost_basis": 93.88956,
-          "last_price": 147.485,
-          "market_value": 97.099094,
+          "last_price": 147.35,
+          "market_value": 97.010215,
           "qty": 0.658365895,
           "side": "positionside.long",
           "ticker": "BNY",
-          "unrealized_pnl": 3.209534,
-          "unrealized_pnl_pct": 0.03418,
-          "weight": 0.008863013050931309
+          "unrealized_pnl": 3.120655,
+          "unrealized_pnl_pct": 0.03324,
+          "weight": 0.008847866019107553
         },
         {
           "avg_entry_price": 330.7600009160886,
           "cost_basis": 64.08036,
-          "last_price": 332.32,
-          "market_value": 64.382589,
+          "last_price": 331.78,
+          "market_value": 64.277971,
           "qty": 0.193736727,
           "side": "positionside.long",
           "ticker": "CB",
-          "unrealized_pnl": 0.302229,
-          "unrealized_pnl_pct": 0.00472,
-          "weight": 0.005876715250914148
+          "unrealized_pnl": 0.197611,
+          "unrealized_pnl_pct": 0.00308,
+          "weight": 0.00586250505050505
         },
         {
           "avg_entry_price": 72.42000028259989,
           "cost_basis": 34.698061,
-          "last_price": 75.065,
-          "market_value": 35.96534,
+          "last_price": 75.42,
+          "market_value": 36.135429,
           "qty": 0.47912263,
           "side": "positionside.long",
           "ticker": "WMB",
-          "unrealized_pnl": 1.267279,
-          "unrealized_pnl_pct": 0.03652,
-          "weight": 0.003282845026351964
+          "unrealized_pnl": 1.437368,
+          "unrealized_pnl_pct": 0.04143,
+          "weight": 0.003295750188111362
         },
         {
           "avg_entry_price": 47.61999984670411,
           "cost_basis": 31.088959,
-          "last_price": 46.745,
-          "market_value": 30.517711,
+          "last_price": 46.715,
+          "market_value": 30.498125,
           "qty": 0.652855084,
           "side": "positionside.long",
           "ticker": "VZ",
-          "unrealized_pnl": -0.571248,
-          "unrealized_pnl_pct": -0.01837,
-          "weight": 0.0027855962371549003
+          "unrealized_pnl": -0.590834,
+          "unrealized_pnl_pct": -0.019,
+          "weight": 0.002781597008459311
         },
         {
           "avg_entry_price": 171.89015106204758,
           "cost_basis": 15.711885,
-          "last_price": 170.865,
-          "market_value": 15.618179,
+          "last_price": 170.79,
+          "market_value": 15.611324,
           "qty": 0.091406546,
           "side": "positionside.long",
           "ticker": "PSX",
-          "unrealized_pnl": -0.093706,
-          "unrealized_pnl_pct": -0.00596,
-          "weight": 0.0014255964562221487
+          "unrealized_pnl": -0.100561,
+          "unrealized_pnl_pct": -0.0064,
+          "weight": 0.001423838748660419
         }
       ],
       "source_type": "broker_positions",
       "summary": {
         "cash": 552.51,
-        "gross_market_value": 10403.07,
-        "largest_position_weight": 0.11675166719303656,
-        "net_market_value": 10403.07,
+        "gross_market_value": 10411.74,
+        "largest_position_weight": 0.11737078505141711,
+        "net_market_value": 10411.74,
         "positions_count": 25,
-        "top5_concentration": 0.43585176358262573
+        "top5_concentration": 0.4366973228446998
       },
       "trust_level": "canonical"
     },
@@ -4550,7 +4669,7 @@
       }
     },
     "system_health_console": {
-      "as_of": "2026-06-23T19:19:25+00:00",
+      "as_of": "2026-06-23T19:48:57+00:00",
       "checks": [
         {
           "detail": "0 fail \u00b7 1 warn \u00b7 6 checks",
@@ -4589,7 +4708,7 @@
       }
     },
     "trades_today": {
-      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "as_of": "2026-06-23T19:45:32.402428+00:00",
       "is_stale": false,
       "rows": [],
       "source_type": "alpaca_fills",
@@ -4605,7 +4724,7 @@
   },
   "sources": [
     {
-      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "as_of": "2026-06-23T19:45:32.402428+00:00",
       "label": "broker account snapshot",
       "path": "outputs/broker/broker_snapshot_latest.json",
       "section": "nav",
@@ -4614,7 +4733,7 @@
       "used": true
     },
     {
-      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "as_of": "2026-06-23T19:45:32.402428+00:00",
       "label": "broker positions snapshot",
       "path": "outputs/broker/posttrade_positions.json",
       "section": "positions",
@@ -4623,7 +4742,7 @@
       "used": true
     },
     {
-      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "as_of": "2026-06-23T19:45:32.402428+00:00",
       "label": "alpaca fills snapshot",
       "path": "outputs/broker_snapshot/broker_snapshot_2026-06-23.json",
       "section": "trades_today",
@@ -4875,27 +4994,27 @@
   "terminal": {
     "benchmark": {
       "down_days": 31,
-      "excess_since_inception_return": 0.016004378848945677,
+      "excess_since_inception_return": 0.016750496901411616,
       "history_points": 78,
       "max_drawdown": -0.05016799999999999,
-      "rolling_20d_excess_return": 0.049289339523260645,
-      "rolling_20d_return": 0.0342820944430966,
-      "rolling_20d_spy_return": -0.015007245080164044,
-      "rolling_5d_excess_return": 0.017465062544159582,
-      "rolling_5d_return": -0.009534400144652344,
-      "rolling_5d_spy_return": -0.026999462688811926,
-      "since_inception_return": 0.09555400000000014,
-      "spy_close": 734.4500122070312,
-      "spy_since_inception_return": 0.07954962115105446,
+      "rolling_20d_excess_return": 0.04999768278478356,
+      "rolling_20d_return": 0.03510438134475535,
+      "rolling_20d_spy_return": -0.014893301440028206,
+      "rolling_5d_excess_return": 0.018139957565679765,
+      "rolling_5d_return": -0.008746948738811988,
+      "rolling_5d_spy_return": -0.026886906304491753,
+      "since_inception_return": 0.09642499999999998,
+      "spy_close": 734.5349731445312,
+      "spy_since_inception_return": 0.07967450309858837,
       "up_days": 44
     },
     "headline": {
       "cash": 552.51,
-      "day_pnl": -154.5,
-      "day_return": -0.013906612457858514,
+      "day_pnl": -145.79,
+      "day_return": -0.013122637098771595,
       "fills_count": 0,
-      "gross_exposure": 0.9495716322518104,
-      "nav": 10955.54,
+      "gross_exposure": 0.9496080443258773,
+      "nav": 10964.25,
       "positions_count": 25,
       "validation_status": "ok"
     },
@@ -4916,136 +5035,136 @@
         {
           "avg_entry_price": 397.29926698375897,
           "cost_basis": 643.695647,
-          "last_price": 387.16,
-          "market_value": 627.268227,
+          "last_price": 386.43,
+          "market_value": 626.085497,
           "qty": 1.62017829,
           "side": "positionside.long",
           "ticker": "MAR",
-          "unrealized_pnl": -16.42742,
-          "unrealized_pnl_pct": -0.02552,
-          "weight": 0.0572558018135117
+          "unrealized_pnl": -17.61015,
+          "unrealized_pnl_pct": -0.02736,
+          "weight": 0.057102446314157375
         },
         {
           "avg_entry_price": 80.3917039690212,
           "cost_basis": 837.685792,
-          "last_price": 79.105,
-          "market_value": 824.278269,
+          "last_price": 79.29,
+          "market_value": 826.205979,
           "qty": 10.4200527,
           "side": "positionside.long",
           "ticker": "GM",
-          "unrealized_pnl": -13.407523,
-          "unrealized_pnl_pct": -0.01601,
-          "weight": 0.07523848838122082
+          "unrealized_pnl": -11.479813,
+          "unrealized_pnl_pct": -0.0137,
+          "weight": 0.0753545366988166
         },
         {
           "avg_entry_price": 364.12,
           "cost_basis": 364.12,
-          "last_price": 356.1,
-          "market_value": 356.1,
+          "last_price": 355.105,
+          "market_value": 355.105,
           "qty": 1.0,
           "side": "positionside.long",
           "ticker": "GE",
-          "unrealized_pnl": -8.02,
-          "unrealized_pnl_pct": -0.02203,
-          "weight": 0.03250410294700216
+          "unrealized_pnl": -9.015,
+          "unrealized_pnl_pct": -0.02476,
+          "weight": 0.0323875322069453
         },
         {
           "avg_entry_price": 146.87094507731067,
           "cost_basis": 617.114218,
-          "last_price": 145.13,
-          "market_value": 609.799211,
+          "last_price": 144.96,
+          "market_value": 609.084915,
           "qty": 4.20174472,
           "side": "positionside.long",
           "ticker": "C",
-          "unrealized_pnl": -7.315007,
-          "unrealized_pnl_pct": -0.01185,
-          "weight": 0.05566126462045686
+          "unrealized_pnl": -8.029303,
+          "unrealized_pnl_pct": -0.01301,
+          "weight": 0.0555518995827348
         },
         {
           "avg_entry_price": 204.8543528691729,
           "cost_basis": 456.592469,
-          "last_price": 203.65,
-          "market_value": 453.90813,
+          "last_price": 203.595,
+          "market_value": 453.785543,
           "qty": 2.228863886,
           "side": "positionside.long",
           "ticker": "QCOM",
-          "unrealized_pnl": -2.684339,
-          "unrealized_pnl_pct": -0.00588,
-          "weight": 0.041431835400171965
+          "unrealized_pnl": -2.806926,
+          "unrealized_pnl_pct": -0.00615,
+          "weight": 0.04138774134117701
         }
       ],
       "winners": [
         {
           "avg_entry_price": 706.3942863793549,
           "cost_basis": 875.151904,
-          "last_price": 1032.43,
-          "market_value": 1279.07756,
+          "last_price": 1038.73,
+          "market_value": 1286.88263,
           "qty": 1.238900032,
           "side": "positionside.long",
           "ticker": "STX",
-          "unrealized_pnl": 403.925656,
-          "unrealized_pnl_pct": 0.46155,
-          "weight": 0.11675166719303656
+          "unrealized_pnl": 411.730726,
+          "unrealized_pnl_pct": 0.47047,
+          "weight": 0.11737078505141711
         },
         {
           "avg_entry_price": 130.035,
           "cost_basis": 780.21,
-          "last_price": 146.97,
-          "market_value": 881.82,
+          "last_price": 147.19,
+          "market_value": 883.14,
           "qty": 6.0,
           "side": "positionside.long",
           "ticker": "FTNT",
-          "unrealized_pnl": 101.61,
-          "unrealized_pnl_pct": 0.13023,
-          "weight": 0.08049078365831351
+          "unrealized_pnl": 102.93,
+          "unrealized_pnl_pct": 0.13193,
+          "weight": 0.0805472330528764
         },
         {
           "avg_entry_price": 91.7543149833832,
           "cost_basis": 996.639723,
-          "last_price": 93.47,
-          "market_value": 1015.275575,
+          "last_price": 93.765,
+          "market_value": 1018.479879,
           "qty": 10.862047449,
           "side": "positionside.long",
           "ticker": "MNST",
-          "unrealized_pnl": 18.635852,
-          "unrealized_pnl_pct": 0.0187,
-          "weight": 0.09267234431164506
-        },
-        {
-          "avg_entry_price": 1100.9859997524675,
-          "cost_basis": 759.451512,
-          "last_price": 1122.86,
-          "market_value": 774.540026,
-          "qty": 0.689792161,
-          "side": "positionside.long",
-          "ticker": "EQIX",
-          "unrealized_pnl": 15.088514,
-          "unrealized_pnl_pct": 0.01987,
-          "weight": 0.07069848003840978
+          "unrealized_pnl": 21.840156,
+          "unrealized_pnl_pct": 0.02191,
+          "weight": 0.09289097557972502
         },
         {
           "avg_entry_price": 99.04295692856739,
           "cost_basis": 616.319532,
-          "last_price": 101.37,
-          "market_value": 630.800139,
+          "last_price": 101.485,
+          "market_value": 631.515755,
           "qty": 6.222749715,
           "side": "positionside.long",
           "ticker": "CVS",
-          "unrealized_pnl": 14.480607,
-          "unrealized_pnl_pct": 0.0235,
-          "weight": 0.05757818774793391
+          "unrealized_pnl": 15.196223,
+          "unrealized_pnl_pct": 0.02466,
+          "weight": 0.057597715758031784
+        },
+        {
+          "avg_entry_price": 1100.9859997524675,
+          "cost_basis": 759.451512,
+          "last_price": 1121.135,
+          "market_value": 773.350134,
+          "qty": 0.689792161,
+          "side": "positionside.long",
+          "ticker": "EQIX",
+          "unrealized_pnl": 13.898622,
+          "unrealized_pnl_pct": 0.0183,
+          "weight": 0.0705337924618647
         }
       ]
     },
     "positioning": {
-      "average_position_weight": 0.03798286908358693,
-      "cash_ratio": 0.050432018868992304,
-      "gross_market_value": 10403.07,
-      "invested_ratio": 0.9495716322518104,
-      "largest_position_weight": 0.11675166719303656,
-      "median_position_weight": 0.02170700969555129,
-      "top10_concentration": 0.7226925354660747,
-      "top5_concentration": 0.43585176358262573
+      "average_position_weight": 0.03798431959504753,
+      "cash_ratio": 0.05039195567412272,
+      "gross_market_value": 10411.74,
+      "invested_ratio": 0.9496080443258773,
+      "largest_position_weight": 0.11737078505141711,
+      "median_position_weight": 0.021642924869462114,
+      "top10_concentration": 0.7230430854823631,
+      "top5_concentration": 0.4366973228446998
     },
     "tape": {
       "buy_notional": 0.0,
