@@ -21,10 +21,7 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--ink);
-  background:
-    radial-gradient(circle at top left, rgba(209, 151, 78, 0.26), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(31, 107, 82, 0.2), transparent 24%),
-    linear-gradient(180deg, var(--bg) 0%, #fdfaf4 100%);
+  background: linear-gradient(180deg, var(--bg) 0%, #fdfaf4 100%);
   font-family: var(--sans);
 }
 
@@ -48,7 +45,7 @@ body {
 .metric-card,
 .status-band {
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
 }
@@ -59,34 +56,7 @@ body {
 
 .hero-accent {
   min-height: 210px;
-  background:
-    linear-gradient(140deg, rgba(30, 36, 48, 0.9), rgba(91, 100, 115, 0.5)),
-    linear-gradient(25deg, rgba(209, 151, 78, 0.45), transparent 55%);
-  position: relative;
-  overflow: hidden;
-}
-
-.hero-accent::before,
-.hero-accent::after {
-  content: "";
-  position: absolute;
-  inset: auto;
-  border-radius: 999px;
-  background: rgba(255, 251, 245, 0.1);
-}
-
-.hero-accent::before {
-  width: 220px;
-  height: 220px;
-  right: -54px;
-  top: -22px;
-}
-
-.hero-accent::after {
-  width: 160px;
-  height: 160px;
-  left: 20px;
-  bottom: -30px;
+  background: linear-gradient(140deg, rgba(30, 36, 48, 0.9), rgba(91, 100, 115, 0.5));
 }
 
 .eyebrow,
@@ -97,7 +67,7 @@ body {
 .trust-label {
   margin: 0 0 8px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
   font-size: 0.74rem;
   color: var(--muted);
 }
@@ -110,13 +80,13 @@ h3 {
 }
 
 h1 {
-  font-size: clamp(2.2rem, 4vw, 4rem);
+  font-size: 3.4rem;
   line-height: 0.96;
   max-width: 10ch;
 }
 
 h2 {
-  font-size: clamp(1.8rem, 3vw, 2.9rem);
+  font-size: 2.4rem;
 }
 
 h3 {
@@ -154,7 +124,7 @@ h3 {
 .trust-badge {
   min-width: 180px;
   padding: 18px 20px;
-  border-radius: 18px;
+  border-radius: 8px;
   color: #fff;
   text-align: right;
 }
@@ -225,7 +195,7 @@ h3 {
   align-items: center;
   padding: 7px 10px;
   margin: 0 8px 8px 0;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid rgba(30, 36, 48, 0.14);
   background: rgba(255, 255, 255, 0.72);
   font-size: 0.92rem;
@@ -237,7 +207,7 @@ h3 {
 
 .path-card {
   padding: 14px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.65);
   border: 1px solid rgba(30, 36, 48, 0.1);
 }
@@ -272,7 +242,7 @@ h3 {
   .metric-card,
   .status-band {
     padding: 18px;
-    border-radius: 20px;
+    border-radius: 8px;
   }
 
   .panel-metrics {

@@ -1539,6 +1539,282 @@ class DashboardV1Builder:
             "rows": rows,
         }
 
+    def _latest_live_order(self, live_pilot: dict[str, Any]) -> dict[str, Any]:
+        order = live_pilot.get("latest_submitted_order")
+        if isinstance(order, dict):
+            return order
+        submitted = live_pilot.get("submitted_orders")
+        if isinstance(submitted, list) and submitted and isinstance(submitted[-1], dict):
+            return submitted[-1]
+        selected = live_pilot.get("selected_order")
+        return selected if isinstance(selected, dict) else {}
+
+    def _live_order_status(self, order: dict[str, Any]) -> str | None:
+        nested = order.get("order") if isinstance(order.get("order"), dict) else {}
+        return str(order.get("status") or nested.get("status") or "").strip() or None
+
+    def _is_live_order_open(self, order: dict[str, Any]) -> bool:
+        status = str(self._live_order_status(order) or "").lower()
+        if "." in status:
+            status = status.rsplit(".", 1)[-1]
+        return status in {
+            "accepted",
+            "accepted_for_bidding",
+            "new",
+            "open",
+            "partially_filled",
+            "pending_cancel",
+            "pending_new",
+            "pending_replace",
+        }
+
+    def _live_pilot_state(self, live_pilot: dict[str, Any]) -> str:
+        status = str(live_pilot.get("status") or "NO_DATA").upper()
+        metrics = live_pilot.get("metrics") or {}
+        order = self._latest_live_order(live_pilot)
+        if "BLOCKED" in status or "FAILED" in status or status in {"REJECTED", "ERROR"}:
+            return "BLOCKED"
+        if (
+            status in {"SUBMITTED", "CLEAN"}
+            or self._is_live_order_open(order)
+            or (metrics.get("filled_count") or 0)
+            or len(live_pilot.get("positions") or []) > 0
+        ):
+            return "ACTIVE"
+        if status in {"READY_FOR_MANUAL_APPROVAL", "PLAN_ONLY", "NO_DATA", "UNKNOWN", "BLOCKED_NO_QUALIFYING_ORDER"}:
+            return "IDLE"
+        return "IDLE"
+
+    def _deployed_pct(self, live_pilot: dict[str, Any]) -> float | None:
+        metrics = live_pilot.get("metrics") or {}
+        explicit = _to_float(metrics.get("cash_deployment_rate"))
+        if explicit is not None:
+            return explicit
+        account = live_pilot.get("account") or {}
+        equity = _to_float(account.get("equity") or account.get("portfolio_value"))
+        cash = _to_float(account.get("cash"))
+        if equity in (None, 0) or cash is None:
+            return None
+        return max(0.0, min(1.0, (equity - cash) / equity))
+
+    def _operator_actions(self, sections: dict[str, Any], validation_status: dict[str, int]) -> list[dict[str, Any]]:
+        live_pilot = sections.get("live_pilot", {})
+        metrics = live_pilot.get("metrics") or {}
+        governance = sections.get("governance_state", {})
+        shadow = sections.get("shadow_command_center", {})
+        decision_grade = sections.get("decision_grade", {})
+        order = self._latest_live_order(live_pilot)
+        live_state = self._live_pilot_state(live_pilot)
+        deployed_pct = self._deployed_pct(live_pilot)
+        actions: list[dict[str, Any]] = []
+
+        if validation_status["blocking_failures"]:
+            actions.append(
+                {
+                    "title": "Dashboard validation failed",
+                    "status": "BLOCKED",
+                    "severity": "critical",
+                    "detail": f"{validation_status['blocking_failures']} blocking validation checks failed.",
+                    "expected_artifact": "validation.checks",
+                    "blocks_pilot": True,
+                    "operator_action": "Review the validation tape before relying on the dashboard.",
+                }
+            )
+
+        if self._is_live_order_open(order):
+            actions.append(
+                {
+                    "title": "Live pilot order open",
+                    "status": "ACTION_REQUIRED",
+                    "severity": "action",
+                    "detail": "Latest FR-104 live-pilot order is still open or pending broker terminal state.",
+                    "expected_artifact": live_pilot.get("run_root") or "outputs/live_pilot/runs/<run_id>/",
+                    "blocks_pilot": False,
+                    "operator_action": "Monitor broker truth and do not submit duplicate exposure.",
+                }
+            )
+        elif live_state == "BLOCKED":
+            actions.append(
+                {
+                    "title": "Live pilot blocked",
+                    "status": "ACTION_REQUIRED",
+                    "severity": "action",
+                    "detail": str(metrics.get("idle_cash_reason") or live_pilot.get("status") or "Live-pilot path is blocked."),
+                    "expected_artifact": live_pilot.get("plan_path") or "outputs/live_pilot/plans/live_pilot_plan_<date>.json",
+                    "blocks_pilot": True,
+                    "operator_action": "Resolve the live-pilot reason code before the next manual attempt.",
+                }
+            )
+        elif live_state == "IDLE" and deployed_pct in (None, 0.0):
+            actions.append(
+                {
+                    "title": "Live pilot cash idle",
+                    "status": "WATCH",
+                    "severity": "watch",
+                    "detail": str(metrics.get("idle_cash_reason") or "No live-pilot capital is currently deployed."),
+                    "expected_artifact": live_pilot.get("plan_path") or "outputs/live_pilot/plans/live_pilot_plan_<date>.json",
+                    "blocks_pilot": False,
+                    "operator_action": "Check whether a qualifying manually approved FR-104 order exists today.",
+                }
+            )
+
+        if shadow.get("is_stale"):
+            actions.append(
+                {
+                    "title": "Shadow NAV stale",
+                    "status": "WATCH",
+                    "severity": "watch",
+                    "detail": "Shadow NAV latest date lags the latest shadow evaluation date.",
+                    "expected_artifact": "outputs/shadow_candidates/performance/shadow_nav_series.csv",
+                    "blocks_pilot": False,
+                    "operator_action": "Refresh shadow scorecard artifacts before judging alpha-vs-baseline evidence.",
+                }
+            )
+
+        if (governance.get("summary") or {}).get("fr068_pilot_blocking") is False:
+            actions.append(
+                {
+                    "title": "FR-068 blocked but not pilot-blocking",
+                    "status": "INFO",
+                    "severity": "info",
+                    "detail": "PIT date-effective membership remains a promotion/scaling blocker only.",
+                    "expected_artifact": "reports/fr068_requirement_replacement_remediation_2026-06-23.md",
+                    "blocks_pilot": False,
+                    "operator_action": "Continue FR-104 evidence collection; do not promote or scale.",
+                }
+            )
+
+        if decision_grade.get("status") in {"PARTIAL", "BLOCKED"}:
+            actions.append(
+                {
+                    "title": "Decision-grade evidence incomplete",
+                    "status": str(decision_grade.get("status") or "PARTIAL"),
+                    "severity": "watch",
+                    "detail": ", ".join(decision_grade.get("reason_codes") or []) or "Decision-grade artifacts are incomplete.",
+                    "expected_artifact": "outputs/model_quality/<date>/",
+                    "blocks_pilot": False,
+                    "operator_action": "Use this as a promotion-readiness warning, not a pilot stop.",
+                }
+            )
+
+        if not actions:
+            actions.append(
+                {
+                    "title": "None",
+                    "status": "OK",
+                    "severity": "info",
+                    "detail": "No operator action is required from current dashboard artifacts.",
+                    "expected_artifact": "",
+                    "blocks_pilot": False,
+                    "operator_action": "Continue monitoring.",
+                }
+            )
+        return actions
+
+    def _build_operator_control_tower(self, sections: dict[str, Any]) -> dict[str, Any]:
+        nav = sections.get("nav", {})
+        live_pilot = sections.get("live_pilot", {})
+        sleeve_inventory = sections.get("sleeve_inventory", {})
+        alpha = sections.get("baseline_alpha_comparison", {})
+        governance = sections.get("governance_state", {})
+        metrics = live_pilot.get("metrics") or {}
+        order = self._latest_live_order(live_pilot)
+        nested_order = order.get("order") if isinstance(order.get("order"), dict) else {}
+        validation_status = {
+            "blocking_failures": sum(1 for check in self.checks if check["severity"] == "blocking" and check["status"] == "fail"),
+            "warnings": sum(1 for check in self.checks if check["status"] == "warn"),
+            "total_checks": len(self.checks),
+        }
+        actions = self._operator_actions(sections, validation_status)
+        live_state = self._live_pilot_state(live_pilot)
+        deployed_pct = self._deployed_pct(live_pilot)
+        lifecycle_counts = (sleeve_inventory.get("summary") or {}).get("by_lifecycle_stage") or {}
+        status_level = "ERROR" if validation_status["blocking_failures"] else "WARNING" if validation_status["warnings"] else "OK"
+        action_required = any(action.get("severity") in {"critical", "action"} for action in actions)
+
+        latest_order = {
+            "ticker": order.get("symbol") or order.get("ticker") or nested_order.get("symbol"),
+            "side": order.get("side") or nested_order.get("side"),
+            "qty": _to_float(order.get("qty") or order.get("shares") or nested_order.get("qty")),
+            "order_type": order.get("submitted_order_type") or order.get("order_type") or nested_order.get("type"),
+            "status": self._live_order_status(order),
+            "filled_qty": _to_float(order.get("filled_qty") or nested_order.get("filled_qty")),
+            "expected_price": _to_float(order.get("expected_price") or order.get("cap_enforcement_price") or order.get("limit_price")),
+            "fill_price": _to_float(order.get("fill_price") or nested_order.get("filled_avg_price")),
+        }
+
+        cards = [
+            {
+                "id": "paper_nav",
+                "label": "Paper NAV / Return",
+                "value": nav.get("equity"),
+                "value_format": "money",
+                "detail": f"Day return {nav.get('day_return') if nav.get('day_return') is not None else 'unavailable'}",
+                "status": "OK" if nav.get("equity") is not None else "NO_DATA",
+            },
+            {
+                "id": "live_capital",
+                "label": "Live Pilot Capital",
+                "value": deployed_pct,
+                "value_format": "percent",
+                "detail": f"Cash {live_pilot.get('account', {}).get('cash')} · Equity {live_pilot.get('account', {}).get('equity')}",
+                "status": live_state,
+            },
+            {
+                "id": "latest_order",
+                "label": "Latest Live Order",
+                "value": latest_order.get("status"),
+                "value_format": "text",
+                "detail": f"{latest_order.get('ticker') or '—'} {latest_order.get('side') or ''} {latest_order.get('qty') or '—'} {latest_order.get('order_type') or ''}".strip(),
+                "status": latest_order.get("status") or "NO_DATA",
+            },
+            {
+                "id": "sleeves",
+                "label": "Sleeves by Lifecycle",
+                "value": (sleeve_inventory.get("summary") or {}).get("total_registered"),
+                "value_format": "integer",
+                "detail": " · ".join(f"{key} {value}" for key, value in sorted(lifecycle_counts.items())) or "registry unavailable",
+                "status": sleeve_inventory.get("status") or "NO_DATA",
+            },
+            {
+                "id": "validation",
+                "label": "Validation Status",
+                "value": status_level,
+                "value_format": "text",
+                "detail": f"{validation_status['blocking_failures']} fail · {validation_status['warnings']} warn",
+                "status": status_level,
+            },
+            {
+                "id": "operator_action",
+                "label": "Operator Action",
+                "value": "REQUIRED" if action_required else "NONE",
+                "value_format": "text",
+                "detail": actions[0].get("title") if actions else "None",
+                "status": "ACTION_REQUIRED" if action_required else "OK",
+            },
+        ]
+
+        return {
+            "as_of": self.generated_at.isoformat(),
+            "is_stale": False,
+            "status": "ACTION_REQUIRED" if action_required else status_level,
+            "summary": {
+                "live_pilot_state": live_state,
+                "live_pilot_deployed_pct": deployed_pct,
+                "live_pilot_open_orders": metrics.get("open_order_count"),
+                "latest_order_status": latest_order.get("status"),
+                "operator_action_required": action_required,
+                "primary_action": actions[0].get("title") if actions else "None",
+                "sleeve_count_by_lifecycle": lifecycle_counts,
+                "alpha_pair_count": (alpha.get("summary") or {}).get("pair_count"),
+                "validation_status": status_level,
+                "fr068_pilot_blocking": (governance.get("summary") or {}).get("fr068_pilot_blocking"),
+            },
+            "cards": cards,
+            "latest_order": latest_order,
+            "operator_actions": actions,
+        }
+
     def _build_terminal_view(self, sections: dict[str, Any]) -> dict[str, Any]:
         nav = sections["nav"]
         positions = sections["positions"]
@@ -1730,6 +2006,8 @@ class DashboardV1Builder:
         decision_grade_section = self._build_decision_grade()
         sections["decision_grade"] = decision_grade_section
         self._freshness_checks(sections)
+        operator_control_section = self._build_operator_control_tower(sections)
+        sections["operator_control_tower"] = operator_control_section
         terminal = self._build_terminal_view(sections)
 
         has_blocking_failure = any(

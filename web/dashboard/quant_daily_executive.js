@@ -80,8 +80,12 @@ function colorClass(value) {
 
 function statusClass(value) {
   const text = String(value || '').toUpperCase();
-  if (['PASS', 'OK', 'GREEN', 'CONTROL', 'PROMOTION_ELIGIBLE', 'HIGH', 'PRESENT', 'READY', 'ACTIVE', 'BASELINE', 'SUBMITTED', 'CLEAN'].includes(text)) return 'pos';
+  if (text.includes('PENDING') || text.includes('ACCEPTED') || text.includes('NEW')) return 'neutral';
+  if (text.includes('FILLED') || text.includes('CLEAN')) return 'pos';
+  if (text.includes('REJECT') || text.includes('FAIL') || text.includes('BLOCKED')) return 'neg';
+  if (['PASS', 'OK', 'GREEN', 'CONTROL', 'PROMOTION_ELIGIBLE', 'HIGH', 'PRESENT', 'READY', 'ACTIVE', 'BASELINE', 'SUBMITTED', 'CLEAN', 'NONE'].includes(text)) return 'pos';
   if (['FAIL', 'ERROR', 'RED', 'NO_DATA', 'NO_PRIOR', 'BROKEN_CHAIN', 'NOT_READY', 'BLOCKED', 'DEPENDENCY_BLOCKED', 'FAILED_RECONCILIATION'].includes(text)) return 'neg';
+  if (['ACTION_REQUIRED', 'WATCH', 'WARNING', 'PARTIAL', 'IDLE', 'IN_PROGRESS'].includes(text)) return 'neutral';
   return 'neutral';
 }
 
@@ -107,6 +111,39 @@ function matrixItem(label, value, detail, cls = '') {
       <div class="matrix-detail">${detail || ' '}</div>
     </div>
   `;
+}
+
+function statePill(label, value, detail, cls = '') {
+  return `
+    <div class="state-pill ${cls}">
+      <strong class="${cls}">${value}</strong>
+      <span>${label}${detail ? ` · ${detail}` : ''}</span>
+    </div>
+  `;
+}
+
+function emptyState(title, reason, path, blocksPilot = false) {
+  return `
+    <div class="empty-state">
+      <strong>${title}</strong>
+      <div class="matrix-detail">${reason || 'Data unavailable.'}</div>
+      <div class="matrix-detail">Expected artifact: <code>${path || 'not specified'}</code></div>
+      <div class="matrix-detail">Blocks pilot: ${blocksPilot ? 'yes' : 'no'}</div>
+    </div>
+  `;
+}
+
+function formatCardValue(card) {
+  if (!card) return '—';
+  if (card.value_format === 'money') return fmtMoney(card.value);
+  if (card.value_format === 'percent') return fmtPct(card.value);
+  if (card.value_format === 'integer') return card.value == null ? '—' : String(card.value);
+  return card.value == null || card.value === '' ? '—' : String(card.value);
+}
+
+function fmtMaybePctDelta(a, b) {
+  if (a == null || b == null || Number.isNaN(Number(a)) || Number.isNaN(Number(b))) return '—';
+  return fmtPct(Number(a) - Number(b));
 }
 
 function rankItem(row) {
@@ -139,25 +176,53 @@ function renderStatus(payload) {
 }
 
 function renderRibbon(payload) {
-  const terminal = payload.terminal || {};
-  const headline = terminal.headline || {};
-  const benchmark = terminal.benchmark || {};
-  const positioning = terminal.positioning || {};
-  const tape = terminal.tape || {};
-  const health = terminal.health || {};
+  const tower = payload.sections?.operator_control_tower || {};
+  const cards = Object.fromEntries((tower.cards || []).map(card => [card.id, card]));
+  const paper = cards.paper_nav || {};
+  const live = cards.live_capital || {};
+  const order = cards.latest_order || {};
+  const sleeves = cards.sleeves || {};
+  const validation = cards.validation || {};
+  const operator = cards.operator_action || {};
 
-  setText('metric-nav', fmtMoney(headline.nav), colorClass(headline.day_pnl));
-  setText('metric-day', `${fmtMoney(headline.day_pnl)} · ${fmtPct(headline.day_return)}`);
-  setText('metric-cash', fmtMoney(headline.cash));
-  setText('metric-buying-power', `BP ${fmtMoney(payload.sections?.nav?.buying_power)}`);
-  setText('metric-exposure', fmtPct(headline.gross_exposure));
-  setText('metric-concentration', `top5 ${fmtPct(positioning.top5_concentration)}`);
-  setText('metric-fills', String(headline.fills_count ?? '—'));
-  setText('metric-tape', tape.last_fill_at ? `last ${fmtTime(tape.last_fill_at)}` : 'no same-day fills');
-  setText('metric-excess', fmtPct(benchmark.excess_since_inception_return), colorClass(benchmark.excess_since_inception_return));
-  setText('metric-rolling-excess', `5d ${fmtPct(benchmark.rolling_5d_excess_return)} · 20d ${fmtPct(benchmark.rolling_20d_excess_return)}`);
-  setText('metric-validation', String(payload.status?.level || '—').toUpperCase(), colorClass(payload.status?.level === 'ok' ? 1 : payload.status?.level === 'error' ? -1 : 0));
-  setText('metric-health', `${health.blocking_failures || 0} fail · ${health.warnings || 0} warn`);
+  setText('tower-paper-nav', formatCardValue(paper), statusClass(paper.status));
+  setText('tower-paper-return', payload.sections?.nav?.day_return == null ? 'day return unavailable' : `Day ${fmtPct(payload.sections.nav.day_return)}`);
+  setText('tower-live-deployed', formatCardValue(live), statusClass(live.status));
+  setText('tower-live-cash', `cash ${fmtMoney(payload.sections?.live_pilot?.account?.cash)} · equity ${fmtMoney(payload.sections?.live_pilot?.account?.equity)}`);
+  setText('tower-live-order-status', formatCardValue(order), statusClass(order.status));
+  setText('tower-live-order-detail', order.detail || 'no live-pilot order artifact');
+  setText('tower-sleeve-count', formatCardValue(sleeves), statusClass(sleeves.status));
+  setText('tower-sleeve-detail', sleeves.detail || 'registry unavailable');
+  setText('tower-validation-status', formatCardValue(validation), statusClass(validation.status));
+  setText('tower-validation-detail', validation.detail || 'validation unavailable');
+  setText('tower-operator-action', formatCardValue(operator), statusClass(operator.status));
+  setText('tower-operator-detail', operator.detail || 'No operator action required.');
+}
+
+function renderOperatorControlTower(payload) {
+  const tower = payload.sections?.operator_control_tower || {};
+  const summary = tower.summary || {};
+  const actions = tower.operator_actions || [];
+  setText(
+    'operator-action-summary',
+    `${summary.operator_action_required ? 'action required' : 'no blocking action'} · live ${summary.live_pilot_state || '—'}`,
+    summary.operator_action_required ? 'neutral' : 'pos'
+  );
+  setHTML('operator-context-matrix', [
+    matrixItem('Live Pilot', summary.live_pilot_state || '—', `deployed ${fmtPct(summary.live_pilot_deployed_pct)}`, statusClass(summary.live_pilot_state)),
+    matrixItem('Open Orders', String(summary.live_pilot_open_orders ?? 0), `latest ${summary.latest_order_status || '—'}`, (summary.live_pilot_open_orders || 0) ? 'neutral' : 'pos'),
+    matrixItem('Alpha Pairs', String(summary.alpha_pair_count ?? 0), 'Polaris and Orion comparisons', (summary.alpha_pair_count || 0) ? 'pos' : 'neutral'),
+    matrixItem('FR-068 Impact', summary.fr068_pilot_blocking ? 'pilot-blocking' : 'not pilot-blocking', 'promotion/scaling gate', summary.fr068_pilot_blocking ? 'neg' : 'pos'),
+  ].join(''));
+  setHTML('operator-action-list', actions.length ? actions.map(action => `
+    <div class="check-item ${action.severity === 'action' || action.severity === 'critical' ? 'action' : action.severity === 'info' ? 'info' : statusClass(action.status)}">
+      <strong>${action.title || '—'}</strong>
+      <div class="matrix-value ${statusClass(action.status)}">${action.status || '—'}</div>
+      <div class="check-detail">${action.detail || '—'}</div>
+      <div class="check-detail">Action: ${action.operator_action || '—'}</div>
+      <div class="check-detail">Expected artifact: ${action.expected_artifact || '—'} · Blocks pilot: ${action.blocks_pilot ? 'yes' : 'no'}</div>
+    </div>
+  `).join('') : emptyState('No operator action data', 'operator_control_tower.operator_actions was empty.', 'sections.operator_control_tower.operator_actions', false));
 }
 
 function renderPerformanceMatrix(payload) {
@@ -193,7 +258,7 @@ function renderSystemHealth(payload) {
       <div class="matrix-value ${statusClass(row.status)}">${String(row.status || '—').toUpperCase()}</div>
       <div class="check-detail">${row.detail || '—'}</div>
     </div>
-  `).join('') : '<div class="check-item warn"><strong>No system health data.</strong><div class="check-detail">Optional operational artifacts are unavailable.</div></div>');
+  `).join('') : emptyState('No system health data', 'Optional operational health artifacts are unavailable.', 'outputs/health/caerus_daily_health_check/latest/health_check.json', false));
 }
 
 function renderRegime(payload) {
@@ -218,7 +283,7 @@ function renderShadowCommand(payload) {
   const body = document.getElementById('shadow-strategy-body');
   if (!body) return;
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="12">No shadow strategy data available.</td></tr>';
+    body.innerHTML = `<tr><td colspan="12">${emptyState('No shadow strategy data available', 'Shadow evaluation artifact is missing or has no strategy rows.', 'outputs/shadow_candidates/<date>/shadow_evaluation.json', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => `
@@ -241,24 +306,33 @@ function renderShadowCommand(payload) {
 
 function renderLivePilot(payload) {
   const section = payload.sections?.live_pilot || {};
+  const tower = payload.sections?.operator_control_tower || {};
+  const towerSummary = tower.summary || {};
+  const latest = tower.latest_order || {};
   const account = section.account || {};
   const metrics = section.metrics || {};
   const recon = section.reconciliation || {};
   const policy = section.policy || {};
   setText(
     'live-pilot-summary',
-    `${section.status || 'NO_DATA'} · run ${section.run_id || '—'}`,
-    statusClass(section.status)
+    `${towerSummary.live_pilot_state || section.status || 'NO_DATA'} · run ${section.run_id || '—'}`,
+    statusClass(towerSummary.live_pilot_state || section.status)
   );
+  setHTML('live-pilot-state-strip', [
+    statePill('state', towerSummary.live_pilot_state || '—', section.status || '—', statusClass(towerSummary.live_pilot_state || section.status)),
+    statePill('deployed', fmtPct(towerSummary.live_pilot_deployed_pct), `cap ${fmtMoney(metrics.capital_cap_usd)}`, 'neutral'),
+    statePill('open orders', String(metrics.open_order_count ?? 0), `${metrics.blocking_open_order_count ?? 0} blocking`, (metrics.blocking_open_order_count || 0) ? 'neg' : 'pos'),
+    statePill('latest order', latest.ticker || '—', latest.status || section.latest_fill_status || '—', statusClass(latest.status || section.latest_fill_status)),
+  ].join(''));
   setHTML('live-pilot-matrix', [
-    matrixItem('Cash', fmtMoney(account.cash), `equity ${fmtMoney(account.equity)}`, 'neutral'),
-    matrixItem('Buying Power', fmtMoney(account.buying_power), `positions ${(section.positions || []).length}`, 'neutral'),
-    matrixItem('Pilot Cap', fmtMoney(metrics.capital_cap_usd), `deployment ${fmtPct(metrics.cash_deployment_rate)}`, 'neutral'),
+    matrixItem('Cash', fmtMoney(account.cash), `equity ${fmtMoney(account.equity)} · BP ${fmtMoney(account.buying_power)}`, 'neutral'),
+    matrixItem('Deployed', fmtPct(towerSummary.live_pilot_deployed_pct), `positions ${(section.positions || []).length}`, statusClass(towerSummary.live_pilot_state)),
+    matrixItem('Latest Order', `${latest.ticker || '—'} ${latest.side || ''}`.trim(), `${fmtNum(latest.qty, 4)} ${latest.order_type || '—'} · ${latest.status || '—'}`, statusClass(latest.status || section.status)),
+    matrixItem('Filled Qty', fmtNum(latest.filled_qty, 4), `fill ${fmtMoney(latest.fill_price)} · expected ${fmtMoney(latest.expected_price)}`, statusClass((metrics.filled_count || 0) > 0 ? 'PASS' : section.status)),
     matrixItem('Fill Rate', fmtPct(metrics.fill_rate), `${metrics.filled_count ?? 0} filled / ${metrics.submitted_count ?? 0} submitted`, statusClass((metrics.filled_count || 0) > 0 ? 'PASS' : section.status)),
     matrixItem('Slippage', fmtBps(metrics.slippage_bps), `avg fill time ${fmtNum(metrics.average_time_to_fill_seconds, 1)}s`, 'neutral'),
     matrixItem('Recon', recon.status || '—', recon.operator_action || metrics.idle_cash_reason || '—', statusClass(recon.status || section.status)),
-    matrixItem('Open Orders', String(metrics.open_order_count ?? 0), `${metrics.blocking_open_order_count ?? 0} blocking`, (metrics.blocking_open_order_count || 0) ? 'neg' : 'pos'),
-    matrixItem('Policy', policy.order_type || '—', policy.scope || 'FR-104 LIVE_PILOT only', 'neutral'),
+    matrixItem('Idle Cash Reason', metrics.idle_cash_reason || '—', policy.scope || 'FR-104 LIVE_PILOT only', 'neutral'),
   ].join(''));
 
   const body = document.getElementById('live-pilot-orders-body');
@@ -274,7 +348,7 @@ function renderLivePilot(payload) {
     fill_price: order.filled_avg_price,
   }));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6">No live-pilot submitted or open orders available.</td></tr>';
+    body.innerHTML = `<tr><td colspan="7">${emptyState('No live-pilot orders available', metrics.idle_cash_reason || 'No submitted/open live-pilot order artifact is available.', section.plan_path || 'outputs/live_pilot/plans/live_pilot_plan_<date>.json', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => {
@@ -284,11 +358,12 @@ function renderLivePilot(payload) {
     return `
       <tr>
         <td>${symbol}</td>
+        <td>${row.side || nested.side || '—'}</td>
         <td class="${statusClass(status)}">${status}</td>
         <td>${row.submitted_order_type || row.order_type || nested.type || '—'}</td>
         <td class="num">${fmtNum(row.qty || row.shares, 4)}</td>
-        <td class="num">${fmtMoney(row.expected_price || row.cap_enforcement_price || row.limit_price)}</td>
-        <td class="num">${fmtMoney(row.fill_price || nested.filled_avg_price)}</td>
+        <td class="num">${fmtNum(row.filled_qty || nested.filled_qty, 4)}</td>
+        <td class="num">${fmtMoney(row.fill_price || nested.filled_avg_price || row.expected_price || row.cap_enforcement_price || row.limit_price)}</td>
       </tr>
     `;
   }).join('');
@@ -299,7 +374,7 @@ function renderAccountLayers(payload) {
   const body = document.getElementById('account-layers-body');
   if (!body) return;
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="5">No account-layer data available.</td></tr>';
+    body.innerHTML = `<tr><td colspan="5">${emptyState('No account-layer data available', 'Dashboard could not derive paper/live/shadow account layers.', 'sections.account_layers.rows', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => `
@@ -326,7 +401,7 @@ function renderSleeveInventory(payload) {
   if (!body) return;
   const rows = section.rows || [];
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="7">No registered sleeves available.</td></tr>';
+    body.innerHTML = `<tr><td colspan="9">${emptyState('No registered sleeves available', 'Strategy registry or sleeve manifest could not produce dashboard rows.', 'config/research/strategy_registry.json + research_registry/sleeves/manifest.json', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => `
@@ -334,9 +409,11 @@ function renderSleeveInventory(payload) {
       <td>${row.display_name || row.sleeve_id || '—'}</td>
       <td>${row.lifecycle_stage || '—'}</td>
       <td>${row.variant_class || '—'}</td>
-      <td class="${statusClass(row.artifact_status)}">${row.artifact_status || '—'}</td>
+      <td class="num ${colorClass(row.today_return)}">${fmtPct(row.today_return)}</td>
       <td class="num ${colorClass(row.since_inception_return)}">${fmtPct(row.since_inception_return)}</td>
+      <td class="num ${colorClass(row.drawdown)}">${fmtPct(row.drawdown)}</td>
       <td class="num">${fmtPct(row.turnover)}</td>
+      <td class="num">${fmtPct(row.concentration)}</td>
       <td class="${statusClass(row.promotion_readiness)}">${row.promotion_readiness || '—'}</td>
     </tr>
   `).join('');
@@ -349,7 +426,7 @@ function renderAlphaComparison(payload) {
   if (!body) return;
   const rows = section.pairs || [];
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6">No baseline-vs-alpha pairs available.</td></tr>';
+    body.innerHTML = `<tr><td colspan="7">${emptyState('No baseline-vs-alpha pairs available', 'Alpha variants are missing a baseline_strategy_id or comparison metrics.', 'config/research/strategy_registry.json shadow_tracking.baseline_strategy_id', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => {
@@ -362,8 +439,9 @@ function renderAlphaComparison(payload) {
         <td>${row.baseline_name || '—'} → ${row.alpha_name || '—'}</td>
         <td class="num ${colorClass(row.return_delta)}">${fmtPct(row.return_delta)}</td>
         <td class="num ${colorClass(-Number(row.drawdown_delta || 0))}">${fmtPct(row.drawdown_delta)}</td>
+        <td class="num">${fmtMaybePctDelta(row.alpha_turnover, row.baseline_turnover)}</td>
+        <td class="num">${fmtMaybePctDelta(row.alpha_concentration, row.baseline_concentration)}</td>
         <td class="num">${fmtNum(row.alpha_effective_n, 1)}</td>
-        <td class="num">${fmtNum(row.alpha_alpha_per_dollar_proxy, 2)}</td>
         <td>${windowText}</td>
       </tr>
     `;
@@ -383,8 +461,9 @@ function renderGovernanceState(payload) {
       <strong>${row.name || '—'}</strong>
       <div class="matrix-value ${statusClass(row.status)}">${row.status || '—'}</div>
       <div class="check-detail">${row.detail || '—'}</div>
+      <div class="check-detail">Blocks pilot: ${row.pilot_blocking ? 'yes' : 'no'} · Blocks promotion: ${row.promotion_blocking ? 'yes' : 'no'}</div>
     </div>
-  `).join(''));
+  `).join('') || emptyState('No governance rows available', 'Governance state could not be derived from dashboard sections.', 'sections.governance_state.rows', false));
 }
 
 function renderEvidenceCollection(payload) {
@@ -446,7 +525,7 @@ function renderDecisionIntelligence(payload) {
       </div>
     `);
   });
-  setHTML('decision-intelligence', items.length ? items.join('') : '<div class="rank-item">No same-day decision changes available.</div>');
+  setHTML('decision-intelligence', items.length ? items.join('') : emptyState('No same-day decision changes available', 'No fills or daily return notes were available for the report date.', 'outputs/broker_snapshot/broker_snapshot_<date>.json', false));
 }
 
 function renderLiveReadiness(payload) {
@@ -460,7 +539,7 @@ function renderLiveReadiness(payload) {
       <div class="matrix-value ${statusClass(row.status)}">${row.status || '—'}</div>
       <div class="check-detail">${row.detail || '—'}</div>
     </div>
-  `).join('') : '<div class="check-item warn"><strong>No readiness criteria available.</strong></div>');
+  `).join('') : emptyState('No readiness criteria available', 'Live readiness section did not produce criteria.', 'sections.live_readiness.criteria', false));
 }
 
 function renderDecisionGrade(payload) {
@@ -483,7 +562,7 @@ function renderDecisionGrade(payload) {
       <div class="matrix-value ${statusClass(row.status)}">${row.status || '—'}</div>
       <div class="check-detail">${row.detail || '—'}</div>
     </div>
-  `).join(''));
+  `).join('') || emptyState('No decision-grade rows available', 'Decision-grade model-quality artifacts did not produce dashboard rows.', 'outputs/model_quality/<date>/', false));
 }
 
 function renderPositions(payload) {
@@ -493,7 +572,7 @@ function renderPositions(payload) {
   if (!body) return;
   const rows = section.rows || [];
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6">No positions available.</td></tr>';
+    body.innerHTML = `<tr><td colspan="6">${emptyState('No positions available', 'Broker position snapshot is missing or empty.', 'outputs/broker/posttrade_positions.json', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => `
@@ -515,7 +594,7 @@ function renderFills(payload) {
   if (!body) return;
   const rows = section.rows || [];
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6">No fills for this report date.</td></tr>';
+    body.innerHTML = `<tr><td colspan="6">${emptyState('No fills for this report date', 'No broker fills were found for the dashboard report date.', 'outputs/broker_snapshot/broker_snapshot_<date>.json', false)}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(row => `
@@ -533,8 +612,8 @@ function renderFills(payload) {
 function renderRanks(payload) {
   const leaders = payload.terminal?.leaders?.winners || [];
   const laggards = payload.terminal?.leaders?.laggards || [];
-  setHTML('leaders-list', leaders.length ? leaders.map(rankItem).join('') : '<div class="rank-item">No leader data.</div>');
-  setHTML('laggards-list', laggards.length ? laggards.map(rankItem).join('') : '<div class="rank-item">No laggard data.</div>');
+  setHTML('leaders-list', leaders.length ? leaders.map(rankItem).join('') : emptyState('No leader data', 'No current position unrealized P&L is available.', 'outputs/broker/posttrade_positions.json', false));
+  setHTML('laggards-list', laggards.length ? laggards.map(rankItem).join('') : emptyState('No laggard data', 'No current position unrealized P&L is available.', 'outputs/broker/posttrade_positions.json', false));
 }
 
 function renderSources(payload) {
@@ -545,7 +624,7 @@ function renderSources(payload) {
       <div class="matrix-detail">${source.source_type} · ${source.trust_level} · ${source.used ? 'used' : 'missing'}</div>
       <div class="source-path">${source.path || '—'}</div>
     </div>
-  `).join(''));
+  `).join('') || emptyState('No source records available', 'Dashboard builder did not record artifact lineage.', 'payload.sources', false));
 }
 
 function renderValidation(payload) {
@@ -556,7 +635,7 @@ function renderValidation(payload) {
       <strong>${check.name}</strong>
       <div class="check-detail">${check.detail}</div>
     </div>
-  `).join(''));
+  `).join('') || emptyState('No validation checks available', 'Dashboard validation tape is missing.', 'payload.validation.checks', true));
 }
 
 function drawLineChart(canvasId, seriesList, options = {}) {
@@ -685,6 +764,7 @@ async function boot() {
     const payload = await fetchJSON(resolveDataPath());
     renderStatus(payload);
     renderRibbon(payload);
+    renderOperatorControlTower(payload);
     renderPerformanceMatrix(payload);
     renderHealthMatrix(payload);
     renderSystemHealth(payload);

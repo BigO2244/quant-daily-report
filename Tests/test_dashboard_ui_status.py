@@ -5,6 +5,10 @@ def test_dashboard_terminal_shell_present():
     html = Path("web/dashboard/index.html").read_text(encoding="utf-8")
 
     assert "terminal-shell" in html
+    assert "CAERUS EVIDENCE CONTROL TOWER" in html
+    assert 'id="operator-action-list"' in html
+    assert 'id="operator-context-matrix"' in html
+    assert 'id="live-pilot-state-strip"' in html
     assert 'id="performance-matrix"' in html
     assert 'id="shadow-strategy-body"' in html
     assert 'id="positions-body"' in html
@@ -34,6 +38,7 @@ def test_dashboard_js_current_render_contract():
     assert "function renderPerformanceMatrix" in js
     assert "function renderHealthMatrix" in js
     assert "function renderDecisionGrade" in js
+    assert "function renderOperatorControlTower" in js
     assert "function renderLivePilot" in js
     assert "function renderSleeveInventory" in js
     assert "function renderAlphaComparison" in js

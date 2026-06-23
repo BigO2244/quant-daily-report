@@ -10,9 +10,9 @@
   <main class="terminal-shell">
     <header class="terminal-header">
       <div>
-        <p class="terminal-tag">CAERUS QUANT TERMINAL</p>
+        <p class="terminal-tag">CAERUS EVIDENCE CONTROL TOWER</p>
         <h1>Portfolio Command</h1>
-        <p class="terminal-subtitle">Broker-authoritative portfolio state, fills, benchmark context, and validation telemetry.</p>
+        <p class="terminal-subtitle">Live-pilot status, sleeve lifecycle, baseline-vs-alpha evidence, governance blockers, and operator actions.</p>
       </div>
       <div class="header-meta">
         <div class="meta-box">
@@ -32,61 +32,140 @@
 
     <section id="status-banner" class="status-banner hidden"></section>
 
-    <section class="metric-ribbon">
-      <article class="metric-panel">
-        <span class="metric-label">NAV</span>
-        <span id="metric-nav" class="metric-value">—</span>
-        <span id="metric-day" class="metric-foot">—</span>
+    <section class="metric-ribbon control-ribbon" aria-label="Evidence control summary">
+      <article class="metric-panel control-card">
+        <span class="metric-label">Paper NAV / Return</span>
+        <span id="tower-paper-nav" class="metric-value">—</span>
+        <span id="tower-paper-return" class="metric-foot">—</span>
       </article>
-      <article class="metric-panel">
-        <span class="metric-label">Cash / BP</span>
-        <span id="metric-cash" class="metric-value">—</span>
-        <span id="metric-buying-power" class="metric-foot">—</span>
+      <article class="metric-panel control-card">
+        <span class="metric-label">Live Pilot Capital</span>
+        <span id="tower-live-deployed" class="metric-value">—</span>
+        <span id="tower-live-cash" class="metric-foot">—</span>
       </article>
-      <article class="metric-panel">
-        <span class="metric-label">Exposure</span>
-        <span id="metric-exposure" class="metric-value">—</span>
-        <span id="metric-concentration" class="metric-foot">—</span>
+      <article class="metric-panel control-card">
+        <span class="metric-label">Latest Live Order</span>
+        <span id="tower-live-order-status" class="metric-value">—</span>
+        <span id="tower-live-order-detail" class="metric-foot">—</span>
       </article>
-      <article class="metric-panel">
-        <span class="metric-label">Fills</span>
-        <span id="metric-fills" class="metric-value">—</span>
-        <span id="metric-tape" class="metric-foot">—</span>
+      <article class="metric-panel control-card">
+        <span class="metric-label">Sleeve Lifecycle</span>
+        <span id="tower-sleeve-count" class="metric-value">—</span>
+        <span id="tower-sleeve-detail" class="metric-foot">—</span>
       </article>
-      <article class="metric-panel">
-        <span class="metric-label">Excess vs SPY</span>
-        <span id="metric-excess" class="metric-value">—</span>
-        <span id="metric-rolling-excess" class="metric-foot">—</span>
-      </article>
-      <article class="metric-panel">
+      <article class="metric-panel control-card">
         <span class="metric-label">Validation</span>
-        <span id="metric-validation" class="metric-value">—</span>
-        <span id="metric-health" class="metric-foot">—</span>
+        <span id="tower-validation-status" class="metric-value">—</span>
+        <span id="tower-validation-detail" class="metric-foot">—</span>
+      </article>
+      <article class="metric-panel control-card">
+        <span class="metric-label">Operator Action</span>
+        <span id="tower-operator-action" class="metric-value">—</span>
+        <span id="tower-operator-detail" class="metric-foot">—</span>
       </article>
     </section>
 
-    <section class="terminal-grid terminal-grid--dual">
-      <article class="terminal-panel">
+    <section class="terminal-grid control-grid">
+      <article class="terminal-panel live-pilot-panel">
         <div class="panel-head">
           <h2>Live Pilot / Account</h2>
           <span id="live-pilot-summary" class="panel-kicker">—</span>
         </div>
+        <div id="live-pilot-state-strip" class="state-strip"></div>
         <div id="live-pilot-matrix" class="matrix-grid"></div>
         <div class="table-wrap compact-table">
           <table>
             <thead>
               <tr>
                 <th>Order</th>
+                <th>Side</th>
                 <th>Status</th>
                 <th>Type</th>
                 <th>Qty</th>
-                <th>Expected</th>
-                <th>Fill</th>
+                <th>Filled</th>
+                <th>Price</th>
               </tr>
             </thead>
             <tbody id="live-pilot-orders-body"></tbody>
           </table>
         </div>
+      </article>
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Operator Action</h2>
+          <span id="operator-action-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="operator-context-matrix" class="matrix-grid compact-matrix"></div>
+        <div id="operator-action-list" class="check-list action-list"></div>
+      </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--single">
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Sleeve Command Center</h2>
+          <span id="sleeve-inventory-summary" class="panel-kicker">—</span>
+        </div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Sleeve</th>
+                <th>Lifecycle</th>
+                <th>Variant</th>
+                <th>Today</th>
+                <th>SI Return</th>
+                <th>Drawdown</th>
+                <th>Turnover</th>
+                <th>Concentration</th>
+                <th>Readiness</th>
+              </tr>
+            </thead>
+            <tbody id="sleeve-inventory-body"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--dual">
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Baseline vs Alpha</h2>
+          <span id="alpha-comparison-summary" class="panel-kicker">—</span>
+        </div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th>Return Δ</th>
+                <th>Drawdown Δ</th>
+                <th>Turnover Δ</th>
+                <th>Conc. Δ</th>
+                <th>Effective N</th>
+                <th>Window</th>
+              </tr>
+            </thead>
+            <tbody id="alpha-comparison-body"></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Governance State</h2>
+          <span id="governance-state-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="governance-state-list" class="check-list"></div>
+      </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--dual">
+      <article class="terminal-panel">
+        <div class="panel-head">
+          <h2>Evidence Collection</h2>
+          <span class="panel-kicker">pilot and shadow constraints</span>
+        </div>
+        <div id="evidence-collection-matrix" class="matrix-grid"></div>
       </article>
       <article class="terminal-panel">
         <div class="panel-head">
@@ -107,69 +186,6 @@
             <tbody id="account-layers-body"></tbody>
           </table>
         </div>
-      </article>
-    </section>
-
-    <section class="terminal-grid terminal-grid--dual">
-      <article class="terminal-panel">
-        <div class="panel-head">
-          <h2>Sleeve Inventory</h2>
-          <span id="sleeve-inventory-summary" class="panel-kicker">—</span>
-        </div>
-        <div class="table-wrap compact-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Sleeve</th>
-                <th>Lifecycle</th>
-                <th>Variant</th>
-                <th>Artifact</th>
-                <th>SI Return</th>
-                <th>Turnover</th>
-                <th>Readiness</th>
-              </tr>
-            </thead>
-            <tbody id="sleeve-inventory-body"></tbody>
-          </table>
-        </div>
-      </article>
-      <article class="terminal-panel">
-        <div class="panel-head">
-          <h2>Governance State</h2>
-          <span id="governance-state-summary" class="panel-kicker">—</span>
-        </div>
-        <div id="governance-state-list" class="check-list"></div>
-      </article>
-    </section>
-
-    <section class="terminal-grid terminal-grid--dual">
-      <article class="terminal-panel">
-        <div class="panel-head">
-          <h2>Baseline vs Alpha</h2>
-          <span id="alpha-comparison-summary" class="panel-kicker">—</span>
-        </div>
-        <div class="table-wrap compact-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Pair</th>
-                <th>Return Δ</th>
-                <th>Drawdown Δ</th>
-                <th>Alpha N</th>
-                <th>Alpha $</th>
-                <th>Window</th>
-              </tr>
-            </thead>
-            <tbody id="alpha-comparison-body"></tbody>
-          </table>
-        </div>
-      </article>
-      <article class="terminal-panel">
-        <div class="panel-head">
-          <h2>Evidence Collection</h2>
-          <span class="panel-kicker">pilot and shadow constraints</span>
-        </div>
-        <div id="evidence-collection-matrix" class="matrix-grid"></div>
       </article>
     </section>
 
@@ -356,23 +372,23 @@
         </div>
         <div id="laggards-list" class="rank-list"></div>
       </article>
-      <article class="terminal-panel">
-        <div class="panel-head">
+      <details class="terminal-panel collapsed-panel">
+        <summary class="panel-head">
           <h2>Source Monitor</h2>
           <span class="panel-kicker">artifact provenance</span>
-        </div>
+        </summary>
         <div id="source-list" class="source-list"></div>
-      </article>
+      </details>
     </section>
 
     <section class="terminal-grid terminal-grid--dual">
-      <article class="terminal-panel">
-        <div class="panel-head">
+      <details class="terminal-panel collapsed-panel">
+        <summary class="panel-head">
           <h2>Validation Tape</h2>
           <span id="validation-summary" class="panel-kicker">—</span>
-        </div>
+        </summary>
         <div id="validation-list" class="check-list"></div>
-      </article>
+      </details>
       <article class="terminal-panel">
         <div class="panel-head">
           <h2>Positioning Monitor</h2>

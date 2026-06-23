@@ -376,7 +376,10 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
     assert "baseline_alpha_comparison" in payload["sections"]
     assert "account_layers" in payload["sections"]
     assert "governance_state" in payload["sections"]
+    assert "operator_control_tower" in payload["sections"]
     assert payload["sections"]["decision_grade"]["status"] == "PARTIAL"
+    assert isinstance(payload["sections"]["operator_control_tower"]["summary"]["operator_action_required"], bool)
+    assert len(payload["sections"]["operator_control_tower"]["cards"]) == 6
     assert payload["terminal"]["headline"]["nav"] == 10000.0
     assert payload["terminal"]["benchmark"]["rolling_5d_return"] is None
     assert payload["terminal"]["leaders"]["winners"][0]["ticker"] == "AAPL"
@@ -433,6 +436,9 @@ def test_dashboard_v1_surfaces_alpha_sleeves_and_live_pilot_evidence(tmp_path: P
     assert payload["sections"]["baseline_alpha_comparison"]["summary"]["pair_count"] == 2
     assert payload["sections"]["live_pilot"]["status"] == "SUBMITTED"
     assert payload["sections"]["live_pilot"]["metrics"]["fill_rate"] == 1.0
+    assert payload["sections"]["operator_control_tower"]["summary"]["live_pilot_state"] == "ACTIVE"
+    assert payload["sections"]["operator_control_tower"]["summary"]["alpha_pair_count"] == 2
+    assert payload["sections"]["operator_control_tower"]["latest_order"]["ticker"] == "AAPL"
     assert payload["sections"]["account_layers"]["rows"][1]["layer"] == "Live pilot account"
     assert payload["sections"]["governance_state"]["summary"]["fr068_pilot_blocking"] is False
 
