@@ -6,6 +6,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/runtime_env.sh"
+activate_runtime_venv "${REPO_ROOT}" || exit 1
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+    echo "FATAL: python interpreter not found or not executable: ${PYTHON_BIN}" >&2
+    exit 1
+fi
+
 ENV_FILE="${HOME}/.caerus/live_pilot.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
     echo "FATAL: ${ENV_FILE} not found" >&2
@@ -17,6 +26,10 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+export MODE="live_pilot"
+export TRADING_MODE="live_pilot"
+export ALPACA_PAPER="0"
+export ALPACA_BASE_URL="https://api.alpaca.markets"
 export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-100}"
 export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-1}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
@@ -59,7 +72,7 @@ if [[ "${CAERUS_LIVE_PILOT_KILL_SWITCH:-0}" == "1" ]]; then
     exit 1
 fi
 
-.venv/bin/python3 - <<'PY'
+"${PYTHON_BIN}" - <<'PY'
 import os
 import sys
 
@@ -90,17 +103,23 @@ echo "approved_sleeve=${CAERUS_LIVE_PILOT_SLEEVE_ID}"
 echo "capital_cap=${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 
+set +e
 BUILD_OUTPUT="$(
-    .venv/bin/python3 scripts/live_pilot_build_plan_from_precompute.py \
+    "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py \
         --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}" \
         --capital-cap "${CAERUS_LIVE_PILOT_CAPITAL_CAP}" \
         --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}" \
         --output-dir outputs/live_pilot/plans
 )"
+BUILD_STATUS=$?
+set -e
 echo "${BUILD_OUTPUT}"
+if [[ "${BUILD_STATUS}" -ne 0 ]]; then
+    echo "live_pilot_plan_builder_exit_code=${BUILD_STATUS}"
+fi
 
 PLAN_PATH="$(
-    BUILD_OUTPUT="${BUILD_OUTPUT}" .venv/bin/python3 - <<'PY'
+    BUILD_OUTPUT="${BUILD_OUTPUT}" "${PYTHON_BIN}" - <<'PY'
 import json
 import os
 import sys
@@ -121,11 +140,19 @@ echo "plan_path=${PLAN_PATH}"
 
 echo "=== LIVE_PILOT DRY RUN ==="
 export CAERUS_LIVE_PILOT_DRY_RUN=1
-.venv/bin/python3 scripts/live_pilot_execute.py --plan "${PLAN_PATH}"
+"${PYTHON_BIN}" scripts/live_pilot_execute.py --plan "${PLAN_PATH}"
+
+echo "dry_run_success=true"
+if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED:-0}" != "1" ]]; then
+    echo "LIVE_PILOT submission paused: set CAERUS_LIVE_PILOT_SUBMIT_APPROVED=1 and rerun this script after Brett approval."
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    exit 0
+fi
+
+require_eq CAERUS_LIVE_PILOT_SUBMIT_APPROVED 1
 
 echo "=== LIVE_PILOT SUBMISSION ==="
-echo "dry_run_success=true"
 export CAERUS_LIVE_PILOT_DRY_RUN=0
-.venv/bin/python3 scripts/live_pilot_execute.py --plan "${PLAN_PATH}"
+"${PYTHON_BIN}" scripts/live_pilot_execute.py --plan "${PLAN_PATH}"
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"

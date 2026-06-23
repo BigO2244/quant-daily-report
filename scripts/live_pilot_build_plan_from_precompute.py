@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -11,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.live_pilot_guardrails import validate_live_pilot_plan
+from core.live_pilot_guardrails import normalize_live_pilot_limit_price, validate_live_pilot_plan
 from paper.run_manager import safe_write_text
 
 
@@ -94,6 +96,11 @@ def _shares(trade: Mapping[str, Any]) -> float | None:
     return _safe_positive_float(_first_nonempty(trade, ("shares", "qty", "quantity")))
 
 
+def _floor_qty_for_cap(qty: float, *, cap: float, limit_price: float) -> float:
+    candidate = min(Decimal(str(qty)), Decimal(str(cap)) / Decimal(str(limit_price)))
+    return float(candidate.quantize(Decimal("0.000000001"), rounding=ROUND_DOWN))
+
+
 def _asset_class(trade: Mapping[str, Any]) -> str:
     return str(trade.get("asset_class") or trade.get("class") or "us_equity").strip().lower()
 
@@ -122,6 +129,7 @@ def _candidate_order(
     payload: Mapping[str, Any],
     approved_sleeve: str,
     capital_cap: float,
+    allow_missing_sleeve: bool,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     reasons: list[str] = []
     ticker = _clean_symbol(trade.get("ticker") or trade.get("symbol"))
@@ -130,6 +138,7 @@ def _candidate_order(
     shares = _shares(trade)
     limit_price, limit_price_source = _limit_price(trade)
     asset_class = _asset_class(trade)
+    missing_sleeve_overridden = False
 
     if not ticker:
         reasons.append("missing_ticker")
@@ -138,7 +147,11 @@ def _candidate_order(
     elif ticker.endswith("USD") and len(ticker) > 4:
         reasons.append("unsupported_crypto_symbol")
     if not sleeve:
-        reasons.append("missing_sleeve")
+        if allow_missing_sleeve and side == "BUY":
+            sleeve = approved_sleeve
+            missing_sleeve_overridden = True
+        else:
+            reasons.append("missing_sleeve")
     elif sleeve != approved_sleeve:
         reasons.append(f"sleeve_mismatch:{sleeve}")
     if side != "BUY":
@@ -150,29 +163,53 @@ def _candidate_order(
     if limit_price is None:
         reasons.append("missing_limit_price")
 
-    notional = None
+    source_notional = None
+    original_limit_price = limit_price
+    normalized_limit_price = None
+    pre_normalization_qty = shares
+    final_qty = shares
+    scaled_to_pilot_cap = False
     if shares is not None and limit_price is not None:
-        notional = round(float(shares) * float(limit_price), 6)
-        if notional > float(capital_cap):
-            reasons.append("notional_exceeds_cap")
+        normalized_limit_price = normalize_live_pilot_limit_price(float(limit_price))
+        source_notional = round(float(shares) * float(limit_price), 6)
+        pre_normalization_qty = _floor_qty_for_cap(float(shares), cap=float(capital_cap), limit_price=float(limit_price))
+        final_qty = _floor_qty_for_cap(float(pre_normalization_qty), cap=float(capital_cap), limit_price=float(normalized_limit_price))
+        scaled_to_pilot_cap = abs(float(final_qty) - float(shares)) > 1e-12
 
     if reasons:
         return None, _reject(trade, index=index, reasons=reasons)
 
+    pilot_notional = float(Decimal(str(final_qty or 0.0)) * Decimal(str(normalized_limit_price or 0.0)))
     order = {
         "ticker": ticker,
         "symbol": ticker,
         "side": "BUY",
-        "shares": float(shares or 0.0),
-        "qty": float(shares or 0.0),
-        "limit_price": float(limit_price or 0.0),
-        "notional": float(notional or 0.0),
+        "shares": float(final_qty or 0.0),
+        "qty": float(final_qty or 0.0),
+        "limit_price": float(normalized_limit_price or 0.0),
+        "original_limit_price": float(original_limit_price or 0.0),
+        "normalized_limit_price": float(normalized_limit_price or 0.0),
+        "notional": float(pilot_notional),
         "order_type": "limit",
         "sleeve": sleeve,
         "source_precompute_index": index,
         "source_reason": trade.get("reason"),
         "limit_price_source": limit_price_source,
+        "scaled_to_pilot_cap": bool(scaled_to_pilot_cap),
+        "source_notional": float(source_notional or 0.0),
+        "pilot_notional_cap": float(capital_cap),
+        "source_order_qty": float(shares or 0.0),
+        "original_qty": float(shares or 0.0),
+        "pre_normalization_qty": float(pre_normalization_qty or 0.0),
+        "pilot_qty": float(final_qty or 0.0),
+        "final_qty": float(final_qty or 0.0),
+        "scale_reason": "live_pilot_cap" if scaled_to_pilot_cap else None,
+        "sleeve_source": "missing_in_source_overridden_for_live_pilot" if missing_sleeve_overridden else "source",
+        "approved_sleeve_override": approved_sleeve if missing_sleeve_overridden else None,
     }
+    for key in ("stop_loss", "take_profit"):
+        if key in trade:
+            order[key] = trade.get(key)
     return order, None
 
 
@@ -197,6 +234,8 @@ def build_live_pilot_plan(
     capital_cap: float = DEFAULT_CAPITAL_CAP,
     max_orders: int = DEFAULT_MAX_ORDERS,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
+    allow_missing_sleeve: bool = False,
+    allow_fractional: bool = False,
 ) -> dict[str, Any]:
     if not str(approved_sleeve or "").strip():
         raise ValueError("approved_sleeve is required")
@@ -220,13 +259,20 @@ def build_live_pilot_plan(
             payload=payload,
             approved_sleeve=approved_sleeve,
             capital_cap=float(capital_cap),
+            allow_missing_sleeve=bool(allow_missing_sleeve),
         )
         if candidate is not None:
             candidates.append(candidate)
         if rejection is not None:
             rejected.append(rejection)
 
-    candidates = sorted(candidates, key=lambda row: (float(row.get("notional") or 0.0), str(row.get("ticker") or "")))
+    candidates = sorted(
+        candidates,
+        key=lambda row: (
+            1 if row.get("sleeve_source") == "missing_in_source_overridden_for_live_pilot" else 0,
+            int(row.get("source_precompute_index") or 0),
+        ),
+    )
     selected = candidates[:1]
     for extra in candidates[1:]:
         rejected.append(
@@ -250,7 +296,9 @@ def build_live_pilot_plan(
         f"CAERUS_LIVE_PILOT_APPROVED=1 CAERUS_LIVE_PILOT_CAPITAL_CAP={float(capital_cap):g} "
         f"CAERUS_LIVE_PILOT_SLEEVE_ID={approved_sleeve} "
         "CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH=<SHA256_ACCOUNT_ID> "
-        f"CAERUS_LIVE_PILOT_MAX_ORDERS={int(max_orders)} CAERUS_LIVE_PILOT_DRY_RUN=1 "
+        f"CAERUS_LIVE_PILOT_MAX_ORDERS={int(max_orders)} "
+        f"CAERUS_LIVE_PILOT_ALLOW_MISSING_SLEEVE={1 if allow_missing_sleeve else 0} "
+        f"CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL={1 if allow_fractional else 0} CAERUS_LIVE_PILOT_DRY_RUN=1 "
         f".venv/bin/python3 scripts/live_pilot_execute.py --plan {plan_path.as_posix()}"
     )
     live_command = dry_run_command.replace("CAERUS_LIVE_PILOT_DRY_RUN=1", "CAERUS_LIVE_PILOT_DRY_RUN=0")
@@ -265,6 +313,8 @@ def build_live_pilot_plan(
         "approved_sleeve": approved_sleeve,
         "capital_cap": float(capital_cap),
         "max_orders": int(max_orders),
+        "allow_missing_sleeve": bool(allow_missing_sleeve),
+        "allow_fractional": bool(allow_fractional),
         "selected_order": selected[0] if selected else None,
         "rejected_orders_with_reasons": rejected,
         "required_dry_run_command": dry_run_command,
@@ -273,6 +323,8 @@ def build_live_pilot_plan(
             "approved_sleeve": approved_sleeve,
             "capital_cap": float(capital_cap),
             "selected_order": selected[0] if selected else None,
+            "allow_missing_sleeve": bool(allow_missing_sleeve),
+            "allow_fractional": bool(allow_fractional),
             "required_manual_review": True,
             "orders_submitted": 0,
         },
@@ -282,8 +334,12 @@ def build_live_pilot_plan(
     # Prove the emitted plan is compatible with scripts/live_pilot_execute.py's
     # live-pilot validation schema before writing it.
     if selected:
+        validation_env = dict(os.environ)
+        if allow_fractional:
+            validation_env["CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"] = "1"
         validation = validate_live_pilot_plan(
             selected,
+            env=validation_env,
             capital_cap_usd=float(capital_cap),
             max_orders=int(max_orders),
             run_id=f"plan-{trade_date}",
@@ -373,6 +429,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--capital-cap", type=float, default=DEFAULT_CAPITAL_CAP)
     parser.add_argument("--max-orders", type=int, default=DEFAULT_MAX_ORDERS)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument(
+        "--allow-missing-sleeve",
+        action="store_true",
+        default=os.getenv("CAERUS_LIVE_PILOT_ALLOW_MISSING_SLEEVE", "").strip().lower() in {"1", "true", "yes", "y", "on"},
+        help="Allow missing source sleeve metadata only for isolated live pilot plan selection.",
+    )
+    parser.add_argument(
+        "--allow-fractional",
+        action="store_true",
+        default=os.getenv("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL", "").strip().lower() in {"1", "true", "yes", "y", "on"},
+        help="Allow fractional quantity only for isolated live pilot plan validation.",
+    )
     return parser.parse_args(argv)
 
 
@@ -392,6 +460,8 @@ def main(argv: list[str] | None = None) -> int:
         capital_cap=float(args.capital_cap),
         max_orders=int(args.max_orders),
         output_dir=Path(args.output_dir),
+        allow_missing_sleeve=bool(args.allow_missing_sleeve),
+        allow_fractional=bool(args.allow_fractional),
     )
     print(json.dumps({"status": plan.get("status"), "json_path": plan.get("json_path"), "markdown_path": plan.get("markdown_path")}, indent=2, sort_keys=True))
     return 0 if plan.get("selected_order") else 1

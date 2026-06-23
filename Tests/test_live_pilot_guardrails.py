@@ -15,6 +15,7 @@ from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
     LIVE_PILOT_SLEEVE_ID_ENV,
     build_live_pilot_gate_result,
+    normalize_live_pilot_limit_price,
     validate_live_pilot_plan,
     validate_live_pilot_submission_guardrails,
 )
@@ -208,6 +209,37 @@ def test_broker_market_submit_guard_failure_does_not_call_sdk(monkeypatch: pytes
             client_order_id="test-live-pilot-market",
         )
     assert client.calls == 0
+
+
+
+def test_live_pilot_limit_price_normalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert normalize_live_pilot_limit_price(228.38999938964844) == 228.39
+    assert normalize_live_pilot_limit_price(0.123456) == 0.1235
+
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL", "1")
+    result = validate_live_pilot_plan(
+        [
+            {
+                "ticker": "JNJ",
+                "side": "BUY",
+                "shares": 0.4378475426561624,
+                "limit_price": 228.39,
+                "original_limit_price": 228.38999938964844,
+                "normalized_limit_price": 228.39,
+            }
+        ],
+        capital_cap_usd=100,
+        max_orders=1,
+        run_id="run-price-normalization",
+    )
+
+    assert result.status == "PASS"
+    order = result.orders[0].to_dict()
+    assert order["original_limit_price"] == 228.38999938964844
+    assert order["normalized_limit_price"] == 228.39
+    assert order["limit_price"] == 228.39
 
 
 def test_plan_validation_blocks_over_cap_and_too_many_orders(monkeypatch: pytest.MonkeyPatch) -> None:

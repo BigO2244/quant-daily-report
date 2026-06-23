@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from decimal import Decimal, ROUND_HALF_UP
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -91,6 +92,8 @@ class LivePilotOrder:
     notional: float
     client_order_id: str
     order_type: str = "limit"
+    original_limit_price: float | None = None
+    normalized_limit_price: float | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -98,6 +101,8 @@ class LivePilotOrder:
             "side": self.side,
             "qty": self.qty,
             "limit_price": self.limit_price,
+            "original_limit_price": self.original_limit_price,
+            "normalized_limit_price": self.normalized_limit_price,
             "notional": self.notional,
             "client_order_id": self.client_order_id,
             "order_type": self.order_type,
@@ -394,6 +399,11 @@ def _fractional_allowed(env: Mapping[str, str]) -> bool:
     return _truthy(env.get(LIVE_PILOT_ALLOW_FRACTIONAL_ENV))
 
 
+def normalize_live_pilot_limit_price(limit_price: float) -> float:
+    places = Decimal("0.01") if float(limit_price) >= 1.0 else Decimal("0.0001")
+    return float(Decimal(str(limit_price)).quantize(places, rounding=ROUND_HALF_UP))
+
+
 def validate_live_pilot_plan(
     trades: Iterable[Mapping[str, object]],
     *,
@@ -442,7 +452,10 @@ def validate_live_pilot_plan(
         if limit_price is None or limit_price <= 0:
             errors.append(f"{symbol}:missing_positive_limit_price")
             continue
-        notional = round(float(qty) * float(limit_price), 6)
+        original_limit_price = _safe_float(raw_trade.get("original_limit_price")) or float(limit_price)
+        normalized_input = _safe_float(raw_trade.get("normalized_limit_price")) or float(limit_price)
+        normalized_limit_price = normalize_live_pilot_limit_price(normalized_input)
+        notional = round(float(qty) * float(normalized_limit_price), 6)
         if notional <= 0:
             errors.append(f"{symbol}:non_positive_notional")
             continue
@@ -452,9 +465,11 @@ def validate_live_pilot_plan(
                 symbol=symbol,
                 side=side,
                 qty=float(qty),
-                limit_price=float(limit_price),
+                limit_price=float(normalized_limit_price),
                 notional=notional,
                 client_order_id=f"caerus-live-pilot-{run_id}-{index}-{symbol}".lower()[:48],
+                original_limit_price=original_limit_price,
+                normalized_limit_price=float(normalized_limit_price),
             )
         )
 

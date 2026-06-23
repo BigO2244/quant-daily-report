@@ -27,17 +27,24 @@ def _payload_path(tmp_path: Path, trades: list[dict[str, object]], *, trade_date
     return path
 
 
-def _build(tmp_path: Path, trades: list[dict[str, object]]) -> dict[str, object]:
+def _build(
+    tmp_path: Path,
+    trades: list[dict[str, object]],
+    *,
+    allow_missing_sleeve: bool = False,
+) -> dict[str, object]:
     return build_live_pilot_plan(
         payload_path=_payload_path(tmp_path, trades),
         approved_sleeve="polaris",
         capital_cap=100,
         max_orders=1,
         output_dir=tmp_path / "outputs" / "live_pilot" / "plans",
+        allow_missing_sleeve=allow_missing_sleeve,
+        allow_fractional=True,
     )
 
 
-def test_no_orders_selected_if_over_cap(tmp_path: Path) -> None:
+def test_over_cap_buy_is_scaled_to_pilot_cap(tmp_path: Path) -> None:
     plan = _build(
         tmp_path,
         [
@@ -51,10 +58,46 @@ def test_no_orders_selected_if_over_cap(tmp_path: Path) -> None:
         ],
     )
 
-    assert plan["status"] == "BLOCKED_NO_QUALIFYING_ORDER"
-    assert plan["selected_order"] is None
-    assert plan["trades"] == []
-    assert "notional_exceeds_cap" in plan["rejected_orders_with_reasons"][0]["reasons"]
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    selected = plan["selected_order"]
+    assert selected["ticker"] == "AAPL"
+    assert selected["scaled_to_pilot_cap"] is True
+    assert selected["source_order_qty"] == 2
+    assert selected["source_notional"] == 120
+    assert selected["pilot_notional_cap"] == 100
+    assert selected["original_qty"] == 2
+    assert selected["pre_normalization_qty"] < 100 / 60
+    assert selected["final_qty"] == selected["pilot_qty"]
+    assert selected["final_qty"] * selected["normalized_limit_price"] <= 100
+    assert selected["notional"] <= 100
+    assert plan["trades"] == [selected]
+
+
+def test_scaled_buy_uses_normalized_limit_price_for_final_qty(tmp_path: Path) -> None:
+    plan = _build(
+        tmp_path,
+        [
+            {
+                "ticker": "JNJ",
+                "side": "BUY",
+                "shares": 3,
+                "limit_price": 228.38999938964844,
+                "sleeve": "polaris",
+            }
+        ],
+    )
+
+    selected = plan["selected_order"]
+    assert selected["ticker"] == "JNJ"
+    assert selected["original_limit_price"] == 228.38999938964844
+    assert selected["normalized_limit_price"] == 228.39
+    assert selected["limit_price"] == 228.39
+    assert selected["original_qty"] == 3
+    assert selected["pre_normalization_qty"] == 0.437847542
+    assert selected["final_qty"] == 0.437847541
+    assert selected["final_qty"] < 0.4378475426561624
+    assert selected["final_qty"] * selected["normalized_limit_price"] <= 100
+    assert selected["notional"] <= 100
 
 
 def test_no_sells_selected(tmp_path: Path) -> None:
@@ -118,12 +161,63 @@ def test_max_one_order_selected(tmp_path: Path) -> None:
     )
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
-    assert plan["selected_order"]["ticker"] == "AAPL"
+    assert plan["selected_order"]["ticker"] == "MSFT"
     assert len(plan["trades"]) == 1
     assert any(
         "max_one_order_selected" in row["reasons"]
         for row in plan["rejected_orders_with_reasons"]
     )
+
+
+def test_missing_sleeve_override_selects_first_buy_in_source_order(tmp_path: Path) -> None:
+    plan = _build(
+        tmp_path,
+        [
+            {
+                "ticker": "MSFT",
+                "side": "BUY",
+                "shares": 4,
+                "limit_price": 50,
+            },
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 1,
+                "limit_price": 20,
+            },
+        ],
+        allow_missing_sleeve=True,
+    )
+
+    selected = plan["selected_order"]
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    assert selected["ticker"] == "MSFT"
+    assert selected["sleeve"] == "polaris"
+    assert selected["sleeve_source"] == "missing_in_source_overridden_for_live_pilot"
+    assert selected["approved_sleeve_override"] == "polaris"
+    assert selected["scaled_to_pilot_cap"] is True
+    assert selected["source_notional"] == 200
+    assert selected["pilot_qty"] == 2
+    assert selected["final_qty"] == 2
+    assert selected["notional"] == 100
+
+
+def test_missing_sleeve_override_does_not_allow_sells(tmp_path: Path) -> None:
+    plan = _build(
+        tmp_path,
+        [
+            {
+                "ticker": "AAPL",
+                "side": "SELL",
+                "shares": 1,
+                "limit_price": 50,
+            }
+        ],
+        allow_missing_sleeve=True,
+    )
+
+    assert plan["selected_order"] is None
+    assert "unsupported_side:SELL" in plan["rejected_orders_with_reasons"][0]["reasons"]
 
 
 def test_missing_limit_price_blocks(tmp_path: Path) -> None:

@@ -86,12 +86,23 @@ def _broker_snapshot(broker: Any) -> dict[str, Any]:
     }
 
 
-def _status_bucket(status: object) -> str:
+def _status_norm(status: object) -> str:
     value = str(status or "").strip().lower()
+    if "." in value:
+        value = value.rsplit(".", 1)[-1]
+    return value
+
+
+def _status_bucket(status: object) -> str:
+    value = _status_norm(status)
     if value in {"filled"}:
         return "filled"
-    if value in {"rejected", "canceled", "cancelled", "expired"}:
+    if value in {"partially_filled"}:
+        return "partial"
+    if value in {"rejected", "canceled", "cancelled", "expired", "failed"}:
         return "rejected"
+    if value in {"accepted", "pending_new", "new", "done_for_day", "pending_replace", "pending_cancel"}:
+        return "accepted_open"
     return "unresolved"
 
 
@@ -107,19 +118,21 @@ def _reconcile(
     rejected = 0
     unresolved = 0
     partial = 0
+    open_count = 0
     for row in submitted:
         status_value = row.get("status") or (row.get("order") or {}).get("status")
-        status_norm = str(status_value or "").strip().lower()
         bucket = _status_bucket(status_value)
-        if status_norm in {"accepted", "new", "done_for_day", "partially_filled", "filled"}:
+        if bucket in {"accepted_open", "partial", "filled"}:
             accepted += 1
-        if status_norm == "partially_filled":
+        if bucket == "accepted_open":
+            open_count += 1
+        if bucket == "partial":
             partial += 1
         if bucket == "filled":
             filled += 1
         elif bucket == "rejected":
             rejected += 1
-        else:
+        elif bucket == "unresolved":
             unresolved += 1
 
     if dry_run:
@@ -153,6 +166,7 @@ def _reconcile(
         "accepted_count": accepted,
         "filled_count": filled,
         "partial_count": partial,
+        "open_count": open_count,
         "rejected_count": rejected + len(errors),
         "unresolved_count": unresolved,
         "errors": list(errors),
@@ -425,9 +439,87 @@ def run_live_pilot(
     return summary
 
 
+
+def _extract_broker_order_id(row: Mapping[str, Any]) -> str:
+    order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
+    return str((order or {}).get("id") or row.get("broker_order_id") or row.get("order_id") or "").strip()
+
+
+def refresh_live_pilot_reconciliation(
+    *,
+    run_root: Path | str,
+    broker: Any | None = None,
+) -> dict[str, Any]:
+    run_root = Path(run_root)
+    broker = broker or AlpacaBroker.from_env()
+    intended_payload = _load_plan(run_root / "live_pilot_orders_intended.json")
+    submitted_payload = _load_plan(run_root / "live_pilot_orders_submitted.json")
+    intended = _trades_from_plan(intended_payload)
+    submitted = [dict(row) for row in _trades_from_plan(submitted_payload)]
+
+    refresh_errors: list[str] = []
+    refreshed: list[dict[str, Any]] = []
+    for row in submitted:
+        order_id = _extract_broker_order_id(row)
+        if not order_id:
+            refresh_errors.append(f"{row.get('symbol') or row.get('ticker')}:missing_broker_order_id")
+            refreshed.append(row)
+            continue
+        try:
+            broker_order = broker.get_order(order_id)
+            if not broker_order:
+                refresh_errors.append(f"{row.get('symbol') or row.get('ticker')}:broker_order_not_found:{order_id}")
+                refreshed.append(row)
+                continue
+            refreshed.append({
+                **row,
+                "status": str((broker_order or {}).get("status") or row.get("status")),
+                "order": broker_order,
+                "refreshed_at": _now_utc(),
+            })
+        except Exception as exc:
+            refresh_errors.append(f"{row.get('symbol') or row.get('ticker')}:broker_order_refresh_failed:{exc}")
+            refreshed.append(row)
+
+    _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": refreshed})
+    try:
+        post_snapshot = _broker_snapshot(broker)
+    except Exception as exc:
+        post_snapshot = {"captured_at": _now_utc(), "status": "SNAPSHOT_FAILED", "error": str(exc)}
+        refresh_errors.append(f"post_snapshot_failed:{exc}")
+    _write_json(run_root / "live_pilot_broker_snapshot_post.json", post_snapshot)
+
+    reconciliation = _reconcile(
+        dry_run=False,
+        intended=intended,
+        submitted=refreshed,
+        errors=refresh_errors,
+    )
+    reconciliation["refreshed_existing_run"] = True
+    _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+
+    summary = {
+        "schema_version": "live_pilot_operator_summary.v1",
+        "generated_at": _now_utc(),
+        "run_id": run_root.name,
+        "mode": LIVE_PILOT_MODE.upper(),
+        "terminal_status": "SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION",
+        "reason_code": reconciliation.get("status"),
+        "live_orders_allowed": True,
+        "dry_run": False,
+        "intended_count": len(intended),
+        "submitted_count": len(refreshed),
+        "operator_action": reconciliation.get("operator_action"),
+        "run_root": str(run_root),
+        "refreshed_existing_run": True,
+    }
+    _write_json(run_root / "live_pilot_operator_summary.json", summary)
+    return summary
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the isolated Caerus LIVE_PILOT executor")
-    parser.add_argument("--plan", required=True, help="Path to a live pilot JSON plan")
+    parser.add_argument("--plan", default=None, help="Path to a live pilot JSON plan")
+    parser.add_argument("--refresh-run", default=None, help="Read-only refresh for an existing live pilot run root")
     parser.add_argument("--run-id", default=None, help="Optional deterministic run id")
     parser.add_argument("--output-root", default="outputs/live_pilot", help="Isolated live pilot output root")
     return parser.parse_args(argv)
@@ -435,13 +527,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    plan_path = Path(args.plan)
-    result = run_live_pilot(
-        plan=_load_plan(plan_path),
-        plan_path=str(plan_path),
-        run_id=args.run_id,
-        output_root=Path(args.output_root),
-    )
+    if args.refresh_run:
+        result = refresh_live_pilot_reconciliation(run_root=Path(args.refresh_run))
+    else:
+        if not args.plan:
+            raise SystemExit("--plan is required unless --refresh-run is provided")
+        plan_path = Path(args.plan)
+        result = run_live_pilot(
+            plan=_load_plan(plan_path),
+            plan_path=str(plan_path),
+            run_id=args.run_id,
+            output_root=Path(args.output_root),
+        )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if str(result.get("terminal_status") or "").upper() in {"DRY_RUN", "SUBMITTED"} else 1
 

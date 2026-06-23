@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.live_pilot_execute import run_live_pilot
+from scripts.live_pilot_execute import refresh_live_pilot_reconciliation, run_live_pilot
 
 
 class FakeBroker:
@@ -33,6 +33,14 @@ class FakeBroker:
             "status": "active",
             "asset_class": "us_equity",
             "tradable": True,
+        }
+
+    def get_order(self, order_id):
+        return {
+            "id": order_id,
+            "status": self.order_status,
+            "symbol": "AAPL",
+            "client_order_id": "client-refresh",
         }
 
     def submit_limit_order(self, **kwargs):
@@ -152,8 +160,29 @@ def test_rejected_order_produces_failed_reconciliation(tmp_path: Path) -> None:
     assert reconciliation["operator_action"]
 
 
-def test_unresolved_order_produces_failed_reconciliation(tmp_path: Path) -> None:
-    broker = FakeBroker(order_status="accepted")
+def test_accepted_open_order_produces_clean_reconciliation(tmp_path: Path) -> None:
+    broker = FakeBroker(order_status="OrderStatus.NEW")
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-open",
+        output_root=tmp_path / "outputs" / "live_pilot",
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-open"
+    assert result["terminal_status"] == "SUBMITTED"
+    reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
+    assert reconciliation["status"] == "CLEAN"
+    assert reconciliation["state"] == "CLEAN"
+    assert reconciliation["accepted_count"] == 1
+    assert reconciliation["open_count"] == 1
+    assert reconciliation["unresolved_count"] == 0
+
+
+def test_unknown_order_status_produces_failed_reconciliation(tmp_path: Path) -> None:
+    broker = FakeBroker(order_status="pending_review")
 
     result = run_live_pilot(
         plan=_plan(),
@@ -168,6 +197,44 @@ def test_unresolved_order_produces_failed_reconciliation(tmp_path: Path) -> None
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
     assert reconciliation["state"] == "UNRESOLVED"
     assert reconciliation["unresolved_count"] == 1
+
+
+
+def test_refresh_existing_run_reconciles_open_broker_order(tmp_path: Path) -> None:
+    broker = FakeBroker(order_status="OrderStatus.NEW")
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-refresh"
+    run_root.mkdir(parents=True)
+    (run_root / "live_pilot_orders_intended.json").write_text(
+        json.dumps({"orders": [{"symbol": "AAPL", "side": "BUY", "qty": 1, "limit_price": 50}]}),
+        encoding="utf-8",
+    )
+    (run_root / "live_pilot_orders_submitted.json").write_text(
+        json.dumps(
+            {
+                "orders": [
+                    {
+                        "symbol": "AAPL",
+                        "side": "BUY",
+                        "qty": 1,
+                        "limit_price": 50,
+                        "status": "OrderStatus.PENDING_NEW",
+                        "order": {"id": "broker-order-1", "status": "OrderStatus.PENDING_NEW"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = refresh_live_pilot_reconciliation(run_root=run_root, broker=broker)
+
+    assert result["terminal_status"] == "SUBMITTED"
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert submitted["orders"][0]["status"] == "OrderStatus.NEW"
+    reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
+    assert reconciliation["status"] == "CLEAN"
+    assert reconciliation["open_count"] == 1
+    assert reconciliation["refreshed_existing_run"] is True
 
 
 def test_partial_order_produces_partial_failed_reconciliation(tmp_path: Path) -> None:
