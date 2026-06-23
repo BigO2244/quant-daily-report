@@ -1,32 +1,32 @@
 window.DASHBOARD_V1 = {
   "environment": "paper",
-  "generated_at": "2026-06-23T18:57:36+00:00",
-  "report_date": "2026-04-09",
+  "generated_at": "2026-06-23T19:19:25+00:00",
+  "report_date": "2026-06-23",
   "schema_version": "dashboard-v2-prototype",
   "sections": {
     "account_layers": {
-      "as_of": "2026-06-23T18:57:36+00:00",
+      "as_of": "2026-06-23T19:19:25+00:00",
       "is_stale": false,
       "rows": [
         {
-          "buying_power": 12101.58,
+          "buying_power": 31338.51,
           "capital_behavior": "paper only",
-          "cash": 2388.18,
-          "equity": 9713.4,
+          "cash": 552.51,
+          "equity": 10955.54,
           "layer": "Paper account",
-          "positions_count": 16,
+          "positions_count": 25,
           "source": "broker paper/account artifacts",
           "status": "PAPER_OBSERVED"
         },
         {
-          "buying_power": null,
+          "buying_power": 399.99,
           "capital_behavior": "FR-104 capped pilot only",
-          "cash": null,
-          "equity": null,
+          "cash": 500.0,
+          "equity": 500.0,
           "layer": "Live pilot account",
           "positions_count": 0,
-          "source": "outputs/live_pilot/plans/live_pilot_plan_2026-03-24.json",
-          "status": "BLOCKED_NO_QUALIFYING_ORDER"
+          "source": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb",
+          "status": "SUBMITTED"
         },
         {
           "buying_power": null,
@@ -42,37 +42,37 @@ window.DASHBOARD_V1 = {
       "status": "OK"
     },
     "baseline_alpha_comparison": {
-      "as_of": "2026-06-08",
+      "as_of": "2026-06-23",
       "is_stale": true,
       "pairs": [
         {
-          "alpha_alpha_per_dollar_proxy": -4.984764,
-          "alpha_concentration": 0.6,
-          "alpha_drawdown": 0.0,
-          "alpha_effective_n": 4.0,
+          "alpha_alpha_per_dollar_proxy": null,
+          "alpha_concentration": null,
+          "alpha_drawdown": null,
+          "alpha_effective_n": null,
           "alpha_name": "Polaris_Alpha",
-          "alpha_return": 0.0588013215,
+          "alpha_return": null,
           "alpha_strategy_id": "caerus_polaris_alpha",
-          "alpha_turnover": 0.0,
-          "baseline_alpha_per_dollar_proxy": 34.707049,
+          "alpha_turnover": null,
+          "baseline_alpha_per_dollar_proxy": null,
           "baseline_concentration": 0.3,
-          "baseline_drawdown": -0.1083554602,
-          "baseline_effective_n": 10.0,
+          "baseline_drawdown": -0.1085908947,
+          "baseline_effective_n": null,
           "baseline_name": "Caerus Polaris",
-          "baseline_return": 38.7536617571,
+          "baseline_return": 0.8922922055,
           "baseline_strategy_id": "caerus_polaris",
-          "baseline_turnover": 0.0785714286,
-          "drawdown_delta": 0.1083554602,
-          "evidence_window_days": 1,
-          "return_delta": -38.6948604356,
+          "baseline_turnover": 0.0744186047,
+          "drawdown_delta": null,
+          "evidence_window_days": 0,
+          "return_delta": null,
           "review_checkpoints": [
             {
-              "observed_days": 1,
+              "observed_days": 0,
               "status": "IN_PROGRESS",
               "trading_days": 20
             },
             {
-              "observed_days": 1,
+              "observed_days": 0,
               "status": "IN_PROGRESS",
               "trading_days": 60
             }
@@ -80,33 +80,33 @@ window.DASHBOARD_V1 = {
           "status": "IN_PROGRESS"
         },
         {
-          "alpha_alpha_per_dollar_proxy": -5.337749,
-          "alpha_concentration": 0.75,
-          "alpha_drawdown": 0.0,
-          "alpha_effective_n": 3.000003,
+          "alpha_alpha_per_dollar_proxy": null,
+          "alpha_concentration": null,
+          "alpha_drawdown": null,
+          "alpha_effective_n": null,
           "alpha_name": "Orion_Alpha",
-          "alpha_return": 0.0433009774,
+          "alpha_return": null,
           "alpha_strategy_id": "caerus_orion_alpha",
-          "alpha_turnover": 0.0,
-          "baseline_alpha_per_dollar_proxy": 167.713982,
+          "alpha_turnover": null,
+          "baseline_alpha_per_dollar_proxy": null,
           "baseline_concentration": 0.6,
-          "baseline_drawdown": -0.1352922746,
-          "baseline_effective_n": 5.0,
+          "baseline_drawdown": -0.1353372101,
+          "baseline_effective_n": null,
           "baseline_name": "Caerus Orion",
-          "baseline_return": 171.7605944241,
+          "baseline_return": 1.2878179278,
           "baseline_strategy_id": "caerus_orion",
-          "baseline_turnover": 0.0142857143,
-          "drawdown_delta": 0.1352922746,
-          "evidence_window_days": 1,
-          "return_delta": -171.71729344669998,
+          "baseline_turnover": 0.0093023256,
+          "drawdown_delta": null,
+          "evidence_window_days": 0,
+          "return_delta": null,
           "review_checkpoints": [
             {
-              "observed_days": 1,
+              "observed_days": 0,
               "status": "IN_PROGRESS",
               "trading_days": 20
             },
             {
-              "observed_days": 1,
+              "observed_days": 0,
               "status": "IN_PROGRESS",
               "trading_days": 60
             }
@@ -124,248 +124,138 @@ window.DASHBOARD_V1 = {
       }
     },
     "daily_decision_intelligence": {
-      "as_of": "2026-04-09",
+      "as_of": "2026-06-23",
       "is_stale": false,
       "laggards": [
         {
-          "avg_entry_price": 49.821,
-          "cost_basis": 498.21,
-          "last_price": 48.0,
-          "market_value": 480.0,
-          "qty": 10.0,
-          "side": "long",
-          "ticker": "VZ",
-          "unrealized_pnl": -18.21,
-          "unrealized_pnl_pct": -0.03655,
-          "weight": 0.049416270306998585
+          "avg_entry_price": 397.29926698375897,
+          "cost_basis": 643.695647,
+          "last_price": 387.16,
+          "market_value": 627.268227,
+          "qty": 1.62017829,
+          "side": "positionside.long",
+          "ticker": "MAR",
+          "unrealized_pnl": -16.42742,
+          "unrealized_pnl_pct": -0.02552,
+          "weight": 0.0572558018135117
         },
         {
-          "avg_entry_price": 28.2225,
-          "cost_basis": 451.56,
-          "last_price": 27.335,
-          "market_value": 437.36,
-          "qty": 16.0,
-          "side": "long",
-          "ticker": "PFE",
-          "unrealized_pnl": -14.2,
-          "unrealized_pnl_pct": -0.03145,
-          "weight": 0.04502645829472687
+          "avg_entry_price": 80.3917039690212,
+          "cost_basis": 837.685792,
+          "last_price": 79.105,
+          "market_value": 824.278269,
+          "qty": 10.4200527,
+          "side": "positionside.long",
+          "ticker": "GM",
+          "unrealized_pnl": -13.407523,
+          "unrealized_pnl_pct": -0.01601,
+          "weight": 0.07523848838122082
         },
         {
-          "avg_entry_price": 261.23,
-          "cost_basis": 522.46,
-          "last_price": 257.62,
-          "market_value": 515.24,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "AAPL",
-          "unrealized_pnl": -7.22,
-          "unrealized_pnl_pct": -0.01382,
-          "weight": 0.05304424815203739
+          "avg_entry_price": 364.12,
+          "cost_basis": 364.12,
+          "last_price": 356.1,
+          "market_value": 356.1,
+          "qty": 1.0,
+          "side": "positionside.long",
+          "ticker": "GE",
+          "unrealized_pnl": -8.02,
+          "unrealized_pnl_pct": -0.02203,
+          "weight": 0.03250410294700216
         }
       ],
-      "largest_decreases": [
-        {
-          "client_order_id": null,
-          "fill_price": 140.89,
-          "filled_at": "2026-04-09T13:35:28.084745Z",
-          "notional": 563.56,
-          "order_id": "c182c2ab-5af4-49f8-8710-48e9166953b6",
-          "qty": 4.0,
-          "side": "sell",
-          "source_execution_id": "20260409093528084::e156b6e8-a1c5-44bb-b0cc-c975f2d2f0e3",
-          "ticker": "GILD"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 49.4,
-          "filled_at": "2026-04-09T13:35:29.597397Z",
-          "notional": 296.4,
-          "order_id": "3ea56dd3-5909-4ccb-8bc1-f726d0d49cb5",
-          "qty": 6.0,
-          "side": "sell",
-          "source_execution_id": "20260409093529597::0fb4fb52-9b8f-4f6e-8b8b-1167c5738989",
-          "ticker": "TFC"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 123.79,
-          "filled_at": "2026-04-09T13:35:27.739359Z",
-          "notional": 247.58,
-          "order_id": "d171c760-1c06-467d-8d03-4ffa28fdad5f",
-          "qty": 2.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527739::c070c6ab-100e-4974-b09f-e427c3beddf5",
-          "ticker": "MRK"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 122.42,
-          "filled_at": "2026-04-09T13:35:29.019475Z",
-          "notional": 244.84,
-          "order_id": "8d9da9d2-11d0-4d9b-9652-3b0ac618263d",
-          "qty": 2.0,
-          "side": "sell",
-          "source_execution_id": "20260409093529019::ae64f4ea-7108-44f7-af71-f537f8b8551c",
-          "ticker": "C"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 219.84,
-          "filled_at": "2026-04-09T13:35:27.336027Z",
-          "notional": 219.84,
-          "order_id": "8ccaf70c-d20a-423b-9fe0-beb51453c689",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527336::206e949e-3778-4fb1-871c-b9f2dc04eed1",
-          "ticker": "PNC"
-        }
-      ],
-      "largest_increases": [
-        {
-          "client_order_id": null,
-          "fill_price": 156.83,
-          "filled_at": "2026-04-09T13:35:34.186233Z",
-          "notional": 627.32,
-          "order_id": "14b67e33-964c-4270-bc53-626b1a614323",
-          "qty": 4.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534186::461c3057-45cd-411f-a966-f34023b9b2fc",
-          "ticker": "BDX"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 232.5,
-          "filled_at": "2026-04-09T13:35:33.493421Z",
-          "notional": 465.0,
-          "order_id": "e2e856bc-921e-49ec-aec8-f8ceba1ed341",
-          "qty": 2.0,
-          "side": "buy",
-          "source_execution_id": "20260409093533493::638b6f83-0df4-49ab-b26d-cd0a5a37293f",
-          "ticker": "ADSK"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 352.0,
-          "filled_at": "2026-04-09T13:35:34.000754Z",
-          "notional": 352.0,
-          "order_id": "1773ad65-4ce5-4969-ad25-1d935591111d",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534000::5e2300f5-c2b1-46bb-8c3d-64adb8009af9",
-          "ticker": "AMGN"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 178.0,
-          "filled_at": "2026-04-09T13:35:33.825099Z",
-          "notional": 178.0,
-          "order_id": "e0c10f9f-6586-4ca9-b9a7-6ec9310b42c6",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093533825::8bf2a739-7d16-46a6-888d-499d4402918d",
-          "ticker": "BKNG"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 178.0,
-          "filled_at": "2026-04-09T13:35:34.865078Z",
-          "notional": 178.0,
-          "order_id": "e0c10f9f-6586-4ca9-b9a7-6ec9310b42c6",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534865::9928d04a-ef6e-4608-949d-6d31da743a93",
-          "ticker": "BKNG"
-        }
-      ],
+      "largest_decreases": [],
+      "largest_increases": [],
       "leaders": [
         {
-          "avg_entry_price": 73.614286,
-          "cost_basis": 883.371432,
-          "last_price": 75.77,
-          "market_value": 909.24,
-          "qty": 12.0,
-          "side": "long",
-          "ticker": "GM",
-          "unrealized_pnl": 25.868568,
-          "unrealized_pnl_pct": 0.02928,
-          "weight": 0.09360677002903206
+          "avg_entry_price": 706.3942863793549,
+          "cost_basis": 875.151904,
+          "last_price": 1032.43,
+          "market_value": 1279.07756,
+          "qty": 1.238900032,
+          "side": "positionside.long",
+          "ticker": "STX",
+          "unrealized_pnl": 403.925656,
+          "unrealized_pnl_pct": 0.46155,
+          "weight": 0.11675166719303656
         },
         {
-          "avg_entry_price": 53.638889,
-          "cost_basis": 482.750001,
-          "last_price": 55.3,
-          "market_value": 497.7,
-          "qty": 9.0,
-          "side": "long",
-          "ticker": "USB",
-          "unrealized_pnl": 14.949999,
-          "unrealized_pnl_pct": 0.03097,
-          "weight": 0.051238495274569154
+          "avg_entry_price": 130.035,
+          "cost_basis": 780.21,
+          "last_price": 146.97,
+          "market_value": 881.82,
+          "qty": 6.0,
+          "side": "positionside.long",
+          "ticker": "FTNT",
+          "unrealized_pnl": 101.61,
+          "unrealized_pnl_pct": 0.13023,
+          "weight": 0.08049078365831351
         },
         {
-          "avg_entry_price": 205.47,
-          "cost_basis": 410.94,
-          "last_price": 212.025,
-          "market_value": 424.05,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "ALL",
-          "unrealized_pnl": 13.11,
-          "unrealized_pnl_pct": 0.0319,
-          "weight": 0.04365618629933906
+          "avg_entry_price": 91.7543149833832,
+          "cost_basis": 996.639723,
+          "last_price": 93.47,
+          "market_value": 1015.275575,
+          "qty": 10.862047449,
+          "side": "positionside.long",
+          "ticker": "MNST",
+          "unrealized_pnl": 18.635852,
+          "unrealized_pnl_pct": 0.0187,
+          "weight": 0.09267234431164506
         }
       ],
       "notes": [
         {
           "kind": "return",
           "label": "Portfolio daily return",
-          "value": 0.01233079541653681
-        },
-        {
-          "detail": 627.32,
-          "kind": "trade",
-          "label": "Largest buy",
-          "value": "BDX"
-        },
-        {
-          "detail": 563.56,
-          "kind": "trade",
-          "label": "Largest sell",
-          "value": "GILD"
+          "value": -0.01390634057123108
         }
       ],
       "summary": {
-        "buy_count": 6,
-        "latest_daily_return": 0.01233079541653681,
-        "sell_count": 14,
-        "turnover_proxy_notional": 4748.4
+        "buy_count": 0,
+        "latest_daily_return": -0.01390634057123108,
+        "sell_count": 0,
+        "turnover_proxy_notional": 0
       }
     },
     "decision_grade": {
       "confidence_summary": {
-        "argo_recommendation_confidence": null,
-        "model_quality_packet_status": null,
-        "multi_asset_status": null,
-        "phoenix_confidence": null,
-        "strategy_differentiation_counts": null
+        "argo_recommendation_confidence": "LOW",
+        "model_quality_packet_status": "PARTIAL",
+        "multi_asset_status": "PARTIAL",
+        "phoenix_confidence": "LOW",
+        "strategy_differentiation_counts": {
+          "DISTINCT": 2,
+          "INSUFFICIENT_EVIDENCE": 12,
+          "NEAR_DUPLICATE": 0,
+          "PARTIALLY_OVERLAPPING": 1
+        }
       },
       "decision_grade_strategy_change": false,
-      "latest_model_quality_date": null,
+      "latest_model_quality_date": "2026-06-08",
       "promotion_ready_count": 0,
       "reason_codes": [
-        "MODEL_QUALITY_PACKET_MISSING",
-        "MODEL_TOURNAMENT_MISSING"
+        "MODEL_QUALITY_DATE_DIFFERS_FROM_REPORT_DATE",
+        "NO_DECISION_GRADE_RECOMMENDATION",
+        "NO_DECISION_GRADE_STRATEGY_CHANGE"
       ],
-      "source_paths": {},
+      "source_paths": {
+        "argo_phase_b_validation": "outputs/model_quality/2026-06-08/argo_phase_b_validation.json",
+        "model_quality_packet": "outputs/model_quality/2026-06-08/model_quality_packet.json",
+        "model_tournament": "outputs/model_quality/2026-06-08/model_tournament.json",
+        "multi_asset_research_framework": "outputs/model_quality/2026-06-08/multi_asset_research_framework.json",
+        "phoenix_phase_b_review": "outputs/model_quality/2026-06-08/phoenix_phase_b_review.json",
+        "strategy_differentiation_deep_dive": "outputs/model_quality/2026-06-08/strategy_differentiation_deep_dive.json"
+      },
       "status": "PARTIAL",
       "top_blockers": [
-        "MODEL_QUALITY_PACKET_MISSING",
-        "MODEL_TOURNAMENT_MISSING"
+        "MODEL_QUALITY_DATE_DIFFERS_FROM_REPORT_DATE",
+        "NO_DECISION_GRADE_RECOMMENDATION",
+        "NO_DECISION_GRADE_STRATEGY_CHANGE"
       ]
     },
     "governance_state": {
-      "as_of": "2026-06-23T18:57:36+00:00",
+      "as_of": "2026-06-23T19:19:25+00:00",
       "is_stale": false,
       "rows": [
         {
@@ -374,7 +264,7 @@ window.DASHBOARD_V1 = {
           "pilot_blocking": false,
           "production_scaling_blocking": false,
           "promotion_blocking": false,
-          "status": "READY"
+          "status": "ACTIVE"
         },
         {
           "detail": "PIT date-effective large-cap membership authority remains unresolved; this blocks promotion and scaling, not FR-104 pilot evidence collection.",
@@ -411,18 +301,77 @@ window.DASHBOARD_V1 = {
     },
     "live_pilot": {
       "account": {
-        "account_id_hash": null,
-        "buying_power": null,
-        "cash": null,
-        "equity": null,
-        "portfolio_value": null,
-        "status": null
+        "account_id_hash": "cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85",
+        "buying_power": 399.99,
+        "cash": 500.0,
+        "equity": 500.0,
+        "portfolio_value": 500.0,
+        "status": "AccountStatus.ACTIVE"
       },
-      "as_of": "2026-06-20T12:05:32+00:00",
+      "as_of": "2026-06-23T14:00:13+00:00",
       "blocking_open_orders": [],
       "is_stale": false,
-      "latest_fill_status": null,
-      "latest_submitted_order": null,
+      "latest_fill_status": "OrderStatus.PENDING_NEW",
+      "latest_submitted_order": {
+        "client_order_id": "caerus-live-pilot-2026-06-23t100012-0400_59e97cb",
+        "limit_price": 86.08,
+        "normalized_limit_price": 86.08,
+        "notional": 99.999998,
+        "order": {
+          "client_order_id": "caerus-live-pilot-2026-06-23t100012-0400_59e97cb",
+          "filled_at": "",
+          "filled_qty": "0",
+          "id": "e5966ed8-198b-4be3-a9f0-30e616ac6d35",
+          "qty": "1.161710012",
+          "raw": {
+            "asset_class": "us_equity",
+            "asset_id": "ac20a75d-5bb4-4d10-96e8-f5e58e730139",
+            "canceled_at": null,
+            "client_order_id": "caerus-live-pilot-2026-06-23t100012-0400_59e97cb",
+            "created_at": "2026-06-23 14:00:13.526161+00:00",
+            "expired_at": null,
+            "expires_at": "2026-06-23 20:00:00+00:00",
+            "extended_hours": false,
+            "failed_at": null,
+            "filled_at": null,
+            "filled_avg_price": null,
+            "filled_qty": "0",
+            "hwm": null,
+            "id": "e5966ed8-198b-4be3-a9f0-30e616ac6d35",
+            "legs": null,
+            "limit_price": "86.08",
+            "notional": null,
+            "order_class": "simple",
+            "order_type": "limit",
+            "position_intent": "buy_to_open",
+            "qty": "1.161710012",
+            "ratio_qty": null,
+            "replaced_at": null,
+            "replaced_by": null,
+            "replaces": null,
+            "side": "buy",
+            "status": "pending_new",
+            "stop_price": null,
+            "submitted_at": "2026-06-23 14:00:13.526161+00:00",
+            "symbol": "NEE",
+            "time_in_force": "day",
+            "trail_percent": null,
+            "trail_price": null,
+            "type": "limit",
+            "updated_at": "2026-06-23 14:00:13.526950+00:00"
+          },
+          "side": "OrderSide.BUY",
+          "status": "OrderStatus.PENDING_NEW",
+          "submitted_at": "2026-06-23 14:00:13.526161+00:00",
+          "symbol": "NEE"
+        },
+        "order_type": "limit",
+        "original_limit_price": 86.08000183105469,
+        "qty": 1.161710012,
+        "side": "BUY",
+        "status": "OrderStatus.PENDING_NEW",
+        "symbol": "NEE"
+      },
       "metrics": {
         "accepted_count": null,
         "average_time_to_fill_seconds": null,
@@ -438,47 +387,136 @@ window.DASHBOARD_V1 = {
         "reconciliation_clean_rate": null,
         "rejected_count": null,
         "slippage_bps": null,
-        "submitted_count": null
+        "submitted_count": 1
       },
       "open_orders": [],
       "paper_live_comparability": {
         "available": false,
         "reason": "paper_live_divergence_artifact_not_available_for_live_pilot_section"
       },
-      "plan_path": "outputs/live_pilot/plans/live_pilot_plan_2026-03-24.json",
-      "plan_status": "BLOCKED_NO_QUALIFYING_ORDER",
+      "plan_path": "outputs/live_pilot/plans/live_pilot_plan_2026-06-23.json",
+      "plan_status": "READY_FOR_MANUAL_APPROVAL",
       "policy": {
         "cap_enforced_before_submission": true,
         "capital_behavior_changed": false,
         "duplicate_open_order_policy": "skip_if_open_live_pilot_order_detected",
         "normal_market_hours_only": true,
-        "order_type": null,
+        "order_type": "limit",
         "paper_or_production_impact": "none",
         "scope": "FR-104 LIVE_PILOT only",
         "time_in_force": null
       },
       "positions": [],
       "reconciliation": {
-        "open_count": null,
-        "operator_action": null,
-        "rejected_count": null,
-        "state": null,
-        "status": null,
-        "unresolved_count": null
+        "open_count": 1,
+        "operator_action": "Monitor broker terminal states and preserve all live pilot artifacts.",
+        "rejected_count": 0,
+        "state": "CLEAN",
+        "status": "CLEAN",
+        "unresolved_count": 0
       },
-      "run_id": null,
-      "run_root": null,
-      "selected_order": null,
-      "status": "BLOCKED_NO_QUALIFYING_ORDER",
-      "submitted_orders": []
+      "run_id": "2026-06-23T100012-0400_59e97cb",
+      "run_root": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb",
+      "selected_order": {
+        "approved_sleeve_override": "orion",
+        "final_qty": 1.161710012,
+        "limit_price": 86.08,
+        "limit_price_source": "entry_price",
+        "normalized_limit_price": 86.08,
+        "notional": 99.99999783296,
+        "order_type": "limit",
+        "original_limit_price": 86.08000183105469,
+        "original_qty": 8.0,
+        "pilot_notional_cap": 100.0,
+        "pilot_qty": 1.161710012,
+        "pre_normalization_qty": 1.161710012,
+        "qty": 1.161710012,
+        "scale_reason": "live_pilot_cap",
+        "scaled_to_pilot_cap": true,
+        "shares": 1.161710012,
+        "side": "BUY",
+        "sleeve": "orion",
+        "sleeve_source": "missing_in_source_overridden_for_live_pilot",
+        "source_notional": 688.640015,
+        "source_order_qty": 8.0,
+        "source_precompute_index": 2,
+        "source_reason": "rebalance_to_target",
+        "stop_loss": 82.93285696847099,
+        "symbol": "NEE",
+        "take_profit": 90.80071912493024,
+        "ticker": "NEE"
+      },
+      "status": "SUBMITTED",
+      "submitted_orders": [
+        {
+          "client_order_id": "caerus-live-pilot-2026-06-23t100012-0400_59e97cb",
+          "limit_price": 86.08,
+          "normalized_limit_price": 86.08,
+          "notional": 99.999998,
+          "order": {
+            "client_order_id": "caerus-live-pilot-2026-06-23t100012-0400_59e97cb",
+            "filled_at": "",
+            "filled_qty": "0",
+            "id": "e5966ed8-198b-4be3-a9f0-30e616ac6d35",
+            "qty": "1.161710012",
+            "raw": {
+              "asset_class": "us_equity",
+              "asset_id": "ac20a75d-5bb4-4d10-96e8-f5e58e730139",
+              "canceled_at": null,
+              "client_order_id": "caerus-live-pilot-2026-06-23t100012-0400_59e97cb",
+              "created_at": "2026-06-23 14:00:13.526161+00:00",
+              "expired_at": null,
+              "expires_at": "2026-06-23 20:00:00+00:00",
+              "extended_hours": false,
+              "failed_at": null,
+              "filled_at": null,
+              "filled_avg_price": null,
+              "filled_qty": "0",
+              "hwm": null,
+              "id": "e5966ed8-198b-4be3-a9f0-30e616ac6d35",
+              "legs": null,
+              "limit_price": "86.08",
+              "notional": null,
+              "order_class": "simple",
+              "order_type": "limit",
+              "position_intent": "buy_to_open",
+              "qty": "1.161710012",
+              "ratio_qty": null,
+              "replaced_at": null,
+              "replaced_by": null,
+              "replaces": null,
+              "side": "buy",
+              "status": "pending_new",
+              "stop_price": null,
+              "submitted_at": "2026-06-23 14:00:13.526161+00:00",
+              "symbol": "NEE",
+              "time_in_force": "day",
+              "trail_percent": null,
+              "trail_price": null,
+              "type": "limit",
+              "updated_at": "2026-06-23 14:00:13.526950+00:00"
+            },
+            "side": "OrderSide.BUY",
+            "status": "OrderStatus.PENDING_NEW",
+            "submitted_at": "2026-06-23 14:00:13.526161+00:00",
+            "symbol": "NEE"
+          },
+          "order_type": "limit",
+          "original_limit_price": 86.08000183105469,
+          "qty": 1.161710012,
+          "side": "BUY",
+          "status": "OrderStatus.PENDING_NEW",
+          "symbol": "NEE"
+        }
+      ]
     },
     "live_readiness": {
-      "as_of": "2026-06-23T18:57:36+00:00",
+      "as_of": "2026-06-23T19:19:25+00:00",
       "criteria": [
         {
-          "detail": "1 blocking errors",
+          "detail": "0 blocking errors",
           "name": "Validation integrity",
-          "status": "FAIL"
+          "status": "PASS"
         },
         {
           "detail": "canonical dashboard sources loaded",
@@ -486,36 +524,36 @@ window.DASHBOARD_V1 = {
           "status": "PASS"
         },
         {
-          "detail": "NAV through 2026-06-05",
+          "detail": "NAV through 2026-06-22",
           "name": "Shadow continuity",
           "status": "WARN"
         },
         {
-          "detail": "0 fail \u00b7 3 warn",
+          "detail": "0 fail \u00b7 2 warn",
           "name": "Operational health",
           "status": "WARN"
         }
       ],
       "is_stale": false,
       "summary": {
-        "artifact_completeness_streak": 26,
-        "consecutive_healthy_days": 26,
+        "artifact_completeness_streak": 78,
+        "consecutive_healthy_days": 78,
         "deployment_confidence": "WATCH",
-        "shadow_evaluation_continuity": "2026-06-05",
+        "shadow_evaluation_continuity": "2026-06-22",
         "successful_execution_streak": null
       }
     },
     "nav": {
-      "as_of": "2026-04-09T13:50:35.044822+00:00",
-      "buying_power": 12101.58,
-      "cash": 2388.18,
-      "day_pnl": -38.57,
-      "day_return": -0.00395509830321461,
-      "equity": 9713.4,
-      "gross_exposure": 0.7541314060987914,
-      "is_stale": true,
-      "long_market_value": 7325.18,
-      "net_exposure": 0.7541314060987914,
+      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "buying_power": 31338.51,
+      "cash": 552.51,
+      "day_pnl": -154.5,
+      "day_return": -0.013906612457858514,
+      "equity": 10955.54,
+      "gross_exposure": 0.9495716322518104,
+      "is_stale": false,
+      "long_market_value": 10403.07,
+      "net_exposure": 0.9495716322518104,
       "short_market_value": 0.0,
       "source_type": "broker_account",
       "trust_level": "canonical"
@@ -649,8 +687,268 @@ window.DASHBOARD_V1 = {
         },
         {
           "date": "2026-04-08",
-          "spy_close": 673.77001953125,
-          "spy_return": 0.022071614142098683
+          "spy_close": 676.010009765625,
+          "spy_return": 0.025469554638327674
+        },
+        {
+          "date": "2026-04-09",
+          "spy_close": 679.9099731445312,
+          "spy_return": 0.00576909117108837
+        },
+        {
+          "date": "2026-04-10",
+          "spy_close": 679.4600219726562,
+          "spy_return": -0.0006617805145495703
+        },
+        {
+          "date": "2026-04-13",
+          "spy_close": 686.0999755859375,
+          "spy_return": 0.009772397784351794
+        },
+        {
+          "date": "2026-04-14",
+          "spy_close": 694.4600219726562,
+          "spy_return": 0.01218488075237012
+        },
+        {
+          "date": "2026-04-15",
+          "spy_close": 699.9400024414062,
+          "spy_return": 0.007890994867038925
+        },
+        {
+          "date": "2026-04-16",
+          "spy_close": 701.6599731445312,
+          "spy_return": 0.002457311622604319
+        },
+        {
+          "date": "2026-04-17",
+          "spy_close": 710.1400146484375,
+          "spy_return": 0.012085685130224011
+        },
+        {
+          "date": "2026-04-20",
+          "spy_close": 708.719970703125,
+          "spy_return": -0.001999667552905704
+        },
+        {
+          "date": "2026-04-21",
+          "spy_close": 704.0800170898438,
+          "spy_return": -0.006546949154936255
+        },
+        {
+          "date": "2026-04-22",
+          "spy_close": 711.2100219726562,
+          "spy_return": 0.010126696838070659
+        },
+        {
+          "date": "2026-04-23",
+          "spy_close": 708.4500122070312,
+          "spy_return": -0.0038807239498251933
+        },
+        {
+          "date": "2026-04-24",
+          "spy_close": 713.9400024414062,
+          "spy_return": 0.007749297960024215
+        },
+        {
+          "date": "2026-04-27",
+          "spy_close": 715.1699829101562,
+          "spy_return": 0.0017228064887020444
+        },
+        {
+          "date": "2026-04-28",
+          "spy_close": 711.6900024414062,
+          "spy_return": -0.004865948728146163
+        },
+        {
+          "date": "2026-04-29",
+          "spy_close": 711.5800170898438,
+          "spy_return": -0.00015454109399481997
+        },
+        {
+          "date": "2026-04-30",
+          "spy_close": 718.6599731445312,
+          "spy_return": 0.009949627427204177
+        },
+        {
+          "date": "2026-05-01",
+          "spy_close": 720.6500244140625,
+          "spy_return": 0.0027691138283709726
+        },
+        {
+          "date": "2026-05-04",
+          "spy_close": 718.010009765625,
+          "spy_return": -0.0036633796697419507
+        },
+        {
+          "date": "2026-05-05",
+          "spy_close": 723.77001953125,
+          "spy_return": 0.008022185884992261
+        },
+        {
+          "date": "2026-05-06",
+          "spy_close": 733.8300170898438,
+          "spy_return": 0.013899439445017592
+        },
+        {
+          "date": "2026-05-07",
+          "spy_close": 731.5800170898438,
+          "spy_return": -0.0030661051573263043
+        },
+        {
+          "date": "2026-05-08",
+          "spy_close": 737.6199951171875,
+          "spy_return": 0.008256073001242203
+        },
+        {
+          "date": "2026-05-11",
+          "spy_close": 739.2999877929688,
+          "spy_return": 0.002277585595431564
+        },
+        {
+          "date": "2026-05-12",
+          "spy_close": 738.1799926757812,
+          "spy_return": -0.0015149399914519135
+        },
+        {
+          "date": "2026-05-13",
+          "spy_close": 742.3099975585938,
+          "spy_return": 0.005594848036780231
+        },
+        {
+          "date": "2026-05-14",
+          "spy_close": 748.1699829101562,
+          "spy_return": 0.007894256268722755
+        },
+        {
+          "date": "2026-05-15",
+          "spy_close": 739.1699829101562,
+          "spy_return": -0.012029351892724582
+        },
+        {
+          "date": "2026-05-18",
+          "spy_close": 738.6500244140625,
+          "spy_return": -0.0007034356211904624
+        },
+        {
+          "date": "2026-05-19",
+          "spy_close": 733.72998046875,
+          "spy_return": -0.006660859382243145
+        },
+        {
+          "date": "2026-05-20",
+          "spy_close": 741.25,
+          "spy_return": 0.010249028568310337
+        },
+        {
+          "date": "2026-05-21",
+          "spy_close": 742.719970703125,
+          "spy_return": 0.0019830970699832307
+        },
+        {
+          "date": "2026-05-22",
+          "spy_close": 745.6400146484375,
+          "spy_return": 0.00393155436839554
+        },
+        {
+          "date": "2026-05-26",
+          "spy_close": 750.5900268554688,
+          "spy_return": 0.0066386085909901915
+        },
+        {
+          "date": "2026-05-27",
+          "spy_close": 750.4600219726562,
+          "spy_return": -0.0001732035840619206
+        },
+        {
+          "date": "2026-05-28",
+          "spy_close": 754.5999755859375,
+          "spy_return": 0.0055165545026623075
+        },
+        {
+          "date": "2026-05-29",
+          "spy_close": 756.47998046875,
+          "spy_return": 0.002491392716190699
+        },
+        {
+          "date": "2026-06-01",
+          "spy_close": 758.5399780273438,
+          "spy_return": 0.00272313559086812
+        },
+        {
+          "date": "2026-06-02",
+          "spy_close": 759.5700073242188,
+          "spy_return": 0.0013579103629497435
+        },
+        {
+          "date": "2026-06-03",
+          "spy_close": 754.239990234375,
+          "spy_return": -0.007017150543661033
+        },
+        {
+          "date": "2026-06-04",
+          "spy_close": 757.0900268554688,
+          "spy_return": 0.003778686701839007
+        },
+        {
+          "date": "2026-06-05",
+          "spy_close": 737.5499877929688,
+          "spy_return": -0.0258093996346227
+        },
+        {
+          "date": "2026-06-08",
+          "spy_close": 739.219970703125,
+          "spy_return": 0.0022642301373410056
+        },
+        {
+          "date": "2026-06-09",
+          "spy_close": 737.0499877929688,
+          "spy_return": -0.002935503633772485
+        },
+        {
+          "date": "2026-06-10",
+          "spy_close": 725.4299926757812,
+          "spy_return": -0.015765545498457323
+        },
+        {
+          "date": "2026-06-11",
+          "spy_close": 737.760009765625,
+          "spy_return": 0.016996839411566045
+        },
+        {
+          "date": "2026-06-12",
+          "spy_close": 741.75,
+          "spy_return": 0.005408249541260179
+        },
+        {
+          "date": "2026-06-15",
+          "spy_close": 754.8300170898438,
+          "spy_return": 0.017633996750716197
+        },
+        {
+          "date": "2026-06-16",
+          "spy_close": 750.3300170898438,
+          "spy_return": -0.005961607114339795
+        },
+        {
+          "date": "2026-06-17",
+          "spy_close": 740.9600219726562,
+          "spy_return": -0.012487831892330603
+        },
+        {
+          "date": "2026-06-18",
+          "spy_close": 746.739990234375,
+          "spy_return": 0.007800647930141791
+        },
+        {
+          "date": "2026-06-22",
+          "spy_close": 744.3900146484375,
+          "spy_return": -0.003146979693962715
+        },
+        {
+          "date": "2026-06-23",
+          "spy_close": 734.4500122070312,
+          "spy_return": -0.01335321840137893
         }
       ],
       "_nav_rows": [
@@ -781,12 +1079,272 @@ window.DASHBOARD_V1 = {
         },
         {
           "date": "2026-04-08",
-          "equity": 9715.45,
-          "return_1d": 0.01233079541653681
+          "equity": 9751.97,
+          "return_1d": 0.016136107640737585
+        },
+        {
+          "date": "2026-04-09",
+          "equity": 9717.87,
+          "return_1d": -0.00349672937878176
+        },
+        {
+          "date": "2026-04-10",
+          "equity": 9584.4,
+          "return_1d": -0.01373449120023229
+        },
+        {
+          "date": "2026-04-13",
+          "equity": 9679.09,
+          "return_1d": 0.009879596010183178
+        },
+        {
+          "date": "2026-04-14",
+          "equity": 9692.89,
+          "return_1d": 0.0014257538673572157
+        },
+        {
+          "date": "2026-04-15",
+          "equity": 9715.71,
+          "return_1d": 0.002354302999415081
+        },
+        {
+          "date": "2026-04-16",
+          "equity": 9758.59,
+          "return_1d": 0.004413470554390786
+        },
+        {
+          "date": "2026-04-17",
+          "equity": 9781.01,
+          "return_1d": 0.002297463055625837
+        },
+        {
+          "date": "2026-04-20",
+          "equity": 9787.87,
+          "return_1d": 0.0007013590621010035
+        },
+        {
+          "date": "2026-04-21",
+          "equity": 9702.98,
+          "return_1d": -0.008672979923109003
+        },
+        {
+          "date": "2026-04-22",
+          "equity": 9696.49,
+          "return_1d": -0.0006688666780720887
+        },
+        {
+          "date": "2026-04-23",
+          "equity": 9674.9,
+          "return_1d": -0.0022265788960748045
+        },
+        {
+          "date": "2026-04-24",
+          "equity": 9678.58,
+          "return_1d": 0.00038036568853416775
+        },
+        {
+          "date": "2026-04-27",
+          "equity": 9732.29,
+          "return_1d": 0.005549367779157821
+        },
+        {
+          "date": "2026-04-28",
+          "equity": 9708.7,
+          "return_1d": -0.0024238899580674156
+        },
+        {
+          "date": "2026-04-29",
+          "equity": 9696.6,
+          "return_1d": -0.0012463048605889648
+        },
+        {
+          "date": "2026-04-30",
+          "equity": 9944.74,
+          "return_1d": 0.02559041313450061
+        },
+        {
+          "date": "2026-05-01",
+          "equity": 9977.44,
+          "return_1d": 0.003288170429795123
+        },
+        {
+          "date": "2026-05-04",
+          "equity": 9977.44,
+          "return_1d": 0.0
+        },
+        {
+          "date": "2026-05-05",
+          "equity": 10102.64,
+          "return_1d": 0.0125483089850702
+        },
+        {
+          "date": "2026-05-06",
+          "equity": 10199.77,
+          "return_1d": 0.009614318633545338
+        },
+        {
+          "date": "2026-05-07",
+          "equity": 10265.62,
+          "return_1d": 0.00645602793004163
+        },
+        {
+          "date": "2026-05-08",
+          "equity": 10396.94,
+          "return_1d": 0.012792213232128091
+        },
+        {
+          "date": "2026-05-11",
+          "equity": 10526.0,
+          "return_1d": 0.01241326774993401
+        },
+        {
+          "date": "2026-05-12",
+          "equity": 10444.21,
+          "return_1d": -0.00777028310849337
+        },
+        {
+          "date": "2026-05-13",
+          "equity": 10539.14,
+          "return_1d": 0.009089246577768995
+        },
+        {
+          "date": "2026-05-14",
+          "equity": 10531.27,
+          "return_1d": -0.000746740246357791
+        },
+        {
+          "date": "2026-05-15",
+          "equity": 10444.61,
+          "return_1d": -0.00822882710252415
+        },
+        {
+          "date": "2026-05-18",
+          "equity": 10374.4,
+          "return_1d": -0.006722127489681373
+        },
+        {
+          "date": "2026-05-19",
+          "equity": 10309.54,
+          "return_1d": -0.006251927822331749
+        },
+        {
+          "date": "2026-05-20",
+          "equity": 10359.31,
+          "return_1d": 0.004827567476337391
+        },
+        {
+          "date": "2026-05-21",
+          "equity": 10443.89,
+          "return_1d": 0.008164636447794305
+        },
+        {
+          "date": "2026-05-22",
+          "equity": 10592.41,
+          "return_1d": 0.014220754910287292
+        },
+        {
+          "date": "2026-05-26",
+          "equity": 10665.09,
+          "return_1d": 0.006861516878595264
+        },
+        {
+          "date": "2026-05-27",
+          "equity": 10685.9,
+          "return_1d": 0.0019512259155805012
+        },
+        {
+          "date": "2026-05-28",
+          "equity": 10716.78,
+          "return_1d": 0.0028897893485808623
+        },
+        {
+          "date": "2026-05-29",
+          "equity": 10730.85,
+          "return_1d": 0.0013128943581934838
+        },
+        {
+          "date": "2026-06-01",
+          "equity": 10804.37,
+          "return_1d": 0.006851274596141099
+        },
+        {
+          "date": "2026-06-02",
+          "equity": 10712.51,
+          "return_1d": -0.008502115347771344
+        },
+        {
+          "date": "2026-06-03",
+          "equity": 10729.32,
+          "return_1d": 0.0015691934009862685
+        },
+        {
+          "date": "2026-06-04",
+          "equity": 10753.75,
+          "return_1d": 0.0022769383334637627
+        },
+        {
+          "date": "2026-06-05",
+          "equity": 10578.03,
+          "return_1d": -0.016340346390793847
+        },
+        {
+          "date": "2026-06-08",
+          "equity": 10596.62,
+          "return_1d": 0.0017574160784190607
+        },
+        {
+          "date": "2026-06-09",
+          "equity": 10549.0,
+          "return_1d": -0.004493885786222451
+        },
+        {
+          "date": "2026-06-10",
+          "equity": 10468.29,
+          "return_1d": -0.007650962176509513
+        },
+        {
+          "date": "2026-06-11",
+          "equity": 10658.5,
+          "return_1d": 0.018170111832973568
+        },
+        {
+          "date": "2026-06-12",
+          "equity": 10886.32,
+          "return_1d": 0.021374489843786648
+        },
+        {
+          "date": "2026-06-15",
+          "equity": 11061.0,
+          "return_1d": 0.01604582632147511
+        },
+        {
+          "date": "2026-06-16",
+          "equity": 10956.49,
+          "return_1d": -0.009448512792695096
+        },
+        {
+          "date": "2026-06-17",
+          "equity": 10951.64,
+          "return_1d": -0.00044266001246751063
+        },
+        {
+          "date": "2026-06-18",
+          "equity": 10963.6,
+          "return_1d": 0.001092073881172162
+        },
+        {
+          "date": "2026-06-22",
+          "equity": 11110.04,
+          "return_1d": 0.013356926556970405
+        },
+        {
+          "date": "2026-06-23",
+          "equity": 10955.54,
+          "return_1d": -0.01390634057123108
         }
       ],
-      "as_of": "2026-04-08",
-      "is_stale": true,
+      "as_of": "2026-06-23",
+      "is_stale": false,
       "series": {
         "daily_return": [
           {
@@ -887,7 +1445,215 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": 0.01233079541653681
+            "value": 0.016136107640737585
+          },
+          {
+            "date": "2026-04-09",
+            "value": -0.00349672937878176
+          },
+          {
+            "date": "2026-04-10",
+            "value": -0.01373449120023229
+          },
+          {
+            "date": "2026-04-13",
+            "value": 0.009879596010183178
+          },
+          {
+            "date": "2026-04-14",
+            "value": 0.0014257538673572157
+          },
+          {
+            "date": "2026-04-15",
+            "value": 0.002354302999415081
+          },
+          {
+            "date": "2026-04-16",
+            "value": 0.004413470554390786
+          },
+          {
+            "date": "2026-04-17",
+            "value": 0.002297463055625837
+          },
+          {
+            "date": "2026-04-20",
+            "value": 0.0007013590621010035
+          },
+          {
+            "date": "2026-04-21",
+            "value": -0.008672979923109003
+          },
+          {
+            "date": "2026-04-22",
+            "value": -0.0006688666780720887
+          },
+          {
+            "date": "2026-04-23",
+            "value": -0.0022265788960748045
+          },
+          {
+            "date": "2026-04-24",
+            "value": 0.00038036568853416775
+          },
+          {
+            "date": "2026-04-27",
+            "value": 0.005549367779157821
+          },
+          {
+            "date": "2026-04-28",
+            "value": -0.0024238899580674156
+          },
+          {
+            "date": "2026-04-29",
+            "value": -0.0012463048605889648
+          },
+          {
+            "date": "2026-04-30",
+            "value": 0.02559041313450061
+          },
+          {
+            "date": "2026-05-01",
+            "value": 0.003288170429795123
+          },
+          {
+            "date": "2026-05-04",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-05",
+            "value": 0.0125483089850702
+          },
+          {
+            "date": "2026-05-06",
+            "value": 0.009614318633545338
+          },
+          {
+            "date": "2026-05-07",
+            "value": 0.00645602793004163
+          },
+          {
+            "date": "2026-05-08",
+            "value": 0.012792213232128091
+          },
+          {
+            "date": "2026-05-11",
+            "value": 0.01241326774993401
+          },
+          {
+            "date": "2026-05-12",
+            "value": -0.00777028310849337
+          },
+          {
+            "date": "2026-05-13",
+            "value": 0.009089246577768995
+          },
+          {
+            "date": "2026-05-14",
+            "value": -0.000746740246357791
+          },
+          {
+            "date": "2026-05-15",
+            "value": -0.00822882710252415
+          },
+          {
+            "date": "2026-05-18",
+            "value": -0.006722127489681373
+          },
+          {
+            "date": "2026-05-19",
+            "value": -0.006251927822331749
+          },
+          {
+            "date": "2026-05-20",
+            "value": 0.004827567476337391
+          },
+          {
+            "date": "2026-05-21",
+            "value": 0.008164636447794305
+          },
+          {
+            "date": "2026-05-22",
+            "value": 0.014220754910287292
+          },
+          {
+            "date": "2026-05-26",
+            "value": 0.006861516878595264
+          },
+          {
+            "date": "2026-05-27",
+            "value": 0.0019512259155805012
+          },
+          {
+            "date": "2026-05-28",
+            "value": 0.0028897893485808623
+          },
+          {
+            "date": "2026-05-29",
+            "value": 0.0013128943581934838
+          },
+          {
+            "date": "2026-06-01",
+            "value": 0.006851274596141099
+          },
+          {
+            "date": "2026-06-02",
+            "value": -0.008502115347771344
+          },
+          {
+            "date": "2026-06-03",
+            "value": 0.0015691934009862685
+          },
+          {
+            "date": "2026-06-04",
+            "value": 0.0022769383334637627
+          },
+          {
+            "date": "2026-06-05",
+            "value": -0.016340346390793847
+          },
+          {
+            "date": "2026-06-08",
+            "value": 0.0017574160784190607
+          },
+          {
+            "date": "2026-06-09",
+            "value": -0.004493885786222451
+          },
+          {
+            "date": "2026-06-10",
+            "value": -0.007650962176509513
+          },
+          {
+            "date": "2026-06-11",
+            "value": 0.018170111832973568
+          },
+          {
+            "date": "2026-06-12",
+            "value": 0.021374489843786648
+          },
+          {
+            "date": "2026-06-15",
+            "value": 0.01604582632147511
+          },
+          {
+            "date": "2026-06-16",
+            "value": -0.009448512792695096
+          },
+          {
+            "date": "2026-06-17",
+            "value": -0.00044266001246751063
+          },
+          {
+            "date": "2026-06-18",
+            "value": 0.001092073881172162
+          },
+          {
+            "date": "2026-06-22",
+            "value": 0.013356926556970405
+          },
+          {
+            "date": "2026-06-23",
+            "value": -0.01390634057123108
           }
         ],
         "drawdown": [
@@ -993,7 +1759,215 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": -0.028454999999999897
+            "value": -0.02480300000000002
+          },
+          {
+            "date": "2026-04-09",
+            "value": -0.028212999999999933
+          },
+          {
+            "date": "2026-04-10",
+            "value": -0.04156000000000004
+          },
+          {
+            "date": "2026-04-13",
+            "value": -0.03209099999999998
+          },
+          {
+            "date": "2026-04-14",
+            "value": -0.030711000000000044
+          },
+          {
+            "date": "2026-04-15",
+            "value": -0.028429000000000038
+          },
+          {
+            "date": "2026-04-16",
+            "value": -0.024140999999999968
+          },
+          {
+            "date": "2026-04-17",
+            "value": -0.021899000000000002
+          },
+          {
+            "date": "2026-04-20",
+            "value": -0.021212999999999926
+          },
+          {
+            "date": "2026-04-21",
+            "value": -0.029702000000000006
+          },
+          {
+            "date": "2026-04-22",
+            "value": -0.030351000000000017
+          },
+          {
+            "date": "2026-04-23",
+            "value": -0.03251000000000004
+          },
+          {
+            "date": "2026-04-24",
+            "value": -0.032142000000000004
+          },
+          {
+            "date": "2026-04-27",
+            "value": -0.026770999999999878
+          },
+          {
+            "date": "2026-04-28",
+            "value": -0.029129999999999878
+          },
+          {
+            "date": "2026-04-29",
+            "value": -0.030339999999999923
+          },
+          {
+            "date": "2026-04-30",
+            "value": -0.005526000000000031
+          },
+          {
+            "date": "2026-05-01",
+            "value": -0.0022559999999999247
+          },
+          {
+            "date": "2026-05-04",
+            "value": -0.0022559999999999247
+          },
+          {
+            "date": "2026-05-05",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-06",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-07",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-08",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-11",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-12",
+            "value": -0.00777028310849337
+          },
+          {
+            "date": "2026-05-13",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-14",
+            "value": -0.000746740246357791
+          },
+          {
+            "date": "2026-05-15",
+            "value": -0.008969422552504214
+          },
+          {
+            "date": "2026-05-18",
+            "value": -0.01563125644027874
+          },
+          {
+            "date": "2026-05-19",
+            "value": -0.021785458775573585
+          },
+          {
+            "date": "2026-05-20",
+            "value": -0.01706306207147834
+          },
+          {
+            "date": "2026-05-21",
+            "value": -0.009037739322183769
+          },
+          {
+            "date": "2026-05-22",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-26",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-27",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-28",
+            "value": 0.0
+          },
+          {
+            "date": "2026-05-29",
+            "value": 0.0
+          },
+          {
+            "date": "2026-06-01",
+            "value": 0.0
+          },
+          {
+            "date": "2026-06-02",
+            "value": -0.008502115347771344
+          },
+          {
+            "date": "2026-06-03",
+            "value": -0.006946263410083198
+          },
+          {
+            "date": "2026-06-04",
+            "value": -0.004685141290052153
+          },
+          {
+            "date": "2026-06-05",
+            "value": -0.020948930849276737
+          },
+          {
+            "date": "2026-06-08",
+            "value": -0.01922833075875785
+          },
+          {
+            "date": "2026-06-09",
+            "value": -0.023635806622690714
+          },
+          {
+            "date": "2026-06-10",
+            "value": -0.03110593213671875
+          },
+          {
+            "date": "2026-06-11",
+            "value": -0.013501018569338274
+          },
+          {
+            "date": "2026-06-12",
+            "value": 0.0
+          },
+          {
+            "date": "2026-06-15",
+            "value": 0.0
+          },
+          {
+            "date": "2026-06-16",
+            "value": -0.009448512792695096
+          },
+          {
+            "date": "2026-06-17",
+            "value": -0.00988699032637197
+          },
+          {
+            "date": "2026-06-18",
+            "value": -0.008805713769098555
+          },
+          {
+            "date": "2026-06-22",
+            "value": 0.0
+          },
+          {
+            "date": "2026-06-23",
+            "value": -0.01390634057123108
           }
         ],
         "excess_return_cumulative": [
@@ -1095,7 +2069,215 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": -0.018812624397267053
+            "value": -0.018453129766876963
+          },
+          {
+            "date": "2026-04-09",
+            "value": -0.0275955879576657
+          },
+          {
+            "date": "2026-04-10",
+            "value": -0.04028121603437529
+          },
+          {
+            "date": "2026-04-13",
+            "value": -0.0405721170331349
+          },
+          {
+            "date": "2026-04-14",
+            "value": -0.051480339185200785
+          },
+          {
+            "date": "2026-04-15",
+            "value": -0.05725322480114181
+          },
+          {
+            "date": "2026-04-16",
+            "value": -0.05549336652636261
+          },
+          {
+            "date": "2026-04-17",
+            "value": -0.06571596648651157
+          },
+          {
+            "date": "2026-04-20",
+            "value": -0.06294267956745592
+          },
+          {
+            "date": "2026-04-21",
+            "value": -0.0646115283221399
+          },
+          {
+            "date": "2026-04-22",
+            "value": -0.07574074337028902
+          },
+          {
+            "date": "2026-04-23",
+            "value": -0.07384287435629044
+          },
+          {
+            "date": "2026-04-24",
+            "value": -0.08154447307524593
+          },
+          {
+            "date": "2026-04-27",
+            "value": -0.07798139046511976
+          },
+          {
+            "date": "2026-04-28",
+            "value": -0.07522525460262208
+          },
+          {
+            "date": "2026-04-29",
+            "value": -0.07627358989755306
+          },
+          {
+            "date": "2026-04-30",
+            "value": -0.061866239430631964
+          },
+          {
+            "date": "2026-05-01",
+            "value": -0.06152136579510392
+          },
+          {
+            "date": "2026-05-04",
+            "value": -0.05764087458918832
+          },
+          {
+            "date": "2026-05-05",
+            "value": -0.053587368233352084
+          },
+          {
+            "date": "2026-05-06",
+            "value": -0.058661305904610606
+          },
+          {
+            "date": "2026-05-07",
+            "value": -0.0487690874319866
+          },
+          {
+            "date": "2026-05-08",
+            "value": -0.04451509939033027
+          },
+          {
+            "date": "2026-05-11",
+            "value": -0.03407847841753764
+          },
+          {
+            "date": "2026-05-12",
+            "value": -0.0406112257327329
+          },
+          {
+            "date": "2026-05-13",
+            "value": -0.03718881615071701
+          },
+          {
+            "date": "2026-05-14",
+            "value": -0.046589261396935644
+          },
+          {
+            "date": "2026-05-15",
+            "value": -0.042026387506440166
+          },
+          {
+            "date": "2026-05-18",
+            "value": -0.04828311357609416
+          },
+          {
+            "date": "2026-05-19",
+            "value": -0.04753726458851237
+          },
+          {
+            "date": "2026-05-20",
+            "value": -0.05361375236995314
+          },
+          {
+            "date": "2026-05-21",
+            "value": -0.047316425375993454
+          },
+          {
+            "date": "2026-05-22",
+            "value": -0.03675652461013157
+          },
+          {
+            "date": "2026-05-26",
+            "value": -0.036764423192712226
+          },
+          {
+            "date": "2026-05-27",
+            "value": -0.0344923322816153
+          },
+          {
+            "date": "2026-05-28",
+            "value": -0.03748954608857069
+          },
+          {
+            "date": "2026-05-29",
+            "value": -0.03884591803393067
+          },
+          {
+            "date": "2026-06-01",
+            "value": -0.03452185669141561
+          },
+          {
+            "date": "2026-06-02",
+            "value": -0.04522187087717944
+          },
+          {
+            "date": "2026-06-03",
+            "value": -0.03570641266432073
+          },
+          {
+            "date": "2026-06-04",
+            "value": -0.03745260989140342
+          },
+          {
+            "date": "2026-06-05",
+            "value": -0.026303197383274135
+          },
+          {
+            "date": "2026-06-08",
+            "value": -0.026898863307467602
+          },
+          {
+            "date": "2026-06-09",
+            "value": -0.02847125994491373
+          },
+          {
+            "date": "2026-06-10",
+            "value": -0.01946232105453105
+          },
+          {
+            "date": "2026-06-11",
+            "value": -0.018564903404441502
+          },
+          {
+            "date": "2026-06-12",
+            "value": -0.001647689808314201
+          },
+          {
+            "date": "2026-06-15",
+            "value": -0.003405678315765881
+          },
+          {
+            "date": "2026-06-16",
+            "value": -0.00724224137051821
+          },
+          {
+            "date": "2026-06-17",
+            "value": 0.006045479047240621
+          },
+          {
+            "date": "2026-06-18",
+            "value": -0.0012543510889087006
+          },
+          {
+            "date": "2026-06-22",
+            "value": 0.016843818985770254
+          },
+          {
+            "date": "2026-06-23",
+            "value": 0.016004378848945677
           }
         ],
         "nav": [
@@ -1201,7 +2383,215 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": 9715.45
+            "value": 9751.97
+          },
+          {
+            "date": "2026-04-09",
+            "value": 9717.87
+          },
+          {
+            "date": "2026-04-10",
+            "value": 9584.4
+          },
+          {
+            "date": "2026-04-13",
+            "value": 9679.09
+          },
+          {
+            "date": "2026-04-14",
+            "value": 9692.89
+          },
+          {
+            "date": "2026-04-15",
+            "value": 9715.71
+          },
+          {
+            "date": "2026-04-16",
+            "value": 9758.59
+          },
+          {
+            "date": "2026-04-17",
+            "value": 9781.01
+          },
+          {
+            "date": "2026-04-20",
+            "value": 9787.87
+          },
+          {
+            "date": "2026-04-21",
+            "value": 9702.98
+          },
+          {
+            "date": "2026-04-22",
+            "value": 9696.49
+          },
+          {
+            "date": "2026-04-23",
+            "value": 9674.9
+          },
+          {
+            "date": "2026-04-24",
+            "value": 9678.58
+          },
+          {
+            "date": "2026-04-27",
+            "value": 9732.29
+          },
+          {
+            "date": "2026-04-28",
+            "value": 9708.7
+          },
+          {
+            "date": "2026-04-29",
+            "value": 9696.6
+          },
+          {
+            "date": "2026-04-30",
+            "value": 9944.74
+          },
+          {
+            "date": "2026-05-01",
+            "value": 9977.44
+          },
+          {
+            "date": "2026-05-04",
+            "value": 9977.44
+          },
+          {
+            "date": "2026-05-05",
+            "value": 10102.64
+          },
+          {
+            "date": "2026-05-06",
+            "value": 10199.77
+          },
+          {
+            "date": "2026-05-07",
+            "value": 10265.62
+          },
+          {
+            "date": "2026-05-08",
+            "value": 10396.94
+          },
+          {
+            "date": "2026-05-11",
+            "value": 10526.0
+          },
+          {
+            "date": "2026-05-12",
+            "value": 10444.21
+          },
+          {
+            "date": "2026-05-13",
+            "value": 10539.14
+          },
+          {
+            "date": "2026-05-14",
+            "value": 10531.27
+          },
+          {
+            "date": "2026-05-15",
+            "value": 10444.61
+          },
+          {
+            "date": "2026-05-18",
+            "value": 10374.4
+          },
+          {
+            "date": "2026-05-19",
+            "value": 10309.54
+          },
+          {
+            "date": "2026-05-20",
+            "value": 10359.31
+          },
+          {
+            "date": "2026-05-21",
+            "value": 10443.89
+          },
+          {
+            "date": "2026-05-22",
+            "value": 10592.41
+          },
+          {
+            "date": "2026-05-26",
+            "value": 10665.09
+          },
+          {
+            "date": "2026-05-27",
+            "value": 10685.9
+          },
+          {
+            "date": "2026-05-28",
+            "value": 10716.78
+          },
+          {
+            "date": "2026-05-29",
+            "value": 10730.85
+          },
+          {
+            "date": "2026-06-01",
+            "value": 10804.37
+          },
+          {
+            "date": "2026-06-02",
+            "value": 10712.51
+          },
+          {
+            "date": "2026-06-03",
+            "value": 10729.32
+          },
+          {
+            "date": "2026-06-04",
+            "value": 10753.75
+          },
+          {
+            "date": "2026-06-05",
+            "value": 10578.03
+          },
+          {
+            "date": "2026-06-08",
+            "value": 10596.62
+          },
+          {
+            "date": "2026-06-09",
+            "value": 10549.0
+          },
+          {
+            "date": "2026-06-10",
+            "value": 10468.29
+          },
+          {
+            "date": "2026-06-11",
+            "value": 10658.5
+          },
+          {
+            "date": "2026-06-12",
+            "value": 10886.32
+          },
+          {
+            "date": "2026-06-15",
+            "value": 11061.0
+          },
+          {
+            "date": "2026-06-16",
+            "value": 10956.49
+          },
+          {
+            "date": "2026-06-17",
+            "value": 10951.64
+          },
+          {
+            "date": "2026-06-18",
+            "value": 10963.6
+          },
+          {
+            "date": "2026-06-22",
+            "value": 11110.04
+          },
+          {
+            "date": "2026-06-23",
+            "value": 10955.54
           }
         ],
         "nav_indexed": [
@@ -1307,7 +2697,215 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": 97.15450000000001
+            "value": 97.5197
+          },
+          {
+            "date": "2026-04-09",
+            "value": 97.1787
+          },
+          {
+            "date": "2026-04-10",
+            "value": 95.844
+          },
+          {
+            "date": "2026-04-13",
+            "value": 96.79090000000001
+          },
+          {
+            "date": "2026-04-14",
+            "value": 96.9289
+          },
+          {
+            "date": "2026-04-15",
+            "value": 97.1571
+          },
+          {
+            "date": "2026-04-16",
+            "value": 97.58590000000001
+          },
+          {
+            "date": "2026-04-17",
+            "value": 97.8101
+          },
+          {
+            "date": "2026-04-20",
+            "value": 97.87870000000001
+          },
+          {
+            "date": "2026-04-21",
+            "value": 97.0298
+          },
+          {
+            "date": "2026-04-22",
+            "value": 96.9649
+          },
+          {
+            "date": "2026-04-23",
+            "value": 96.749
+          },
+          {
+            "date": "2026-04-24",
+            "value": 96.7858
+          },
+          {
+            "date": "2026-04-27",
+            "value": 97.32290000000002
+          },
+          {
+            "date": "2026-04-28",
+            "value": 97.08700000000002
+          },
+          {
+            "date": "2026-04-29",
+            "value": 96.96600000000001
+          },
+          {
+            "date": "2026-04-30",
+            "value": 99.4474
+          },
+          {
+            "date": "2026-05-01",
+            "value": 99.77440000000001
+          },
+          {
+            "date": "2026-05-04",
+            "value": 99.77440000000001
+          },
+          {
+            "date": "2026-05-05",
+            "value": 101.02640000000001
+          },
+          {
+            "date": "2026-05-06",
+            "value": 101.99770000000001
+          },
+          {
+            "date": "2026-05-07",
+            "value": 102.6562
+          },
+          {
+            "date": "2026-05-08",
+            "value": 103.96940000000001
+          },
+          {
+            "date": "2026-05-11",
+            "value": 105.25999999999999
+          },
+          {
+            "date": "2026-05-12",
+            "value": 104.44209999999998
+          },
+          {
+            "date": "2026-05-13",
+            "value": 105.3914
+          },
+          {
+            "date": "2026-05-14",
+            "value": 105.31270000000002
+          },
+          {
+            "date": "2026-05-15",
+            "value": 104.4461
+          },
+          {
+            "date": "2026-05-18",
+            "value": 103.74399999999999
+          },
+          {
+            "date": "2026-05-19",
+            "value": 103.09540000000001
+          },
+          {
+            "date": "2026-05-20",
+            "value": 103.59309999999999
+          },
+          {
+            "date": "2026-05-21",
+            "value": 104.4389
+          },
+          {
+            "date": "2026-05-22",
+            "value": 105.92409999999998
+          },
+          {
+            "date": "2026-05-26",
+            "value": 106.6509
+          },
+          {
+            "date": "2026-05-27",
+            "value": 106.859
+          },
+          {
+            "date": "2026-05-28",
+            "value": 107.16780000000001
+          },
+          {
+            "date": "2026-05-29",
+            "value": 107.30850000000001
+          },
+          {
+            "date": "2026-06-01",
+            "value": 108.04370000000002
+          },
+          {
+            "date": "2026-06-02",
+            "value": 107.12509999999999
+          },
+          {
+            "date": "2026-06-03",
+            "value": 107.2932
+          },
+          {
+            "date": "2026-06-04",
+            "value": 107.5375
+          },
+          {
+            "date": "2026-06-05",
+            "value": 105.78030000000001
+          },
+          {
+            "date": "2026-06-08",
+            "value": 105.96620000000001
+          },
+          {
+            "date": "2026-06-09",
+            "value": 105.49
+          },
+          {
+            "date": "2026-06-10",
+            "value": 104.6829
+          },
+          {
+            "date": "2026-06-11",
+            "value": 106.585
+          },
+          {
+            "date": "2026-06-12",
+            "value": 108.8632
+          },
+          {
+            "date": "2026-06-15",
+            "value": 110.61000000000001
+          },
+          {
+            "date": "2026-06-16",
+            "value": 109.5649
+          },
+          {
+            "date": "2026-06-17",
+            "value": 109.5164
+          },
+          {
+            "date": "2026-06-18",
+            "value": 109.636
+          },
+          {
+            "date": "2026-06-22",
+            "value": 111.10040000000001
+          },
+          {
+            "date": "2026-06-23",
+            "value": 109.55540000000002
           }
         ],
         "spy_close": [
@@ -1413,7 +3011,215 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": 673.77001953125
+            "value": 676.010009765625
+          },
+          {
+            "date": "2026-04-09",
+            "value": 679.9099731445312
+          },
+          {
+            "date": "2026-04-10",
+            "value": 679.4600219726562
+          },
+          {
+            "date": "2026-04-13",
+            "value": 686.0999755859375
+          },
+          {
+            "date": "2026-04-14",
+            "value": 694.4600219726562
+          },
+          {
+            "date": "2026-04-15",
+            "value": 699.9400024414062
+          },
+          {
+            "date": "2026-04-16",
+            "value": 701.6599731445312
+          },
+          {
+            "date": "2026-04-17",
+            "value": 710.1400146484375
+          },
+          {
+            "date": "2026-04-20",
+            "value": 708.719970703125
+          },
+          {
+            "date": "2026-04-21",
+            "value": 704.0800170898438
+          },
+          {
+            "date": "2026-04-22",
+            "value": 711.2100219726562
+          },
+          {
+            "date": "2026-04-23",
+            "value": 708.4500122070312
+          },
+          {
+            "date": "2026-04-24",
+            "value": 713.9400024414062
+          },
+          {
+            "date": "2026-04-27",
+            "value": 715.1699829101562
+          },
+          {
+            "date": "2026-04-28",
+            "value": 711.6900024414062
+          },
+          {
+            "date": "2026-04-29",
+            "value": 711.5800170898438
+          },
+          {
+            "date": "2026-04-30",
+            "value": 718.6599731445312
+          },
+          {
+            "date": "2026-05-01",
+            "value": 720.6500244140625
+          },
+          {
+            "date": "2026-05-04",
+            "value": 718.010009765625
+          },
+          {
+            "date": "2026-05-05",
+            "value": 723.77001953125
+          },
+          {
+            "date": "2026-05-06",
+            "value": 733.8300170898438
+          },
+          {
+            "date": "2026-05-07",
+            "value": 731.5800170898438
+          },
+          {
+            "date": "2026-05-08",
+            "value": 737.6199951171875
+          },
+          {
+            "date": "2026-05-11",
+            "value": 739.2999877929688
+          },
+          {
+            "date": "2026-05-12",
+            "value": 738.1799926757812
+          },
+          {
+            "date": "2026-05-13",
+            "value": 742.3099975585938
+          },
+          {
+            "date": "2026-05-14",
+            "value": 748.1699829101562
+          },
+          {
+            "date": "2026-05-15",
+            "value": 739.1699829101562
+          },
+          {
+            "date": "2026-05-18",
+            "value": 738.6500244140625
+          },
+          {
+            "date": "2026-05-19",
+            "value": 733.72998046875
+          },
+          {
+            "date": "2026-05-20",
+            "value": 741.25
+          },
+          {
+            "date": "2026-05-21",
+            "value": 742.719970703125
+          },
+          {
+            "date": "2026-05-22",
+            "value": 745.6400146484375
+          },
+          {
+            "date": "2026-05-26",
+            "value": 750.5900268554688
+          },
+          {
+            "date": "2026-05-27",
+            "value": 750.4600219726562
+          },
+          {
+            "date": "2026-05-28",
+            "value": 754.5999755859375
+          },
+          {
+            "date": "2026-05-29",
+            "value": 756.47998046875
+          },
+          {
+            "date": "2026-06-01",
+            "value": 758.5399780273438
+          },
+          {
+            "date": "2026-06-02",
+            "value": 759.5700073242188
+          },
+          {
+            "date": "2026-06-03",
+            "value": 754.239990234375
+          },
+          {
+            "date": "2026-06-04",
+            "value": 757.0900268554688
+          },
+          {
+            "date": "2026-06-05",
+            "value": 737.5499877929688
+          },
+          {
+            "date": "2026-06-08",
+            "value": 739.219970703125
+          },
+          {
+            "date": "2026-06-09",
+            "value": 737.0499877929688
+          },
+          {
+            "date": "2026-06-10",
+            "value": 725.4299926757812
+          },
+          {
+            "date": "2026-06-11",
+            "value": 737.760009765625
+          },
+          {
+            "date": "2026-06-12",
+            "value": 741.75
+          },
+          {
+            "date": "2026-06-15",
+            "value": 754.8300170898438
+          },
+          {
+            "date": "2026-06-16",
+            "value": 750.3300170898438
+          },
+          {
+            "date": "2026-06-17",
+            "value": 740.9600219726562
+          },
+          {
+            "date": "2026-06-18",
+            "value": 746.739990234375
+          },
+          {
+            "date": "2026-06-22",
+            "value": 744.3900146484375
+          },
+          {
+            "date": "2026-06-23",
+            "value": 734.4500122070312
           }
         ],
         "spy_indexed": [
@@ -1519,226 +3325,542 @@ window.DASHBOARD_V1 = {
           },
           {
             "date": "2026-04-08",
-            "value": 99.03576243972674
+            "value": 99.36501297668772
+          },
+          {
+            "date": "2026-04-09",
+            "value": 99.93825879576661
+          },
+          {
+            "date": "2026-04-10",
+            "value": 99.87212160343756
+          },
+          {
+            "date": "2026-04-13",
+            "value": 100.84811170331352
+          },
+          {
+            "date": "2026-04-14",
+            "value": 102.07693391852008
+          },
+          {
+            "date": "2026-04-15",
+            "value": 102.88242248011422
+          },
+          {
+            "date": "2026-04-16",
+            "value": 103.13523665263628
+          },
+          {
+            "date": "2026-04-17",
+            "value": 104.38169664865117
+          },
+          {
+            "date": "2026-04-20",
+            "value": 104.17296795674562
+          },
+          {
+            "date": "2026-04-21",
+            "value": 103.490952832214
+          },
+          {
+            "date": "2026-04-22",
+            "value": 104.53897433702892
+          },
+          {
+            "date": "2026-04-23",
+            "value": 104.13328743562906
+          },
+          {
+            "date": "2026-04-24",
+            "value": 104.94024730752459
+          },
+          {
+            "date": "2026-04-27",
+            "value": 105.12103904651198
+          },
+          {
+            "date": "2026-04-28",
+            "value": 104.60952546026219
+          },
+          {
+            "date": "2026-04-29",
+            "value": 104.59335898975527
+          },
+          {
+            "date": "2026-04-30",
+            "value": 105.63402394306316
+          },
+          {
+            "date": "2026-05-01",
+            "value": 105.92653657951037
+          },
+          {
+            "date": "2026-05-04",
+            "value": 105.53848745891882
+          },
+          {
+            "date": "2026-05-05",
+            "value": 106.38513682333519
+          },
+          {
+            "date": "2026-05-06",
+            "value": 107.86383059046105
+          },
+          {
+            "date": "2026-05-07",
+            "value": 107.53310874319865
+          },
+          {
+            "date": "2026-05-08",
+            "value": 108.42090993903304
+          },
+          {
+            "date": "2026-05-11",
+            "value": 108.66784784175377
+          },
+          {
+            "date": "2026-05-12",
+            "value": 108.50322257327328
+          },
+          {
+            "date": "2026-05-13",
+            "value": 109.11028161507168
+          },
+          {
+            "date": "2026-05-14",
+            "value": 109.97162613969356
+          },
+          {
+            "date": "2026-05-15",
+            "value": 108.64873875064403
+          },
+          {
+            "date": "2026-05-18",
+            "value": 108.57231135760941
+          },
+          {
+            "date": "2026-05-19",
+            "value": 107.84912645885127
+          },
+          {
+            "date": "2026-05-20",
+            "value": 108.95447523699535
+          },
+          {
+            "date": "2026-05-21",
+            "value": 109.17054253759937
+          },
+          {
+            "date": "2026-05-22",
+            "value": 109.5997524610132
+          },
+          {
+            "date": "2026-05-26",
+            "value": 110.32734231927128
+          },
+          {
+            "date": "2026-05-27",
+            "value": 110.30823322816157
+          },
+          {
+            "date": "2026-05-28",
+            "value": 110.91675460885708
+          },
+          {
+            "date": "2026-05-29",
+            "value": 111.19309180339312
+          },
+          {
+            "date": "2026-06-01",
+            "value": 111.49588566914161
+          },
+          {
+            "date": "2026-06-02",
+            "value": 111.64728708771801
+          },
+          {
+            "date": "2026-06-03",
+            "value": 110.86384126643213
+          },
+          {
+            "date": "2026-06-04",
+            "value": 111.28276098914039
+          },
+          {
+            "date": "2026-06-05",
+            "value": 108.41061973832747
+          },
+          {
+            "date": "2026-06-08",
+            "value": 108.65608633074679
+          },
+          {
+            "date": "2026-06-09",
+            "value": 108.33712599449137
+          },
+          {
+            "date": "2026-06-10",
+            "value": 106.62913210545311
+          },
+          {
+            "date": "2026-06-11",
+            "value": 108.44149034044418
+          },
+          {
+            "date": "2026-06-12",
+            "value": 109.02796898083142
+          },
+          {
+            "date": "2026-06-15",
+            "value": 110.95056783157659
+          },
+          {
+            "date": "2026-06-16",
+            "value": 110.28912413705183
+          },
+          {
+            "date": "2026-06-17",
+            "value": 108.91185209527596
+          },
+          {
+            "date": "2026-06-18",
+            "value": 109.76143510889086
+          },
+          {
+            "date": "2026-06-22",
+            "value": 109.41601810142299
+          },
+          {
+            "date": "2026-06-23",
+            "value": 107.95496211510545
           }
         ]
       },
       "source_type": "alpaca_portfolio_history",
       "summary": {
-        "excess_since_inception_return": -0.018812624397267275,
+        "excess_since_inception_return": 0.016004378848945677,
         "inception_date": "2026-03-03",
-        "latest_nav": 9715.45,
+        "latest_nav": 10955.54,
         "max_drawdown": -0.05016799999999999,
-        "since_inception_return": -0.028454999999999897,
-        "spy_since_inception_return": -0.009642375602732622
+        "since_inception_return": 0.09555400000000014,
+        "spy_since_inception_return": 0.07954962115105446
       },
       "trust_level": "canonical"
     },
     "positions": {
-      "as_of": "2026-04-09T13:50:35.044822+00:00",
-      "is_stale": true,
+      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "is_stale": false,
       "rows": [
         {
-          "avg_entry_price": 73.614286,
-          "cost_basis": 883.371432,
-          "last_price": 75.77,
-          "market_value": 909.24,
-          "qty": 12.0,
-          "side": "long",
-          "ticker": "GM",
-          "unrealized_pnl": 25.868568,
-          "unrealized_pnl_pct": 0.02928,
-          "weight": 0.09360677002903206
+          "avg_entry_price": 706.3942863793549,
+          "cost_basis": 875.151904,
+          "last_price": 1032.43,
+          "market_value": 1279.07756,
+          "qty": 1.238900032,
+          "side": "positionside.long",
+          "ticker": "STX",
+          "unrealized_pnl": 403.925656,
+          "unrealized_pnl_pct": 0.46155,
+          "weight": 0.11675166719303656
         },
         {
-          "avg_entry_price": 128.262,
-          "cost_basis": 641.31,
-          "last_price": 127.56,
-          "market_value": 637.8,
-          "qty": 5.0,
-          "side": "long",
-          "ticker": "QCOM",
-          "unrealized_pnl": -3.51,
-          "unrealized_pnl_pct": -0.00547,
-          "weight": 0.06566186917042437
+          "avg_entry_price": 91.7543149833832,
+          "cost_basis": 996.639723,
+          "last_price": 93.47,
+          "market_value": 1015.275575,
+          "qty": 10.862047449,
+          "side": "positionside.long",
+          "ticker": "MNST",
+          "unrealized_pnl": 18.635852,
+          "unrealized_pnl_pct": 0.0187,
+          "weight": 0.09267234431164506
         },
         {
-          "avg_entry_price": 156.83,
-          "cost_basis": 627.32,
-          "last_price": 155.435,
-          "market_value": 621.74,
-          "qty": 4.0,
-          "side": "long",
-          "ticker": "BDX",
-          "unrealized_pnl": -5.58,
-          "unrealized_pnl_pct": -0.00889,
-          "weight": 0.0640084831264027
-        },
-        {
-          "avg_entry_price": 261.23,
-          "cost_basis": 522.46,
-          "last_price": 257.62,
-          "market_value": 515.24,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "AAPL",
-          "unrealized_pnl": -7.22,
-          "unrealized_pnl_pct": -0.01382,
-          "weight": 0.05304424815203739
-        },
-        {
-          "avg_entry_price": 127.27,
-          "cost_basis": 509.08,
-          "last_price": 127.0,
-          "market_value": 508.0,
-          "qty": 4.0,
-          "side": "long",
-          "ticker": "COP",
-          "unrealized_pnl": -1.08,
-          "unrealized_pnl_pct": -0.00212,
-          "weight": 0.052298886074906833
-        },
-        {
-          "avg_entry_price": 53.638889,
-          "cost_basis": 482.750001,
-          "last_price": 55.3,
-          "market_value": 497.7,
-          "qty": 9.0,
-          "side": "long",
-          "ticker": "USB",
-          "unrealized_pnl": 14.949999,
-          "unrealized_pnl_pct": 0.03097,
-          "weight": 0.051238495274569154
-        },
-        {
-          "avg_entry_price": 49.821,
-          "cost_basis": 498.21,
-          "last_price": 48.0,
-          "market_value": 480.0,
-          "qty": 10.0,
-          "side": "long",
-          "ticker": "VZ",
-          "unrealized_pnl": -18.21,
-          "unrealized_pnl_pct": -0.03655,
-          "weight": 0.049416270306998585
-        },
-        {
-          "avg_entry_price": 64.64,
-          "cost_basis": 452.48,
-          "last_price": 66.485,
-          "market_value": 465.395,
-          "qty": 7.0,
-          "side": "long",
-          "ticker": "MO",
-          "unrealized_pnl": 12.915,
-          "unrealized_pnl_pct": 0.02854,
-          "weight": 0.047912677332345006
-        },
-        {
-          "avg_entry_price": 232.5,
-          "cost_basis": 465.0,
-          "last_price": 229.22,
-          "market_value": 458.44,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "ADSK",
-          "unrealized_pnl": -6.56,
-          "unrealized_pnl_pct": -0.01411,
-          "weight": 0.04719665616570923
-        },
-        {
-          "avg_entry_price": 28.2225,
-          "cost_basis": 451.56,
-          "last_price": 27.335,
-          "market_value": 437.36,
-          "qty": 16.0,
-          "side": "long",
-          "ticker": "PFE",
-          "unrealized_pnl": -14.2,
-          "unrealized_pnl_pct": -0.03145,
-          "weight": 0.04502645829472687
-        },
-        {
-          "avg_entry_price": 205.47,
-          "cost_basis": 410.94,
-          "last_price": 212.025,
-          "market_value": 424.05,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "ALL",
-          "unrealized_pnl": 13.11,
-          "unrealized_pnl_pct": 0.0319,
-          "weight": 0.04365618629933906
-        },
-        {
-          "avg_entry_price": 81.444,
-          "cost_basis": 407.22,
-          "last_price": 82.07,
-          "market_value": 410.35,
-          "qty": 5.0,
-          "side": "long",
+          "avg_entry_price": 130.035,
+          "cost_basis": 780.21,
+          "last_price": 146.97,
+          "market_value": 881.82,
+          "qty": 6.0,
+          "side": "positionside.long",
           "ticker": "FTNT",
-          "unrealized_pnl": 3.13,
-          "unrealized_pnl_pct": 0.00769,
-          "weight": 0.04224576358432681
+          "unrealized_pnl": 101.61,
+          "unrealized_pnl_pct": 0.13023,
+          "weight": 0.08049078365831351
         },
         {
-          "avg_entry_price": 178.0,
-          "cost_basis": 356.0,
-          "last_price": 177.88,
-          "market_value": 355.76,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "BKNG",
-          "unrealized_pnl": -0.24,
-          "unrealized_pnl_pct": -0.00067,
-          "weight": 0.03662569234253711
+          "avg_entry_price": 80.3917039690212,
+          "cost_basis": 837.685792,
+          "last_price": 79.105,
+          "market_value": 824.278269,
+          "qty": 10.4200527,
+          "side": "positionside.long",
+          "ticker": "GM",
+          "unrealized_pnl": -13.407523,
+          "unrealized_pnl_pct": -0.01601,
+          "weight": 0.07523848838122082
         },
         {
-          "avg_entry_price": 352.0,
-          "cost_basis": 352.0,
-          "last_price": 352.34,
-          "market_value": 352.34,
+          "avg_entry_price": 1100.9859997524675,
+          "cost_basis": 759.451512,
+          "last_price": 1122.86,
+          "market_value": 774.540026,
+          "qty": 0.689792161,
+          "side": "positionside.long",
+          "ticker": "EQIX",
+          "unrealized_pnl": 15.088514,
+          "unrealized_pnl_pct": 0.01987,
+          "weight": 0.07069848003840978
+        },
+        {
+          "avg_entry_price": 240.44933694447803,
+          "cost_basis": 661.122575,
+          "last_price": 244.26,
+          "market_value": 671.600106,
+          "qty": 2.749529624,
+          "side": "positionside.long",
+          "ticker": "KLAC",
+          "unrealized_pnl": 10.477531,
+          "unrealized_pnl_pct": 0.01585,
+          "weight": 0.06130232795462386
+        },
+        {
+          "avg_entry_price": 99.04295692856739,
+          "cost_basis": 616.319532,
+          "last_price": 101.37,
+          "market_value": 630.800139,
+          "qty": 6.222749715,
+          "side": "positionside.long",
+          "ticker": "CVS",
+          "unrealized_pnl": 14.480607,
+          "unrealized_pnl_pct": 0.0235,
+          "weight": 0.05757818774793391
+        },
+        {
+          "avg_entry_price": 397.29926698375897,
+          "cost_basis": 643.695647,
+          "last_price": 387.16,
+          "market_value": 627.268227,
+          "qty": 1.62017829,
+          "side": "positionside.long",
+          "ticker": "MAR",
+          "unrealized_pnl": -16.42742,
+          "unrealized_pnl_pct": -0.02552,
+          "weight": 0.0572558018135117
+        },
+        {
+          "avg_entry_price": 146.87094507731067,
+          "cost_basis": 617.114218,
+          "last_price": 145.13,
+          "market_value": 609.799211,
+          "qty": 4.20174472,
+          "side": "positionside.long",
+          "ticker": "C",
+          "unrealized_pnl": -7.315007,
+          "unrealized_pnl_pct": -0.01185,
+          "weight": 0.05566126462045686
+        },
+        {
+          "avg_entry_price": 221.2216479662892,
+          "cost_basis": 589.156996,
+          "last_price": 226.43,
+          "market_value": 603.027867,
+          "qty": 2.663197754,
+          "side": "positionside.long",
+          "ticker": "MS",
+          "unrealized_pnl": 13.870871,
+          "unrealized_pnl_pct": 0.02354,
+          "weight": 0.05504318974692256
+        },
+        {
+          "avg_entry_price": 204.8543528691729,
+          "cost_basis": 456.592469,
+          "last_price": 203.65,
+          "market_value": 453.90813,
+          "qty": 2.228863886,
+          "side": "positionside.long",
+          "ticker": "QCOM",
+          "unrealized_pnl": -2.684339,
+          "unrealized_pnl_pct": -0.00588,
+          "weight": 0.041431835400171965
+        },
+        {
+          "avg_entry_price": 364.12,
+          "cost_basis": 364.12,
+          "last_price": 356.1,
+          "market_value": 356.1,
           "qty": 1.0,
-          "side": "long",
-          "ticker": "AMGN",
-          "unrealized_pnl": 0.34,
-          "unrealized_pnl_pct": 0.00097,
-          "weight": 0.03627360141659975
+          "side": "positionside.long",
+          "ticker": "GE",
+          "unrealized_pnl": -8.02,
+          "unrealized_pnl_pct": -0.02203,
+          "weight": 0.03250410294700216
         },
         {
-          "avg_entry_price": 170.01,
-          "cost_basis": 170.01,
-          "last_price": 169.25,
-          "market_value": 169.25,
-          "qty": 1.0,
-          "side": "long",
-          "ticker": "PANW",
-          "unrealized_pnl": -0.76,
-          "unrealized_pnl_pct": -0.00447,
-          "weight": 0.01742438281137398
+          "avg_entry_price": 398.66614170564924,
+          "cost_basis": 239.46755,
+          "last_price": 395.91,
+          "market_value": 237.812013,
+          "qty": 0.600671903,
+          "side": "positionside.long",
+          "ticker": "ELV",
+          "unrealized_pnl": -1.655537,
+          "unrealized_pnl_pct": -0.00691,
+          "weight": 0.02170700969555129
         },
         {
-          "avg_entry_price": 27.48,
-          "cost_basis": 82.44,
-          "last_price": 27.505,
-          "market_value": 82.515,
-          "qty": 3.0,
-          "side": "long",
-          "ticker": "WBD",
-          "unrealized_pnl": 0.075,
-          "unrealized_pnl_pct": 0.00091,
-          "weight": 0.008494965717462475
+          "avg_entry_price": 229.4870591329288,
+          "cost_basis": 223.743997,
+          "last_price": 238.23,
+          "market_value": 232.26814,
+          "qty": 0.974974353,
+          "side": "positionside.long",
+          "ticker": "JNJ",
+          "unrealized_pnl": 8.524143,
+          "unrealized_pnl_pct": 0.0381,
+          "weight": 0.021200975944590587
+        },
+        {
+          "avg_entry_price": 406.20999975214903,
+          "cost_basis": 198.933133,
+          "last_price": 408.72,
+          "market_value": 200.162355,
+          "qty": 0.489729778,
+          "side": "positionside.long",
+          "ticker": "UNH",
+          "unrealized_pnl": 1.229222,
+          "unrealized_pnl_pct": 0.00618,
+          "weight": 0.018270423456990707
+        },
+        {
+          "avg_entry_price": 223.8400002877967,
+          "cost_basis": 191.269509,
+          "last_price": 230.71,
+          "market_value": 197.139869,
+          "qty": 0.854492087,
+          "side": "positionside.long",
+          "ticker": "ALL",
+          "unrealized_pnl": 5.87036,
+          "unrealized_pnl_pct": 0.03069,
+          "weight": 0.017994536919220778
+        },
+        {
+          "avg_entry_price": 214.00000044528946,
+          "cost_basis": 191.273338,
+          "last_price": 216.405,
+          "market_value": 193.422928,
+          "qty": 0.893800643,
+          "side": "positionside.long",
+          "ticker": "SPG",
+          "unrealized_pnl": 2.14959,
+          "unrealized_pnl_pct": 0.01124,
+          "weight": 0.017655261904022987
+        },
+        {
+          "avg_entry_price": 141.2999998580857,
+          "cost_basis": 134.216489,
+          "last_price": 145.715,
+          "market_value": 138.410161,
+          "qty": 0.949868996,
+          "side": "positionside.long",
+          "ticker": "PLD",
+          "unrealized_pnl": 4.193672,
+          "unrealized_pnl_pct": 0.03125,
+          "weight": 0.01263380545367914
+        },
+        {
+          "avg_entry_price": 69.50000027591653,
+          "cost_basis": 121.787738,
+          "last_price": 71.315,
+          "market_value": 124.968237,
+          "qty": 1.752341547,
+          "side": "positionside.long",
+          "ticker": "MO",
+          "unrealized_pnl": 3.180499,
+          "unrealized_pnl_pct": 0.02612,
+          "weight": 0.01140685324502489
+        },
+        {
+          "avg_entry_price": 85.89999996633473,
+          "cost_basis": 107.166811,
+          "last_price": 86.415,
+          "market_value": 107.809313,
+          "qty": 1.24757638,
+          "side": "positionside.long",
+          "ticker": "NEE",
+          "unrealized_pnl": 0.642502,
+          "unrealized_pnl_pct": 0.006,
+          "weight": 0.009840620635769666
+        },
+        {
+          "avg_entry_price": 142.60999956566707,
+          "cost_basis": 93.88956,
+          "last_price": 147.485,
+          "market_value": 97.099094,
+          "qty": 0.658365895,
+          "side": "positionside.long",
+          "ticker": "BNY",
+          "unrealized_pnl": 3.209534,
+          "unrealized_pnl_pct": 0.03418,
+          "weight": 0.008863013050931309
+        },
+        {
+          "avg_entry_price": 330.7600009160886,
+          "cost_basis": 64.08036,
+          "last_price": 332.32,
+          "market_value": 64.382589,
+          "qty": 0.193736727,
+          "side": "positionside.long",
+          "ticker": "CB",
+          "unrealized_pnl": 0.302229,
+          "unrealized_pnl_pct": 0.00472,
+          "weight": 0.005876715250914148
+        },
+        {
+          "avg_entry_price": 72.42000028259989,
+          "cost_basis": 34.698061,
+          "last_price": 75.065,
+          "market_value": 35.96534,
+          "qty": 0.47912263,
+          "side": "positionside.long",
+          "ticker": "WMB",
+          "unrealized_pnl": 1.267279,
+          "unrealized_pnl_pct": 0.03652,
+          "weight": 0.003282845026351964
+        },
+        {
+          "avg_entry_price": 47.61999984670411,
+          "cost_basis": 31.088959,
+          "last_price": 46.745,
+          "market_value": 30.517711,
+          "qty": 0.652855084,
+          "side": "positionside.long",
+          "ticker": "VZ",
+          "unrealized_pnl": -0.571248,
+          "unrealized_pnl_pct": -0.01837,
+          "weight": 0.0027855962371549003
+        },
+        {
+          "avg_entry_price": 171.89015106204758,
+          "cost_basis": 15.711885,
+          "last_price": 170.865,
+          "market_value": 15.618179,
+          "qty": 0.091406546,
+          "side": "positionside.long",
+          "ticker": "PSX",
+          "unrealized_pnl": -0.093706,
+          "unrealized_pnl_pct": -0.00596,
+          "weight": 0.0014255964562221487
         }
       ],
       "source_type": "broker_positions",
       "summary": {
-        "cash": 2388.18,
-        "gross_market_value": 7325.18,
-        "largest_position_weight": 0.09360677002903206,
-        "net_market_value": 7325.18,
-        "positions_count": 16,
-        "top5_concentration": 0.32862025655280336
+        "cash": 552.51,
+        "gross_market_value": 10403.07,
+        "largest_position_weight": 0.11675166719303656,
+        "net_market_value": 10403.07,
+        "positions_count": 25,
+        "top5_concentration": 0.43585176358262573
       },
       "trust_level": "canonical"
     },
@@ -1747,7 +3869,7 @@ window.DASHBOARD_V1 = {
       "checks": [
         {
           "blocking": true,
-          "current": "neutral_mixed",
+          "current": "risk_on_trending",
           "name": "regime_data_available",
           "note": "The allocator needs a real regime state before its sleeve budgets mean anything.",
           "status": "pass",
@@ -1763,7 +3885,7 @@ window.DASHBOARD_V1 = {
         },
         {
           "blocking": true,
-          "current": "/Users/brettolson/Documents/Caerus/quant-daily-report-main/signals/2026-04-10.json",
+          "current": "/home/brettolson/quant-daily-report/signals/2026-06-23.json",
           "name": "signal_snapshot_present",
           "note": "If the signal snapshot is missing, the allocator decision is not auditable.",
           "status": "pass",
@@ -1772,12 +3894,12 @@ window.DASHBOARD_V1 = {
         {
           "blocking": true,
           "current": {
-            "max_abs_gap": 0.306699,
-            "total_abs_gap": 1.0
+            "max_abs_gap": 0.087763,
+            "total_abs_gap": 0.233428
           },
           "name": "shadow_vs_live_alignment",
           "note": "Compares the model target book to the live broker book at the decision point.",
-          "status": "fail",
+          "status": "pass",
           "threshold": {
             "max_single_sleeve_gap": 0.15,
             "max_total_allocation_gap": 0.3
@@ -1785,7 +3907,7 @@ window.DASHBOARD_V1 = {
         },
         {
           "blocking": false,
-          "current": 0.0,
+          "current": 0.0751353562299076,
           "name": "overlap_complexity",
           "note": "Heavy overlap across sleeves makes attribution harder even when allocation math is correct.",
           "status": "pass",
@@ -1809,7 +3931,7 @@ window.DASHBOARD_V1 = {
         },
         {
           "blocking": false,
-          "current": 1.0,
+          "current": 0.1381754304807613,
           "name": "cash_discipline",
           "note": "Idle cash should be a deliberate risk-off decision, not a quiet participation failure.",
           "status": "fail",
@@ -1821,813 +3943,307 @@ window.DASHBOARD_V1 = {
       "is_stale": false,
       "max_positions": 10.0,
       "portfolio_scale": 1.0,
-      "promotion_gate_blockers": [
-        "shadow_vs_live_alignment"
-      ],
-      "vix": 18.139999389648438
+      "promotion_gate_blockers": [],
+      "vix": 19.959999084472656
     },
     "shadow_command_center": {
-      "as_of": "2026-06-08",
+      "as_of": "2026-06-23",
       "is_stale": true,
       "rolling_excess_series": [
         {
-          "caerus_lyra": 0.07795848828565166,
-          "caerus_orion": 0.09357996634036336,
-          "caerus_orion_alpha": 0.04760580417937854,
-          "caerus_polaris": 0.07376895060350575,
-          "caerus_polaris_alpha": 0.05377348932928139,
-          "date": "2026-02-11"
-        },
-        {
-          "caerus_lyra": 0.03994278070043,
-          "caerus_orion": 0.039732207894533245,
-          "caerus_orion_alpha": 0.01719556119598664,
-          "caerus_polaris": 0.0386678835758314,
-          "caerus_polaris_alpha": 0.025364033369267958,
-          "date": "2026-02-12"
-        },
-        {
-          "caerus_lyra": 0.03670795915622527,
-          "caerus_orion": 0.03685590574727382,
-          "caerus_orion_alpha": 0.024374199402717678,
-          "caerus_polaris": 0.026046620715033275,
-          "caerus_polaris_alpha": 0.031678081838088734,
-          "date": "2026-02-13"
-        },
-        {
-          "caerus_lyra": 0.09363893841443016,
-          "caerus_orion": 0.09322268060781591,
-          "caerus_orion_alpha": 0.06702842920703878,
-          "caerus_polaris": 0.060761676775772044,
-          "caerus_polaris_alpha": 0.08123710404170181,
-          "date": "2026-02-17"
-        },
-        {
-          "caerus_lyra": 0.029665865745714615,
-          "caerus_orion": 0.029665865745714615,
-          "caerus_orion_alpha": 0.027323080841656133,
-          "caerus_polaris": 0.025464352775513954,
-          "caerus_polaris_alpha": 0.027659792745791445,
-          "date": "2026-02-18"
-        },
-        {
-          "caerus_lyra": 0.0029074473377992405,
-          "caerus_orion": 0.0029074473377992405,
-          "caerus_orion_alpha": -0.01651909098840665,
-          "caerus_polaris": 0.011998935884493855,
-          "caerus_polaris_alpha": -0.008632219533138752,
-          "date": "2026-02-19"
-        },
-        {
-          "caerus_lyra": 0.006578620259852785,
-          "caerus_orion": 0.006578620259852785,
-          "caerus_orion_alpha": -0.004433549915733637,
-          "caerus_polaris": -0.0015145332654064037,
-          "caerus_polaris_alpha": 0.0009818957930021188,
-          "date": "2026-02-20"
-        },
-        {
-          "caerus_lyra": -0.0067268890603106035,
-          "caerus_orion": -0.0067268890603104925,
-          "caerus_orion_alpha": -0.026885822825102546,
-          "caerus_polaris": 0.010825168980816535,
-          "caerus_polaris_alpha": -0.013881778593784255,
-          "date": "2026-02-23"
-        },
-        {
-          "caerus_lyra": -0.001831699905857187,
-          "caerus_orion": -0.001831699905856965,
-          "caerus_orion_alpha": -0.014133306364498832,
-          "caerus_polaris": 0.015479582627867083,
-          "caerus_polaris_alpha": -0.009455112175400293,
-          "date": "2026-02-24"
-        },
-        {
-          "caerus_lyra": -0.005180066796321325,
-          "caerus_orion": -0.005180066796321103,
-          "caerus_orion_alpha": -0.005416618635632586,
-          "caerus_polaris": 0.0038821747870232404,
-          "caerus_polaris_alpha": -0.014736944030440013,
-          "date": "2026-02-25"
-        },
-        {
-          "caerus_lyra": -0.0204572445946426,
-          "caerus_orion": -0.020457244594642376,
-          "caerus_orion_alpha": -0.0061815164507109666,
-          "caerus_polaris": 0.0013180625739313,
-          "caerus_polaris_alpha": -0.019375594045905387,
-          "date": "2026-02-26"
-        },
-        {
-          "caerus_lyra": -0.04214655185280758,
-          "caerus_orion": -0.04214655185280747,
-          "caerus_orion_alpha": -0.03469858244150836,
-          "caerus_polaris": -0.012866746720966105,
-          "caerus_polaris_alpha": -0.045483812958200476,
-          "date": "2026-02-27"
-        },
-        {
-          "caerus_lyra": -0.08349878309549619,
-          "caerus_orion": -0.07006947302247857,
-          "caerus_orion_alpha": -0.0396164075572647,
-          "caerus_polaris": -0.06463271263727388,
-          "caerus_polaris_alpha": -0.0696902067610149,
-          "date": "2026-03-02"
-        },
-        {
-          "caerus_lyra": -0.08181165224039944,
-          "caerus_orion": -0.07122504730422918,
-          "caerus_orion_alpha": -0.04965380379560491,
-          "caerus_polaris": -0.05990750576996029,
-          "caerus_polaris_alpha": -0.06545652246118538,
-          "date": "2026-03-03"
-        },
-        {
-          "caerus_lyra": -0.0757154120520297,
-          "caerus_orion": -0.05953988200445326,
-          "caerus_orion_alpha": -0.041203351042182756,
-          "caerus_polaris": -0.0568468288963363,
-          "caerus_polaris_alpha": -0.054317781784928076,
-          "date": "2026-03-04"
-        },
-        {
-          "caerus_lyra": -0.09801969311917924,
-          "caerus_orion": -0.08304598601128821,
-          "caerus_orion_alpha": -0.047096001497129225,
-          "caerus_polaris": -0.08542436852750135,
-          "caerus_polaris_alpha": -0.08164697672666321,
-          "date": "2026-03-05"
-        },
-        {
-          "caerus_lyra": -0.0430327625476824,
-          "caerus_orion": -0.029356214975272965,
-          "caerus_orion_alpha": -0.003897885538886592,
-          "caerus_polaris": -0.04457674115039545,
-          "caerus_polaris_alpha": -0.024241534317854696,
-          "date": "2026-03-06"
-        },
-        {
-          "caerus_lyra": 0.040044527914824046,
-          "caerus_orion": 0.04009601881541669,
-          "caerus_orion_alpha": 0.03562641133531508,
-          "caerus_polaris": 0.027355369932508866,
-          "caerus_polaris_alpha": 0.0432298342818076,
-          "date": "2026-03-09"
-        },
-        {
-          "caerus_lyra": 0.02625870881160408,
-          "caerus_orion": 0.02945554973967568,
-          "caerus_orion_alpha": 0.027042095716855008,
-          "caerus_polaris": 0.01374786729598465,
-          "caerus_polaris_alpha": 0.03042375554337473,
-          "date": "2026-03-10"
-        },
-        {
-          "caerus_lyra": 0.026457104868847003,
-          "caerus_orion": 0.02364092199903378,
-          "caerus_orion_alpha": 0.024778781144530693,
-          "caerus_polaris": 0.01454975182343865,
-          "caerus_polaris_alpha": 0.027781885303743814,
-          "date": "2026-03-11"
-        },
-        {
-          "caerus_lyra": 0.09319825514280422,
-          "caerus_orion": 0.09096558885040607,
-          "caerus_orion_alpha": 0.05655596727610146,
-          "caerus_polaris": 0.06295080935910546,
-          "caerus_polaris_alpha": 0.09724007491825348,
-          "date": "2026-03-12"
-        },
-        {
-          "caerus_lyra": 0.0771689859892134,
-          "caerus_orion": 0.07758642420654838,
-          "caerus_orion_alpha": 0.055868916247211575,
-          "caerus_polaris": 0.04405846475182751,
-          "caerus_polaris_alpha": 0.07951406482502998,
-          "date": "2026-03-13"
-        },
-        {
-          "caerus_lyra": 0.09712692511716448,
-          "caerus_orion": 0.10194478653182348,
-          "caerus_orion_alpha": 0.09152697062812876,
-          "caerus_polaris": 0.04393262119860197,
-          "caerus_polaris_alpha": 0.10301335901627118,
-          "date": "2026-03-16"
-        },
-        {
-          "caerus_lyra": 0.07931366367208126,
-          "caerus_orion": 0.0817863723586123,
-          "caerus_orion_alpha": 0.0830463181143255,
-          "caerus_polaris": 0.03684857917963047,
-          "caerus_polaris_alpha": 0.08546301373205378,
-          "date": "2026-03-17"
-        },
-        {
-          "caerus_lyra": 0.12856103972341926,
-          "caerus_orion": 0.1279988038387937,
-          "caerus_orion_alpha": 0.10909796829027918,
-          "caerus_polaris": 0.06675063317778018,
-          "caerus_polaris_alpha": 0.12649003113233348,
-          "date": "2026-03-18"
-        },
-        {
-          "caerus_lyra": 0.052607752385309015,
-          "caerus_orion": 0.06437666279120924,
-          "caerus_orion_alpha": 0.05404387963509416,
-          "caerus_polaris": 0.031852312276325234,
-          "caerus_polaris_alpha": 0.0624671872316076,
-          "date": "2026-03-19"
-        },
-        {
-          "caerus_lyra": 0.02082630207071956,
-          "caerus_orion": 0.021718409955796103,
-          "caerus_orion_alpha": 0.008323371411500746,
-          "caerus_polaris": 0.019444968473884883,
-          "caerus_polaris_alpha": 0.022681018895188476,
-          "date": "2026-03-20"
-        },
-        {
-          "caerus_lyra": 0.016679501463392588,
-          "caerus_orion": -0.003828929191720065,
-          "caerus_orion_alpha": -0.02030180886801436,
-          "caerus_polaris": 0.023687840227319845,
-          "caerus_polaris_alpha": -0.0011751743172186968,
-          "date": "2026-03-23"
-        },
-        {
-          "caerus_lyra": -0.0022348949898011172,
-          "caerus_orion": -0.027199393442905007,
-          "caerus_orion_alpha": -0.043013786577740465,
-          "caerus_polaris": 0.01307433458854279,
-          "caerus_polaris_alpha": -0.026188460791135904,
-          "date": "2026-03-24"
-        },
-        {
-          "caerus_lyra": -0.09035609363864539,
-          "caerus_orion": -0.09704327849951344,
-          "caerus_orion_alpha": -0.09787923601637327,
-          "caerus_polaris": -0.041407643197691635,
-          "caerus_polaris_alpha": -0.09024277580232265,
-          "date": "2026-03-25"
-        },
-        {
-          "caerus_lyra": -0.03302669681943249,
-          "caerus_orion": -0.05316534289223762,
-          "caerus_orion_alpha": -0.05069997794868786,
-          "caerus_polaris": -0.003316290297644353,
-          "caerus_polaris_alpha": -0.045296892801569344,
-          "date": "2026-03-26"
-        },
-        {
-          "caerus_lyra": -0.08800950071887481,
-          "caerus_orion": -0.08632634482670154,
-          "caerus_orion_alpha": -0.07855655987321819,
-          "caerus_polaris": -0.04584323928721279,
-          "caerus_polaris_alpha": -0.08026320015352917,
-          "date": "2026-03-27"
-        },
-        {
-          "caerus_lyra": -0.09004960515727434,
-          "caerus_orion": -0.08007191886608445,
-          "caerus_orion_alpha": -0.07619404468569224,
-          "caerus_polaris": -0.047338152857254845,
-          "caerus_polaris_alpha": -0.0788316319164144,
-          "date": "2026-03-30"
-        },
-        {
-          "caerus_lyra": -0.014128434685870661,
-          "caerus_orion": -0.005250122146124303,
-          "caerus_orion_alpha": 0.002895580631414596,
-          "caerus_polaris": 0.0019060647366239136,
-          "caerus_polaris_alpha": -0.0030480567043126294,
-          "date": "2026-03-31"
-        },
-        {
-          "caerus_lyra": 0.057184033129161316,
-          "caerus_orion": 0.041093478203857,
-          "caerus_orion_alpha": 0.045163730660212176,
-          "caerus_polaris": 0.044117681721698165,
-          "caerus_polaris_alpha": 0.05151407070014935,
-          "date": "2026-04-01"
-        },
-        {
-          "caerus_lyra": 0.054577595078031615,
-          "caerus_orion": 0.043273961486917534,
-          "caerus_orion_alpha": 0.049800624197107624,
-          "caerus_polaris": 0.03349993159140241,
-          "caerus_polaris_alpha": 0.046437773813819305,
-          "date": "2026-04-02"
-        },
-        {
-          "caerus_lyra": 0.15300284695024913,
-          "caerus_orion": 0.12179830031542527,
-          "caerus_orion_alpha": 0.1297567067101384,
-          "caerus_polaris": 0.09561370820666282,
-          "caerus_polaris_alpha": 0.126542841769818,
-          "date": "2026-04-06"
-        },
-        {
-          "caerus_lyra": 0.17917093639981063,
-          "caerus_orion": 0.13412430879913884,
-          "caerus_orion_alpha": 0.13799603817706818,
-          "caerus_polaris": 0.10662059217222852,
-          "caerus_polaris_alpha": 0.122039040330431,
-          "date": "2026-04-07"
-        },
-        {
-          "caerus_lyra": 0.12755014542263665,
-          "caerus_orion": 0.08775841740182022,
-          "caerus_orion_alpha": 0.07724402062433011,
-          "caerus_polaris": 0.0769996761444518,
-          "caerus_polaris_alpha": 0.07443095108400244,
-          "date": "2026-04-08"
-        },
-        {
-          "caerus_lyra": 0.13437494370048642,
-          "caerus_orion": 0.10198807331814086,
-          "caerus_orion_alpha": 0.0838390064776422,
-          "caerus_polaris": 0.0898396492587421,
-          "caerus_polaris_alpha": 0.07283483470290175,
-          "date": "2026-04-09"
-        },
-        {
-          "caerus_lyra": 0.12275744361904617,
-          "caerus_orion": 0.08221081203075231,
-          "caerus_orion_alpha": 0.061132663866174886,
-          "caerus_polaris": 0.08419034707266237,
-          "caerus_polaris_alpha": 0.058323029304778506,
-          "date": "2026-04-10"
-        },
-        {
-          "caerus_lyra": 0.1317230743234945,
-          "caerus_orion": 0.09668385032051963,
-          "caerus_orion_alpha": 0.08084197513782221,
-          "caerus_polaris": 0.0802378793462537,
-          "caerus_polaris_alpha": 0.06525588520827119,
-          "date": "2026-04-13"
-        },
-        {
-          "caerus_lyra": 0.033102226425642645,
-          "caerus_orion": 0.026304461307991467,
-          "caerus_orion_alpha": 0.02594678292026753,
-          "caerus_polaris": 0.015342660586929346,
-          "caerus_polaris_alpha": 0.022455370015652454,
-          "date": "2026-04-14"
-        },
-        {
-          "caerus_lyra": 0.008725758901621639,
-          "caerus_orion": 0.012204047564121634,
-          "caerus_orion_alpha": 0.02251279538697948,
-          "caerus_polaris": 0.0005319195756106065,
-          "caerus_polaris_alpha": 0.011970468661175904,
-          "date": "2026-04-15"
-        },
-        {
-          "caerus_lyra": 0.0005169440136596481,
-          "caerus_orion": 0.00918907382186851,
-          "caerus_orion_alpha": 0.01885643682488447,
-          "caerus_polaris": -0.004079834178644326,
-          "caerus_polaris_alpha": 0.005594440900910325,
-          "date": "2026-04-16"
-        },
-        {
-          "caerus_lyra": -0.013231782407655324,
-          "caerus_orion": -0.0013918503639953617,
-          "caerus_orion_alpha": 0.01032890984107726,
-          "caerus_polaris": -0.009628052625673567,
-          "caerus_polaris_alpha": -0.004910091070978062,
-          "date": "2026-04-17"
-        },
-        {
-          "caerus_lyra": -0.021907391346386862,
-          "caerus_orion": -0.01244325071161434,
-          "caerus_orion_alpha": 0.0016185126610444023,
-          "caerus_polaris": -0.006545056221280099,
-          "caerus_polaris_alpha": -0.00853832976361657,
-          "date": "2026-04-20"
-        },
-        {
-          "caerus_lyra": 0.029565856064865503,
-          "caerus_orion": 0.035224197181261685,
-          "caerus_orion_alpha": 0.04660988517705866,
-          "caerus_polaris": 0.04194935654185494,
-          "caerus_polaris_alpha": 0.033918386626086816,
-          "date": "2026-04-21"
-        },
-        {
-          "caerus_lyra": 0.037612665238065945,
-          "caerus_orion": 0.03907448025270277,
-          "caerus_orion_alpha": 0.05857478521526782,
-          "caerus_polaris": 0.050573724641706175,
-          "caerus_polaris_alpha": 0.03775783737084115,
-          "date": "2026-04-22"
-        },
-        {
-          "caerus_lyra": 0.04246923982335704,
-          "caerus_orion": 0.04121614031880361,
-          "caerus_orion_alpha": 0.05652542519251802,
-          "caerus_polaris": 0.05781590753885668,
-          "caerus_polaris_alpha": 0.04385164571789146,
-          "date": "2026-04-23"
-        },
-        {
-          "caerus_lyra": 0.05128512286267051,
-          "caerus_orion": 0.05170581184797807,
-          "caerus_orion_alpha": 0.07662966526750448,
-          "caerus_polaris": 0.04906730910982704,
-          "caerus_polaris_alpha": 0.0563707357463652,
-          "date": "2026-04-24"
-        },
-        {
-          "caerus_lyra": 0.0036015696337092784,
-          "caerus_orion": 0.016071886366576305,
-          "caerus_orion_alpha": 0.033101352387463034,
-          "caerus_polaris": 0.0054244654347939125,
-          "caerus_polaris_alpha": 0.006229383072352324,
-          "date": "2026-04-27"
-        },
-        {
-          "caerus_lyra": 0.019430131128409744,
-          "caerus_orion": 0.031499653500607794,
-          "caerus_orion_alpha": 0.058671695936770796,
-          "caerus_polaris": 0.006092082745586369,
-          "caerus_polaris_alpha": 0.021486318809709193,
-          "date": "2026-04-28"
-        },
-        {
-          "caerus_lyra": 0.04292374130412968,
-          "caerus_orion": 0.046218728415578614,
-          "caerus_orion_alpha": 0.06047054182789102,
-          "caerus_polaris": 0.02289093384818197,
-          "caerus_polaris_alpha": 0.024753182472048385,
-          "date": "2026-04-29"
-        },
-        {
-          "caerus_lyra": 0.04936040646812767,
-          "caerus_orion": 0.05965628082213481,
-          "caerus_orion_alpha": 0.08938952650253529,
-          "caerus_polaris": 0.00869885337977494,
-          "caerus_polaris_alpha": 0.032659673088858865,
-          "date": "2026-04-30"
-        },
-        {
-          "caerus_lyra": 0.07386676079419341,
-          "caerus_orion": 0.08359583504604329,
-          "caerus_orion_alpha": 0.10560245759100129,
-          "caerus_polaris": 0.03226095709529986,
-          "caerus_polaris_alpha": 0.05499538194735942,
-          "date": "2026-05-01"
-        },
-        {
-          "caerus_lyra": 0.15176774590412934,
-          "caerus_orion": 0.15986061238027216,
-          "caerus_orion_alpha": 0.1770542716009289,
-          "caerus_polaris": 0.11097694321988971,
-          "caerus_polaris_alpha": 0.13034028564560574,
-          "date": "2026-05-04"
-        },
-        {
-          "caerus_lyra": 0.14379194883555435,
-          "caerus_orion": 0.14279781703452565,
-          "caerus_orion_alpha": 0.13568559705898786,
-          "caerus_polaris": 0.11772305039257369,
-          "caerus_polaris_alpha": 0.12323626554778566,
-          "date": "2026-05-05"
-        },
-        {
-          "caerus_lyra": 0.09532907907925847,
-          "caerus_orion": 0.09481272278320385,
-          "caerus_orion_alpha": 0.09413807709247535,
-          "caerus_polaris": 0.059787028171041534,
-          "caerus_polaris_alpha": 0.09438884487261867,
-          "date": "2026-05-06"
-        },
-        {
-          "caerus_lyra": 0.12383212499459528,
-          "caerus_orion": 0.11609699821837993,
-          "caerus_orion_alpha": 0.11288635996582208,
-          "caerus_polaris": 0.1080113415919699,
-          "caerus_polaris_alpha": 0.12272780088944746,
-          "date": "2026-05-07"
-        },
-        {
-          "caerus_lyra": 0.16367900015163817,
-          "caerus_orion": 0.13357856325145678,
-          "caerus_orion_alpha": 0.1347525399952838,
-          "caerus_polaris": 0.13774196823225715,
-          "caerus_polaris_alpha": 0.16136940489011886,
-          "date": "2026-05-08"
-        },
-        {
-          "caerus_lyra": 0.078179297571348,
-          "caerus_orion": 0.04952214570668989,
-          "caerus_orion_alpha": 0.05446699683097078,
-          "caerus_polaris": 0.05831443458626051,
-          "caerus_polaris_alpha": 0.08378403944839974,
-          "date": "2026-05-11"
-        },
-        {
-          "caerus_lyra": 0.0684314095569174,
-          "caerus_orion": 0.0406693255423225,
-          "caerus_orion_alpha": 0.05500851415567509,
-          "caerus_polaris": 0.03521457102481618,
-          "caerus_polaris_alpha": 0.06925853891334888,
-          "date": "2026-05-12"
-        },
-        {
-          "caerus_lyra": 0.06939457362242218,
-          "caerus_orion": 0.04727266360211657,
-          "caerus_orion_alpha": 0.053556845074083315,
-          "caerus_polaris": 0.05208743675289251,
-          "caerus_polaris_alpha": 0.06681164544133034,
-          "date": "2026-05-13"
-        },
-        {
-          "caerus_lyra": -0.004915909720930256,
-          "caerus_orion": -0.010273109438201478,
-          "caerus_orion_alpha": -0.0033218535217571787,
-          "caerus_polaris": -0.018773334793744656,
-          "caerus_polaris_alpha": 0.0026931273668326927,
-          "date": "2026-05-14"
-        },
-        {
-          "caerus_lyra": -0.11233391952950156,
-          "caerus_orion": -0.0857638308429618,
-          "caerus_orion_alpha": -0.09103451358350023,
-          "caerus_polaris": -0.0870240321743524,
-          "caerus_polaris_alpha": -0.10027223214761516,
-          "date": "2026-05-15"
-        },
-        {
-          "caerus_lyra": -0.06960053265341126,
-          "caerus_orion": -0.0551571384336087,
-          "caerus_orion_alpha": -0.05599692086665664,
-          "caerus_polaris": -0.05586144114006475,
-          "caerus_polaris_alpha": -0.06601729888695274,
-          "date": "2026-05-18"
-        },
-        {
-          "caerus_lyra": -0.0654822593304254,
-          "caerus_orion": -0.04729170472242106,
-          "caerus_orion_alpha": -0.05822798898428383,
-          "caerus_polaris": -0.040369051207982065,
-          "caerus_polaris_alpha": -0.0713068510320457,
+          "caerus_lyra": -0.06566785055305435,
+          "caerus_orion": -0.0551559858920313,
+          "caerus_polaris": -0.06028756951445369,
           "date": "2026-05-19"
         },
         {
-          "caerus_lyra": -0.007837635627843342,
-          "caerus_orion": 0.00733356326180179,
-          "caerus_orion_alpha": 0.004517187409777579,
-          "caerus_polaris": -0.004846540134263444,
-          "caerus_polaris_alpha": -0.010777452557450995,
+          "caerus_lyra": -0.06151364103515555,
+          "caerus_orion": -0.04729170482064693,
+          "caerus_polaris": -0.04489056537435898,
           "date": "2026-05-20"
         },
         {
-          "caerus_lyra": 0.02267062438623424,
-          "caerus_orion": 0.019551125353149512,
-          "caerus_orion_alpha": 0.007886427701341292,
-          "caerus_polaris": 0.024136450889524763,
-          "caerus_polaris_alpha": 0.007019435791247641,
+          "caerus_lyra": -0.003648747932148866,
+          "caerus_orion": 0.007333563224359074,
+          "caerus_polaris": -0.009861759434722006,
           "date": "2026-05-21"
         },
         {
-          "caerus_lyra": 0.15219109899519712,
-          "caerus_orion": 0.1338164980440395,
-          "caerus_orion_alpha": 0.13170137047042174,
-          "caerus_polaris": 0.11614048566653046,
-          "caerus_polaris_alpha": 0.12215503186924437,
+          "caerus_lyra": 0.027057491187397087,
+          "caerus_orion": 0.019551125182330154,
+          "caerus_polaris": 0.02077496127578482,
           "date": "2026-05-22"
         },
         {
-          "caerus_lyra": 0.15023194449552646,
-          "caerus_orion": 0.14529896284588673,
-          "caerus_orion_alpha": 0.14460529798865074,
-          "caerus_polaris": 0.10823977496870052,
-          "caerus_polaris_alpha": 0.1308620838070338,
+          "caerus_lyra": 0.1526569545400669,
+          "caerus_orion": 0.13381649790459016,
+          "caerus_polaris": 0.11618522327100367,
           "date": "2026-05-26"
         },
         {
-          "caerus_lyra": 0.10459380219240755,
-          "caerus_orion": 0.11388196447484522,
-          "caerus_orion_alpha": 0.12858159954686932,
-          "caerus_polaris": 0.06847452093463358,
-          "caerus_polaris_alpha": 0.11134669072992875,
+          "caerus_lyra": 0.15023193750316688,
+          "caerus_orion": 0.14529896279087406,
+          "caerus_polaris": 0.10805768810845984,
           "date": "2026-05-27"
         },
         {
-          "caerus_lyra": 0.05133297627583944,
-          "caerus_orion": 0.08033300588989212,
-          "caerus_orion_alpha": 0.09289299437159015,
-          "caerus_polaris": 0.03324761243110985,
-          "caerus_polaris_alpha": 0.058779221427738726,
+          "caerus_lyra": 0.10459380835948417,
+          "caerus_orion": 0.11388196440256815,
+          "caerus_polaris": 0.06829960752777176,
           "date": "2026-05-28"
         },
         {
-          "caerus_lyra": 0.06627427988103207,
-          "caerus_orion": 0.1158716965148352,
-          "caerus_orion_alpha": 0.13820320936134411,
-          "caerus_polaris": 0.03779825528789993,
-          "caerus_polaris_alpha": 0.0815958848127718,
+          "caerus_lyra": 0.05100768098901032,
+          "caerus_orion": 0.08033300584632097,
+          "caerus_polaris": 0.035907583156503886,
           "date": "2026-05-29"
         },
         {
-          "caerus_lyra": 0.027378662695163536,
-          "caerus_orion": 0.054507931568799295,
-          "caerus_orion_alpha": 0.06752511590234556,
-          "caerus_polaris": 0.01535704238029334,
-          "caerus_polaris_alpha": 0.02268603189480012,
+          "caerus_lyra": 0.06594480788963497,
+          "caerus_orion": 0.10364531686669598,
+          "caerus_polaris": 0.03535269282104481,
           "date": "2026-06-01"
         },
         {
-          "caerus_lyra": 0.06322645861850229,
-          "caerus_orion": 0.08968934615957425,
-          "caerus_orion_alpha": 0.08488829374007434,
-          "caerus_polaris": 0.06002517780590022,
-          "caerus_polaris_alpha": 0.05084994045948843,
+          "caerus_lyra": 0.02874657455857843,
+          "caerus_orion": 0.04576019829173239,
+          "caerus_polaris": 0.011813370881906149,
           "date": "2026-06-02"
         },
         {
-          "caerus_lyra": 0.04201577060243067,
-          "caerus_orion": 0.057575824247020346,
-          "caerus_orion_alpha": 0.050794215859022884,
-          "caerus_polaris": 0.0453697852592132,
-          "caerus_polaris_alpha": 0.024550552071292975,
+          "caerus_lyra": 0.06295578315562222,
+          "caerus_orion": 0.07836901091939485,
+          "caerus_polaris": 0.05631474588416774,
           "date": "2026-06-03"
         },
         {
-          "caerus_lyra": -0.04133509053800444,
-          "caerus_orion": -0.037854466972637724,
-          "caerus_orion_alpha": -0.01934071090566314,
-          "caerus_polaris": -0.01818816937773482,
-          "caerus_polaris_alpha": -0.03754753241663367,
+          "caerus_lyra": 0.04175091509407669,
+          "caerus_orion": 0.04660554099259562,
+          "caerus_polaris": 0.04171646352020919,
           "date": "2026-06-04"
         },
         {
-          "caerus_lyra": 0.007540970594898888,
-          "caerus_orion": -0.00022873225050790147,
-          "caerus_orion_alpha": -0.015886599955035607,
-          "caerus_polaris": 0.02467967317067865,
-          "caerus_polaris_alpha": -0.004753668185915494,
+          "caerus_lyra": -0.04133631561240858,
+          "caerus_orion": -0.047593242471177244,
+          "caerus_polaris": -0.023761791087204553,
           "date": "2026-06-05"
+        },
+        {
+          "caerus_lyra": 0.0070772423146832075,
+          "caerus_orion": -0.0010793707355574167,
+          "caerus_polaris": 0.02561950881947228,
+          "date": "2026-06-08"
+        },
+        {
+          "caerus_lyra": -0.04758717200144391,
+          "caerus_orion": -0.025540046891655233,
+          "caerus_polaris": -0.018971571009021027,
+          "date": "2026-06-09"
+        },
+        {
+          "caerus_lyra": -0.10068561010271615,
+          "caerus_orion": -0.08142711075624876,
+          "caerus_polaris": -0.07039350673369038,
+          "date": "2026-06-10"
+        },
+        {
+          "caerus_lyra": -0.015601280932661776,
+          "caerus_orion": 0.020991504780790926,
+          "caerus_polaris": 0.008031686322421572,
+          "date": "2026-06-11"
+        },
+        {
+          "caerus_lyra": 0.11334071013930802,
+          "caerus_orion": 0.15448045529413723,
+          "caerus_polaris": 0.10935376572910971,
+          "date": "2026-06-12"
+        },
+        {
+          "caerus_lyra": 0.12046935511278156,
+          "caerus_orion": 0.16197066426531026,
+          "caerus_polaris": 0.10459559202376956,
+          "date": "2026-06-15"
+        },
+        {
+          "caerus_lyra": 0.1266228690504163,
+          "caerus_orion": 0.1500195835163236,
+          "caerus_polaris": 0.09799990164338013,
+          "date": "2026-06-16"
+        },
+        {
+          "caerus_lyra": 0.19482780518301857,
+          "caerus_orion": 0.22129312968945536,
+          "caerus_polaris": 0.1595417836747266,
+          "date": "2026-06-17"
+        },
+        {
+          "caerus_lyra": 0.1936235117098426,
+          "caerus_orion": 0.18638270728150896,
+          "caerus_polaris": 0.13363793663196377,
+          "date": "2026-06-18"
+        },
+        {
+          "caerus_lyra": 0.2019578795785293,
+          "caerus_orion": 0.18996389041747697,
+          "caerus_polaris": 0.14939999754427946,
+          "date": "2026-06-22"
         }
       ],
-      "status": "OK",
+      "status": "NO_DATA",
       "strategies": [
         {
-          "alpha_per_dollar_deployed_proxy": 34.707049,
-          "avg_cash_weight": 0.0,
-          "avg_effective_n": 10.0,
-          "avg_hhi": 0.1,
+          "alpha_per_dollar_deployed_proxy": null,
+          "avg_cash_weight": null,
+          "avg_effective_n": null,
+          "avg_hhi": null,
           "avg_top_3_concentration": 0.3,
-          "avg_turnover": 0.0785714286,
-          "cumulative_return": 38.7536617571,
-          "daily_return": 0.0582178463,
-          "data_reason": null,
-          "data_status": "OK",
-          "excess_return_vs_spy": 34.7070492556,
+          "avg_turnover": 0.0744186047,
+          "cumulative_return": 0.8922922055,
+          "daily_return": 0.0,
+          "data_reason": "PRICE_CACHE_STALE",
+          "data_status": "NO_DATA",
+          "excess_return_vs_spy": 0.6068625165,
           "failed_criteria": [
-            "INSUFFICIENT_VALID_DAYS"
+            "PRICE_CACHE_STALE"
           ],
-          "max_drawdown": -0.1083554602,
+          "max_drawdown": -0.1085908947,
           "name": "Caerus Polaris",
           "promotion_readiness": "CONTROL",
-          "realized_volatility_ann": 0.5602559725,
+          "realized_volatility_ann": 0.5599950025,
           "role": "CONTROL",
-          "rolling_20d_excess": 0.06879900303971054,
-          "rolling_5d_excess": 0.02467967317067865,
+          "rolling_20d_excess": 0.287204334569759,
+          "rolling_5d_excess": 0.14939999754427946,
           "slug": "caerus_polaris",
           "status": "OK",
-          "valid_evaluation_days": 28
+          "valid_evaluation_days": 44
         },
         {
-          "alpha_per_dollar_deployed_proxy": -4.984764,
-          "avg_cash_weight": 0.2,
-          "avg_effective_n": 4.0,
-          "avg_hhi": 0.25,
-          "avg_top_3_concentration": 0.6,
-          "avg_turnover": 0.0,
-          "cumulative_return": 0.0588013215,
-          "daily_return": 0.0588013215,
+          "alpha_per_dollar_deployed_proxy": null,
+          "avg_cash_weight": null,
+          "avg_effective_n": null,
+          "avg_hhi": null,
+          "avg_top_3_concentration": null,
+          "avg_turnover": null,
+          "cumulative_return": null,
+          "daily_return": null,
           "data_reason": null,
-          "data_status": "OK",
-          "excess_return_vs_spy": -3.98781118,
-          "failed_criteria": [
-            "INSUFFICIENT_VALID_DAYS",
-            "BEHIND_POLARIS_EXCESS"
-          ],
-          "max_drawdown": 0.0,
-          "name": "Polaris_Alpha",
-          "promotion_readiness": "NOT_READY",
-          "realized_volatility_ann": null,
-          "role": "CHALLENGER",
-          "rolling_20d_excess": 0.0859088597205433,
-          "rolling_5d_excess": -0.004753668185915494,
-          "slug": "caerus_polaris_alpha",
-          "status": "OK",
-          "valid_evaluation_days": 1
-        },
-        {
-          "alpha_per_dollar_deployed_proxy": 167.713982,
-          "avg_cash_weight": 0.0,
-          "avg_effective_n": 5.0,
-          "avg_hhi": 0.2,
-          "avg_top_3_concentration": 0.6,
-          "avg_turnover": 0.0142857143,
-          "cumulative_return": 171.7605944241,
-          "daily_return": 0.0749711904,
-          "data_reason": null,
-          "data_status": "OK",
-          "excess_return_vs_spy": 167.7139819226,
+          "data_status": null,
+          "excess_return_vs_spy": null,
           "failed_criteria": [
             "INSUFFICIENT_VALID_DAYS"
           ],
-          "max_drawdown": -0.1352922746,
-          "name": "Caerus Orion",
+          "max_drawdown": null,
+          "name": "Polaris Alpha",
           "promotion_readiness": "WATCHLIST",
-          "realized_volatility_ann": 0.6119340545,
+          "realized_volatility_ann": null,
           "role": "CHALLENGER",
-          "rolling_20d_excess": 0.12439459150849785,
-          "rolling_5d_excess": -0.00022873225050790147,
+          "rolling_20d_excess": null,
+          "rolling_5d_excess": null,
+          "slug": "caerus_polaris_alpha",
+          "status": null,
+          "valid_evaluation_days": null
+        },
+        {
+          "alpha_per_dollar_deployed_proxy": null,
+          "avg_cash_weight": null,
+          "avg_effective_n": null,
+          "avg_hhi": null,
+          "avg_top_3_concentration": 0.6,
+          "avg_turnover": 0.0093023256,
+          "cumulative_return": 1.2878179278,
+          "daily_return": 0.0,
+          "data_reason": "PRICE_CACHE_STALE",
+          "data_status": "NO_DATA",
+          "excess_return_vs_spy": 1.0023882388,
+          "failed_criteria": [
+            "PRICE_CACHE_STALE"
+          ],
+          "max_drawdown": -0.1353372101,
+          "name": "Caerus Orion",
+          "promotion_readiness": "NOT_READY",
+          "realized_volatility_ann": 0.6136615919,
+          "role": "CHALLENGER",
+          "rolling_20d_excess": 0.408844357236946,
+          "rolling_5d_excess": 0.18996389041747697,
           "slug": "caerus_orion",
           "status": "OK",
-          "valid_evaluation_days": 28
+          "valid_evaluation_days": 44
         },
         {
-          "alpha_per_dollar_deployed_proxy": -5.337749,
-          "avg_cash_weight": 0.25,
-          "avg_effective_n": 3.000003,
-          "avg_hhi": 0.333333,
-          "avg_top_3_concentration": 0.75,
-          "avg_turnover": 0.0,
-          "cumulative_return": 0.0433009774,
-          "daily_return": 0.0433009774,
+          "alpha_per_dollar_deployed_proxy": null,
+          "avg_cash_weight": null,
+          "avg_effective_n": null,
+          "avg_hhi": null,
+          "avg_top_3_concentration": null,
+          "avg_turnover": null,
+          "cumulative_return": null,
+          "daily_return": null,
           "data_reason": null,
-          "data_status": "OK",
-          "excess_return_vs_spy": -4.0033115241,
-          "failed_criteria": [
-            "INSUFFICIENT_VALID_DAYS",
-            "BEHIND_POLARIS_EXCESS"
-          ],
-          "max_drawdown": 0.0,
-          "name": "Orion_Alpha",
-          "promotion_readiness": "NOT_READY",
-          "realized_volatility_ann": null,
-          "role": "CHALLENGER",
-          "rolling_20d_excess": 0.12321958212035122,
-          "rolling_5d_excess": -0.015886599955035607,
-          "slug": "caerus_orion_alpha",
-          "status": "OK",
-          "valid_evaluation_days": 1
-        },
-        {
-          "alpha_per_dollar_deployed_proxy": 172.231761,
-          "avg_cash_weight": 0.0,
-          "avg_effective_n": 5.0,
-          "avg_hhi": 0.2,
-          "avg_top_3_concentration": 0.6,
-          "avg_turnover": 0.0285714286,
-          "cumulative_return": 176.278373003,
-          "daily_return": 0.0713139924,
-          "data_reason": null,
-          "data_status": "OK",
-          "excess_return_vs_spy": 172.2317605015,
+          "data_status": null,
+          "excess_return_vs_spy": null,
           "failed_criteria": [
             "INSUFFICIENT_VALID_DAYS"
           ],
-          "max_drawdown": -0.1348606728,
-          "name": "Caerus Lyra",
+          "max_drawdown": null,
+          "name": "Orion Alpha",
           "promotion_readiness": "WATCHLIST",
-          "realized_volatility_ann": 0.6490185521,
+          "realized_volatility_ann": null,
           "role": "CHALLENGER",
-          "rolling_20d_excess": 0.09269407497927173,
-          "rolling_5d_excess": 0.007540970594898888,
+          "rolling_20d_excess": null,
+          "rolling_5d_excess": null,
+          "slug": "caerus_orion_alpha",
+          "status": null,
+          "valid_evaluation_days": null
+        },
+        {
+          "alpha_per_dollar_deployed_proxy": null,
+          "avg_cash_weight": null,
+          "avg_effective_n": null,
+          "avg_hhi": null,
+          "avg_top_3_concentration": 0.6,
+          "avg_turnover": 0.0279069767,
+          "cumulative_return": 1.3482407593,
+          "daily_return": 0.0,
+          "data_reason": "PRICE_CACHE_STALE",
+          "data_status": "NO_DATA",
+          "excess_return_vs_spy": 1.0628110703,
+          "failed_criteria": [
+            "PRICE_CACHE_STALE"
+          ],
+          "max_drawdown": -0.138882998,
+          "name": "Caerus Lyra",
+          "promotion_readiness": "NOT_READY",
+          "realized_volatility_ann": 0.6485728748,
+          "role": "CHALLENGER",
+          "rolling_20d_excess": 0.34482466977517,
+          "rolling_5d_excess": 0.2019578795785293,
           "slug": "caerus_lyra",
           "status": "OK",
-          "valid_evaluation_days": 28
+          "valid_evaluation_days": 44
         }
       ],
       "summary": {
         "benchmark": "SPY",
         "candidate_count": 4,
         "control": "caerus_polaris",
-        "latest_nav_date": "2026-06-05"
+        "latest_nav_date": "2026-06-22"
       }
     },
     "sleeve_inventory": {
-      "as_of": "2026-06-08",
+      "as_of": "2026-06-23",
       "is_stale": true,
       "rows": [
         {
-          "alpha_per_dollar_proxy": 34.707049,
+          "alpha_per_dollar_proxy": null,
           "artifact_status": "PRESENT",
           "baseline_strategy_id": null,
           "concentration": 0.3,
           "construction": {},
           "current_lifecycle_status": "paper",
-          "data_status": "OK",
+          "data_status": "NO_DATA",
           "display_name": "Caerus Polaris",
-          "drawdown": -0.1083554602,
-          "effective_n": 10.0,
+          "drawdown": -0.1085908947,
+          "effective_n": null,
           "eligible_for_promotion": false,
           "eligible_for_shadow": true,
           "execution_impact": "NON_EXECUTIONAL",
@@ -2638,20 +4254,20 @@ window.DASHBOARD_V1 = {
           "review_checkpoints": [],
           "role": "baseline",
           "short_name": "polaris",
-          "since_inception_return": 38.7536617571,
+          "since_inception_return": 0.8922922055,
           "sleeve_id": "polaris",
           "source_variant": "baseline_top10_daily",
           "strategy_id": "caerus_polaris",
           "strategy_type": "security_selection",
-          "today_return": 0.0582178463,
-          "turnover": 0.0785714286,
+          "today_return": 0.0,
+          "turnover": 0.0744186047,
           "variant_class": "baseline"
         },
         {
-          "alpha_per_dollar_proxy": -4.984764,
+          "alpha_per_dollar_proxy": null,
           "artifact_status": "PRESENT",
           "baseline_strategy_id": "caerus_polaris",
-          "concentration": 0.6,
+          "concentration": null,
           "construction": {
             "cash_residual_allowed": true,
             "max_position_weight": 0.2,
@@ -2661,49 +4277,8 @@ window.DASHBOARD_V1 = {
           "current_lifecycle_status": "shadow",
           "data_status": "OK",
           "display_name": "Polaris_Alpha",
-          "drawdown": 0.0,
-          "effective_n": 4.0,
-          "eligible_for_promotion": true,
-          "eligible_for_shadow": true,
-          "execution_impact": "NON_EXECUTIONAL",
-          "family": "core_momentum",
-          "lifecycle_stage": "shadow",
-          "manifest_lifecycle_stage": "shadow_observed",
-          "promotion_readiness": "NOT_READY",
-          "review_checkpoints": [
-            {
-              "observed_days": 1,
-              "status": "IN_PROGRESS",
-              "trading_days": 20
-            },
-            {
-              "observed_days": 1,
-              "status": "IN_PROGRESS",
-              "trading_days": 60
-            }
-          ],
-          "role": "challenger",
-          "short_name": "polaris_alpha",
-          "since_inception_return": 0.0588013215,
-          "sleeve_id": "polaris_alpha",
-          "source_variant": "polaris_alpha_top4_cap20_daily",
-          "strategy_id": "caerus_polaris_alpha",
-          "strategy_type": "security_selection",
-          "today_return": 0.0588013215,
-          "turnover": 0.0,
-          "variant_class": "alpha"
-        },
-        {
-          "alpha_per_dollar_proxy": 167.713982,
-          "artifact_status": "PRESENT",
-          "baseline_strategy_id": null,
-          "concentration": 0.6,
-          "construction": {},
-          "current_lifecycle_status": "shadow",
-          "data_status": "OK",
-          "display_name": "Caerus Orion",
-          "drawdown": -0.1352922746,
-          "effective_n": 5.0,
+          "drawdown": null,
+          "effective_n": null,
           "eligible_for_promotion": true,
           "eligible_for_shadow": true,
           "execution_impact": "NON_EXECUTIONAL",
@@ -2711,23 +4286,64 @@ window.DASHBOARD_V1 = {
           "lifecycle_stage": "shadow",
           "manifest_lifecycle_stage": "shadow_observed",
           "promotion_readiness": "WATCHLIST",
+          "review_checkpoints": [
+            {
+              "observed_days": 0,
+              "status": "IN_PROGRESS",
+              "trading_days": 20
+            },
+            {
+              "observed_days": 0,
+              "status": "IN_PROGRESS",
+              "trading_days": 60
+            }
+          ],
+          "role": "challenger",
+          "short_name": "polaris_alpha",
+          "since_inception_return": null,
+          "sleeve_id": "polaris_alpha",
+          "source_variant": "polaris_alpha_top4_cap20_daily",
+          "strategy_id": "caerus_polaris_alpha",
+          "strategy_type": "security_selection",
+          "today_return": null,
+          "turnover": null,
+          "variant_class": "alpha"
+        },
+        {
+          "alpha_per_dollar_proxy": null,
+          "artifact_status": "PRESENT",
+          "baseline_strategy_id": null,
+          "concentration": 0.6,
+          "construction": {},
+          "current_lifecycle_status": "shadow",
+          "data_status": "NO_DATA",
+          "display_name": "Caerus Orion",
+          "drawdown": -0.1353372101,
+          "effective_n": null,
+          "eligible_for_promotion": true,
+          "eligible_for_shadow": true,
+          "execution_impact": "NON_EXECUTIONAL",
+          "family": "core_momentum",
+          "lifecycle_stage": "shadow",
+          "manifest_lifecycle_stage": "shadow_observed",
+          "promotion_readiness": "NOT_READY",
           "review_checkpoints": [],
           "role": "challenger",
           "short_name": "orion",
-          "since_inception_return": 171.7605944241,
+          "since_inception_return": 1.2878179278,
           "sleeve_id": "orion",
           "source_variant": "h2_rank_decay_exit_h6_top5",
           "strategy_id": "caerus_orion",
           "strategy_type": "security_selection",
-          "today_return": 0.0749711904,
-          "turnover": 0.0142857143,
+          "today_return": 0.0,
+          "turnover": 0.0093023256,
           "variant_class": "standard"
         },
         {
-          "alpha_per_dollar_proxy": -5.337749,
+          "alpha_per_dollar_proxy": null,
           "artifact_status": "PRESENT",
           "baseline_strategy_id": "caerus_orion",
-          "concentration": 0.75,
+          "concentration": null,
           "construction": {
             "cash_residual_allowed": true,
             "max_position_weight": 0.25,
@@ -2738,49 +4354,8 @@ window.DASHBOARD_V1 = {
           "current_lifecycle_status": "shadow",
           "data_status": "OK",
           "display_name": "Orion_Alpha",
-          "drawdown": 0.0,
-          "effective_n": 3.000003,
-          "eligible_for_promotion": true,
-          "eligible_for_shadow": true,
-          "execution_impact": "NON_EXECUTIONAL",
-          "family": "core_momentum",
-          "lifecycle_stage": "shadow",
-          "manifest_lifecycle_stage": "shadow_observed",
-          "promotion_readiness": "NOT_READY",
-          "review_checkpoints": [
-            {
-              "observed_days": 1,
-              "status": "IN_PROGRESS",
-              "trading_days": 20
-            },
-            {
-              "observed_days": 1,
-              "status": "IN_PROGRESS",
-              "trading_days": 60
-            }
-          ],
-          "role": "challenger",
-          "short_name": "orion_alpha",
-          "since_inception_return": 0.0433009774,
-          "sleeve_id": "orion_alpha",
-          "source_variant": "orion_alpha_rank_decay_top3_cap25",
-          "strategy_id": "caerus_orion_alpha",
-          "strategy_type": "security_selection",
-          "today_return": 0.0433009774,
-          "turnover": 0.0,
-          "variant_class": "alpha"
-        },
-        {
-          "alpha_per_dollar_proxy": 172.231761,
-          "artifact_status": "PRESENT",
-          "baseline_strategy_id": null,
-          "concentration": 0.6,
-          "construction": {},
-          "current_lifecycle_status": "shadow",
-          "data_status": "OK",
-          "display_name": "Caerus Lyra",
-          "drawdown": -0.1348606728,
-          "effective_n": 5.0,
+          "drawdown": null,
+          "effective_n": null,
           "eligible_for_promotion": true,
           "eligible_for_shadow": true,
           "execution_impact": "NON_EXECUTIONAL",
@@ -2788,16 +4363,57 @@ window.DASHBOARD_V1 = {
           "lifecycle_stage": "shadow",
           "manifest_lifecycle_stage": "shadow_observed",
           "promotion_readiness": "WATCHLIST",
+          "review_checkpoints": [
+            {
+              "observed_days": 0,
+              "status": "IN_PROGRESS",
+              "trading_days": 20
+            },
+            {
+              "observed_days": 0,
+              "status": "IN_PROGRESS",
+              "trading_days": 60
+            }
+          ],
+          "role": "challenger",
+          "short_name": "orion_alpha",
+          "since_inception_return": null,
+          "sleeve_id": "orion_alpha",
+          "source_variant": "orion_alpha_rank_decay_top3_cap25",
+          "strategy_id": "caerus_orion_alpha",
+          "strategy_type": "security_selection",
+          "today_return": null,
+          "turnover": null,
+          "variant_class": "alpha"
+        },
+        {
+          "alpha_per_dollar_proxy": null,
+          "artifact_status": "PRESENT",
+          "baseline_strategy_id": null,
+          "concentration": 0.6,
+          "construction": {},
+          "current_lifecycle_status": "shadow",
+          "data_status": "NO_DATA",
+          "display_name": "Caerus Lyra",
+          "drawdown": -0.138882998,
+          "effective_n": null,
+          "eligible_for_promotion": true,
+          "eligible_for_shadow": true,
+          "execution_impact": "NON_EXECUTIONAL",
+          "family": "core_momentum",
+          "lifecycle_stage": "shadow",
+          "manifest_lifecycle_stage": "shadow_observed",
+          "promotion_readiness": "NOT_READY",
           "review_checkpoints": [],
           "role": "challenger",
           "short_name": "lyra",
-          "since_inception_return": 176.278373003,
+          "since_inception_return": 1.3482407593,
           "sleeve_id": "lyra",
           "source_variant": "h1_weekly_h6_top5",
           "strategy_id": "caerus_lyra",
           "strategy_type": "security_selection",
-          "today_return": 0.0713139924,
-          "turnover": 0.0285714286,
+          "today_return": 0.0,
+          "turnover": 0.0279069767,
           "variant_class": "standard"
         },
         {
@@ -2934,30 +4550,30 @@ window.DASHBOARD_V1 = {
       }
     },
     "system_health_console": {
-      "as_of": "2026-06-23T18:57:36+00:00",
+      "as_of": "2026-06-23T19:19:25+00:00",
       "checks": [
         {
-          "detail": "0 fail \u00b7 2 warn \u00b7 6 checks",
+          "detail": "0 fail \u00b7 1 warn \u00b7 6 checks",
           "name": "Daily health",
           "status": "WARN"
         },
         {
-          "detail": "max cache 2026-06-08",
+          "detail": "max cache 2026-06-22",
           "name": "Hydration",
           "status": "OK"
         },
         {
-          "detail": "generated 2026-04-30T15:15:51Z",
+          "detail": "generated 2026-06-23T11:06:42Z",
           "name": "Reconciliation",
           "status": "NOT_COMPARABLE"
         },
         {
-          "detail": "1 errors \u00b7 1 warnings",
+          "detail": "0 errors \u00b7 1 warnings",
           "name": "Dashboard validation",
           "status": "canonical"
         },
         {
-          "detail": "outputs/runs/2026-04-10T164001-0400_0d4dcad/trading_day_summary.json",
+          "detail": "outputs/runs/2026-06-23T093506-0400_2858433/trading_day_summary.json",
           "name": "Latest execution artifact",
           "status": "PRESENT"
         }
@@ -2965,252 +4581,31 @@ window.DASHBOARD_V1 = {
       "is_stale": true,
       "summary": {
         "failed_pipeline_count": 0,
-        "hydration_max_cache_date": "2026-06-08",
-        "latest_successful_execution": "outputs/runs/2026-04-10T164001-0400_0d4dcad/trading_day_summary.json",
-        "shadow_generation_date": "2026-06-08",
+        "hydration_max_cache_date": "2026-06-22",
+        "latest_successful_execution": "outputs/runs/2026-06-23T093506-0400_2858433/trading_day_summary.json",
+        "shadow_generation_date": "2026-06-23",
         "status": "WARN",
-        "warning_count": 3
+        "warning_count": 2
       }
     },
     "trades_today": {
-      "as_of": "2026-04-09T13:50:35.044822+00:00",
-      "is_stale": true,
-      "rows": [
-        {
-          "client_order_id": null,
-          "fill_price": 127.4,
-          "filled_at": "2026-04-09T13:35:27.091548Z",
-          "notional": 127.4,
-          "order_id": "26d57be2-3310-460b-a8e2-b7b8b38f3822",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527091::b67f0515-6931-45b7-8b4f-4aff87c59c42",
-          "ticker": "COP"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 219.84,
-          "filled_at": "2026-04-09T13:35:27.336027Z",
-          "notional": 219.84,
-          "order_id": "8ccaf70c-d20a-423b-9fe0-beb51453c689",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527336::206e949e-3778-4fb1-871c-b9f2dc04eed1",
-          "ticker": "PNC"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 75.67,
-          "filled_at": "2026-04-09T13:35:27.727294Z",
-          "notional": 151.34,
-          "order_id": "727c678b-d0cb-4211-898d-21ee4d8b4cd0",
-          "qty": 2.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527727::700e0044-3fd4-4558-b3e4-7650872557e6",
-          "ticker": "GM"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 123.79,
-          "filled_at": "2026-04-09T13:35:27.739359Z",
-          "notional": 247.58,
-          "order_id": "d171c760-1c06-467d-8d03-4ffa28fdad5f",
-          "qty": 2.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527739::c070c6ab-100e-4974-b09f-e427c3beddf5",
-          "ticker": "MRK"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 49.4,
-          "filled_at": "2026-04-09T13:35:27.776043Z",
-          "notional": 49.4,
-          "order_id": "3ea56dd3-5909-4ccb-8bc1-f726d0d49cb5",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527776::996f023b-2a7d-42f1-ae98-4749fc61b9e4",
-          "ticker": "TFC"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 122.5,
-          "filled_at": "2026-04-09T13:35:27.927139Z",
-          "notional": 122.5,
-          "order_id": "8d9da9d2-11d0-4d9b-9652-3b0ac618263d",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093527927::84d0355b-b2b5-4cb3-be46-ffa45e3b3306",
-          "ticker": "C"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 140.89,
-          "filled_at": "2026-04-09T13:35:28.084745Z",
-          "notional": 563.56,
-          "order_id": "c182c2ab-5af4-49f8-8710-48e9166953b6",
-          "qty": 4.0,
-          "side": "sell",
-          "source_execution_id": "20260409093528084::e156b6e8-a1c5-44bb-b0cc-c975f2d2f0e3",
-          "ticker": "GILD"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 219.84,
-          "filled_at": "2026-04-09T13:35:28.462122Z",
-          "notional": 219.84,
-          "order_id": "8ccaf70c-d20a-423b-9fe0-beb51453c689",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093528462::26f927ac-c8d2-4402-b47a-8d67b9f83dd1",
-          "ticker": "PNC"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 123.86,
-          "filled_at": "2026-04-09T13:35:28.882584Z",
-          "notional": 123.86,
-          "order_id": "d171c760-1c06-467d-8d03-4ffa28fdad5f",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093528882::0ae43282-8172-4ce5-8d86-1aa3844166cb",
-          "ticker": "MRK"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 49.4,
-          "filled_at": "2026-04-09T13:35:28.907249Z",
-          "notional": 148.2,
-          "order_id": "3ea56dd3-5909-4ccb-8bc1-f726d0d49cb5",
-          "qty": 3.0,
-          "side": "sell",
-          "source_execution_id": "20260409093528907::eb2d80ed-2242-4d48-953c-68052e2c7168",
-          "ticker": "TFC"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 122.42,
-          "filled_at": "2026-04-09T13:35:29.019475Z",
-          "notional": 244.84,
-          "order_id": "8d9da9d2-11d0-4d9b-9652-3b0ac618263d",
-          "qty": 2.0,
-          "side": "sell",
-          "source_execution_id": "20260409093529019::ae64f4ea-7108-44f7-af71-f537f8b8551c",
-          "ticker": "C"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 140.89,
-          "filled_at": "2026-04-09T13:35:29.157749Z",
-          "notional": 140.89,
-          "order_id": "c182c2ab-5af4-49f8-8710-48e9166953b6",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093529157::961d7be3-9343-4102-ae1b-0e139a53232e",
-          "ticker": "GILD"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 49.4,
-          "filled_at": "2026-04-09T13:35:29.597397Z",
-          "notional": 296.4,
-          "order_id": "3ea56dd3-5909-4ccb-8bc1-f726d0d49cb5",
-          "qty": 6.0,
-          "side": "sell",
-          "source_execution_id": "20260409093529597::0fb4fb52-9b8f-4f6e-8b8b-1167c5738989",
-          "ticker": "TFC"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 122.42,
-          "filled_at": "2026-04-09T13:35:29.684837Z",
-          "notional": 122.42,
-          "order_id": "8d9da9d2-11d0-4d9b-9652-3b0ac618263d",
-          "qty": 1.0,
-          "side": "sell",
-          "source_execution_id": "20260409093529684::c496d068-b538-4486-a078-eeed63f45d77",
-          "ticker": "C"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 232.5,
-          "filled_at": "2026-04-09T13:35:33.493421Z",
-          "notional": 465.0,
-          "order_id": "e2e856bc-921e-49ec-aec8-f8ceba1ed341",
-          "qty": 2.0,
-          "side": "buy",
-          "source_execution_id": "20260409093533493::638b6f83-0df4-49ab-b26d-cd0a5a37293f",
-          "ticker": "ADSK"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 178.0,
-          "filled_at": "2026-04-09T13:35:33.825099Z",
-          "notional": 178.0,
-          "order_id": "e0c10f9f-6586-4ca9-b9a7-6ec9310b42c6",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093533825::8bf2a739-7d16-46a6-888d-499d4402918d",
-          "ticker": "BKNG"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 352.0,
-          "filled_at": "2026-04-09T13:35:34.000754Z",
-          "notional": 352.0,
-          "order_id": "1773ad65-4ce5-4969-ad25-1d935591111d",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534000::5e2300f5-c2b1-46bb-8c3d-64adb8009af9",
-          "ticker": "AMGN"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 156.83,
-          "filled_at": "2026-04-09T13:35:34.186233Z",
-          "notional": 627.32,
-          "order_id": "14b67e33-964c-4270-bc53-626b1a614323",
-          "qty": 4.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534186::461c3057-45cd-411f-a966-f34023b9b2fc",
-          "ticker": "BDX"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 170.01,
-          "filled_at": "2026-04-09T13:35:34.488197Z",
-          "notional": 170.01,
-          "order_id": "fc54ff02-4a46-4c95-82da-9689ee43e72d",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534488::14508164-e8e8-4b48-b84d-4a749af43d85",
-          "ticker": "PANW"
-        },
-        {
-          "client_order_id": null,
-          "fill_price": 178.0,
-          "filled_at": "2026-04-09T13:35:34.865078Z",
-          "notional": 178.0,
-          "order_id": "e0c10f9f-6586-4ca9-b9a7-6ec9310b42c6",
-          "qty": 1.0,
-          "side": "buy",
-          "source_execution_id": "20260409093534865::9928d04a-ef6e-4608-949d-6d31da743a93",
-          "ticker": "BKNG"
-        }
-      ],
+      "as_of": "2026-06-23T19:14:58.885352+00:00",
+      "is_stale": false,
+      "rows": [],
       "source_type": "alpaca_fills",
       "summary": {
-        "buy_count": 6,
-        "buy_notional": 1970.33,
-        "fills_count": 20,
-        "sell_count": 14,
-        "sell_notional": 2778.07
+        "buy_count": 0,
+        "buy_notional": 0.0,
+        "fills_count": 0,
+        "sell_count": 0,
+        "sell_notional": 0.0
       },
       "trust_level": "canonical"
     }
   },
   "sources": [
     {
-      "as_of": "2026-04-09T13:50:35.044822+00:00",
+      "as_of": "2026-06-23T19:14:58.885352+00:00",
       "label": "broker account snapshot",
       "path": "outputs/broker/broker_snapshot_latest.json",
       "section": "nav",
@@ -3219,7 +4614,7 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-04-09T13:50:35.044822+00:00",
+      "as_of": "2026-06-23T19:14:58.885352+00:00",
       "label": "broker positions snapshot",
       "path": "outputs/broker/posttrade_positions.json",
       "section": "positions",
@@ -3228,9 +4623,9 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-04-09T13:50:35.044822+00:00",
+      "as_of": "2026-06-23T19:14:58.885352+00:00",
       "label": "alpaca fills snapshot",
-      "path": "outputs/broker_snapshot/broker_snapshot_2026-04-09.json",
+      "path": "outputs/broker_snapshot/broker_snapshot_2026-06-23.json",
       "section": "trades_today",
       "source_type": "alpaca_fills",
       "trust_level": "canonical",
@@ -3255,16 +4650,16 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-06-08",
+      "as_of": "2026-06-23",
       "label": "shadow evaluation",
-      "path": "outputs/shadow_candidates/2026-06-08/shadow_evaluation.json",
+      "path": "outputs/shadow_candidates/2026-06-23/shadow_evaluation.json",
       "section": "shadow_command_center",
       "source_type": "shadow_evaluation",
       "trust_level": "diagnostic",
       "used": true
     },
     {
-      "as_of": "2026-06-05",
+      "as_of": "2026-06-22",
       "label": "shadow nav series",
       "path": "outputs/shadow_candidates/performance/shadow_nav_series.csv",
       "section": "shadow_command_center",
@@ -3282,7 +4677,7 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-04-09",
+      "as_of": "2026-06-22",
       "label": "engine review",
       "path": "outputs/engine_review/live_regime_review_latest.json",
       "section": "regime_market_state",
@@ -3291,9 +4686,27 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-06-20T12:05:32+00:00",
+      "as_of": "2026-06-23T14:00:10+00:00",
       "label": "live pilot plan",
-      "path": "outputs/live_pilot/plans/live_pilot_plan_2026-03-24.json",
+      "path": "outputs/live_pilot/plans/live_pilot_plan_2026-06-23.json",
+      "section": "live_pilot",
+      "source_type": "live_pilot_artifact",
+      "trust_level": "runtime",
+      "used": true
+    },
+    {
+      "as_of": "2026-06-23T14:00:13+00:00",
+      "label": "live pilot preflight",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_preflight.json",
+      "section": "live_pilot",
+      "source_type": "live_pilot_artifact",
+      "trust_level": "runtime",
+      "used": true
+    },
+    {
+      "as_of": "2026-06-23T14:00:13+00:00",
+      "label": "live pilot operator summary",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_operator_summary.json",
       "section": "live_pilot",
       "source_type": "live_pilot_artifact",
       "trust_level": "runtime",
@@ -3301,53 +4714,35 @@ window.DASHBOARD_V1 = {
     },
     {
       "as_of": null,
-      "label": "live pilot preflight",
-      "path": "",
-      "section": "live_pilot",
-      "source_type": "live_pilot_artifact",
-      "trust_level": "missing",
-      "used": false
-    },
-    {
-      "as_of": null,
-      "label": "live pilot operator summary",
-      "path": "",
-      "section": "live_pilot",
-      "source_type": "live_pilot_artifact",
-      "trust_level": "missing",
-      "used": false
-    },
-    {
-      "as_of": null,
       "label": "live pilot evidence metrics",
-      "path": "",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_evidence_metrics.json",
       "section": "live_pilot",
       "source_type": "live_pilot_artifact",
       "trust_level": "missing",
       "used": false
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-23T14:00:13+00:00",
       "label": "live pilot reconciliation",
-      "path": "",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_reconciliation.json",
       "section": "live_pilot",
       "source_type": "live_pilot_artifact",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "runtime",
+      "used": true
     },
     {
       "as_of": null,
       "label": "live pilot submitted orders",
-      "path": "",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_orders_submitted.json",
       "section": "live_pilot",
       "source_type": "live_pilot_artifact",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "runtime",
+      "used": true
     },
     {
       "as_of": null,
       "label": "live pilot open order check",
-      "path": "",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_open_order_check.json",
       "section": "live_pilot",
       "source_type": "live_pilot_artifact",
       "trust_level": "missing",
@@ -3356,11 +4751,11 @@ window.DASHBOARD_V1 = {
     {
       "as_of": null,
       "label": "live pilot broker snapshot",
-      "path": "",
+      "path": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb/live_pilot_broker_snapshot_post.json",
       "section": "live_pilot",
       "source_type": "live_pilot_artifact",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "runtime",
+      "used": true
     },
     {
       "as_of": null,
@@ -3381,7 +4776,7 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-04-28",
+      "as_of": "2026-04-30",
       "label": "daily health check",
       "path": "outputs/health/caerus_daily_health_check/latest/health_check.json",
       "section": "system_health_console",
@@ -3390,16 +4785,16 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": "2026-06-08",
+      "as_of": "2026-06-22",
       "label": "hydration status",
-      "path": "outputs/price_hydration/2026-06-08/status.json",
+      "path": "outputs/price_hydration/2026-06-22/status.json",
       "section": "system_health_console",
       "source_type": "price_hydration",
       "trust_level": "diagnostic",
       "used": true
     },
     {
-      "as_of": "2026-04-30T15:15:51Z",
+      "as_of": "2026-06-23T11:06:42Z",
       "label": "live vs shadow reconciliation",
       "path": "outputs/reconciliation/live_vs_shadow/latest/live_vs_shadow_reconciliation.json",
       "section": "system_health_console",
@@ -3408,69 +4803,64 @@ window.DASHBOARD_V1 = {
       "used": true
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-08",
       "label": "model quality packet",
-      "path": "outputs/model_quality/2026-04-09/model_quality_packet.json",
+      "path": "outputs/model_quality/2026-06-08/model_quality_packet.json",
       "section": "decision_grade",
       "source_type": "model_quality",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "diagnostic",
+      "used": true
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-08",
       "label": "model tournament",
-      "path": "outputs/model_quality/2026-04-09/model_tournament.json",
+      "path": "outputs/model_quality/2026-06-08/model_tournament.json",
       "section": "decision_grade",
       "source_type": "model_quality",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "diagnostic",
+      "used": true
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-08",
       "label": "argo phase b validation",
-      "path": "outputs/model_quality/2026-04-09/argo_phase_b_validation.json",
+      "path": "outputs/model_quality/2026-06-08/argo_phase_b_validation.json",
       "section": "decision_grade",
       "source_type": "model_quality",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "diagnostic",
+      "used": true
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-08",
       "label": "strategy differentiation deep dive",
-      "path": "outputs/model_quality/2026-04-09/strategy_differentiation_deep_dive.json",
+      "path": "outputs/model_quality/2026-06-08/strategy_differentiation_deep_dive.json",
       "section": "decision_grade",
       "source_type": "model_quality",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "diagnostic",
+      "used": true
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-08",
       "label": "phoenix phase b review",
-      "path": "outputs/model_quality/2026-04-09/phoenix_phase_b_review.json",
+      "path": "outputs/model_quality/2026-06-08/phoenix_phase_b_review.json",
       "section": "decision_grade",
       "source_type": "model_quality",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "diagnostic",
+      "used": true
     },
     {
-      "as_of": null,
+      "as_of": "2026-06-08",
       "label": "multi asset research framework",
-      "path": "outputs/model_quality/2026-04-09/multi_asset_research_framework.json",
+      "path": "outputs/model_quality/2026-06-08/multi_asset_research_framework.json",
       "section": "decision_grade",
       "source_type": "model_quality",
-      "trust_level": "missing",
-      "used": false
+      "trust_level": "diagnostic",
+      "used": true
     }
   ],
   "status": {
-    "errors": [
-      {
-        "code": "history_latest_nav_matches_nav_section",
-        "message": "Latest portfolio history NAV does not match current NAV."
-      }
-    ],
-    "level": "error",
-    "summary": "Blocking validation failed.",
+    "errors": [],
+    "level": "warning",
+    "summary": "Dashboard published with warnings.",
     "warnings": [
       {
         "code": "shadow_nav_current",
@@ -3479,225 +4869,191 @@ window.DASHBOARD_V1 = {
       {
         "code": "decision_grade_model_quality_present",
         "message": "Decision-grade model-quality artifacts are incomplete."
-      },
-      {
-        "code": "positions_timestamp_fresh",
-        "message": "positions timestamp is stale."
-      },
-      {
-        "code": "nav_timestamp_fresh",
-        "message": "nav timestamp is stale."
-      },
-      {
-        "code": "trades_today_timestamp_fresh",
-        "message": "trades_today timestamp is stale."
-      },
-      {
-        "code": "performance_timestamp_fresh",
-        "message": "Performance history latest date lags report date."
       }
     ]
   },
   "terminal": {
     "benchmark": {
-      "down_days": 12,
-      "excess_since_inception_return": -0.018812624397267275,
-      "history_points": 26,
+      "down_days": 31,
+      "excess_since_inception_return": 0.016004378848945677,
+      "history_points": 78,
       "max_drawdown": -0.05016799999999999,
-      "rolling_20d_excess_return": -0.014470482388119432,
-      "rolling_20d_return": -0.019506031549956337,
-      "rolling_20d_spy_return": -0.005035549161836905,
-      "rolling_5d_excess_return": -0.02470496616366402,
-      "rolling_5d_return": 0.01132232987879278,
-      "rolling_5d_spy_return": 0.0360272960424568,
-      "since_inception_return": -0.028454999999999897,
-      "spy_close": 673.77001953125,
-      "spy_since_inception_return": -0.009642375602732622,
-      "up_days": 12
+      "rolling_20d_excess_return": 0.049289339523260645,
+      "rolling_20d_return": 0.0342820944430966,
+      "rolling_20d_spy_return": -0.015007245080164044,
+      "rolling_5d_excess_return": 0.017465062544159582,
+      "rolling_5d_return": -0.009534400144652344,
+      "rolling_5d_spy_return": -0.026999462688811926,
+      "since_inception_return": 0.09555400000000014,
+      "spy_close": 734.4500122070312,
+      "spy_since_inception_return": 0.07954962115105446,
+      "up_days": 44
     },
     "headline": {
-      "cash": 2388.18,
-      "day_pnl": -38.57,
-      "day_return": -0.00395509830321461,
-      "fills_count": 20,
-      "gross_exposure": 0.7541314060987914,
-      "nav": 9713.4,
-      "positions_count": 16,
-      "validation_status": "error"
+      "cash": 552.51,
+      "day_pnl": -154.5,
+      "day_return": -0.013906612457858514,
+      "fills_count": 0,
+      "gross_exposure": 0.9495716322518104,
+      "nav": 10955.54,
+      "positions_count": 25,
+      "validation_status": "ok"
     },
     "health": {
-      "blocking_failures": 1,
+      "blocking_failures": 0,
       "sources_total": 28,
-      "sources_used": 15,
+      "sources_used": 26,
       "stale_sections": [
-        "positions",
-        "nav",
-        "trades_today",
-        "performance_history",
         "shadow_command_center",
         "sleeve_inventory",
         "baseline_alpha_comparison",
         "system_health_console"
       ],
-      "warnings": 6
+      "warnings": 2
     },
     "leaders": {
       "laggards": [
         {
-          "avg_entry_price": 49.821,
-          "cost_basis": 498.21,
-          "last_price": 48.0,
-          "market_value": 480.0,
-          "qty": 10.0,
-          "side": "long",
-          "ticker": "VZ",
-          "unrealized_pnl": -18.21,
-          "unrealized_pnl_pct": -0.03655,
-          "weight": 0.049416270306998585
+          "avg_entry_price": 397.29926698375897,
+          "cost_basis": 643.695647,
+          "last_price": 387.16,
+          "market_value": 627.268227,
+          "qty": 1.62017829,
+          "side": "positionside.long",
+          "ticker": "MAR",
+          "unrealized_pnl": -16.42742,
+          "unrealized_pnl_pct": -0.02552,
+          "weight": 0.0572558018135117
         },
         {
-          "avg_entry_price": 28.2225,
-          "cost_basis": 451.56,
-          "last_price": 27.335,
-          "market_value": 437.36,
-          "qty": 16.0,
-          "side": "long",
-          "ticker": "PFE",
-          "unrealized_pnl": -14.2,
-          "unrealized_pnl_pct": -0.03145,
-          "weight": 0.04502645829472687
+          "avg_entry_price": 80.3917039690212,
+          "cost_basis": 837.685792,
+          "last_price": 79.105,
+          "market_value": 824.278269,
+          "qty": 10.4200527,
+          "side": "positionside.long",
+          "ticker": "GM",
+          "unrealized_pnl": -13.407523,
+          "unrealized_pnl_pct": -0.01601,
+          "weight": 0.07523848838122082
         },
         {
-          "avg_entry_price": 261.23,
-          "cost_basis": 522.46,
-          "last_price": 257.62,
-          "market_value": 515.24,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "AAPL",
-          "unrealized_pnl": -7.22,
-          "unrealized_pnl_pct": -0.01382,
-          "weight": 0.05304424815203739
+          "avg_entry_price": 364.12,
+          "cost_basis": 364.12,
+          "last_price": 356.1,
+          "market_value": 356.1,
+          "qty": 1.0,
+          "side": "positionside.long",
+          "ticker": "GE",
+          "unrealized_pnl": -8.02,
+          "unrealized_pnl_pct": -0.02203,
+          "weight": 0.03250410294700216
         },
         {
-          "avg_entry_price": 232.5,
-          "cost_basis": 465.0,
-          "last_price": 229.22,
-          "market_value": 458.44,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "ADSK",
-          "unrealized_pnl": -6.56,
-          "unrealized_pnl_pct": -0.01411,
-          "weight": 0.04719665616570923
+          "avg_entry_price": 146.87094507731067,
+          "cost_basis": 617.114218,
+          "last_price": 145.13,
+          "market_value": 609.799211,
+          "qty": 4.20174472,
+          "side": "positionside.long",
+          "ticker": "C",
+          "unrealized_pnl": -7.315007,
+          "unrealized_pnl_pct": -0.01185,
+          "weight": 0.05566126462045686
         },
         {
-          "avg_entry_price": 156.83,
-          "cost_basis": 627.32,
-          "last_price": 155.435,
-          "market_value": 621.74,
-          "qty": 4.0,
-          "side": "long",
-          "ticker": "BDX",
-          "unrealized_pnl": -5.58,
-          "unrealized_pnl_pct": -0.00889,
-          "weight": 0.0640084831264027
+          "avg_entry_price": 204.8543528691729,
+          "cost_basis": 456.592469,
+          "last_price": 203.65,
+          "market_value": 453.90813,
+          "qty": 2.228863886,
+          "side": "positionside.long",
+          "ticker": "QCOM",
+          "unrealized_pnl": -2.684339,
+          "unrealized_pnl_pct": -0.00588,
+          "weight": 0.041431835400171965
         }
       ],
       "winners": [
         {
-          "avg_entry_price": 73.614286,
-          "cost_basis": 883.371432,
-          "last_price": 75.77,
-          "market_value": 909.24,
-          "qty": 12.0,
-          "side": "long",
-          "ticker": "GM",
-          "unrealized_pnl": 25.868568,
-          "unrealized_pnl_pct": 0.02928,
-          "weight": 0.09360677002903206
+          "avg_entry_price": 706.3942863793549,
+          "cost_basis": 875.151904,
+          "last_price": 1032.43,
+          "market_value": 1279.07756,
+          "qty": 1.238900032,
+          "side": "positionside.long",
+          "ticker": "STX",
+          "unrealized_pnl": 403.925656,
+          "unrealized_pnl_pct": 0.46155,
+          "weight": 0.11675166719303656
         },
         {
-          "avg_entry_price": 53.638889,
-          "cost_basis": 482.750001,
-          "last_price": 55.3,
-          "market_value": 497.7,
-          "qty": 9.0,
-          "side": "long",
-          "ticker": "USB",
-          "unrealized_pnl": 14.949999,
-          "unrealized_pnl_pct": 0.03097,
-          "weight": 0.051238495274569154
-        },
-        {
-          "avg_entry_price": 205.47,
-          "cost_basis": 410.94,
-          "last_price": 212.025,
-          "market_value": 424.05,
-          "qty": 2.0,
-          "side": "long",
-          "ticker": "ALL",
-          "unrealized_pnl": 13.11,
-          "unrealized_pnl_pct": 0.0319,
-          "weight": 0.04365618629933906
-        },
-        {
-          "avg_entry_price": 64.64,
-          "cost_basis": 452.48,
-          "last_price": 66.485,
-          "market_value": 465.395,
-          "qty": 7.0,
-          "side": "long",
-          "ticker": "MO",
-          "unrealized_pnl": 12.915,
-          "unrealized_pnl_pct": 0.02854,
-          "weight": 0.047912677332345006
-        },
-        {
-          "avg_entry_price": 81.444,
-          "cost_basis": 407.22,
-          "last_price": 82.07,
-          "market_value": 410.35,
-          "qty": 5.0,
-          "side": "long",
+          "avg_entry_price": 130.035,
+          "cost_basis": 780.21,
+          "last_price": 146.97,
+          "market_value": 881.82,
+          "qty": 6.0,
+          "side": "positionside.long",
           "ticker": "FTNT",
-          "unrealized_pnl": 3.13,
-          "unrealized_pnl_pct": 0.00769,
-          "weight": 0.04224576358432681
+          "unrealized_pnl": 101.61,
+          "unrealized_pnl_pct": 0.13023,
+          "weight": 0.08049078365831351
+        },
+        {
+          "avg_entry_price": 91.7543149833832,
+          "cost_basis": 996.639723,
+          "last_price": 93.47,
+          "market_value": 1015.275575,
+          "qty": 10.862047449,
+          "side": "positionside.long",
+          "ticker": "MNST",
+          "unrealized_pnl": 18.635852,
+          "unrealized_pnl_pct": 0.0187,
+          "weight": 0.09267234431164506
+        },
+        {
+          "avg_entry_price": 1100.9859997524675,
+          "cost_basis": 759.451512,
+          "last_price": 1122.86,
+          "market_value": 774.540026,
+          "qty": 0.689792161,
+          "side": "positionside.long",
+          "ticker": "EQIX",
+          "unrealized_pnl": 15.088514,
+          "unrealized_pnl_pct": 0.01987,
+          "weight": 0.07069848003840978
+        },
+        {
+          "avg_entry_price": 99.04295692856739,
+          "cost_basis": 616.319532,
+          "last_price": 101.37,
+          "market_value": 630.800139,
+          "qty": 6.222749715,
+          "side": "positionside.long",
+          "ticker": "CVS",
+          "unrealized_pnl": 14.480607,
+          "unrealized_pnl_pct": 0.0235,
+          "weight": 0.05757818774793391
         }
       ]
     },
     "positioning": {
-      "average_position_weight": 0.047133212881174454,
-      "cash_ratio": 0.24586447587868304,
-      "gross_market_value": 7325.18,
-      "invested_ratio": 0.7541314060987914,
-      "largest_position_weight": 0.09360677002903206,
-      "median_position_weight": 0.047554666749027114,
-      "top10_concentration": 0.5694108139271521,
-      "top5_concentration": 0.32862025655280336
+      "average_position_weight": 0.03798286908358693,
+      "cash_ratio": 0.050432018868992304,
+      "gross_market_value": 10403.07,
+      "invested_ratio": 0.9495716322518104,
+      "largest_position_weight": 0.11675166719303656,
+      "median_position_weight": 0.02170700969555129,
+      "top10_concentration": 0.7226925354660747,
+      "top5_concentration": 0.43585176358262573
     },
     "tape": {
-      "buy_notional": 1970.33,
-      "buy_symbols": [
-        "ADSK",
-        "AMGN",
-        "BDX",
-        "BKNG",
-        "PANW"
-      ],
-      "last_fill_at": "2026-04-09T13:35:34.865078Z",
-      "net_notional": -807.7400000000002,
-      "sell_notional": 2778.07,
-      "sell_symbols": [
-        "C",
-        "COP",
-        "GILD",
-        "GM",
-        "MRK",
-        "PNC",
-        "TFC"
-      ]
+      "buy_notional": 0.0,
+      "buy_symbols": [],
+      "last_fill_at": null,
+      "net_notional": 0.0,
+      "sell_notional": 0.0,
+      "sell_symbols": []
     }
   },
   "validation": {
@@ -3758,14 +5114,10 @@ window.DASHBOARD_V1 = {
         "status": "pass"
       },
       {
-        "detail": "Latest portfolio history NAV does not match current NAV.",
-        "latest_nav": 9715.45,
-        "latest_nav_date": "2026-04-08",
+        "detail": "Latest portfolio history NAV matches current NAV.",
         "name": "history_latest_nav_matches_nav_section",
-        "nav_equity": 9713.4,
-        "report_date": "2026-04-09",
         "severity": "blocking",
-        "status": "fail"
+        "status": "pass"
       },
       {
         "detail": "Shadow evaluation artifact loaded.",
@@ -3775,8 +5127,8 @@ window.DASHBOARD_V1 = {
       },
       {
         "detail": "Shadow NAV latest date lags latest evaluation date.",
-        "evaluation_date": "2026-06-08",
-        "latest_nav_date": "2026-06-05",
+        "evaluation_date": "2026-06-23",
+        "latest_nav_date": "2026-06-22",
         "name": "shadow_nav_current",
         "severity": "non_blocking",
         "status": "warn"
@@ -3800,28 +5152,28 @@ window.DASHBOARD_V1 = {
         "status": "warn"
       },
       {
-        "detail": "positions timestamp is stale.",
+        "detail": "positions timestamp is fresh.",
         "name": "positions_timestamp_fresh",
         "severity": "non_blocking",
-        "status": "warn"
+        "status": "pass"
       },
       {
-        "detail": "nav timestamp is stale.",
+        "detail": "nav timestamp is fresh.",
         "name": "nav_timestamp_fresh",
         "severity": "non_blocking",
-        "status": "warn"
+        "status": "pass"
       },
       {
-        "detail": "trades_today timestamp is stale.",
+        "detail": "trades_today timestamp is fresh.",
         "name": "trades_today_timestamp_fresh",
         "severity": "non_blocking",
-        "status": "warn"
+        "status": "pass"
       },
       {
-        "detail": "Performance history latest date lags report date.",
+        "detail": "Performance history latest date matches report date.",
         "name": "performance_timestamp_fresh",
         "severity": "non_blocking",
-        "status": "warn"
+        "status": "pass"
       },
       {
         "detail": "Buying power present.",
