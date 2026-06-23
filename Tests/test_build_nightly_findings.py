@@ -21,7 +21,7 @@ class BuildNightlyFindingsTest(unittest.TestCase):
             reports_dir = tmp_path / "reports" / "agents"
             reports_dir.mkdir(parents=True)
 
-            (dashboard_dir / "dashboard-data.json").write_text(
+            (dashboard_dir / "dashboard_data.json").write_text(
                 json.dumps(
                     {
                         "tradeDate": "2026-04-08",
@@ -76,8 +76,6 @@ class BuildNightlyFindingsTest(unittest.TestCase):
                     str(SCRIPT),
                     "--repo-root",
                     str(tmp_path),
-                    "--dashboard-data",
-                    "web/dashboard/dashboard-data.json",
                     "--audit",
                     "repo_workflow_audit.md",
                     "--output-json",

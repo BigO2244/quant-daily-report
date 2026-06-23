@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.research.build_dashboard_v1 import DashboardV1Builder, parse_args
+from scripts.research.build_dashboard_v1 import DashboardV1Builder, parse_args, write_dashboard_v1_payload
 
 
 def _write_strategy_registry(root: Path) -> None:
@@ -244,6 +244,21 @@ def test_build_dashboard_v1_accepts_date_alias() -> None:
     args = parse_args(["--date", "2026-06-08"])
 
     assert args.report_date == "2026-06-08"
+
+
+def test_dashboard_v1_payload_aliases_are_consistent(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": "dashboard-v2-prototype",
+        "sections": {"operator_control_tower": {"summary": {"live_pilot_state": "ACTIVE"}}},
+    }
+
+    write_dashboard_v1_payload(payload, tmp_path)
+
+    canonical = (tmp_path / "dashboard_data.json").read_text(encoding="utf-8")
+    assert (tmp_path / "dashboard-data.json").read_text(encoding="utf-8") == canonical
+    wrapper = (tmp_path / "dashboard-data.js").read_text(encoding="utf-8")
+    assert wrapper.startswith("window.DASHBOARD_V1 = ")
+    assert '"operator_control_tower"' in wrapper
 
 
 def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:

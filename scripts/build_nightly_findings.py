@@ -138,7 +138,7 @@ def write_findings(output_json: Path, output_md: Path, findings: dict[str, Any])
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build nightly agent findings from the latest dashboard payload")
     parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--dashboard-data", default="web/dashboard/dashboard-data.json")
+    parser.add_argument("--dashboard-data", default="web/dashboard/dashboard_data.json")
     parser.add_argument("--audit", default="repo_workflow_audit.md")
     parser.add_argument("--output-json", default="reports/agents/nightly_findings.json")
     parser.add_argument("--output-md", default="reports/agents/nightly_findings.md")

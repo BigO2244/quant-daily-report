@@ -22,6 +22,17 @@ async function fetchJSON(url) {
   return response.json();
 }
 
+async function loadDashboardPayload() {
+  try {
+    return await fetchJSON(resolveDataPath());
+  } catch (error) {
+    if (window.DASHBOARD_V1) {
+      return window.DASHBOARD_V1;
+    }
+    throw error;
+  }
+}
+
 function fmtMoney(v) {
   if (v == null || Number.isNaN(Number(v))) return '—';
   return Number(v).toLocaleString('en-US', {
@@ -761,7 +772,7 @@ function renderCharts(payload) {
 
 async function boot() {
   try {
-    const payload = await fetchJSON(resolveDataPath());
+    const payload = await loadDashboardPayload();
     renderStatus(payload);
     renderRibbon(payload);
     renderOperatorControlTower(payload);

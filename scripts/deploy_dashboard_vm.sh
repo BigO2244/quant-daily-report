@@ -15,9 +15,18 @@ scp \
   "${repo_root}/web/dashboard/quant_daily_executive.css" \
   "${repo_root}/web/dashboard/quant_daily_executive.js" \
   "${repo_root}/web/dashboard/dashboard_data.json" \
-  "${repo_root}/web/dashboard/dashboard-data.json" \
-  "${repo_root}/web/dashboard/dashboard-data.js" \
   "${REMOTE_HOST}:${REMOTE_WEB}/"
+
+ssh "${REMOTE_HOST}" "python3 - <<'PY'
+from pathlib import Path
+remote_web = Path('${REMOTE_WEB}')
+payload = remote_web / 'dashboard_data.json'
+json_alias = remote_web / 'dashboard-data.json'
+js_alias = remote_web / 'dashboard-data.js'
+text = payload.read_text(encoding='utf-8')
+json_alias.write_text(text, encoding='utf-8')
+js_alias.write_text('window.DASHBOARD_V1 = ' + text.rstrip() + ';\n', encoding='utf-8')
+PY"
 
 echo "[deploy] syncing dashboard refresh scripts"
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_REPO}/scripts/research'"
