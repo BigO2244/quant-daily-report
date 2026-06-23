@@ -88,7 +88,11 @@ def test_strategy_names_and_slugs_map_correctly() -> None:
     assert lookup["caerus_lyra"].spec.use_rank_decay_exit is False
 
 
-def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_path: Path) -> None:
+def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "research.shadow_tracking.run.load_universe",
+        lambda _path: ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"],
+    )
     panel = _make_panel()
     panel_path = tmp_path / "price_panel.parquet"
     panel.to_parquet(panel_path, index=False)
