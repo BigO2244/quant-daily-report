@@ -65,14 +65,45 @@
       </article>
     </section>
 
-    <section class="terminal-grid control-grid">
+    <section class="terminal-grid cockpit-grid" aria-label="CIO operator cockpit">
+      <article class="terminal-panel top-positions-panel">
+        <div class="panel-head">
+          <h2>Top Positions / Exposure</h2>
+          <span id="top-positions-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="top-positions-bars" class="bar-list top-position-bars"></div>
+      </article>
+      <article class="terminal-panel sleeve-return-panel">
+        <div class="panel-head">
+          <h2>Sleeve Since-Inception Return</h2>
+          <span id="sleeve-return-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="sleeve-return-bars" class="bar-list"></div>
+      </article>
+      <article class="terminal-panel sleeve-excess-panel">
+        <div class="panel-head">
+          <h2>Sleeve Excess vs SPY</h2>
+          <span id="sleeve-excess-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="sleeve-excess-bars" class="bar-list"></div>
+      </article>
+      <article class="terminal-panel alpha-delta-panel">
+        <div class="panel-head">
+          <h2>Baseline vs Alpha Delta</h2>
+          <span id="alpha-delta-summary" class="panel-kicker">—</span>
+        </div>
+        <div id="alpha-delta-bars" class="bar-list"></div>
+      </article>
+    </section>
+
+    <section class="terminal-grid control-grid" aria-label="Live pilot and operator detail">
       <article class="terminal-panel live-pilot-panel">
         <div class="panel-head">
           <h2>Live Pilot / Account</h2>
           <span id="live-pilot-summary" class="panel-kicker">—</span>
         </div>
-        <div id="live-pilot-state-strip" class="state-strip"></div>
-        <div id="live-pilot-matrix" class="matrix-grid"></div>
+        <div id="live-pilot-state-strip" class="state-strip state-strip--compact"></div>
+        <div id="live-pilot-matrix" class="matrix-grid compact-matrix"></div>
         <div class="table-wrap compact-table">
           <table>
             <thead>
@@ -90,7 +121,7 @@
           </table>
         </div>
       </article>
-      <article class="terminal-panel">
+      <article class="terminal-panel operator-panel">
         <div class="panel-head">
           <h2>Operator Action</h2>
           <span id="operator-action-summary" class="panel-kicker">—</span>
@@ -98,6 +129,11 @@
         <div id="operator-context-matrix" class="matrix-grid compact-matrix"></div>
         <div id="operator-action-list" class="check-list action-list"></div>
       </article>
+    </section>
+
+    <section id="cio-dashboard-section" class="section-band">
+      <span class="terminal-tag">CIO Dashboard</span>
+      <p>Sleeve lifecycle, governance state, evidence quality, and portfolio risk.</p>
     </section>
 
     <section class="terminal-grid terminal-grid--single">
@@ -312,6 +348,11 @@
       </article>
     </section>
 
+    <section id="audit-appendix-section" class="section-band appendix-band">
+      <span class="terminal-tag">Audit Appendix</span>
+      <p>Execution tape, full position detail, leaders and laggards, validation, and source provenance.</p>
+    </section>
+
     <section class="terminal-grid terminal-grid--dual">
       <article class="terminal-panel">
         <div class="panel-head">
@@ -372,23 +413,6 @@
         </div>
         <div id="laggards-list" class="rank-list"></div>
       </article>
-      <details class="terminal-panel collapsed-panel">
-        <summary class="panel-head">
-          <h2>Source Monitor</h2>
-          <span class="panel-kicker">artifact provenance</span>
-        </summary>
-        <div id="source-list" class="source-list"></div>
-      </details>
-    </section>
-
-    <section class="terminal-grid terminal-grid--dual">
-      <details class="terminal-panel collapsed-panel">
-        <summary class="panel-head">
-          <h2>Validation Tape</h2>
-          <span id="validation-summary" class="panel-kicker">—</span>
-        </summary>
-        <div id="validation-list" class="check-list"></div>
-      </details>
       <article class="terminal-panel">
         <div class="panel-head">
           <h2>Positioning Monitor</h2>
@@ -396,6 +420,23 @@
         </div>
         <div id="positioning-matrix" class="matrix-grid"></div>
       </article>
+    </section>
+
+    <section class="terminal-grid terminal-grid--dual">
+      <details class="terminal-panel collapsed-panel">
+        <summary class="panel-head">
+          <h2>Source Monitor</h2>
+          <span class="panel-kicker">artifact provenance</span>
+        </summary>
+        <div id="source-list" class="source-list"></div>
+      </details>
+      <details class="terminal-panel collapsed-panel">
+        <summary class="panel-head">
+          <h2>Validation Tape</h2>
+          <span id="validation-summary" class="panel-kicker">—</span>
+        </summary>
+        <div id="validation-list" class="check-list"></div>
+      </details>
     </section>
   </main>
 

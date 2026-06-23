@@ -89,6 +89,12 @@ function colorClass(value) {
   return Number(value) > 0 ? 'pos' : Number(value) < 0 ? 'neg' : 'neutral';
 }
 
+function asNumber(value) {
+  if (value == null || value === '') return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
 function statusClass(value) {
   const text = String(value || '').toUpperCase();
   if (text.includes('PENDING') || text.includes('ACCEPTED') || text.includes('NEW')) return 'neutral';
@@ -167,6 +173,39 @@ function rankItem(row) {
   `;
 }
 
+function maxAbs(values) {
+  const numeric = values.map(asNumber).filter(value => value != null);
+  if (!numeric.length) return 1;
+  return Math.max(...numeric.map(value => Math.abs(value)), 0.000001);
+}
+
+function barRow({ label, value, valueText, detail, maxValue, positiveOnly = false, tone = '', valueClass = '' }) {
+  const numeric = asNumber(value);
+  const signed = !positiveOnly;
+  const scale = positiveOnly ? 100 : 50;
+  const width = numeric == null ? 0 : Math.min(scale, (Math.abs(numeric) / Math.max(maxValue || 1, 0.000001)) * scale);
+  const direction = signed && numeric < 0 ? 'neg' : 'pos';
+  const fillTone = tone || (numeric == null ? 'neutral' : colorClass(numeric));
+  const displayClass = valueClass || (numeric == null ? 'neutral' : colorClass(numeric));
+  return `
+    <div class="bar-row ${numeric == null ? 'collecting' : ''}">
+      <div class="bar-row-head">
+        <strong>${label || '—'}</strong>
+        <span class="bar-value ${displayClass}">${valueText || (numeric == null ? 'collecting evidence' : fmtPct(numeric))}</span>
+      </div>
+      <div class="bar-track ${positiveOnly ? 'positive-only' : 'signed'}">
+        <span class="bar-fill ${direction} ${fillTone}" style="--bar-width: ${width.toFixed(2)}%;"></span>
+      </div>
+      <div class="bar-detail">${detail || ' '}</div>
+    </div>
+  `;
+}
+
+function checkpointText(checkpoints, fallbackDays = 0) {
+  if (!Array.isArray(checkpoints) || !checkpoints.length) return `${fallbackDays || 0}d`;
+  return checkpoints.map(check => `${check.observed_days || 0}/${check.trading_days || 0}d`).join(' · ');
+}
+
 function renderStatus(payload) {
   setText('meta-report-date', payload.report_date || '—');
   setText('meta-generated-at', fmtDateTime(payload.generated_at));
@@ -208,6 +247,113 @@ function renderRibbon(payload) {
   setText('tower-validation-detail', validation.detail || 'validation unavailable');
   setText('tower-operator-action', formatCardValue(operator), statusClass(operator.status));
   setText('tower-operator-detail', operator.detail || 'No operator action required.');
+}
+
+function renderTopPositions(payload) {
+  const section = payload.sections?.positions || {};
+  const summary = section.summary || {};
+  const nav = payload.sections?.nav || {};
+  const rows = (section.rows || [])
+    .slice()
+    .sort((a, b) => (asNumber(b.weight) || 0) - (asNumber(a.weight) || 0))
+    .slice(0, 8);
+  setText(
+    'top-positions-summary',
+    `${summary.positions_count || rows.length} positions · top 5 ${fmtPct(summary.top5_concentration)} · cash ${fmtMoney(summary.cash ?? nav.cash)}`,
+    rows.length ? 'neutral' : 'neg'
+  );
+  if (!rows.length) {
+    setHTML('top-positions-bars', emptyState('No top positions available', 'Broker position snapshot is missing or empty.', 'outputs/broker/posttrade_positions.json', false));
+    return;
+  }
+  const maxWeight = maxAbs(rows.map(row => row.weight));
+  setHTML('top-positions-bars', rows.map(row => {
+    const dailyMove = row.daily_return ?? row.day_return ?? row.daily_move;
+    const detail = [
+      fmtMoney(row.market_value),
+      `P&L ${fmtMoney(row.unrealized_pnl)}`,
+      dailyMove == null ? 'daily move unavailable' : `day ${fmtPct(dailyMove)}`,
+    ].join(' · ');
+    return barRow({
+      label: row.ticker || '—',
+      value: row.weight,
+      valueText: fmtPct(row.weight),
+      detail,
+      maxValue: maxWeight,
+      positiveOnly: true,
+      tone: 'exposure',
+      valueClass: colorClass(row.unrealized_pnl),
+    });
+  }).join(''));
+}
+
+function renderSleeveBarCharts(payload) {
+  const sleeveRows = payload.sections?.sleeve_inventory?.rows || [];
+  const strategyRows = payload.sections?.shadow_command_center?.strategies || [];
+  const alphaPairs = payload.sections?.baseline_alpha_comparison?.pairs || [];
+
+  const returnMax = maxAbs(sleeveRows.map(row => row.since_inception_return));
+  const returnRows = sleeveRows.map(row => barRow({
+    label: row.display_name || row.sleeve_id || '—',
+    value: row.since_inception_return,
+    valueText: asNumber(row.since_inception_return) == null ? 'collecting evidence' : fmtPct(row.since_inception_return),
+    detail: `${row.lifecycle_stage || '—'} · ${row.variant_class || row.role || '—'} · ${row.promotion_readiness || '—'}`,
+    maxValue: returnMax,
+  }));
+  setText(
+    'sleeve-return-summary',
+    `${sleeveRows.filter(row => asNumber(row.since_inception_return) != null).length}/${sleeveRows.length} with return history`,
+    sleeveRows.length ? 'neutral' : 'neg'
+  );
+  setHTML(
+    'sleeve-return-bars',
+    returnRows.length ? returnRows.join('') : emptyState('No sleeve return rows available', 'Sleeve inventory is missing registered rows.', 'sections.sleeve_inventory.rows', false)
+  );
+
+  const excessMax = maxAbs(strategyRows.map(row => row.excess_return_vs_spy));
+  const excessRows = strategyRows.map(row => barRow({
+    label: row.name || row.slug || '—',
+    value: row.excess_return_vs_spy,
+    valueText: asNumber(row.excess_return_vs_spy) == null ? 'collecting evidence' : fmtPct(row.excess_return_vs_spy),
+    detail: `${row.role || '—'} · ${row.valid_evaluation_days ?? 0} valid days · ${row.data_status || '—'}`,
+    maxValue: excessMax,
+  }));
+  setText(
+    'sleeve-excess-summary',
+    `${strategyRows.filter(row => asNumber(row.excess_return_vs_spy) != null).length}/${strategyRows.length} with SPY comparison`,
+    strategyRows.length ? 'neutral' : 'neg'
+  );
+  setHTML(
+    'sleeve-excess-bars',
+    excessRows.length ? excessRows.join('') : emptyState('No sleeve excess rows available', 'Shadow command center has no strategy comparison rows.', 'sections.shadow_command_center.strategies', false)
+  );
+
+  const deltaMax = maxAbs(alphaPairs.map(row => row.return_delta));
+  const deltaRows = alphaPairs.map(row => {
+    const value = asNumber(row.return_delta);
+    const checkpoints = row.review_checkpoints || [];
+    const firstCheckpoint = checkpoints.find(check => Number(check.trading_days) === 20) || checkpoints[0] || {};
+    const observed = Number(firstCheckpoint.observed_days || row.evidence_window_days || 0);
+    const target = Number(firstCheckpoint.trading_days || 20);
+    const collecting = value == null || observed < target;
+    return barRow({
+      label: `${row.baseline_name || 'Baseline'} → ${row.alpha_name || 'Alpha'}`,
+      value: value,
+      valueText: value == null ? 'collecting evidence' : fmtPct(value),
+      detail: `${collecting ? 'collecting evidence' : 'checkpoint ready'} · ${checkpointText(checkpoints, row.evidence_window_days)}`,
+      maxValue: deltaMax,
+      valueClass: value == null ? 'neutral' : colorClass(value),
+    });
+  });
+  setText(
+    'alpha-delta-summary',
+    `${alphaPairs.length} alpha pairs · 20/60d review`,
+    alphaPairs.length ? 'neutral' : 'neg'
+  );
+  setHTML(
+    'alpha-delta-bars',
+    deltaRows.length ? deltaRows.join('') : emptyState('No baseline-vs-alpha delta rows available', 'Alpha comparison artifact has no registered pairs.', 'sections.baseline_alpha_comparison.pairs', false)
+  );
 }
 
 function renderOperatorControlTower(payload) {
@@ -775,6 +921,8 @@ async function boot() {
     const payload = await loadDashboardPayload();
     renderStatus(payload);
     renderRibbon(payload);
+    renderTopPositions(payload);
+    renderSleeveBarCharts(payload);
     renderOperatorControlTower(payload);
     renderPerformanceMatrix(payload);
     renderHealthMatrix(payload);
