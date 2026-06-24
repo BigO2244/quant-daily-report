@@ -454,3 +454,9 @@ Operator-facing scorecards and governance docs should say "Since Observation
 Inception (2026-05-12)" for the recovered observation window rather than "YTD
 from 2026-05-12". Presentation labels must not imply a promotion, retirement,
 allocation, or strategy lifecycle decision.
+
+## 2026-06-24 — Shadow scorecard stale/misattributed leaderboard (HOTFIX-2026-06-24, FR-085)
+
+- **Reporting must fail closed on stale AND on internal inconsistency.** The scorecard ranked a sleeve #1 while the same email flagged it 0 valid days. A freshness check alone is insufficient — rank only NAV-derived returns with sufficient valid days, and never publish a leaderboard when the refresh failed or NAV is stale beyond tolerance. (FR-085 gates.)
+- **NAV lineage must carry a single canonical scale.** Mixed/legacy-scale rows in the active operational NAV file caused the refresh to fail closed on continuity (correct) but froze the series silently for ~18 days. Restatements must fully purge legacy-scale history; new sleeves need explicit inception handling (blank pre-inception cells, first row from 1.0). Open: why legacy-scale history survived the 2026-06-14 restatement.
+- **Process.** This was incident/hotfix work initially filed as planned FRs (FR-085/FR-086) with docs back-filled after implementation. Corrected: keep FR-085 as the durable contract, record the incident as HOTFIX-2026-06-24. Going forward, for incidents write the hotfix record (blast radius / validation / rollback) before the fix, reserve FR numbers for durable/planned work, and default refactors to Friday after close.
