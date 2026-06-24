@@ -8,6 +8,14 @@ This log covers material architectural and process changes. Routine bug fixes an
 ---
 
 ## Recent Major Changes (Early 2026)
+
+### Shadow Scorecard Publication Integrity Gates (FR-085) — June 24, 2026
+
+- The daily Shadow CIO Model Scorecard (`scripts/send_shadow_cio_report.py`) now withholds publication instead of printing a leaderboard from stale or internally inconsistent research artifacts.
+- Freshness gate: withholds rankings, leader/runner-up/laggard, promotion signals, and the CIO takeaway when the shadow refresh failed, the latest valid NAV lags the report date beyond `SHADOW_CIO_MAX_NAV_AGE_TRADING_DAYS` (default 2 trading days), or NAV integrity is corrupt — emitting a `MODEL SCORECARD: PUBLICATION WITHHELD` block while preserving the DATA HEALTH diagnostics.
+- Internal-consistency gate: a sleeve is excluded from ranking and leader selection unless its period return is NAV-derived (`period_return_source == "nav"`) and it has at least `MIN_VALID_DAYS` (10) valid days. This prevents a zero-track-record concentration variant (e.g. `Orion_Alpha`, activated 2026-06-23) from being crowned leader via an unvalidated `cumulative_return` fallback.
+- Reporting-only; no trading, execution, allocation, broker, or cron behavior changed. Branch `fix/scorecard-publication-gates`, draft PR #117. The upstream NAV refresh-freeze (why the series is stuck at 2026-06-05) is tracked as a P2 follow-up. Full FR record: `docs/governance/fr_active_backlog.md` (FR-085).
+
 ### Named Strategy Framework and Daily Shadow Lane — April 2026
 
 - Introduced named strategy framework for operator-facing materials:
