@@ -14,6 +14,22 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+
+def _load_dotenv(repo_root: Path) -> None:
+    env_path = repo_root / ".env"
+    if not env_path.exists():
+        return
+    with env_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text or text.startswith("#") or "=" not in text:
+                continue
+            key, _, value = text.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv(_REPO_ROOT)
+
 from brokers.alpaca_broker import AlpacaBroker
 from core.security_master import resolve_trade_plan_symbols
 from paper.paper_broker import (
