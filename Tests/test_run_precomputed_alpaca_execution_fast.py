@@ -29,6 +29,7 @@ def _load_module(tmp_path: Path):
         "core.execution_payload",
         "core.execution_summary",
         "core.execution_target_attainment",
+        "core.live_pilot_preflight",
         "core.live_retry_policy",
         "core.operational_invariants",
         "core.operator_summary",
@@ -181,6 +182,16 @@ def _load_module(tmp_path: Path):
     sys.modules["core.execution_target_attainment"] = _module(
         "core.execution_target_attainment",
         build_execution_target_attainment=lambda **_kwargs: {"status": "PASS"},
+    )
+    sys.modules["core.live_pilot_preflight"] = _module(
+        "core.live_pilot_preflight",
+        build_live_pilot_preflight_result_from_env=lambda: _module(
+            "LivePilotPreflightResult",
+            to_dict=lambda: {
+                "status": "PASS",
+                "reason_code": "paper_mode_passthrough",
+            },
+        ),
     )
     sys.modules["core.live_retry_policy"] = _module(
         "core.live_retry_policy",

@@ -1847,6 +1847,37 @@ def _orders_notional(
     return float(total)
 
 
+def _budget_skipped_order_diagnostics(
+    orders: List[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    for order in orders or []:
+        if not isinstance(order, dict):
+            continue
+        row = {
+            "ticker": str(order.get("ticker") or order.get("symbol") or ""),
+            "side": str(order.get("side") or ""),
+            "quantity": _coerce_float(
+                order.get("quantity", order.get("qty", order.get("shares"))),
+                None,
+            ),
+            "notional": _order_notional(order),
+            "block_reason": order.get("block_reason"),
+        }
+        for key in (
+            "buy_budget_at_decision",
+            "buy_budget_basis",
+            "cash_at_buy_decision",
+            "buying_power_at_buy_decision",
+            "account_status_clean_for_buying_power",
+            "account_status",
+        ):
+            if key in order:
+                row[key] = order.get(key)
+        rows.append(row)
+    return rows
+
+
 def _positions_to_quantity_map(positions: List[Dict[str, object]]) -> Dict[str, float]:
     normalized: Dict[str, float] = {}
     for pos in positions or []:
@@ -2160,6 +2191,9 @@ def _build_cash_gate_diagnostics(
             budget_skipped_orders,
             side="BUY",
             block_reasons=cash_block_reasons,
+        ),
+        "budget_skipped_orders": _budget_skipped_order_diagnostics(
+            budget_skipped_orders
         ),
         "cash_rebalance_status": cash_rebalance_status,
         "raw_cash_gate_triggered": raw_cash_gate_triggered,
@@ -3151,7 +3185,9 @@ def _account_is_clean_for_buying_power(account: Mapping[str, object]) -> bool:
             return raw.get(name)
         return None
 
-    status = str(_flag("status") or "").upper()
+    status = str(_flag("status") or "").strip().upper()
+    if "." in status:
+        status = status.rsplit(".", 1)[-1]
     # An empty status string from a paper/in-process broker is treated as
     # OK (no signal to the contrary). ACTIVE is the canonical good state.
     if status and status != "ACTIVE":
@@ -3223,6 +3259,10 @@ def _apply_buy_budget(
     pending_sell_count: int = 0,
     pending_sell_notional: float = 0.0,
     buy_budget_basis: str = "cash",
+    account_status_clean: bool | None = None,
+    cash_at_decision: float | None = None,
+    buying_power_at_decision: float | None = None,
+    account_status: object | None = None,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
     """Greedily fit ``buy_orders`` within ``buy_budget``.
 
@@ -3255,6 +3295,16 @@ def _apply_buy_budget(
                 blocked["block_reason"] = BUY_BLOCKED_PENDING_SELLS_REQUIRED_FOR_CASH
             else:
                 blocked["block_reason"] = BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
+            blocked["buy_budget_at_decision"] = float(buy_budget)
+            blocked["buy_budget_basis"] = basis
+            if cash_at_decision is not None:
+                blocked["cash_at_buy_decision"] = float(cash_at_decision)
+            if buying_power_at_decision is not None:
+                blocked["buying_power_at_buy_decision"] = float(buying_power_at_decision)
+            if account_status_clean is not None:
+                blocked["account_status_clean_for_buying_power"] = bool(account_status_clean)
+            if account_status is not None:
+                blocked["account_status"] = str(account_status)
             skipped.append(blocked)
     return kept, skipped
 
@@ -5650,12 +5700,32 @@ def run_paper_day(
                         len(buy_orders),
                     )
                 else:
+                    postsell_raw = (
+                        postsell_account_snapshot.get("raw")
+                        if isinstance(postsell_account_snapshot, Mapping)
+                        and isinstance(postsell_account_snapshot.get("raw"), Mapping)
+                        else {}
+                    )
+                    postsell_account_status = (
+                        postsell_account_snapshot.get("status")
+                        if isinstance(postsell_account_snapshot, Mapping)
+                        else None
+                    ) or postsell_raw.get("status")
+                    postsell_account_clean = (
+                        _account_is_clean_for_buying_power(postsell_account_snapshot)
+                        if isinstance(postsell_account_snapshot, Mapping)
+                        else None
+                    )
                     buy_orders_budgeted, budget_skipped_orders = _apply_buy_budget(
                         buy_orders,
                         float(buy_budget_computed or 0.0),
                         pending_sell_count=pending_sell_count_at_buy_decision,
                         pending_sell_notional=pending_sell_notional,
                         buy_budget_basis=buy_budget_basis,
+                        account_status_clean=postsell_account_clean,
+                        cash_at_decision=postsell_cash_confirmed,
+                        buying_power_at_decision=postsell_buying_power_confirmed,
+                        account_status=postsell_account_status,
                     )
                     skipped_buy_count = int(len(budget_skipped_orders))
                     blocked_buy_count = int(len(budget_skipped_orders))
