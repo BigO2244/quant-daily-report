@@ -13,8 +13,11 @@ if str(_REPO_ROOT) not in sys.path:
 from core.operator_summary import format_execution_health_banner, write_operator_summary
 from core.trading_day_summary import build_trading_day_summary
 from paper.paper_broker import (
+    BUY_BLOCKED_INSUFFICIENT_BUYING_POWER,
     PaperConfig,
+    _account_is_clean_for_buying_power,
     _apply_capital_budget_to_trades,
+    _apply_buy_budget,
     _build_capital_budget,
     _build_shadow_orders,
     _compute_buy_budget,
@@ -135,6 +138,98 @@ def test_postsell_buy_budget_targets_less_than_five_percent_cash() -> None:
     # In paper mode with positive buying_power and a clean account, the
     # budget is sized from buying_power (which here equals cash exactly).
     assert basis == "broker_buying_power"
+
+
+def test_account_clean_for_buying_power_accepts_active_status_variants() -> None:
+    class EnumStyleActive:
+        def __str__(self) -> str:
+            return "AccountStatus.ACTIVE"
+
+    assert _account_is_clean_for_buying_power({"status": "ACTIVE"})
+    assert _account_is_clean_for_buying_power({"status": "active"})
+    assert _account_is_clean_for_buying_power({"status": "AccountStatus.ACTIVE"})
+    assert _account_is_clean_for_buying_power({"status": EnumStyleActive()})
+    assert _account_is_clean_for_buying_power({"raw": {"status": "AccountStatus.ACTIVE"}})
+    assert not _account_is_clean_for_buying_power({"status": "AccountStatus.BLOCKED"})
+    assert not _account_is_clean_for_buying_power(
+        {"status": "AccountStatus.ACTIVE", "trading_blocked": True}
+    )
+
+
+def test_postsell_buy_budget_uses_buying_power_for_enum_style_active_status() -> None:
+    requested_buy_notional = 606.780029296875 + 461.5 + 514.0299949645996
+
+    budget, basis = _compute_buy_budget(
+        {
+            "status": "AccountStatus.ACTIVE",
+            "cash": "552.49",
+            "equity": "10951.63",
+            "buying_power": "31327.56",
+        },
+        _cfg(),
+    )
+
+    assert basis == "broker_buying_power"
+    assert round(budget, 2) == 31227.56
+    assert budget > requested_buy_notional
+
+
+def test_apply_buy_budget_keeps_20260624_buys_when_buying_power_is_valid() -> None:
+    orders = [
+        {"ticker": "NSC", "side": "BUY", "quantity": 2.0, "notional": 606.780029296875},
+        {"ticker": "SNPS", "side": "BUY", "quantity": 1.0, "notional": 461.5},
+        {"ticker": "VZ", "side": "BUY", "quantity": 11.0, "notional": 514.0299949645996},
+    ]
+    cash_only_budget = 452.49
+    budget, basis = _compute_buy_budget(
+        {
+            "status": "AccountStatus.ACTIVE",
+            "cash": "552.49",
+            "equity": "10951.63",
+            "buying_power": "31327.56",
+        },
+        _cfg(),
+    )
+
+    assert all(float(order["notional"]) > cash_only_budget for order in orders)
+    kept, skipped = _apply_buy_budget(
+        orders,
+        budget,
+        buy_budget_basis=basis,
+        account_status_clean=True,
+        cash_at_decision=552.49,
+        buying_power_at_decision=31327.56,
+        account_status="AccountStatus.ACTIVE",
+    )
+
+    assert kept == orders
+    assert skipped == []
+
+
+def test_apply_buy_budget_skipped_orders_include_budget_context() -> None:
+    orders = [
+        {"ticker": "NSC", "side": "BUY", "quantity": 2.0, "notional": 606.780029296875},
+    ]
+
+    kept, skipped = _apply_buy_budget(
+        orders,
+        452.49,
+        buy_budget_basis="cash",
+        account_status_clean=False,
+        cash_at_decision=552.49,
+        buying_power_at_decision=31327.56,
+        account_status="AccountStatus.ACTIVE",
+    )
+
+    assert kept == []
+    assert len(skipped) == 1
+    assert skipped[0]["block_reason"] == BUY_BLOCKED_INSUFFICIENT_BUYING_POWER
+    assert skipped[0]["buy_budget_at_decision"] == 452.49
+    assert skipped[0]["buy_budget_basis"] == "cash"
+    assert skipped[0]["cash_at_buy_decision"] == 552.49
+    assert skipped[0]["buying_power_at_buy_decision"] == 31327.56
+    assert skipped[0]["account_status_clean_for_buying_power"] is False
+    assert skipped[0]["account_status"] == "AccountStatus.ACTIVE"
 
 
 def test_reserve_policy_uses_max_of_minimum_and_equity_percent() -> None:
