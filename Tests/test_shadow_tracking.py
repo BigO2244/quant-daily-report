@@ -35,8 +35,8 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _make_panel() -> pd.DataFrame:
-    dates = pd.date_range("2022-01-03", periods=340, freq="B")
+def _make_panel(*, start: str = "2022-01-03", periods: int = 340) -> pd.DataFrame:
+    dates = pd.date_range(start, periods=periods, freq="B")
     rows = []
     slopes = {
         "AAA": 0.0026,
@@ -93,18 +93,18 @@ def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_p
         "research.shadow_tracking.run.load_universe",
         lambda _path: ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"],
     )
-    panel = _make_panel()
+    panel = _make_panel(start="2025-03-10")
     panel_path = tmp_path / "price_panel.parquet"
     panel.to_parquet(panel_path, index=False)
     out_dir = tmp_path / "shadow"
     rc = main(
         [
             "--trade-date",
-            "2023-03-30",
+            "2026-06-23",
             "--start-date",
-            "2022-01-03",
+            "2025-03-10",
             "--end-date",
-            "2023-03-30",
+            "2026-06-23",
             "--output-dir",
             str(out_dir),
             "--price-cache-path",
@@ -115,11 +115,11 @@ def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_p
     rc = main(
         [
             "--trade-date",
-            "2023-03-31",
+            "2026-06-24",
             "--start-date",
-            "2022-01-03",
+            "2025-03-10",
             "--end-date",
-            "2023-03-31",
+            "2026-06-24",
             "--output-dir",
             str(out_dir),
             "--price-cache-path",
@@ -127,7 +127,7 @@ def test_shadow_runner_writes_expected_files_and_no_execution_side_effects(tmp_p
         ]
     )
     assert rc == 0
-    dated_dir = out_dir / "2023-03-31"
+    dated_dir = out_dir / "2026-06-24"
     assert (dated_dir / "caerus_polaris.json").exists()
     assert (dated_dir / "caerus_polaris_alpha.json").exists()
     assert (dated_dir / "caerus_orion.json").exists()
@@ -274,9 +274,9 @@ def test_shadow_performance_legitimate_inception_still_starts_at_one(tmp_path: P
 def test_shadow_performance_new_shadow_sleeves_incept_without_breaking_prior_chain(tmp_path: Path) -> None:
     output_root = tmp_path / "shadow"
     _write_json(
-        output_root / "2026-01-01" / "shadow_performance.json",
+        output_root / "2026-06-22" / "shadow_performance.json",
         {
-            "trade_date": "2026-01-01",
+            "trade_date": "2026-06-22",
             "status": "OK",
             "data_status": "OK",
             "strategies": {
@@ -289,18 +289,18 @@ def test_shadow_performance_new_shadow_sleeves_incept_without_breaking_prior_cha
     )
     panel = pd.DataFrame(
         [
-            {"date": pd.Timestamp("2026-01-01"), "ticker": "AAA", "close": 100.0},
-            {"date": pd.Timestamp("2026-01-02"), "ticker": "AAA", "close": 101.0},
-            {"date": pd.Timestamp("2026-01-01"), "ticker": "SPY", "close": 200.0},
-            {"date": pd.Timestamp("2026-01-02"), "ticker": "SPY", "close": 202.0},
+            {"date": pd.Timestamp("2026-06-22"), "ticker": "AAA", "close": 100.0},
+            {"date": pd.Timestamp("2026-06-23"), "ticker": "AAA", "close": 101.0},
+            {"date": pd.Timestamp("2026-06-22"), "ticker": "SPY", "close": 200.0},
+            {"date": pd.Timestamp("2026-06-23"), "ticker": "SPY", "close": 202.0},
         ]
     )
 
     payload = build_shadow_performance_payload(
         panel=panel,
         output_root=output_root,
-        trade_date="2026-01-02",
-        previous_trade_date="2026-01-01",
+        trade_date="2026-06-23",
+        previous_trade_date="2026-06-22",
         strategy_payloads={
             "caerus_polaris": {"target_weights": {"AAA": 1.0}},
             "caerus_polaris_alpha": {"target_weights": {"AAA": 0.8}},

@@ -15,7 +15,7 @@ from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot
 from research.flow_detection.data import ensure_price_panel, load_universe
 from research.shadow_tracking import run as shadow
-from research.shadow_tracking.strategies import build_shadow_definitions
+from research.shadow_tracking.strategies import build_shadow_definitions, shadow_tracking_observation_start
 
 
 BENCHMARK_SYMBOL = "SPY"
@@ -26,6 +26,10 @@ OPTIONAL_PRE_INCEPTION_SLUGS = tuple(
     if (entry.shadow_tracking or {}).get("baseline_strategy_id")
 )
 MODEL_SLUGS = (*_REGISTRY.active_shadow_security_selection_ids(), "spy_benchmark")
+OBSERVATION_START_BY_SLUG = {
+    entry.strategy_id: shadow_tracking_observation_start(entry)
+    for entry in _REGISTRY.active_shadow_security_selection_entries()
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +103,13 @@ def _effective_n(weights: pd.Series) -> float:
     return round(float(1.0 / hhi), 6) if hhi > 0.0 else 0.0
 
 
+def _is_before_observation_start(slug: str, trade_date: str) -> bool:
+    start_date = OBSERVATION_START_BY_SLUG.get(slug)
+    if not start_date or not trade_date:
+        return False
+    return pd.Timestamp(trade_date).strftime("%Y-%m-%d") < start_date
+
+
 def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any]) -> dict[str, Any]:
     trade_date = str(shadow_performance.get("trade_date") or "")
     if shadow_performance.get("data_status") != "OK":
@@ -116,6 +127,9 @@ def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any])
     strategies = shadow_performance.get("strategies") or {}
     row = {"date": trade_date}
     for slug in MODEL_SLUGS:
+        if _is_before_observation_start(slug, trade_date):
+            row[slug] = ""
+            continue
         nav = (strategies.get(slug) or {}).get("nav")
         if nav is None:
             return {"status": "SKIPPED", "reason": f"missing_nav:{slug}"}
@@ -176,6 +190,8 @@ def _validate_nav_append_continuity(
     previous = rows[prior_dates[-1]]
     strategies = shadow_performance.get("strategies") or {}
     for slug in MODEL_SLUGS:
+        if _is_before_observation_start(slug, trade_date) and not str(row.get(slug) or ""):
+            continue
         try:
             candidate_nav = float(row[slug])
             reported_daily_return = float((strategies.get(slug) or {}).get("daily_return"))
@@ -282,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError(f"cannot refresh scorecard artifacts for {trade_date}: {reason}")
 
     strategy_payloads: dict[str, dict[str, Any]] = {}
-    for definition in build_shadow_definitions():
+    for definition in build_shadow_definitions(trade_date=trade_date):
         snapshot = build_target_snapshot(signals, definition.spec, trade_date=trade_date, start_date=args.start_date)
         payload = _strategy_payload(definition=definition, snapshot=snapshot, trade_date=trade_date)
         strategy_payloads[definition.strategy_slug] = payload

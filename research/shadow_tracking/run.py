@@ -15,7 +15,7 @@ from research.flow_detection.data import ensure_price_panel, load_universe
 
 from core.feedback_loop_artifacts import write_feedback_loop_artifacts
 
-from .strategies import build_shadow_definitions
+from .strategies import build_shadow_definitions, shadow_tracking_active_on
 
 
 BENCHMARK_SYMBOL = "SPY"
@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[SHADOW] wrote {dated_dir}/...")
         return 0
 
-    definitions = build_shadow_definitions()
+    definitions = build_shadow_definitions(trade_date=trade_date)
     strategy_payloads = {}
     backtest_results = {}
     for definition in definitions:
@@ -422,8 +422,13 @@ def _heading_label(slug: str) -> str:
     return _strategy_label(slug).replace("Caerus ", "")
 
 
-def _model_strategy_slugs() -> tuple[str, ...]:
-    return load_strategy_registry().active_shadow_security_selection_ids()
+def _model_strategy_slugs(*, trade_date: str | None = None) -> tuple[str, ...]:
+    registry = load_strategy_registry()
+    return tuple(
+        entry.strategy_id
+        for entry in registry.active_shadow_security_selection_entries()
+        if shadow_tracking_active_on(entry, trade_date=trade_date)
+    )
 
 
 def _comparison_strategy_slugs(comparison: dict) -> tuple[str, ...]:
@@ -826,7 +831,7 @@ def build_shadow_performance_payload(
         print(f"[SHADOW] broken performance chain at prior date={previous_trade_date}")
 
     strategies = {}
-    for slug in _model_strategy_slugs():
+    for slug in _model_strategy_slugs(trade_date=trade_date):
         prior_strategy = prior_navs.get(slug) or {}
         prev_nav_raw = prior_strategy.get("nav")
         if prev_nav_raw is None and chain_state in {"NO_PRIOR", "OK"}:
@@ -946,7 +951,7 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
     }
     strategy_names = {
         slug: _strategy_label(slug)
-        for slug in (*_model_strategy_slugs(), BENCHMARK_SLUG)
+        for slug in (*_model_strategy_slugs(trade_date=trade_date), BENCHMARK_SLUG)
     }
     spy_current = ((current_performance.get("strategies") or {}).get(BENCHMARK_SLUG) or {})
     spy_cumulative_return = (
@@ -1022,7 +1027,7 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
         for date in history_dates
     ]
     strategies = {}
-    for slug in (*_model_strategy_slugs(), BENCHMARK_SLUG):
+    for slug in (*_model_strategy_slugs(trade_date=trade_date), BENCHMARK_SLUG):
         evaluation = (shadow_evaluation.get("strategies") or {}).get(slug) or {}
         daily_returns = extract_valid_daily_returns(performance_history=performance_history, strategy_slug=slug)
         nav_history = extract_chain_nav_history(performance_history=performance_history, strategy_slug=slug)
@@ -1520,7 +1525,7 @@ def build_delta_payload(
 
     previous_dir = output_root / previous_trade_date
     strategies = {}
-    for slug in _model_strategy_slugs():
+    for slug in _model_strategy_slugs(trade_date=trade_date):
         previous_path = previous_dir / f"{slug}.json"
         if not previous_path.exists():
             print(f"[SHADOW] warning: prior snapshot missing for {slug} on {previous_trade_date}")

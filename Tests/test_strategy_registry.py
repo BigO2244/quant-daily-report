@@ -129,6 +129,24 @@ def test_shadow_definitions_are_registry_driven_without_changing_current_specs()
     assert by_slug["caerus_lyra"].spec.use_rank_decay_exit is False
 
 
+def test_shadow_definitions_respect_observation_start_dates() -> None:
+    before_start = tuple(definition.strategy_slug for definition in build_shadow_definitions(trade_date="2026-06-22"))
+    on_start = tuple(definition.strategy_slug for definition in build_shadow_definitions(trade_date="2026-06-23"))
+
+    assert before_start == (
+        "caerus_polaris",
+        "caerus_orion",
+        "caerus_lyra",
+    )
+    assert on_start == (
+        "caerus_polaris",
+        "caerus_polaris_alpha",
+        "caerus_orion",
+        "caerus_orion_alpha",
+        "caerus_lyra",
+    )
+
+
 def test_registry_validation_rejects_overlay_holdings_capability() -> None:
     payload = {
         "strategy_id": "caerus_bad_overlay",

@@ -51,6 +51,7 @@
       "shadow_tracking": {
         "enabled": true,
         "source_variant": "polaris_alpha_top4_cap20_daily",
+        "observation_start_date": "2026-06-23",
         "baseline_strategy_id": "caerus_polaris",
         "construction": {
           "top_n": 4,
@@ -114,6 +115,7 @@
       "shadow_tracking": {
         "enabled": true,
         "source_variant": "orion_alpha_rank_decay_top3_cap25",
+        "observation_start_date": "2026-06-23",
         "baseline_strategy_id": "caerus_orion",
         "construction": {
           "top_n": 3,
