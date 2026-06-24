@@ -42,6 +42,7 @@ SELF_HEAL_PRECOMPUTE_ONLY="${SELF_HEAL_PRECOMPUTE_ONLY:-0}"
 WORKFLOW_DIR="${REPO_ROOT}/outputs/workflow/${REPORT_DATE}"
 SELF_HEAL_STATUS_PATH="${WORKFLOW_DIR}/precompute_self_heal.json"
 BUNDLE_VALIDATION_PATH="${WORKFLOW_DIR}/precompute_bundle_validation.json"
+EXECUTION_READINESS_CERTIFICATION_ENABLED="${EXECUTION_READINESS_CERTIFICATION_ENABLED:-1}"
 
 # --- Suppress emails during precompute (planning only) ---
 export EMAIL_INLINE_REPORTS=0
@@ -79,6 +80,19 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
     else
         echo "OK: precompute bundle written to ${BUNDLE_DIR}" | tee -a "${LOG_FILE}"
         echo "bundle_validation=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
+        if [[ ! "${EXECUTION_READINESS_CERTIFICATION_ENABLED}" =~ ^(0|false|FALSE|no|NO|n|N|off|OFF)$ ]]; then
+            CERTIFICATION_PATH="${BUNDLE_DIR}/execution_readiness_certification.json"
+            if ! python3 -m scripts.certify_execution_readiness \
+                --trade-date "${REPORT_DATE}" \
+                --mode paper \
+                --no-submit \
+                --output-path "${CERTIFICATION_PATH}" >> "${LOG_FILE}" 2>&1; then
+                echo "ERROR: execution readiness certification failed; details=${CERTIFICATION_PATH}" | tee -a "${LOG_FILE}"
+                EXIT_CODE=1
+            else
+                echo "OK: execution readiness certification written to ${CERTIFICATION_PATH}" | tee -a "${LOG_FILE}"
+            fi
+        fi
     fi
 else
     echo "ERROR: precompute failed with exit code ${EXIT_CODE}" | tee -a "${LOG_FILE}"
