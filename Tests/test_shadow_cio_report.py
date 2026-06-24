@@ -14,7 +14,7 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2))
 
 
-def _evaluation(*, no_data: bool = False, valid_days: int = 9) -> dict:
+def _evaluation(*, no_data: bool = False, valid_days: int = 10) -> dict:
     status = "NO_DATA" if no_data else "OK"
     reason = "PRICE_CACHE_STALE" if no_data else None
     daily_returns = {
@@ -46,7 +46,7 @@ def _evaluation(*, no_data: bool = False, valid_days: int = 9) -> dict:
     }
 
 
-def _write_shadow_artifacts(tmp_path: Path, *, no_data: bool = False, valid_days: int = 9) -> None:
+def _write_shadow_artifacts(tmp_path: Path, *, no_data: bool = False, valid_days: int = 10) -> None:
     latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
     _write_json(latest / "shadow_evaluation.json", _evaluation(no_data=no_data, valid_days=valid_days))
     comparison = {"trade_date": TRADE_DATE, "status": "NO_DATA", "reason_code": "PRICE_CACHE_STALE"} if no_data else {"trade_date": TRADE_DATE, "status": "OK"}
@@ -71,11 +71,28 @@ def _write_shadow_artifacts(tmp_path: Path, *, no_data: bool = False, valid_days
     )
 
 
+def _write_hydration_status(tmp_path: Path, *, trade_date: str, shadow_refresh_status: str = "OK") -> None:
+    _write_json(
+        tmp_path / "outputs" / "price_hydration" / trade_date / "status.json",
+        {
+            "status": "OK",
+            "as_of_date": trade_date,
+            "max_cache_date": trade_date,
+            "shadow_refresh": {
+                "status": shadow_refresh_status,
+                "reason": None if shadow_refresh_status == "OK" else "PRICE_CACHE_STALE",
+                "nav_series_latest_date": "2026-01-13",
+            },
+        },
+    )
+
+
 def test_shadow_cio_report_renders_readable_scorecard(tmp_path: Path) -> None:
     _write_shadow_artifacts(tmp_path)
 
     report = build_report(tmp_path)
 
+    assert report.publication_withheld is False
     assert report.subject == f"Caerus Model Scorecard \u2014 {TRADE_DATE}"
     assert "=== DAILY MODEL SCORECARD ===" in report.body
     assert "=== PERFORMANCE SNAPSHOT ===" in report.body
@@ -102,6 +119,71 @@ def test_shadow_cio_report_ranking_order_uses_ytd_return(tmp_path: Path) -> None
 
     assert body.index("1. Lyra -> +12.00% YTD") < body.index("2. Polaris -> +10.00% YTD")
     assert body.index("2. Polaris -> +10.00% YTD") < body.index("3. Orion -> +5.00% YTD")
+
+
+def test_shadow_cio_report_withholds_when_shadow_refresh_failed(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path)
+    _write_hydration_status(tmp_path, trade_date=TRADE_DATE, shadow_refresh_status="FAILED")
+
+    report = build_report(tmp_path)
+
+    assert report.publication_withheld is True
+    assert report.publication_withheld_reason == "FAILED_REFRESH"
+    assert "=== MODEL SCORECARD: PUBLICATION WITHHELD ===" in report.body
+    assert "Reason: FAILED_REFRESH" in report.body
+    assert "Latest valid NAV date: 2026-01-13" in report.body
+    assert "Requested report date: 2026-01-13" in report.body
+    assert "No rankings, promotion signals, or CIO performance conclusions were generated." in report.body
+    assert "=== DATA HEALTH ===" in report.body
+    assert "Leader:" not in report.body
+    assert "=== RANKING ===" not in report.body
+    assert "=== PROMOTION SIGNAL ===" not in report.body
+    assert "leads the model set" not in report.body
+
+
+def test_shadow_cio_report_withholds_when_nav_age_exceeds_tolerance(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path)
+    latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
+    evaluation = _evaluation(no_data=True)
+    evaluation["trade_date"] = "2026-01-16"
+    _write_json(latest / "shadow_evaluation.json", evaluation)
+    _write_json(latest / "comparison.json", {"trade_date": "2026-01-16", "status": "NO_DATA", "reason_code": "PRICE_CACHE_STALE"})
+
+    report = build_report(tmp_path)
+
+    assert report.publication_withheld is True
+    assert report.publication_withheld_reason == "NAV_STALE"
+    assert "Reason: NAV_STALE" in report.body
+    assert "Latest valid NAV date: 2026-01-13" in report.body
+    assert "Requested report date: 2026-01-16" in report.body
+    assert "Leader:" not in report.body
+    assert "=== RANKING ===" not in report.body
+    assert "=== PROMOTION SIGNAL ===" not in report.body
+
+
+def test_shadow_cio_report_fallback_return_is_not_rankable_or_promotable(tmp_path: Path) -> None:
+    _write_shadow_artifacts(tmp_path)
+    latest = tmp_path / "outputs" / "shadow_candidates" / "latest"
+    evaluation = _evaluation()
+    evaluation["strategies"]["caerus_orion_alpha"] = {
+        "strategy_name": "Orion_Alpha",
+        "data_status": "OK",
+        "data_reason": None,
+        "daily_return": 0.0,
+        "cumulative_return": 1.50,
+        "excess_return_vs_spy": 1.47,
+        "rolling_count_of_valid_days": 0,
+    }
+    _write_json(latest / "shadow_evaluation.json", evaluation)
+
+    report = build_report(tmp_path)
+
+    assert report.publication_withheld is False
+    assert "Orion_Alpha | +0.00% | N/A | +150.00% | +147.00%" in report.body
+    assert "Leader: Lyra (+12.00% YTD)" in report.body
+    assert "Leader: Orion_Alpha" not in report.body
+    assert "Orion_Alpha ->" not in report.body
+    assert "- Orion_Alpha: NOT_READY - Strong YTD, but only 0 valid days." in report.body
 
 
 def test_shadow_cio_report_calculates_excess_vs_spy_ytd(tmp_path: Path) -> None:
@@ -265,8 +347,12 @@ def test_shadow_cio_report_suppresses_windows_and_rankings_when_nav_chain_resets
     report = build_report(tmp_path)
 
     assert report.data_health == "Fresh but corrupt"
+    assert report.publication_withheld is True
+    assert report.publication_withheld_reason == "ARTIFACT_CORRUPT"
     assert "SHADOW_NAV_CHAIN_RESET" in report.data_health_reason
-    assert "Polaris | N/A | N/A | N/A | N/A" in report.body
-    assert "=== RANKING ===\n\nSPY" not in report.body
+    assert "Reason: ARTIFACT_CORRUPT" in report.body
+    assert "=== PERFORMANCE SNAPSHOT ===" not in report.body
+    assert "=== RANKING ===" not in report.body
+    assert "=== PROMOTION SIGNAL ===" not in report.body
     assert "PROMOTE_CANDIDATE" not in report.body
-    assert "performance is unavailable because of artifact corruption" in report.body
+    assert "Publication withheld. No CIO performance conclusions were generated." in report.body
