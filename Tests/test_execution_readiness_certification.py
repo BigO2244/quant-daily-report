@@ -138,7 +138,11 @@ def _certify(
 
 def test_certification_passes_20260624_fixed_failure_shape(tmp_path: Path, monkeypatch) -> None:
     _patch_symbol_resolution(monkeypatch)
-    _write_payload(tmp_path, "2026-06-24", _incident_trades())
+    payload_path = _write_payload(tmp_path, "2026-06-24", _incident_trades())
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["planner_intended_trades_count"] = 14
+    payload["execution_eligible_trades_count"] = 5
+    payload_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     broker = FakeBroker(_account())
 
     result = _certify(tmp_path, broker)
