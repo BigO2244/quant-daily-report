@@ -59,6 +59,8 @@ Archived copies are retained for auditability.
 | FR-073 | Sleeve Numeric Diagnostics and Cash-Routing Explainability | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Diagnostic-only sleeve numeric trace and cash-route explainability. Produces `outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json` when available; no execution, allocation, sizing, ranking, or risk-threshold behavior change. |
 | FR-074 | Execution Reliability Framework | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_074_execution_reliability_framework.md` | ACTIVE | Phase A observe-first operational invariant framework. Produces `outputs/runs/<RUN_ID>/audit/execution_reliability_report_<TRADE_DATE>.json`, normalizes existing execution integrity, target-attainment, reconciliation, precompute, and sleeve numeric evidence, and surfaces deterministic reliability score/status in operator summary without changing strategy, sleeve, sizing, allocation, cash policy, or broker submission semantics. |
 
+| FR-085 | Shadow Scorecard Publication Integrity Gates | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Reporting-integrity publication gates for the Shadow CIO scorecard (freshness + internal-consistency). Implemented on branch `fix/scorecard-publication-gates` (draft PR #117, commit `2ee5cd5`); not yet deployed. Moves to the deployed tables after merge and observation. |
+
 ## FR Numbering Exceptions
 
 The following paired documents intentionally reuse FR numbers for auditability:

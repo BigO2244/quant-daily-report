@@ -21,6 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core.strategy_registry import load_strategy_registry  # noqa: E402
+from paper.trading_calendar import is_trading_day  # noqa: E402
 
 _REGISTRY = load_strategy_registry()
 MODEL_ORDER = [*_REGISTRY.active_shadow_security_selection_ids(), "spy_benchmark"]
@@ -35,6 +36,8 @@ ESTABLISHED_MODEL_ORDER = [
 PROMOTION_SLUGS = list(reversed(_REGISTRY.promotion_candidate_ids()))
 BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 BENCHMARK_SLUG = "spy_benchmark"
+MIN_VALID_DAYS = 10
+MAX_NAV_AGE_TRADING_DAYS = int(os.environ.get("SHADOW_CIO_MAX_NAV_AGE_TRADING_DAYS", "2"))
 DISPLAY_NAMES = {
     entry.strategy_id: entry.display_name.replace("Caerus ", "")
     for entry in _REGISTRY.active_shadow_security_selection_entries()
@@ -59,6 +62,7 @@ class ModelSnapshot:
     valid_day_count: int | None
     data_status: str | None
     data_reason: str | None
+    period_return_source: str | None
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,8 @@ class ShadowCioReport:
     latest_source_date: str | None
     requested_report_date: str
     latest_source_warning: str | None
+    publication_withheld: bool = False
+    publication_withheld_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,13 @@ class PerformanceIntegrity:
     reason_code: str | None
     detail: str
     offending_date: str | None = None
+
+
+@dataclass(frozen=True)
+class PublicationGate:
+    withheld: bool
+    reason_code: str | None
+    detail: str | None = None
 
 
 def _load_dotenv(repo_root: Path) -> None:
@@ -303,6 +316,51 @@ def _collect_data_reasons(
     return "Stale", "; ".join(unique)
 
 
+def _trading_day_lag(as_of_date: str, trade_date: str) -> int | None:
+    try:
+        start = dt.date.fromisoformat(as_of_date)
+        end = dt.date.fromisoformat(trade_date)
+    except ValueError:
+        return None
+    if start >= end:
+        return 0
+
+    lag = 0
+    current = start + dt.timedelta(days=1)
+    while current <= end:
+        if is_trading_day(current.isoformat()):
+            lag += 1
+        current += dt.timedelta(days=1)
+    return lag
+
+
+def _publication_gate(
+    *,
+    hydration_status: dict[str, Any] | None,
+    as_of_date: str,
+    trade_date: str,
+    integrity: PerformanceIntegrity,
+) -> PublicationGate:
+    if integrity.status == "CORRUPT":
+        return PublicationGate(True, "ARTIFACT_CORRUPT", f"{integrity.reason_code}: {integrity.detail}")
+
+    shadow_refresh = (hydration_status or {}).get("shadow_refresh") or {}
+    refresh_status = shadow_refresh.get("status")
+    if refresh_status not in (None, "OK"):
+        refresh_reason = shadow_refresh.get("reason") or refresh_status
+        return PublicationGate(True, "FAILED_REFRESH", str(refresh_reason))
+
+    nav_lag = _trading_day_lag(as_of_date, trade_date)
+    if nav_lag is not None and nav_lag > MAX_NAV_AGE_TRADING_DAYS:
+        return PublicationGate(
+            True,
+            "NAV_STALE",
+            f"latest valid NAV date lags requested report date by {nav_lag} trading days",
+        )
+
+    return PublicationGate(False, None)
+
+
 def _build_model_snapshots(
     *,
     evaluation: dict[str, Any] | None,
@@ -328,8 +386,10 @@ def _build_model_snapshots(
         period_label = period.label
         period_start_date = period.start_date
         period_end_date = period.end_date
+        period_return_source = "nav" if period_return is not None else None
         if period_return is None:
             period_return = _as_float(payload.get("cumulative_return"))
+            period_return_source = "fallback" if period_return is not None else None
             period_start_date = as_of_date if period_start_date is None else period_start_date
             period_end_date = as_of_date if period_end_date is None else period_end_date
         seven_day = seven_by_slug.get(slug) or PeriodReturn(None, "7-Day", None, None)
@@ -358,6 +418,7 @@ def _build_model_snapshots(
                 valid_day_count=_as_int(payload.get("rolling_count_of_valid_days")),
                 data_status=payload.get("data_status"),
                 data_reason=payload.get("data_reason"),
+                period_return_source=None if suppress_performance else period_return_source,
             )
         )
     return snapshots
@@ -365,7 +426,14 @@ def _build_model_snapshots(
 
 def _rankable_models(models: list[ModelSnapshot]) -> list[ModelSnapshot]:
     return sorted(
-        [model for model in models if model.period_return is not None],
+        [
+            model
+            for model in models
+            if model.period_return is not None
+            and model.period_return_source == "nav"
+            and model.valid_day_count is not None
+            and model.valid_day_count >= MIN_VALID_DAYS
+        ],
         key=lambda model: model.period_return if model.period_return is not None else float("-inf"),
         reverse=True,
     )
@@ -399,7 +467,7 @@ def _promotion_signal(
     )
     is_stale = data_health == "Stale" or "PRICE_CACHE_STALE" in data_health_reason
     is_strong = gap is not None and gap > 0 and excess is not None and excess > 0
-    if valid_days < 10:
+    if valid_days < MIN_VALID_DAYS:
         signal = "NOT_READY"
         if is_strong and is_stale:
             reason = f"Strong {model.period_label}, but only {valid_days} valid days and current data is stale."
@@ -410,6 +478,8 @@ def _promotion_signal(
         else:
             reason = f"Only {valid_days} valid days."
         return signal, reason
+    if model.period_return_source != "nav":
+        return "NOT_READY", f"{model.period_label} return is not NAV-derived."
     if model.period_return is None:
         signal = "NOT_READY"
     elif is_strong and not is_stale:
@@ -484,6 +554,7 @@ def render_email_body(
     latest_source_date: str | None,
     requested_report_date: str,
     latest_source_warning: str | None,
+    publication_withheld_reason: str | None = None,
 ) -> str:
     ranked_all = _rankable_models(models)
     ranked_models = [model for model in ranked_all if model.slug != BENCHMARK_SLUG]
@@ -514,6 +585,42 @@ def render_email_body(
                 "Current trade date not yet available; report uses latest fully available shadow data.",
             ]
         )
+    if publication_withheld_reason:
+        lines.extend(
+            [
+                "",
+                "=== MODEL SCORECARD: PUBLICATION WITHHELD ===",
+                f"Reason: {publication_withheld_reason}",
+                f"Latest valid NAV date: {as_of_date}",
+                f"Requested report date: {requested_report_date}",
+                "No rankings, promotion signals, or CIO performance conclusions were generated.",
+                "Action: investigate upstream shadow refresh (scripts/refresh_shadow_scorecard_artifacts.py).",
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "=== DATA HEALTH ===",
+                "",
+                f"- {data_health}",
+                f"- {data_health_reason}",
+                f"- Latest source path: {latest_source_path}",
+                f"- Latest source date: {latest_source_date or 'UNAVAILABLE'}",
+                f"- Requested/report date: {requested_report_date}",
+                f"- Performance publication: WITHHELD ({publication_withheld_reason})",
+            ]
+        )
+        if latest_source_warning:
+            lines.append(f"- WARNING: {latest_source_warning}")
+        lines.extend(
+            [
+                "",
+                "=== CIO TAKEAWAY ===",
+                "",
+                "Publication withheld. No CIO performance conclusions were generated.",
+            ]
+        )
+        return "\n".join(lines)
     lines.extend(
         [
             "",
@@ -631,6 +738,12 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
     if suppress_performance:
         data_health = "Fresh but corrupt" if data_health == "Fresh" else f"{data_health} and corrupt"
         data_health_reason = f"{integrity.reason_code}: {integrity.detail}"
+    publication_gate = _publication_gate(
+        hydration_status=hydration_status,
+        as_of_date=as_of_date,
+        trade_date=trade_date,
+        integrity=integrity,
+    )
     models = _build_model_snapshots(
         evaluation=evaluation,
         nav_history=nav_history,
@@ -648,6 +761,7 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
         latest_source_date,
         trade_date,
         latest_source_warning,
+        publication_gate.reason_code if publication_gate.withheld else None,
     )
     return ShadowCioReport(
         trade_date=trade_date,
@@ -661,6 +775,8 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
         latest_source_date=latest_source_date,
         requested_report_date=trade_date,
         latest_source_warning=latest_source_warning,
+        publication_withheld=publication_gate.withheld,
+        publication_withheld_reason=publication_gate.reason_code,
     )
 
 
