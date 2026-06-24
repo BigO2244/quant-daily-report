@@ -134,10 +134,10 @@ def _default_output_path(repo_root: Path, trade_date: str, output_path: str | Pa
 
 def _expected_planned_trade_count(payload: Mapping[str, object]) -> int | None:
     for key in (
-        "planned_trade_count",
-        "planned_trades_count",
-        "planner_intended_trades_count",
-        "model_proposed_trades_count",
+        "trades_count",
+        "trade_count",
+        "executable_trades_count",
+        "execution_eligible_trades_count",
     ):
         if payload.get(key) is not None:
             return _safe_int(payload.get(key), default=-1)
