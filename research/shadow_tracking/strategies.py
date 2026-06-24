@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from core.strategy_registry import StrategyRegistryEntry, load_strategy_registry
 from research.alpha_lab_v2.engine import StrategySpec
@@ -14,12 +15,34 @@ class ShadowStrategyDefinition:
     spec: StrategySpec
 
 
-def build_shadow_definitions() -> list[ShadowStrategyDefinition]:
+def build_shadow_definitions(*, trade_date: str | None = None) -> list[ShadowStrategyDefinition]:
     registry = load_strategy_registry()
     return [
         _definition_from_registry_entry(entry)
         for entry in registry.active_shadow_security_selection_entries()
+        if shadow_tracking_active_on(entry, trade_date=trade_date)
     ]
+
+
+def shadow_tracking_observation_start(entry: StrategyRegistryEntry) -> str | None:
+    value = (entry.shadow_tracking or {}).get("observation_start_date")
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"{entry.strategy_id}: invalid shadow observation_start_date {value!r}") from exc
+
+
+def shadow_tracking_active_on(entry: StrategyRegistryEntry, *, trade_date: str | None) -> bool:
+    start_date = shadow_tracking_observation_start(entry)
+    if trade_date is None or start_date is None:
+        return True
+    try:
+        normalized_trade_date = date.fromisoformat(str(trade_date)).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"invalid shadow trade_date {trade_date!r}") from exc
+    return normalized_trade_date >= start_date
 
 
 def _definition_from_registry_entry(entry: StrategyRegistryEntry) -> ShadowStrategyDefinition:

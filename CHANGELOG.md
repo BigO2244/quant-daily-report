@@ -16,6 +16,13 @@ This log covers material architectural and process changes. Routine bug fixes an
 - Internal-consistency gate: a sleeve is excluded from ranking and leader selection unless its period return is NAV-derived (`period_return_source == "nav"`) and it has at least `MIN_VALID_DAYS` (10) valid days. This prevents a zero-track-record concentration variant (e.g. `Orion_Alpha`, activated 2026-06-23) from being crowned leader via an unvalidated `cumulative_return` fallback.
 - Reporting-only; no trading, execution, allocation, broker, or cron behavior changed. Branch `fix/scorecard-publication-gates`, draft PR #117. The upstream NAV refresh-freeze (why the series is stuck at 2026-06-05) is tracked as a P2 follow-up. Full FR record: `docs/governance/fr_active_backlog.md` (FR-085).
 
+### Shadow Refresh Alpha Inception Handling & NAV Restatement (FR-086) — June 24, 2026
+
+- Diagnosed and fixed the Shadow NAV refresh freeze (the series was stuck at 2026-06-05). Root cause was not scheduler, cache, path, or signal warmup: the NAV append correctly failed closed on a continuity mismatch (`SHADOW_NAV_CONTINUITY_MISMATCH`) because the active NAV file carried mixed/legacy-scale history (`caerus_polaris` prior NAV 38.22 vs operational-scale 1.89).
+- `scripts/refresh_shadow_scorecard_artifacts.py` and shadow definition/performance generation are now date-aware for the alpha concentration variants: `observation_start_date` 2026-06-23, blank pre-inception NAV cells, and the first real alpha row seeded from `previous_nav=1.0`. Regression coverage added.
+- Operational recovery (VM): re-seeded the active NAV from the validated same-day operational staging artifact and replayed the 2026-06-15 → 2026-06-23 backfill in order (Juneteenth and weekend correctly skipped); the active NAV is restored to 29 rows (2026-05-12 → 2026-06-23). Combined with FR-085 the scorecard un-withholds (Data health Fresh; Leader Orion +30.25% Since Observation Inception).
+- No trading, allocation, execution, broker, scheduler, or price-download logic changed. Branch `fix/shadow-refresh-freeze`, draft PR #118. Full FR record: `docs/governance/fr_active_backlog.md` (FR-086).
+
 ### Named Strategy Framework and Daily Shadow Lane — April 2026
 
 - Introduced named strategy framework for operator-facing materials:
