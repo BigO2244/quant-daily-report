@@ -41,6 +41,7 @@ LOG_FILE="${LOG_DIR}/execute_${REPORT_DATE}.log"
 WORKFLOW_DIR="${REPO_ROOT}/outputs/workflow/${REPORT_DATE}"
 EXECUTION_SELF_HEAL_STATUS_PATH="${WORKFLOW_DIR}/execution_self_heal.json"
 BUNDLE_VALIDATION_PATH="${WORKFLOW_DIR}/execution_bundle_validation.json"
+EXECUTION_READINESS_CERTIFICATION_ENABLED="${EXECUTION_READINESS_CERTIFICATION_ENABLED:-1}"
 
 # --- Options overlay execution (default enabled for paper trading) ---
 export ALLOW_OPTIONS_EXECUTION="${ALLOW_OPTIONS_EXECUTION:-1}"
@@ -123,6 +124,22 @@ if ! python3 -m core.precompute_bundle_validation \
 fi
 echo "OK: precompute bundle validated at ${BUNDLE_DIR}" | tee -a "${LOG_FILE}"
 echo "bundle_validation=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
+
+# --- Certify execution readiness without submitting orders ---
+if [[ ! "${EXECUTION_READINESS_CERTIFICATION_ENABLED}" =~ ^(0|false|FALSE|no|NO|n|N|off|OFF)$ ]]; then
+    CERTIFICATION_PATH="${BUNDLE_DIR}/execution_readiness_certification.json"
+    if ! python3 -m scripts.certify_execution_readiness \
+        --trade-date "${REPORT_DATE}" \
+        --mode paper \
+        --no-submit \
+        --output-path "${CERTIFICATION_PATH}" >> "${LOG_FILE}" 2>&1; then
+        echo "FATAL: execution readiness certification failed; details=${CERTIFICATION_PATH}" | tee -a "${LOG_FILE}"
+        echo "FATAL: execution halted before broker submission." | tee -a "${LOG_FILE}"
+        echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1" | tee -a "${LOG_FILE}"
+        exit 1
+    fi
+    echo "OK: execution readiness certification written to ${CERTIFICATION_PATH}" | tee -a "${LOG_FILE}"
+fi
 
 # --- Set bundle environment (replaces GitHub artifact download step) ---
 export PRECOMPUTE_BUNDLE_REQUIRED=true
