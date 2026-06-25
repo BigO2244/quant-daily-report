@@ -106,8 +106,10 @@ artifacts.
 
 ## Recommended Next Step
 
-Implement lineage/version manifests and coverage diagnostics across P1-P3
-artifacts. Keep approved env-file or exported vendor keys outside the
+Use `data/manifests/research_data_observability.json` as the source for
+read-only data-trust summaries, then harden dataset-specific coverage,
+release-date, restatement/version, and security-id policies before sleeve
+migration. Keep approved env-file or exported vendor keys outside the
 repository, continue focused no-secret probes when source coverage changes, and
 do not wire normalized data into sleeves until separate migration gates approve
 consumption.

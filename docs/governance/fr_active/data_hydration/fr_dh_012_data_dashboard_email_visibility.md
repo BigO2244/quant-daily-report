@@ -1,12 +1,13 @@
 # FR-DH-012 Data Dashboard and Email Visibility
 
-Status: DRAFT / PLANNED
+Status: DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION
 
 Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
-Runtime impact statement: Documentation-only. Initial visibility is read-only
-and non-execution-affecting. This spec does not change dashboard runtime,
-email sending, broker behavior, execution gates, or scheduler state.
+Runtime impact statement: Read-only observability artifact. The current
+implementation writes ignored local manifest data only and is
+non-execution-affecting. This spec does not change dashboard runtime, email
+sending, broker behavior, execution gates, or scheduler state.
 
 ## Strategic Purpose
 
@@ -24,7 +25,8 @@ analysis.
 ## Scope
 
 - Define read-only dashboard/email data trust fields.
-- Consume FR-DH-009 freshness artifacts.
+- Consume FR-DH-009 freshness artifacts and
+  `data/manifests/research_data_observability.json`.
 - Surface source, latest successful hydration timestamp, stale/missing flags,
   schema status, PIT violations, and known limitations.
 - Keep initial visibility advisory and non-execution-affecting.
@@ -40,6 +42,7 @@ analysis.
 ## Required Datasets
 
 - `data/manifests/dataset_freshness.json`
+- `data/manifests/research_data_observability.json`
 - Dataset manifests for all FR-DH data families.
 - Optional summary artifacts from FR-DH-011 migration reports.
 
@@ -47,7 +50,8 @@ analysis.
 
 - `outputs/data_trust/data_trust_summary.json`
 - `outputs/data_trust/data_trust_summary.md`
-- Dashboard/email read-only view models derived from the freshness artifact.
+- Dashboard/email read-only view models derived from freshness and
+  observability artifacts.
 
 ## Proposed Interfaces
 
@@ -66,10 +70,16 @@ analysis.
 - The visibility layer is read-only and does not call broker/order submission
   paths.
 - Dashboard/email output is deterministic for a given freshness artifact.
+- The observability manifest reports freshness, coverage, validation, lineage,
+  PIT status, source artifacts, versions/stages, and blocker reasons per
+  cataloged dataset.
 
 ## Validation Plan
 
 - Fixture tests for each FR-DH-009 failure level.
+- Run `Tests/test_data_hydration_observability.py`.
+- Run `scripts/data_hydration/build_research_data_observability.py`.
+- Run `scripts/data_hydration/validate_research_data_observability.py`.
 - Snapshot tests for summary JSON/markdown.
 - Tests proving no broker, execution, or vendor submission interfaces are
   invoked.
@@ -99,7 +109,8 @@ analysis.
 
 ## Rollout Sequence
 
-1. Define read-only summary schema from `dataset_freshness.json`.
+1. Define read-only summary schema from `dataset_freshness.json` and
+   `research_data_observability.json`.
 2. Build fixture-based summary tests.
 3. Add markdown/email summary generation.
 4. Add dashboard display only in a separate isolated dashboard patch.
@@ -107,6 +118,6 @@ analysis.
 
 ## Recommended Next Implementation Step
 
-After FR-DH-009 exists, build a fixture-only `data_trust_summary.json` and
-markdown renderer. Defer dashboard file changes until unrelated dashboard work
-is clean or intentionally included.
+Use `research_data_observability.json` as the input to a fixture-only
+`data_trust_summary.json` and markdown renderer. Defer dashboard file changes
+until unrelated dashboard work is clean or intentionally included.

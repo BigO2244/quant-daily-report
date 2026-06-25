@@ -262,8 +262,11 @@ cataloged datasets, but the first implementation is read-only and advisory.
 3. Keep the initial inventory table synchronized with the generated catalog.
 4. Link FR-DH-013 from FR-DH-000, registry, active backlog, and roadmaps.
 5. Maintain the source policy decision matrix as a read-only planning artifact.
-6. Keep catalog rules advisory until migration gates approve enforcement.
-7. Later, add advisory checks that flag uncataloged datasets during sleeve
+6. Maintain `data/manifests/research_data_observability.json` as the read-only
+   roll-up for catalog coverage, freshness, validation, lineage, PIT status,
+   source artifacts, versions/stages, and blocker reasons.
+7. Keep catalog rules advisory until migration gates approve enforcement.
+8. Later, add advisory checks that flag uncataloged datasets during sleeve
    migration.
 
 ## Runtime Impact Statement

@@ -72,6 +72,7 @@ This index does not own datasets directly. Child FR-DH documents cover:
 - `data/manifests/`
 - `data/manifests/dataset_freshness.json`
 - `data/manifests/research_data_catalog.json`
+- `data/manifests/research_data_observability.json`
 - `data/manifests/p1_normalization_schema.template.json`
 - `data/manifests/source_policy_decision_matrix.template.json`
 - `docs/governance/fr_active/data_hydration/`
@@ -194,6 +195,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `Tests/test_data_hydration_p2_normalization.py`.
 - Run `Tests/test_data_hydration_p3_normalization.py`.
 - Run `Tests/test_data_hydration_feature_store.py`.
+- Run `Tests/test_data_hydration_observability.py`.
 - Run `scripts/data_hydration/validate_research_data_catalog.py`.
 - Run `scripts/data_hydration/validate_dataset_freshness.py`.
 - Run `scripts/data_hydration/validate_hydration_swarm.py`.
@@ -201,6 +203,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `scripts/data_hydration/validate_p2_normalization.py`.
 - Run `scripts/data_hydration/validate_p3_normalization.py`.
 - Run `scripts/data_hydration/validate_feature_store.py`.
+- Run `scripts/data_hydration/validate_research_data_observability.py`.
 - Manually verify all index links and child file names.
 
 ## Dependencies
@@ -247,10 +250,12 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 7. Add feature coverage diagnostics and feature-definition manifests.
 8. Maintain P3 source-specific normalizers for ETF/index constituents, 13F
    filing metadata, and news metadata where read-only samples exist.
-9. Resolve blocked-source datasets or mark them explicitly blocked with source,
+9. Maintain `research_data_observability.json` as the read-only data readiness,
+   lineage, validation, and blocker summary.
+10. Resolve blocked-source datasets or mark them explicitly blocked with source,
    legal, credential, or business-decision reasons.
-10. Migrate sleeves observe-only behind explicit governance gates.
-11. Add dashboard/email visibility after data trust status is stable.
+11. Migrate sleeves observe-only behind explicit governance gates.
+12. Add dashboard/email visibility after data trust status is stable.
 
 ## Recommended Next Implementation Step
 
