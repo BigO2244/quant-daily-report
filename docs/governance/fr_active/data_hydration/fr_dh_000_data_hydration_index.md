@@ -192,11 +192,13 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `Tests/test_data_hydration_freshness.py`.
 - Run `Tests/test_data_hydration_p1_normalization.py`.
 - Run `Tests/test_data_hydration_p2_normalization.py`.
+- Run `Tests/test_data_hydration_feature_store.py`.
 - Run `scripts/data_hydration/validate_research_data_catalog.py`.
 - Run `scripts/data_hydration/validate_dataset_freshness.py`.
 - Run `scripts/data_hydration/validate_hydration_swarm.py`.
 - Run `scripts/data_hydration/validate_p1_normalization.py`.
 - Run `scripts/data_hydration/validate_p2_normalization.py`.
+- Run `scripts/data_hydration/validate_feature_store.py`.
 - Manually verify all index links and child file names.
 
 ## Dependencies
@@ -238,16 +240,17 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 5. Maintain P2 observe-only normalizers and validators for PIT fundamentals,
    macro/rates, VIX, insider, and SEC metadata; do not promote while
    restatement, release-date, transaction-level, and source-policy gaps remain.
-6. Add feature-store builders after normalized inputs have lineage and
-   PIT-safety validation.
-7. Add P3 source-specific normalizers after legal/source-policy review.
-8. Migrate sleeves observe-only behind explicit governance gates.
-9. Add dashboard/email visibility after data trust status is stable.
+6. Maintain observe-only feature-store builders after normalized inputs have
+   lineage and PIT-safety validation.
+7. Add feature coverage diagnostics and feature-definition manifests.
+8. Add P3 source-specific normalizers after legal/source-policy review.
+9. Migrate sleeves observe-only behind explicit governance gates.
+10. Add dashboard/email visibility after data trust status is stable.
 
 ## Recommended Next Implementation Step
 
-Implement the next observe-only dependency: feature-store prototypes and P3
-normalizers, starting with deterministic fundamental-feature scaffolding from
-PIT fundamentals and PIT membership normalization for ETF/index constituents.
-Keep all strategy, sleeve, execution, broker, allocation, and scheduler
-consumers unchanged until a separate migration gate approves consumption.
+Implement the next observe-only dependency: feature coverage/definition
+diagnostics and P3 normalizers, starting with PIT ETF/index membership
+normalization. Keep all strategy, sleeve, execution, broker, allocation, and
+scheduler consumers unchanged until a separate migration gate approves
+consumption.

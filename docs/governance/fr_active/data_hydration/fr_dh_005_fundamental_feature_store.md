@@ -1,12 +1,14 @@
 # FR-DH-005 Fundamental Feature Store
 
-Status: DRAFT / PLANNED
+Status: DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION
 
 Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
-Runtime impact statement: Documentation-only. This spec does not change any
-current model features, strategy weights, execution behavior, or runtime data
-access.
+Runtime impact statement: Read-only feature generation. The current
+implementation may write ignored local artifacts under
+`data/features/fundamental_features/` and `data/manifests/`. It does not change
+current model features, strategy weights, execution behavior, runtime data
+access, or sleeve consumption.
 
 ## Strategic Purpose
 
@@ -28,6 +30,8 @@ explicit.
 - Require features to use FR-DH-004 PIT fundamentals.
 - Version feature definitions and input datasets.
 - Provide feature availability and missingness diagnostics.
+- Build an initial observe-only `fundamental_features_v1_observe_only` feature
+  set from normalized PIT fundamentals.
 
 ## Out of Scope
 
@@ -46,9 +50,10 @@ explicit.
 ## Proposed Canonical Artifacts
 
 - `data/features/fundamental_features/features.parquet`
+- `data/features/fundamental_features/features.json`
 - `data/features/fundamental_features/feature_definitions.json`
 - `data/features/fundamental_features/feature_coverage.json`
-- `data/manifests/fundamental_feature_manifest.json`
+- `data/manifests/feature_store_manifest.json`
 
 ## Proposed Interfaces
 
@@ -65,11 +70,16 @@ explicit.
 - Quality and Value can run observe-only feature comparisons against legacy
   feature logic before migration.
 - Feature builders cannot read vendor SDKs directly.
+- The observe-only feature artifact records input artifact digest, input
+  dataset schema version, feature version, as-of date, and PIT status.
 
 ## Validation Plan
 
 - Unit tests for representative value, quality, profitability, leverage,
   growth, and capital-efficiency formulas.
+- Run `Tests/test_data_hydration_feature_store.py`.
+- Run `scripts/data_hydration/build_feature_store.py --as-of-date <date>`.
+- Run `scripts/data_hydration/validate_feature_store.py`.
 - PIT tests proving features do not use filings unavailable as of the feature
   date.
 - Snapshot tests for feature version stability.
@@ -105,13 +115,19 @@ explicit.
 
 ## Rollout Sequence
 
-1. Define feature family schema and versioning contract.
-2. Implement fixture-only feature builders.
-3. Build features from FR-DH-004 prototype data.
-4. Run observe-only sleeve parity.
-5. Expose features through `research_data`.
+1. Maintain the observe-only feature family schema and versioning contract.
+2. Build `fundamental_features_v1_observe_only` from normalized PIT
+   fundamentals.
+3. Validate feature manifests, input artifact digests, and feature-date
+   ordering.
+4. Add feature definitions and coverage diagnostics.
+5. Run observe-only sleeve parity.
+6. Expose features through `research_data` only for research workflows until a
+   migration gate approves sleeve consumption.
 
 ## Recommended Next Implementation Step
 
-Define `feature_definitions.json` for a small initial Quality/Value feature
-set and write fixture tests that recompute features from PIT fundamentals.
+Add explicit `feature_definitions.json` and coverage diagnostics for
+`fundamental_features_v1_observe_only`, then run observe-only parity against any
+legacy Quality/Value feature logic. Do not wire features into sleeves until
+restatement/version, security-id resolution, and migration gates pass.

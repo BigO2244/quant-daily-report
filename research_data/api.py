@@ -102,3 +102,7 @@ def load_sec_events(*, repo_root: Path | None = None, required: bool = True) -> 
 
 def load_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
     return load_dataset("fundamental_features", repo_root=repo_root, required=required)
+
+
+def load_fundamental_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_features(repo_root=repo_root, required=required)

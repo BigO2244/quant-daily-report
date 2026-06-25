@@ -6,6 +6,7 @@ from research_data.api import (
     load_dataset,
     load_dataset_freshness,
     load_features,
+    load_fundamental_features,
     load_fundamentals,
     load_insiders,
     load_macro,
@@ -16,6 +17,7 @@ from research_data.api import (
     load_yield_curve,
 )
 from research_data.catalog import catalog_entries, catalog_entry_by_id
+from research_data.features import build_feature_store
 from research_data.normalization import normalize_p1, normalize_p2
 
 __all__ = [
@@ -26,6 +28,7 @@ __all__ = [
     "load_dataset",
     "load_dataset_freshness",
     "load_features",
+    "load_fundamental_features",
     "load_fundamentals",
     "load_insiders",
     "load_macro",
@@ -34,6 +37,7 @@ __all__ = [
     "load_security_master",
     "load_vix",
     "load_yield_curve",
+    "build_feature_store",
     "normalize_p1",
     "normalize_p2",
 ]
