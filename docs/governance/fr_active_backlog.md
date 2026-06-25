@@ -161,7 +161,8 @@ procedures are proven.
 - **Current state:** FR-DH governance, catalog, hydration swarm, credential-safe
   Sharadar probes, dataset freshness, P1/P2/P3 observe-only normalization,
   fundamental and macro feature artifacts, data observability, data-trust
-  summaries, validation, and internal `research_data` load APIs exist.
+  summaries, validation, and internal `research_data` load/diagnostics APIs
+  exist.
   Generated data artifacts remain ignored local research outputs. No
   sleeve consumes these artifacts yet. Sharadar may be a source feeding
   canonical datasets, but it is not the platform. After migration, sleeves must

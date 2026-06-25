@@ -65,6 +65,10 @@ Required initial functions:
 - `research_data.load_macro_regime_features()`
 - `research_data.load_insider_transactions()`
 - `research_data.load_sec_events()`
+- `research_data.load_dataset_diagnostics(dataset_id)`
+- `research_data.load_dataset_with_diagnostics(dataset_id)`
+- `research_data.load_research_data_observability()`
+- `research_data.load_data_trust_summary()`
 
 Recommended common parameters:
 
@@ -89,6 +93,7 @@ Recommended common parameters:
 ## Validation Plan
 
 - Unit tests proving API functions read canonical fixture artifacts.
+- Run `Tests/test_research_data_api_diagnostics.py`.
 - Tests proving no vendor SDK, broker client, or network call is invoked.
 - PIT tests for as-of filtering.
 - Schema tests for diagnostics and missing-data reason codes.
@@ -127,5 +132,6 @@ Recommended common parameters:
 
 ## Recommended Next Implementation Step
 
-Add diagnostics-returning wrappers for freshness, lineage, validation, and
-PIT-safety metadata before any observe-only sleeve migration.
+Add query filtering parameters such as `as_of_date`, `start_date`, `end_date`,
+`security_ids`, and `fields` behind fixture-backed tests before any
+observe-only sleeve migration.

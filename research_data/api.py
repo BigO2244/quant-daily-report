@@ -29,6 +29,8 @@ NORMALIZED_ARTIFACTS = {
 }
 
 FEATURE_DATASETS = ("fundamental_features", "macro_regime_features")
+OBSERVABILITY_PATH = Path("data/manifests/research_data_observability.json")
+DATA_TRUST_SUMMARY_PATH = Path("outputs/data_trust/data_trust_summary.json")
 
 
 def load_dataset(dataset_id: str, *, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
@@ -48,6 +50,69 @@ def load_dataset(dataset_id: str, *, repo_root: Path | None = None, required: bo
     if not isinstance(rows, list):
         raise ValueError(f"Normalized artifact for {dataset_id} is missing rows list: {path}")
     return rows
+
+
+def load_dataset_diagnostics(dataset_id: str, *, repo_root: Path | None = None, required: bool = True) -> dict[str, Any]:
+    root = Path(repo_root) if repo_root is not None else REPO_ROOT
+    path = root / OBSERVABILITY_PATH
+    if not path.exists():
+        if required:
+            raise FileNotFoundError(f"Research data observability manifest does not exist: {path}")
+        return {
+            "dataset_id": dataset_id,
+            "diagnostics_status": "MISSING_OBSERVABILITY",
+            "reason": f"Research data observability manifest does not exist: {path}",
+        }
+    payload = read_json(path)
+    for row in payload.get("datasets") or []:
+        if row.get("dataset_id") == dataset_id:
+            return {
+                "diagnostics_status": "OK",
+                "schema_version": payload.get("schema_version"),
+                "manifest_as_of_date": payload.get("as_of_date"),
+                "manifest_generated_at": payload.get("generated_at"),
+                **row,
+            }
+    if required:
+        raise KeyError(f"No diagnostics row exists for dataset {dataset_id!r}")
+    return {
+        "dataset_id": dataset_id,
+        "diagnostics_status": "MISSING_DATASET_DIAGNOSTICS",
+        "reason": f"No diagnostics row exists for dataset {dataset_id!r}",
+    }
+
+
+def load_dataset_with_diagnostics(
+    dataset_id: str,
+    *,
+    repo_root: Path | None = None,
+    required: bool = True,
+) -> dict[str, Any]:
+    return {
+        "dataset_id": dataset_id,
+        "rows": load_dataset(dataset_id, repo_root=repo_root, required=required),
+        "diagnostics": load_dataset_diagnostics(dataset_id, repo_root=repo_root, required=required),
+    }
+
+
+def load_research_data_observability(*, repo_root: Path | None = None, required: bool = True) -> dict[str, Any]:
+    root = Path(repo_root) if repo_root is not None else REPO_ROOT
+    path = root / OBSERVABILITY_PATH
+    if not path.exists():
+        if required:
+            raise FileNotFoundError(f"Research data observability manifest does not exist: {path}")
+        return {}
+    return read_json(path)
+
+
+def load_data_trust_summary(*, repo_root: Path | None = None, required: bool = True) -> dict[str, Any]:
+    root = Path(repo_root) if repo_root is not None else REPO_ROOT
+    path = root / DATA_TRUST_SUMMARY_PATH
+    if not path.exists():
+        if required:
+            raise FileNotFoundError(f"Data trust summary does not exist: {path}")
+        return {}
+    return read_json(path)
 
 
 def load_prices(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:

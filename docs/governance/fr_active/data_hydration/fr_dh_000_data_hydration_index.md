@@ -205,6 +205,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `Tests/test_data_hydration_feature_store.py`.
 - Run `Tests/test_data_hydration_observability.py`.
 - Run `Tests/test_data_trust_summary.py`.
+- Run `Tests/test_research_data_api_diagnostics.py`.
 - Run `scripts/data_hydration/validate_research_data_catalog.py`.
 - Run `scripts/data_hydration/validate_dataset_freshness.py`.
 - Run `scripts/data_hydration/validate_hydration_swarm.py`.
