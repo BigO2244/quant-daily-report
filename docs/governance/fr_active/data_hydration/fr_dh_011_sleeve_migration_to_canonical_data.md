@@ -1,12 +1,14 @@
 # FR-DH-011 Sleeve Migration to Canonical Data
 
-Status: DRAFT / PLANNED
+Status: DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION
 
 Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
-Runtime impact statement: Documentation-only. This spec does not migrate any
-sleeve, change rankings, promote a model, alter allocation, or affect paper/live
-execution.
+Runtime impact statement: Read-only advisory migration audit. The current
+implementation writes ignored local readiness artifacts under
+`outputs/research/data_migration/` and does not invoke sleeve runtime code,
+migrate any sleeve, change rankings, promote a model, alter allocation, or
+affect paper/live execution.
 
 ## Strategic Purpose
 
@@ -27,6 +29,8 @@ data-source changes with genuine strategy improvement or degradation.
 - Require parity tests and backtest comparison.
 - Preserve legacy results as lineage-only where data defects are found.
 - Define rules for future sleeves to start on canonical data by default.
+- Build a read-only migration readiness audit from the FR-069 sleeve manifest
+  and FR-DH observability manifest.
 
 ## Out of Scope
 
@@ -54,6 +58,8 @@ data-source changes with genuine strategy improvement or degradation.
 - `outputs/research/data_migration/<sleeve>/<date>/backtest_comparison.json`
 - `outputs/research/data_migration/<sleeve>/<date>/data_lineage.json`
 - `outputs/research/data_migration/<sleeve>/<date>/migration_readiness.md`
+- `outputs/research/data_migration/<date>/migration_readiness.json`
+- `outputs/research/data_migration/<date>/migration_readiness.md`
 
 ## Proposed Interfaces
 
@@ -61,6 +67,8 @@ data-source changes with genuine strategy improvement or degradation.
 - Migration reports compare legacy data path versus canonical data path.
 - Evidence envelopes record dataset versions, feature versions, freshness
   status, and PIT validation status.
+- `scripts/data_hydration/build_sleeve_migration_readiness.py` produces the
+  advisory readiness artifact without running sleeves.
 
 ## Acceptance Criteria
 
@@ -81,6 +89,11 @@ data-source changes with genuine strategy improvement or degradation.
 - Per-sleeve parity tests between legacy and canonical input shapes.
 - Backtest comparison before and after canonical migration.
 - PIT and freshness status included in every migration artifact.
+- Run `Tests/test_sleeve_migration_readiness.py`.
+- Run `scripts/data_hydration/build_sleeve_migration_readiness.py --as-of-date
+  <date>`.
+- Run `scripts/data_hydration/validate_sleeve_migration_readiness.py --path
+  outputs/research/data_migration/<date>/migration_readiness.json`.
 - Observe-only window before any promotion or runtime change.
 - Review under FR-069 evidence-envelope rules.
 
@@ -109,14 +122,16 @@ data-source changes with genuine strategy improvement or degradation.
 ## Rollout Sequence
 
 1. Inventory direct vendor and ad hoc data calls by sleeve.
-2. Migrate one low-risk research-only sleeve in observe-only mode.
-3. Produce parity and backtest comparison artifacts.
-4. Expand to Quality and Value after fundamentals/features are validated.
-5. Migrate event and regime sleeves after SEC/insider/macro datasets are ready.
-6. Require future sleeves to use canonical APIs from inception.
+2. Maintain advisory readiness artifacts from sleeve and dataset manifests.
+3. Migrate one low-risk research-only sleeve in observe-only mode.
+4. Produce parity and backtest comparison artifacts.
+5. Expand to Quality and Value after fundamentals/features are validated.
+6. Migrate event and regime sleeves after SEC/insider/macro datasets are ready.
+7. Require future sleeves to use canonical APIs from inception.
 
 ## Recommended Next Implementation Step
 
-Run a read-only inventory of sleeve data dependencies and direct vendor calls,
-then choose the first observe-only migration candidate based on low blast radius
-and available canonical fixture coverage.
+Use the advisory migration readiness artifact to choose the first observe-only
+parity candidate. Keep blocked sleeves blocked until required datasets are
+observe-only ready and warning-only datasets have acceptable freshness,
+coverage, and PIT evidence.

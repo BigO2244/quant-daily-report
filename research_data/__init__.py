@@ -27,6 +27,7 @@ from research_data.api import (
 from research_data.catalog import catalog_entries, catalog_entry_by_id
 from research_data.data_trust import build_data_trust_summary
 from research_data.features import build_feature_store
+from research_data.migration import build_sleeve_migration_readiness
 from research_data.normalization import normalize_p1, normalize_p2, normalize_p3
 from research_data.observability import build_research_data_observability
 
@@ -58,6 +59,7 @@ __all__ = [
     "build_data_trust_summary",
     "build_feature_store",
     "build_research_data_observability",
+    "build_sleeve_migration_readiness",
     "normalize_p1",
     "normalize_p2",
     "normalize_p3",

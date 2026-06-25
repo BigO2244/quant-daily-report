@@ -79,6 +79,8 @@ This index does not own datasets directly. Child FR-DH documents cover:
 - `data/manifests/source_policy_decision_matrix.template.json`
 - `outputs/data_trust/data_trust_summary.json`
 - `outputs/data_trust/data_trust_summary.md`
+- `outputs/research/data_migration/<date>/migration_readiness.json`
+- `outputs/research/data_migration/<date>/migration_readiness.md`
 - `docs/governance/fr_active/data_hydration/`
 - `docs/governance/fr_active/data_hydration/fr_dh_runtime_credentials_setup.md`
 - `docs/governance/fr_active/data_hydration/fr_dh_p1_normalization_schema.md`
@@ -206,6 +208,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `Tests/test_data_hydration_observability.py`.
 - Run `Tests/test_data_trust_summary.py`.
 - Run `Tests/test_research_data_api_diagnostics.py`.
+- Run `Tests/test_sleeve_migration_readiness.py`.
 - Run `scripts/data_hydration/validate_research_data_catalog.py`.
 - Run `scripts/data_hydration/validate_dataset_freshness.py`.
 - Run `scripts/data_hydration/validate_hydration_swarm.py`.
@@ -215,6 +218,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `scripts/data_hydration/validate_feature_store.py`.
 - Run `scripts/data_hydration/validate_research_data_observability.py`.
 - Run `scripts/data_hydration/validate_data_trust_summary.py`.
+- Run `scripts/data_hydration/validate_sleeve_migration_readiness.py`.
 - Manually verify all index links and child file names.
 
 ## Dependencies

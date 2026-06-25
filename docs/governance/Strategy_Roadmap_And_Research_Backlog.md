@@ -24,9 +24,9 @@ It is a draft research package with read-only implementation for canonical
 research data, PIT-safety, cataloged dataset inventory, hydration discovery,
 freshness monitoring, P1/P2/P3 observe-only normalization, fundamental and
 macro feature artifacts, data observability, data-trust summaries, internal
-model-facing APIs, and sleeve migration planning. It does not implement execution changes,
-allocation changes, model-consumer wiring, sleeve migration, or promotion
-behavior.
+model-facing APIs, and advisory sleeve migration readiness. It does not
+implement execution changes, allocation changes, model-consumer wiring, sleeve
+migration, or promotion behavior.
 
 ---
 
