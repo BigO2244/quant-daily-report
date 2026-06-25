@@ -1,0 +1,139 @@
+{
+  "schema_version": "p1_normalization_schema_template_v1",
+  "status": "DRAFT_RESEARCH_READ_ONLY",
+  "runtime_impact": "schema_template_only_no_data_normalization_no_trading_path_changes",
+  "governance_references": [
+    "FR-DH-002",
+    "FR-DH-003",
+    "FR-DH-009",
+    "FR-DH-013"
+  ],
+  "p1_scope": [
+    "ohlcv_prices",
+    "security_master_pit",
+    "corporate_actions",
+    "dataset_freshness"
+  ],
+  "global_requirements": {
+    "pit_safety": "Every normalized row must expose the date/time at which the record became knowable to Caerus.",
+    "lineage": "Every artifact must include source, source_table_or_endpoint, ingestion_timestamp, and input artifact digest where available.",
+    "no_lookahead": "No feature or consumer may use records before effective_date, filing_date, publication_date, or source availability permits.",
+    "consumer_policy": "No sleeve or trading path may consume these schemas until a later migration gate approves canonical data use."
+  },
+  "datasets": {
+    "ohlcv_prices": {
+      "canonical_artifact": "data/normalized/prices/ohlcv_prices.parquet",
+      "primary_key": ["security_id", "trade_date", "price_source"],
+      "required_fields": [
+        {"name": "security_id", "type": "string", "description": "Canonical PIT security identifier."},
+        {"name": "source_symbol", "type": "string", "description": "Symbol as represented by the source for this row."},
+        {"name": "trade_date", "type": "date", "description": "Market session date."},
+        {"name": "open", "type": "decimal", "nullable": true, "description": "Unadjusted open."},
+        {"name": "high", "type": "decimal", "nullable": true, "description": "Unadjusted high."},
+        {"name": "low", "type": "decimal", "nullable": true, "description": "Unadjusted low."},
+        {"name": "close", "type": "decimal", "nullable": true, "description": "Unadjusted close."},
+        {"name": "close_adjusted", "type": "decimal", "nullable": true, "description": "Adjusted close when source provides it."},
+        {"name": "volume", "type": "integer", "nullable": true, "description": "Reported volume."},
+        {"name": "price_source", "type": "string", "description": "Canonical source label."},
+        {"name": "adjustment_policy", "type": "string", "description": "Adjustment methodology/version."},
+        {"name": "as_of_date", "type": "date", "description": "Date this row is allowed to be observed in research."},
+        {"name": "ingestion_timestamp", "type": "timestamp_utc", "description": "Caerus ingestion time."},
+        {"name": "source_retrieved_at", "type": "timestamp_utc", "nullable": true, "description": "Source retrieval time if distinct from ingestion."},
+        {"name": "source_artifact_digest", "type": "string", "nullable": true, "description": "Digest of raw input artifact."}
+      ],
+      "validation_rules": [
+        "unique primary key",
+        "trade_date <= as_of_date",
+        "non-negative volume when present",
+        "high >= low when both present",
+        "adjusted and unadjusted fields must not be mixed without adjustment_policy"
+      ]
+    },
+    "security_master_pit": {
+      "canonical_artifact": "data/normalized/security_master/security_master.parquet",
+      "primary_key": ["security_id", "effective_start_date", "source"],
+      "required_fields": [
+        {"name": "security_id", "type": "string", "description": "Stable Caerus security identifier."},
+        {"name": "source_security_id", "type": "string", "nullable": true, "description": "Vendor stable identifier such as permaticker."},
+        {"name": "ticker", "type": "string", "description": "Ticker valid for the effective interval."},
+        {"name": "name", "type": "string", "nullable": true, "description": "Issuer/security name."},
+        {"name": "exchange", "type": "string", "nullable": true, "description": "Listing exchange."},
+        {"name": "asset_type", "type": "string", "description": "Equity, ETF, ADR, or other approved class."},
+        {"name": "is_active", "type": "boolean", "description": "Active state as of the effective interval."},
+        {"name": "listing_date", "type": "date", "nullable": true, "description": "First listing/price date when available."},
+        {"name": "delisting_date", "type": "date", "nullable": true, "description": "Delisting/last price date when available."},
+        {"name": "effective_start_date", "type": "date", "description": "Start of PIT validity interval."},
+        {"name": "effective_end_date", "type": "date", "nullable": true, "description": "End of PIT validity interval."},
+        {"name": "as_of_date", "type": "date", "description": "Date this row is allowed to be observed in research."},
+        {"name": "source", "type": "string", "description": "Canonical source label."},
+        {"name": "ingestion_timestamp", "type": "timestamp_utc", "description": "Caerus ingestion time."},
+        {"name": "source_artifact_digest", "type": "string", "nullable": true, "description": "Digest of raw input artifact."}
+      ],
+      "validation_rules": [
+        "no overlapping effective intervals for the same security_id and source",
+        "ticker history must preserve reused tickers",
+        "listing_date <= delisting_date when both present",
+        "effective_start_date <= as_of_date",
+        "active/inactive state must align with delisting fields"
+      ]
+    },
+    "corporate_actions": {
+      "canonical_artifact": "data/normalized/corporate_actions/actions.parquet",
+      "primary_key": ["corporate_action_id"],
+      "required_fields": [
+        {"name": "corporate_action_id", "type": "string", "description": "Deterministic action id from source/security/action/date fields."},
+        {"name": "security_id", "type": "string", "description": "Canonical PIT security identifier."},
+        {"name": "source_symbol", "type": "string", "nullable": true, "description": "Source symbol on the action record."},
+        {"name": "action_type", "type": "string", "description": "split, dividend, merger, spinoff, ticker_change, delisting, or approved extension."},
+        {"name": "announcement_date", "type": "date", "nullable": true, "description": "Announcement date if available."},
+        {"name": "ex_date", "type": "date", "nullable": true, "description": "Ex-date if applicable."},
+        {"name": "record_date", "type": "date", "nullable": true, "description": "Record date if applicable."},
+        {"name": "payable_date", "type": "date", "nullable": true, "description": "Payable date if applicable."},
+        {"name": "effective_date", "type": "date", "description": "Effective date for PIT application."},
+        {"name": "cash_amount", "type": "decimal", "nullable": true, "description": "Dividend/cash amount when applicable."},
+        {"name": "split_ratio", "type": "decimal", "nullable": true, "description": "Split ratio when applicable."},
+        {"name": "adjustment_factor", "type": "decimal", "nullable": true, "description": "Price adjustment factor when approved."},
+        {"name": "old_ticker", "type": "string", "nullable": true, "description": "Old ticker for ticker changes."},
+        {"name": "new_ticker", "type": "string", "nullable": true, "description": "New ticker for ticker changes."},
+        {"name": "as_of_date", "type": "date", "description": "Date this action is allowed to be observed in research."},
+        {"name": "source", "type": "string", "description": "Canonical source label."},
+        {"name": "ingestion_timestamp", "type": "timestamp_utc", "description": "Caerus ingestion time."},
+        {"name": "source_artifact_digest", "type": "string", "nullable": true, "description": "Digest of raw input artifact."}
+      ],
+      "validation_rules": [
+        "effective_date <= as_of_date",
+        "action_type in approved vocabulary",
+        "split actions require split_ratio",
+        "cash dividend actions require cash_amount",
+        "ticker changes require old_ticker or new_ticker",
+        "security_id must resolve through security_master_pit"
+      ]
+    },
+    "dataset_freshness": {
+      "canonical_artifact": "data/manifests/dataset_freshness.json",
+      "primary_key": ["dataset_id", "as_of_date"],
+      "required_fields": [
+        {"name": "dataset_id", "type": "string", "description": "Catalog dataset id."},
+        {"name": "dataset_name", "type": "string", "description": "Human-readable dataset name."},
+        {"name": "as_of_date", "type": "date", "description": "Freshness assessment date."},
+        {"name": "freshness_status", "type": "string", "description": "OK, WARN_STALE, WARN_PARTIAL, FAIL_MISSING, FAIL_SCHEMA, or FAIL_PIT_VIOLATION."},
+        {"name": "hydration_status", "type": "string", "description": "Latest hydration status."},
+        {"name": "latest_source_observation_date", "type": "date", "nullable": true, "description": "Most recent source observation date when available."},
+        {"name": "latest_ingestion_timestamp", "type": "timestamp_utc", "description": "Most recent Caerus ingestion timestamp."},
+        {"name": "artifact_path", "type": "string", "nullable": true, "description": "Latest artifact path when present."},
+        {"name": "records_written", "type": "integer", "nullable": true, "description": "Latest sample or canonical row count."},
+        {"name": "validation_status", "type": "string", "description": "Latest validation status."},
+        {"name": "PIT_safe_status", "type": "string", "description": "Latest PIT safety classification."},
+        {"name": "reason", "type": "string", "description": "Machine-readable/human-readable reason."},
+        {"name": "generated_at", "type": "timestamp_utc", "description": "Manifest generation time."}
+      ],
+      "validation_rules": [
+        "dataset_id exists in research_data_catalog",
+        "freshness_status in approved vocabulary",
+        "latest_ingestion_timestamp <= generated_at",
+        "FAIL_PIT_VIOLATION if PIT_safe_status indicates violation",
+        "missing artifact_path requires a non-empty reason"
+      ]
+    }
+  }
+}

@@ -16,6 +16,17 @@ Future portfolio construction should avoid concentration in highly correlated st
 
 This document is strategic context only. For authoritative FR status and the operational FR queue, use `fr_registry.md` and `fr_active_backlog.md`.
 
+Data Hydration governance now lives under
+`docs/governance/fr_active/data_hydration/fr_dh_000_data_hydration_index.md`,
+with the canonical research data catalog at
+`docs/governance/fr_active/data_hydration/fr_dh_013_canonical_research_data_catalog.md`.
+It is a draft research package with read-only implementation for canonical
+research data, PIT-safety, cataloged dataset inventory, hydration discovery,
+freshness monitoring, P1 observe-only normalization, internal model-facing APIs,
+and sleeve migration planning. It does not implement execution changes,
+allocation changes, model-consumer wiring, sleeve migration, or promotion
+behavior.
+
 ---
 
 # Current Strategy Inventory

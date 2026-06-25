@@ -1,0 +1,112 @@
+# FR-DH-012 Data Dashboard and Email Visibility
+
+Status: DRAFT / PLANNED
+
+Owner / steward placeholder: Caerus Research Data Steward (TBD)
+
+Runtime impact statement: Documentation-only. Initial visibility is read-only
+and non-execution-affecting. This spec does not change dashboard runtime,
+email sending, broker behavior, execution gates, or scheduler state.
+
+## Strategic Purpose
+
+Make data trust visible to operators by surfacing freshness, source, stale or
+missing flags, PIT violations, and latest successful hydration timestamp in
+dashboard and email surfaces.
+
+## Problem Statement
+
+Research outputs can look authoritative even when inputs are stale, partial, or
+non-PIT-safe. Operators need a compact, read-only trust surface before using
+research artifacts for prioritization, promotion review, or model-quality
+analysis.
+
+## Scope
+
+- Define read-only dashboard/email data trust fields.
+- Consume FR-DH-009 freshness artifacts.
+- Surface source, latest successful hydration timestamp, stale/missing flags,
+  schema status, PIT violations, and known limitations.
+- Keep initial visibility advisory and non-execution-affecting.
+
+## Out of Scope
+
+- Redesigning the dashboard.
+- Changing dashboard auth, deploy scripts, or unrelated dashboard files.
+- Sending new emails in this patch.
+- Blocking execution based on data trust status in the initial implementation.
+- Hiding or rewriting underlying data artifacts.
+
+## Required Datasets
+
+- `data/manifests/dataset_freshness.json`
+- Dataset manifests for all FR-DH data families.
+- Optional summary artifacts from FR-DH-011 migration reports.
+
+## Proposed Canonical Artifacts
+
+- `outputs/data_trust/data_trust_summary.json`
+- `outputs/data_trust/data_trust_summary.md`
+- Dashboard/email read-only view models derived from the freshness artifact.
+
+## Proposed Interfaces
+
+- Dashboard reads summarized data trust status.
+- Email/reporting reads the same summary artifact.
+- No dashboard or email surface reads vendor APIs directly.
+- No dashboard or email surface mutates canonical data.
+
+## Acceptance Criteria
+
+- Operators can see dataset status, source, latest data date, latest hydration
+  timestamp, validation status, and reason codes.
+- `FAIL_PIT_VIOLATION` is visible and loud.
+- Stale, missing, partial, schema-failed, and PIT-failed states are visually and
+  textually distinct.
+- The visibility layer is read-only and does not call broker/order submission
+  paths.
+- Dashboard/email output is deterministic for a given freshness artifact.
+
+## Validation Plan
+
+- Fixture tests for each FR-DH-009 failure level.
+- Snapshot tests for summary JSON/markdown.
+- Tests proving no broker, execution, or vendor submission interfaces are
+  invoked.
+- Manual dashboard/email review only after unrelated dashboard dirt is isolated.
+- Later VM validation should verify served artifact parity if dashboard files
+  are changed in a separate patch.
+
+## Dependencies
+
+- FR-DH-009 dataset freshness monitor.
+- FR-DH-001 metadata charter.
+- Dashboard/reporting governance.
+- Existing operator email/reporting conventions.
+
+## Risks
+
+- Operators may treat advisory visibility as a hard gate or as approval to use
+  data before validation.
+- Dashboard changes can collide with unrelated dirty dashboard work.
+- Too much detail can make the trust surface hard to scan.
+
+## No-Lookahead / PIT-Safety Requirements
+
+- PIT violation status must be surfaced directly from validation artifacts.
+- Dashboard/email summaries must not suppress or downgrade PIT failures.
+- Data trust views must preserve as-of date and dataset version context.
+
+## Rollout Sequence
+
+1. Define read-only summary schema from `dataset_freshness.json`.
+2. Build fixture-based summary tests.
+3. Add markdown/email summary generation.
+4. Add dashboard display only in a separate isolated dashboard patch.
+5. Consider hard gates only after governance approval and observation.
+
+## Recommended Next Implementation Step
+
+After FR-DH-009 exists, build a fixture-only `data_trust_summary.json` and
+markdown renderer. Defer dashboard file changes until unrelated dashboard work
+is clean or intentionally included.

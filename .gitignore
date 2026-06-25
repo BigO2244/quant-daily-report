@@ -83,6 +83,19 @@ data/security_master/*
 !data/security_master/manual_aliases.json
 data/pit_universe/*
 !data/pit_universe/README.md
+data/raw/**
+!data/raw/.gitkeep
+data/staged/**
+!data/staged/.gitkeep
+data/normalized/**
+!data/normalized/.gitkeep
+data/features/**
+!data/features/.gitkeep
+data/manifests/**
+!data/manifests/.gitkeep
+!data/manifests/*.template.json
+data/hydration_logs/**
+!data/hydration_logs/.gitkeep
 *.csv
 *.parquet
 # Loose root-level scripts and artifacts
