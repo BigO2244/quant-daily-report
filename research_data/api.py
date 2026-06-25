@@ -21,6 +21,9 @@ NORMALIZED_ARTIFACTS = {
     "insider_form4": Path("data/normalized/insiders/form4_filings.json"),
     "sec_8k_events": Path("data/normalized/sec_events/eight_k_items.json"),
     "sec_10q_10k_metadata": Path("data/normalized/sec_events/filings.json"),
+    "etf_index_constituents": Path("data/normalized/constituents/constituents.json"),
+    "institutional_13f": Path("data/normalized/institutional_holdings/form13f_filings.json"),
+    "news_metadata": Path("data/normalized/news/news_metadata.json"),
     "fundamental_features": Path("data/features/fundamental_features/features.json"),
 }
 
@@ -106,3 +109,15 @@ def load_features(*, repo_root: Path | None = None, required: bool = True) -> li
 
 def load_fundamental_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
     return load_features(repo_root=repo_root, required=required)
+
+
+def load_constituents(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("etf_index_constituents", repo_root=repo_root, required=required)
+
+
+def load_institutional_holdings(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("institutional_13f", repo_root=repo_root, required=required)
+
+
+def load_news_metadata(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("news_metadata", repo_root=repo_root, required=required)

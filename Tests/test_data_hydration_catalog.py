@@ -71,6 +71,13 @@ def test_feature_catalog_entries_mark_read_only_observe_state() -> None:
     assert entries["fundamental_features"]["canonical_artifact_name"] == "features.json"
 
 
+def test_p3_normalized_catalog_entries_mark_read_only_observe_state() -> None:
+    entries = {entry["dataset_id"]: entry for entry in catalog_entries()}
+
+    for dataset_id in ("etf_index_constituents", "institutional_13f", "news_metadata"):
+        assert entries[dataset_id]["status"] == "OBSERVE_ONLY"
+
+
 def test_catalog_artifact_validator_accepts_generated_catalog(tmp_path) -> None:
     path = tmp_path / "data" / "manifests" / "research_data_catalog.json"
     write_catalog(path)

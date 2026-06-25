@@ -22,6 +22,11 @@ P2_DATASETS = {
     "sec_8k_events",
     "sec_10q_10k_metadata",
 }
+P3_DATASETS = {
+    "etf_index_constituents",
+    "institutional_13f",
+    "news_metadata",
+}
 
 
 def normalize_p1(
@@ -131,6 +136,58 @@ def normalize_p2(
         "datasets": results,
     }
     write_json(repo_root / "data" / "manifests" / "p2_normalization_manifest.json", manifest)
+    return manifest
+
+
+def normalize_p3(
+    *,
+    repo_root: Path,
+    as_of_date: str | None = None,
+    dataset_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    repo_root = Path(repo_root)
+    selected = set(dataset_ids or P3_DATASETS)
+    unsupported = selected - P3_DATASETS
+    if unsupported:
+        raise ValueError(f"Unsupported P3 datasets: {sorted(unsupported)}")
+    run_metadata = _latest_hydration_metadata(repo_root)
+    effective_as_of = as_of_date or run_metadata.get("summary", {}).get("as_of_date") or datetime.now(UTC).date().isoformat()
+    generated_at = utc_now_iso()
+    results: list[dict[str, Any]] = []
+
+    normalizers = {
+        "etf_index_constituents": _normalize_etf_index_constituents,
+        "institutional_13f": _normalize_institutional_13f,
+        "news_metadata": _normalize_news_metadata,
+    }
+    for dataset_id in sorted(selected):
+        try:
+            results.append(normalizers[dataset_id](repo_root, effective_as_of, generated_at, run_metadata))
+        except FileNotFoundError as exc:
+            results.append(
+                _result(
+                    dataset_id=dataset_id,
+                    status="MISSING_SOURCE",
+                    artifact_path=None,
+                    row_count=0,
+                    validation_errors=[str(exc)],
+                    source_artifacts=[],
+                    generated_at=generated_at,
+                    as_of_date=effective_as_of,
+                )
+            )
+
+    manifest = {
+        "schema_version": "p3_normalization_manifest_v1",
+        "generated_at": generated_at,
+        "as_of_date": effective_as_of,
+        "runtime_impact": "read_only_normalization_no_trading_path_changes",
+        "dataset_count": len(results),
+        "normalized_dataset_count": sum(1 for item in results if item["status"] in {"OK", "WARN"}),
+        "failed_dataset_count": sum(1 for item in results if item["status"] not in {"OK", "WARN"}),
+        "datasets": results,
+    }
+    write_json(repo_root / "data" / "manifests" / "p3_normalization_manifest.json", manifest)
     return manifest
 
 
@@ -468,6 +525,121 @@ def _normalize_sec_10q_10k_metadata(repo_root: Path, as_of_date: str, generated_
     normalized["validation"] = _validation_payload(validation)
     write_json(artifact, normalized)
     return _result_from_payload("sec_10q_10k_metadata", artifact, normalized, generated_at, as_of_date, run_metadata)
+
+
+def _normalize_etf_index_constituents(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
+    path = _require_first(repo_root, ["data/raw/etf_index_constituents/nasdaq_sharadar/sharadar_sp500_sample.json"])
+    payload = read_json(path)
+    rows = []
+    for item in payload.get("rows") or []:
+        effective_date = _date_or_default(item.get("date"), as_of_date)
+        if effective_date > as_of_date:
+            continue
+        ticker = item.get("ticker")
+        action = str(item.get("action") or "").lower()
+        raw_key = "|".join(str(part) for part in ("nasdaq_sharadar", "SP500", ticker, effective_date, action))
+        rows.append(
+            {
+                "constituent_id": hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:24],
+                "index_id": "SP500",
+                "security_id": f"SHARADAR_TICKER:{ticker}",
+                "source_symbol": ticker,
+                "name": item.get("name"),
+                "membership_action": action,
+                "effective_date": effective_date,
+                "as_of_date": as_of_date,
+                "source": "nasdaq_sharadar",
+                "ingestion_timestamp": generated_at,
+                "source_artifact_digest": _sha256(path),
+                "security_id_resolution_status": "UNRESOLVED_SOURCE_SYMBOL_ONLY",
+                "membership_policy": "SAMPLE_MEMBERSHIP_ACTIONS_ONLY_NEEDS_RANGE_AUDIT",
+            }
+        )
+    artifact = repo_root / "data" / "normalized" / "constituents" / "constituents.json"
+    normalized = _dataset_payload("etf_index_constituents", as_of_date, generated_at, [path], rows)
+    validation = _validate_required(rows, ["constituent_id", "index_id", "security_id", "source_symbol", "membership_action", "effective_date", "as_of_date", "source", "ingestion_timestamp"])
+    validation.extend(_validate_date_lte(rows, "effective_date", "as_of_date"))
+    validation.extend(["etf_index_constituents: membership ranges and security-id joins remain observe-only"] if rows else [])
+    normalized["validation"] = _validation_payload(validation)
+    write_json(artifact, normalized)
+    return _result_from_payload("etf_index_constituents", artifact, normalized, generated_at, as_of_date, run_metadata)
+
+
+def _normalize_institutional_13f(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
+    path = _require_first(repo_root, ["data/raw/institutional_13f/sec_edgar_public/submissions_0001067983_sample.json"])
+    payload = read_json(path)
+    rows = []
+    for record in payload.get("records") or []:
+        filing_date = _date_or_default(record.get("filingDate"), as_of_date)
+        if filing_date > as_of_date:
+            continue
+        accession = record.get("accessionNumber")
+        rows.append(
+            {
+                "institutional_13f_filing_id": hashlib.sha256(f"sec_edgar_public|13f|{accession}".encode("utf-8")).hexdigest()[:24],
+                "manager_cik": payload.get("cik"),
+                "accession_number": accession,
+                "form": record.get("form"),
+                "report_period_end": record.get("reportDate"),
+                "filing_date": filing_date,
+                "acceptance_timestamp": record.get("acceptanceDateTime"),
+                "primary_document": record.get("primaryDocument"),
+                "holdings_detail_status": "FILING_METADATA_ONLY",
+                "cusip_mapping_status": "NOT_PARSED",
+                "as_of_date": as_of_date,
+                "source": "sec_edgar_public",
+                "ingestion_timestamp": generated_at,
+                "source_artifact_digest": _sha256(path),
+            }
+        )
+    artifact = repo_root / "data" / "normalized" / "institutional_holdings" / "form13f_filings.json"
+    normalized = _dataset_payload("institutional_13f", as_of_date, generated_at, [path], rows)
+    validation = _validate_required(rows, ["institutional_13f_filing_id", "manager_cik", "accession_number", "form", "report_period_end", "filing_date", "acceptance_timestamp", "as_of_date", "source", "ingestion_timestamp"])
+    validation.extend(_validate_date_lte(rows, "filing_date", "as_of_date"))
+    validation.extend(_validate_date_lte(rows, "report_period_end", "filing_date"))
+    validation.extend(["institutional_13f: normalized rows are filing metadata only; holdings/CUSIP parsing remains pending"] if rows else [])
+    normalized["validation"] = _validation_payload(validation)
+    write_json(artifact, normalized)
+    return _result_from_payload("institutional_13f", artifact, normalized, generated_at, as_of_date, run_metadata)
+
+
+def _normalize_news_metadata(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
+    path = _require_first(repo_root, ["data/raw/news_metadata/gdelt_public_news/gdelt_aapl_news_sample.json"])
+    payload = read_json(path)
+    rows = []
+    for article in payload.get("articles") or []:
+        publication_timestamp = _gdelt_seen_timestamp(article.get("seendate"))
+        publication_date = publication_timestamp[:10] if publication_timestamp else as_of_date
+        if publication_date > as_of_date:
+            continue
+        url = article.get("url")
+        raw_key = "|".join(str(part) for part in ("gdelt_public_news", url, article.get("seendate")))
+        rows.append(
+            {
+                "news_id": hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:24],
+                "entity_query": "AAPL",
+                "title": article.get("title"),
+                "url": url,
+                "domain": article.get("domain"),
+                "language": article.get("language"),
+                "source_country": article.get("sourcecountry"),
+                "publication_timestamp": publication_timestamp,
+                "publication_date": publication_date,
+                "as_of_date": as_of_date,
+                "source": "gdelt_public_news",
+                "ingestion_timestamp": generated_at,
+                "source_artifact_digest": _sha256(path),
+                "timestamp_validation_status": "PUBLIC_SOURCE_TIMESTAMP_NEEDS_VALIDATION",
+            }
+        )
+    artifact = repo_root / "data" / "normalized" / "news" / "news_metadata.json"
+    normalized = _dataset_payload("news_metadata", as_of_date, generated_at, [path], rows)
+    validation = _validate_required(rows, ["news_id", "entity_query", "title", "url", "publication_timestamp", "publication_date", "as_of_date", "source", "ingestion_timestamp"])
+    validation.extend(_validate_date_lte(rows, "publication_date", "as_of_date"))
+    validation.extend(["news_metadata: public-source publication timestamps require source policy validation"] if rows else [])
+    normalized["validation"] = _validation_payload(validation)
+    write_json(artifact, normalized)
+    return _result_from_payload("news_metadata", artifact, normalized, generated_at, as_of_date, run_metadata)
 
 
 def _normalize_yahoo_ohlcv(payload: dict[str, Any], as_of_date: str, generated_at: str, path: Path) -> list[dict[str, Any]]:
@@ -860,3 +1032,14 @@ def _subtract(left: Any, right: Any) -> float | None:
 def _date_or_default(value: Any, default: str) -> str:
     text = str(value or "").strip()
     return text[:10] if len(text) >= 10 else default
+
+
+def _gdelt_seen_timestamp(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if len(text) != 16 or "T" not in text or not text.endswith("Z"):
+        return None
+    try:
+        parsed = datetime.strptime(text, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return parsed.isoformat().replace("+00:00", "Z")
