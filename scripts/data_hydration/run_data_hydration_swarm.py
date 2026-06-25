@@ -42,6 +42,7 @@ SOURCE_PLAN: dict[str, list[str]] = {
     "dataset_freshness": ["internal_dataset_freshness"],
     "fundamentals_pit": ["sec_edgar_public", "nasdaq_sharadar"],
     "fundamental_features": ["internal_derived_features"],
+    "macro_regime_features": ["internal_derived_features"],
     "macro_rates": ["fred_public_csv"],
     "yield_curve": ["fred_public_csv"],
     "credit_spreads": ["fred_public_csv"],

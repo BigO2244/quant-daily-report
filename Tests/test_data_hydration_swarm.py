@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from research_data.hydration import BaseHydrationAdapter, HydrationContext, HydrationResult, utc_now_iso
+from research_data.hydration import write_json
 from scripts.data_hydration.run_data_hydration_swarm import parse_args, run_swarm
 from scripts.data_hydration.validate_hydration_swarm import validate_swarm_artifact
 
@@ -17,6 +18,8 @@ def test_swarm_dry_run_classifies_every_catalog_dataset(tmp_path: Path) -> None:
     freshness_row = next(row for row in payload["datasets"] if row["dataset_id"] == "dataset_freshness")
     assert freshness_row["final_status"] == "OK"
     assert freshness_row["attempted_sources"] == ["internal_dataset_freshness"]
+    macro_feature_row = next(row for row in payload["datasets"] if row["dataset_id"] == "macro_regime_features")
+    assert macro_feature_row["attempted_sources"] == ["internal_derived_features"]
     assert (tmp_path / "data" / "manifests" / "research_data_catalog.json").exists()
     assert (tmp_path / "data" / "manifests" / "dataset_freshness.json").exists()
     assert (tmp_path / "data" / "manifests" / "hydration_capability_matrix.json").exists()
@@ -63,6 +66,35 @@ def test_swarm_limit_sample_uses_adapter_and_writes_success(tmp_path: Path) -> N
     assert payload["datasets"][0]["final_status"] == "OK"
     assert payload["datasets"][0]["records_written"] == 1
     assert payload["datasets"][0]["artifact_path"]
+
+
+def test_swarm_classifies_existing_derived_feature_artifact(tmp_path: Path) -> None:
+    write_json(
+        tmp_path / "data/features/macro_regime_features/features.json",
+        {
+            "schema_version": "macro_regime_features_v1",
+            "feature_set": "macro_regime_features",
+            "row_count": 1,
+            "rows": [
+                {
+                    "feature_id": "macro-1",
+                    "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY",
+                }
+            ],
+            "validation": {"status": "PASS", "errors": []},
+        },
+    )
+
+    payload = run_swarm(
+        repo_root=tmp_path,
+        limit_sample=True,
+        as_of_date="2026-06-24",
+        dataset_ids={"macro_regime_features"},
+    )
+
+    assert payload["summary"]["successful_dataset_count"] == 1
+    assert payload["datasets"][0]["final_status"] == "OK"
+    assert payload["datasets"][0]["records_written"] == 1
 
 
 class SharadarOkAdapter(BaseHydrationAdapter):
