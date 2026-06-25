@@ -22,8 +22,8 @@ with the canonical research data catalog at
 `docs/governance/fr_active/data_hydration/fr_dh_013_canonical_research_data_catalog.md`.
 It is a draft research package with read-only implementation for canonical
 research data, PIT-safety, cataloged dataset inventory, hydration discovery,
-freshness monitoring, P1 observe-only normalization, internal model-facing APIs,
-and sleeve migration planning. It does not implement execution changes,
+freshness monitoring, P1/P2 observe-only normalization, internal model-facing
+APIs, and sleeve migration planning. It does not implement execution changes,
 allocation changes, model-consumer wiring, sleeve migration, or promotion
 behavior.
 

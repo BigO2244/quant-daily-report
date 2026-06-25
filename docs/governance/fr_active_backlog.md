@@ -130,7 +130,7 @@ procedures are proven.
 3. FR-DH data hydration is the current read-only research-data foundation
    package. P1 catalog, hydration, freshness, normalization, validation, and
    API scaffolding are implemented observe-only. Next work should continue with
-   P2 PIT fundamentals and macro/rates normalizers before sleeve migration.
+   feature-store scaffolding and P3 normalizers before sleeve migration.
 4. FR-070 implementation work only if diagnostics produce a classified failure.
 5. Orion/Lyra continued evaluation as part of sleeve architecture, not as a
    standalone immediate retirement decision.
@@ -165,10 +165,11 @@ procedures are proven.
   not the platform. After migration, sleeves must not call vendors directly;
   they should use the internal `research_data` interface backed by canonical
   artifacts.
-- **Recommended next implementation:** P2 observe-only normalizers and
-  validators for PIT fundamentals and macro/rates, with explicit source-date,
-  restatement/version, lineage, and PIT-safety metadata before any sleeve
-  migration.
+- **Recommended next implementation:** observe-only feature-store scaffolding
+  and P3 normalizers, starting with deterministic fundamental features and
+  PIT ETF/index membership normalization. Close restatement/version,
+  release-date, transaction-level, lineage, and PIT-safety gaps before any
+  sleeve migration.
 
 ## Priority Decision Note — 2026-06-12
 

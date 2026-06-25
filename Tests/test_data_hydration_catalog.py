@@ -48,6 +48,22 @@ def test_p1_catalog_entries_mark_read_only_observe_state() -> None:
         assert entries[dataset_id]["status"] == "OBSERVE_ONLY"
 
 
+def test_p2_normalized_catalog_entries_mark_read_only_observe_state() -> None:
+    entries = {entry["dataset_id"]: entry for entry in catalog_entries()}
+
+    for dataset_id in (
+        "fundamentals_pit",
+        "macro_rates",
+        "yield_curve",
+        "credit_spreads",
+        "vix_volatility_regime",
+        "insider_form4",
+        "sec_8k_events",
+        "sec_10q_10k_metadata",
+    ):
+        assert entries[dataset_id]["status"] == "OBSERVE_ONLY"
+
+
 def test_catalog_artifact_validator_accepts_generated_catalog(tmp_path) -> None:
     path = tmp_path / "data" / "manifests" / "research_data_catalog.json"
     write_catalog(path)

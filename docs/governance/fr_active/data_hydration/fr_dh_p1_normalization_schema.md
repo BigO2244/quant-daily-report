@@ -214,7 +214,8 @@ Validation rules:
 
 ## Recommended Next Step
 
-Extend normalization to P2 datasets in observe-only mode, starting with
-`fundamentals_pit` and macro/rates. Require explicit source-date semantics,
-restatement/version lineage, and validation tests before any sleeve can consume
-the normalized outputs.
+Continue from P1 into feature-store scaffolding and P3 observe-only
+normalizers. P2 normalization now exists for fundamentals, macro/rates, VIX,
+insider Form 4 filing metadata, and SEC filing metadata, but those artifacts
+remain observe-only until restatement/version, release-date, transaction-level,
+and source-policy gaps are closed.

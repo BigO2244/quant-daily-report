@@ -17,7 +17,8 @@ NORMALIZED_ARTIFACTS = {
     "macro_rates": Path("data/normalized/macro/macro_rates.json"),
     "yield_curve": Path("data/normalized/macro/yield_curve.json"),
     "credit_spreads": Path("data/normalized/macro/credit_spreads.json"),
-    "insider_form4": Path("data/normalized/insiders/form4_transactions.json"),
+    "vix_volatility_regime": Path("data/normalized/volatility/vix.json"),
+    "insider_form4": Path("data/normalized/insiders/form4_filings.json"),
     "sec_8k_events": Path("data/normalized/sec_events/eight_k_items.json"),
     "sec_10q_10k_metadata": Path("data/normalized/sec_events/filings.json"),
     "fundamental_features": Path("data/features/fundamental_features/features.json"),
@@ -71,6 +72,18 @@ def load_macro(*, repo_root: Path | None = None, required: bool = True) -> list[
         root = Path(repo_root) if repo_root is not None else REPO_ROOT
         raise FileNotFoundError(f"No normalized macro artifacts exist under {root / 'data' / 'normalized' / 'macro'}")
     return rows
+
+
+def load_yield_curve(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("yield_curve", repo_root=repo_root, required=required)
+
+
+def load_credit_spreads(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("credit_spreads", repo_root=repo_root, required=required)
+
+
+def load_vix(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("vix_volatility_regime", repo_root=repo_root, required=required)
 
 
 def load_insiders(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
