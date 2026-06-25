@@ -75,6 +75,8 @@ This index does not own datasets directly. Child FR-DH documents cover:
 - `data/manifests/research_data_observability.json`
 - `data/manifests/p1_normalization_schema.template.json`
 - `data/manifests/source_policy_decision_matrix.template.json`
+- `outputs/data_trust/data_trust_summary.json`
+- `outputs/data_trust/data_trust_summary.md`
 - `docs/governance/fr_active/data_hydration/`
 - `docs/governance/fr_active/data_hydration/fr_dh_runtime_credentials_setup.md`
 - `docs/governance/fr_active/data_hydration/fr_dh_p1_normalization_schema.md`
@@ -196,6 +198,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `Tests/test_data_hydration_p3_normalization.py`.
 - Run `Tests/test_data_hydration_feature_store.py`.
 - Run `Tests/test_data_hydration_observability.py`.
+- Run `Tests/test_data_trust_summary.py`.
 - Run `scripts/data_hydration/validate_research_data_catalog.py`.
 - Run `scripts/data_hydration/validate_dataset_freshness.py`.
 - Run `scripts/data_hydration/validate_hydration_swarm.py`.
@@ -204,6 +207,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
 - Run `scripts/data_hydration/validate_p3_normalization.py`.
 - Run `scripts/data_hydration/validate_feature_store.py`.
 - Run `scripts/data_hydration/validate_research_data_observability.py`.
+- Run `scripts/data_hydration/validate_data_trust_summary.py`.
 - Manually verify all index links and child file names.
 
 ## Dependencies
@@ -252,10 +256,12 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
    filing metadata, and news metadata where read-only samples exist.
 9. Maintain `research_data_observability.json` as the read-only data readiness,
    lineage, validation, and blocker summary.
-10. Resolve blocked-source datasets or mark them explicitly blocked with source,
+10. Maintain read-only `outputs/data_trust/data_trust_summary.json` and
+   markdown as the operator-facing trust summary input.
+11. Resolve blocked-source datasets or mark them explicitly blocked with source,
    legal, credential, or business-decision reasons.
-11. Migrate sleeves observe-only behind explicit governance gates.
-12. Add dashboard/email visibility after data trust status is stable.
+12. Migrate sleeves observe-only behind explicit governance gates.
+13. Add dashboard/email visibility after data trust status is stable.
 
 ## Recommended Next Implementation Step
 

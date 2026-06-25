@@ -4,8 +4,8 @@ Status: DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION
 
 Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
-Runtime impact statement: Read-only observability artifact. The current
-implementation writes ignored local manifest data only and is
+Runtime impact statement: Read-only observability and data-trust artifacts. The
+current implementation writes ignored local manifest/report data only and is
 non-execution-affecting. This spec does not change dashboard runtime, email
 sending, broker behavior, execution gates, or scheduler state.
 
@@ -48,8 +48,8 @@ analysis.
 
 ## Proposed Canonical Artifacts
 
-- `outputs/data_trust/data_trust_summary.json`
-- `outputs/data_trust/data_trust_summary.md`
+- `outputs/data_trust/data_trust_summary.json` (implemented read-only)
+- `outputs/data_trust/data_trust_summary.md` (implemented read-only)
 - Dashboard/email read-only view models derived from freshness and
   observability artifacts.
 
@@ -78,8 +78,11 @@ analysis.
 
 - Fixture tests for each FR-DH-009 failure level.
 - Run `Tests/test_data_hydration_observability.py`.
+- Run `Tests/test_data_trust_summary.py`.
 - Run `scripts/data_hydration/build_research_data_observability.py`.
 - Run `scripts/data_hydration/validate_research_data_observability.py`.
+- Run `scripts/data_hydration/build_data_trust_summary.py`.
+- Run `scripts/data_hydration/validate_data_trust_summary.py`.
 - Snapshot tests for summary JSON/markdown.
 - Tests proving no broker, execution, or vendor submission interfaces are
   invoked.
@@ -118,6 +121,6 @@ analysis.
 
 ## Recommended Next Implementation Step
 
-Use `research_data_observability.json` as the input to a fixture-only
-`data_trust_summary.json` and markdown renderer. Defer dashboard file changes
-until unrelated dashboard work is clean or intentionally included.
+Use the generated data-trust summary as the input contract for a future isolated
+dashboard/email patch. Defer dashboard file changes until unrelated dashboard
+work is clean or intentionally included.

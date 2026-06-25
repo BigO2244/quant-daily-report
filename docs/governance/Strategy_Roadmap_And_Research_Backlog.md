@@ -23,9 +23,10 @@ with the canonical research data catalog at
 It is a draft research package with read-only implementation for canonical
 research data, PIT-safety, cataloged dataset inventory, hydration discovery,
 freshness monitoring, P1/P2/P3 observe-only normalization, feature-store
-scaffolding, data observability, internal model-facing APIs, and sleeve
-migration planning. It does not implement execution changes, allocation
-changes, model-consumer wiring, sleeve migration, or promotion behavior.
+scaffolding, data observability, data-trust summaries, internal model-facing
+APIs, and sleeve migration planning. It does not implement execution changes,
+allocation changes, model-consumer wiring, sleeve migration, or promotion
+behavior.
 
 ---
 

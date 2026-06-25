@@ -265,8 +265,10 @@ cataloged datasets, but the first implementation is read-only and advisory.
 6. Maintain `data/manifests/research_data_observability.json` as the read-only
    roll-up for catalog coverage, freshness, validation, lineage, PIT status,
    source artifacts, versions/stages, and blocker reasons.
-7. Keep catalog rules advisory until migration gates approve enforcement.
-8. Later, add advisory checks that flag uncataloged datasets during sleeve
+7. Maintain `outputs/data_trust/data_trust_summary.json` and markdown as the
+   read-only operator-facing summary derived from cataloged datasets.
+8. Keep catalog rules advisory until migration gates approve enforcement.
+9. Later, add advisory checks that flag uncataloged datasets during sleeve
    migration.
 
 ## Runtime Impact Statement
