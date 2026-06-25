@@ -9,6 +9,68 @@ from research_data.hydration import read_json, utc_now_iso, write_json
 
 
 FEATURE_SETS = {"fundamental_features", "macro_regime_features"}
+FEATURE_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
+    "fundamental_features": [
+        {
+            "feature_name": "net_margin",
+            "feature_version": "fundamental_features_v1_observe_only",
+            "input_dataset_ids": ["fundamentals_pit"],
+            "input_fields": ["net_income", "revenue"],
+            "definition": "net_income / revenue when both values are present and revenue is non-zero.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_FUNDAMENTALS_OBSERVE_ONLY",
+        },
+        {
+            "feature_name": "revenue_positive",
+            "feature_version": "fundamental_features_v1_observe_only",
+            "input_dataset_ids": ["fundamentals_pit"],
+            "input_fields": ["revenue"],
+            "definition": "True when revenue is present and greater than zero.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_FUNDAMENTALS_OBSERVE_ONLY",
+        },
+        {
+            "feature_name": "profit_positive",
+            "feature_version": "fundamental_features_v1_observe_only",
+            "input_dataset_ids": ["fundamentals_pit"],
+            "input_fields": ["net_income"],
+            "definition": "True when net income is present and greater than zero.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_FUNDAMENTALS_OBSERVE_ONLY",
+        },
+    ],
+    "macro_regime_features": [
+        {
+            "feature_name": "yield_curve_inverted",
+            "feature_version": "macro_regime_features_v1_observe_only",
+            "input_dataset_ids": ["yield_curve"],
+            "input_fields": ["slope_10y_2y"],
+            "definition": "True when the normalized 10-year minus 2-year yield-curve slope is below zero.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY_RELEASE_DATE_UNVERIFIED",
+        },
+        {
+            "feature_name": "credit_stress",
+            "feature_version": "macro_regime_features_v1_observe_only",
+            "input_dataset_ids": ["credit_spreads"],
+            "input_fields": ["spread_percent"],
+            "definition": "True when BAA10Y credit spread is at least 3.0 percentage points.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY_RELEASE_DATE_UNVERIFIED",
+        },
+        {
+            "feature_name": "high_volatility",
+            "feature_version": "macro_regime_features_v1_observe_only",
+            "input_dataset_ids": ["vix_volatility_regime"],
+            "input_fields": ["vix_close"],
+            "definition": "True when VIX close is at least 25.0.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY",
+        },
+        {
+            "feature_name": "rate_10y_percent",
+            "feature_version": "macro_regime_features_v1_observe_only",
+            "input_dataset_ids": ["macro_rates"],
+            "input_fields": ["value_percent"],
+            "definition": "Normalized DGS10 10-year Treasury rate level.",
+            "PIT_safe_status": "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY_RELEASE_DATE_UNVERIFIED",
+        },
+    ],
+}
 
 
 def build_feature_store(
@@ -55,10 +117,92 @@ def build_feature_store(
         "feature_set_count": len(results),
         "built_feature_set_count": sum(1 for item in results if item["status"] in {"OK", "WARN"}),
         "failed_feature_set_count": sum(1 for item in results if item["status"] not in {"OK", "WARN"}),
+        "feature_definitions_path": str(repo_root / "data" / "manifests" / "feature_definitions.json"),
+        "feature_coverage_path": str(repo_root / "data" / "manifests" / "feature_coverage.json"),
         "feature_sets": results,
     }
     write_json(repo_root / "data" / "manifests" / "feature_store_manifest.json", manifest)
+    _write_feature_definitions(repo_root, effective_as_of, generated_at)
+    _write_feature_coverage(repo_root, manifest, effective_as_of, generated_at)
     return manifest
+
+
+def _write_feature_definitions(repo_root: Path, as_of_date: str, generated_at: str) -> None:
+    rows = []
+    for feature_set in sorted(FEATURE_DEFINITIONS):
+        rows.extend({"feature_set": feature_set, **definition} for definition in FEATURE_DEFINITIONS[feature_set])
+    write_json(
+        repo_root / "data" / "manifests" / "feature_definitions.json",
+        {
+            "schema_version": "feature_definitions_v1",
+            "generated_at": generated_at,
+            "as_of_date": as_of_date,
+            "runtime_impact": "read_only_feature_metadata_no_trading_path_changes",
+            "feature_set_count": len(FEATURE_DEFINITIONS),
+            "feature_definition_count": len(rows),
+            "definitions": rows,
+        },
+    )
+
+
+def _write_feature_coverage(repo_root: Path, manifest: dict[str, Any], as_of_date: str, generated_at: str) -> None:
+    rows = []
+    for item in manifest["feature_sets"]:
+        rows.append(_feature_coverage_row(repo_root, item))
+    write_json(
+        repo_root / "data" / "manifests" / "feature_coverage.json",
+        {
+            "schema_version": "feature_coverage_v1",
+            "generated_at": generated_at,
+            "as_of_date": as_of_date,
+            "runtime_impact": "read_only_feature_coverage_no_trading_path_changes",
+            "feature_set_count": len(rows),
+            "coverage": rows,
+        },
+    )
+
+
+def _feature_coverage_row(repo_root: Path, manifest_item: dict[str, Any]) -> dict[str, Any]:
+    feature_set = str(manifest_item["feature_set"])
+    path_value = manifest_item.get("artifact_path")
+    if not path_value:
+        return {
+            "feature_set": feature_set,
+            "status": manifest_item.get("status"),
+            "artifact_path": None,
+            "row_count": 0,
+            "first_feature_date": None,
+            "last_feature_date": None,
+            "features": [],
+        }
+    artifact_path = Path(str(path_value))
+    artifact = artifact_path if artifact_path.is_absolute() else repo_root / artifact_path
+    payload = read_json(artifact)
+    rows = payload.get("rows") or []
+    dates = sorted(str(row.get("feature_date")) for row in rows if row.get("feature_date"))
+    features = []
+    for definition in FEATURE_DEFINITIONS.get(feature_set, []):
+        name = definition["feature_name"]
+        non_null = sum(1 for row in rows if row.get(name) is not None)
+        total = len(rows)
+        features.append(
+            {
+                "feature_name": name,
+                "non_null_count": non_null,
+                "missing_count": total - non_null,
+                "coverage_ratio": round(non_null / total, 8) if total else 0.0,
+            }
+        )
+    return {
+        "feature_set": feature_set,
+        "status": manifest_item.get("status"),
+        "artifact_path": str(artifact),
+        "row_count": len(rows),
+        "first_feature_date": dates[0] if dates else None,
+        "last_feature_date": dates[-1] if dates else None,
+        "validation_status": manifest_item.get("validation_status"),
+        "features": features,
+    }
 
 
 def _build_fundamental_features(repo_root: Path, as_of_date: str, generated_at: str) -> dict[str, Any]:

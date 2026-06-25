@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from research_data.features import FEATURE_SETS
+from research_data.features import FEATURE_DEFINITIONS, FEATURE_SETS
 from research_data.hydration import read_json
 
 
@@ -39,6 +39,7 @@ def validate_feature_store_manifest(path: Path, *, repo_root: Path | None = None
         errors.append(f"built_feature_set_count mismatch: {payload.get('built_feature_set_count')} != {built_count}")
     if payload.get("failed_feature_set_count") != failed_count:
         errors.append(f"failed_feature_set_count mismatch: {payload.get('failed_feature_set_count')} != {failed_count}")
+    errors.extend(_validate_metadata_artifacts(payload, root))
 
     seen: set[str] = set()
     for item in feature_sets:
@@ -67,6 +68,75 @@ def validate_feature_store_manifest(path: Path, *, repo_root: Path | None = None
     duplicate_count = len(feature_sets) - len(seen)
     if duplicate_count:
         errors.append(f"feature store manifest contains {duplicate_count} duplicate feature sets")
+    return errors
+
+
+def _validate_metadata_artifacts(payload: dict[str, Any], repo_root: Path) -> list[str]:
+    errors: list[str] = []
+    definitions_path = payload.get("feature_definitions_path")
+    coverage_path = payload.get("feature_coverage_path")
+    if not definitions_path:
+        errors.append("feature_store_manifest missing feature_definitions_path")
+    else:
+        path = _resolve_path(repo_root, str(definitions_path))
+        if not path.exists():
+            errors.append(f"feature definitions artifact missing: {path}")
+        else:
+            errors.extend(_validate_feature_definitions(path))
+    if not coverage_path:
+        errors.append("feature_store_manifest missing feature_coverage_path")
+    else:
+        path = _resolve_path(repo_root, str(coverage_path))
+        if not path.exists():
+            errors.append(f"feature coverage artifact missing: {path}")
+        else:
+            errors.extend(_validate_feature_coverage(path, payload))
+    return errors
+
+
+def _validate_feature_definitions(path: Path) -> list[str]:
+    payload = read_json(path)
+    errors: list[str] = []
+    if payload.get("schema_version") != "feature_definitions_v1":
+        errors.append("feature definitions schema_version must be feature_definitions_v1")
+    rows = payload.get("definitions")
+    if not isinstance(rows, list):
+        return errors + ["feature definitions missing definitions list"]
+    if payload.get("feature_definition_count") != len(rows):
+        errors.append("feature_definition_count mismatch")
+    seen_sets = {row.get("feature_set") for row in rows}
+    if seen_sets != set(FEATURE_DEFINITIONS):
+        errors.append(f"feature definitions set mismatch: {sorted(seen_sets)}")
+    for idx, row in enumerate(rows):
+        for field in ("feature_set", "feature_name", "feature_version", "input_dataset_ids", "input_fields", "definition", "PIT_safe_status"):
+            if row.get(field) in (None, "", []):
+                errors.append(f"feature definition {idx} missing {field}")
+    return errors
+
+
+def _validate_feature_coverage(path: Path, manifest: dict[str, Any]) -> list[str]:
+    payload = read_json(path)
+    errors: list[str] = []
+    if payload.get("schema_version") != "feature_coverage_v1":
+        errors.append("feature coverage schema_version must be feature_coverage_v1")
+    rows = payload.get("coverage")
+    if not isinstance(rows, list):
+        return errors + ["feature coverage missing coverage list"]
+    if payload.get("feature_set_count") != len(rows):
+        errors.append("feature coverage feature_set_count mismatch")
+    manifest_counts = {item.get("feature_set"): int(item.get("row_count") or 0) for item in manifest.get("feature_sets") or []}
+    seen = set()
+    for row in rows:
+        feature_set = row.get("feature_set")
+        seen.add(feature_set)
+        if row.get("row_count") != manifest_counts.get(feature_set):
+            errors.append(f"{feature_set}: coverage row_count mismatch")
+        for feature in row.get("features") or []:
+            coverage_ratio = feature.get("coverage_ratio")
+            if coverage_ratio is None or not 0 <= float(coverage_ratio) <= 1:
+                errors.append(f"{feature_set}: invalid coverage_ratio for {feature.get('feature_name')}")
+    if seen != set(manifest_counts):
+        errors.append(f"feature coverage set mismatch: {sorted(seen)}")
     return errors
 
 

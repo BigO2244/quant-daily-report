@@ -71,6 +71,8 @@ This index does not own datasets directly. Child FR-DH documents cover:
 - `data/features/`
 - `data/manifests/`
 - `data/manifests/dataset_freshness.json`
+- `data/manifests/feature_coverage.json`
+- `data/manifests/feature_definitions.json`
 - `data/manifests/research_data_catalog.json`
 - `data/manifests/research_data_observability.json`
 - `data/manifests/p1_normalization_schema.template.json`
@@ -255,7 +257,7 @@ FR-DH-013 catalogs every dataset before migrated sleeves may depend on it.
    restatement, release-date, transaction-level, and source-policy gaps remain.
 6. Maintain observe-only feature-store builders after normalized inputs have
    lineage and PIT-safety validation.
-7. Add feature coverage diagnostics and feature-definition manifests.
+7. Maintain feature coverage diagnostics and feature-definition manifests.
 8. Maintain P3 source-specific normalizers for ETF/index constituents, 13F
    filing metadata, and news metadata where read-only samples exist.
 9. Maintain `research_data_observability.json` as the read-only data readiness,

@@ -61,6 +61,8 @@ series.
 - `data/features/macro_regime_features/features.json`
 - `data/manifests/p2_normalization_manifest.json`
 - `data/manifests/feature_store_manifest.json`
+- `data/manifests/feature_definitions.json`
+- `data/manifests/feature_coverage.json`
 
 ## Proposed Interfaces
 
@@ -126,6 +128,6 @@ series.
 
 ## Recommended Next Implementation Step
 
-Harden release-date/vintage policy and coverage diagnostics for public macro
-samples, then compare `macro_regime_features_v1_observe_only` against legacy
-Argo proxy inputs without wiring it into Argo.
+Harden release-date/vintage policy for public macro samples, then compare
+`macro_regime_features_v1_observe_only` against legacy Argo proxy inputs
+without wiring it into Argo.

@@ -138,6 +138,19 @@ def test_validate_feature_store_accepts_clean_feature_artifacts(tmp_path: Path) 
     assert errors == []
 
 
+def test_feature_store_writes_definition_and_coverage_metadata(tmp_path: Path) -> None:
+    _seed_normalized_fundamentals(tmp_path)
+    build_feature_store(repo_root=tmp_path, as_of_date="2026-06-24", feature_sets={"fundamental_features"})
+
+    definitions = tmp_path / "data/manifests/feature_definitions.json"
+    coverage = tmp_path / "data/manifests/feature_coverage.json"
+
+    assert definitions.exists()
+    assert coverage.exists()
+    assert "net_margin" in definitions.read_text(encoding="utf-8")
+    assert "coverage_ratio" in coverage.read_text(encoding="utf-8")
+
+
 def test_build_feature_store_reports_missing_input_without_throwing(tmp_path: Path) -> None:
     manifest = build_feature_store(repo_root=tmp_path, as_of_date="2026-06-24", feature_sets={"fundamental_features"})
 

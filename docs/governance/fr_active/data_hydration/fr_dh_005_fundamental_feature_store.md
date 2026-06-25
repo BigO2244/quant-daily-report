@@ -54,8 +54,8 @@ explicit.
 - `data/features/fundamental_features/features.parquet`
 - `data/features/fundamental_features/features.json`
 - `data/features/macro_regime_features/features.json`
-- `data/features/fundamental_features/feature_definitions.json`
-- `data/features/fundamental_features/feature_coverage.json`
+- `data/manifests/feature_definitions.json`
+- `data/manifests/feature_coverage.json`
 - `data/manifests/feature_store_manifest.json`
 
 ## Proposed Interfaces
@@ -75,6 +75,8 @@ explicit.
 - Feature builders cannot read vendor SDKs directly.
 - The observe-only feature artifact records input artifact digest, input
   dataset schema version, feature version, as-of date, and PIT status.
+- Feature definitions and coverage diagnostics are written to read-only
+  manifests and validated with the feature-store manifest.
 
 ## Validation Plan
 
@@ -125,15 +127,13 @@ explicit.
    yield-curve, credit-spread, and VIX inputs.
 4. Validate feature manifests, input artifact digests, and feature-date
    ordering.
-5. Add feature definitions and coverage diagnostics.
+5. Maintain feature definitions and coverage diagnostics.
 6. Run observe-only sleeve parity.
 7. Expose features through `research_data` only for research workflows until a
    migration gate approves sleeve consumption.
 
 ## Recommended Next Implementation Step
 
-Add explicit `feature_definitions.json` and coverage diagnostics for the
-fundamental and macro feature sets, then run observe-only parity against any
-legacy Quality/Value or Argo proxy feature logic. Do not wire features into
-sleeves until restatement/version, release-date policy, security-id resolution,
-and migration gates pass.
+Run observe-only parity against any legacy Quality/Value or Argo proxy feature
+logic. Do not wire features into sleeves until restatement/version,
+release-date policy, security-id resolution, coverage, and migration gates pass.
