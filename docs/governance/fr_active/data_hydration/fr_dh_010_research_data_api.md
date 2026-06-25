@@ -97,6 +97,8 @@ Recommended common parameters:
 - Tests proving no vendor SDK, broker client, or network call is invoked.
 - PIT tests for as-of filtering.
 - Schema tests for diagnostics and missing-data reason codes.
+- Tests for common `as_of_date`, date range, `security_ids`, and `fields`
+  filters.
 - Sleeve observe-only tests before replacing legacy data calls.
 
 ## Dependencies
@@ -132,6 +134,6 @@ Recommended common parameters:
 
 ## Recommended Next Implementation Step
 
-Add query filtering parameters such as `as_of_date`, `start_date`, `end_date`,
-`security_ids`, and `fields` behind fixture-backed tests before any
-observe-only sleeve migration.
+Add observe-only sleeve parity fixtures that consume filtered canonical
+`research_data` rows while preserving legacy sleeve outputs and runtime
+behavior.

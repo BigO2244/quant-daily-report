@@ -6,8 +6,10 @@ import pytest
 
 from research_data import (
     load_data_trust_summary,
+    load_dataset,
     load_dataset_diagnostics,
     load_dataset_with_diagnostics,
+    load_prices,
     load_research_data_observability,
 )
 from research_data.hydration import write_json
@@ -18,8 +20,27 @@ def _seed_price_artifact(root: Path) -> None:
         root / "data/normalized/prices/ohlcv_prices.json",
         {
             "schema_version": "ohlcv_prices_normalized_v1",
-            "row_count": 1,
-            "rows": [{"security_id": "YAHOO:SPY", "trade_date": "2026-06-24", "close": 600.0}],
+            "row_count": 3,
+            "rows": [
+                {
+                    "security_id": "YAHOO:SPY",
+                    "trade_date": "2026-06-23",
+                    "close": 599.0,
+                    "as_of_date": "2026-06-23",
+                },
+                {
+                    "security_id": "YAHOO:SPY",
+                    "trade_date": "2026-06-24",
+                    "close": 600.0,
+                    "as_of_date": "2026-06-24",
+                },
+                {
+                    "security_id": "YAHOO:QQQ",
+                    "trade_date": "2026-06-24",
+                    "close": 530.0,
+                    "as_of_date": "2026-06-25",
+                },
+            ],
         },
     )
 
@@ -60,6 +81,36 @@ def test_load_dataset_with_diagnostics_returns_rows_and_observability(tmp_path: 
     assert payload["diagnostics"]["diagnostics_status"] == "OK"
     assert payload["diagnostics"]["validation_status"] == "PASS"
     assert payload["diagnostics"]["PIT_safe_status"] == "PIT_SAFE_SAMPLE_AS_OF_DATED"
+
+
+def test_load_dataset_supports_pit_date_security_and_field_filters(tmp_path: Path) -> None:
+    _seed_price_artifact(tmp_path)
+
+    rows = load_prices(
+        repo_root=tmp_path,
+        as_of_date="2026-06-24",
+        start_date="2026-06-24",
+        end_date="2026-06-24",
+        security_ids=["YAHOO:SPY"],
+        fields=["security_id", "close"],
+    )
+
+    assert rows == [{"security_id": "YAHOO:SPY", "close": 600.0}]
+
+
+def test_load_dataset_with_diagnostics_applies_row_filters(tmp_path: Path) -> None:
+    _seed_price_artifact(tmp_path)
+    _seed_observability(tmp_path)
+
+    payload = load_dataset_with_diagnostics("ohlcv_prices", repo_root=tmp_path, security_ids=["YAHOO:QQQ"])
+
+    assert len(payload["rows"]) == 1
+    assert payload["rows"][0]["security_id"] == "YAHOO:QQQ"
+    assert payload["diagnostics"]["diagnostics_status"] == "OK"
+
+
+def test_load_dataset_returns_empty_for_optional_unknown_dataset(tmp_path: Path) -> None:
+    assert load_dataset("unknown_dataset", repo_root=tmp_path, required=False) == []
 
 
 def test_load_dataset_diagnostics_can_fail_soft_when_manifest_missing(tmp_path: Path) -> None:

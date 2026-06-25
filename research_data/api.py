@@ -33,7 +33,17 @@ OBSERVABILITY_PATH = Path("data/manifests/research_data_observability.json")
 DATA_TRUST_SUMMARY_PATH = Path("outputs/data_trust/data_trust_summary.json")
 
 
-def load_dataset(dataset_id: str, *, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+def load_dataset(
+    dataset_id: str,
+    *,
+    repo_root: Path | None = None,
+    required: bool = True,
+    as_of_date: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    security_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    fields: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
     rel_path = NORMALIZED_ARTIFACTS.get(dataset_id)
     if rel_path is None:
@@ -49,7 +59,14 @@ def load_dataset(dataset_id: str, *, repo_root: Path | None = None, required: bo
     rows = payload.get("rows")
     if not isinstance(rows, list):
         raise ValueError(f"Normalized artifact for {dataset_id} is missing rows list: {path}")
-    return rows
+    return _filter_rows(
+        rows,
+        as_of_date=as_of_date,
+        start_date=start_date,
+        end_date=end_date,
+        security_ids=security_ids,
+        fields=fields,
+    )
 
 
 def load_dataset_diagnostics(dataset_id: str, *, repo_root: Path | None = None, required: bool = True) -> dict[str, Any]:
@@ -87,10 +104,24 @@ def load_dataset_with_diagnostics(
     *,
     repo_root: Path | None = None,
     required: bool = True,
+    as_of_date: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    security_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    fields: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     return {
         "dataset_id": dataset_id,
-        "rows": load_dataset(dataset_id, repo_root=repo_root, required=required),
+        "rows": load_dataset(
+            dataset_id,
+            repo_root=repo_root,
+            required=required,
+            as_of_date=as_of_date,
+            start_date=start_date,
+            end_date=end_date,
+            security_ids=security_ids,
+            fields=fields,
+        ),
         "diagnostics": load_dataset_diagnostics(dataset_id, repo_root=repo_root, required=required),
     }
 
@@ -115,87 +146,137 @@ def load_data_trust_summary(*, repo_root: Path | None = None, required: bool = T
     return read_json(path)
 
 
-def load_prices(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("ohlcv_prices", repo_root=repo_root, required=required)
+def load_prices(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("ohlcv_prices", repo_root=repo_root, required=required, **query)
 
 
-def load_security_master(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("security_master_pit", repo_root=repo_root, required=required)
+def load_security_master(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("security_master_pit", repo_root=repo_root, required=required, **query)
 
 
-def load_corporate_actions(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("corporate_actions", repo_root=repo_root, required=required)
+def load_corporate_actions(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("corporate_actions", repo_root=repo_root, required=required, **query)
 
 
-def load_dataset_freshness(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("dataset_freshness", repo_root=repo_root, required=required)
+def load_dataset_freshness(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("dataset_freshness", repo_root=repo_root, required=required, **query)
 
 
-def load_fundamentals(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("fundamentals_pit", repo_root=repo_root, required=required)
+def load_fundamentals(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("fundamentals_pit", repo_root=repo_root, required=required, **query)
 
 
-def load_macro(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+def load_macro(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for dataset_id in ("macro_rates", "yield_curve", "credit_spreads"):
-        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False))
+        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False, **query))
     if required and not rows:
         root = Path(repo_root) if repo_root is not None else REPO_ROOT
         raise FileNotFoundError(f"No normalized macro artifacts exist under {root / 'data' / 'normalized' / 'macro'}")
     return rows
 
 
-def load_yield_curve(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("yield_curve", repo_root=repo_root, required=required)
+def load_yield_curve(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("yield_curve", repo_root=repo_root, required=required, **query)
 
 
-def load_credit_spreads(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("credit_spreads", repo_root=repo_root, required=required)
+def load_credit_spreads(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("credit_spreads", repo_root=repo_root, required=required, **query)
 
 
-def load_vix(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("vix_volatility_regime", repo_root=repo_root, required=required)
+def load_vix(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("vix_volatility_regime", repo_root=repo_root, required=required, **query)
 
 
-def load_insiders(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("insider_form4", repo_root=repo_root, required=required)
+def load_insiders(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("insider_form4", repo_root=repo_root, required=required, **query)
 
 
-def load_sec_events(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+def load_sec_events(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for dataset_id in ("sec_8k_events", "sec_10q_10k_metadata"):
-        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False))
+        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False, **query))
     if required and not rows:
         root = Path(repo_root) if repo_root is not None else REPO_ROOT
         raise FileNotFoundError(f"No normalized SEC event artifacts exist under {root / 'data' / 'normalized' / 'sec_events'}")
     return rows
 
 
-def load_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+def load_features(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for dataset_id in FEATURE_DATASETS:
-        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False))
+        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False, **query))
     if required and not rows:
         root = Path(repo_root) if repo_root is not None else REPO_ROOT
         raise FileNotFoundError(f"No canonical feature artifacts exist under {root / 'data' / 'features'}")
     return rows
 
 
-def load_fundamental_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("fundamental_features", repo_root=repo_root, required=required)
+def load_fundamental_features(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("fundamental_features", repo_root=repo_root, required=required, **query)
 
 
-def load_macro_regime_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("macro_regime_features", repo_root=repo_root, required=required)
+def load_macro_regime_features(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("macro_regime_features", repo_root=repo_root, required=required, **query)
 
 
-def load_constituents(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("etf_index_constituents", repo_root=repo_root, required=required)
+def load_constituents(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("etf_index_constituents", repo_root=repo_root, required=required, **query)
 
 
-def load_institutional_holdings(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("institutional_13f", repo_root=repo_root, required=required)
+def load_institutional_holdings(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("institutional_13f", repo_root=repo_root, required=required, **query)
 
 
-def load_news_metadata(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("news_metadata", repo_root=repo_root, required=required)
+def load_news_metadata(*, repo_root: Path | None = None, required: bool = True, **query: Any) -> list[dict[str, Any]]:
+    return load_dataset("news_metadata", repo_root=repo_root, required=required, **query)
+
+
+def _filter_rows(
+    rows: list[dict[str, Any]],
+    *,
+    as_of_date: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    security_ids: set[str] | list[str] | tuple[str, ...] | None,
+    fields: set[str] | list[str] | tuple[str, ...] | None,
+) -> list[dict[str, Any]]:
+    security_filter = set(security_ids or [])
+    field_filter = list(fields or [])
+    filtered = []
+    for row in rows:
+        if as_of_date and str(row.get("as_of_date") or "")[:10] > as_of_date:
+            continue
+        row_date = _row_date(row)
+        if start_date and row_date and row_date < start_date:
+            continue
+        if end_date and row_date and row_date > end_date:
+            continue
+        if security_filter and row.get("security_id") not in security_filter:
+            continue
+        filtered.append(_project_fields(row, field_filter) if field_filter else dict(row))
+    return filtered
+
+
+def _row_date(row: dict[str, Any]) -> str | None:
+    for field in (
+        "feature_date",
+        "trade_date",
+        "observation_date",
+        "filing_date",
+        "event_date",
+        "publication_date",
+        "transaction_date",
+        "effective_date",
+        "report_period_end",
+        "as_of_date",
+    ):
+        value = row.get(field)
+        if value:
+            return str(value)[:10]
+    timestamp = row.get("publication_timestamp") or row.get("acceptance_timestamp")
+    return str(timestamp)[:10] if timestamp else None
+
+
+def _project_fields(row: dict[str, Any], fields: list[str]) -> dict[str, Any]:
+    return {field: row[field] for field in fields if field in row}
