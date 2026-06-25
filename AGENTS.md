@@ -8,6 +8,12 @@ context for ChatGPT-as-orchestrator and Codex-as-implementation-agent work.
 The strategic escalation policy lives at
 `docs/governance/STRATEGIC_ESCALATION_POLICY.md`.
 
+Caerus now uses the lightweight AI Chief of Staff workflow in
+`docs/ai_chief_of_staff_workflow.md`. GitHub Issues are the primary AI work
+queue and pull requests are the execution and review vehicle. The `.aios/`
+directory may contain supporting metadata or historical experiment artifacts, but
+it is not the user-facing queue.
+
 Caerus is Brett's paper-traded quantitative investment operating system. The
 mission is to build a disciplined, evidence-driven, long-only alpha stack with
 deterministic artifacts, explicit governance, and a promotion ladder from
@@ -40,6 +46,7 @@ Safety boundaries:
 
 Required pre-work before editing:
 - Read `docs/governance/ORCHESTRATOR_CONTEXT.md`.
+- Read the linked GitHub Issue or explicit work item before editing.
 - Read the files named by the task and any immediately referenced governance
   documents.
 - Check `git status --short` and preserve unrelated user changes.
@@ -60,6 +67,19 @@ Git hygiene:
 - Do not stage unrelated modified files.
 - Prefer git revert over ad hoc rollback for deployed changes.
 - Do not push, deploy, or fast-forward the VM unless the user explicitly asks.
+
+AI Chief of Staff workflow:
+- Do not rely on Brett copying large context between tools. Treat the GitHub
+  Issue, linked PRs, committed artifacts, and governance docs as durable state.
+- If Brett says `Implement Issue #X`, read the issue first and keep the PR
+  scoped to that issue.
+- Write findings into the PR body or a committed markdown artifact.
+- Include validation commands and results in the PR.
+- State whether production or trading logic changed.
+- If no PR is opened, the work is not complete unless Brett explicitly asked for
+  local-only work.
+- Keep `.aios/` queue files and queue branches out of normal implementation PRs
+  unless the issue explicitly approves them.
 
 > SOURCE OF TRUTH (added 2026-06-08): Before creating or editing any strategy,
 > FR, or governance document, read `docs/governance/CURRENT_RESEARCH_ROADMAP.md`

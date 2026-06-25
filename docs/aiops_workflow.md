@@ -1,5 +1,12 @@
 # AIOps Workflow & Operator Guide
 
+> Deprecated for AI coordination: Caerus now uses the lightweight AI Chief of
+> Staff workflow in `docs/ai_chief_of_staff_workflow.md`. GitHub Issues are the
+> primary work queue and PRs are the execution/review vehicle. This older AIOps
+> CLI-oriented guide is retained as historical implementation reference only and
+> should not be used to create custom queue branches or a new orchestration
+> platform.
+
 **Version**: 1.0  
 **Target Audience**: Operators, CI/CD engineers, developers  
 **Date**: 2026-03-01
@@ -581,4 +588,3 @@ exit 0
 - See [System Contract v0.1](../specs/aiops_system_contract_v0_1.md) for detailed exit code semantics
 - Read [Tests README](../tests/fixtures/README.md) for test fixture structure
 - See `pytest -q` for all test results and coverage
-
