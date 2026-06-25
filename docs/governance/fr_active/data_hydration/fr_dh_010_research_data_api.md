@@ -1,11 +1,13 @@
 # FR-DH-010 Research Data API
 
-Status: DRAFT / PLANNED
+Status: DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION
 
 Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
-Runtime impact statement: Documentation-only. This spec does not add an import
-path, package, dependency, runtime interface, or model migration in this patch.
+Runtime impact statement: Read-only canonical artifact API. The current
+implementation adds local `research_data` loaders for ignored research artifacts
+only. It does not call vendors, brokers, networks, schedulers, dashboard code,
+execution paths, allocation logic, or sleeve consumers.
 
 ## Strategic Purpose
 
@@ -29,7 +31,6 @@ PIT-safety hard to enforce. After migration, sleeves should use a stable
 
 ## Out of Scope
 
-- Implementing the API in this patch.
 - Rewriting sleeves in this patch.
 - Changing runtime execution or production model behavior.
 - Introducing new network calls at model runtime.
@@ -60,7 +61,8 @@ Required initial functions:
 - `research_data.load_corporate_actions()`
 - `research_data.load_fundamentals()`
 - `research_data.load_fundamental_features()`
-- `research_data.load_macro_features()`
+- `research_data.load_macro()`
+- `research_data.load_macro_regime_features()`
 - `research_data.load_insider_transactions()`
 - `research_data.load_sec_events()`
 
@@ -125,6 +127,5 @@ Recommended common parameters:
 
 ## Recommended Next Implementation Step
 
-Create an interface-only design and fixture tests for
-`load_security_master()`, `load_fundamentals()`, and
-`load_dataset_freshness()` before adding broader API surface.
+Add diagnostics-returning wrappers for freshness, lineage, validation, and
+PIT-safety metadata before any observe-only sleeve migration.

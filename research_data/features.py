@@ -8,7 +8,7 @@ from typing import Any
 from research_data.hydration import read_json, utc_now_iso, write_json
 
 
-FEATURE_SETS = {"fundamental_features"}
+FEATURE_SETS = {"fundamental_features", "macro_regime_features"}
 
 
 def build_feature_store(
@@ -26,7 +26,10 @@ def build_feature_store(
     generated_at = utc_now_iso()
     results = []
 
-    builders = {"fundamental_features": _build_fundamental_features}
+    builders = {
+        "fundamental_features": _build_fundamental_features,
+        "macro_regime_features": _build_macro_regime_features,
+    }
     for feature_set in sorted(selected):
         try:
             results.append(builders[feature_set](repo_root, effective_as_of, generated_at))
@@ -138,6 +141,172 @@ def _validate_fundamental_features(rows: list[dict[str, Any]]) -> list[str]:
         if row.get("restatement_policy") == "source_dimension_preserved_needs_version_audit":
             errors.append(f"row {idx} restatement/version policy remains observe-only")
     return errors
+
+
+def _build_macro_regime_features(repo_root: Path, as_of_date: str, generated_at: str) -> dict[str, Any]:
+    input_paths = {
+        "macro_rates": repo_root / "data" / "normalized" / "macro" / "macro_rates.json",
+        "yield_curve": repo_root / "data" / "normalized" / "macro" / "yield_curve.json",
+        "credit_spreads": repo_root / "data" / "normalized" / "macro" / "credit_spreads.json",
+        "vix_volatility_regime": repo_root / "data" / "normalized" / "volatility" / "vix.json",
+    }
+    missing = [str(path) for path in input_paths.values() if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"normalized macro regime inputs missing: {', '.join(missing)}")
+
+    payloads = {dataset_id: read_json(path) for dataset_id, path in input_paths.items()}
+    input_artifacts = [{"path": str(path), "sha256": _sha256(path)} for path in input_paths.values()]
+    by_date: dict[str, dict[str, Any]] = {}
+    release_policy_unverified = False
+
+    for item in payloads["macro_rates"].get("rows") or []:
+        observation_date = _feature_date(item, "observation_date", as_of_date)
+        if not observation_date:
+            continue
+        release_policy_unverified = release_policy_unverified or _release_policy_unverified(item)
+        row = _macro_row(by_date, observation_date, as_of_date, generated_at)
+        if item.get("series_id") == "DGS10":
+            row["rate_10y_percent"] = _float_or_none(item.get("value_percent"))
+
+    for item in payloads["yield_curve"].get("rows") or []:
+        observation_date = _feature_date(item, "observation_date", as_of_date)
+        if not observation_date:
+            continue
+        release_policy_unverified = release_policy_unverified or _release_policy_unverified(item)
+        row = _macro_row(by_date, observation_date, as_of_date, generated_at)
+        row["dgs10_percent"] = _float_or_none(item.get("dgs10"))
+        row["slope_10y_2y"] = _float_or_none(item.get("slope_10y_2y"))
+        row["slope_30y_10y"] = _float_or_none(item.get("slope_30y_10y"))
+        row["yield_curve_inverted"] = row["slope_10y_2y"] is not None and row["slope_10y_2y"] < 0
+
+    for item in payloads["credit_spreads"].get("rows") or []:
+        observation_date = _feature_date(item, "observation_date", as_of_date)
+        if not observation_date:
+            continue
+        release_policy_unverified = release_policy_unverified or _release_policy_unverified(item)
+        row = _macro_row(by_date, observation_date, as_of_date, generated_at)
+        if item.get("series_id") == "BAA10Y":
+            spread = _float_or_none(item.get("spread_percent"))
+            row["credit_spread_baa10y_percent"] = spread
+            row["credit_stress"] = spread is not None and spread >= 3.0
+
+    for item in payloads["vix_volatility_regime"].get("rows") or []:
+        observation_date = _feature_date(item, "observation_date", as_of_date)
+        if not observation_date:
+            continue
+        row = _macro_row(by_date, observation_date, as_of_date, generated_at)
+        vix_close = _float_or_none(item.get("vix_close"))
+        row["vix_close"] = vix_close
+        row["high_volatility"] = vix_close is not None and vix_close >= 25.0
+
+    rows = [
+        row
+        for row in (_finalize_macro_row(row, payloads, input_artifacts, release_policy_unverified) for _, row in sorted(by_date.items()))
+        if _has_macro_feature_values(row)
+    ]
+    artifact = repo_root / "data" / "features" / "macro_regime_features" / "features.json"
+    feature_payload = {
+        "schema_version": "macro_regime_features_v1",
+        "feature_set": "macro_regime_features",
+        "generated_at": generated_at,
+        "as_of_date": as_of_date,
+        "row_count": len(rows),
+        "input_artifacts": input_artifacts,
+        "rows": rows,
+    }
+    validation = _validate_macro_regime_features(rows, release_policy_unverified)
+    feature_payload["validation"] = {"status": "PASS" if not validation else "WARN", "errors": validation}
+    write_json(artifact, feature_payload)
+    return {
+        "feature_set": "macro_regime_features",
+        "status": "OK" if not validation else "WARN",
+        "artifact_path": str(artifact),
+        "row_count": len(rows),
+        "validation_status": "PASS" if not validation else "WARN",
+        "validation_errors": validation,
+        "input_artifacts": input_artifacts,
+        "as_of_date": as_of_date,
+        "generated_at": generated_at,
+    }
+
+
+def _macro_row(by_date: dict[str, dict[str, Any]], feature_date: str, as_of_date: str, generated_at: str) -> dict[str, Any]:
+    if feature_date not in by_date:
+        by_date[feature_date] = {
+            "feature_id": hashlib.sha256(f"macro_regime_features_v1|{feature_date}".encode("utf-8")).hexdigest()[:24],
+            "feature_set": "macro_regime_features",
+            "feature_version": "macro_regime_features_v1_observe_only",
+            "security_id": "MACRO:GLOBAL",
+            "feature_date": feature_date,
+            "as_of_date": as_of_date,
+            "rate_10y_percent": None,
+            "dgs10_percent": None,
+            "slope_10y_2y": None,
+            "slope_30y_10y": None,
+            "credit_spread_baa10y_percent": None,
+            "vix_close": None,
+            "yield_curve_inverted": None,
+            "credit_stress": None,
+            "high_volatility": None,
+            "input_dataset_ids": ["macro_rates", "yield_curve", "credit_spreads", "vix_volatility_regime"],
+            "generated_at": generated_at,
+        }
+    return by_date[feature_date]
+
+
+def _finalize_macro_row(
+    row: dict[str, Any],
+    payloads: dict[str, dict[str, Any]],
+    input_artifacts: list[dict[str, str]],
+    release_policy_unverified: bool,
+) -> dict[str, Any]:
+    row = dict(row)
+    row["input_dataset_schema_versions"] = {dataset_id: payload.get("schema_version") for dataset_id, payload in payloads.items()}
+    row["input_artifact_digest"] = hashlib.sha256("|".join(item["sha256"] for item in input_artifacts).encode("utf-8")).hexdigest()
+    row["lineage_status"] = "OBSERVE_ONLY_INPUT_LINEAGE_RECORDED"
+    row["release_date_policy_status"] = "UNVERIFIED_RELEASE_DATE_POLICY" if release_policy_unverified else "RELEASE_DATE_POLICY_RECORDED"
+    row["PIT_safe_status"] = (
+        "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY_RELEASE_DATE_UNVERIFIED"
+        if release_policy_unverified
+        else "PIT_DERIVED_FROM_NORMALIZED_MACRO_OBSERVE_ONLY"
+    )
+    return row
+
+
+def _validate_macro_regime_features(rows: list[dict[str, Any]], release_policy_unverified: bool) -> list[str]:
+    errors = []
+    if not rows:
+        errors.append("macro_regime_features: no rows generated")
+    if release_policy_unverified:
+        errors.append("macro_regime_features: release-date policy remains observe-only for one or more inputs")
+    for idx, row in enumerate(rows):
+        missing = [field for field in ("feature_id", "security_id", "feature_date", "as_of_date", "input_artifact_digest", "generated_at") if row.get(field) in (None, "")]
+        if missing:
+            errors.append(f"row {idx} missing required fields: {', '.join(missing)}")
+        if row.get("feature_date") and row.get("as_of_date") and str(row["feature_date"]) > str(row["as_of_date"]):
+            errors.append(f"row {idx} violates feature_date <= as_of_date: {row['feature_date']} > {row['as_of_date']}")
+        if not _has_macro_feature_values(row):
+            errors.append(f"row {idx} has no macro feature values")
+    return errors
+
+
+def _has_macro_feature_values(row: dict[str, Any]) -> bool:
+    return any(
+        row.get(field) is not None
+        for field in ("rate_10y_percent", "dgs10_percent", "slope_10y_2y", "credit_spread_baa10y_percent", "vix_close")
+    )
+
+
+def _feature_date(item: dict[str, Any], field: str, as_of_date: str) -> str | None:
+    value = str(item.get(field) or "")[:10]
+    if not value or value > as_of_date:
+        return None
+    return value
+
+
+def _release_policy_unverified(item: dict[str, Any]) -> bool:
+    status = str(item.get("publication_date_status") or "").upper()
+    return "UNVERIFIED" in status or not item.get("release_date")
 
 
 def _float_or_none(value: Any) -> float | None:

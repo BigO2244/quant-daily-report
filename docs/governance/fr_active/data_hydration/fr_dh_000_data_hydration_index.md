@@ -89,7 +89,8 @@ This index does not own datasets directly. Child FR-DH documents cover:
 - `research_data.load_corporate_actions()`
 - `research_data.load_fundamentals()`
 - `research_data.load_fundamental_features()`
-- `research_data.load_macro_features()`
+- `research_data.load_macro()`
+- `research_data.load_macro_regime_features()`
 - `research_data.load_insider_transactions()`
 - `research_data.load_sec_events()`
 - `research_data.load_research_data_catalog()`
@@ -133,7 +134,7 @@ Supporting matrix:
 |---|---|---|
 | Phase 0 | Charter / governance | FR-DH-000, FR-DH-001, FR-DH-013 |
 | Phase 1 | Security master, corporate actions, freshness monitor | FR-DH-002, FR-DH-003, FR-DH-009 |
-| Phase 2 | PIT fundamentals, fundamental features | FR-DH-004, FR-DH-005 |
+| Phase 2 | PIT fundamentals, fundamental and macro feature sets | FR-DH-004, FR-DH-005 |
 | Phase 3 | Macro and insider data | FR-DH-006, FR-DH-007 |
 | Phase 4 | SEC events and research data API | FR-DH-008, FR-DH-010 |
 | Phase 5 | Sleeve migration and dashboard/email visibility | FR-DH-011, FR-DH-012 |
@@ -158,6 +159,9 @@ FR-DH-013 catalog
 FR-DH-002 + FR-DH-003
   -> FR-DH-004 PIT fundamentals
   -> FR-DH-005 fundamental feature store
+
+FR-DH-006 macro
+  -> FR-DH-005 macro regime feature store
 
 FR-DH-006 macro + FR-DH-007 insider + FR-DH-008 SEC events
   -> FR-DH-010 research data API

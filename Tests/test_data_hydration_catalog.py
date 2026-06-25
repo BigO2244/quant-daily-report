@@ -16,6 +16,7 @@ def test_catalog_contains_required_fr_dh_datasets() -> None:
         "dataset_freshness",
         "fundamentals_pit",
         "fundamental_features",
+        "macro_regime_features",
         "macro_rates",
         "yield_curve",
         "credit_spreads",
@@ -69,6 +70,8 @@ def test_feature_catalog_entries_mark_read_only_observe_state() -> None:
 
     assert entries["fundamental_features"]["status"] == "OBSERVE_ONLY"
     assert entries["fundamental_features"]["canonical_artifact_name"] == "features.json"
+    assert entries["macro_regime_features"]["status"] == "OBSERVE_ONLY"
+    assert entries["macro_regime_features"]["canonical_artifact_name"] == "features.json"
 
 
 def test_p3_normalized_catalog_entries_mark_read_only_observe_state() -> None:

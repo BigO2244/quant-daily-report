@@ -6,9 +6,9 @@ Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
 Runtime impact statement: Read-only feature generation. The current
 implementation may write ignored local artifacts under
-`data/features/fundamental_features/` and `data/manifests/`. It does not change
-current model features, strategy weights, execution behavior, runtime data
-access, or sleeve consumption.
+`data/features/fundamental_features/`, `data/features/macro_regime_features/`,
+and `data/manifests/`. It does not change current model features, strategy
+weights, execution behavior, runtime data access, or sleeve consumption.
 
 ## Strategic Purpose
 
@@ -32,6 +32,8 @@ explicit.
 - Provide feature availability and missingness diagnostics.
 - Build an initial observe-only `fundamental_features_v1_observe_only` feature
   set from normalized PIT fundamentals.
+- Build an initial observe-only `macro_regime_features_v1_observe_only` feature
+  set from normalized macro, yield, credit, and VIX inputs.
 
 ## Out of Scope
 
@@ -51,6 +53,7 @@ explicit.
 
 - `data/features/fundamental_features/features.parquet`
 - `data/features/fundamental_features/features.json`
+- `data/features/macro_regime_features/features.json`
 - `data/features/fundamental_features/feature_definitions.json`
 - `data/features/fundamental_features/feature_coverage.json`
 - `data/manifests/feature_store_manifest.json`
@@ -118,16 +121,19 @@ explicit.
 1. Maintain the observe-only feature family schema and versioning contract.
 2. Build `fundamental_features_v1_observe_only` from normalized PIT
    fundamentals.
-3. Validate feature manifests, input artifact digests, and feature-date
+3. Build `macro_regime_features_v1_observe_only` from normalized macro,
+   yield-curve, credit-spread, and VIX inputs.
+4. Validate feature manifests, input artifact digests, and feature-date
    ordering.
-4. Add feature definitions and coverage diagnostics.
-5. Run observe-only sleeve parity.
-6. Expose features through `research_data` only for research workflows until a
+5. Add feature definitions and coverage diagnostics.
+6. Run observe-only sleeve parity.
+7. Expose features through `research_data` only for research workflows until a
    migration gate approves sleeve consumption.
 
 ## Recommended Next Implementation Step
 
-Add explicit `feature_definitions.json` and coverage diagnostics for
-`fundamental_features_v1_observe_only`, then run observe-only parity against any
-legacy Quality/Value feature logic. Do not wire features into sleeves until
-restatement/version, security-id resolution, and migration gates pass.
+Add explicit `feature_definitions.json` and coverage diagnostics for the
+fundamental and macro feature sets, then run observe-only parity against any
+legacy Quality/Value or Argo proxy feature logic. Do not wire features into
+sleeves until restatement/version, release-date policy, security-id resolution,
+and migration gates pass.

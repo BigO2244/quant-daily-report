@@ -214,7 +214,7 @@ Validation rules:
 
 ## Recommended Next Step
 
-Continue from P1 into feature-store scaffolding and P3 observe-only
+Continue from P1 into governed feature artifacts and P3 observe-only
 normalizers. P2 normalization now exists for fundamentals, macro/rates, VIX,
 insider Form 4 filing metadata, and SEC filing metadata, but those artifacts
 remain observe-only until restatement/version, release-date, transaction-level,

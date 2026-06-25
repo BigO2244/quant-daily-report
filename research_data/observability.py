@@ -137,8 +137,9 @@ def _feature_by_dataset(repo_root: Path) -> dict[str, dict[str, Any]]:
     payload = _read_optional_json(repo_root / "data" / "manifests" / "feature_store_manifest.json") or {}
     rows: dict[str, dict[str, Any]] = {}
     for row in payload.get("feature_sets") or []:
-        if row.get("feature_set") == "fundamental_features":
-            rows["fundamental_features"] = row
+        feature_set = row.get("feature_set")
+        if feature_set in FEATURE_SETS:
+            rows[str(feature_set)] = row
     return rows
 
 

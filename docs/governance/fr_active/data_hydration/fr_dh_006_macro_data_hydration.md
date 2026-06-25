@@ -1,12 +1,15 @@
 # FR-DH-006 Macro Data Hydration
 
-Status: DRAFT / PLANNED
+Status: DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION
 
 Owner / steward placeholder: Caerus Research Data Steward (TBD)
 
-Runtime impact statement: Documentation-only. This spec does not change Argo,
-regime selection, risk controls, allocation, execution, broker behavior, or
-scheduler behavior.
+Runtime impact statement: Read-only macro normalization and feature generation.
+The current implementation may write ignored local artifacts under
+`data/normalized/macro/`, `data/normalized/volatility/`,
+`data/features/macro_regime_features/`, and `data/manifests/`. This spec does
+not change Argo, regime selection, risk controls, allocation, execution, broker
+behavior, scheduler behavior, or sleeve consumption.
 
 ## Strategic Purpose
 
@@ -28,6 +31,8 @@ series.
 - Preserve publication/release dates and revision vintages where available.
 - Align macro series to trading calendars.
 - Provide feature-ready macro views for Argo and future regime sleeves.
+- Build an observe-only `macro_regime_features_v1_observe_only` artifact from
+  normalized macro, yield, credit, and VIX samples.
 
 ## Out of Scope
 
@@ -49,14 +54,18 @@ series.
 ## Proposed Canonical Artifacts
 
 - `data/raw/macro/`
-- `data/normalized/macro/series.parquet`
-- `data/normalized/macro/release_calendar.parquet`
-- `data/features/macro_features/features.parquet`
-- `data/manifests/macro_manifest.json`
+- `data/normalized/macro/macro_rates.json`
+- `data/normalized/macro/yield_curve.json`
+- `data/normalized/macro/credit_spreads.json`
+- `data/normalized/volatility/vix.json`
+- `data/features/macro_regime_features/features.json`
+- `data/manifests/p2_normalization_manifest.json`
+- `data/manifests/feature_store_manifest.json`
 
 ## Proposed Interfaces
 
-- `research_data.load_macro_features(as_of_date=..., feature_set=...)`
+- `research_data.load_macro()`
+- `research_data.load_macro_regime_features()`
 - `research_data.load_macro_series(series_id, as_of_date=...)`
 - `research_data.load_macro_release_calendar()`
 
@@ -76,6 +85,12 @@ series.
   dates, and revised observations.
 - Compare source series counts and date ranges against source manifests.
 - Run macro feature stability tests.
+- Run `Tests/test_data_hydration_p2_normalization.py`.
+- Run `Tests/test_data_hydration_feature_store.py`.
+- Run `scripts/data_hydration/normalize_p2.py --as-of-date <date>`.
+- Run `scripts/data_hydration/build_feature_store.py --as-of-date <date>`.
+- Run `scripts/data_hydration/validate_p2_normalization.py`.
+- Run `scripts/data_hydration/validate_feature_store.py`.
 - Run Argo observe-only parity and divergence reports.
 - Require FR-DH-009 freshness monitor coverage.
 
@@ -111,5 +126,6 @@ series.
 
 ## Recommended Next Implementation Step
 
-Create a macro schema and fixture suite for release-date handling using a small
-FRED/Treasury/VIX sample, without wiring it into Argo.
+Harden release-date/vintage policy and coverage diagnostics for public macro
+samples, then compare `macro_regime_features_v1_observe_only` against legacy
+Argo proxy inputs without wiring it into Argo.

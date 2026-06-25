@@ -25,7 +25,10 @@ NORMALIZED_ARTIFACTS = {
     "institutional_13f": Path("data/normalized/institutional_holdings/form13f_filings.json"),
     "news_metadata": Path("data/normalized/news/news_metadata.json"),
     "fundamental_features": Path("data/features/fundamental_features/features.json"),
+    "macro_regime_features": Path("data/features/macro_regime_features/features.json"),
 }
+
+FEATURE_DATASETS = ("fundamental_features", "macro_regime_features")
 
 
 def load_dataset(dataset_id: str, *, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
@@ -104,11 +107,21 @@ def load_sec_events(*, repo_root: Path | None = None, required: bool = True) -> 
 
 
 def load_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_dataset("fundamental_features", repo_root=repo_root, required=required)
+    rows: list[dict[str, Any]] = []
+    for dataset_id in FEATURE_DATASETS:
+        rows.extend(load_dataset(dataset_id, repo_root=repo_root, required=False))
+    if required and not rows:
+        root = Path(repo_root) if repo_root is not None else REPO_ROOT
+        raise FileNotFoundError(f"No canonical feature artifacts exist under {root / 'data' / 'features'}")
+    return rows
 
 
 def load_fundamental_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
-    return load_features(repo_root=repo_root, required=required)
+    return load_dataset("fundamental_features", repo_root=repo_root, required=required)
+
+
+def load_macro_regime_features(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
+    return load_dataset("macro_regime_features", repo_root=repo_root, required=required)
 
 
 def load_constituents(*, repo_root: Path | None = None, required: bool = True) -> list[dict[str, Any]]:
