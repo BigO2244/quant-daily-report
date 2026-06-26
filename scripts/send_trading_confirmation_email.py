@@ -25,6 +25,15 @@ if _env_path.exists():
 
 from core.email_governance import EmailEvent
 from core.dynamic_daily_email import render_dynamic_email_sections
+from core.email_reporting_sections import (
+    construction_provenance_rows,
+    execution_reliability_rows,
+    fr105_research_status_rows,
+    merge_run_reporting_context,
+    simple_html_section,
+    target_attainment_rows,
+    text_table_section,
+)
 from core.execution_payload import STATUS_EXECUTED, STATUS_HALTED, STATUS_SKIPPED_DUPLICATE
 from core.operator_summary import write_operator_summary, load_operator_summary, format_operator_summary_log
 from core.quant_report import send_email
@@ -520,6 +529,39 @@ def _format_live_pilot_buy_lifecycle(results: dict) -> tuple[str, str]:
     return text, html
 
 
+def _format_reporting_artifact_sections(results: dict, results_path: Path) -> tuple[str, str]:
+    context = merge_run_reporting_context(results, results_path, _REPO_ROOT)
+    sections = [
+        (
+            "Execution Reliability",
+            execution_reliability_rows(context, _REPO_ROOT),
+        ),
+        (
+            "Target Attainment",
+            target_attainment_rows(context, _REPO_ROOT),
+        ),
+        (
+            "Construction Provenance",
+            construction_provenance_rows(context, _REPO_ROOT),
+        ),
+        (
+            "FR-105 Research Status",
+            fr105_research_status_rows(context, _REPO_ROOT),
+        ),
+    ]
+    text = "".join(
+        f"{text_table_section(title, rows)}\n"
+        for title, rows in sections
+        if rows
+    )
+    html = "".join(
+        simple_html_section(title, rows)
+        for title, rows in sections
+        if rows
+    )
+    return text, html
+
+
 def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, str, str]:
     """
     Build confirmation email from execution results.
@@ -584,7 +626,9 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     elif halt_reason:
         reason_line = f"Halt reason: {halt_reason}"
     else:
-        reason_line = "Halt reason: none"
+        reason_line = "Status reason: none"
+    html_reason_label = "Halt/skip reason" if halt_reason or status_display == "SKIPPED_DUPLICATE" else "Status reason"
+    html_reason_value = halt_reason or ("Duplicate execution detected" if status_display == "SKIPPED_DUPLICATE" else "none")
 
     # When the final status was upgraded by post-trade reconciliation, preserve a
     # plainly-labelled diagnostic record of the raw (pre-reconciliation) status.
@@ -629,7 +673,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         f"<p><b>Status:</b> {html_escape(status_display)}</p>"
         f"<p><b>Submitted:</b> {submitted} | <b>Accepted:</b> {accepted} | "
         f"<b>Rejected:</b> {rejected} | <b>Filled:</b> {filled}</p>"
-        f"<p><b>Halt/skip reason:</b> {html_escape(halt_reason or 'none')}</p>"
+        f"<p><b>{html_escape(html_reason_label)}:</b> {html_escape(html_reason_value)}</p>"
         f"<p style='font-size: 0.9em; color: #666;'>{html_escape(artifact_ref)}</p>"
     )
 
@@ -637,6 +681,10 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         _load_reconciliation_data(trade_date, results_path)
     )
     live_pilot_lifecycle_text, live_pilot_lifecycle_html = _format_live_pilot_buy_lifecycle(results)
+    reporting_artifacts_text, reporting_artifacts_html = _format_reporting_artifact_sections(
+        results,
+        results_path,
+    )
 
     # ------------------------------------------------------------------ #
     # Performance vs SPY section
@@ -719,6 +767,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         f"{execution_text}\n"
         f"{raw_diag_text}{chr(10) if raw_diag_text else ''}"
         f"{live_pilot_lifecycle_text}{chr(10) if live_pilot_lifecycle_text else ''}"
+        f"{reporting_artifacts_text}{chr(10) if reporting_artifacts_text else ''}"
         f"{recon_text}\n"
         f"{perf_text}"
         f"{shadow_text}"
@@ -731,6 +780,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         f"{execution_html}"
         f"{('<hr>' + raw_diag_html) if raw_diag_html else ''}"
         f"{('<hr>' + live_pilot_lifecycle_html) if live_pilot_lifecycle_html else ''}"
+        f"{('<hr>' + reporting_artifacts_html) if reporting_artifacts_html else ''}"
         f"<hr>"
         f"{recon_html}"
         f"<hr>"
