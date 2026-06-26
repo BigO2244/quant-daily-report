@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from core.dynamic_daily_email import render_dynamic_email_sections
+from core.email_reporting_sections import (
+    construction_provenance_rows,
+    execution_reliability_rows,
+    fr105_research_status_rows,
+    target_attainment_rows,
+    text_table_section,
+)
 from paper.email_styles import wrap_email_html
 from paper.html_tables import render_card, render_html_table
 
@@ -134,6 +141,87 @@ def _diag_from_payload(payload: dict[str, Any], key: str) -> Any:
         return None
 
     return payload.get(key)
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _candidate_lifecycle_reason_detail(payload: dict[str, Any]) -> str:
+    candidates = payload.get("candidate_trade_lifecycle")
+    candidates = candidates if isinstance(candidates, list) else []
+    parts: list[str] = []
+    for raw in candidates:
+        row = raw if isinstance(raw, dict) else {}
+        ticker = str(row.get("ticker") or "").strip().upper()
+        side = str(row.get("side") or "").strip().upper()
+        reason = str(row.get("decision_reason") or row.get("suppression_or_clipping_reason") or "").strip()
+        if ticker and side and reason:
+            parts.append(f"{ticker} {side}:{reason}")
+    return "|".join(parts)
+
+
+def _candidate_lifecycle_rows(payload: dict[str, Any]) -> list[list[Any]]:
+    summary = payload.get("candidate_trade_lifecycle_summary")
+    summary = summary if isinstance(summary, dict) else {}
+    artifact = payload.get("candidate_trade_lifecycle_artifact") or summary.get("artifact_path")
+    reason_detail = _candidate_lifecycle_reason_detail(payload)
+    rows = [
+        ["Planned Payload Trades", _first_present(payload.get("planned_payload_trade_count"), summary.get("precompute_candidates"))],
+        ["Executable Filter Passed", _first_present(payload.get("executable_filter_passed_count"), summary.get("passed_executable_filter"))],
+        ["Intended Orders", _first_present(payload.get("intended_orders_count"), summary.get("intended_orders"))],
+        ["Final Executable Trades", _first_present(payload.get("final_executable_trades_count"), payload.get("execution_eligible_trades_count"), payload.get("executable_trades_count"))],
+        ["Orders Submitted", _first_present(payload.get("submitted_count"), payload.get("orders_submitted_count"), summary.get("submitted"))],
+        ["Orders Accepted", _first_present(payload.get("accepted_count"), summary.get("accepted"))],
+        ["Orders Filled", _first_present(payload.get("orders_filled_count"), summary.get("filled"))],
+        ["Orders Rejected", _first_present(payload.get("rejected_count"), summary.get("rejected"))],
+        ["Clipped Candidates", summary.get("clipped")],
+        ["Suppressed Candidates", summary.get("suppressed")],
+        ["Candidate Reasons", reason_detail],
+    ]
+    if artifact:
+        rows.append(["Lifecycle Artifact", artifact])
+    return [row for row in rows if row[1] not in (None, "")]
+
+
+def _candidate_lifecycle_text(payload: dict[str, Any]) -> list[str]:
+    rows = _candidate_lifecycle_rows(payload)
+    if not rows:
+        return []
+    return [
+        "",
+        "EXECUTION LIFECYCLE",
+        "Metric | Value",
+        "------ | -----",
+        *[f"{label} | {value}" for label, value in rows],
+    ]
+
+
+def _audit_reporting_text(payload: dict[str, Any]) -> list[str]:
+    repo_root = Path(str(payload.get("repo_root") or Path(__file__).resolve().parents[1]))
+    sections = [
+        text_table_section(
+            "Execution Reliability",
+            execution_reliability_rows(payload, repo_root),
+        ),
+        text_table_section(
+            "Target Attainment",
+            target_attainment_rows(payload, repo_root),
+        ),
+        text_table_section(
+            "Construction Provenance",
+            construction_provenance_rows(payload, repo_root),
+        ),
+        text_table_section(
+            "FR-105 Research Status",
+            fr105_research_status_rows(payload, repo_root),
+        ),
+    ]
+    return [section for section in sections if section]
+
 
 def _fmt_planned_for(value: Any) -> str:
     raw = str(value or "").strip()
@@ -272,6 +360,7 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
                     lines.append(f"• {note}")
         
         dynamic = _dynamic_sections(payload, trade_date)
+        lines.extend(_audit_reporting_text(payload))
         if dynamic["text"]:
             lines.append(dynamic["text"].rstrip())
         return subject, "\n".join(lines)
@@ -307,6 +396,11 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
 
     if turnover_note:
         lines.append(f"Risk Note: {turnover_note}")
+
+    lifecycle_text = _candidate_lifecycle_text(payload)
+    if lifecycle_text:
+        lines.extend(lifecycle_text)
+    lines.extend(_audit_reporting_text(payload))
 
     risk_summary = payload.get("risk_summary", {}) or {}
     if risk_summary:
@@ -663,6 +757,48 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
         cards.append(banner_html)
     
     cards.append(render_card("Run Context", f"<ul class='kvs'>{''.join(header_items)}</ul>"))
+
+    lifecycle_rows = _candidate_lifecycle_rows(payload)
+    if lifecycle_rows:
+        cards.append(
+            render_card(
+                "Execution Lifecycle",
+                render_html_table(["Metric", "Value"], lifecycle_rows, numeric_cols=set()),
+            )
+        )
+    repo_root = Path(str(payload.get("repo_root") or Path(__file__).resolve().parents[1]))
+    reliability_rows = execution_reliability_rows(payload, repo_root)
+    if reliability_rows:
+        cards.append(
+            render_card(
+                "Execution Reliability",
+                render_html_table(["Metric", "Value"], reliability_rows, numeric_cols=set()),
+            )
+        )
+    attainment_rows = target_attainment_rows(payload, repo_root)
+    if attainment_rows:
+        cards.append(
+            render_card(
+                "Target Attainment",
+                render_html_table(["Metric", "Value"], attainment_rows, numeric_cols=set()),
+            )
+        )
+    provenance_rows = construction_provenance_rows(payload, repo_root)
+    if provenance_rows:
+        cards.append(
+            render_card(
+                "Construction Provenance",
+                render_html_table(["Metric", "Value"], provenance_rows, numeric_cols=set()),
+            )
+        )
+    fr105_rows = fr105_research_status_rows(payload, repo_root)
+    if fr105_rows:
+        cards.append(
+            render_card(
+                "FR-105 Research Status",
+                render_html_table(["Metric", "Value"], fr105_rows, numeric_cols=set()),
+            )
+        )
 
     trades = payload.get("trades", []) or []
     if not trades:
