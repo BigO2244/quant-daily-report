@@ -142,6 +142,15 @@ def merge_run_reporting_context(
             fallback_paths["fr105_shadow_alpha_framework_artifact"] = (
                 research_root / "shadow_alpha_chase_framework.json"
             )
+            fallback_paths["fr105_phase2_topn_frontier_artifact"] = (
+                research_root / trade_date / "phase2_global_topn_frontier.json"
+            )
+            fallback_paths["fr105_phase3_holding_count_artifact"] = (
+                research_root / trade_date / "phase3_optimizer_derived_holding_count.json"
+            )
+            fallback_paths["fr105_shadow_alpha_chase_comparison_artifact"] = (
+                research_root / trade_date / "shadow_alpha_chase_comparison.json"
+            )
             for key, path in fallback_paths.items():
                 if not context.get(key) and path.exists():
                     context[key] = str(path)
@@ -335,11 +344,20 @@ def fr105_research_status_rows(
     completeness_status = _artifact_status(context, "fr105_phase01_completeness_artifact", repo_root)
     framework, framework_path = _artifact_payload(context, "fr105_shadow_alpha_framework_artifact", repo_root)
     framework_status = _artifact_status(context, "fr105_shadow_alpha_framework_artifact", repo_root)
+    phase2, phase2_path = _artifact_payload(context, "fr105_phase2_topn_frontier_artifact", repo_root)
+    phase2_status = _artifact_status(context, "fr105_phase2_topn_frontier_artifact", repo_root)
+    phase3, phase3_path = _artifact_payload(context, "fr105_phase3_holding_count_artifact", repo_root)
+    phase3_status = _artifact_status(context, "fr105_phase3_holding_count_artifact", repo_root)
+    shadow, shadow_path = _artifact_payload(context, "fr105_shadow_alpha_chase_comparison_artifact", repo_root)
+    shadow_status = _artifact_status(context, "fr105_shadow_alpha_chase_comparison_artifact", repo_root)
     summary = completeness.get("summary") if isinstance(completeness.get("summary"), Mapping) else {}
     readiness = completeness.get("readiness") if isinstance(completeness.get("readiness"), Mapping) else {}
     phase_status = completeness.get("phase_status") if isinstance(completeness.get("phase_status"), Mapping) else {}
     framework_metadata = framework.get("metadata") if isinstance(framework.get("metadata"), Mapping) else {}
     framework_eval = framework.get("evaluation_status") if isinstance(framework.get("evaluation_status"), Mapping) else {}
+    phase2_readiness = phase2.get("readiness") if isinstance(phase2.get("readiness"), Mapping) else {}
+    phase3_readiness = phase3.get("readiness") if isinstance(phase3.get("readiness"), Mapping) else {}
+    shadow_readiness = shadow.get("readiness") if isinstance(shadow.get("readiness"), Mapping) else {}
     alpha_enabled = framework_metadata.get("enabled")
     if alpha_enabled is None and framework:
         alpha_enabled = False
@@ -351,6 +369,11 @@ def fr105_research_status_rows(
         ["Missing artifacts", _compact_list(summary.get("missing_fields"))],
         ["Unavailable evidence", _compact_list(summary.get("unavailable_fields"))],
         ["Readiness", _fmt_value(readiness.get("status"))],
+        ["Phase 2 readiness", _fmt_value(phase2_readiness.get("status"))],
+        ["Phase 2 blockers", _compact_list(phase2_readiness.get("blocking_gaps"))],
+        ["Phase 3 readiness", _fmt_value(phase3_readiness.get("status"))],
+        ["Phase 3 blockers", _compact_list(phase3_readiness.get("blocking_gaps"))],
+        ["Shadow evaluation", _fmt_value(shadow_readiness.get("status"))],
         ["Alpha Chase enabled", _fmt_value(alpha_enabled)],
         ["Alpha Chase status", _fmt_value(framework_eval.get("status"))],
         ["Recommendations", "none; readiness only"],
@@ -358,12 +381,24 @@ def fr105_research_status_rows(
         ["Completeness artifact", _fmt_value(completeness_path or context.get("fr105_phase01_completeness_artifact"))],
         ["Framework artifact status", _fmt_value(framework_status)],
         ["Framework artifact", _fmt_value(framework_path or context.get("fr105_shadow_alpha_framework_artifact"))],
+        ["Phase 2 artifact status", _fmt_value(phase2_status)],
+        ["Phase 2 artifact", _fmt_value(phase2_path or context.get("fr105_phase2_topn_frontier_artifact"))],
+        ["Phase 3 artifact status", _fmt_value(phase3_status)],
+        ["Phase 3 artifact", _fmt_value(phase3_path or context.get("fr105_phase3_holding_count_artifact"))],
+        ["Shadow comparison artifact status", _fmt_value(shadow_status)],
+        ["Shadow comparison artifact", _fmt_value(shadow_path or context.get("fr105_shadow_alpha_chase_comparison_artifact"))],
     ]
     has_signal = bool(
         completeness
         or framework
+        or phase2
+        or phase3
+        or shadow
         or context.get("fr105_phase01_completeness_artifact")
         or context.get("fr105_shadow_alpha_framework_artifact")
+        or context.get("fr105_phase2_topn_frontier_artifact")
+        or context.get("fr105_phase3_holding_count_artifact")
+        or context.get("fr105_shadow_alpha_chase_comparison_artifact")
     )
     return [row for row in rows if has_signal and row[1] != "unavailable"]
 

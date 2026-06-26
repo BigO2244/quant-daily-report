@@ -397,6 +397,50 @@ def test_execution_email_surfaces_fr105_readiness_without_recommendations(tmp_pa
         ),
         encoding="utf-8",
     )
+    phase2_path = research_dir / "phase2_global_topn_frontier.json"
+    phase2_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "fr105_phase2_global_topn_frontier.v1",
+                "readiness": {
+                    "status": "BLOCKED_ARTIFACT_GAPS",
+                    "blocking_gaps": ["candidate_pool", "score_source"],
+                },
+                "metadata": {"paper_or_live_influence_allowed": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    phase3_path = research_dir / "phase3_optimizer_derived_holding_count.json"
+    phase3_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "fr105_phase3_optimizer_derived_holding_count.v1",
+                "readiness": {
+                    "status": "BLOCKED_ARTIFACT_GAPS",
+                    "blocking_gaps": ["phase2_frontier_not_ready"],
+                },
+                "selected_research_variant": {"status": "BLOCKED_ARTIFACT_GAPS"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    shadow_path = research_dir / "shadow_alpha_chase_comparison.json"
+    shadow_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "fr105_shadow_alpha_chase_comparison.v1",
+                "metadata": {"enabled": False, "default_off": True},
+                "readiness": {
+                    "status": "BLOCKED_ARTIFACT_GAPS",
+                    "blocking_gaps": ["phase2_frontier_not_ready"],
+                    "recommendations_allowed": False,
+                },
+                "recommendations": {"allowed": False, "items": []},
+            }
+        ),
+        encoding="utf-8",
+    )
     payload = {
         "repo_root": str(tmp_path),
         "trade_date": "2026-06-26",
@@ -405,6 +449,9 @@ def test_execution_email_surfaces_fr105_readiness_without_recommendations(tmp_pa
         "trades": [],
         "fr105_phase01_completeness_artifact": str(completeness_path),
         "fr105_shadow_alpha_framework_artifact": str(framework_path),
+        "fr105_phase2_topn_frontier_artifact": str(phase2_path),
+        "fr105_phase3_holding_count_artifact": str(phase3_path),
+        "fr105_shadow_alpha_chase_comparison_artifact": str(shadow_path),
     }
 
     _, body = build_execution_email_text(payload)
@@ -413,8 +460,13 @@ def test_execution_email_surfaces_fr105_readiness_without_recommendations(tmp_pa
     assert "FR-105 RESEARCH STATUS" in body
     assert "Research Status | INCOMPLETE" in body
     assert "Readiness | BLOCKED_ARTIFACT_GAPS" in body
+    assert "Phase 2 readiness | BLOCKED_ARTIFACT_GAPS" in body
+    assert "Phase 3 readiness | BLOCKED_ARTIFACT_GAPS" in body
+    assert "Shadow evaluation | BLOCKED_ARTIFACT_GAPS" in body
     assert "Alpha Chase enabled | NO" in body
     assert "Recommendations | none; readiness only" in body
+    assert "buy recommendation" not in body.lower()
+    assert "allocation recommendation" not in body.lower()
     assert "lifecycle_artifact" in body
     assert "FR-105 Research Status" in html
     assert "DISABLED" in html
