@@ -75,7 +75,32 @@ def _resolve_execution_pointer_optional(trade_date: str) -> dict | None:
         return None
 
 
+def _explicit_results_path() -> Path | None:
+    raw = str(os.getenv("TRADING_CONFIRMATION_RESULTS_PATH") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else _REPO_ROOT / path
+
+
+def _explicit_run_root() -> Path | None:
+    raw = str(os.getenv("TRADING_CONFIRMATION_RUN_ROOT") or "").strip()
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else _REPO_ROOT / path
+    results_path = _explicit_results_path()
+    if results_path is not None:
+        return results_path.parent
+    return None
+
+
 def _load_results(trade_date: str) -> tuple[dict, Path]:
+    explicit_path = _explicit_results_path()
+    if explicit_path is not None:
+        if not explicit_path.exists():
+            raise RuntimeError(f"Explicit confirmation results path does not exist: {explicit_path}")
+        return _load_json_dict(explicit_path), explicit_path
+
     latest = _resolve_execution_pointer_optional(trade_date)
 
     if latest:
@@ -341,6 +366,7 @@ def _load_reconciliation_data(trade_date: str, results_path: Path) -> dict:
         if summary_path:
             path = Path(summary_path)
             candidates.append(path if path.is_absolute() else _REPO_ROOT / path)
+        candidates.append(run_root / "live_pilot_reconciliation.json")
         candidates.append(run_root / "broker" / f"recon_posttrade_{trade_date}.json")
 
     candidates.append(_REPO_ROOT / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
@@ -374,7 +400,7 @@ def _format_reconciliation_section(recon: dict) -> tuple[str, str, bool]:
     payload = recon.get("payload") if isinstance(recon.get("payload"), dict) else {}
     path = recon.get("path")
     path_text = str(path) if path else "unavailable"
-    healthy = status in {"OK", "PASS", "OK_RECONCILED"}
+    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION"}
     if healthy:
         explanation = "Broker positions match expected post-execution state."
     elif status == "DRIFT_DETECTED":
@@ -726,8 +752,9 @@ def main() -> None:
     results, results_path = _load_results(trade_date)
 
     # Load run context for operator summary updates
-    latest = _resolve_execution_pointer_optional(trade_date)
-    run_root = Path(str(latest.get("run_root") or "").strip()) if latest else None
+    explicit_run_root = _explicit_run_root()
+    latest = None if explicit_run_root is not None else _resolve_execution_pointer_optional(trade_date)
+    run_root = explicit_run_root or (Path(str(latest.get("run_root") or "").strip()) if latest else None)
 
     event = EmailEvent(
         event_type="trading_confirmation",

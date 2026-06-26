@@ -65,6 +65,20 @@ def _trades_from_plan(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [trade for trade in trades if isinstance(trade, Mapping)]
 
 
+def _trade_date_from_context(
+    *,
+    plan: Mapping[str, Any] | None,
+    env: Mapping[str, str],
+    now_et: dt.datetime | None,
+) -> str:
+    value = str((plan or {}).get("trade_date") or env.get("REPORT_DATE") or "").strip()
+    if value:
+        return value
+    if now_et is not None:
+        return now_et.astimezone(ET_TZ).date().isoformat()
+    return dt.datetime.now(ET_TZ).date().isoformat()
+
+
 PLAN_PROVENANCE_KEYS = (
     "ticker",
     "sleeve",
@@ -495,6 +509,7 @@ def _entry_policy_summary(
 def _build_live_pilot_execution_results(
     *,
     run_id: str,
+    trade_date: str,
     terminal_status: str,
     reason_code: object,
     intended: list[dict[str, Any]],
@@ -515,10 +530,18 @@ def _build_live_pilot_execution_results(
     return {
         "schema_version": "live_pilot_execution_results.v1",
         "run_id": run_id,
+        "trade_date": trade_date,
         "mode": LIVE_PILOT_MODE.upper(),
         "status": terminal_status,
         "reason": reason_code,
         "halt_reason": None if terminal_status in {"DRY_RUN", "SUBMITTED"} else reason_code,
+        "operator_execution_status": (
+            "dry_run"
+            if dry_run
+            else "executed"
+            if terminal_status == "SUBMITTED"
+            else "halted"
+        ),
         "submitted_count": 0 if dry_run else len(submitted),
         "accepted_count": int(reconciliation.get("accepted_count") or 0),
         "rejected_count": int(reconciliation.get("rejected_count") or 0),
@@ -810,6 +833,7 @@ def _write_blocked_artifacts(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_id,
+            trade_date=str(preflight.get("trade_date") or os.getenv("REPORT_DATE") or ""),
             terminal_status="BLOCKED",
             reason_code=reason_code,
             intended=intended,
@@ -834,6 +858,11 @@ def run_live_pilot(
 ) -> dict[str, Any]:
     environ = env if env is not None else os.environ
     run_id = str(run_id or environ.get("RUN_ID") or generate_run_id())
+    trade_date = _trade_date_from_context(
+        plan=plan,
+        env=environ,
+        now_et=now_et,
+    )
     run_root = Path(output_root) / "runs" / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
@@ -849,6 +878,7 @@ def run_live_pilot(
     preflight = gate.to_dict()
     preflight["schema_version"] = "live_pilot_preflight.v1"
     preflight["run_id"] = run_id
+    preflight["trade_date"] = trade_date
     preflight["generated_at"] = _now_utc()
     preflight["orders_submitted"] = 0
     _write_json(run_root / "live_pilot_preflight.json", preflight)
@@ -857,6 +887,7 @@ def run_live_pilot(
         "schema_version": "live_pilot_execution_payload.v1",
         "generated_at": _now_utc(),
         "run_id": run_id,
+        "trade_date": trade_date,
         "mode": LIVE_PILOT_MODE,
         "plan_path": plan_path,
         "dry_run": bool(gate.dry_run),
@@ -949,9 +980,10 @@ def run_live_pilot(
     _write_json(
         run_root / "live_pilot_entry_attempt_history.json",
         {
-            "schema_version": "live_pilot_entry_attempt_history.v1",
+        "schema_version": "live_pilot_entry_attempt_history.v1",
             "generated_at": _now_utc(),
             "run_id": run_id,
+            "trade_date": trade_date,
             "orders": [
                 {
                     "symbol": row.get("symbol"),
@@ -1157,6 +1189,7 @@ def run_live_pilot(
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_id,
+        "trade_date": trade_date,
         "mode": LIVE_PILOT_MODE.upper(),
         "terminal_status": terminal_status,
         "reason_code": reconciliation.get("status"),
@@ -1177,6 +1210,7 @@ def run_live_pilot(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_id,
+            trade_date=trade_date,
             terminal_status=terminal_status,
             reason_code=reconciliation.get("status"),
             intended=intended,
@@ -1275,6 +1309,15 @@ def refresh_live_pilot_reconciliation(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_root.name,
+            trade_date=str(
+                (
+                    json.loads((run_root / "live_pilot_preflight.json").read_text(encoding="utf-8"))
+                    if (run_root / "live_pilot_preflight.json").exists()
+                    else {}
+                ).get("trade_date")
+                or os.getenv("REPORT_DATE")
+                or ""
+            ),
             terminal_status=str(summary.get("terminal_status") or ""),
             reason_code=reconciliation.get("status"),
             intended=[dict(row) for row in intended if isinstance(row, Mapping)],

@@ -47,6 +47,26 @@ Live pilot submission requires all of the following:
 
 Any failed control blocks before Alpaca SDK submission.
 
+## Scheduled Automation
+
+FR-104 has a separate VM cron lane from the paper execution lane:
+
+- `scripts/cron_live_pilot_execute.sh` runs after paper execution, builds the
+  current-date live-pilot plan from the precompute bundle, validates the plan,
+  runs a dry-run executor pass, and submits only when
+  `CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1`,
+  `CAERUS_LIVE_PILOT_CRON_APPROVED=1`, and
+  `CAERUS_LIVE_PILOT_SUBMIT_APPROVED=1`.
+- `scripts/cron_live_pilot_confirm.sh` sends the confirmation email from the
+  isolated live-pilot run's `execution_results.json` via explicit results-path
+  routing, so it does not replace or consume the paper workflow execution
+  pointer.
+- The scheduled lane writes its own pointer at
+  `outputs/workflow/<trade_date>/live_pilot_execution.json`.
+
+The normal paper cron remains paper-forced and continues to use
+`outputs/workflow/<trade_date>/execution.json`.
+
 ## Order Policy
 
 Current FR-104 policy:
