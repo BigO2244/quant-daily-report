@@ -54,6 +54,42 @@ def _fmt_number(value: object, *, digits: int = 2) -> str:
     return f"{numeric:.{digits}f}"
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _payload_rows(payload: Mapping[str, Any], key: str = "orders") -> list[dict[str, Any]]:
+    rows = payload.get(key)
+    if not isinstance(rows, list):
+        rows = payload.get("trades")
+    if not isinstance(rows, list):
+        return []
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _row_side(row: Mapping[str, Any]) -> str:
+    return str(row.get("side") or "").strip().upper()
+
+
+def _row_status(row: Mapping[str, Any]) -> str:
+    order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
+    status = row.get("status") or order.get("status") or ""
+    value = str(status).strip().lower()
+    if "." in value:
+        value = value.rsplit(".", 1)[-1]
+    return value
+
+
+def _is_unfilled_buy(row: Mapping[str, Any]) -> bool:
+    if _row_side(row) != "BUY":
+        return False
+    status = _row_status(row)
+    return status not in {"", "filled", "rejected", "canceled", "cancelled", "expired", "failed", "dry_run_not_submitted"}
+
+
 def _manifest_sleeves(repo_root: Path) -> dict[str, dict[str, Any]]:
     path = repo_root / "research_registry" / "sleeves" / "manifest.json"
     payload = _load_json(path)
@@ -268,8 +304,11 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
     summary = _load_json(run_root / "live_pilot_operator_summary.json")
     recon = _load_json(run_root / "live_pilot_reconciliation.json")
     evidence = _load_json(run_root / "live_pilot_evidence_metrics.json")
+    execution_results = _load_json(run_root / "execution_results.json")
+    intended_payload = _load_json(run_root / "live_pilot_orders_intended.json")
     submitted_payload = _load_json(run_root / "live_pilot_orders_submitted.json")
-    submitted = submitted_payload.get("orders") if isinstance(submitted_payload.get("orders"), list) else []
+    intended = _payload_rows(intended_payload)
+    submitted = _payload_rows(submitted_payload)
     snapshot = _load_json(run_root / "live_pilot_broker_snapshot_post.json")
     if not snapshot.get("account"):
         snapshot = _load_json(run_root / "live_pilot_broker_snapshot_pre.json")
@@ -280,6 +319,60 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         row for row in submitted
         if isinstance(row, dict) and str(row.get("status") or "").strip().lower() == "filled"
     ]
+    approved_buys = [row for row in intended if _row_side(row) == "BUY"]
+    submitted_buys = [
+        row for row in submitted
+        if _row_side(row) == "BUY" and _row_status(row) != "dry_run_not_submitted"
+    ]
+    unfilled_buys = [row for row in submitted_buys if _is_unfilled_buy(row)]
+    escalated_buys = [
+        row for row in (submitted or intended)
+        if _row_side(row) == "BUY"
+        and str(row.get("escalation_reason") or "").strip()
+        and str(row.get("escalation_reason")) != "none"
+    ]
+    policy_rows = submitted or intended
+    first_policy_row = (policy_rows or [{}])[0]
+    fallback_marketable_count = (
+        sum(1 for row in policy_rows if bool(row.get("is_marketable")))
+        if policy_rows
+        else "unavailable"
+    )
+    fallback_passive_count = (
+        sum(1 for row in policy_rows if bool(row.get("is_passive")))
+        if policy_rows
+        else "unavailable"
+    )
+    approved_buy_count = _first_present(
+        execution_results.get("approved_buy_count"),
+        summary.get("approved_buy_count"),
+        evidence.get("approved_buy_count"),
+        len(approved_buys),
+    )
+    submitted_buy_count = _first_present(
+        execution_results.get("submitted_buy_count"),
+        summary.get("submitted_buy_count"),
+        evidence.get("submitted_buy_count"),
+        len(submitted_buys),
+    )
+    unfilled_buy_count = _first_present(
+        execution_results.get("unfilled_buy_count"),
+        summary.get("unfilled_buy_count"),
+        evidence.get("unfilled_buy_count"),
+        len(unfilled_buys),
+    )
+    escalated_buy_count = _first_present(
+        execution_results.get("escalated_buy_count"),
+        summary.get("escalated_buy_count"),
+        evidence.get("escalated_buy_count"),
+        len(escalated_buys),
+    )
+    remaining_blocked_or_suppressed_buy_count = _first_present(
+        execution_results.get("remaining_blocked_or_suppressed_buy_count"),
+        summary.get("remaining_blocked_or_suppressed_buy_count"),
+        evidence.get("remaining_blocked_or_suppressed_buy_count"),
+        max(int(approved_buy_count or 0) - int(submitted_buy_count or 0), 0),
+    )
     return {
         "status": "OK",
         "latest_run_id": summary.get("run_id") or run_root.name,
@@ -292,6 +385,58 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         "filled_orders": filled,
         "reconciliation_status": recon.get("status") or summary.get("reason_code") or "unavailable",
         "evidence_metrics": evidence,
+        "execution_results": execution_results,
+        "approved_buy_count": approved_buy_count,
+        "submitted_buy_count": submitted_buy_count,
+        "unfilled_buy_count": unfilled_buy_count,
+        "escalated_buy_count": escalated_buy_count,
+        "remaining_blocked_or_suppressed_buy_count": remaining_blocked_or_suppressed_buy_count,
+        "blocked_or_suppressed_buy_reason": (
+            summary.get("reason_code")
+            if int(remaining_blocked_or_suppressed_buy_count or 0) > 0
+            else "none"
+        ),
+        "entry_execution_policy": _first_present(
+            execution_results.get("entry_execution_policy"),
+            summary.get("entry_execution_policy"),
+            evidence.get("entry_execution_policy"),
+            first_policy_row.get("entry_execution_policy"),
+            "unavailable",
+        ),
+        "submitted_order_type": _first_present(
+            execution_results.get("submitted_order_type"),
+            summary.get("submitted_order_type"),
+            evidence.get("submitted_order_type"),
+            first_policy_row.get("submitted_order_type"),
+            "unavailable",
+        ),
+        "marketable_order_count": _first_present(
+            execution_results.get("marketable_order_count"),
+            summary.get("marketable_order_count"),
+            evidence.get("marketable_order_count"),
+            fallback_marketable_count,
+            "unavailable",
+        ),
+        "passive_order_count": _first_present(
+            execution_results.get("passive_order_count"),
+            summary.get("passive_order_count"),
+            evidence.get("passive_order_count"),
+            fallback_passive_count,
+            "unavailable",
+        ),
+        "prior_unfilled_attempts": _first_present(
+            execution_results.get("prior_unfilled_attempts"),
+            summary.get("prior_unfilled_attempts"),
+            evidence.get("prior_unfilled_attempts"),
+            first_policy_row.get("prior_unfilled_attempts"),
+            0,
+        ),
+        "escalation_reason": _first_present(
+            first_policy_row.get("escalation_reason"),
+            execution_results.get("escalation_reason"),
+            summary.get("escalation_reason"),
+            "none",
+        ),
         "paper_live_divergence": _paper_live_divergence(root),
         "open_order_count": _open_order_count(snapshot),
     }
@@ -359,6 +504,17 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
             f"Fill rate: {_fmt_pct(evidence.get('fill_rate'))}",
             f"Cash deployment rate: {_fmt_pct(evidence.get('cash_deployment_rate'))}",
             f"Idle cash reason: {evidence.get('idle_cash_reason') or 'unavailable'}",
+            f"Approved buys: {live_payload.get('approved_buy_count')}",
+            f"Submitted buys: {live_payload.get('submitted_buy_count')}",
+            f"Unfilled buys: {live_payload.get('unfilled_buy_count')}",
+            f"Escalated buys: {live_payload.get('escalated_buy_count')}",
+            f"Entry execution policy: {live_payload.get('entry_execution_policy')}",
+            f"Submitted order type: {live_payload.get('submitted_order_type')}",
+            f"Marketable/passive orders: {live_payload.get('marketable_order_count')}/{live_payload.get('passive_order_count')}",
+            f"Prior unfilled attempts: {live_payload.get('prior_unfilled_attempts')}",
+            f"Escalation reason: {live_payload.get('escalation_reason')}",
+            f"Remaining blocked/suppressed buys: {live_payload.get('remaining_blocked_or_suppressed_buy_count')}",
+            f"Blocked/suppressed reason: {live_payload.get('blocked_or_suppressed_buy_reason')}",
         ]
     )
 
@@ -421,6 +577,19 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
         f"<b>Cash deployment:</b> {html.escape(_fmt_pct(evidence.get('cash_deployment_rate')))} | "
         f"<b>Idle cash reason:</b> {html.escape(str(evidence.get('idle_cash_reason') or 'unavailable'))} | "
         f"<b>Paper/live divergence:</b> {html.escape(str(live_payload.get('paper_live_divergence')))}</p>"
+        f"<p><b>Approved buys:</b> {html.escape(str(live_payload.get('approved_buy_count')))} | "
+        f"<b>Submitted buys:</b> {html.escape(str(live_payload.get('submitted_buy_count')))} | "
+        f"<b>Unfilled buys:</b> {html.escape(str(live_payload.get('unfilled_buy_count')))} | "
+        f"<b>Escalated buys:</b> {html.escape(str(live_payload.get('escalated_buy_count')))}</p>"
+        f"<p><b>Entry execution policy:</b> {html.escape(str(live_payload.get('entry_execution_policy')))} | "
+        f"<b>Submitted order type:</b> {html.escape(str(live_payload.get('submitted_order_type')))} | "
+        f"<b>Marketable/passive:</b> {html.escape(str(live_payload.get('marketable_order_count')))}"
+        f"/{html.escape(str(live_payload.get('passive_order_count')))} | "
+        f"<b>Prior unfilled attempts:</b> {html.escape(str(live_payload.get('prior_unfilled_attempts')))}</p>"
+        f"<p><b>Escalation reason:</b> {html.escape(str(live_payload.get('escalation_reason')))} | "
+        f"<b>Remaining blocked/suppressed buys:</b> "
+        f"{html.escape(str(live_payload.get('remaining_blocked_or_suppressed_buy_count')))} | "
+        f"<b>Reason:</b> {html.escape(str(live_payload.get('blocked_or_suppressed_buy_reason')))}</p>"
     )
 
     return {"text": "\n".join(text_lines) + "\n", "html": html_section}

@@ -29,6 +29,14 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Phase 2: Order Execution
 35 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_execute.sh >> $HOME/quant-daily-report/logs/cron_execute.log 2>&1
 
+# Phase 2b: LIVE_PILOT automated lane. Disabled unless
+# CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1, and live submission still requires
+# CAERUS_LIVE_PILOT_CRON_APPROVED=1 plus CAERUS_LIVE_PILOT_SUBMIT_APPROVED=1.
+36 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_live_pilot_execute.sh >> $HOME/quant-daily-report/logs/cron_live_pilot_execute.log 2>&1
+
+# Phase 3b: LIVE_PILOT confirmation email from isolated live-pilot artifacts.
+45 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_live_pilot_confirm.sh >> $HOME/quant-daily-report/logs/cron_live_pilot_confirm.log 2>&1
+
 # Phase 3: Confirmation + Email
 0 10 * * 1-5 $HOME/quant-daily-report/scripts/cron_confirm.sh >> $HOME/quant-daily-report/logs/cron_confirm.log 2>&1
 

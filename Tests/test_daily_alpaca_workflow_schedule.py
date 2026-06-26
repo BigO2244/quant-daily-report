@@ -19,6 +19,8 @@ def test_vm_crontab_owns_daily_production_schedule() -> None:
     assert "CRON_TZ=America/New_York" in crontab
     assert "0 7 * * 1-5 $HOME/quant-daily-report/scripts/cron_precompute.sh" in crontab
     assert "35 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_execute.sh" in crontab
+    assert "36 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_live_pilot_execute.sh" in crontab
+    assert "45 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_live_pilot_confirm.sh" in crontab
     assert "0 10 * * 1-5 $HOME/quant-daily-report/scripts/cron_confirm.sh" in crontab
 
 

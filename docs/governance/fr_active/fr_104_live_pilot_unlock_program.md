@@ -47,11 +47,42 @@ Live pilot submission requires all of the following:
 
 Any failed control blocks before Alpaca SDK submission.
 
+## Scheduled Automation
+
+FR-104 has a separate VM cron lane from the paper execution lane:
+
+- `scripts/cron_live_pilot_execute.sh` runs after paper execution, builds the
+  current-date live-pilot plan from the precompute bundle, validates the plan,
+  runs a dry-run executor pass, and submits only when
+  `CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1`,
+  `CAERUS_LIVE_PILOT_CRON_APPROVED=1`, and
+  `CAERUS_LIVE_PILOT_SUBMIT_APPROVED=1`.
+- `scripts/cron_live_pilot_confirm.sh` sends the confirmation email from the
+  isolated live-pilot run's `execution_results.json` via explicit results-path
+  routing, so it does not replace or consume the paper workflow execution
+  pointer.
+- The scheduled lane writes its own pointer at
+  `outputs/workflow/<trade_date>/live_pilot_execution.json`.
+
+The normal paper cron remains paper-forced and continues to use
+`outputs/workflow/<trade_date>/execution.json`.
+
 ## Order Policy
 
 Current FR-104 policy:
 
 - long-only US equity market orders during normal market hours only;
+- approved live-pilot BUY entries are submitted as market orders even if an
+  older approved plan still says `order_type=limit`;
+- prior submitted-but-unfilled live-pilot BUY artifacts are scanned by
+  ticker/date/run before submission; three prior unfilled attempts records a
+  session-limit escalation reason instead of allowing passive limit misses to
+  continue silently;
+- live-pilot plan rows may recover execution-sleeve provenance from canonical
+  precompute `live_strategy_id` / `strategy_identity.live_strategy_id` when the
+  trade row omits `sleeve`; recovered execution sleeve must still match the
+  approved live-pilot sleeve id, while per-ticker signal sleeves are recorded
+  only as source provenance;
 - market orders require explicit estimated notional before submission;
 - estimated notional must be computed from normalized expected/cap-enforcement
   price and final quantity before any broker call;
@@ -79,11 +110,13 @@ Required artifacts:
 - `live_pilot_broker_snapshot_pre.json`
 - `live_pilot_broker_snapshot_post.json`
 - `live_pilot_open_order_check.json`
+- `live_pilot_entry_attempt_history.json`
 - `live_pilot_market_hours_gate.json`
 - `live_pilot_reconciliation.json`
 - `live_pilot_evidence_metrics.json`
 - `live_pilot_capital_usage.json`
 - `live_pilot_operator_summary.json`
+- `execution_results.json`
 
 It does not write to `outputs/runs`, `outputs/broker`, `outputs/paper_state`,
 or `outputs/orders_sent`.

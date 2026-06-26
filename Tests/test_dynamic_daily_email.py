@@ -168,7 +168,37 @@ def _write_live_pilot_run(root: Path) -> None:
     )
     _write_json(
         run / "live_pilot_orders_submitted.json",
-        {"orders": [{"symbol": "AAPL", "status": "filled", "filled_avg_price": "50"}]},
+        {
+            "orders": [
+                {
+                    "symbol": "AAPL",
+                    "side": "BUY",
+                    "status": "filled",
+                    "filled_avg_price": "50",
+                    "entry_execution_policy": "live_pilot_buy_market_order_immediate",
+                    "submitted_order_type": "market",
+                    "is_marketable": True,
+                    "is_passive": False,
+                    "prior_unfilled_attempts": 2,
+                    "escalation_reason": "prior_unfilled_live_buy_attempts_detected",
+                }
+            ]
+        },
+    )
+    _write_json(
+        run / "live_pilot_orders_intended.json",
+        {
+            "orders": [
+                {
+                    "symbol": "AAPL",
+                    "side": "BUY",
+                    "entry_execution_policy": "live_pilot_buy_market_order_immediate",
+                    "submitted_order_type": "market",
+                    "prior_unfilled_attempts": 2,
+                    "escalation_reason": "prior_unfilled_live_buy_attempts_detected",
+                }
+            ]
+        },
     )
     _write_json(
         run / "live_pilot_evidence_metrics.json",
@@ -179,6 +209,29 @@ def _write_live_pilot_run(root: Path) -> None:
             "fill_rate": 1.0,
             "cash_deployment_rate": 0.5,
             "idle_cash_reason": "partial_cap_deployment",
+            "approved_buy_count": 1,
+            "submitted_buy_count": 1,
+            "unfilled_buy_count": 0,
+            "escalated_buy_count": 1,
+            "entry_execution_policy": "live_pilot_buy_market_order_immediate",
+            "submitted_order_type": "market",
+            "marketable_order_count": 1,
+            "passive_order_count": 0,
+            "prior_unfilled_attempts": 2,
+        },
+    )
+    _write_json(
+        run / "execution_results.json",
+        {
+            "approved_buy_count": 1,
+            "submitted_buy_count": 1,
+            "unfilled_buy_count": 0,
+            "escalated_buy_count": 1,
+            "entry_execution_policy": "live_pilot_buy_market_order_immediate",
+            "submitted_order_type": "market",
+            "marketable_order_count": 1,
+            "passive_order_count": 0,
+            "prior_unfilled_attempts": 2,
         },
     )
 
@@ -199,6 +252,14 @@ def test_dynamic_sections_include_registry_manifest_alpha_and_live_account(tmp_p
     assert "Open orders: 1" in rendered["text"]
     assert "Filled pilot orders: 1" in rendered["text"]
     assert "Fill rate: 100.00%" in rendered["text"]
+    assert "Approved buys: 1" in rendered["text"]
+    assert "Submitted buys: 1" in rendered["text"]
+    assert "Unfilled buys: 0" in rendered["text"]
+    assert "Escalated buys: 1" in rendered["text"]
+    assert "Entry execution policy: live_pilot_buy_market_order_immediate" in rendered["text"]
+    assert "Submitted order type: market" in rendered["text"]
+    assert "Marketable/passive orders: 1/0" in rendered["text"]
+    assert "Prior unfilled attempts: 2" in rendered["text"]
     assert "Polaris_Alpha" in rendered["html"]
 
 

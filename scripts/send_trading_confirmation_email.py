@@ -75,7 +75,32 @@ def _resolve_execution_pointer_optional(trade_date: str) -> dict | None:
         return None
 
 
+def _explicit_results_path() -> Path | None:
+    raw = str(os.getenv("TRADING_CONFIRMATION_RESULTS_PATH") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else _REPO_ROOT / path
+
+
+def _explicit_run_root() -> Path | None:
+    raw = str(os.getenv("TRADING_CONFIRMATION_RUN_ROOT") or "").strip()
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else _REPO_ROOT / path
+    results_path = _explicit_results_path()
+    if results_path is not None:
+        return results_path.parent
+    return None
+
+
 def _load_results(trade_date: str) -> tuple[dict, Path]:
+    explicit_path = _explicit_results_path()
+    if explicit_path is not None:
+        if not explicit_path.exists():
+            raise RuntimeError(f"Explicit confirmation results path does not exist: {explicit_path}")
+        return _load_json_dict(explicit_path), explicit_path
+
     latest = _resolve_execution_pointer_optional(trade_date)
 
     if latest:
@@ -341,6 +366,7 @@ def _load_reconciliation_data(trade_date: str, results_path: Path) -> dict:
         if summary_path:
             path = Path(summary_path)
             candidates.append(path if path.is_absolute() else _REPO_ROOT / path)
+        candidates.append(run_root / "live_pilot_reconciliation.json")
         candidates.append(run_root / "broker" / f"recon_posttrade_{trade_date}.json")
 
     candidates.append(_REPO_ROOT / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
@@ -374,7 +400,7 @@ def _format_reconciliation_section(recon: dict) -> tuple[str, str, bool]:
     payload = recon.get("payload") if isinstance(recon.get("payload"), dict) else {}
     path = recon.get("path")
     path_text = str(path) if path else "unavailable"
-    healthy = status in {"OK", "PASS", "OK_RECONCILED"}
+    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION"}
     if healthy:
         explanation = "Broker positions match expected post-execution state."
     elif status == "DRIFT_DETECTED":
@@ -430,6 +456,68 @@ def html_escape(value: object) -> str:
 def _fmt_pct(val: float) -> str:
     sign = "+" if val >= 0 else ""
     return f"{sign}{val * 100:.2f}%"
+
+
+def _format_live_pilot_buy_lifecycle(results: dict) -> tuple[str, str]:
+    keys = {
+        "approved_buy_count",
+        "submitted_buy_count",
+        "unfilled_buy_count",
+        "escalated_buy_count",
+        "entry_execution_policy",
+        "prior_unfilled_attempts",
+        "order_type_submitted",
+        "submitted_order_type",
+    }
+    if not any(key in results for key in keys):
+        return "", ""
+
+    submitted_order_type = (
+        results.get("order_type_submitted")
+        or results.get("submitted_order_type")
+        or "unavailable"
+    )
+    blocked_count = results.get("remaining_blocked_or_suppressed_buy_count")
+    if blocked_count is None:
+        try:
+            blocked_count = max(
+                int(results.get("approved_buy_count") or 0) - int(results.get("submitted_buy_count") or 0),
+                0,
+            )
+        except Exception:
+            blocked_count = "unavailable"
+    rows = [
+        ("Approved buys", results.get("approved_buy_count", "unavailable")),
+        ("Submitted buys", results.get("submitted_buy_count", "unavailable")),
+        ("Unfilled buys", results.get("unfilled_buy_count", "unavailable")),
+        ("Escalated buys", results.get("escalated_buy_count", "unavailable")),
+        ("Entry execution policy", results.get("entry_execution_policy", "unavailable")),
+        ("Submitted order type", submitted_order_type),
+        ("Marketable orders", results.get("marketable_order_count", "unavailable")),
+        ("Passive orders", results.get("passive_order_count", "unavailable")),
+        ("Prior unfilled attempts", results.get("prior_unfilled_attempts", "unavailable")),
+        ("Escalation reason", results.get("escalation_reason", "none")),
+        ("Remaining blocked/suppressed buys", blocked_count),
+        ("Blocked/suppressed reason", results.get("blocked_or_suppressed_buy_reason") or results.get("halt_reason") or "none"),
+    ]
+    text = (
+        "--- Live Pilot Buy Lifecycle ---\n"
+        + "\n".join(f"{label}: {value}" for label, value in rows)
+        + "\n"
+    )
+    html = (
+        "<h3>Live Pilot Buy Lifecycle</h3>"
+        "<table style='border-collapse:collapse; font-family:monospace; font-size:0.95em;'>"
+        + "".join(
+            "<tr>"
+            f"<td style='padding:4px 12px 4px 0;'><b>{html_escape(label)}</b></td>"
+            f"<td style='padding:4px 0;'>{html_escape(value)}</td>"
+            "</tr>"
+            for label, value in rows
+        )
+        + "</table>"
+    )
+    return text, html
 
 
 def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, str, str]:
@@ -548,6 +636,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     recon_text, recon_html, recon_healthy = _format_reconciliation_section(
         _load_reconciliation_data(trade_date, results_path)
     )
+    live_pilot_lifecycle_text, live_pilot_lifecycle_html = _format_live_pilot_buy_lifecycle(results)
 
     # ------------------------------------------------------------------ #
     # Performance vs SPY section
@@ -629,6 +718,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     body_text = (
         f"{execution_text}\n"
         f"{raw_diag_text}{chr(10) if raw_diag_text else ''}"
+        f"{live_pilot_lifecycle_text}{chr(10) if live_pilot_lifecycle_text else ''}"
         f"{recon_text}\n"
         f"{perf_text}"
         f"{shadow_text}"
@@ -640,6 +730,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         f"<h2>Trading Confirmation {html_escape(trade_date)} [{html_escape(status_display)}]</h2>"
         f"{execution_html}"
         f"{('<hr>' + raw_diag_html) if raw_diag_html else ''}"
+        f"{('<hr>' + live_pilot_lifecycle_html) if live_pilot_lifecycle_html else ''}"
         f"<hr>"
         f"{recon_html}"
         f"<hr>"
@@ -661,8 +752,9 @@ def main() -> None:
     results, results_path = _load_results(trade_date)
 
     # Load run context for operator summary updates
-    latest = _resolve_execution_pointer_optional(trade_date)
-    run_root = Path(str(latest.get("run_root") or "").strip()) if latest else None
+    explicit_run_root = _explicit_run_root()
+    latest = None if explicit_run_root is not None else _resolve_execution_pointer_optional(trade_date)
+    run_root = explicit_run_root or (Path(str(latest.get("run_root") or "").strip()) if latest else None)
 
     event = EmailEvent(
         event_type="trading_confirmation",
