@@ -17,6 +17,9 @@ class FakeBroker:
 
     def __init__(self, *, order_status: str = "accepted") -> None:
         self.submit_calls = 0
+        self.market_calls = 0
+        self.limit_calls = 0
+        self.submitted_methods: list[str] = []
         self.order_status = order_status
         self.open_orders: list[dict[str, object]] = []
 
@@ -54,6 +57,8 @@ class FakeBroker:
 
     def submit_market_order(self, **kwargs):
         self.submit_calls += 1
+        self.market_calls += 1
+        self.submitted_methods.append("market")
         return {
             "id": f"order-{self.submit_calls}",
             "status": self.order_status,
@@ -66,6 +71,8 @@ class FakeBroker:
 
     def submit_limit_order(self, **kwargs):
         self.submit_calls += 1
+        self.limit_calls += 1
+        self.submitted_methods.append("limit")
         return {
             "id": f"order-{self.submit_calls}",
             "status": self.order_status,
@@ -89,7 +96,45 @@ def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
 def _plan() -> dict[str, object]:
     return {
         "trades": [
-            {"ticker": "AAPL", "side": "BUY", "shares": 1, "limit_price": 50, "order_type": "market"},
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 1,
+                "limit_price": 50,
+                "order_type": "market",
+                "sleeve": "polaris",
+                "sleeve_source": "precompute_live_strategy_id",
+                "source_strategy_id": "polaris",
+                "source_signal_sleeve": "sleeve_trend",
+                "sleeve_provenance": {
+                    "sleeve_source": "precompute_live_strategy_id",
+                    "source_strategy_id": "polaris",
+                    "source_signal_sleeve": "sleeve_trend",
+                },
+            },
+        ]
+    }
+
+
+def _limit_plan() -> dict[str, object]:
+    return {
+        "trades": [
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 1,
+                "limit_price": 50,
+                "order_type": "limit",
+                "sleeve": "polaris",
+                "sleeve_source": "precompute_live_strategy_id",
+                "source_strategy_id": "polaris",
+                "source_signal_sleeve": "sleeve_trend",
+                "sleeve_provenance": {
+                    "sleeve_source": "precompute_live_strategy_id",
+                    "source_strategy_id": "polaris",
+                    "source_signal_sleeve": "sleeve_trend",
+                },
+            },
         ]
     }
 
@@ -116,6 +161,7 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     assert (run_root / "live_pilot_preflight.json").exists()
     assert (run_root / "live_pilot_orders_intended.json").exists()
     assert (run_root / "live_pilot_orders_submitted.json").exists()
+    assert (run_root / "live_pilot_entry_attempt_history.json").exists()
     assert (run_root / "live_pilot_broker_snapshot_pre.json").exists()
     assert (run_root / "live_pilot_broker_snapshot_post.json").exists()
     assert (run_root / "live_pilot_open_order_check.json").exists()
@@ -124,10 +170,17 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     assert (run_root / "live_pilot_evidence_metrics.json").exists()
     assert (run_root / "live_pilot_capital_usage.json").exists()
     assert (run_root / "live_pilot_operator_summary.json").exists()
+    assert (run_root / "execution_results.json").exists()
     assert not (tmp_path / "outputs" / "runs").exists()
 
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"][0]["status"] == "DRY_RUN_NOT_SUBMITTED"
+    assert submitted["orders"][0]["sleeve"] == "polaris"
+    assert submitted["orders"][0]["sleeve_source"] == "precompute_live_strategy_id"
+    assert submitted["orders"][0]["source_signal_sleeve"] == "sleeve_trend"
+    history = json.loads((run_root / "live_pilot_entry_attempt_history.json").read_text())
+    assert history["orders"][0]["sleeve"] == "polaris"
+    assert history["orders"][0]["source_strategy_id"] == "polaris"
 
 
 def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) -> None:
@@ -145,8 +198,13 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-submit"
     assert result["terminal_status"] == "SUBMITTED"
     assert broker.submit_calls == 1
+    assert broker.market_calls == 1
+    assert broker.limit_calls == 0
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"][0]["submitted_order_type"] == "market"
+    assert submitted["orders"][0]["entry_execution_policy"] == "live_pilot_buy_market_order_immediate"
+    assert submitted["orders"][0]["is_marketable"] is True
+    assert submitted["orders"][0]["is_passive"] is False
     assert submitted["orders"][0]["expected_price"] == 50
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
     assert reconciliation["status"] == "CLEAN"
@@ -159,6 +217,88 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     assert evidence["slippage_bps"] is not None
     usage = json.loads((run_root / "live_pilot_capital_usage.json").read_text())
     assert usage["submitted_notional_usd"] == 50
+
+
+def test_live_buy_limit_plan_is_submitted_as_market_with_policy_metadata(tmp_path: Path) -> None:
+    broker = FakeBroker(order_status="filled")
+
+    result = run_live_pilot(
+        plan=_limit_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-limit-to-market",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-limit-to-market"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_methods == ["market"]
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    assert intended["orders"][0]["approved_order_type"] == "limit"
+    assert intended["orders"][0]["submitted_order_type"] == "market"
+    assert intended["orders"][0]["escalation_reason"] == "approved_limit_buy_overridden_to_market"
+    assert intended["orders"][0]["sleeve"] == "polaris"
+    assert intended["orders"][0]["sleeve_source"] == "precompute_live_strategy_id"
+    assert intended["orders"][0]["source_signal_sleeve"] == "sleeve_trend"
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert submitted["orders"][0]["approved_order_type"] == "limit"
+    assert submitted["orders"][0]["submitted_order_type"] == "market"
+    assert submitted["orders"][0]["sleeve"] == "polaris"
+    results = json.loads((run_root / "execution_results.json").read_text())
+    assert results["entry_execution_policy"] == "live_pilot_buy_market_order_immediate"
+    assert results["submitted_order_type"] == "market"
+    assert results["marketable_order_count"] == 1
+    assert results["passive_order_count"] == 0
+
+
+def test_repeated_unfilled_live_buy_attempts_escalate_from_artifacts(tmp_path: Path) -> None:
+    output_root = tmp_path / "outputs" / "live_pilot"
+    for idx, trade_date in enumerate(["2026-06-20", "2026-06-22", "2026-06-23"], start=1):
+        prior_root = output_root / "runs" / f"{trade_date}T093500-0400_prior{idx}"
+        prior_root.mkdir(parents=True)
+        (prior_root / "live_pilot_operator_summary.json").write_text(
+            json.dumps({"run_id": prior_root.name, "generated_at": f"{trade_date}T13:35:00+00:00"}),
+            encoding="utf-8",
+        )
+        (prior_root / "live_pilot_orders_submitted.json").write_text(
+            json.dumps(
+                {
+                    "orders": [
+                        {
+                            "symbol": "AAPL",
+                            "side": "BUY",
+                            "status": "OrderStatus.NEW",
+                            "submitted_order_type": "limit",
+                            "client_order_id": f"prior-{idx}",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+    broker = FakeBroker(order_status="filled")
+
+    result = run_live_pilot(
+        plan=_limit_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-escalated",
+        output_root=output_root,
+        now_et=_market_open_now(),
+    )
+
+    run_root = output_root / "runs" / "run-escalated"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_methods == ["market"]
+    history = json.loads((run_root / "live_pilot_entry_attempt_history.json").read_text())
+    assert history["orders"][0]["prior_unfilled_attempts"] == 3
+    assert history["orders"][0]["escalation_reason"] == "prior_unfilled_attempts_reached_three_session_limit"
+    assert history["orders"][0]["prior_unfilled_attempts_detail"][0]["trade_date"] == "2026-06-20"
+    results = json.loads((run_root / "execution_results.json").read_text())
+    assert results["prior_unfilled_attempts"] == 3
+    assert results["escalated_buy_count"] == 1
+    assert results["unfilled_buy_count"] == 0
 
 
 def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path) -> None:

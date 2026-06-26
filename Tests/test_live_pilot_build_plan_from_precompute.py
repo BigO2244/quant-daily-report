@@ -7,20 +7,24 @@ from core.live_pilot_guardrails import validate_live_pilot_plan
 from scripts.live_pilot_build_plan_from_precompute import build_live_pilot_plan
 
 
-def _payload_path(tmp_path: Path, trades: list[dict[str, object]], *, trade_date: str = "2026-06-22") -> Path:
+def _payload_path(
+    tmp_path: Path,
+    trades: list[dict[str, object]],
+    *,
+    trade_date: str = "2026-06-22",
+    extra_payload: dict[str, object] | None = None,
+) -> Path:
     path = tmp_path / "outputs" / "precompute" / trade_date / "planned_execution_payload.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "trade_date": trade_date,
+        "mode": "PAPER",
+        "execution_status": "PLANNED",
+        "trades": trades,
+    }
+    payload.update(extra_payload or {})
     path.write_text(
-        json.dumps(
-            {
-                "trade_date": trade_date,
-                "mode": "PAPER",
-                "execution_status": "PLANNED",
-                "trades": trades,
-            },
-            indent=2,
-            sort_keys=True,
-        )
+        json.dumps(payload, indent=2, sort_keys=True)
         + "\n",
         encoding="utf-8",
     )
@@ -32,10 +36,12 @@ def _build(
     trades: list[dict[str, object]],
     *,
     allow_missing_sleeve: bool = False,
+    approved_sleeve: str = "polaris",
+    extra_payload: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return build_live_pilot_plan(
-        payload_path=_payload_path(tmp_path, trades),
-        approved_sleeve="polaris",
+        payload_path=_payload_path(tmp_path, trades, extra_payload=extra_payload),
+        approved_sleeve=approved_sleeve,
         capital_cap=100,
         max_orders=1,
         output_dir=tmp_path / "outputs" / "live_pilot" / "plans",
@@ -73,6 +79,84 @@ def test_over_cap_buy_is_scaled_to_pilot_cap(tmp_path: Path) -> None:
     assert selected["final_qty"] * selected["normalized_limit_price"] <= 100
     assert selected["notional"] <= 100
     assert plan["trades"] == [selected]
+
+
+def test_missing_trade_sleeve_recovers_live_strategy_and_signal_provenance(tmp_path: Path) -> None:
+    signals_path = tmp_path / "outputs" / "precompute" / "2026-06-22" / "signals.json"
+    signals_path.parent.mkdir(parents=True, exist_ok=True)
+    signals_path.write_text(
+        json.dumps(
+            {
+                "signals": [
+                    {
+                        "ticker": "SPG",
+                        "sleeve": "sleeve_trend",
+                        "target_weight": 0.0717,
+                        "raw_score": 0.19,
+                    }
+                ]
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    plan = _build(
+        tmp_path,
+        [
+            {
+                "ticker": "SPG",
+                "side": "BUY",
+                "shares": 2,
+                "limit_price": 50,
+            }
+        ],
+        approved_sleeve="growth_engine_v4",
+        extra_payload={
+            "live_strategy_id": "growth_engine_v4",
+            "strategy_identity": {"live_strategy_id": "growth_engine_v4"},
+            "execution_target_source": str(signals_path),
+        },
+    )
+
+    selected = plan["selected_order"]
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    assert selected["ticker"] == "SPG"
+    assert selected["sleeve"] == "growth_engine_v4"
+    assert selected["sleeve_source"] == "precompute_live_strategy_id"
+    assert selected["source_strategy_id"] == "growth_engine_v4"
+    assert selected["source_signal_sleeve"] == "sleeve_trend"
+    assert selected["source_signal_target_weight"] == 0.0717
+    assert selected["source_signal_raw_score"] == 0.19
+    assert selected["sleeve_provenance"]["missing_source_trade_sleeve_recovered"] is True
+
+
+def test_recovered_live_strategy_mismatch_fails_closed(tmp_path: Path) -> None:
+    plan = _build(
+        tmp_path,
+        [
+            {
+                "ticker": "SPG",
+                "side": "BUY",
+                "shares": 2,
+                "limit_price": 50,
+            }
+        ],
+        approved_sleeve="orion",
+        extra_payload={
+            "live_strategy_id": "growth_engine_v4",
+            "strategy_identity": {"live_strategy_id": "growth_engine_v4"},
+        },
+    )
+
+    assert plan["status"] == "BLOCKED_NO_QUALIFYING_ORDER"
+    rejection = plan["rejected_orders_with_reasons"][0]
+    assert rejection["ticker"] == "SPG"
+    assert rejection["sleeve"] == "growth_engine_v4"
+    assert "sleeve_mismatch:growth_engine_v4" in rejection["reasons"]
+    assert rejection["sleeve_provenance"]["sleeve_source"] == "precompute_live_strategy_id"
 
 
 def test_scaled_buy_uses_normalized_limit_price_for_final_qty(tmp_path: Path) -> None:

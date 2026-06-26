@@ -52,6 +52,17 @@ Any failed control blocks before Alpaca SDK submission.
 Current FR-104 policy:
 
 - long-only US equity market orders during normal market hours only;
+- approved live-pilot BUY entries are submitted as market orders even if an
+  older approved plan still says `order_type=limit`;
+- prior submitted-but-unfilled live-pilot BUY artifacts are scanned by
+  ticker/date/run before submission; three prior unfilled attempts records a
+  session-limit escalation reason instead of allowing passive limit misses to
+  continue silently;
+- live-pilot plan rows may recover execution-sleeve provenance from canonical
+  precompute `live_strategy_id` / `strategy_identity.live_strategy_id` when the
+  trade row omits `sleeve`; recovered execution sleeve must still match the
+  approved live-pilot sleeve id, while per-ticker signal sleeves are recorded
+  only as source provenance;
 - market orders require explicit estimated notional before submission;
 - estimated notional must be computed from normalized expected/cap-enforcement
   price and final quantity before any broker call;
@@ -79,11 +90,13 @@ Required artifacts:
 - `live_pilot_broker_snapshot_pre.json`
 - `live_pilot_broker_snapshot_post.json`
 - `live_pilot_open_order_check.json`
+- `live_pilot_entry_attempt_history.json`
 - `live_pilot_market_hours_gate.json`
 - `live_pilot_reconciliation.json`
 - `live_pilot_evidence_metrics.json`
 - `live_pilot_capital_usage.json`
 - `live_pilot_operator_summary.json`
+- `execution_results.json`
 
 It does not write to `outputs/runs`, `outputs/broker`, `outputs/paper_state`,
 or `outputs/orders_sent`.

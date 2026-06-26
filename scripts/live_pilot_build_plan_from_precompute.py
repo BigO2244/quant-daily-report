@@ -71,17 +71,124 @@ def _extract_trades(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [trade for trade in trades if isinstance(trade, Mapping)]
 
 
-def _trade_sleeve(trade: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
+def _payload_strategy_identity(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = payload.get("strategy_identity")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _trade_sleeve_provenance(
+    trade: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    source_signal: Mapping[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
     value = _first_nonempty(
         trade,
         ("sleeve", "sleeve_id", "approved_sleeve", "strategy", "strategy_id", "strategy_name"),
     )
+    source = "source_trade"
     if value is None:
         value = _first_nonempty(
             payload,
             ("sleeve", "sleeve_id", "approved_sleeve", "strategy", "strategy_id", "strategy_name"),
         )
-    return str(value or "").strip()
+        source = "source_payload"
+    strategy_identity = _payload_strategy_identity(payload)
+    if value is None:
+        value = _first_nonempty(
+            payload,
+            ("live_strategy_id",),
+        )
+        source = "precompute_live_strategy_id"
+    if value is None:
+        value = _first_nonempty(
+            strategy_identity,
+            ("live_strategy_id", "strategy_id", "strategy", "strategy_name"),
+        )
+        source = "precompute_strategy_identity"
+    if value is None and source_signal is not None:
+        value = _first_nonempty(
+            source_signal,
+            ("sleeve", "sleeve_id", "strategy", "strategy_id", "strategy_name"),
+        )
+        source = "precompute_signal_ticker_match"
+
+    signal_sleeve = None
+    signal_target_weight = None
+    signal_raw_score = None
+    if source_signal is not None:
+        signal_sleeve = _first_nonempty(
+            source_signal,
+            ("sleeve", "sleeve_id", "strategy", "strategy_id", "strategy_name"),
+        )
+        signal_target_weight = source_signal.get("target_weight")
+        signal_raw_score = source_signal.get("raw_score")
+
+    sleeve = str(value or "").strip()
+    return sleeve, {
+        "sleeve_source": source if sleeve else None,
+        "source_strategy_id": str(
+            payload.get("live_strategy_id")
+            or strategy_identity.get("live_strategy_id")
+            or strategy_identity.get("strategy_id")
+            or ""
+        ).strip() or None,
+        "source_strategy_identity": dict(strategy_identity) if strategy_identity else None,
+        "source_signal_sleeve": str(signal_sleeve or "").strip() or None,
+        "source_signal_target_weight": signal_target_weight,
+        "source_signal_raw_score": signal_raw_score,
+        "missing_source_trade_sleeve_recovered": value is not None
+        and _first_nonempty(
+            trade,
+            ("sleeve", "sleeve_id", "approved_sleeve", "strategy", "strategy_id", "strategy_name"),
+        )
+        is None,
+    }
+
+
+def _resolve_payload_relative_path(payload_path: Path, raw_path: object) -> Path | None:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate
+    candidates = [candidate]
+    parts = list(payload_path.parts)
+    try:
+        outputs_index = parts.index("outputs")
+    except ValueError:
+        outputs_index = -1
+    if outputs_index > 0:
+        repo_root = Path(*parts[:outputs_index])
+        candidates.append(repo_root / candidate)
+    candidates.append(payload_path.parent / candidate.name)
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+def _source_signal_lookup(payload_path: Path, payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    path = _resolve_payload_relative_path(payload_path, payload.get("execution_target_source"))
+    if path is None or not path.exists():
+        return {}
+    try:
+        source_payload = _read_json(path)
+    except Exception:
+        return {}
+    if not isinstance(source_payload, Mapping):
+        return {}
+    signals = source_payload.get("signals")
+    if not isinstance(signals, list):
+        return {}
+    out: dict[str, Mapping[str, Any]] = {}
+    for raw in signals:
+        if not isinstance(raw, Mapping):
+            continue
+        ticker = _clean_symbol(raw.get("ticker") or raw.get("symbol"))
+        if ticker and ticker not in out:
+            out[ticker] = raw
+    return out
 
 
 def _limit_price(trade: Mapping[str, Any]) -> tuple[float | None, str | None]:
@@ -110,12 +217,22 @@ def _reject(
     *,
     index: int,
     reasons: list[str],
+    sleeve: str | None = None,
+    sleeve_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "index": index,
         "ticker": _clean_symbol(trade.get("ticker") or trade.get("symbol")),
         "side": str(trade.get("side") or "").strip().upper(),
-        "sleeve": str(trade.get("sleeve") or trade.get("sleeve_id") or trade.get("strategy") or "").strip(),
+        "sleeve": str(
+            sleeve
+            if sleeve is not None
+            else trade.get("sleeve")
+            or trade.get("sleeve_id")
+            or trade.get("strategy")
+            or ""
+        ).strip(),
+        "sleeve_provenance": dict(sleeve_provenance or {}),
         "notional": _safe_float(trade.get("notional")),
         "reasons": list(reasons),
         "source_trade": dict(trade),
@@ -127,6 +244,7 @@ def _candidate_order(
     *,
     index: int,
     payload: Mapping[str, Any],
+    source_signal: Mapping[str, Any] | None,
     approved_sleeve: str,
     capital_cap: float,
     allow_missing_sleeve: bool,
@@ -134,7 +252,7 @@ def _candidate_order(
     reasons: list[str] = []
     ticker = _clean_symbol(trade.get("ticker") or trade.get("symbol"))
     side = str(trade.get("side") or "").strip().upper()
-    sleeve = _trade_sleeve(trade, payload)
+    sleeve, sleeve_provenance = _trade_sleeve_provenance(trade, payload, source_signal)
     shares = _shares(trade)
     limit_price, limit_price_source = _limit_price(trade)
     asset_class = _asset_class(trade)
@@ -150,6 +268,8 @@ def _candidate_order(
         if allow_missing_sleeve and side == "BUY":
             sleeve = approved_sleeve
             missing_sleeve_overridden = True
+            sleeve_provenance["sleeve_source"] = "missing_in_source_overridden_for_live_pilot"
+            sleeve_provenance["approved_sleeve_override"] = approved_sleeve
         else:
             reasons.append("missing_sleeve")
     elif sleeve != approved_sleeve:
@@ -181,7 +301,13 @@ def _candidate_order(
         scaled_to_pilot_cap = abs(float(final_qty) - float(shares)) > 1e-12
 
     if reasons:
-        return None, _reject(trade, index=index, reasons=reasons)
+        return None, _reject(
+            trade,
+            index=index,
+            reasons=reasons,
+            sleeve=sleeve,
+            sleeve_provenance=sleeve_provenance,
+        )
 
     pilot_notional = float(Decimal(str(final_qty or 0.0)) * Decimal(str(normalized_limit_price or 0.0)))
     order = {
@@ -212,7 +338,12 @@ def _candidate_order(
         "pilot_qty": float(final_qty or 0.0),
         "final_qty": float(final_qty or 0.0),
         "scale_reason": "live_pilot_cap" if scaled_to_pilot_cap else None,
-        "sleeve_source": "missing_in_source_overridden_for_live_pilot" if missing_sleeve_overridden else "source",
+        "sleeve_source": sleeve_provenance.get("sleeve_source") or "source",
+        "sleeve_provenance": sleeve_provenance,
+        "source_strategy_id": sleeve_provenance.get("source_strategy_id"),
+        "source_signal_sleeve": sleeve_provenance.get("source_signal_sleeve"),
+        "source_signal_target_weight": sleeve_provenance.get("source_signal_target_weight"),
+        "source_signal_raw_score": sleeve_provenance.get("source_signal_raw_score"),
         "approved_sleeve_override": approved_sleeve if missing_sleeve_overridden else None,
     }
     for key in ("stop_loss", "take_profit"):
@@ -257,6 +388,7 @@ def build_live_pilot_plan(
         raise ValueError("planned execution payload must be a JSON object")
     trade_date = str(payload.get("trade_date") or payload_path.parent.name)
     trades = _extract_trades(payload)
+    signal_lookup = _source_signal_lookup(payload_path, payload)
 
     candidates: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -265,6 +397,7 @@ def build_live_pilot_plan(
             trade,
             index=index,
             payload=payload,
+            source_signal=signal_lookup.get(_clean_symbol(trade.get("ticker") or trade.get("symbol"))),
             approved_sleeve=approved_sleeve,
             capital_cap=float(capital_cap),
             allow_missing_sleeve=bool(allow_missing_sleeve),
@@ -397,6 +530,9 @@ def render_markdown(plan: Mapping[str, Any], *, json_path: Path) -> str:
                 f"- Order Type: `{selected.get('order_type')}`",
                 f"- Expected/Cap Price: `{selected.get('expected_price') or selected.get('limit_price')}`",
                 f"- Notional: `${float(selected.get('notional') or 0.0):.2f}`",
+                f"- Sleeve: `{selected.get('sleeve')}`",
+                f"- Sleeve Source: `{selected.get('sleeve_source')}`",
+                f"- Source Signal Sleeve: `{selected.get('source_signal_sleeve') or 'n/a'}`",
             ]
         )
     else:

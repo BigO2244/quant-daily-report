@@ -81,3 +81,42 @@ def test_genuine_partial_remains_partial_with_observed_fills(tmp_path):
     assert "Status: PARTIAL" in body_text
     assert "Filled: 5" in body_text
     assert "Raw Execution (pre-reconciliation)" not in body_text
+
+
+def test_confirmation_email_renders_live_pilot_buy_lifecycle(tmp_path):
+    results = _results(
+        mode="LIVE_PILOT",
+        status="SUBMITTED",
+        operator_execution_status="executed",
+        halt_reason=None,
+        submitted_count=1,
+        accepted_count=1,
+        orders_filled_count=0,
+        approved_buy_count=1,
+        submitted_buy_count=1,
+        unfilled_buy_count=1,
+        escalated_buy_count=1,
+        entry_execution_policy="live_pilot_buy_market_order_immediate",
+        submitted_order_type="market",
+        marketable_order_count=1,
+        passive_order_count=0,
+        prior_unfilled_attempts=3,
+        escalation_reason="prior_unfilled_attempts_reached_three_session_limit",
+        remaining_blocked_or_suppressed_buy_count=0,
+        blocked_or_suppressed_buy_reason="none",
+    )
+
+    _, body_text, body_html = _build_confirmation_email(
+        results, tmp_path / "execution_results.json"
+    )
+
+    assert "Live Pilot Buy Lifecycle" in body_text
+    assert "Approved buys: 1" in body_text
+    assert "Submitted buys: 1" in body_text
+    assert "Unfilled buys: 1" in body_text
+    assert "Escalated buys: 1" in body_text
+    assert "Entry execution policy: live_pilot_buy_market_order_immediate" in body_text
+    assert "Submitted order type: market" in body_text
+    assert "Prior unfilled attempts: 3" in body_text
+    assert "prior_unfilled_attempts_reached_three_session_limit" in body_text
+    assert "Live Pilot Buy Lifecycle" in body_html
