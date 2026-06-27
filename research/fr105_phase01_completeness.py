@@ -112,6 +112,15 @@ def _mtime(path: Path | None) -> str | None:
     return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _artifact_timestamp(path: Path | None) -> str | None:
+    payload = _as_dict(_read_json(path))
+    metadata = _as_dict(payload.get("metadata"))
+    generated_at = metadata.get("generated_at")
+    if generated_at not in (None, ""):
+        return str(generated_at)
+    return _mtime(path)
+
+
 def _status_for_path(path: Path | None, *, expected: bool = True) -> str:
     if path is None:
         return UNAVAILABLE if not expected else MISSING
@@ -123,7 +132,7 @@ def _artifact_entry(path: Path | None, repo_root: Path, *, expected: bool = True
     return {
         "path": _relative(path, repo_root),
         "status": status,
-        "timestamp": _mtime(path) if status == FOUND else None,
+        "timestamp": _artifact_timestamp(path) if status == FOUND else None,
         "sha256": _sha256(path) if status == FOUND else None,
     }
 
@@ -180,6 +189,10 @@ def _candidate_rows(contract: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in _as_list(contract.get("sleeve_candidates")) if isinstance(row, Mapping)]
 
 
+def _selected_target_rows(contract: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [dict(row) for row in _as_list(contract.get("selected_target_candidates")) if isinstance(row, Mapping)]
+
+
 def _position_rows(contract: Mapping[str, Any], baseline: Mapping[str, Any]) -> list[dict[str, Any]]:
     baseline_rows = _as_list(_as_dict(baseline.get("baseline_positions")).get("positions"))
     if baseline_rows:
@@ -225,6 +238,8 @@ def _required_evidence(
 ) -> dict[str, dict[str, Any]]:
     source_artifacts = _as_dict(contract.get("source_artifacts"))
     candidates = _candidate_rows(contract)
+    selected_targets = _selected_target_rows(contract)
+    target_source_rows = candidates + selected_targets
     positions = _position_rows(contract, baseline)
     universe = _as_dict(contract.get("universe_snapshot"))
     controls = _as_dict(baseline.get("pit_controls"))
@@ -239,11 +254,15 @@ def _required_evidence(
         for value in (universe.get("universe_id"), universe.get("ticker_count"), universe.get("source_artifact_path"))
     ) or universe.get("status") not in (None, "", "unavailable")
     pit_values = {
-        "data_asof": controls.get("data_asof") or _first_present(*(row.get("data_asof") for row in candidates)),
+        "data_asof": controls.get("data_asof") or _first_present(*(row.get("data_asof") for row in target_source_rows)),
         "universe_asof": controls.get("universe_asof") or universe.get("asof"),
         "price_asof": controls.get("price_asof") or _as_dict(contract.get("metadata")).get("price_asof"),
     }
-    target_weight_count = sum(1 for row in candidates if _has_numeric_or_text(row.get("target_weight")))
+    target_weight_count = sum(
+        1
+        for row in target_source_rows
+        if _has_numeric_or_text(_first_present(row.get("target_weight"), row.get("final_target_weight")))
+    )
     current_weight_count = sum(
         1
         for row in positions
@@ -296,10 +315,18 @@ def _required_evidence(
         ),
         "score_source": _score_source_status(candidates),
         "sleeve_source": _field(
-            FOUND if any(row.get("sleeve_id") or row.get("strategy_id") or row.get("source_model") for row in candidates) else UNAVAILABLE,
-            evidence={"candidate_count_with_sleeve_source": sum(1 for row in candidates if row.get("sleeve_id") or row.get("strategy_id") or row.get("source_model"))},
-            source="global_optimizer_replay_contract.sleeve_candidates",
-            reason=None if candidates else "candidate_pool_unavailable",
+            FOUND if any(row.get("sleeve_id") or row.get("strategy_id") or row.get("source_model") for row in target_source_rows) else UNAVAILABLE,
+            evidence={
+                "candidate_count_with_sleeve_source": sum(
+                    1
+                    for row in target_source_rows
+                    if row.get("sleeve_id") or row.get("strategy_id") or row.get("source_model")
+                ),
+                "canonical_candidate_count": len(candidates),
+                "selected_target_count": len(selected_targets),
+            },
+            source="global_optimizer_replay_contract.sleeve_candidates or selected_target_candidates",
+            reason=None if target_source_rows else "candidate_and_selected_target_sources_unavailable",
         ),
         "target_portfolio": _field(
             FOUND if target_path is not None and target_path.exists() else MISSING if source_artifacts.get("target_portfolio_path") else UNAVAILABLE,
@@ -321,8 +348,12 @@ def _required_evidence(
         ),
         "target_weights": _field(
             FOUND if target_weight_count else UNAVAILABLE,
-            evidence={"target_weight_count": target_weight_count},
-            source="global_optimizer_replay_contract.sleeve_candidates",
+            evidence={
+                "target_weight_count": target_weight_count,
+                "canonical_candidate_count": len(candidates),
+                "selected_target_count": len(selected_targets),
+            },
+            source="global_optimizer_replay_contract.sleeve_candidates or selected_target_candidates",
             reason=None if target_weight_count else "target_weights_unavailable",
         ),
         "suppression_reasons": _field(
