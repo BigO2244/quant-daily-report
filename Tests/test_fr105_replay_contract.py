@@ -175,6 +175,117 @@ def _repo_fixture(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _repo_fixture_with_existing_reporting_artifacts(tmp_path: Path) -> Path:
+    _write_json(
+        tmp_path / "paper" / "config_paper.json",
+        {
+            "constraints": {"min_trade_dollars": 100.0},
+            "risk": {"max_position_pct": 0.20, "max_turnover_pct": 0.95},
+        },
+    )
+    run = tmp_path / "outputs" / "runs" / RUN_ID
+    _write_json(
+        tmp_path / "outputs" / "precompute" / TRADE_DATE / "signals.json",
+        {
+            "meta": {"asof_date": "2026-06-24", "trade_date": TRADE_DATE},
+            "signals": [
+                {"ticker": "AAA", "sleeve": "sleeve_trend", "raw_score": 0.10, "target_weight": 0.10},
+                {"ticker": "BBB", "sleeve": "sleeve_quality", "raw_score": 0.20, "target_weight": 0.20},
+                {"ticker": "CASH", "sleeve": "core", "raw_score": 0.0, "target_weight": 0.70},
+            ],
+        },
+    )
+    _write_json(
+        tmp_path / "outputs" / "precompute" / TRADE_DATE / "planned_execution_payload.json",
+        {
+            "trade_date": TRADE_DATE,
+            "pricing_asof": "2026-06-24",
+            "planned_payload_trade_count": 3,
+            "planner_intended_trades_count": 2,
+        },
+    )
+    _write_json(
+        run / "snapshots" / f"risk_adjusted_{TRADE_DATE}.json",
+        {
+            "meta": {"asof_date": "2026-06-24", "trade_date": TRADE_DATE, "risk_controls_applied": True},
+            "signals": [
+                {"ticker": "AAA", "sleeve": "sleeve_trend", "target_weight": 0.11},
+                {"ticker": "BBB", "sleeve": "sleeve_quality", "target_weight": 0.19},
+            ],
+        },
+    )
+    _write_json(
+        run / "audit" / "risk_controls.json",
+        {
+            "result": {
+                "actions": [{"action": "exposure_cap", "before_gross": 1.05, "after_gross": 0.95}],
+                "metrics": {"gross_weight": 0.95},
+            }
+        },
+    )
+    _write_json(
+        run / "audit" / f"execution_target_attainment_{TRADE_DATE}.json",
+        {
+            "missing_intended_buys": [{"ticker": "BBB", "reason": "buy_blocked_insufficient_buying_power"}],
+            "skipped_deferred_buy_notional": 125.0,
+            "submitted_count": 1,
+            "filled_buy_count": 1,
+        },
+    )
+    _write_json(
+        run / "audit" / "execution_integrity.json",
+        {
+            "intended_orders_count": 2,
+            "explicit_block_reasons": ["buy_phase_block_reason:sell_phase_completed"],
+            "missing_intended_orders": [{"ticker": "BBB", "reason": "buy_blocked_insufficient_buying_power"}],
+        },
+    )
+    _write_json(run / "broker" / f"intended_orders_{TRADE_DATE}.json", {"orders_intended_count": 2})
+    _write_json(
+        run / "broker" / f"post_sell_rebudget_{TRADE_DATE}.json",
+        {
+            "schema_version": "post_sell_rebudget.v1",
+            "enabled": True,
+            "status": "REBUILT",
+            "target_cash_weight": 0.05,
+            "post_sell_buying_power": 500.0,
+            "skipped_buy_orders": [
+                {
+                    "ticker": "BBB",
+                    "block_reason": "min_trade_dollars_after_budget_clip",
+                    "allowed_notional": 80.0,
+                }
+            ],
+        },
+    )
+    _write_json(
+        run / "broker" / "posttrade_account_snapshot.json",
+        {"equity": 1000.0, "cash": 700.0, "trade_date": TRADE_DATE},
+    )
+    _write_json(
+        run / "broker" / "posttrade_positions.json",
+        {
+            "positions": [
+                {"symbol": "AAA", "qty": "1", "market_value": "100.00"},
+                {"symbol": "BBB", "qty": "2", "market_value": "200.00"},
+            ]
+        },
+    )
+    _write_json(
+        run / "execution_results.json",
+        {
+            "trade_date": TRADE_DATE,
+            "submitted_count": 1,
+            "orders_filled_count": 1,
+            "skipped_buy_count": 1,
+            "executable_trades_count": 2,
+            "planned_payload_trade_count": 3,
+        },
+    )
+    _write_json(run / "execution_payload.json", {"trade_date": TRADE_DATE, "submitted_count": 1})
+    return tmp_path
+
+
 def test_fr105_contract_generation_with_candidate_lifecycle_rollups(tmp_path: Path) -> None:
     repo_root = _repo_fixture(tmp_path)
 
@@ -237,6 +348,48 @@ def test_missing_optional_artifacts_use_explicit_null_or_unavailable(tmp_path: P
     assert contract["constraints_snapshot"]["liquidity_constraints"] == "unavailable"
     assert contract["constraints_snapshot"]["sector_caps"] is None
     assert contract["execution_residuals"]["planned_candidates"] is None
+
+
+def test_existing_reporting_artifacts_are_wired_without_score_inference(tmp_path: Path) -> None:
+    repo_root = _repo_fixture_with_existing_reporting_artifacts(tmp_path)
+
+    contract = build_fr105_replay_contract(
+        repo_root=repo_root,
+        trade_date=TRADE_DATE,
+        run_id=RUN_ID,
+        git_sha="testsha",
+    )
+
+    assert contract["validation_status"]["status"] == "PASS"
+    assert contract["source_artifacts"]["candidate_trade_lifecycle_path"] is None
+    assert contract["source_artifacts"]["target_portfolio_path"] is None
+    assert contract["source_artifacts"]["precompute_signals_path"].endswith(f"precompute/{TRADE_DATE}/signals.json")
+    assert contract["source_artifacts"]["risk_adjusted_targets_path"].endswith(f"risk_adjusted_{TRADE_DATE}.json")
+    assert contract["sleeve_candidates"] == []
+    assert len(contract["selected_target_candidates"]) == 2
+
+    aaa = next(row for row in contract["selected_target_candidates"] if row["ticker"] == "AAA")
+    assert aaa["sleeve_id"] == "sleeve_trend"
+    assert aaa["pre_risk_target_weight"] == 0.10
+    assert aaa["target_weight"] == 0.11
+    assert aaa["score"] is None
+    assert aaa["conviction_score"] is None
+    assert aaa["expected_alpha"] is None
+    assert aaa["score_status"] == "UNAVAILABLE"
+
+    weights = {row["ticker"]: row["current_weight"] for row in contract["current_portfolio"]["positions"]}
+    assert weights == {"AAA": 0.1, "BBB": 0.2}
+    assert contract["execution_residuals"]["planned_candidates"] == 3
+    assert contract["execution_residuals"]["intended_orders"] == 2
+    assert contract["execution_residuals"]["submitted_orders"] == 1
+    assert contract["execution_residuals"]["filled_orders"] == 1
+    assert contract["execution_residuals"]["suppression_reason_counts"] == {
+        "buy_phase_block_reason:sell_phase_completed": 1,
+        "min_trade_dollars_after_budget_clip": 1,
+    }
+    assert contract["constraints_snapshot"]["risk_control_actions"] == [
+        {"action": "exposure_cap", "after_gross": 0.95, "before_gross": 1.05}
+    ]
 
 
 def test_validator_rejects_malformed_contracts(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from research.fr105_phase01_completeness import (
     build_fr105_phase01_completeness,
     write_fr105_phase01_completeness,
 )
+from scripts.research.run_fr105_phase01_readiness import run_phase01_readiness
 
 
 TRADE_DATE = "2026-06-26"
@@ -164,6 +165,89 @@ def _phase1(root: Path) -> Path:
     return path
 
 
+def _phase01_readiness_repo(root: Path) -> None:
+    run_id = "2026-06-26T093000-0400_readiness"
+    run = root / "outputs" / "runs" / run_id
+    _write_json(
+        root / "paper" / "config_paper.json",
+        {
+            "constraints": {"min_trade_dollars": 100.0},
+            "risk": {"max_position_pct": 0.20, "max_turnover_pct": 0.95},
+        },
+    )
+    _write_json(
+        root / "outputs" / "precompute" / TRADE_DATE / "signals.json",
+        {
+            "meta": {"asof_date": "2026-06-25", "trade_date": TRADE_DATE},
+            "signals": [
+                {"ticker": "AAA", "sleeve": "sleeve_trend", "raw_score": 0.10, "target_weight": 0.10},
+                {"ticker": "BBB", "sleeve": "sleeve_quality", "raw_score": 0.20, "target_weight": 0.20},
+                {"ticker": "CASH", "sleeve": "core", "raw_score": 0.0, "target_weight": 0.70},
+            ],
+        },
+    )
+    _write_json(
+        root / "outputs" / "precompute" / TRADE_DATE / "planned_execution_payload.json",
+        {"trade_date": TRADE_DATE, "pricing_asof": "2026-06-25", "planner_intended_trades_count": 2},
+    )
+    _write_json(
+        run / "snapshots" / f"risk_adjusted_{TRADE_DATE}.json",
+        {
+            "meta": {"asof_date": "2026-06-25", "trade_date": TRADE_DATE},
+            "signals": [
+                {"ticker": "AAA", "sleeve": "sleeve_trend", "target_weight": 0.11},
+                {"ticker": "BBB", "sleeve": "sleeve_quality", "target_weight": 0.19},
+            ],
+        },
+    )
+    _write_json(
+        run / "audit" / "risk_controls.json",
+        {"result": {"actions": [{"action": "exposure_cap", "before_gross": 1.05, "after_gross": 0.95}]}},
+    )
+    _write_json(
+        run / "audit" / f"execution_target_attainment_{TRADE_DATE}.json",
+        {
+            "missing_intended_buys": [{"ticker": "BBB", "reason": "buy_blocked_insufficient_buying_power"}],
+            "skipped_deferred_buy_notional": 125.0,
+        },
+    )
+    _write_json(
+        run / "audit" / "execution_integrity.json",
+        {
+            "intended_orders_count": 2,
+            "explicit_block_reasons": ["buy_phase_block_reason:sell_phase_completed"],
+        },
+    )
+    _write_json(
+        run / "broker" / f"post_sell_rebudget_{TRADE_DATE}.json",
+        {
+            "enabled": True,
+            "status": "REBUILT",
+            "target_cash_weight": 0.05,
+            "post_sell_buying_power": 500.0,
+            "skipped_buy_orders": [{"ticker": "BBB", "block_reason": "min_trade_dollars_after_budget_clip"}],
+        },
+    )
+    _write_json(run / "broker" / f"intended_orders_{TRADE_DATE}.json", {"orders_intended_count": 2})
+    _write_json(run / "broker" / "posttrade_account_snapshot.json", {"equity": 1000.0, "cash": 700.0})
+    _write_json(
+        run / "broker" / "posttrade_positions.json",
+        {"positions": [{"symbol": "AAA", "qty": "1", "market_value": "100.00"}]},
+    )
+    _write_json(
+        run / "execution_results.json",
+        {
+            "trade_date": TRADE_DATE,
+            "planned_payload_trade_count": 3,
+            "executable_trades_count": 2,
+            "submitted_count": 1,
+            "orders_filled_count": 1,
+            "skipped_buy_count": 1,
+        },
+    )
+    _write_json(run / "execution_payload.json", {"trade_date": TRADE_DATE, "submitted_count": 1})
+
+
 def test_phase01_completeness_reports_complete_artifact_set(tmp_path: Path) -> None:
     phase0 = _phase0(tmp_path)
     phase1 = _phase1(tmp_path)
@@ -226,3 +310,53 @@ def test_phase01_completeness_rejects_weight_derived_score_sources(tmp_path: Pat
     assert payload["summary"]["status"] == "INCOMPLETE"
     assert payload["required_evidence"]["score_source"]["status"] == MISSING
     assert payload["required_evidence"]["score_source"]["reason"] == "weight_derived_score_source_present"
+
+
+def test_phase01_readiness_orchestrator_wires_existing_artifacts_but_keeps_core_gaps_blocked(tmp_path: Path) -> None:
+    _phase01_readiness_repo(tmp_path)
+    output_root = tmp_path / "research_out"
+
+    path, summary = run_phase01_readiness(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        output_root=output_root,
+        generated_at="2026-06-26T20:00:00Z",
+    )
+    first_payload = json.loads(path.read_text(encoding="utf-8"))
+    first_text = path.read_text(encoding="utf-8")
+    _, second_summary = run_phase01_readiness(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        output_root=output_root,
+        generated_at="2026-06-26T20:00:00Z",
+    )
+
+    assert second_summary == summary
+    assert path.read_text(encoding="utf-8") == first_text
+    assert summary["status"] == "BLOCKED_ARTIFACT_GAPS"
+    assert summary["safety"]["broker_behavior_changed"] is False
+    assert summary["safety"]["production_execution_modules_invoked"] == []
+    assert set(summary["closed_gaps"]) >= {
+        "active_constraints",
+        "current_holdings",
+        "current_weights",
+        "execution_residuals",
+        "pit_lineage",
+        "provenance_availability",
+        "sleeve_source",
+        "suppression_reasons",
+        "target_weights",
+    }
+    assert set(summary["remaining_blocking_gaps"]) >= {
+        "candidate_pool",
+        "candidate_universe",
+        "lifecycle_artifact",
+        "score_source",
+        "target_portfolio",
+    }
+    assert first_payload["required_evidence"]["candidate_pool"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["candidate_universe"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["lifecycle_artifact"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["score_source"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["target_portfolio"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["target_weights"]["status"] == FOUND

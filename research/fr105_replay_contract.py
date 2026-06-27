@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import subprocess
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -221,6 +222,10 @@ def _existing_path(repo_root: Path, *candidates: Path | str | None) -> Path | No
     return None
 
 
+def _find_precompute_path(repo_root: Path, trade_date: str, filename: str) -> Path | None:
+    return _existing_path(repo_root, repo_root / "outputs" / "precompute" / trade_date / filename)
+
+
 def _find_run_root(repo_root: Path, trade_date: str, run_id: str | None) -> Path | None:
     runs_root = repo_root / "outputs" / "runs"
     if run_id:
@@ -277,6 +282,7 @@ def _find_reconciliation_path(
     return _existing_path(
         repo_root,
         explicit,
+        broker / f"recon_posttrade_{trade_date}.json",
         broker / f"posttrade_reconciliation_{trade_date}.json",
         broker / f"reconciliation_{trade_date}.json",
         run_root / "posttrade_reconciliation.json",
@@ -304,6 +310,56 @@ def _find_broker_positions_path(repo_root: Path, run_root: Path | None) -> Path 
         run_root / "broker" / "posttrade_positions.json",
         run_root / "broker" / "positions_posttrade.json",
         run_root / "posttrade_positions.json",
+    )
+
+
+def _find_posttrade_account_path(repo_root: Path, run_root: Path | None) -> Path | None:
+    if not run_root:
+        return None
+    return _existing_path(
+        repo_root,
+        run_root / "broker" / "posttrade_account_snapshot.json",
+        run_root / "posttrade_account_snapshot.json",
+    )
+
+
+def _find_risk_adjusted_targets_path(repo_root: Path, trade_date: str, run_root: Path | None) -> Path | None:
+    return _existing_path(
+        repo_root,
+        run_root / "snapshots" / f"risk_adjusted_{trade_date}.json" if run_root else None,
+        repo_root / "outputs" / "precompute" / trade_date / f"risk_adjusted_{trade_date}.json",
+    )
+
+
+def _find_risk_controls_path(repo_root: Path, run_root: Path | None) -> Path | None:
+    if not run_root:
+        return None
+    return _existing_path(repo_root, run_root / "audit" / "risk_controls.json")
+
+
+def _find_execution_target_attainment_path(repo_root: Path, trade_date: str, run_root: Path | None) -> Path | None:
+    if not run_root:
+        return None
+    return _existing_path(repo_root, run_root / "audit" / f"execution_target_attainment_{trade_date}.json")
+
+
+def _find_execution_integrity_path(repo_root: Path, run_root: Path | None) -> Path | None:
+    if not run_root:
+        return None
+    return _existing_path(repo_root, run_root / "audit" / "execution_integrity.json")
+
+
+def _find_intended_orders_path(repo_root: Path, trade_date: str, run_root: Path | None) -> Path | None:
+    if not run_root:
+        return None
+    return _existing_path(repo_root, run_root / "broker" / f"intended_orders_{trade_date}.json")
+
+
+def _find_construction_provenance_path(repo_root: Path, trade_date: str, run_root: Path | None) -> Path | None:
+    return _existing_path(
+        repo_root,
+        run_root / "audit" / f"construction_provenance_{trade_date}.json" if run_root else None,
+        repo_root / "outputs" / "research" / "construction_provenance" / trade_date / "construction_provenance.json",
     )
 
 
@@ -336,6 +392,86 @@ def _price_source(
         _as_dict(lifecycle.get("execution_config")).get("price_source"),
     )
     return str(value) if value is not None else "unavailable"
+
+
+def _metadata_value(payload: Mapping[str, Any], key: str) -> Any:
+    metadata = _as_dict(payload.get("meta")) or _as_dict(payload.get("metadata"))
+    return _first_present(metadata.get(key), payload.get(key))
+
+
+def _artifact_asof_values(
+    *,
+    precompute_signals: Mapping[str, Any],
+    risk_adjusted_targets: Mapping[str, Any],
+    execution_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "data_asof": _first_present(
+            _metadata_value(risk_adjusted_targets, "asof_date"),
+            _metadata_value(precompute_signals, "asof_date"),
+            execution_payload.get("security_master_asof_date"),
+        ),
+        "price_asof": _first_present(
+            execution_payload.get("pricing_asof"),
+            _metadata_value(risk_adjusted_targets, "asof_date"),
+            _metadata_value(precompute_signals, "asof_date"),
+        ),
+    }
+
+
+def _signal_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [row for row in _as_list(payload.get("signals")) if isinstance(row, Mapping)]
+
+
+def _selected_target_candidates(
+    *,
+    precompute_signals: Mapping[str, Any],
+    risk_adjusted_targets: Mapping[str, Any],
+    precompute_signals_path: Path | None,
+    risk_adjusted_targets_path: Path | None,
+    repo_root: Path,
+) -> list[dict[str, Any]]:
+    pre_rows = {
+        str(row.get("ticker") or "").strip().upper(): row
+        for row in _signal_rows(precompute_signals)
+        if str(row.get("ticker") or "").strip().upper() and str(row.get("ticker") or "").strip().upper() != "CASH"
+    }
+    final_rows = {
+        str(row.get("ticker") or "").strip().upper(): row
+        for row in _signal_rows(risk_adjusted_targets)
+        if str(row.get("ticker") or "").strip().upper() and str(row.get("ticker") or "").strip().upper() != "CASH"
+    }
+    tickers = sorted(set(pre_rows) | set(final_rows))
+    data_asof = _first_present(
+        _metadata_value(risk_adjusted_targets, "asof_date"),
+        _metadata_value(precompute_signals, "asof_date"),
+    )
+    rows: list[dict[str, Any]] = []
+    for ticker in tickers:
+        pre = pre_rows.get(ticker, {})
+        final = final_rows.get(ticker, {})
+        source_path = risk_adjusted_targets_path if final else precompute_signals_path
+        rows.append(
+            {
+                "ticker": ticker,
+                "sleeve_id": _first_present(final.get("sleeve"), pre.get("sleeve")),
+                "strategy_id": "current_policy_sleeve_merge",
+                "source_model": _first_present(final.get("sleeve"), pre.get("sleeve")),
+                "pre_risk_target_weight": _float(pre.get("target_weight")),
+                "final_target_weight": _float(_first_present(final.get("target_weight"), pre.get("target_weight"))),
+                "target_weight": _float(_first_present(final.get("target_weight"), pre.get("target_weight"))),
+                "target_weight_source": "risk_adjusted_targets" if final else "precompute_signals",
+                "data_asof": data_asof,
+                "source_artifact_path": _relative(source_path, repo_root),
+                "score": None,
+                "conviction_score": None,
+                "expected_alpha": None,
+                "score_source": None,
+                "score_status": "UNAVAILABLE",
+                "score_reason": "target_or_allocation_weights_are_not_alpha_scores",
+            }
+        )
+    return rows
 
 
 def _candidate_lifecycle_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -419,7 +555,12 @@ def _sleeve_candidates_from_lifecycle(
     return rows
 
 
-def _positions_from_payload(payload: Any) -> tuple[list[dict[str, Any]], int | None]:
+def _account_equity(payload: Any) -> float | None:
+    account = _as_dict(_as_dict(payload).get("account"))
+    return _float(_first_present(_as_dict(payload).get("equity"), account.get("equity"), account.get("portfolio_value")))
+
+
+def _positions_from_payload(payload: Any, account_payload: Any = None) -> tuple[list[dict[str, Any]], int | None]:
     if payload is None:
         return [], None
     if isinstance(payload, list):
@@ -433,15 +574,20 @@ def _positions_from_payload(payload: Any) -> tuple[list[dict[str, Any]], int | N
             or _as_list(obj.get("holdings"))
         )
     positions: list[dict[str, Any]] = []
+    equity = _account_equity(account_payload)
     for row in raw_rows:
         if not isinstance(row, Mapping):
             continue
+        market_value = _float(_first_present(row.get("market_value"), row.get("notional")))
+        current_weight = _float(_first_present(row.get("current_weight"), row.get("weight")))
+        if current_weight is None and market_value is not None and equity is not None and equity > 0:
+            current_weight = market_value / equity
         positions.append(
             {
                 "ticker": _first_present(row.get("ticker"), row.get("symbol")),
                 "quantity": _float(_first_present(row.get("quantity"), row.get("qty"), row.get("shares"))),
-                "market_value": _float(_first_present(row.get("market_value"), row.get("notional"))),
-                "current_weight": _float(_first_present(row.get("current_weight"), row.get("weight"))),
+                "market_value": market_value,
+                "current_weight": current_weight,
             }
         )
     return positions, len(positions)
@@ -495,6 +641,103 @@ def _execution_residuals_from_lifecycle(lifecycle: Mapping[str, Any]) -> dict[st
     }
 
 
+def _count_reasons(rows: list[Any], default_reason: str) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for item in rows:
+        row = item if isinstance(item, Mapping) else {}
+        reason = str(
+            _first_present(
+                row.get("reason"),
+                row.get("block_reason"),
+                row.get("decision_reason"),
+                row.get("code"),
+                default_reason,
+            )
+        )
+        counts[reason] += 1
+    return dict(sorted(counts.items()))
+
+
+def _merge_reason_counts(*counts: Mapping[str, Any]) -> dict[str, int]:
+    merged: Counter[str] = Counter()
+    for mapping in counts:
+        for key, value in _as_dict(mapping).items():
+            try:
+                merged[str(key)] += int(value)
+            except (TypeError, ValueError):
+                merged[str(key)] += 1
+    return dict(sorted(merged.items()))
+
+
+def _execution_residuals_from_artifacts(
+    *,
+    lifecycle: Mapping[str, Any],
+    execution_results: Mapping[str, Any],
+    execution_payload: Mapping[str, Any],
+    target_attainment: Mapping[str, Any],
+    execution_integrity: Mapping[str, Any],
+    post_sell_rebudget: Mapping[str, Any],
+    intended_orders: Mapping[str, Any],
+) -> dict[str, Any]:
+    if lifecycle:
+        return _execution_residuals_from_lifecycle(lifecycle)
+    skipped_buy_orders = _as_list(post_sell_rebudget.get("skipped_buy_orders"))
+    missing_intended = _as_list(
+        _first_present(
+            target_attainment.get("missing_intended_buys"),
+            execution_integrity.get("missing_intended_orders"),
+            execution_integrity.get("missing_buy_orders"),
+        )
+    )
+    suppression_reason_counts = _merge_reason_counts(
+        _count_reasons(skipped_buy_orders, "post_sell_rebudget_skipped_buy"),
+        {} if skipped_buy_orders else _count_reasons(missing_intended, "missing_intended_buy"),
+    )
+    explicit_block_reasons = [str(item) for item in _as_list(execution_integrity.get("explicit_block_reasons"))]
+    for reason in explicit_block_reasons:
+        suppression_reason_counts[reason] = suppression_reason_counts.get(reason, 0) + 1
+    clipped_count = sum(
+        1
+        for row in skipped_buy_orders
+        if isinstance(row, Mapping)
+        and (
+            "clip" in str(row.get("block_reason") or "").lower()
+            or row.get("allowed_notional") is not None
+        )
+    )
+    return {
+        "planned_candidates": _first_present(
+            execution_results.get("planned_payload_trade_count"),
+            execution_payload.get("planned_payload_trade_count"),
+            execution_payload.get("planner_intended_trades_count"),
+        ),
+        "executable_candidates": _first_present(
+            execution_results.get("executable_trades_count"),
+            execution_payload.get("executable_trades_count"),
+            execution_payload.get("execution_eligible_trades_count"),
+        ),
+        "intended_orders": _first_present(
+            execution_integrity.get("intended_orders_count"),
+            intended_orders.get("orders_intended_count"),
+            execution_payload.get("planner_intended_trades_count"),
+        ),
+        "submitted_orders": _first_present(execution_results.get("submitted_count"), execution_payload.get("submitted_count")),
+        "filled_orders": _first_present(execution_results.get("orders_filled_count"), execution_payload.get("orders_filled_count")),
+        "suppressed_count": _first_present(
+            execution_results.get("skipped_buy_count"),
+            len(skipped_buy_orders) if skipped_buy_orders else len(missing_intended) if missing_intended else None,
+        ),
+        "clipped_count": clipped_count if skipped_buy_orders else None,
+        "suppression_reason_counts": dict(sorted(suppression_reason_counts.items())),
+        "clipping_reason_counts": (
+            {"post_sell_rebudget_budget_clip": clipped_count}
+            if clipped_count
+            else {}
+        ),
+        "estimated_unexecuted_notional_total": _float(target_attainment.get("skipped_deferred_buy_notional")),
+    }
+
+
 def _config_constraints(repo_root: Path) -> tuple[dict[str, Any], Path | None]:
     config_path = repo_root / "paper" / "config_paper.json"
     config = _as_dict(_read_json(config_path))
@@ -545,6 +788,7 @@ def _constraints_snapshot(
     execution_payload: Mapping[str, Any],
     lifecycle: Mapping[str, Any],
     post_sell_rebudget: Mapping[str, Any],
+    risk_controls: Mapping[str, Any],
 ) -> dict[str, Any]:
     constraints, _ = _config_constraints(repo_root)
     cash_gate = _as_dict(
@@ -593,6 +837,13 @@ def _constraints_snapshot(
         if rebudget
         else "unavailable"
     )
+    risk_result = _as_dict(risk_controls.get("result"))
+    actions = _as_list(risk_result.get("actions"))
+    if actions:
+        constraints["risk_control_actions"] = actions
+    metrics = _as_dict(risk_result.get("metrics"))
+    if metrics:
+        constraints["risk_control_metrics"] = metrics
     return constraints
 
 
@@ -624,10 +875,35 @@ def build_fr105_replay_contract(
     lifecycle = _as_dict(_read_json(lifecycle_path))
     reconciliation_path = _find_reconciliation_path(root, trade_date, run_root, execution_results, execution_payload)
     broker_positions_path = _find_broker_positions_path(root, run_root)
+    posttrade_account_path = _find_posttrade_account_path(root, run_root)
     target_portfolio_path = _find_target_portfolio_path(root, trade_date, run_root)
     rebudget_path = _find_post_sell_rebudget_path(root, trade_date, run_root)
     post_sell_rebudget = _as_dict(_read_json(rebudget_path))
-    positions, positions_count = _positions_from_payload(_read_json(broker_positions_path))
+    precompute_signals_path = _find_precompute_path(root, trade_date, "signals.json")
+    precompute_signals = _as_dict(_read_json(precompute_signals_path))
+    daily_snapshot_path = _find_precompute_path(root, trade_date, "daily_snapshot.json")
+    planned_payload_path = _find_precompute_path(root, trade_date, "planned_execution_payload.json")
+    planned_payload = _as_dict(_read_json(planned_payload_path))
+    risk_adjusted_targets_path = _find_risk_adjusted_targets_path(root, trade_date, run_root)
+    risk_adjusted_targets = _as_dict(_read_json(risk_adjusted_targets_path))
+    risk_controls_path = _find_risk_controls_path(root, run_root)
+    risk_controls = _as_dict(_read_json(risk_controls_path))
+    target_attainment_path = _find_execution_target_attainment_path(root, trade_date, run_root)
+    target_attainment = _as_dict(_read_json(target_attainment_path))
+    execution_integrity_path = _find_execution_integrity_path(root, run_root)
+    execution_integrity = _as_dict(_read_json(execution_integrity_path))
+    intended_orders_path = _find_intended_orders_path(root, trade_date, run_root)
+    intended_orders = _as_dict(_read_json(intended_orders_path))
+    construction_provenance_path = _find_construction_provenance_path(root, trade_date, run_root)
+    asofs = _artifact_asof_values(
+        precompute_signals=precompute_signals,
+        risk_adjusted_targets=risk_adjusted_targets,
+        execution_payload=planned_payload or execution_payload,
+    )
+    positions, positions_count = _positions_from_payload(
+        _read_json(broker_positions_path),
+        _read_json(posttrade_account_path),
+    )
     contract_key = _contract_id(run_root, run_id, trade_date)
 
     contract: dict[str, Any] = {
@@ -639,6 +915,8 @@ def build_fr105_replay_contract(
             "fr_id": FR_ID,
             "schema_version": SCHEMA_VERSION,
             "contract_id": contract_key,
+            "data_asof": asofs.get("data_asof"),
+            "price_asof": asofs.get("price_asof"),
             "production_execution_modules_invoked": [],
         },
         "source_artifacts": {
@@ -646,11 +924,21 @@ def build_fr105_replay_contract(
             "target_portfolio_path": _relative(target_portfolio_path, root),
             "sleeve_artifacts": _source_artifacts_from_lifecycle(lifecycle, root),
             "execution_results_path": _relative(execution_results_path, root),
+            "execution_payload_path": _relative(execution_payload_path, root),
             "reconciliation_path": _relative(reconciliation_path, root),
             "broker_positions_path": _relative(broker_positions_path, root),
+            "posttrade_account_path": _relative(posttrade_account_path, root),
             "price_source": _price_source(lifecycle, execution_results, execution_payload),
-            "execution_payload_path": _relative(execution_payload_path, root),
             "post_sell_rebudget_path": _relative(rebudget_path, root),
+            "precompute_signals_path": _relative(precompute_signals_path, root),
+            "precompute_daily_snapshot_path": _relative(daily_snapshot_path, root),
+            "planned_execution_payload_path": _relative(planned_payload_path, root),
+            "risk_adjusted_targets_path": _relative(risk_adjusted_targets_path, root),
+            "risk_controls_path": _relative(risk_controls_path, root),
+            "execution_target_attainment_path": _relative(target_attainment_path, root),
+            "execution_integrity_path": _relative(execution_integrity_path, root),
+            "intended_orders_path": _relative(intended_orders_path, root),
+            "construction_provenance_path": _relative(construction_provenance_path, root),
         },
         "universe_snapshot": {
             "status": "unavailable",
@@ -660,8 +948,16 @@ def build_fr105_replay_contract(
             "source_artifact_path": None,
         },
         "sleeve_candidates": _sleeve_candidates_from_lifecycle(lifecycle, lifecycle_path, root),
+        "selected_target_candidates": _selected_target_candidates(
+            precompute_signals=precompute_signals,
+            risk_adjusted_targets=risk_adjusted_targets,
+            precompute_signals_path=precompute_signals_path,
+            risk_adjusted_targets_path=risk_adjusted_targets_path,
+            repo_root=root,
+        ),
         "current_portfolio": {
             "source_artifact_path": _relative(broker_positions_path, root),
+            "account_source_artifact_path": _relative(posttrade_account_path, root),
             "positions_count": positions_count,
             "positions": positions,
         },
@@ -671,8 +967,17 @@ def build_fr105_replay_contract(
             execution_payload,
             lifecycle,
             post_sell_rebudget,
+            risk_controls,
         ),
-        "execution_residuals": _execution_residuals_from_lifecycle(lifecycle),
+        "execution_residuals": _execution_residuals_from_artifacts(
+            lifecycle=lifecycle,
+            execution_results=execution_results,
+            execution_payload=execution_payload,
+            target_attainment=target_attainment,
+            execution_integrity=execution_integrity,
+            post_sell_rebudget=post_sell_rebudget,
+            intended_orders=intended_orders,
+        ),
         "provenance_schema_version": PROVENANCE_SCHEMA_VERSION,
         "validation_status": {
             "status": "UNVALIDATED",

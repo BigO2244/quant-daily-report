@@ -342,9 +342,16 @@ def _metrics(
 def _asof_values(contract: Mapping[str, Any]) -> tuple[Any, Any, Any]:
     metadata = _as_dict(contract.get("metadata"))
     universe = _as_dict(contract.get("universe_snapshot"))
-    candidates = [row for row in _as_list(contract.get("sleeve_candidates")) if isinstance(row, Mapping)]
+    candidates = [
+        row
+        for row in (
+            _as_list(contract.get("sleeve_candidates"))
+            + _as_list(contract.get("selected_target_candidates"))
+        )
+        if isinstance(row, Mapping)
+    ]
     candidate_asofs = sorted({str(row.get("data_asof")) for row in candidates if row.get("data_asof")})
-    data_asof = candidate_asofs[0] if len(candidate_asofs) == 1 else None
+    data_asof = _first_present(metadata.get("data_asof"), candidate_asofs[0] if len(candidate_asofs) == 1 else None)
     universe_asof = universe.get("asof") if universe.get("status") != "unavailable" else None
     price_asof = metadata.get("price_asof")
     return data_asof, universe_asof, price_asof
