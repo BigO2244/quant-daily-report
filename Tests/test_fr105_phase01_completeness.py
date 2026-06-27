@@ -25,8 +25,31 @@ def _write_json(path: Path, payload: object) -> None:
 def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
     lifecycle = root / "sources" / "candidate_trade_lifecycle.json"
     target = root / "sources" / "target_portfolio.json"
+    universe = root / "sources" / "candidate_universe.json"
+    pool = root / "sources" / "candidate_pool.json"
     _write_json(lifecycle, {"status": "FOUND"})
     _write_json(target, {"targets": [{"ticker": "AAA", "target_weight": 0.25}]})
+    _write_json(
+        universe,
+        {
+            "readiness": {"status": "FOUND"},
+            "candidate_universe_count": 2,
+            "symbols": ["AAA", "BBB"],
+            "metadata": {"generated_at": "2026-06-26T20:00:00Z"},
+        },
+    )
+    _write_json(
+        pool,
+        {
+            "readiness": {"status": "FOUND"},
+            "candidate_count": 2,
+            "candidates": [
+                {"ticker": "AAA", "score_source": score_source, "score_value": 0.91},
+                {"ticker": "BBB", "score_source": score_source, "score_value": 0.81},
+            ],
+            "metadata": {"generated_at": "2026-06-26T20:00:00Z"},
+        },
+    )
     path = root / "outputs" / "research" / "fr_105" / CONTRACT_ID / "global_optimizer_replay_contract.json"
     _write_json(
         path,
@@ -41,6 +64,8 @@ def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
                 "production_execution_modules_invoked": [],
             },
             "source_artifacts": {
+                "candidate_universe_path": "sources/candidate_universe.json",
+                "candidate_pool_path": "sources/candidate_pool.json",
                 "candidate_trade_lifecycle_path": "sources/candidate_trade_lifecycle.json",
                 "target_portfolio_path": "sources/target_portfolio.json",
                 "sleeve_artifacts": ["sources/candidate_trade_lifecycle.json"],
@@ -54,7 +79,7 @@ def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
                 "universe_id": "test_universe",
                 "asof": TRADE_DATE,
                 "ticker_count": 2,
-                "source_artifact_path": "sources/universe.json",
+                "source_artifact_path": "sources/candidate_universe.json",
             },
             "sleeve_candidates": [
                 {
@@ -296,6 +321,26 @@ def test_phase01_completeness_sparse_artifacts_block_readiness(tmp_path: Path) -
     assert payload["required_evidence"]["target_portfolio"]["status"] == UNAVAILABLE
 
 
+def test_phase01_completeness_requires_candidate_artifacts(tmp_path: Path) -> None:
+    phase0 = _phase0(tmp_path)
+    phase1 = _phase1(tmp_path)
+    (tmp_path / "sources" / "candidate_universe.json").unlink()
+    (tmp_path / "sources" / "candidate_pool.json").unlink()
+
+    payload = build_fr105_phase01_completeness(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        input_contract_path=phase0,
+        input_baseline_path=phase1,
+    )
+
+    assert payload["summary"]["status"] == "INCOMPLETE"
+    assert payload["required_evidence"]["candidate_universe"]["status"] == UNAVAILABLE
+    assert payload["required_evidence"]["candidate_universe"]["reason"] == "candidate_universe_artifact_unavailable"
+    assert payload["required_evidence"]["candidate_pool"]["status"] == UNAVAILABLE
+    assert payload["required_evidence"]["candidate_pool"]["reason"] == "candidate_pool_artifact_unavailable"
+
+
 def test_phase01_completeness_rejects_weight_derived_score_sources(tmp_path: Path) -> None:
     phase0 = _phase0(tmp_path, score_source="target_weight")
     phase1 = _phase1(tmp_path)
@@ -338,6 +383,8 @@ def test_phase01_readiness_orchestrator_wires_existing_artifacts_but_keeps_core_
     assert summary["safety"]["production_execution_modules_invoked"] == []
     assert set(summary["closed_gaps"]) >= {
         "active_constraints",
+        "candidate_pool",
+        "candidate_universe",
         "current_holdings",
         "current_weights",
         "execution_residuals",
@@ -347,15 +394,13 @@ def test_phase01_readiness_orchestrator_wires_existing_artifacts_but_keeps_core_
         "suppression_reasons",
         "target_weights",
     }
-    assert set(summary["remaining_blocking_gaps"]) >= {
-        "candidate_pool",
-        "candidate_universe",
+    assert set(summary["remaining_blocking_gaps"]) == {
         "lifecycle_artifact",
         "score_source",
         "target_portfolio",
     }
-    assert first_payload["required_evidence"]["candidate_pool"]["status"] == UNAVAILABLE
-    assert first_payload["required_evidence"]["candidate_universe"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["candidate_pool"]["status"] == FOUND
+    assert first_payload["required_evidence"]["candidate_universe"]["status"] == FOUND
     assert first_payload["required_evidence"]["lifecycle_artifact"]["status"] == UNAVAILABLE
     assert first_payload["required_evidence"]["score_source"]["status"] == UNAVAILABLE
     assert first_payload["required_evidence"]["target_portfolio"]["status"] == UNAVAILABLE

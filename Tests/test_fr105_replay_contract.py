@@ -340,6 +340,8 @@ def test_missing_optional_artifacts_use_explicit_null_or_unavailable(tmp_path: P
 
     assert contract["metadata"]["generated_at"] == "unavailable"
     assert contract["validation_status"]["status"] == "PASS"
+    assert contract["source_artifacts"]["candidate_universe_path"] is None
+    assert contract["source_artifacts"]["candidate_pool_path"] is None
     assert contract["source_artifacts"]["candidate_trade_lifecycle_path"] is None
     assert contract["source_artifacts"]["price_source"] == "unavailable"
     assert contract["source_artifacts"]["sleeve_artifacts"] == []
@@ -390,6 +392,49 @@ def test_existing_reporting_artifacts_are_wired_without_score_inference(tmp_path
     assert contract["constraints_snapshot"]["risk_control_actions"] == [
         {"action": "exposure_cap", "after_gross": 0.95, "before_gross": 1.05}
     ]
+
+
+def test_candidate_universe_and_pool_artifacts_are_written_without_score_inference(tmp_path: Path) -> None:
+    repo_root = _repo_fixture_with_existing_reporting_artifacts(tmp_path)
+
+    out_path, contract = write_fr105_replay_contract(
+        repo_root=repo_root,
+        trade_date=TRADE_DATE,
+        run_id=RUN_ID,
+        generated_at="2026-06-25T16:00:00Z",
+        git_sha="testsha",
+    )
+    first_text = out_path.read_text(encoding="utf-8")
+    universe_path = repo_root / contract["source_artifacts"]["candidate_universe_path"]
+    pool_path = repo_root / contract["source_artifacts"]["candidate_pool_path"]
+    universe = json.loads(universe_path.read_text(encoding="utf-8"))
+    pool = json.loads(pool_path.read_text(encoding="utf-8"))
+
+    assert universe["readiness"]["status"] == "FOUND"
+    assert universe["candidate_universe_count"] == 2
+    assert universe["symbols"] == ["AAA", "BBB"]
+    assert universe["trading_behavior_changed"] is False
+    assert pool["readiness"]["status"] == "FOUND"
+    assert pool["candidate_count"] == 2
+    assert {row["ticker"] for row in pool["candidates"]} == {"AAA", "BBB"}
+    assert all(row["score_source"] == "UNAVAILABLE" for row in pool["candidates"])
+    assert all(row["score_value"] is None for row in pool["candidates"])
+    assert all(row["unavailable_fields"] == ["score_source", "score_value"] for row in pool["candidates"])
+    assert len(contract["sleeve_candidates"]) == 2
+    assert all(row["rank"] is None for row in contract["sleeve_candidates"])
+    assert all(row["score"] is None for row in contract["sleeve_candidates"])
+    assert all(row["conviction_score"] is None for row in contract["sleeve_candidates"])
+    assert all(row["expected_alpha"] is None for row in contract["sleeve_candidates"])
+
+    _, second_contract = write_fr105_replay_contract(
+        repo_root=repo_root,
+        trade_date=TRADE_DATE,
+        run_id=RUN_ID,
+        generated_at="2026-06-25T16:00:00Z",
+        git_sha="testsha",
+    )
+    assert second_contract == contract
+    assert out_path.read_text(encoding="utf-8") == first_text
 
 
 def test_validator_rejects_malformed_contracts(tmp_path: Path) -> None:

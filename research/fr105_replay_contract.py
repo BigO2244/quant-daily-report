@@ -18,6 +18,8 @@ from typing import Any, Mapping
 FR_ID = "FR-105"
 SCHEMA_VERSION = "fr105_global_optimizer_replay_contract.v1"
 PROVENANCE_SCHEMA_VERSION = "fr105_candidate_provenance.v1"
+CANDIDATE_UNIVERSE_SCHEMA_VERSION = "fr105_candidate_universe.v1"
+CANDIDATE_POOL_SCHEMA_VERSION = "fr105_candidate_pool.v1"
 DEFAULT_OUTPUT_ROOT = Path("outputs/research/fr_105")
 
 REQUIRED_TOP_LEVEL_SECTIONS = (
@@ -421,6 +423,207 @@ def _artifact_asof_values(
 
 def _signal_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [row for row in _as_list(payload.get("signals")) if isinstance(row, Mapping)]
+
+
+def _ticker(value: Any) -> str | None:
+    ticker = str(value or "").strip().upper()
+    return ticker if ticker and ticker != "CASH" else None
+
+
+def _source_entry(path: Path | None, repo_root: Path) -> dict[str, Any]:
+    return {
+        "path": _relative(path, repo_root),
+        "status": "FOUND" if path is not None and path.exists() else "UNAVAILABLE",
+    }
+
+
+def _candidate_universe_from_signals(
+    *,
+    repo_root: Path,
+    trade_date: str,
+    run_id: str,
+    precompute_signals: Mapping[str, Any],
+    precompute_signals_path: Path | None,
+    generated_at: str,
+    git_sha: str,
+) -> dict[str, Any]:
+    symbols = sorted(
+        {
+            ticker
+            for ticker in (_ticker(row.get("ticker")) for row in _signal_rows(precompute_signals))
+            if ticker is not None
+        }
+    )
+    asof = _metadata_value(precompute_signals, "asof_date")
+    found = bool(symbols and precompute_signals_path is not None and precompute_signals_path.exists())
+    unavailable = [] if found else ["symbols"]
+    return {
+        "schema_version": CANDIDATE_UNIVERSE_SCHEMA_VERSION,
+        "metadata": {
+            "trade_date": trade_date,
+            "run_id": run_id,
+            "generated_at": generated_at,
+            "git_sha": git_sha,
+            "mode": "research_only",
+            "fr_id": FR_ID,
+            "alpha_chase_default": "off",
+            "production_execution_modules_invoked": [],
+        },
+        "trade_date": trade_date,
+        "run_id": run_id,
+        "readiness": {
+            "status": "FOUND" if found else "MISSING",
+            "reason": "precompute_signals_symbols_found" if found else "precompute_signals_symbols_unavailable",
+        },
+        "source_artifacts": {
+            "precompute_signals": _source_entry(precompute_signals_path, repo_root),
+        },
+        "candidate_universe_count": len(symbols),
+        "symbols": symbols,
+        "field_sources": {
+            "symbols": "precompute_signals.signals[].ticker" if found else "unavailable",
+            "candidate_universe_count": "precompute_signals.signals[].ticker" if found else "unavailable",
+            "asof": "precompute_signals.meta.asof_date" if asof else "unavailable",
+        },
+        "asof": asof,
+        "unavailable_fields": unavailable,
+        "trading_behavior_changed": False,
+    }
+
+
+def _candidate_pool_from_signals(
+    *,
+    repo_root: Path,
+    trade_date: str,
+    run_id: str,
+    precompute_signals: Mapping[str, Any],
+    precompute_signals_path: Path | None,
+    generated_at: str,
+    git_sha: str,
+) -> dict[str, Any]:
+    grouped: dict[str, dict[str, Any]] = {}
+    source_path = _relative(precompute_signals_path, repo_root)
+    for row in _signal_rows(precompute_signals):
+        ticker = _ticker(row.get("ticker"))
+        if ticker is None:
+            continue
+        candidate = grouped.setdefault(
+            ticker,
+            {
+                "ticker": ticker,
+                "source_artifacts": [source_path] if source_path else [],
+                "sleeve_sources": [],
+                "candidate_status": "available",
+                "score_source": "UNAVAILABLE",
+                "score_value": None,
+                "field_sources": {
+                    "ticker": "precompute_signals.signals[].ticker",
+                    "sleeve_sources": "precompute_signals.signals[].sleeve",
+                    "candidate_status": "precompute_signals.signals[]",
+                    "score_source": "unavailable_no_explicit_non_weight_score_provenance",
+                    "score_value": "unavailable_no_explicit_non_weight_score_provenance",
+                },
+                "unavailable_fields": ["score_source", "score_value"],
+                "trading_behavior_changed": False,
+            },
+        )
+        sleeve = row.get("sleeve")
+        if sleeve not in (None, ""):
+            candidate["sleeve_sources"].append(str(sleeve))
+    candidates = []
+    for ticker in sorted(grouped):
+        candidate = grouped[ticker]
+        candidate["sleeve_sources"] = sorted(set(candidate["sleeve_sources"]))
+        candidates.append(candidate)
+    found = bool(candidates and precompute_signals_path is not None and precompute_signals_path.exists())
+    return {
+        "schema_version": CANDIDATE_POOL_SCHEMA_VERSION,
+        "metadata": {
+            "trade_date": trade_date,
+            "run_id": run_id,
+            "generated_at": generated_at,
+            "git_sha": git_sha,
+            "mode": "research_only",
+            "fr_id": FR_ID,
+            "alpha_chase_default": "off",
+            "production_execution_modules_invoked": [],
+        },
+        "trade_date": trade_date,
+        "run_id": run_id,
+        "readiness": {
+            "status": "FOUND" if found else "MISSING",
+            "reason": "precompute_signals_candidates_found" if found else "precompute_signals_candidates_unavailable",
+        },
+        "source_artifacts": {
+            "precompute_signals": _source_entry(precompute_signals_path, repo_root),
+        },
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "field_sources": {
+            "candidates": "precompute_signals.signals[]",
+            "candidate_count": "precompute_signals.signals[].ticker",
+            "score_source": "unavailable_no_explicit_non_weight_score_provenance",
+            "score_value": "unavailable_no_explicit_non_weight_score_provenance",
+        },
+        "unavailable_fields": ["score_source", "score_value"] if candidates else ["candidates"],
+        "trading_behavior_changed": False,
+    }
+
+
+def _candidate_artifact_found(payload: Mapping[str, Any]) -> bool:
+    return _as_dict(payload.get("readiness")).get("status") == "FOUND"
+
+
+def _universe_snapshot_from_artifact(payload: Mapping[str, Any], path: Path, repo_root: Path) -> dict[str, Any]:
+    return {
+        "status": "FOUND",
+        "universe_id": f"fr105_candidate_universe_{payload.get('trade_date')}",
+        "asof": payload.get("asof"),
+        "ticker_count": _int(payload.get("candidate_universe_count")),
+        "source_artifact_path": _relative(path, repo_root),
+    }
+
+
+def _sleeve_candidates_from_candidate_pool(
+    payload: Mapping[str, Any],
+    path: Path,
+    repo_root: Path,
+    data_asof: Any,
+) -> list[dict[str, Any]]:
+    source_path = _relative(path, repo_root)
+    rows: list[dict[str, Any]] = []
+    for row in _as_list(payload.get("candidates")):
+        if not isinstance(row, Mapping):
+            continue
+        sleeves = [str(item) for item in _as_list(row.get("sleeve_sources")) if item not in (None, "")]
+        sleeve = sleeves[0] if len(sleeves) == 1 else None
+        rows.append(
+            {
+                "ticker": row.get("ticker"),
+                "sleeve_id": sleeve,
+                "strategy_id": "current_policy_sleeve_merge",
+                "source_model": sleeve,
+                "lifecycle": {
+                    "decision_stage": "candidate_pool_artifact",
+                    "decision_reason": row.get("candidate_status"),
+                },
+                "rank": None,
+                "score": None,
+                "conviction_score": None,
+                "expected_alpha": None,
+                "expected_risk": None,
+                "target_weight": None,
+                "target_notional": None,
+                "current_weight": None,
+                "current_notional": None,
+                "delta_notional": None,
+                "reason_included": "present_in_candidate_pool",
+                "reason_excluded": None,
+                "data_asof": data_asof,
+                "source_artifact_path": source_path,
+            }
+        )
+    return rows
 
 
 def _selected_target_candidates(
@@ -920,6 +1123,8 @@ def build_fr105_replay_contract(
             "production_execution_modules_invoked": [],
         },
         "source_artifacts": {
+            "candidate_universe_path": None,
+            "candidate_pool_path": None,
             "candidate_trade_lifecycle_path": _relative(lifecycle_path, root),
             "target_portfolio_path": _relative(target_portfolio_path, root),
             "sleeve_artifacts": _source_artifacts_from_lifecycle(lifecycle, root),
@@ -1011,6 +1216,54 @@ def write_fr105_replay_contract(
     if not output.is_absolute():
         output = root / output
     out_path = output / str(contract["metadata"]["contract_id"]) / "global_optimizer_replay_contract.json"
+    out_dir = out_path.parent
+    precompute_signals_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("precompute_signals_path"),
+        root,
+    )
+    precompute_signals = _as_dict(_read_json(precompute_signals_path))
+    generated = str(contract["metadata"]["generated_at"])
+    git = str(contract["metadata"]["git_sha"])
+    contract_id = str(contract["metadata"]["contract_id"])
+
+    candidate_universe = _candidate_universe_from_signals(
+        repo_root=root,
+        trade_date=trade_date,
+        run_id=contract_id,
+        precompute_signals=precompute_signals,
+        precompute_signals_path=precompute_signals_path,
+        generated_at=generated,
+        git_sha=git,
+    )
+    if _candidate_artifact_found(candidate_universe):
+        candidate_universe_path = out_dir / "candidate_universe.json"
+        _write_json(candidate_universe_path, candidate_universe)
+        contract["source_artifacts"]["candidate_universe_path"] = _relative(candidate_universe_path, root)
+        contract["universe_snapshot"] = _universe_snapshot_from_artifact(candidate_universe, candidate_universe_path, root)
+
+    candidate_pool = _candidate_pool_from_signals(
+        repo_root=root,
+        trade_date=trade_date,
+        run_id=contract_id,
+        precompute_signals=precompute_signals,
+        precompute_signals_path=precompute_signals_path,
+        generated_at=generated,
+        git_sha=git,
+    )
+    if _candidate_artifact_found(candidate_pool):
+        candidate_pool_path = out_dir / "candidate_pool.json"
+        _write_json(candidate_pool_path, candidate_pool)
+        contract["source_artifacts"]["candidate_pool_path"] = _relative(candidate_pool_path, root)
+        if not contract.get("sleeve_candidates"):
+            contract["sleeve_candidates"] = _sleeve_candidates_from_candidate_pool(
+                candidate_pool,
+                candidate_pool_path,
+                root,
+                _as_dict(candidate_universe).get("asof") or _as_dict(contract.get("metadata")).get("data_asof"),
+            )
+
+    contract = _clean(contract)
+    contract["validation_status"] = validate_fr105_replay_contract(contract).to_dict()
     _write_json(out_path, contract)
     return out_path, contract
 
