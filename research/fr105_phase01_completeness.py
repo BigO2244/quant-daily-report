@@ -193,6 +193,12 @@ def _selected_target_rows(contract: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in _as_list(contract.get("selected_target_candidates")) if isinstance(row, Mapping)]
 
 
+def _candidate_pool_artifact_rows(contract: Mapping[str, Any], repo_root: Path) -> list[dict[str, Any]]:
+    path = _source_path(contract, "candidate_pool_path", repo_root)
+    payload = _as_dict(_read_json(path))
+    return [dict(row) for row in _as_list(payload.get("candidates")) if isinstance(row, Mapping)]
+
+
 def _position_rows(contract: Mapping[str, Any], baseline: Mapping[str, Any]) -> list[dict[str, Any]]:
     baseline_rows = _as_list(_as_dict(baseline.get("baseline_positions")).get("positions"))
     if baseline_rows:
@@ -238,6 +244,7 @@ def _required_evidence(
 ) -> dict[str, dict[str, Any]]:
     source_artifacts = _as_dict(contract.get("source_artifacts"))
     candidates = _candidate_rows(contract)
+    pool_artifact_rows = _candidate_pool_artifact_rows(contract, repo_root)
     selected_targets = _selected_target_rows(contract)
     target_source_rows = candidates + selected_targets
     positions = _position_rows(contract, baseline)
@@ -248,11 +255,21 @@ def _required_evidence(
 
     target_path = _source_path(contract, "target_portfolio_path", repo_root)
     lifecycle_path = _source_path(contract, "candidate_trade_lifecycle_path", repo_root)
+    candidate_universe_path = _source_path(contract, "candidate_universe_path", repo_root)
+    candidate_pool_path = _source_path(contract, "candidate_pool_path", repo_root)
+    candidate_universe_artifact = _as_dict(_read_json(candidate_universe_path))
+    candidate_pool_artifact = _as_dict(_read_json(candidate_pool_path))
 
     candidate_universe_found = any(
         _has_numeric_or_text(value)
         for value in (universe.get("universe_id"), universe.get("ticker_count"), universe.get("source_artifact_path"))
-    ) or universe.get("status") not in (None, "", "unavailable")
+    ) and candidate_universe_path is not None and candidate_universe_path.exists() and _as_dict(candidate_universe_artifact.get("readiness")).get("status") == FOUND
+    candidate_pool_found = bool(
+        candidate_pool_path is not None
+        and candidate_pool_path.exists()
+        and _as_dict(candidate_pool_artifact.get("readiness")).get("status") == FOUND
+        and (candidates or pool_artifact_rows)
+    )
     pit_values = {
         "data_asof": controls.get("data_asof") or _first_present(*(row.get("data_asof") for row in target_source_rows)),
         "universe_asof": controls.get("universe_asof") or universe.get("asof"),
@@ -297,15 +314,27 @@ def _required_evidence(
     return {
         "candidate_universe": _field(
             FOUND if candidate_universe_found else UNAVAILABLE,
-            evidence={key: universe.get(key) for key in ("status", "universe_id", "asof", "ticker_count", "source_artifact_path")},
-            source="global_optimizer_replay_contract.universe_snapshot",
-            reason=None if candidate_universe_found else "universe_snapshot_sparse",
+            evidence={
+                "artifact": _artifact_entry(candidate_universe_path, repo_root, expected=bool(source_artifacts.get("candidate_universe_path"))),
+                "universe_snapshot": {
+                    key: universe.get(key)
+                    for key in ("status", "universe_id", "asof", "ticker_count", "source_artifact_path")
+                },
+                "candidate_universe_count": candidate_universe_artifact.get("candidate_universe_count"),
+            },
+            source="source_artifacts.candidate_universe_path",
+            reason=None if candidate_universe_found else "candidate_universe_artifact_unavailable",
         ),
         "candidate_pool": _field(
-            FOUND if candidates else UNAVAILABLE,
-            evidence={"candidate_count": len(candidates)},
-            source="global_optimizer_replay_contract.sleeve_candidates",
-            reason=None if candidates else "sleeve_candidates_empty",
+            FOUND if candidate_pool_found else UNAVAILABLE,
+            evidence={
+                "artifact": _artifact_entry(candidate_pool_path, repo_root, expected=bool(source_artifacts.get("candidate_pool_path"))),
+                "candidate_count": len(candidates) or len(pool_artifact_rows),
+                "contract_candidate_count": len(candidates),
+                "artifact_candidate_count": len(pool_artifact_rows),
+            },
+            source="source_artifacts.candidate_pool_path",
+            reason=None if candidate_pool_found else "candidate_pool_artifact_unavailable",
         ),
         "pit_lineage": _field(
             FOUND if all(_has_numeric_or_text(value) for value in pit_values.values()) else UNAVAILABLE,
