@@ -177,7 +177,7 @@ def _phase1_baseline(*, sparse: bool = False) -> dict:
     }
 
 
-def _phase01_completeness(*, sparse: bool = False) -> dict:
+def _phase01_completeness(*, sparse: bool = False, waived_score_source: bool = False) -> dict:
     gaps = [
         "candidate_pool",
         "candidate_universe",
@@ -191,6 +191,16 @@ def _phase01_completeness(*, sparse: bool = False) -> dict:
         "target_portfolio",
         "target_weights",
     ] if sparse else []
+    if waived_score_source:
+        gaps = ["score_source"]
+    complete = not sparse and not waived_score_source
+    readiness_status = (
+        "BLOCKED_ARTIFACT_GAPS"
+        if sparse
+        else "READY_WITH_SCORE_SOURCE_UNAVAILABLE"
+        if waived_score_source
+        else "READY"
+    )
     return {
         "schema_version": "fr105_phase01_artifact_completeness.v1",
         "metadata": {
@@ -200,29 +210,49 @@ def _phase01_completeness(*, sparse: bool = False) -> dict:
             "fr_id": "FR-105",
         },
         "summary": {
-            "status": "INCOMPLETE" if sparse else "COMPLETE",
-            "complete": not sparse,
+            "status": "COMPLETE" if complete else "INCOMPLETE",
+            "complete": complete,
             "missing_fields": [],
             "unavailable_fields": gaps,
         },
         "phase_status": {"phase0": "COMPLETE", "phase1": "COMPLETE"},
         "readiness": {
-            "status": "BLOCKED_ARTIFACT_GAPS" if sparse else "READY",
-            "blocking_gaps": gaps,
-            "alpha_chase_evaluation_ready": not sparse,
-            "shadow_comparison_ready": not sparse,
+            "status": readiness_status,
+            "blocking_gaps": [] if waived_score_source else gaps,
+            "waived_gaps": ["score_source"] if waived_score_source else [],
+            "historical_replay_ready": complete or waived_score_source,
+            "score_driven_ranking_replayable": complete,
+            "alpha_chase_evaluation_ready": complete,
+            "shadow_comparison_ready": complete,
+            "score_source_unavailable_waiver": {
+                "applied": waived_score_source,
+                "waived_fields": ["score_source"] if waived_score_source else [],
+                "reason": (
+                    "historical_non_weight_score_source_not_retained"
+                    if waived_score_source
+                    else "not_applicable"
+                ),
+            },
         },
     }
 
 
-def _write_inputs(root: Path, *, sparse: bool = False) -> tuple[Path, Path]:
+def _write_inputs(
+    root: Path,
+    *,
+    sparse: bool = False,
+    waived_score_source: bool = False,
+) -> tuple[Path, Path]:
     out = root / "outputs" / "research" / "fr_105" / CONTRACT_ID
     contract = out / "global_optimizer_replay_contract.json"
     baseline = out / "phase1_current_policy_baseline.json"
     completeness = out / "phase01_artifact_completeness.json"
     _write_json(contract, _phase0_contract(sparse=sparse))
     _write_json(baseline, _phase1_baseline(sparse=sparse))
-    _write_json(completeness, _phase01_completeness(sparse=sparse))
+    _write_json(
+        completeness,
+        _phase01_completeness(sparse=sparse, waived_score_source=waived_score_source),
+    )
     return contract, baseline
 
 
@@ -253,6 +283,37 @@ def test_phase2_sparse_inputs_block_shadow_evaluation(tmp_path: Path) -> None:
     assert "phase01.candidate_pool" in frontier["data_quality"]["unavailable_fields"]
     assert frontier["pit_controls"]["no_forward_returns_used"] is True
     assert frontier["pit_controls"]["no_production_modules_invoked"] is True
+
+
+def test_phase2_preserves_score_source_waiver_context_while_blocking_ranking(tmp_path: Path) -> None:
+    contract_path, baseline_path = _write_inputs(tmp_path, waived_score_source=True)
+
+    _, frontier = write_fr105_phase2_topn_frontier(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        input_contract_path=contract_path,
+        input_baseline_path=baseline_path,
+        top_n_values=(5,),
+        generated_at="2026-06-25T18:00:00Z",
+    )
+
+    assert frontier["readiness"]["status"] == "BLOCKED_ARTIFACT_GAPS"
+    assert frontier["readiness"]["blocking_gaps"] == ["score_source_unavailable_for_score_driven_ranking"]
+    gate = frontier["input_completeness"]
+    assert gate["phase01_readiness_status"] == "READY_WITH_SCORE_SOURCE_UNAVAILABLE"
+    assert gate["historical_replay_ready"] is True
+    assert gate["score_driven_ranking_replayable"] is False
+    assert gate["alpha_chase_evaluation_ready"] is False
+    assert gate["shadow_comparison_ready"] is False
+    assert gate["waived_gaps"] == ["score_source"]
+    assert (
+        gate["score_source_unavailable_waiver"]["reason"]
+        == "historical_non_weight_score_source_not_retained"
+    )
+    assert frontier["score_source_status"]["reason"] == "score_source_unavailable_for_score_driven_ranking"
+    assert frontier["data_quality"]["diagnostics"] == [
+        "phase01_score_source_unavailable_blocks_score_driven_ranking"
+    ]
 
 
 def test_phase2_populated_candidate_pool_generates_topn_variants(tmp_path: Path) -> None:

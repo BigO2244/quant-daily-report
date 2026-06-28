@@ -29,6 +29,8 @@ COMPLETENESS_ARTIFACT_NAME = "phase01_artifact_completeness.json"
 DEFAULT_TOP_N_VALUES = (5, 10, 15, 20, 25, 30)
 READY = "READY"
 BLOCKED_ARTIFACT_GAPS = "BLOCKED_ARTIFACT_GAPS"
+READY_WITH_SCORE_SOURCE_UNAVAILABLE = "READY_WITH_SCORE_SOURCE_UNAVAILABLE"
+SCORE_SOURCE_REPLAY_GAP = "score_source_unavailable_for_score_driven_ranking"
 
 REQUIRED_TOP_LEVEL_SECTIONS = (
     "metadata",
@@ -251,21 +253,49 @@ def phase01_completeness_gate(
     summary = _as_dict(payload.get("summary"))
     readiness = _as_dict(payload.get("readiness"))
     blocking_gaps = list(_as_list(readiness.get("blocking_gaps")))
-    if not blocking_gaps:
-        blocking_gaps = list(_as_list(summary.get("missing_fields"))) + list(_as_list(summary.get("unavailable_fields")))
-    status = str(readiness.get("status") or (READY if summary.get("complete") is True and not blocking_gaps else BLOCKED_ARTIFACT_GAPS))
+    status = str(
+        readiness.get("status")
+        or (READY if summary.get("complete") is True and not blocking_gaps else BLOCKED_ARTIFACT_GAPS)
+    )
+    if not blocking_gaps and status != READY_WITH_SCORE_SOURCE_UNAVAILABLE:
+        blocking_gaps = list(_as_list(summary.get("missing_fields"))) + list(
+            _as_list(summary.get("unavailable_fields"))
+        )
     complete = summary.get("complete") is True
     ready = status == READY and complete and not blocking_gaps
+    waiver = _as_dict(readiness.get("score_source_unavailable_waiver"))
     return {
         "ready": ready,
         "status": READY if ready else BLOCKED_ARTIFACT_GAPS,
+        "phase01_readiness_status": status,
         "blocking_gaps": sorted({str(gap) for gap in blocking_gaps if str(gap)}),
+        "waived_gaps": [str(gap) for gap in _as_list(readiness.get("waived_gaps"))],
+        "historical_replay_ready": readiness.get("historical_replay_ready") is True or complete,
+        "score_driven_ranking_replayable": (
+            readiness.get("score_driven_ranking_replayable") is True or complete
+        ),
+        "alpha_chase_evaluation_ready": readiness.get("alpha_chase_evaluation_ready") is True or complete,
+        "shadow_comparison_ready": readiness.get("shadow_comparison_ready") is True or complete,
+        "score_source_unavailable_waiver": waiver,
         "path": _relative(path, root),
         "artifact_status": "FOUND",
         "summary_status": summary.get("status") or ("COMPLETE" if complete else "INCOMPLETE"),
+        "summary_missing_fields": list(_as_list(summary.get("missing_fields"))),
+        "summary_unavailable_fields": list(_as_list(summary.get("unavailable_fields"))),
         "complete": complete,
         "contract_id": _as_dict(payload.get("metadata")).get("contract_id"),
     }
+
+
+def phase01_score_driven_blocking_gaps(completeness_gate: Mapping[str, Any]) -> list[str]:
+    gaps = sorted({str(gap) for gap in _as_list(completeness_gate.get("blocking_gaps")) if str(gap)})
+    if (
+        completeness_gate.get("historical_replay_ready") is True
+        and completeness_gate.get("score_driven_ranking_replayable") is False
+        and "score_source" in set(_as_list(completeness_gate.get("waived_gaps")))
+    ):
+        return [SCORE_SOURCE_REPLAY_GAP]
+    return gaps
 
 
 def _source_artifact_paths(
@@ -620,9 +650,10 @@ def _blocked_phase2_frontier(
     top_n_values: Sequence[int],
     generated_at: str | None,
 ) -> dict[str, Any]:
-    blocking_gaps = sorted({str(gap) for gap in _as_list(completeness_gate.get("blocking_gaps")) if str(gap)})
+    blocking_gaps = phase01_score_driven_blocking_gaps(completeness_gate)
     contract_id = str(completeness_gate.get("contract_id") or run_id or trade_date)
     variants = _blocked_variants(top_n_values, "phase01_completeness_blocked")
+    score_gap = blocking_gaps == [SCORE_SOURCE_REPLAY_GAP]
     unavailable = sorted(
         set(
             ["candidate_pool.candidates", "frontier_variants", "score_source_status", "selected_universe_status"]
@@ -678,7 +709,10 @@ def _blocked_phase2_frontier(
             },
             "unavailable_fields": unavailable,
         },
-        "score_source_status": {"status": "UNAVAILABLE", "reason": BLOCKED_ARTIFACT_GAPS},
+        "score_source_status": {
+            "status": "UNAVAILABLE",
+            "reason": SCORE_SOURCE_REPLAY_GAP if score_gap else BLOCKED_ARTIFACT_GAPS,
+        },
         "selected_universe_status": {"status": "UNAVAILABLE", "reason": BLOCKED_ARTIFACT_GAPS},
         "constraint_summary": {"status": "UNAVAILABLE", "reason": BLOCKED_ARTIFACT_GAPS},
         "candidate_pool": {
@@ -705,7 +739,11 @@ def _blocked_phase2_frontier(
             "forward_returns_used": False,
             "pit_safe_return_data_available": False,
             "unavailable_fields": unavailable,
-            "diagnostics": ["phase01_completeness_blocks_phase2_shadow_evaluation"],
+            "diagnostics": [
+                "phase01_score_source_unavailable_blocks_score_driven_ranking"
+                if score_gap
+                else "phase01_completeness_blocks_phase2_shadow_evaluation"
+            ],
         },
         "validation_status": {
             "status": "UNVALIDATED",
