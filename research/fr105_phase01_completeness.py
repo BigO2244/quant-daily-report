@@ -48,13 +48,32 @@ REQUIRED_EVIDENCE_KEYS = (
 )
 
 WEIGHT_DERIVED_SCORE_SOURCES = {
+    "allocation",
     "allocation_weight",
     "allocation_weights",
+    "construction_output",
     "final_allocation_weight",
     "final_target_weight",
+    "notional",
+    "portfolio_construction",
+    "portfolio_weight",
+    "rebalance_delta",
     "target_allocation_weight",
+    "target_notional",
+    "target_portfolio",
     "target_weight",
     "weight",
+    "weights",
+}
+
+APPROVED_SCORE_SOURCE_FIELDS = (
+    "score_source",
+    "conviction_score_source",
+    "expected_alpha_source",
+)
+SCORE_SOURCE_UNAVAILABLE_REASONS = {
+    "score_fields_unavailable",
+    "score_source_provenance_unavailable",
 }
 
 
@@ -216,24 +235,44 @@ def _score_source_status(candidates: list[Mapping[str, Any]]) -> dict[str, Any]:
         return _field(UNAVAILABLE, reason="candidate_pool_unavailable")
     scored = 0
     prohibited = 0
+    unprovenanced = 0
     sources: set[str] = set()
     for row in candidates:
-        source = str(row.get("score_source") or row.get("conviction_score_source") or row.get("expected_alpha_source") or row.get("source_model") or "").strip()
-        source_key = source.lower()
-        has_score = any(_has_numeric_or_text(row.get(key)) for key in ("conviction_score", "score", "expected_alpha"))
+        has_score = any(
+            _has_numeric_or_text(row.get(key))
+            for key in ("conviction_score", "score", "expected_alpha")
+        )
         if not has_score:
+            continue
+        source = str(_first_present(*(row.get(key) for key in APPROVED_SCORE_SOURCE_FIELDS)) or "").strip()
+        source_key = source.lower()
+        if not source or source_key == "unavailable":
+            unprovenanced += 1
             continue
         if source_key in WEIGHT_DERIVED_SCORE_SOURCES:
             prohibited += 1
             continue
         scored += 1
-        if source:
-            sources.add(source)
+        sources.add(source)
     if prohibited:
         return _field(
             MISSING,
-            evidence={"score_backed_candidates": scored, "prohibited_weight_derived_score_candidates": prohibited},
+            evidence={
+                "score_backed_candidates": scored,
+                "prohibited_weight_derived_score_candidates": prohibited,
+                "unprovenanced_score_candidates": unprovenanced,
+            },
             reason="weight_derived_score_source_present",
+        )
+    if unprovenanced:
+        return _field(
+            UNAVAILABLE,
+            evidence={
+                "score_backed_candidates": scored,
+                "unprovenanced_score_candidates": unprovenanced,
+                "score_sources": sorted(sources),
+            },
+            reason="score_source_provenance_unavailable",
         )
     if scored:
         return _field(FOUND, evidence={"score_backed_candidates": scored, "score_sources": sorted(sources)})
@@ -452,7 +491,7 @@ def _score_source_unavailable_waiver(
         not missing_fields
         and unavailable_fields == {"score_source"}
         and score_source.get("status") == UNAVAILABLE
-        and score_source.get("reason") == "score_fields_unavailable"
+        and score_source.get("reason") in SCORE_SOURCE_UNAVAILABLE_REASONS
     )
     return {
         "applied": bool(waived),

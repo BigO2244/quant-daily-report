@@ -19,10 +19,12 @@ from research.fr105_phase1_baseline import (
 from research.fr105_phase2_topn_frontier import (
     BLOCKED_ARTIFACT_GAPS,
     READY,
+    SCORE_SOURCE_REPLAY_GAP,
     find_phase1_baseline_path,
     validate_fr105_phase2_topn_frontier,
     find_phase01_completeness_path,
     phase01_completeness_gate,
+    phase01_score_driven_blocking_gaps,
 )
 from research.fr105_replay_contract import (
     DEFAULT_OUTPUT_ROOT,
@@ -650,7 +652,9 @@ def _blocked_phase3_holding_count(
     reason: str,
     generated_at: str | None,
 ) -> dict[str, Any]:
-    blocking_gaps = sorted({str(gap) for gap in _as_list(completeness_gate.get("blocking_gaps")) if str(gap)})
+    blocking_gaps = phase01_score_driven_blocking_gaps(completeness_gate)
+    if reason == "phase01_completeness_blocked" and blocking_gaps == [SCORE_SOURCE_REPLAY_GAP]:
+        reason = SCORE_SOURCE_REPLAY_GAP
     if reason and reason not in blocking_gaps:
         blocking_gaps.append(reason)
         blocking_gaps = sorted(set(blocking_gaps))

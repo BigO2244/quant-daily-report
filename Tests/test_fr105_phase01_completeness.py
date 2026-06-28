@@ -8,6 +8,7 @@ from research.fr105_phase01_completeness import (
     MISSING,
     READY_WITH_SCORE_SOURCE_UNAVAILABLE,
     UNAVAILABLE,
+    _score_source_status,
     build_fr105_phase01_completeness,
     write_fr105_phase01_completeness,
 )
@@ -329,6 +330,78 @@ def test_phase01_completeness_sparse_artifacts_block_readiness(tmp_path: Path) -
     assert payload["source_artifacts"]["phase1_current_policy_baseline"]["status"] == MISSING
     assert payload["required_evidence"]["candidate_pool"]["status"] == UNAVAILABLE
     assert payload["required_evidence"]["target_portfolio"]["status"] == UNAVAILABLE
+
+
+def test_score_source_status_requires_explicit_score_provenance() -> None:
+    for row in (
+        {"conviction_score": 0.91},
+        {"score": 0.5},
+        {"expected_alpha": 0.02},
+        {"conviction_score": 0.91, "source_model": "orion"},
+    ):
+        result = _score_source_status([row])
+        assert result["status"] == UNAVAILABLE
+        assert result["reason"] == "score_source_provenance_unavailable"
+
+    for source_field in ("score_source", "conviction_score_source", "expected_alpha_source"):
+        result = _score_source_status(
+            [{"conviction_score": 0.91, source_field: "orion_model_output"}]
+        )
+        assert result["status"] == FOUND
+        assert result["evidence"]["score_sources"] == ["orion_model_output"]
+
+
+def test_score_source_status_rejects_construction_derived_sources() -> None:
+    prohibited_sources = (
+        "target_weight",
+        "allocation_weight",
+        "portfolio_weight",
+        "final_target_weight",
+        "rebalance_delta",
+        "target_notional",
+        "notional",
+        "construction_output",
+        "portfolio_construction",
+        "target_portfolio",
+        "allocation",
+        "weight",
+        "weights",
+    )
+    for source_field in ("score_source", "conviction_score_source", "expected_alpha_source"):
+        for source in prohibited_sources:
+            result = _score_source_status(
+                [{"conviction_score": 0.91, source_field: source}]
+            )
+            assert result["status"] == MISSING
+            assert result["reason"] == "weight_derived_score_source_present"
+
+
+def test_phase01_completeness_waives_unavailable_historical_score_source_provenance(tmp_path: Path) -> None:
+    phase0 = _phase0(tmp_path, score_source="")
+    phase1 = _phase1(tmp_path)
+
+    payload = build_fr105_phase01_completeness(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        input_contract_path=phase0,
+        input_baseline_path=phase1,
+    )
+
+    assert payload["summary"]["status"] == "INCOMPLETE"
+    assert payload["required_evidence"]["score_source"]["status"] == UNAVAILABLE
+    assert payload["required_evidence"]["score_source"]["reason"] == "score_source_provenance_unavailable"
+    assert payload["readiness"]["status"] == READY_WITH_SCORE_SOURCE_UNAVAILABLE
+    assert payload["readiness"]["blocking_gaps"] == []
+    assert payload["readiness"]["waived_gaps"] == ["score_source"]
+    assert payload["readiness"]["historical_replay_ready"] is True
+    assert payload["readiness"]["score_driven_ranking_replayable"] is False
+    assert payload["readiness"]["alpha_chase_evaluation_ready"] is False
+    assert payload["readiness"]["shadow_comparison_ready"] is False
+    assert payload["readiness"]["score_source_unavailable_waiver"]["applied"] is True
+    assert (
+        payload["readiness"]["score_source_unavailable_waiver"]["reason"]
+        == "historical_non_weight_score_source_not_retained"
+    )
 
 
 def test_phase01_completeness_waives_unavailable_historical_score_source(tmp_path: Path) -> None:

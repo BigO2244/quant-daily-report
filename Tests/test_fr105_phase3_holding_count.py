@@ -132,8 +132,18 @@ def _phase1_baseline(*, sparse: bool = False) -> dict:
     }
 
 
-def _phase01_completeness(*, sparse: bool = False) -> dict:
+def _phase01_completeness(*, sparse: bool = False, waived_score_source: bool = False) -> dict:
     gaps = ["candidate_pool", "score_source", "target_weights"] if sparse else []
+    if waived_score_source:
+        gaps = ["score_source"]
+    complete = not sparse and not waived_score_source
+    readiness_status = (
+        "BLOCKED_ARTIFACT_GAPS"
+        if sparse
+        else "READY_WITH_SCORE_SOURCE_UNAVAILABLE"
+        if waived_score_source
+        else "READY"
+    )
     return {
         "schema_version": "fr105_phase01_artifact_completeness.v1",
         "metadata": {
@@ -143,17 +153,29 @@ def _phase01_completeness(*, sparse: bool = False) -> dict:
             "fr_id": "FR-105",
         },
         "summary": {
-            "status": "INCOMPLETE" if sparse else "COMPLETE",
-            "complete": not sparse,
+            "status": "COMPLETE" if complete else "INCOMPLETE",
+            "complete": complete,
             "missing_fields": [],
             "unavailable_fields": gaps,
         },
         "phase_status": {"phase0": "COMPLETE", "phase1": "COMPLETE"},
         "readiness": {
-            "status": "BLOCKED_ARTIFACT_GAPS" if sparse else "READY",
-            "blocking_gaps": gaps,
-            "alpha_chase_evaluation_ready": not sparse,
-            "shadow_comparison_ready": not sparse,
+            "status": readiness_status,
+            "blocking_gaps": [] if waived_score_source else gaps,
+            "waived_gaps": ["score_source"] if waived_score_source else [],
+            "historical_replay_ready": complete or waived_score_source,
+            "score_driven_ranking_replayable": complete,
+            "alpha_chase_evaluation_ready": complete,
+            "shadow_comparison_ready": complete,
+            "score_source_unavailable_waiver": {
+                "applied": waived_score_source,
+                "waived_fields": ["score_source"] if waived_score_source else [],
+                "reason": (
+                    "historical_non_weight_score_source_not_retained"
+                    if waived_score_source
+                    else "not_applicable"
+                ),
+            },
         },
     }
 
@@ -275,7 +297,13 @@ def _phase2_frontier(*, sparse: bool = False, tie_fixture: bool = False) -> dict
     }
 
 
-def _write_inputs(root: Path, *, sparse: bool = False, tie_fixture: bool = False) -> tuple[Path, Path, Path]:
+def _write_inputs(
+    root: Path,
+    *,
+    sparse: bool = False,
+    tie_fixture: bool = False,
+    waived_score_source: bool = False,
+) -> tuple[Path, Path, Path]:
     out = root / "outputs" / "research" / "fr_105" / CONTRACT_ID
     contract = out / "global_optimizer_replay_contract.json"
     baseline = out / "phase1_current_policy_baseline.json"
@@ -284,7 +312,10 @@ def _write_inputs(root: Path, *, sparse: bool = False, tie_fixture: bool = False
     _write_json(contract, _phase0_contract())
     _write_json(baseline, _phase1_baseline(sparse=sparse))
     _write_json(frontier, _phase2_frontier(sparse=sparse, tie_fixture=tie_fixture))
-    _write_json(completeness, _phase01_completeness(sparse=sparse))
+    _write_json(
+        completeness,
+        _phase01_completeness(sparse=sparse, waived_score_source=waived_score_source),
+    )
     return contract, baseline, frontier
 
 
@@ -314,6 +345,43 @@ def test_phase3_sparse_inputs_block_shadow_selection(tmp_path: Path) -> None:
     assert shadow["metadata"]["enabled"] is False
     assert shadow["metadata"]["default_off"] is True
     assert shadow["readiness"]["status"] == "BLOCKED_ARTIFACT_GAPS"
+    assert shadow["recommendations"]["allowed"] is False
+
+
+def test_phase3_preserves_score_source_waiver_context_while_blocking_shadow(tmp_path: Path) -> None:
+    contract_path, baseline_path, frontier_path = _write_inputs(tmp_path, waived_score_source=True)
+
+    out_path, artifact = write_fr105_phase3_holding_count(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        input_contract_path=contract_path,
+        input_baseline_path=baseline_path,
+        input_frontier_path=frontier_path,
+        generated_at="2026-06-25T19:00:00Z",
+    )
+
+    assert artifact["readiness"]["status"] == "BLOCKED_ARTIFACT_GAPS"
+    assert artifact["readiness"]["blocking_gaps"] == ["score_source_unavailable_for_score_driven_ranking"]
+    gate = artifact["input_completeness"]
+    assert gate["phase01_readiness_status"] == "READY_WITH_SCORE_SOURCE_UNAVAILABLE"
+    assert gate["historical_replay_ready"] is True
+    assert gate["score_driven_ranking_replayable"] is False
+    assert gate["alpha_chase_evaluation_ready"] is False
+    assert gate["shadow_comparison_ready"] is False
+    assert gate["waived_gaps"] == ["score_source"]
+    assert (
+        gate["score_source_unavailable_waiver"]["reason"]
+        == "historical_non_weight_score_source_not_retained"
+    )
+    assert (
+        artifact["selected_research_variant"]["fallback_reason"]
+        == "score_source_unavailable_for_score_driven_ranking"
+    )
+
+    shadow = json.loads(
+        (out_path.parent / "shadow_alpha_chase_comparison.json").read_text(encoding="utf-8")
+    )
+    assert shadow["readiness"]["blocking_gaps"] == ["score_source_unavailable_for_score_driven_ranking"]
     assert shadow["recommendations"]["allowed"] is False
 
 
