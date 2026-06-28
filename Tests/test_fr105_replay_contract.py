@@ -407,8 +407,12 @@ def test_candidate_universe_and_pool_artifacts_are_written_without_score_inferen
     first_text = out_path.read_text(encoding="utf-8")
     universe_path = repo_root / contract["source_artifacts"]["candidate_universe_path"]
     pool_path = repo_root / contract["source_artifacts"]["candidate_pool_path"]
+    target_path = repo_root / contract["source_artifacts"]["target_portfolio_path"]
+    lifecycle_path = repo_root / contract["source_artifacts"]["candidate_trade_lifecycle_path"]
     universe = json.loads(universe_path.read_text(encoding="utf-8"))
     pool = json.loads(pool_path.read_text(encoding="utf-8"))
+    target = json.loads(target_path.read_text(encoding="utf-8"))
+    lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
 
     assert universe["readiness"]["status"] == "FOUND"
     assert universe["candidate_universe_count"] == 2
@@ -425,6 +429,18 @@ def test_candidate_universe_and_pool_artifacts_are_written_without_score_inferen
     assert all(row["score"] is None for row in contract["sleeve_candidates"])
     assert all(row["conviction_score"] is None for row in contract["sleeve_candidates"])
     assert all(row["expected_alpha"] is None for row in contract["sleeve_candidates"])
+    assert target["readiness"]["status"] == "FOUND"
+    assert target["target_count"] == 2
+    assert {row["ticker"] for row in target["targets"]} == {"AAA", "BBB"}
+    assert all(row["target_weight"] is not None for row in target["targets"])
+    assert all(row["target_notional"] is None for row in target["targets"])
+    assert lifecycle["readiness"]["status"] == "FOUND"
+    assert lifecycle["lifecycle_count"] == 2
+    assert lifecycle["status_counts"] == {"retained": 1, "skipped": 1}
+    bbb = next(row for row in lifecycle["candidates"] if row["ticker"] == "BBB")
+    assert bbb["lifecycle_status"] == "skipped"
+    assert bbb["suppression_or_block_reason"] == "min_trade_dollars_after_budget_clip"
+    assert bbb["reason_source_artifact"].endswith(f"post_sell_rebudget_{TRADE_DATE}.json")
 
     _, second_contract = write_fr105_replay_contract(
         repo_root=repo_root,

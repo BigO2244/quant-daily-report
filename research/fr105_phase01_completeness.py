@@ -20,6 +20,10 @@ from research.fr105_replay_contract import DEFAULT_OUTPUT_ROOT, FR_ID
 PHASE01_COMPLETENESS_SCHEMA_VERSION = "fr105_phase01_artifact_completeness.v1"
 ARTIFACT_NAME = "phase01_artifact_completeness.json"
 
+READY = "READY"
+READY_WITH_SCORE_SOURCE_UNAVAILABLE = "READY_WITH_SCORE_SOURCE_UNAVAILABLE"
+BLOCKED_ARTIFACT_GAPS = "BLOCKED_ARTIFACT_GAPS"
+
 FOUND = "FOUND"
 MISSING = "MISSING"
 UNAVAILABLE = "UNAVAILABLE"
@@ -437,6 +441,62 @@ def _summary(required: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _score_source_unavailable_waiver(
+    required: Mapping[str, Mapping[str, Any]],
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    unavailable_fields = set(_as_list(summary.get("unavailable_fields")))
+    missing_fields = set(_as_list(summary.get("missing_fields")))
+    score_source = _as_dict(required.get("score_source"))
+    waived = (
+        not missing_fields
+        and unavailable_fields == {"score_source"}
+        and score_source.get("status") == UNAVAILABLE
+        and score_source.get("reason") == "score_fields_unavailable"
+    )
+    return {
+        "applied": bool(waived),
+        "waived_fields": ["score_source"] if waived else [],
+        "reason": (
+            "historical_non_weight_score_source_not_retained"
+            if waived
+            else "not_applicable"
+        ),
+        "score_driven_ranking_replayable": False if waived else None,
+        "prohibited_score_sources": sorted(WEIGHT_DERIVED_SCORE_SOURCES),
+    }
+
+
+def _readiness_block(required: Mapping[str, Mapping[str, Any]], summary: Mapping[str, Any]) -> dict[str, Any]:
+    waiver = _score_source_unavailable_waiver(required, summary)
+    complete = bool(summary["complete"])
+    status = (
+        READY
+        if complete
+        else READY_WITH_SCORE_SOURCE_UNAVAILABLE
+        if waiver["applied"]
+        else BLOCKED_ARTIFACT_GAPS
+    )
+    blocking_gaps = (
+        []
+        if status in {READY, READY_WITH_SCORE_SOURCE_UNAVAILABLE}
+        else sorted(summary["missing_fields"] + summary["unavailable_fields"])
+    )
+    score_driven_ranking_replayable = (
+        _as_dict(required.get("score_source")).get("status") == FOUND
+    )
+    return {
+        "alpha_chase_evaluation_ready": complete,
+        "historical_replay_ready": complete or bool(waiver["applied"]),
+        "shadow_comparison_ready": complete,
+        "score_driven_ranking_replayable": score_driven_ranking_replayable,
+        "status": status,
+        "blocking_gaps": blocking_gaps,
+        "waived_gaps": waiver["waived_fields"],
+        "score_source_unavailable_waiver": waiver,
+    }
+
+
 def build_fr105_phase01_completeness(
     *,
     repo_root: Path | str,
@@ -474,6 +534,7 @@ def build_fr105_phase01_completeness(
     )
     required = _required_evidence(contract=phase0, baseline=phase1, repo_root=root)
     summary = _summary(required)
+    readiness = _readiness_block(required, summary)
     phase0_entry = _artifact_entry(phase0_path, root)
     phase1_entry = _artifact_entry(phase1_path, root)
     report = {
@@ -504,16 +565,19 @@ def build_fr105_phase01_completeness(
         },
         "required_evidence": required,
         "summary": summary,
-        "readiness": {
-            "alpha_chase_evaluation_ready": bool(summary["complete"]),
-            "shadow_comparison_ready": bool(summary["complete"]),
-            "status": "READY" if summary["complete"] else "BLOCKED_ARTIFACT_GAPS",
-            "blocking_gaps": sorted(summary["missing_fields"] + summary["unavailable_fields"]),
-        },
+        "readiness": readiness,
         "validation_status": {
             "status": "PASS",
             "findings": [],
-            "warnings": [] if summary["complete"] else ["artifact_gaps_block_alpha_chase_evaluation"],
+            "warnings": (
+                []
+                if summary["complete"]
+                else [
+                    "score_source_unavailable_historical_waiver_score_driven_ranking_not_replayable"
+                ]
+                if readiness["status"] == READY_WITH_SCORE_SOURCE_UNAVAILABLE
+                else ["artifact_gaps_block_alpha_chase_evaluation"]
+            ),
         },
     }
     return report

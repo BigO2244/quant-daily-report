@@ -6,6 +6,7 @@ from pathlib import Path
 from research.fr105_phase01_completeness import (
     FOUND,
     MISSING,
+    READY_WITH_SCORE_SOURCE_UNAVAILABLE,
     UNAVAILABLE,
     build_fr105_phase01_completeness,
     write_fr105_phase01_completeness,
@@ -22,11 +23,12 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
+def _phase0(root: Path, *, score_source: str | None = "model_score") -> Path:
     lifecycle = root / "sources" / "candidate_trade_lifecycle.json"
     target = root / "sources" / "target_portfolio.json"
     universe = root / "sources" / "candidate_universe.json"
     pool = root / "sources" / "candidate_pool.json"
+    score_available = score_source is not None
     _write_json(lifecycle, {"status": "FOUND"})
     _write_json(target, {"targets": [{"ticker": "AAA", "target_weight": 0.25}]})
     _write_json(
@@ -44,8 +46,16 @@ def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
             "readiness": {"status": "FOUND"},
             "candidate_count": 2,
             "candidates": [
-                {"ticker": "AAA", "score_source": score_source, "score_value": 0.91},
-                {"ticker": "BBB", "score_source": score_source, "score_value": 0.81},
+                {
+                    "ticker": "AAA",
+                    "score_source": score_source if score_available else "UNAVAILABLE",
+                    "score_value": 0.91 if score_available else None,
+                },
+                {
+                    "ticker": "BBB",
+                    "score_source": score_source if score_available else "UNAVAILABLE",
+                    "score_value": 0.81 if score_available else None,
+                },
             ],
             "metadata": {"generated_at": "2026-06-26T20:00:00Z"},
         },
@@ -87,10 +97,10 @@ def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
                     "sleeve_id": "caerus_polaris",
                     "strategy_id": "polaris_v1",
                     "source_model": "momentum",
-                    "rank": 1,
-                    "score": 0.91,
-                    "score_source": score_source,
-                    "conviction_score": 0.91,
+                    "rank": 1 if score_available else None,
+                    "score": 0.91 if score_available else None,
+                    "score_source": score_source if score_available else None,
+                    "conviction_score": 0.91 if score_available else None,
                     "expected_alpha": None,
                     "expected_risk": None,
                     "target_weight": 0.25,
@@ -105,10 +115,10 @@ def _phase0(root: Path, *, score_source: str = "model_score") -> Path:
                     "sleeve_id": "caerus_orion",
                     "strategy_id": "orion_v1",
                     "source_model": "quality",
-                    "rank": 2,
-                    "score": 0.81,
-                    "score_source": score_source,
-                    "conviction_score": 0.81,
+                    "rank": 2 if score_available else None,
+                    "score": 0.81 if score_available else None,
+                    "score_source": score_source if score_available else None,
+                    "conviction_score": 0.81 if score_available else None,
                     "expected_alpha": None,
                     "expected_risk": None,
                     "target_weight": 0.15,
@@ -321,6 +331,37 @@ def test_phase01_completeness_sparse_artifacts_block_readiness(tmp_path: Path) -
     assert payload["required_evidence"]["target_portfolio"]["status"] == UNAVAILABLE
 
 
+def test_phase01_completeness_waives_unavailable_historical_score_source(tmp_path: Path) -> None:
+    phase0 = _phase0(tmp_path, score_source=None)
+    phase1 = _phase1(tmp_path)
+
+    payload = build_fr105_phase01_completeness(
+        repo_root=tmp_path,
+        trade_date=TRADE_DATE,
+        input_contract_path=phase0,
+        input_baseline_path=phase1,
+    )
+
+    assert payload["summary"]["status"] == "INCOMPLETE"
+    assert payload["required_evidence"]["score_source"]["status"] == UNAVAILABLE
+    assert payload["required_evidence"]["score_source"]["reason"] == "score_fields_unavailable"
+    assert payload["readiness"]["status"] == READY_WITH_SCORE_SOURCE_UNAVAILABLE
+    assert payload["readiness"]["blocking_gaps"] == []
+    assert payload["readiness"]["waived_gaps"] == ["score_source"]
+    assert payload["readiness"]["historical_replay_ready"] is True
+    assert payload["readiness"]["alpha_chase_evaluation_ready"] is False
+    assert payload["readiness"]["shadow_comparison_ready"] is False
+    assert payload["readiness"]["score_driven_ranking_replayable"] is False
+    assert payload["readiness"]["score_source_unavailable_waiver"]["applied"] is True
+    assert (
+        payload["readiness"]["score_source_unavailable_waiver"]["reason"]
+        == "historical_non_weight_score_source_not_retained"
+    )
+    assert payload["validation_status"]["warnings"] == [
+        "score_source_unavailable_historical_waiver_score_driven_ranking_not_replayable"
+    ]
+
+
 def test_phase01_completeness_requires_candidate_artifacts(tmp_path: Path) -> None:
     phase0 = _phase0(tmp_path)
     phase1 = _phase1(tmp_path)
@@ -378,7 +419,9 @@ def test_phase01_readiness_orchestrator_wires_existing_artifacts_but_keeps_core_
 
     assert second_summary == summary
     assert path.read_text(encoding="utf-8") == first_text
-    assert summary["status"] == "BLOCKED_ARTIFACT_GAPS"
+    assert summary["status"] == READY_WITH_SCORE_SOURCE_UNAVAILABLE
+    assert summary["alpha_chase_evaluation_ready"] is False
+    assert summary["shadow_comparison_ready"] is False
     assert summary["safety"]["broker_behavior_changed"] is False
     assert summary["safety"]["production_execution_modules_invoked"] == []
     assert set(summary["closed_gaps"]) >= {
@@ -388,20 +431,22 @@ def test_phase01_readiness_orchestrator_wires_existing_artifacts_but_keeps_core_
         "current_holdings",
         "current_weights",
         "execution_residuals",
+        "lifecycle_artifact",
         "pit_lineage",
         "provenance_availability",
         "sleeve_source",
         "suppression_reasons",
+        "target_portfolio",
         "target_weights",
     }
-    assert set(summary["remaining_blocking_gaps"]) == {
-        "lifecycle_artifact",
-        "score_source",
-        "target_portfolio",
-    }
+    assert summary["remaining_blocking_gaps"] == []
+    assert set(summary["unavailable_fields"]) == {"score_source"}
     assert first_payload["required_evidence"]["candidate_pool"]["status"] == FOUND
     assert first_payload["required_evidence"]["candidate_universe"]["status"] == FOUND
-    assert first_payload["required_evidence"]["lifecycle_artifact"]["status"] == UNAVAILABLE
+    assert first_payload["required_evidence"]["lifecycle_artifact"]["status"] == FOUND
     assert first_payload["required_evidence"]["score_source"]["status"] == UNAVAILABLE
-    assert first_payload["required_evidence"]["target_portfolio"]["status"] == UNAVAILABLE
+    assert first_payload["readiness"]["historical_replay_ready"] is True
+    assert first_payload["readiness"]["score_driven_ranking_replayable"] is False
+    assert first_payload["readiness"]["score_source_unavailable_waiver"]["applied"] is True
+    assert first_payload["required_evidence"]["target_portfolio"]["status"] == FOUND
     assert first_payload["required_evidence"]["target_weights"]["status"] == FOUND
