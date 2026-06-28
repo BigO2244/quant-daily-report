@@ -20,6 +20,8 @@ SCHEMA_VERSION = "fr105_global_optimizer_replay_contract.v1"
 PROVENANCE_SCHEMA_VERSION = "fr105_candidate_provenance.v1"
 CANDIDATE_UNIVERSE_SCHEMA_VERSION = "fr105_candidate_universe.v1"
 CANDIDATE_POOL_SCHEMA_VERSION = "fr105_candidate_pool.v1"
+TARGET_PORTFOLIO_SCHEMA_VERSION = "fr105_target_portfolio.v1"
+CANDIDATE_LIFECYCLE_SCHEMA_VERSION = "fr105_candidate_lifecycle.v1"
 DEFAULT_OUTPUT_ROOT = Path("outputs/research/fr_105")
 
 REQUIRED_TOP_LEVEL_SECTIONS = (
@@ -572,6 +574,274 @@ def _candidate_pool_from_signals(
 
 def _candidate_artifact_found(payload: Mapping[str, Any]) -> bool:
     return _as_dict(payload.get("readiness")).get("status") == "FOUND"
+
+
+def _target_portfolio_from_risk_adjusted_targets(
+    *,
+    repo_root: Path,
+    trade_date: str,
+    run_id: str,
+    risk_adjusted_targets: Mapping[str, Any],
+    risk_adjusted_targets_path: Path | None,
+    generated_at: str,
+    git_sha: str,
+) -> dict[str, Any]:
+    targets: list[dict[str, Any]] = []
+    source_path = _relative(risk_adjusted_targets_path, repo_root)
+    for row in _signal_rows(risk_adjusted_targets):
+        ticker = _ticker(row.get("ticker"))
+        if ticker is None:
+            continue
+        target_weight = _float(row.get("target_weight"))
+        if target_weight is None:
+            continue
+        target_notional = _float(_first_present(row.get("target_notional"), row.get("notional")))
+        unavailable_fields = []
+        if target_notional is None:
+            unavailable_fields.append("target_notional")
+        targets.append(
+            {
+                "ticker": ticker,
+                "target_weight": target_weight,
+                "target_notional": target_notional,
+                "sleeve_sources": [str(row.get("sleeve"))] if row.get("sleeve") not in (None, "") else [],
+                "source_artifacts": [source_path] if source_path else [],
+                "field_sources": {
+                    "ticker": "risk_adjusted_targets.signals[].ticker",
+                    "target_weight": "risk_adjusted_targets.signals[].target_weight",
+                    "target_notional": (
+                        "risk_adjusted_targets.signals[].target_notional"
+                        if target_notional is not None
+                        else "unavailable"
+                    ),
+                    "sleeve_sources": "risk_adjusted_targets.signals[].sleeve" if row.get("sleeve") else "unavailable",
+                },
+                "unavailable_fields": unavailable_fields,
+                "trading_behavior_changed": False,
+            }
+        )
+    targets = sorted(targets, key=lambda item: str(item["ticker"]))
+    found = bool(targets and risk_adjusted_targets_path is not None and risk_adjusted_targets_path.exists())
+    return {
+        "schema_version": TARGET_PORTFOLIO_SCHEMA_VERSION,
+        "metadata": {
+            "trade_date": trade_date,
+            "run_id": run_id,
+            "generated_at": generated_at,
+            "git_sha": git_sha,
+            "mode": "research_only",
+            "fr_id": FR_ID,
+            "alpha_chase_default": "off",
+            "production_execution_modules_invoked": [],
+        },
+        "trade_date": trade_date,
+        "run_id": run_id,
+        "readiness": {
+            "status": "FOUND" if found else "MISSING",
+            "reason": (
+                "risk_adjusted_targets_found"
+                if found
+                else "risk_adjusted_targets_unavailable_or_missing_target_weights"
+            ),
+        },
+        "source_artifacts": {
+            "risk_adjusted_targets": _source_entry(risk_adjusted_targets_path, repo_root),
+        },
+        "target_count": len(targets),
+        "targets": targets,
+        "field_sources": {
+            "targets": "risk_adjusted_targets.signals[]",
+            "target_count": "risk_adjusted_targets.signals[].ticker",
+            "target_weight": "risk_adjusted_targets.signals[].target_weight",
+            "target_notional": "risk_adjusted_targets.signals[].target_notional if present",
+        },
+        "unavailable_fields": ["target_notional"] if any("target_notional" in row["unavailable_fields"] for row in targets) else [],
+        "trading_behavior_changed": False,
+    }
+
+
+def _target_weights_from_artifact(payload: Mapping[str, Any]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for row in _as_list(payload.get("targets")):
+        if not isinstance(row, Mapping):
+            continue
+        ticker = _ticker(row.get("ticker"))
+        weight = _float(row.get("target_weight"))
+        if ticker is not None and weight is not None:
+            weights[ticker] = weight
+    return weights
+
+
+def _current_weights_from_contract(contract: Mapping[str, Any]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for row in _as_list(_as_dict(contract.get("current_portfolio")).get("positions")):
+        if not isinstance(row, Mapping):
+            continue
+        ticker = _ticker(_first_present(row.get("ticker"), row.get("symbol")))
+        weight = _float(_first_present(row.get("current_weight"), row.get("weight")))
+        if ticker is not None and weight is not None:
+            weights[ticker] = weight
+    return weights
+
+
+def _reason_map(*rows: list[Any]) -> dict[str, dict[str, Any]]:
+    reasons: dict[str, dict[str, Any]] = {}
+    for group in rows:
+        for item in group:
+            if not isinstance(item, Mapping):
+                continue
+            ticker = _ticker(item.get("ticker"))
+            if ticker is None:
+                continue
+            reason = _first_present(item.get("reason"), item.get("block_reason"), item.get("decision_reason"), item.get("code"))
+            if reason in (None, ""):
+                continue
+            reasons[ticker] = {
+                "reason": str(reason),
+                "source_fields": [
+                    key
+                    for key in ("reason", "block_reason", "decision_reason", "code")
+                    if item.get(key) not in (None, "")
+                ],
+            }
+    return reasons
+
+
+def _candidate_lifecycle_from_artifacts(
+    *,
+    repo_root: Path,
+    trade_date: str,
+    run_id: str,
+    contract: Mapping[str, Any],
+    candidate_pool: Mapping[str, Any],
+    candidate_pool_path: Path | None,
+    target_portfolio: Mapping[str, Any],
+    target_portfolio_path: Path | None,
+    post_sell_rebudget: Mapping[str, Any],
+    post_sell_rebudget_path: Path | None,
+    target_attainment: Mapping[str, Any],
+    target_attainment_path: Path | None,
+    execution_integrity: Mapping[str, Any],
+    execution_integrity_path: Path | None,
+    generated_at: str,
+    git_sha: str,
+) -> dict[str, Any]:
+    target_weights = _target_weights_from_artifact(target_portfolio)
+    current_weights = _current_weights_from_contract(contract)
+    skipped_reasons = _reason_map(_as_list(post_sell_rebudget.get("skipped_buy_orders")))
+    suppressed_reasons = _reason_map(
+        _as_list(target_attainment.get("missing_intended_buys")),
+        _as_list(execution_integrity.get("missing_intended_orders")),
+        _as_list(execution_integrity.get("missing_buy_orders")),
+    )
+    lifecycle_rows: list[dict[str, Any]] = []
+    for row in _as_list(candidate_pool.get("candidates")):
+        if not isinstance(row, Mapping):
+            continue
+        ticker = _ticker(row.get("ticker"))
+        if ticker is None:
+            continue
+        target_weight = target_weights.get(ticker)
+        current_weight = current_weights.get(ticker)
+        unavailable_fields: list[str] = []
+        suppression_or_block_reason = None
+        reason_source_artifact = None
+        if ticker in skipped_reasons:
+            status = "skipped"
+            suppression_or_block_reason = skipped_reasons[ticker]["reason"]
+            reason_source_artifact = _relative(post_sell_rebudget_path, repo_root)
+        elif ticker in suppressed_reasons:
+            status = "suppressed"
+            suppression_or_block_reason = suppressed_reasons[ticker]["reason"]
+            reason_source_artifact = _first_present(
+                _relative(target_attainment_path, repo_root),
+                _relative(execution_integrity_path, repo_root),
+            )
+        elif target_weight is not None and current_weight is not None and current_weight > 0:
+            status = "retained"
+            unavailable_fields.append("suppression_or_block_reason")
+        elif target_weight is not None:
+            status = "selected"
+            unavailable_fields.append("suppression_or_block_reason")
+        else:
+            status = "unavailable"
+            unavailable_fields.extend(["target_weight", "suppression_or_block_reason"])
+        lifecycle_rows.append(
+            {
+                "ticker": ticker,
+                "lifecycle_status": status,
+                "target_weight": target_weight,
+                "current_weight": current_weight,
+                "suppression_or_block_reason": suppression_or_block_reason,
+                "reason_source_artifact": reason_source_artifact,
+                "source_artifacts": sorted(
+                    artifact
+                    for artifact in {
+                        _relative(candidate_pool_path, repo_root),
+                        _relative(target_portfolio_path, repo_root),
+                        reason_source_artifact,
+                    }
+                    if artifact
+                ),
+                "field_sources": {
+                    "ticker": "candidate_pool.candidates[].ticker",
+                    "lifecycle_status": "target_portfolio/current_portfolio plus explicit skip/suppression artifacts",
+                    "target_weight": "target_portfolio.targets[].target_weight" if target_weight is not None else "unavailable",
+                    "current_weight": "global_optimizer_replay_contract.current_portfolio.positions[].current_weight" if current_weight is not None else "unavailable",
+                    "suppression_or_block_reason": reason_source_artifact or "unavailable",
+                },
+                "unavailable_fields": sorted(set(unavailable_fields)),
+                "trading_behavior_changed": False,
+            }
+        )
+    lifecycle_rows = sorted(lifecycle_rows, key=lambda item: str(item["ticker"]))
+    found = bool(
+        lifecycle_rows
+        and candidate_pool_path is not None
+        and candidate_pool_path.exists()
+        and target_portfolio_path is not None
+        and target_portfolio_path.exists()
+    )
+    status_counts = dict(sorted(Counter(str(row["lifecycle_status"]) for row in lifecycle_rows).items()))
+    return {
+        "schema_version": CANDIDATE_LIFECYCLE_SCHEMA_VERSION,
+        "metadata": {
+            "trade_date": trade_date,
+            "run_id": run_id,
+            "generated_at": generated_at,
+            "git_sha": git_sha,
+            "mode": "research_only",
+            "fr_id": FR_ID,
+            "alpha_chase_default": "off",
+            "production_execution_modules_invoked": [],
+        },
+        "trade_date": trade_date,
+        "run_id": run_id,
+        "readiness": {
+            "status": "FOUND" if found else "MISSING",
+            "reason": "candidate_pool_and_target_portfolio_found" if found else "candidate_pool_or_target_portfolio_unavailable",
+        },
+        "source_artifacts": {
+            "candidate_pool": _source_entry(candidate_pool_path, repo_root),
+            "target_portfolio": _source_entry(target_portfolio_path, repo_root),
+            "post_sell_rebudget": _source_entry(post_sell_rebudget_path, repo_root),
+            "execution_target_attainment": _source_entry(target_attainment_path, repo_root),
+            "execution_integrity": _source_entry(execution_integrity_path, repo_root),
+        },
+        "lifecycle_count": len(lifecycle_rows),
+        "status_counts": status_counts,
+        "candidates": lifecycle_rows,
+        "field_sources": {
+            "candidates": "candidate_pool.candidates[]",
+            "target_weight": "target_portfolio.targets[].target_weight",
+            "current_weight": "global_optimizer_replay_contract.current_portfolio.positions[]",
+            "suppression_or_block_reason": "post_sell_rebudget/execution_target_attainment/execution_integrity when present",
+        },
+        "unavailable_fields": sorted(
+            set(field for row in lifecycle_rows for field in _as_list(row.get("unavailable_fields")))
+        ),
+        "trading_behavior_changed": False,
+    }
 
 
 def _universe_snapshot_from_artifact(payload: Mapping[str, Any], path: Path, repo_root: Path) -> dict[str, Any]:
@@ -1261,6 +1531,68 @@ def write_fr105_replay_contract(
                 root,
                 _as_dict(candidate_universe).get("asof") or _as_dict(contract.get("metadata")).get("data_asof"),
             )
+
+    risk_adjusted_targets_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("risk_adjusted_targets_path"),
+        root,
+    )
+    risk_adjusted_targets = _as_dict(_read_json(risk_adjusted_targets_path))
+    target_portfolio = _target_portfolio_from_risk_adjusted_targets(
+        repo_root=root,
+        trade_date=trade_date,
+        run_id=contract_id,
+        risk_adjusted_targets=risk_adjusted_targets,
+        risk_adjusted_targets_path=risk_adjusted_targets_path,
+        generated_at=generated,
+        git_sha=git,
+    )
+    if contract["source_artifacts"].get("target_portfolio_path") is None and _candidate_artifact_found(target_portfolio):
+        target_portfolio_path = out_dir / "target_portfolio.json"
+        _write_json(target_portfolio_path, target_portfolio)
+        contract["source_artifacts"]["target_portfolio_path"] = _relative(target_portfolio_path, root)
+
+    candidate_pool_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("candidate_pool_path"),
+        root,
+    )
+    target_portfolio_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("target_portfolio_path"),
+        root,
+    )
+    post_sell_rebudget_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("post_sell_rebudget_path"),
+        root,
+    )
+    target_attainment_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("execution_target_attainment_path"),
+        root,
+    )
+    execution_integrity_path = _path_from_text(
+        _as_dict(contract.get("source_artifacts")).get("execution_integrity_path"),
+        root,
+    )
+    candidate_lifecycle = _candidate_lifecycle_from_artifacts(
+        repo_root=root,
+        trade_date=trade_date,
+        run_id=contract_id,
+        contract=contract,
+        candidate_pool=_as_dict(_read_json(candidate_pool_path)),
+        candidate_pool_path=candidate_pool_path,
+        target_portfolio=_as_dict(_read_json(target_portfolio_path)),
+        target_portfolio_path=target_portfolio_path,
+        post_sell_rebudget=_as_dict(_read_json(post_sell_rebudget_path)),
+        post_sell_rebudget_path=post_sell_rebudget_path,
+        target_attainment=_as_dict(_read_json(target_attainment_path)),
+        target_attainment_path=target_attainment_path,
+        execution_integrity=_as_dict(_read_json(execution_integrity_path)),
+        execution_integrity_path=execution_integrity_path,
+        generated_at=generated,
+        git_sha=git,
+    )
+    if contract["source_artifacts"].get("candidate_trade_lifecycle_path") is None and _candidate_artifact_found(candidate_lifecycle):
+        candidate_lifecycle_path = out_dir / "candidate_lifecycle.json"
+        _write_json(candidate_lifecycle_path, candidate_lifecycle)
+        contract["source_artifacts"]["candidate_trade_lifecycle_path"] = _relative(candidate_lifecycle_path, root)
 
     contract = _clean(contract)
     contract["validation_status"] = validate_fr105_replay_contract(contract).to_dict()
