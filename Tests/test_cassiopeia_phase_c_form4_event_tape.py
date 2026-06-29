@@ -8,6 +8,7 @@ import pandas as pd
 
 from scripts.research.build_cassiopeia_phase_c_form4_event_tape import (
     _is_form4_xml_name,
+    _primary_xml_document,
     build_artifact,
     parse_form4_xml,
 )
@@ -62,6 +63,19 @@ def test_xsl_rendered_form4_path_is_not_treated_as_raw_xml() -> None:
     assert _is_form4_xml_name("form4.xml") is True
     assert _is_form4_xml_name("xslF345X05/wk-form4_1727385738.xml") is False
     assert _is_form4_xml_name("ownership.xsl") is False
+
+
+def test_primary_xml_document_uses_issuer_cik_not_reporting_owner_prefix(tmp_path: Path) -> None:
+    document, index_url, archive_cik = _primary_xml_document(
+        tmp_path,
+        "0000789019",
+        "0001062993-24-016766",
+        "form4.xml",
+    )
+
+    assert document == "form4.xml"
+    assert index_url is None
+    assert archive_cik == "0000789019"
 
 
 def _write_fixture_repo(root: Path) -> None:
@@ -294,6 +308,42 @@ def test_build_artifact_strips_xsl_primary_document_path(tmp_path: Path) -> None
 
     assert payload["event_tape"]["usable_event_count"] == 1
     assert payload["event_tape"]["events"][0]["source_url"] == raw_xml_url
+
+
+def test_build_artifact_uses_issuer_archive_cik_when_accession_prefix_differs(tmp_path: Path) -> None:
+    _write_fixture_repo(tmp_path)
+    submissions_url = "https://data.sec.gov/submissions/CIK0000001234.json"
+    raw_xml_url = "https://www.sec.gov/Archives/edgar/data/1234/000106299324016766/form4.xml"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["4"],
+                "items": [""],
+                "acceptanceDateTime": ["2024-11-26T22:18:19.000Z"],
+                "filingDate": ["2024-11-26"],
+                "reportDate": ["2024-11-25"],
+                "accessionNumber": ["0001062993-24-016766"],
+                "primaryDocument": ["form4.xml"],
+            }
+        }
+    }
+
+    payload = build_artifact(
+        repo_root=tmp_path,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        output_date="issuer-cik",
+        sleep_s=0,
+        max_filings=1,
+        get_submissions_fn=lambda url: {submissions_url: submissions}[url],
+        get_xml_fn=lambda url: {raw_xml_url: _form4_xml()}[url],
+    )
+
+    event = payload["event_tape"]["events"][0]
+    assert payload["event_tape"]["usable_event_count"] == 1
+    assert event["archive_cik"] == "0000001234"
+    assert event["accession_filer_cik"] == "0001062993"
+    assert event["source_url"] == raw_xml_url
 
 
 def test_build_artifact_resumes_from_checkpoint(tmp_path: Path) -> None:
