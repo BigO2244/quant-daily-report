@@ -20,6 +20,7 @@ _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 _build_confirmation_email = _mod._build_confirmation_email
 _load_results = _mod._load_results
+refresh_live_pilot_confirmation_status = _mod.refresh_live_pilot_confirmation_status
 
 
 def _results(**overrides):
@@ -148,3 +149,254 @@ def test_confirmation_email_loads_explicit_live_pilot_results_path(tmp_path, mon
     assert loaded_path == results_path
     assert results["mode"] == "LIVE_PILOT"
     assert results["submitted_count"] == 1
+
+
+def test_confirmation_email_renders_reliability_and_target_attainment_from_run_artifacts(tmp_path):
+    run_root = tmp_path / "run"
+    audit = run_root / "audit"
+    audit.mkdir(parents=True)
+    reliability_path = audit / "execution_reliability_report_2026-06-03.json"
+    reliability_path.write_text(
+        json.dumps(
+            {
+                "overall_status": "WARN",
+                "classification": "YELLOW",
+                "score": 88,
+                "top_failure_reason": "target_cash_drift",
+                "recommended_operator_actions": ["Review underdeployment"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    target_path = audit / "execution_target_attainment_2026-06-03.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "status": "WARN_RECONCILED_BUT_UNDERDEPLOYED",
+                "target_cash_weight": 0.05,
+                "achieved_cash_weight": 0.18,
+                "cash_target_drift": 0.13,
+                "warnings": ["reconciliation passed despite target cash miss"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "operator_summary.json").write_text(
+        json.dumps(
+            {
+                "execution_reliability_artifact": str(reliability_path),
+                "execution_target_attainment_artifact": str(target_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    results = _results(
+        status="EXECUTED",
+        operator_execution_status="executed",
+        halt_reason=None,
+        submitted_count=2,
+        accepted_count=2,
+        orders_filled_count=2,
+    )
+
+    _, body_text, body_html = _build_confirmation_email(
+        results,
+        run_root / "execution_results.json",
+    )
+
+    assert "Status reason: none" in body_text
+    assert "EXECUTION RELIABILITY" in body_text
+    assert "Classification | YELLOW" in body_text
+    assert "Review underdeployment" in body_text
+    assert "TARGET ATTAINMENT" in body_text
+    assert "WARN_RECONCILED_BUT_UNDERDEPLOYED" in body_text
+    assert "Achieved cash weight | 18.00%" in body_text
+    assert "Execution Reliability" in body_html
+    assert "Target Attainment" in body_html
+
+
+def test_live_pilot_confirmation_refresh_failure_is_explicit_and_retains_artifact_status(tmp_path):
+    class FailingRefreshBroker:
+        def get_order(self, order_id):
+            raise RuntimeError(f"read_only_get_order_failed:{order_id}")
+
+        def get_account(self):
+            return {"id": "acct-123", "cash": "302.40", "equity": "500.03"}
+
+        def get_positions(self):
+            return []
+
+        def list_orders(self, status="open", limit=100):
+            return []
+
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "live_pilot_orders_intended.json").write_text(
+        json.dumps({"orders": [{"symbol": "ABBV", "side": "BUY", "qty": 1, "order_type": "market"}]}),
+        encoding="utf-8",
+    )
+    (run_root / "live_pilot_orders_submitted.json").write_text(
+        json.dumps(
+            {
+                "orders": [
+                    {
+                        "symbol": "ABBV",
+                        "side": "BUY",
+                        "qty": 1,
+                        "status": "OrderStatus.PENDING_NEW",
+                        "submitted_order_type": "market",
+                        "order_type_submitted": "market",
+                        "entry_execution_policy": "live_pilot_buy_market_order_immediate",
+                        "is_marketable": True,
+                        "is_passive": False,
+                        "order": {"id": "broker-order-abbv", "status": "OrderStatus.PENDING_NEW"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    results_path = run_root / "execution_results.json"
+    results = _results(
+        run_id="live-run",
+        trade_date="2026-06-29",
+        mode="LIVE_PILOT",
+        status="SUBMITTED",
+        operator_execution_status="executed",
+        halt_reason=None,
+        submitted_count=1,
+        accepted_count=1,
+        orders_filled_count=0,
+        filled_count=0,
+        approved_buy_count=1,
+        submitted_buy_count=1,
+        unfilled_buy_count=1,
+        entry_execution_policy="live_pilot_buy_market_order_immediate",
+        submitted_order_type="market",
+        order_type_submitted="market",
+        marketable_order_count=1,
+        passive_order_count=0,
+        run_root=str(run_root),
+        broker_responses=[
+            {
+                "symbol": "ABBV",
+                "side": "BUY",
+                "status": "OrderStatus.PENDING_NEW",
+                "order": {"id": "broker-order-abbv", "status": "OrderStatus.PENDING_NEW"},
+            }
+        ],
+    )
+    results_path.write_text(json.dumps(results), encoding="utf-8")
+
+    refreshed, refreshed_path = refresh_live_pilot_confirmation_status(
+        results,
+        results_path,
+        broker=FailingRefreshBroker(),
+    )
+    _, body_text, _ = _build_confirmation_email(refreshed, refreshed_path)
+
+    assert refreshed["status"] == "SUBMITTED"
+    assert refreshed["filled_count"] == 0
+    assert refreshed["broker_status_refresh"] == "FAILED"
+    assert refreshed["broker_status_refresh_claims_broker_truth"] is False
+    assert "broker_status_refresh: FAILED" in body_text
+    assert "read_only_get_order_failed:broker-order-abbv" in body_text
+    assert "Filled: 0" in body_text
+
+
+def test_live_pilot_confirmation_refresh_converts_stale_pending_market_order_to_filled(tmp_path):
+    class FilledRefreshBroker:
+        def get_order(self, order_id):
+            return {
+                "id": order_id,
+                "status": "filled",
+                "symbol": "ABBV",
+                "filled_qty": "1",
+                "filled_quantity": "1",
+                "filled_avg_price": "185.25",
+            }
+
+        def get_account(self):
+            return {"id": "acct-123", "cash": "117.15", "equity": "500.03"}
+
+        def get_positions(self):
+            return []
+
+        def list_orders(self, status="open", limit=100):
+            return []
+
+    run_root = tmp_path / "run-filled"
+    run_root.mkdir()
+    (run_root / "live_pilot_orders_intended.json").write_text(
+        json.dumps({"orders": [{"symbol": "ABBV", "side": "BUY", "qty": 1, "order_type": "market"}]}),
+        encoding="utf-8",
+    )
+    (run_root / "live_pilot_orders_submitted.json").write_text(
+        json.dumps(
+            {
+                "orders": [
+                    {
+                        "symbol": "ABBV",
+                        "side": "BUY",
+                        "qty": 1,
+                        "status": "OrderStatus.PENDING_NEW",
+                        "submitted_order_type": "market",
+                        "order_type_submitted": "market",
+                        "entry_execution_policy": "live_pilot_buy_market_order_immediate",
+                        "is_marketable": True,
+                        "is_passive": False,
+                        "order": {"id": "broker-order-abbv", "status": "OrderStatus.PENDING_NEW"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    results_path = run_root / "execution_results.json"
+    results = _results(
+        run_id="live-run-filled",
+        trade_date="2026-06-29",
+        mode="LIVE_PILOT",
+        status="SUBMITTED",
+        operator_execution_status="executed",
+        halt_reason=None,
+        submitted_count=1,
+        accepted_count=1,
+        orders_filled_count=0,
+        filled_count=0,
+        approved_buy_count=1,
+        submitted_buy_count=1,
+        unfilled_buy_count=1,
+        entry_execution_policy="live_pilot_buy_market_order_immediate",
+        submitted_order_type="market",
+        order_type_submitted="market",
+        marketable_order_count=1,
+        passive_order_count=0,
+        run_root=str(run_root),
+        broker_responses=[
+            {
+                "symbol": "ABBV",
+                "side": "BUY",
+                "status": "OrderStatus.PENDING_NEW",
+                "order": {"id": "broker-order-abbv", "status": "OrderStatus.PENDING_NEW"},
+            }
+        ],
+    )
+    results_path.write_text(json.dumps(results), encoding="utf-8")
+
+    refreshed, refreshed_path = refresh_live_pilot_confirmation_status(
+        results,
+        results_path,
+        broker=FilledRefreshBroker(),
+    )
+    _, body_text, _ = _build_confirmation_email(refreshed, refreshed_path)
+
+    assert refreshed["broker_status_refresh"] == "OK"
+    assert refreshed["filled_count"] == 1
+    assert refreshed["filled_qty"] == 1.0
+    assert refreshed["avg_fill_price"] == 185.25
+    assert refreshed["open_orders_count"] == 0
+    assert refreshed["idle_cash_reason"] != "submitted_not_filled"
+    assert "Filled: 1" in body_text
+    assert "broker_status_refresh: OK" in body_text
+    assert "Filled qty: 1.0" in body_text

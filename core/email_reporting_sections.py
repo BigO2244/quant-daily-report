@@ -230,6 +230,8 @@ def target_attainment_rows(
     artifact, artifact_path = _artifact_payload(context, "execution_target_attainment_artifact", repo_root)
     artifact_status = _artifact_status(context, "execution_target_attainment_artifact", repo_root)
     warnings = _first_present(artifact.get("warnings"), context.get("execution_target_attainment_warnings"))
+    resized_buys = _first_present(artifact.get("resized_intended_buys"), context.get("resized_intended_buys"))
+    suppressed_buys = _first_present(artifact.get("suppressed_intended_buys"), context.get("suppressed_intended_buys"))
     missing_buys = _first_present(artifact.get("missing_intended_buys"), context.get("missing_intended_buys"))
     rows = [
         [
@@ -242,6 +244,8 @@ def target_attainment_rows(
         ["Submitted buys", _fmt_value(artifact.get("submitted_buy_count"))],
         ["Filled buys", _fmt_value(artifact.get("filled_buy_count"))],
         ["Pending buys", _fmt_value(artifact.get("pending_buy_count"))],
+        ["Resized intended buys", _join_values(resized_buys)],
+        ["Suppressed intended buys", _join_values(suppressed_buys)],
         ["Missing intended buys", _join_values(missing_buys)],
         ["Warnings", _join_values(warnings)],
         ["Actual posttrade cash", _fmt_money(artifact.get("actual_posttrade_cash"))],

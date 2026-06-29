@@ -234,6 +234,69 @@ def test_cash_drift_above_threshold_produces_warning() -> None:
     assert "cash_target_drift" in {finding["code"] for finding in audit["findings"]}
 
 
+def test_post_sell_rebudget_resized_and_suppressed_buys_are_not_missing() -> None:
+    intended_orders = [
+        _order_without_id("GE", "SELL", 1),
+        _order_without_id("C", "SELL", 2),
+        _order_without_id("CVS", "SELL", 2),
+        _order_without_id("EOG", "BUY", 6),
+        _order_without_id("SPG", "BUY", 3),
+        _order_without_id("VZ", "BUY", 11),
+        _order_without_id("ABBV", "BUY", 2),
+        _order_without_id("JCI", "BUY", 3),
+        _order_without_id("MS", "BUY", 1),
+    ]
+    payload_orders = [
+        _order_without_id("GE", "SELL", 1),
+        _order_without_id("C", "SELL", 2),
+        _order_without_id("CVS", "SELL", 2),
+        _order("EOG", "BUY", 2.087315765),
+        _order("SPG", "BUY", 2.976602846),
+    ]
+    post_sell_rebudget = {
+        "final_buy_orders_submitted": [
+            {"ticker": "EOG", "side": "BUY", "shares": 2.087315765, "notional": 276.78, "reason": "post_sell_rebudget_capital_clipped"},
+            {"ticker": "SPG", "side": "BUY", "shares": 2.976602846, "notional": 675.36, "reason": "post_sell_rebudget_capital_clipped"},
+        ],
+        "skipped_buy_orders": [
+            {"ticker": "ABBV", "side": "BUY", "shares": 2, "notional": 371.50, "block_reason": "buy_blocked_insufficient_buying_power"},
+            {"ticker": "JCI", "side": "BUY", "shares": 3, "notional": 318.00, "block_reason": "buy_blocked_insufficient_buying_power"},
+            {"ticker": "MS", "side": "BUY", "shares": 1, "notional": 141.00, "block_reason": "buy_blocked_insufficient_buying_power"},
+            {"ticker": "VZ", "side": "BUY", "shares": 11, "notional": 498.00, "block_reason": "buy_blocked_insufficient_buying_power"},
+        ],
+    }
+    readiness = {
+        "per_trade_diagnostics": {
+            "skipped": [
+                {"ticker": "MO", "side": "SELL", "requested_quantity": 1, "skip_reason": "min_notional", "stage": "execution_filter"},
+                {"ticker": "NEE", "side": "SELL", "requested_quantity": 1, "skip_reason": "min_notional", "stage": "execution_filter"},
+            ]
+        }
+    }
+
+    audit = validate_execution_integrity(
+        trade_date="2026-06-29",
+        run_id="2026-06-29T093507-0400_965aa63",
+        intended_orders=_intended(intended_orders),
+        execution_payload=_payload(payload_orders, execution_source="post_sell_rebudget"),
+        execution_results=_results(payload_orders),
+        operator_summary={"terminal_status": "success"},
+        post_sell_rebudget=post_sell_rebudget,
+        readiness_certification=readiness,
+    )
+
+    assert audit["status"] == "OK"
+    assert audit["lineage_count_reconciliation"] == "EXPLAINED"
+    assert audit["missing_buy_orders"] == []
+    assert audit["unexpected_payload_orders"] == []
+    assert {row["ticker"] for row in audit["resized_buy_orders"]} == {"EOG", "SPG"}
+    assert {row["ticker"] for row in audit["suppressed_buy_orders"]} == {"ABBV", "JCI", "MS", "VZ"}
+    assert {row["ticker"] for row in audit["filtered_orders"]} == {"MO", "NEE"}
+    assert "intended_payload_count_mismatch_with_exception" not in {
+        finding["code"] for finding in audit["findings"]
+    }
+
+
 def test_write_execution_integrity_audit_writes_deterministic_artifact(tmp_path: Path) -> None:
     run_root = tmp_path / "outputs" / "runs" / "run-fr031"
     intended_path = run_root / "broker" / "intended_orders_2026-05-27.json"

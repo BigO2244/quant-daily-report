@@ -26,9 +26,12 @@ def _fmt_price(value: Any) -> str:
 
 def _fmt_shares(value: Any) -> str:
     try:
-        return str(int(value))
+        qty = float(value)
     except Exception:
         return "n/a"
+    if qty.is_integer():
+        return str(int(qty))
+    return f"{qty:.9f}".rstrip("0").rstrip(".")
 
 
 def _fmt_est_notional(value: Any) -> str:
@@ -171,6 +174,7 @@ def _candidate_lifecycle_rows(payload: dict[str, Any]) -> list[list[Any]]:
     reason_detail = _candidate_lifecycle_reason_detail(payload)
     rows = [
         ["Planned Payload Trades", _first_present(payload.get("planned_payload_trade_count"), summary.get("precompute_candidates"))],
+        ["Min-Notional Filtered", _first_present(payload.get("min_notional_filtered_count"), summary.get("min_notional_filtered"))],
         ["Executable Filter Passed", _first_present(payload.get("executable_filter_passed_count"), summary.get("passed_executable_filter"))],
         ["Intended Orders", _first_present(payload.get("intended_orders_count"), summary.get("intended_orders"))],
         ["Final Executable Trades", _first_present(payload.get("final_executable_trades_count"), payload.get("execution_eligible_trades_count"), payload.get("executable_trades_count"))],

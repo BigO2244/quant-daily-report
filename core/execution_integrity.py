@@ -88,6 +88,10 @@ def _semantic_order_key(order: Mapping[str, Any]) -> str:
     return f"{_order_symbol(order)}:{_order_side(order)}:{_order_qty(order)}"
 
 
+def _symbol_side_key(order: Mapping[str, Any]) -> str:
+    return f"{_order_symbol(order)}:{_order_side(order)}"
+
+
 def _orders_match_for_lineage(
     order: Mapping[str, Any],
     candidates_by_key: Mapping[str, Mapping[str, Any]],
@@ -110,6 +114,112 @@ def _order_ref(order: Mapping[str, Any]) -> dict[str, Any]:
         "shares": order.get("shares", order.get("quantity", order.get("qty"))),
         "order_id": order.get("order_id") or order.get("client_order_id"),
     }
+
+
+def _order_reason(order: Mapping[str, Any], default: str = "") -> str:
+    for key in (
+        "reason",
+        "reason_code",
+        "block_reason",
+        "skip_reason",
+        "decision_reason",
+        "suppression_or_clipping_reason",
+    ):
+        value = str(order.get(key) or "").strip()
+        if value:
+            return value
+    return default
+
+
+def _with_reason(ref: dict[str, Any], *, reason: str, stage: str) -> dict[str, Any]:
+    out = dict(ref)
+    out["reason"] = reason
+    out["stage"] = stage
+    return out
+
+
+def _rebudget_final_buy_index(post_sell_rebudget: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    out: dict[str, Mapping[str, Any]] = {}
+    for row in _as_list(post_sell_rebudget.get("final_buy_orders_submitted")):
+        if not isinstance(row, Mapping) or _order_side(row) != "BUY":
+            continue
+        key = _symbol_side_key(row)
+        if key:
+            out[key] = row
+    return out
+
+
+def _rebudget_skipped_buy_index(post_sell_rebudget: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    out: dict[str, Mapping[str, Any]] = {}
+    for row in _as_list(post_sell_rebudget.get("skipped_buy_orders")):
+        if not isinstance(row, Mapping) or _order_side(row) != "BUY":
+            continue
+        key = _symbol_side_key(row)
+        if key:
+            out[key] = row
+    return out
+
+
+def _readiness_filtered_orders(readiness_certification: Mapping[str, Any]) -> list[dict[str, Any]]:
+    diagnostics = readiness_certification.get("per_trade_diagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, Mapping) else {}
+    rows = diagnostics.get("skipped")
+    out: list[dict[str, Any]] = []
+    for row in _as_list(rows):
+        if not isinstance(row, Mapping):
+            continue
+        reason = _order_reason(row, default="filtered")
+        out.append(
+            _with_reason(
+                _order_ref(row),
+                reason=reason,
+                stage=str(row.get("stage") or "execution_filter"),
+            )
+        )
+    return out
+
+
+def _classified_resized_ref(
+    intended_order: Mapping[str, Any],
+    rebudget_order: Mapping[str, Any],
+) -> dict[str, Any]:
+    ref = _order_ref(intended_order)
+    ref.update(
+        {
+            "reason": "resized_by_post_sell_rebudget",
+            "stage": "post_sell_rebudget",
+            "submitted_shares": rebudget_order.get(
+                "shares",
+                rebudget_order.get("quantity", rebudget_order.get("qty")),
+            ),
+            "submitted_notional": rebudget_order.get("notional"),
+            "submitted_order_id": rebudget_order.get("order_id")
+            or rebudget_order.get("client_order_id"),
+            "rebudget_reason": _order_reason(
+                rebudget_order,
+                default="post_sell_rebudget",
+            ),
+        }
+    )
+    return ref
+
+
+def _classified_suppressed_ref(
+    intended_order: Mapping[str, Any],
+    skipped_order: Mapping[str, Any],
+) -> dict[str, Any]:
+    ref = _order_ref(intended_order)
+    ref.update(
+        {
+            "reason": _order_reason(
+                skipped_order,
+                default="buy_blocked_insufficient_buying_power",
+            ),
+            "stage": "post_sell_rebudget",
+            "skipped_notional": skipped_order.get("notional"),
+        }
+    )
+    return ref
 
 
 def _side_count(orders: list[Any], side: str) -> int:
@@ -216,12 +326,16 @@ def validate_execution_integrity(
     execution_payload: Mapping[str, Any] | None,
     execution_results: Mapping[str, Any] | None,
     operator_summary: Mapping[str, Any] | None = None,
+    post_sell_rebudget: Mapping[str, Any] | None = None,
+    readiness_certification: Mapping[str, Any] | None = None,
     cash_drift_threshold: float = DEFAULT_CASH_DRIFT_THRESHOLD,
 ) -> dict[str, Any]:
     intended_orders = dict(intended_orders or {})
     execution_payload = dict(execution_payload or {})
     execution_results = dict(execution_results or {})
     operator_summary = dict(operator_summary or {})
+    post_sell_rebudget = dict(post_sell_rebudget or {})
+    readiness_certification = dict(readiness_certification or {})
 
     intended = [
         dict(order)
@@ -303,46 +417,96 @@ def validate_execution_integrity(
     intended_keys = {_order_key(order): order for order in intended}
     payload_keys = {_order_key(order): order for order in payload_orders}
     payload_semantic_keys: dict[str, list[Mapping[str, Any]]] = {}
+    payload_symbol_side_keys: dict[str, list[Mapping[str, Any]]] = {}
     for order in payload_orders:
         payload_semantic_keys.setdefault(_semantic_order_key(order), []).append(order)
+        payload_symbol_side_keys.setdefault(_symbol_side_key(order), []).append(order)
     comparable_intended = list(intended)
     if continuation_side:
         comparable_intended = [
             order for order in intended if _order_side(order) == continuation_side
         ]
-    missing_intended = [
-        _order_ref(order)
-        for order in sorted(
-            comparable_intended,
-            key=lambda candidate: (_semantic_order_key(candidate), _order_key(candidate)),
-        )
-        if not _orders_match_for_lineage(order, payload_keys, payload_semantic_keys)
-    ]
-    missing_buy_orders = [
-        order for order in missing_intended if _order_side(order) == "BUY"
-    ]
+    rebudget_final_buys = _rebudget_final_buy_index(post_sell_rebudget)
+    rebudget_skipped_buys = _rebudget_skipped_buy_index(post_sell_rebudget)
+
+    missing_intended: list[dict[str, Any]] = []
+    resized_intended_orders: list[dict[str, Any]] = []
+    suppressed_intended_orders: list[dict[str, Any]] = []
+    for order in sorted(
+        comparable_intended,
+        key=lambda candidate: (_semantic_order_key(candidate), _order_key(candidate)),
+    ):
+        if _orders_match_for_lineage(order, payload_keys, payload_semantic_keys):
+            continue
+        symbol_side_key = _symbol_side_key(order)
+        if _order_side(order) == "BUY":
+            rebudget_order = rebudget_final_buys.get(symbol_side_key)
+            if rebudget_order and payload_symbol_side_keys.get(symbol_side_key):
+                resized_intended_orders.append(_classified_resized_ref(order, rebudget_order))
+                continue
+            skipped_order = rebudget_skipped_buys.get(symbol_side_key)
+            if skipped_order:
+                suppressed_intended_orders.append(_classified_suppressed_ref(order, skipped_order))
+                continue
+        missing_intended.append(_order_ref(order))
+    missing_buy_orders = [order for order in missing_intended if _order_side(order) == "BUY"]
     comparable_intended_keys = {_order_key(order): order for order in comparable_intended}
     comparable_intended_semantic_keys: dict[str, list[Mapping[str, Any]]] = {}
+    comparable_intended_symbol_side_keys: dict[str, list[Mapping[str, Any]]] = {}
     for order in comparable_intended:
         comparable_intended_semantic_keys.setdefault(_semantic_order_key(order), []).append(order)
-    unexpected_payload_orders = [
-        _order_ref(order)
-        for order in sorted(
-            payload_orders,
-            key=lambda candidate: (_semantic_order_key(candidate), _order_key(candidate)),
-        )
-        if intended
-        and not _orders_match_for_lineage(
+        comparable_intended_symbol_side_keys.setdefault(_symbol_side_key(order), []).append(order)
+    unexpected_payload_orders: list[dict[str, Any]] = []
+    for order in sorted(
+        payload_orders,
+        key=lambda candidate: (_semantic_order_key(candidate), _order_key(candidate)),
+    ):
+        if not intended:
+            continue
+        if _orders_match_for_lineage(
             order,
             comparable_intended_keys,
             comparable_intended_semantic_keys,
-        )
-    ]
+        ):
+            continue
+        symbol_side_key = _symbol_side_key(order)
+        if (
+            _order_side(order) == "BUY"
+            and rebudget_final_buys.get(symbol_side_key)
+            and comparable_intended_symbol_side_keys.get(symbol_side_key)
+        ):
+            continue
+        unexpected_payload_orders.append(_order_ref(order))
+
+    filtered_orders = _readiness_filtered_orders(readiness_certification)
+    supported_lineage_exception = bool(
+        resized_intended_orders
+        or suppressed_intended_orders
+        or filtered_orders
+    )
+    effective_explicit_exception = bool(has_explicit_exception or supported_lineage_exception)
+    count_delta = max(intended_count - payload_count, 0)
+    count_mismatch_explained = bool(
+        intended_count != payload_count
+        and count_delta > 0
+        and not missing_intended
+        and not unexpected_payload_orders
+        and len(suppressed_intended_orders) >= count_delta
+    )
+    lineage_count_reconciliation = (
+        "MATCH"
+        if intended_count == payload_count
+        else "EXPLAINED"
+        if count_mismatch_explained
+        else "UNEXPLAINED"
+    )
 
     findings: list[dict[str, str]] = []
     if intended_count != payload_count and continuation_mode:
         pass
-    elif intended_count != payload_count and not has_explicit_exception:
+    elif intended_count != payload_count and count_mismatch_explained:
+        pass
+    elif intended_count != payload_count and not effective_explicit_exception:
         _add_finding(
             findings,
             severity="FAIL",
@@ -352,7 +516,7 @@ def validate_execution_integrity(
                 f"execution_payload_trade_count={payload_count}"
             ),
         )
-    elif intended_count != payload_count and has_explicit_exception:
+    elif intended_count != payload_count and effective_explicit_exception:
         _add_finding(
             findings,
             severity="WARN",
@@ -364,7 +528,7 @@ def validate_execution_integrity(
             ),
         )
 
-    if missing_buy_orders and not has_explicit_exception:
+    if missing_buy_orders and not effective_explicit_exception:
         _add_finding(
             findings,
             severity="FAIL",
@@ -523,8 +687,18 @@ def validate_execution_integrity(
         "continuation_side": continuation_side or None,
         "continuation_source": continuation_source or None,
         "continuation_intended_orders_path": continuation_path or None,
+        "lineage_count_reconciliation": lineage_count_reconciliation,
         "missing_intended_orders": missing_intended,
         "missing_buy_orders": missing_buy_orders,
+        "resized_intended_orders": resized_intended_orders,
+        "resized_buy_orders": [
+            order for order in resized_intended_orders if _order_side(order) == "BUY"
+        ],
+        "suppressed_intended_orders": suppressed_intended_orders,
+        "suppressed_buy_orders": [
+            order for order in suppressed_intended_orders if _order_side(order) == "BUY"
+        ],
+        "filtered_orders": filtered_orders,
         "unexpected_payload_orders": unexpected_payload_orders,
         "explicit_block_reasons": explicit_block_reasons,
         "explicit_defer_reasons": explicit_defer_reasons,
@@ -549,6 +723,9 @@ def write_execution_integrity_audit(
         if intended_orders_path
         else root / "broker" / f"intended_orders_{trade_date}.json"
     )
+    rebudget_path = root / "broker" / f"post_sell_rebudget_{trade_date}.json"
+    outputs_root = root.parents[1] if len(root.parents) > 1 else root.parent
+    readiness_path = outputs_root / "precompute" / trade_date / "execution_readiness_certification.json"
     audit = validate_execution_integrity(
         trade_date=trade_date,
         run_id=run_id,
@@ -556,6 +733,8 @@ def write_execution_integrity_audit(
         execution_payload=_read_json(root / "execution_payload.json"),
         execution_results=_read_json(root / "execution_results.json"),
         operator_summary=_read_json(root / "operator_summary.json"),
+        post_sell_rebudget=_read_json(rebudget_path),
+        readiness_certification=_read_json(readiness_path),
         cash_drift_threshold=cash_drift_threshold,
     )
     audit["source_artifacts"] = {
@@ -563,6 +742,8 @@ def write_execution_integrity_audit(
         "execution_payload": str(root / "execution_payload.json"),
         "execution_results": str(root / "execution_results.json"),
         "operator_summary": str(root / "operator_summary.json"),
+        "post_sell_rebudget": str(rebudget_path),
+        "execution_readiness_certification": str(readiness_path),
     }
     out_path = root / "audit" / "execution_integrity.json"
     safe_write_text(

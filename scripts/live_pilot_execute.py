@@ -527,6 +527,34 @@ def _build_live_pilot_execution_results(
         entry_summary["blocked_or_suppressed_buy_reason"] = reason_code
     else:
         entry_summary["blocked_or_suppressed_buy_reason"] = NO_ESCALATION_REASON
+    filled_qty_total = 0.0
+    fill_prices: list[float] = []
+    for row in submitted:
+        order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
+        if _status_bucket(row.get("status") or order.get("status")) != "filled":
+            continue
+        qty = _safe_float(
+            row.get("filled_qty")
+            or row.get("filled_quantity")
+            or order.get("filled_qty")
+            or order.get("filled_quantity")
+            or row.get("qty")
+        )
+        if qty is not None:
+            filled_qty_total += qty
+        fill_price = _fill_price(row)
+        if fill_price is not None:
+            fill_prices.append(fill_price)
+    submitted_count = 0 if dry_run else len(submitted)
+    filled_count = int(reconciliation.get("filled_count") or 0)
+    if dry_run:
+        idle_cash_reason = "dry_run_no_capital_submitted"
+    elif submitted_count > 0 and filled_count == 0:
+        idle_cash_reason = "submitted_not_filled"
+    elif submitted_count > 0 and filled_count >= submitted_count:
+        idle_cash_reason = "capital_deployed_within_cap"
+    else:
+        idle_cash_reason = "partial_cap_deployment"
     return {
         "schema_version": "live_pilot_execution_results.v1",
         "run_id": run_id,
@@ -542,11 +570,20 @@ def _build_live_pilot_execution_results(
             if terminal_status == "SUBMITTED"
             else "halted"
         ),
-        "submitted_count": 0 if dry_run else len(submitted),
+        "submitted_count": submitted_count,
         "accepted_count": int(reconciliation.get("accepted_count") or 0),
         "rejected_count": int(reconciliation.get("rejected_count") or 0),
-        "filled_count": int(reconciliation.get("filled_count") or 0),
-        "orders_filled_count": int(reconciliation.get("filled_count") or 0),
+        "filled_count": filled_count,
+        "orders_filled_count": filled_count,
+        "filled_qty": filled_qty_total if filled_qty_total > 0 else None,
+        "fill_qty": filled_qty_total if filled_qty_total > 0 else None,
+        "avg_fill_price": _mean(fill_prices),
+        "open_orders_count": int(reconciliation.get("open_count") or 0),
+        "idle_cash_reason": reconciliation.get("idle_cash_reason") or idle_cash_reason,
+        "broker_status_refresh": reconciliation.get("broker_status_refresh"),
+        "broker_status_refresh_at": reconciliation.get("broker_status_refresh_at"),
+        "broker_status_refresh_errors": list(reconciliation.get("broker_status_refresh_errors") or []),
+        "broker_status_refresh_claims_broker_truth": reconciliation.get("broker_status_refresh_claims_broker_truth"),
         "broker_responses": submitted,
         "order_lifecycle": submitted,
         "run_root": str(run_root),
@@ -1259,6 +1296,10 @@ def refresh_live_pilot_reconciliation(
                 **row,
                 "status": str((broker_order or {}).get("status") or row.get("status")),
                 "order": broker_order,
+                "filled_qty": (broker_order or {}).get("filled_qty") or (broker_order or {}).get("filled_quantity") or row.get("filled_qty"),
+                "filled_quantity": (broker_order or {}).get("filled_quantity") or (broker_order or {}).get("filled_qty") or row.get("filled_quantity"),
+                "filled_avg_price": (broker_order or {}).get("filled_avg_price") or row.get("filled_avg_price"),
+                "avg_fill_price": (broker_order or {}).get("filled_avg_price") or row.get("avg_fill_price"),
                 "refreshed_at": _now_utc(),
             })
         except Exception as exc:
@@ -1280,6 +1321,10 @@ def refresh_live_pilot_reconciliation(
         errors=refresh_errors,
     )
     reconciliation["refreshed_existing_run"] = True
+    reconciliation["broker_status_refresh"] = "FAILED" if refresh_errors else "OK"
+    reconciliation["broker_status_refresh_at"] = _now_utc()
+    reconciliation["broker_status_refresh_errors"] = list(refresh_errors)
+    reconciliation["broker_status_refresh_claims_broker_truth"] = not bool(refresh_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
 
     summary = {
