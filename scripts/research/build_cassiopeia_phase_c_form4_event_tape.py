@@ -327,9 +327,13 @@ def _role_label(title: str | None, is_director: bool, is_officer: bool, is_ten_p
     return "other"
 
 
-def _archive_cik_from_accession(accession: str, fallback_cik10: str) -> str:
+def _issuer_archive_cik(cik10: str) -> str:
+    return str(cik10 or "").zfill(10)
+
+
+def _accession_filer_cik(accession: str) -> str | None:
     prefix = str(accession or "").split("-", 1)[0]
-    return prefix.zfill(10) if prefix.isdigit() else fallback_cik10
+    return prefix.zfill(10) if prefix.isdigit() else None
 
 
 def _is_form4_xml_name(name: str | None) -> bool:
@@ -342,21 +346,37 @@ def _is_form4_xml_name(name: str | None) -> bool:
     return base.endswith(".xml")
 
 
+def _primary_document_xml_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    if not str(name).lower().endswith(".xml"):
+        return None
+    return Path(str(name)).name
+
+
 def _primary_xml_document(repo_root: Path, cik10: str, accession: str, primary_doc: str | None) -> tuple[str | None, str | None, str]:
-    archive_cik = _archive_cik_from_accession(accession, cik10)
-    if _is_form4_xml_name(primary_doc):
-        return primary_doc, None, archive_cik
-    if primary_doc and str(primary_doc).lower().endswith(".xml"):
-        return Path(str(primary_doc)).name, None, archive_cik
-    cik_int = int(archive_cik)
+    archive_cik = _issuer_archive_cik(cik10)
+    document = _primary_document_xml_name(primary_doc)
+    if document:
+        return document, None, archive_cik
     acc_nodash = accession.replace("-", "")
-    url = ARCHIVE_INDEX_URL.format(cik_int=cik_int, acc_nodash=acc_nodash)
-    index = fetch_json_cached(repo_root, url)
-    for item in index.get("directory", {}).get("item", []):
-        name = str(item.get("name") or "")
-        if _is_form4_xml_name(name):
-            return name, url, archive_cik
-    return None, url, archive_cik
+    candidate_ciks = [archive_cik]
+    filer_cik = _accession_filer_cik(accession)
+    if filer_cik and filer_cik not in candidate_ciks:
+        candidate_ciks.append(filer_cik)
+    last_url = None
+    for candidate_cik in candidate_ciks:
+        url = ARCHIVE_INDEX_URL.format(cik_int=int(candidate_cik), acc_nodash=acc_nodash)
+        last_url = url
+        try:
+            index = fetch_json_cached(repo_root, url)
+        except Exception:
+            continue
+        for item in index.get("directory", {}).get("item", []):
+            name = str(item.get("name") or "")
+            if _is_form4_xml_name(name):
+                return name, url, candidate_cik
+    return None, last_url, archive_cik
 
 
 def extract_form4_candidates(submissions: dict[str, Any], *, ticker: str, cik10: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
@@ -547,6 +567,7 @@ def build_artifact(
                 document, index_url, archive_cik = _primary_xml_document(repo_root, cik10, accession, candidate.get("primary_document"))
                 candidate["index_url"] = index_url
                 candidate["archive_cik"] = archive_cik
+                candidate["accession_filer_cik"] = _accession_filer_cik(accession)
                 if not document:
                     reason_codes.append("primary_xml_missing")
                 else:
