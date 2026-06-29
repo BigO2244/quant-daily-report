@@ -298,11 +298,114 @@ def _order_key(order: Mapping[str, Any]) -> str:
     return f"{_order_symbol(order)}:{_order_side(order)}:{_order_qty(order)}"
 
 
-def _missing_intended_buys(intended_orders: Mapping[str, Any], submitted_orders: list[Any]) -> list[dict[str, Any]]:
+def _symbol_side_key(order: Mapping[str, Any]) -> str:
+    return f"{_order_symbol(order)}:{_order_side(order)}"
+
+
+def _reason_from_order(order: Mapping[str, Any], default: str = "") -> str:
+    for key in (
+        "reason",
+        "reason_code",
+        "block_reason",
+        "skip_reason",
+        "decision_reason",
+        "suppression_or_clipping_reason",
+    ):
+        value = str(order.get(key) or "").strip()
+        if value:
+            return value
+    return default
+
+
+def _intended_buys_by_symbol_side(intended_orders: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        _symbol_side_key(order): order
+        for order in _side_orders(_as_list(intended_orders.get("orders_intended")), "BUY")
+    }
+
+
+def _resized_intended_buys(
+    intended_orders: Mapping[str, Any],
+    post_sell_rebudget: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    intended_by_key = _intended_buys_by_symbol_side(intended_orders)
+    rows: list[dict[str, Any]] = []
+    for row in _as_list(post_sell_rebudget.get("final_buy_orders_submitted")):
+        if not isinstance(row, Mapping) or _order_side(row) != "BUY":
+            continue
+        key = _symbol_side_key(row)
+        intended = intended_by_key.get(key)
+        if not intended:
+            continue
+        intended_qty = _order_qty(intended)
+        submitted_qty = _order_qty(row)
+        if intended_qty is not None and submitted_qty is not None and abs(intended_qty - submitted_qty) <= 1e-9:
+            continue
+        rows.append(
+            {
+                "ticker": _order_symbol(intended),
+                "side": "BUY",
+                "shares": intended.get("shares", intended.get("quantity", intended.get("qty"))),
+                "submitted_shares": row.get("shares", row.get("quantity", row.get("qty"))),
+                "notional": _round(_order_notional(intended), 2),
+                "submitted_notional": _round(_order_notional(row), 2),
+                "reason": "resized_by_post_sell_rebudget",
+                "rebudget_reason": _reason_from_order(row, default="post_sell_rebudget"),
+            }
+        )
+    return rows
+
+
+def _suppressed_intended_buys(
+    intended_orders: Mapping[str, Any],
+    post_sell_rebudget: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    intended_by_key = _intended_buys_by_symbol_side(intended_orders)
+    rows: list[dict[str, Any]] = []
+    for row in _as_list(post_sell_rebudget.get("skipped_buy_orders")):
+        if not isinstance(row, Mapping) or _order_side(row) != "BUY":
+            continue
+        key = _symbol_side_key(row)
+        intended = intended_by_key.get(key)
+        if not intended:
+            continue
+        rows.append(
+            {
+                "ticker": _order_symbol(intended),
+                "side": "BUY",
+                "shares": intended.get("shares", intended.get("quantity", intended.get("qty"))),
+                "notional": _round(_order_notional(intended), 2),
+                "reason": _reason_from_order(
+                    row,
+                    default="buy_blocked_insufficient_buying_power",
+                ),
+                "skipped_notional": _round(_order_notional(row), 2),
+            }
+        )
+    return rows
+
+
+def _symbol_side_keys(rows: list[Any]) -> set[str]:
+    return {
+        _symbol_side_key(row)
+        for row in rows
+        if isinstance(row, Mapping) and _symbol_side_key(row) != ":"
+    }
+
+
+def _missing_intended_buys(
+    intended_orders: Mapping[str, Any],
+    submitted_orders: list[Any],
+    *,
+    excluded_symbol_side_keys: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    excluded_symbol_side_keys = set(excluded_symbol_side_keys or set())
     intended = _side_orders(_as_list(intended_orders.get("orders_intended")), "BUY")
     submitted_keys = {_order_key(order) for order in _side_orders(submitted_orders, "BUY")}
     out = []
     for order in intended:
+        if _symbol_side_key(order) in excluded_symbol_side_keys:
+            continue
         if _order_key(order) in submitted_keys:
             continue
         out.append(
@@ -457,6 +560,30 @@ def build_execution_target_attainment(
         _as_list(post_sell_rebudget.get("skipped_buy_orders")),
         "BUY",
     ) + float(cash_gate_skipped_notional or 0.0)
+    resized_intended_buys = (
+        _as_list(integrity.get("resized_buy_orders"))
+        or _as_list(integrity.get("resized_intended_orders"))
+        or _resized_intended_buys(intended_orders, post_sell_rebudget)
+    )
+    suppressed_intended_buys = (
+        _as_list(integrity.get("suppressed_buy_orders"))
+        or _as_list(integrity.get("suppressed_intended_orders"))
+        or _suppressed_intended_buys(intended_orders, post_sell_rebudget)
+    )
+    accepted_exception_keys = _symbol_side_keys(resized_intended_buys) | _symbol_side_keys(suppressed_intended_buys)
+    raw_integrity_missing = integrity.get("missing_buy_orders")
+    if isinstance(raw_integrity_missing, list):
+        missing_intended_buys = [
+            row
+            for row in raw_integrity_missing
+            if isinstance(row, Mapping) and _symbol_side_key(row) not in accepted_exception_keys
+        ]
+    else:
+        missing_intended_buys = _missing_intended_buys(
+            intended_orders,
+            submitted_orders,
+            excluded_symbol_side_keys=accepted_exception_keys,
+        )
 
     actual_cash_source = _cash_source(
         posttrade_account=posttrade_account,
@@ -617,7 +744,9 @@ def build_execution_target_attainment(
         "filled_buy_notional": _round(filled_buy_notional, 2),
         "buy_fill_status_source": buy_fill_status_source,
         "skipped_deferred_buy_notional": _round(skipped_deferred_buy_notional, 2),
-        "missing_intended_buys": integrity.get("missing_buy_orders") or _missing_intended_buys(intended_orders, submitted_orders),
+        "resized_intended_buys": resized_intended_buys,
+        "suppressed_intended_buys": suppressed_intended_buys,
+        "missing_intended_buys": missing_intended_buys,
         "reconciled_but_target_miss": bool(status == WARN_RECONCILED_BUT_UNDERDEPLOYED),
         "tolerances": {
             "cash_weight_drift_tolerance": float(cash_weight_drift_tolerance),

@@ -1547,6 +1547,250 @@ def _coerce_whole_shares(value: object) -> int:
         return 0
 
 
+def _coerce_share_quantity(value: object, *, whole: bool) -> float | int:
+    try:
+        numeric = max(0.0, float(value))
+    except Exception:
+        return 0
+    if whole:
+        return int(numeric)
+    if numeric.is_integer():
+        return int(numeric)
+    return numeric
+
+
+def _candidate_row_symbol(row: dict[str, object]) -> str:
+    return str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+
+
+def _candidate_row_side(row: dict[str, object]) -> str:
+    return str(row.get("side") or row.get("action") or "").strip().upper()
+
+
+def _candidate_symbol_side_key(row: dict[str, object]) -> str:
+    return f"{_candidate_row_symbol(row)}:{_candidate_row_side(row)}"
+
+
+def _candidate_row_qty(row: dict[str, object]) -> float | None:
+    for key in ("shares", "quantity", "qty", "requested_quantity", "rounded_quantity"):
+        value = row.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            return float(value)
+        except Exception:
+            return None
+    return None
+
+
+def _candidate_row_reason(row: dict[str, object], default: str = "") -> str:
+    for key in (
+        "decision_reason",
+        "suppression_or_clipping_reason",
+        "reason",
+        "reason_code",
+        "block_reason",
+        "skip_reason",
+    ):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return default
+
+
+def _load_execution_readiness_certification(trade_date: str, paper_summary: dict | None) -> dict[str, object]:
+    if isinstance((paper_summary or {}).get("execution_readiness_certification"), dict):
+        return dict((paper_summary or {}).get("execution_readiness_certification") or {})
+    raw_path = (paper_summary or {}).get("execution_readiness_certification_path")
+    path = Path(str(raw_path)) if raw_path else Path("outputs") / "precompute" / trade_date / "execution_readiness_certification.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _readiness_rows(readiness: dict[str, object], key: str) -> list[dict[str, object]]:
+    diagnostics = readiness.get("per_trade_diagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    rows = diagnostics.get(key)
+    if not isinstance(rows, list):
+        rows = readiness.get(key) if isinstance(readiness.get(key), list) else []
+    return [dict(row) for row in rows if isinstance(row, dict)]
+
+
+def _execution_lifecycle_payload(
+    *,
+    trade_date: str,
+    paper_summary: dict | None,
+    filter_stats: dict | None,
+    payload_submitted_count: int,
+    payload_rejected_count: int,
+) -> dict[str, object]:
+    summary = paper_summary or {}
+    readiness = _load_execution_readiness_certification(trade_date, summary)
+    post_sell_rebudget = summary.get("post_sell_rebudget")
+    if not isinstance(post_sell_rebudget, dict):
+        submission_summary = summary.get("alpaca_submission_summary")
+        if isinstance(submission_summary, dict) and isinstance(submission_summary.get("post_sell_rebudget"), dict):
+            post_sell_rebudget = submission_summary.get("post_sell_rebudget")
+    if not isinstance(post_sell_rebudget, dict):
+        cash_gate = summary.get("cash_gate_diagnostics")
+        if isinstance(cash_gate, dict) and isinstance(cash_gate.get("post_sell_rebudget"), dict):
+            post_sell_rebudget = cash_gate.get("post_sell_rebudget")
+    post_sell_rebudget = dict(post_sell_rebudget or {})
+
+    expected_rows = [
+        row
+        for row in (
+            _readiness_rows(readiness, "expected_submission_orders")
+            or _readiness_rows(readiness, "retained")
+        )
+        if _candidate_row_symbol(row) and _candidate_row_side(row)
+    ]
+    expected_by_key = {_candidate_symbol_side_key(row): row for row in expected_rows}
+    expected_keys = set(expected_by_key)
+
+    filtered_rows = [
+        row
+        for row in _readiness_rows(readiness, "skipped")
+        if _candidate_row_reason(row) in {"min_notional", "zero_shares"}
+    ]
+    min_notional_rows = [
+        row for row in filtered_rows if _candidate_row_reason(row) == "min_notional"
+    ]
+    filtered_sell_rows = [
+        row for row in min_notional_rows if _candidate_row_side(row) in {"SELL", "CLOSE", "REDUCE"}
+    ]
+
+    resized_rows: list[dict[str, object]] = []
+    for row in post_sell_rebudget.get("final_buy_orders_submitted") or []:
+        if not isinstance(row, dict) or _candidate_row_side(row) != "BUY":
+            continue
+        key = _candidate_symbol_side_key(row)
+        expected = expected_by_key.get(key)
+        expected_qty = _candidate_row_qty(expected) if expected else None
+        submitted_qty = _candidate_row_qty(row)
+        if expected_keys and key not in expected_keys:
+            continue
+        if expected_qty is not None and submitted_qty is not None and abs(expected_qty - submitted_qty) <= 1e-9:
+            continue
+        resized_rows.append(
+            {
+                "ticker": _candidate_row_symbol(row),
+                "side": "BUY",
+                "submitted": True,
+                "decision_reason": "resized_by_post_sell_rebudget",
+                "suppression_or_clipping_reason": _candidate_row_reason(row, "post_sell_rebudget"),
+                "requested_quantity": expected_qty,
+                "submitted_quantity": submitted_qty,
+            }
+        )
+
+    suppressed_rows: list[dict[str, object]] = []
+    for row in post_sell_rebudget.get("skipped_buy_orders") or []:
+        if not isinstance(row, dict) or _candidate_row_side(row) != "BUY":
+            continue
+        key = _candidate_symbol_side_key(row)
+        if expected_keys and key not in expected_keys:
+            continue
+        suppressed_rows.append(
+            {
+                "ticker": _candidate_row_symbol(row),
+                "side": "BUY",
+                "submitted": False,
+                "decision_reason": _candidate_row_reason(row, "buy_blocked_insufficient_buying_power"),
+                "suppression_or_clipping_reason": _candidate_row_reason(row, "buy_blocked_insufficient_buying_power"),
+            }
+        )
+
+    filtered_lifecycle_rows = [
+        {
+            "ticker": _candidate_row_symbol(row),
+            "side": _candidate_row_side(row),
+            "submitted": False,
+            "decision_reason": _candidate_row_reason(row, "execution_filter"),
+            "suppression_or_clipping_reason": _candidate_row_reason(row, "execution_filter"),
+        }
+        for row in filtered_sell_rows
+    ]
+    lifecycle_rows = [*resized_rows, *suppressed_rows, *filtered_lifecycle_rows]
+
+    planned_count = (
+        summary.get("planned_payload_trade_count")
+        or readiness.get("planned_trade_count")
+        or (filter_stats or {}).get("raw")
+    )
+    min_notional_count = (
+        readiness.get("dropped_min_notional_count")
+        or (filter_stats or {}).get("dropped_min_notional")
+    )
+    intended_count = (
+        summary.get("intended_orders_count")
+        or readiness.get("expected_submissions")
+        or (filter_stats or {}).get("kept")
+    )
+    submission_summary = summary.get("alpaca_submission_summary")
+    submission_summary = submission_summary if isinstance(submission_summary, dict) else {}
+    filled_count = (
+        summary.get("orders_filled_count")
+        or summary.get("filled_count")
+        or submission_summary.get("orders_filled_count")
+        or submission_summary.get("filled_count")
+    )
+
+    try:
+        final_count = int(payload_submitted_count)
+    except Exception:
+        final_count = 0
+    if final_count <= 0:
+        final_count = int(summary.get("submitted_count") or summary.get("orders_submitted_count") or 0)
+    try:
+        rejected_count = int(summary.get("rejected_count") or payload_rejected_count or 0)
+    except Exception:
+        rejected_count = int(payload_rejected_count or 0)
+    try:
+        planned_differs_from_submitted = bool(
+            planned_count is not None and final_count and int(planned_count) != final_count
+        )
+    except Exception:
+        planned_differs_from_submitted = False
+
+    has_lifecycle_signal = bool(
+        lifecycle_rows
+        or planned_differs_from_submitted
+        or min_notional_count
+    )
+    if not has_lifecycle_signal:
+        return {}
+
+    return {
+        "planned_payload_trade_count": planned_count,
+        "min_notional_filtered_count": min_notional_count,
+        "executable_filter_passed_count": intended_count,
+        "intended_orders_count": intended_count,
+        "final_executable_trades_count": final_count,
+        "candidate_trade_lifecycle_summary": {
+            "precompute_candidates": planned_count,
+            "min_notional_filtered": min_notional_count,
+            "passed_executable_filter": intended_count,
+            "intended_orders": intended_count,
+            "submitted": final_count,
+            "accepted": summary.get("accepted_count") or final_count,
+            "filled": filled_count,
+            "rejected": rejected_count,
+            "clipped": len(resized_rows),
+            "suppressed": len(suppressed_rows),
+            "filtered": len(filtered_lifecycle_rows),
+            "artifact_path": post_sell_rebudget.get("artifact_path") or readiness.get("artifact_path"),
+        },
+        "candidate_trade_lifecycle": lifecycle_rows,
+        "resized_intended_buys": resized_rows,
+        "suppressed_intended_buys": suppressed_rows,
+        "filtered_sells": filtered_lifecycle_rows,
+    }
+
+
 def _coerce_filter_stats(execution_filter: object) -> dict | None:
     if not isinstance(execution_filter, dict):
         return None
@@ -1903,12 +2147,17 @@ def build_execution_email_payload(
         ticker = row.get("ticker")
         side = str(row.get("side", "")).upper()
         risk = risk_map.get(ticker, {})
-        shares = _coerce_whole_shares(row.get("shares"))
-        if side in {"SELL", "CLOSE", "REDUCE"} and str(row.get("source") or "") != "alpaca_submissions":
+        row_source = str(row.get("source") or "")
+        broker_quantity_source = row_source == "alpaca_submissions"
+        shares = _coerce_share_quantity(row.get("shares"), whole=not broker_quantity_source)
+        if side in {"SELL", "CLOSE", "REDUCE"} and not broker_quantity_source:
             available = holdings_shares.get(str(ticker))
             if available is not None:
                 shares = min(shares, available)
-        if shares < 1:
+        if broker_quantity_source:
+            if float(shares or 0) <= 0.0:
+                continue
+        elif shares < 1:
             continue
         entry_price = risk.get("entry_price")
         notional = None
@@ -2092,14 +2341,35 @@ def build_execution_email_payload(
             "executable_trades_count": int(len(trades)),
         },
     )
+    submission_summary_for_counts = (paper_summary or {}).get("alpaca_submission_summary")
+    submission_summary_for_counts = (
+        submission_summary_for_counts
+        if isinstance(submission_summary_for_counts, dict)
+        else {}
+    )
+    orders_filled_count = int(
+        (paper_summary or {}).get("orders_filled_count")
+        or (paper_summary or {}).get("filled_count")
+        or submission_summary_for_counts.get("orders_filled_count")
+        or submission_summary_for_counts.get("filled_count")
+        or trade_count_contract["orders_filled_count"]
+    )
     sizing_equity = _coerce_float_or_none((paper_summary or {}).get("sizing_equity"))
     total_equity_fallback = _coerce_float_or_none((paper_summary or {}).get("total_equity"))
     identity = strategy_identity_metadata(trade_date)
+    lifecycle_payload = _execution_lifecycle_payload(
+        trade_date=trade_date,
+        paper_summary=paper_summary,
+        filter_stats=filter_stats,
+        payload_submitted_count=payload_submitted_count,
+        payload_rejected_count=payload_rejected_count,
+    )
 
     payload = {
         "trade_date": trade_date,
         "strategy_identity": identity,
         **identity,
+        **lifecycle_payload,
         "mode": mode,
         "execution_status": status,
         "halt_reason": halted_reason,
@@ -2146,7 +2416,7 @@ def build_execution_email_payload(
         "planner_intended_trades_count": int(trade_count_contract["planner_intended_trades_count"]),
         "execution_eligible_trades_count": int(trade_count_contract["execution_eligible_trades_count"]),
         "orders_submitted_count": int(trade_count_contract["orders_submitted_count"]),
-        "orders_filled_count": int(trade_count_contract["orders_filled_count"]),
+        "orders_filled_count": orders_filled_count,
         "submitted_count": payload_submitted_count,
         "accepted_count": payload_submitted_count,
         "rejected_count": payload_rejected_count,

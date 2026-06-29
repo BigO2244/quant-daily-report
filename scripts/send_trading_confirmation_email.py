@@ -265,6 +265,142 @@ def _build_live_broker_snapshot_payload(**kwargs) -> dict:
     return build_snapshot_payload(**kwargs)
 
 
+_LIVE_PILOT_REFRESH_OPEN_STATUSES = {
+    "accepted",
+    "accepted_for_bidding",
+    "done_for_day",
+    "held",
+    "new",
+    "open",
+    "pending_new",
+    "pending_replace",
+    "pending_cancel",
+}
+
+
+def _status_norm(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text
+
+
+def _live_pilot_confirmation_needs_refresh(results: dict) -> bool:
+    if str(results.get("mode") or "").strip().upper() != "LIVE_PILOT":
+        return False
+    if str(results.get("broker_status_refresh") or "").strip():
+        return False
+    submitted = _to_int(results.get("submitted_count"))
+    filled = _to_int(
+        results.get("filled_count")
+        or results.get("orders_filled_count")
+        or results.get("broker_fill_count")
+    )
+    if submitted <= 0 or filled >= submitted:
+        return False
+    submitted_type = str(
+        results.get("submitted_order_type")
+        or results.get("order_type_submitted")
+        or ""
+    ).strip().lower()
+    marketable_count = _to_int(results.get("marketable_order_count"))
+    if submitted_type != "market" and marketable_count <= 0:
+        return False
+    rows = results.get("broker_responses") or results.get("order_lifecycle") or []
+    if not isinstance(rows, list) or not rows:
+        return _to_int(results.get("unfilled_buy_count")) > 0 or str(results.get("status") or "").upper() == "SUBMITTED"
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        order = row.get("order") if isinstance(row.get("order"), dict) else {}
+        if _status_norm(row.get("status") or order.get("status")) in _LIVE_PILOT_REFRESH_OPEN_STATUSES:
+            return True
+    return False
+
+
+def _write_live_pilot_refresh_failure(
+    results: dict,
+    results_path: Path,
+    error: Exception,
+) -> dict:
+    updated = dict(results)
+    updated["broker_status_refresh"] = "FAILED"
+    updated["broker_status_refresh_error"] = str(error)
+    updated["broker_status_refresh_errors"] = [str(error)]
+    updated["broker_status_refresh_claims_broker_truth"] = False
+    updated["broker_status_refresh_note"] = "Read-only broker order refresh failed; email retains artifact status."
+    if results_path.name == "execution_results.json":
+        results_path.write_text(
+            json.dumps(updated, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
+    return updated
+
+
+def _retain_live_pilot_artifact_status_after_refresh_failure(
+    original: dict,
+    refreshed: dict,
+    results_path: Path,
+) -> dict:
+    retained = dict(original)
+    for key in (
+        "broker_status_refresh",
+        "broker_status_refresh_at",
+        "broker_status_refresh_error",
+        "broker_status_refresh_errors",
+        "broker_status_refresh_claims_broker_truth",
+        "broker_status_refresh_note",
+    ):
+        if key in refreshed:
+            retained[key] = refreshed.get(key)
+    retained.setdefault(
+        "broker_status_refresh_note",
+        "Read-only broker order refresh failed; email retains artifact status.",
+    )
+    retained["broker_status_refresh_claims_broker_truth"] = False
+    if results_path.name == "execution_results.json":
+        results_path.write_text(
+            json.dumps(retained, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
+    return retained
+
+
+def refresh_live_pilot_confirmation_status(
+    results: dict,
+    results_path: Path,
+    *,
+    broker: object | None = None,
+) -> tuple[dict, Path]:
+    if not _live_pilot_confirmation_needs_refresh(results):
+        return results, results_path
+    run_root = Path(str(results.get("run_root") or "")).expanduser()
+    if not str(run_root).strip() or str(run_root) == ".":
+        run_root = results_path.parent
+    try:
+        from scripts.live_pilot_execute import refresh_live_pilot_reconciliation
+
+        refresh_live_pilot_reconciliation(run_root=run_root, broker=broker)
+        refreshed_path = run_root / "execution_results.json"
+        if refreshed_path.exists():
+            refreshed = _load_json_dict(refreshed_path)
+            if str(refreshed.get("broker_status_refresh") or "").upper() == "FAILED":
+                return _retain_live_pilot_artifact_status_after_refresh_failure(
+                    results,
+                    refreshed,
+                    refreshed_path,
+                ), refreshed_path
+            return refreshed, refreshed_path
+        return _write_live_pilot_refresh_failure(
+            results,
+            results_path,
+            RuntimeError("live_pilot_refresh_missing_execution_results"),
+        ), results_path
+    except Exception as exc:
+        logger.warning("[TRADING_CONFIRMATION] live pilot broker status refresh failed: %s", exc)
+        return _write_live_pilot_refresh_failure(results, results_path, exc), results_path
+
+
 def _load_broker_results_fallback(trade_date: str, pointer: dict | None = None) -> tuple[dict, Path]:
     snapshot_dir = _REPO_ROOT / "outputs" / "broker_snapshot"
     snapshot_path = snapshot_dir / f"broker_snapshot_{trade_date}.json"
@@ -477,6 +613,12 @@ def _format_live_pilot_buy_lifecycle(results: dict) -> tuple[str, str]:
         "prior_unfilled_attempts",
         "order_type_submitted",
         "submitted_order_type",
+        "broker_status_refresh",
+        "broker_status_refresh_error",
+        "filled_qty",
+        "avg_fill_price",
+        "open_orders_count",
+        "idle_cash_reason",
     }
     if not any(key in results for key in keys):
         return "", ""
@@ -504,6 +646,12 @@ def _format_live_pilot_buy_lifecycle(results: dict) -> tuple[str, str]:
         ("Submitted order type", submitted_order_type),
         ("Marketable orders", results.get("marketable_order_count", "unavailable")),
         ("Passive orders", results.get("passive_order_count", "unavailable")),
+        ("broker_status_refresh", results.get("broker_status_refresh", "not_attempted")),
+        ("broker_status_refresh_error", results.get("broker_status_refresh_error") or "; ".join(results.get("broker_status_refresh_errors") or []) or "none"),
+        ("Filled qty", results.get("filled_qty") or results.get("fill_qty") or "unavailable"),
+        ("Avg fill price", results.get("avg_fill_price") or "unavailable"),
+        ("Open orders count", results.get("open_orders_count", "unavailable")),
+        ("Idle cash reason", results.get("idle_cash_reason", "unavailable")),
         ("Prior unfilled attempts", results.get("prior_unfilled_attempts", "unavailable")),
         ("Escalation reason", results.get("escalation_reason", "none")),
         ("Remaining blocked/suppressed buys", blocked_count),
@@ -800,6 +948,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     trade_date = _resolve_trade_date()
     results, results_path = _load_results(trade_date)
+    results, results_path = refresh_live_pilot_confirmation_status(results, results_path)
 
     # Load run context for operator summary updates
     explicit_run_root = _explicit_run_root()
