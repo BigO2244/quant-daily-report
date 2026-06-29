@@ -354,6 +354,42 @@ def _top_non_pass_result(results: list[dict[str, Any]]) -> dict[str, Any] | None
     return None
 
 
+def _operator_exception_table(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    status_rank = {STATUS_FAIL: 0, STATUS_WARN: 1}
+    severity_rank = {SEVERITY_CRITICAL: 0, SEVERITY_WARNING: 1, SEVERITY_INFO: 2}
+    exceptions: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    for index, row in enumerate(results):
+        status = str(row.get("status") or "").upper()
+        if status == STATUS_PASS:
+            continue
+        severity = str(row.get("severity") or "").lower()
+        exceptions.append(
+            (
+                (
+                    status_rank.get(status, 99),
+                    severity_rank.get(severity, 99),
+                    index,
+                ),
+                row,
+            )
+        )
+
+    table: list[dict[str, Any]] = []
+    for rank, (_, row) in enumerate(sorted(exceptions, key=lambda item: item[0]), start=1):
+        table.append(
+            {
+                "rank": rank,
+                "invariant_id": row.get("invariant_id"),
+                "status": row.get("status"),
+                "severity": row.get("severity"),
+                "reason_code": row.get("reason_code"),
+                "human_summary": row.get("human_summary"),
+                "operator_action": row.get("operator_action"),
+            }
+        )
+    return table
+
+
 def classify_reliability_readiness(
     *,
     score: int,
@@ -851,6 +887,8 @@ def build_execution_reliability_report(
             seen_actions.add(action)
             recommended_actions.append(action)
     top_result = _top_non_pass_result(results)
+    operator_exception_table = _operator_exception_table(results)
+    operator_action_required = bool(operator_exception_table)
     summary_counts = _summary_counts(results)
     history_entry = {
         "trade_date": str(trade_date),
@@ -887,6 +925,11 @@ def build_execution_reliability_report(
         "top_failure_invariant_id": top_result.get("invariant_id") if top_result else None,
         "top_failure_reason": top_result.get("reason_code") if top_result else None,
         "top_failure_summary": top_result.get("human_summary") if top_result else None,
+        "operator_action_required": operator_action_required,
+        "operator_action_required_reason": top_result.get("reason_code") if top_result else None,
+        "operator_action_required_summary": top_result.get("human_summary") if top_result else "No operator action required.",
+        "operator_exception_count": len(operator_exception_table),
+        "operator_exception_table": operator_exception_table,
         "invariant_results": results,
         "summary_counts": summary_counts,
         "trend_metrics": trend_metrics,

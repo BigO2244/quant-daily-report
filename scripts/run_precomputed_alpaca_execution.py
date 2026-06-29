@@ -2021,6 +2021,7 @@ def main(argv: list[str] | None = None) -> int:
                 execution_reliability_score=reliability_payload.get("score"),
                 execution_reliability_top_reason=reliability_payload.get("top_failure_reason"),
                 execution_reliability_top_invariant=reliability_payload.get("top_failure_invariant_id"),
+                execution_reliability_operator_action_required=reliability_payload.get("operator_action_required"),
                 execution_reliability_clean_run_streak=trend_metrics.get("clean_run_streak"),
                 execution_reliability_readiness_artifact=str(
                     Path("outputs") / "reliability" / "reliability_readiness.json"

@@ -133,6 +133,11 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
     assert report["score"] < 100
     assert report["overall_status"] == "FAIL"
     assert report["top_failure_reason"] == "planned_payload_trades_dropped_before_execution"
+    assert report["operator_action_required"] is True
+    assert report["operator_action_required_reason"] == "planned_payload_trades_dropped_before_execution"
+    assert report["operator_exception_count"] == 2
+    assert report["operator_exception_table"][0]["invariant_id"] == "planned_payload_nonempty_zero_execution"
+    assert report["operator_exception_table"][0]["operator_action"]
     assert "Halt the run" in report["recommended_operator_actions"][0]
 
 
@@ -175,6 +180,10 @@ def test_empty_planned_payload_zero_submitted_is_legitimate_no_action(tmp_path: 
     assert report["overall_status"] == "PASS"
     assert report["score"] == 100
     assert report["classification"] == RELIABILITY_GREEN
+    assert report["operator_action_required"] is False
+    assert report["operator_action_required_summary"] == "No operator action required."
+    assert report["operator_exception_count"] == 0
+    assert report["operator_exception_table"] == []
 
 
 def test_submitted_orders_without_acceptance_fails_with_action(tmp_path: Path, monkeypatch) -> None:
@@ -385,6 +394,8 @@ def test_write_execution_reliability_report_writes_daily_audit_artifact(tmp_path
     assert payload["trade_date"] == TRADE_DATE
     assert payload["score"] == 100
     assert payload["top_failure_reason"] is None
+    assert payload["operator_action_required"] is False
+    assert payload["operator_exception_count"] == 0
     assert payload["classification"] == RELIABILITY_GREEN
     assert payload["trend_metrics"]["clean_run_streak"] == 1
 
