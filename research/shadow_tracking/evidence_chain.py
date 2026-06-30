@@ -6,6 +6,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.artifact_time_status import (
+    BLOCKED_MISSING,
+    BLOCKED_STALE,
+    PASS,
+    PENDING_EOD_IMPORT,
+    PENDING_PUBLICATION,
+    classify_artifact_time_status,
+)
 from core.strategy_registry import load_strategy_registry
 
 
@@ -51,6 +59,8 @@ def build_alpha_evidence_chain_payload(
     trade_date: str | None = None,
     assess_latest_pointer: bool = True,
     strategy_slugs: tuple[str, ...] | None = None,
+    now: datetime | None = None,
+    expected_publish_time: str | None = None,
 ) -> dict[str, Any]:
     output_root = Path(output_root)
     resolved_trade_date = trade_date or latest_dated_trade_date(output_root)
@@ -78,18 +88,49 @@ def build_alpha_evidence_chain_payload(
             nav_row=nav_row,
             nav_rows=nav_rows,
             latest_status=latest_status,
+            now=now,
+            expected_publish_time=expected_publish_time,
         )
         strategies.append(strategy_payload)
 
+    latest_time_status = _latest_pointer_time_status(
+        trade_date=resolved_trade_date,
+        latest_status=latest_status,
+        now=now,
+        expected_publish_time=expected_publish_time,
+    )
     blocked = [
-        {"strategy": item["strategy_id"], "missing": item["missing_fields"]}
+        {"strategy": item["strategy_id"], "status": item["status"], "missing": item["missing_fields"]}
         for item in strategies
-        if item["missing_fields"]
+        if item["status"] in {BLOCKED_MISSING, BLOCKED_STALE}
     ]
-    evidence_ready = not blocked and bool(resolved_trade_date)
+    pending = [
+        {"strategy": item["strategy_id"], "status": item["status"], "missing": item["missing_fields"]}
+        for item in strategies
+        if item["status"] in {PENDING_EOD_IMPORT, PENDING_PUBLICATION}
+    ]
+    non_pass = [
+        {"strategy": item["strategy_id"], "status": item["status"], "missing": item["missing_fields"]}
+        for item in strategies
+        if item["status"] != PASS
+    ]
+    latest_blocks = (latest_time_status or {}).get("status") in {BLOCKED_MISSING, BLOCKED_STALE}
+    if latest_blocks:
+        blocked.append(
+            {
+                "artifact": "latest_pointer",
+                "status": (latest_time_status or {}).get("status"),
+                "missing": (latest_time_status or {}).get("required_fields_missing") or [],
+            }
+        )
+    evidence_ready = all(item["status"] == PASS for item in strategies) and bool(resolved_trade_date) and not latest_blocks
     reporting_current = latest_status["status"] == "CURRENT"
     reporting_not_assessed = latest_status["status"] == "NOT_ASSESSED"
-    status = "OK" if evidence_ready and (reporting_current or reporting_not_assessed) else "WARN" if evidence_ready else "BLOCKED"
+    status = _aggregate_status(
+        strategy_statuses=[item["status"] for item in strategies],
+        latest_time_status=latest_time_status,
+        include_latest_pointer=not reporting_not_assessed,
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "trade_date": resolved_trade_date,
@@ -109,7 +150,8 @@ def build_alpha_evidence_chain_payload(
             "no promotion",
         ],
         "status": status,
-        "can_start_20_60_day_evidence_collection": evidence_ready,
+        "can_start_20_60_day_evidence_collection": evidence_ready and (reporting_current or reporting_not_assessed),
+        "evidence_clock_status": "ADVANCE" if evidence_ready and (reporting_current or reporting_not_assessed) else "DO_NOT_ADVANCE",
         "reporting_status": (
             "CURRENT"
             if reporting_current
@@ -120,8 +162,11 @@ def build_alpha_evidence_chain_payload(
         "required_daily_fields": list(REQUIRED_DAILY_FIELDS),
         "artifact_status": artifacts,
         "latest_pointer": latest_status,
+        "latest_pointer_time_status": latest_time_status,
         "strategies": strategies,
         "blocked_reasons": blocked,
+        "pending_reasons": pending,
+        "non_pass_reasons": non_pass,
         "daily_evidence_checklist": _daily_checklist_summary(strategies),
         "research_artifact_gaps": [
             {
@@ -151,12 +196,16 @@ def write_alpha_evidence_chain_artifacts(
     strategy_slugs: tuple[str, ...] | None = None,
     backfilled: bool = False,
     generated_at: str | None = None,
+    now: datetime | None = None,
+    expected_publish_time: str | None = None,
 ) -> dict[str, Any]:
     payload = build_alpha_evidence_chain_payload(
         output_root=output_root,
         trade_date=trade_date,
         assess_latest_pointer=assess_latest_pointer,
         strategy_slugs=strategy_slugs,
+        now=now,
+        expected_publish_time=expected_publish_time,
     )
     if backfilled:
         payload = annotate_backfilled_payload(
@@ -201,6 +250,8 @@ def render_alpha_evidence_chain_markdown(payload: dict[str, Any]) -> str:
         f"- Trade date: `{payload.get('trade_date') or 'UNKNOWN'}`",
         f"- Status: `{payload.get('status')}`",
         f"- Reporting status: `{payload.get('reporting_status')}`",
+        f"- Publication window status: `{((payload.get('latest_pointer_time_status') or {}).get('publication_window_status') or 'NA')}`",
+        f"- Evidence clock: `{payload.get('evidence_clock_status') or 'NA'}`",
         f"- 20/60-day evidence collection can start: `{payload.get('can_start_20_60_day_evidence_collection')}`",
         f"- Backfilled: `{payload.get('backfilled', False)}`",
         "- Runtime impact: `NO_RUNTIME_CHANGE`",
@@ -293,6 +344,8 @@ def _strategy_payload(
     nav_row: dict[str, str] | None,
     nav_rows: list[dict[str, str]],
     latest_status: dict[str, Any],
+    now: datetime | None,
+    expected_publish_time: str | None,
 ) -> dict[str, Any]:
     entry = load_strategy_registry().get(slug)
     eval_row = ((evaluation or {}).get("strategies") or {}).get(slug) or {}
@@ -350,13 +403,30 @@ def _strategy_payload(
         "observed_day_count": _int_or_none(eval_row.get("rolling_count_of_valid_days")),
     }
     missing = _missing_fields(evidence=evidence, trade_date=trade_date, evaluation=evaluation, latest_status=latest_status)
+    time_status = classify_artifact_time_status(
+        artifact_date=trade_date,
+        now=now,
+        artifact_type="alpha_evidence_chain",
+        expected_publish_time=expected_publish_time,
+        latest_available_date=(evaluation or {}).get("trade_date") if isinstance(evaluation, dict) else None,
+        required_fields_missing=missing,
+        freshness_status=_strategy_freshness_status(
+            trade_date=trade_date,
+            evaluation=evaluation,
+            eval_row=eval_row,
+        ),
+    )
     return {
         "strategy_id": slug,
         "display_name": entry.display_name if entry else slug,
         "source_variant": ((entry.shadow_tracking or {}).get("source_variant") if entry else None),
         "baseline_strategy_id": ((entry.shadow_tracking or {}).get("baseline_strategy_id") if entry else None),
-        "status": "PASS" if not missing else "BLOCKED",
+        "status": time_status.status,
         "missing_fields": missing,
+        "time_status": time_status.as_dict(),
+        "publication_window_status": time_status.publication_window_status,
+        "missing_fields_actionable": time_status.missing_fields_actionable,
+        "evidence_clock_effect": "ADVANCE" if time_status.should_affect_evidence_clock else "DO_NOT_ADVANCE",
         "evidence": evidence,
         "source_artifacts": {
             "strategy_snapshot": str((dated_dir / f"{slug}.json") if dated_dir else output_root / "<date>" / f"{slug}.json"),
@@ -431,6 +501,87 @@ def _latest_pointer_status(*, output_root: Path, trade_date: str | None) -> dict
     status = "MISSING" if missing else "STALE" if stale else "CURRENT"
     reason = "latest pointer matches dated trade_date" if status == "CURRENT" else "latest pointer missing or does not match dated trade_date"
     return {"status": status, "reason": reason, "artifacts": artifacts}
+
+
+def _latest_pointer_time_status(
+    *,
+    trade_date: str | None,
+    latest_status: dict[str, Any],
+    now: datetime | None,
+    expected_publish_time: str | None,
+) -> dict[str, Any] | None:
+    status = latest_status.get("status")
+    if status == "NOT_ASSESSED":
+        return {
+            "status": "NOT_ASSESSED",
+            "explanation": latest_status.get("reason"),
+            "expected_yet": False,
+            "missing_fields_actionable": False,
+            "should_affect_evidence_clock": False,
+            "counts_as_evidence_failure": False,
+        }
+    missing = [] if status == "CURRENT" else ["latest_pointer"]
+    latest_available_date = _latest_pointer_available_date(latest_status)
+    freshness_status = "OK" if status == "CURRENT" else status
+    return classify_artifact_time_status(
+        artifact_date=trade_date,
+        now=now,
+        artifact_type="alpha_evidence_chain",
+        expected_publish_time=expected_publish_time,
+        latest_available_date=latest_available_date,
+        required_fields_missing=missing,
+        freshness_status=freshness_status,
+    ).as_dict()
+
+
+def _latest_pointer_available_date(latest_status: dict[str, Any]) -> str | None:
+    dates = [
+        str(item.get("trade_date"))
+        for item in latest_status.get("artifacts") or []
+        if isinstance(item, dict) and item.get("trade_date")
+    ]
+    return sorted(dates)[-1] if dates else None
+
+
+def _aggregate_status(
+    *,
+    strategy_statuses: list[str],
+    latest_time_status: dict[str, Any] | None,
+    include_latest_pointer: bool,
+) -> str:
+    statuses = list(strategy_statuses)
+    if include_latest_pointer and latest_time_status:
+        latest_status = str(latest_time_status.get("status") or "")
+        if latest_status and latest_status != "NOT_ASSESSED":
+            statuses.append(latest_status)
+    if not statuses:
+        return BLOCKED_MISSING
+    for candidate in (BLOCKED_MISSING, BLOCKED_STALE, PENDING_EOD_IMPORT, PENDING_PUBLICATION):
+        if candidate in statuses:
+            return candidate
+    for candidate in ("NOT_EXPECTED_YET", "NOT_EXPECTED_NON_TRADING_DAY"):
+        if candidate in statuses:
+            return candidate
+    return PASS if all(status == PASS for status in statuses) else BLOCKED_MISSING
+
+
+def _strategy_freshness_status(
+    *,
+    trade_date: str | None,
+    evaluation: dict[str, Any] | None,
+    eval_row: dict[str, Any],
+) -> str | None:
+    if not isinstance(evaluation, dict):
+        return "MISSING"
+    if trade_date and evaluation.get("trade_date") != trade_date:
+        return "STALE"
+    data_status = str(eval_row.get("data_status") or "").strip().upper()
+    data_reason = str(eval_row.get("data_reason") or "").strip().upper()
+    if data_reason:
+        return data_reason
+    if data_status and data_status != "OK":
+        return data_status
+    return "OK"
 
 
 def _daily_checklist_summary(strategies: list[dict[str, Any]]) -> list[dict[str, Any]]:

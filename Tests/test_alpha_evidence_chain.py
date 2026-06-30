@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from research.shadow_tracking.evidence_chain import (
     build_alpha_evidence_chain_payload,
     write_alpha_evidence_chain_artifacts,
 )
+from paper.trading_calendar import ET_TZ
 
 
 REQUIRED_SLUGS = (
@@ -17,6 +19,8 @@ REQUIRED_SLUGS = (
     "caerus_orion_alpha",
     "caerus_lyra",
 )
+AFTER_PUBLICATION_NOW = dt.datetime(2026, 6, 30, 19, 15, tzinfo=ET_TZ)
+BEFORE_EOD_NOW = dt.datetime(2026, 6, 30, 17, 0, tzinfo=ET_TZ)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -95,17 +99,75 @@ def _seed_complete_shadow_chain(root: Path, trade_date: str = "2026-06-24") -> P
     return output_root
 
 
+def _remove_holdings_rank_sources(output_root: Path, trade_date: str) -> None:
+    dated = output_root / trade_date
+    for slug in REQUIRED_SLUGS:
+        artifact_path = dated / f"{slug}.json"
+        if artifact_path.exists():
+            artifact_path.unlink()
+    comparison_path = dated / "comparison.json"
+    comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+    for row in comparison["strategies"].values():
+        row.pop("holdings", None)
+        row.pop("rank_table", None)
+    comparison_path.write_text(json.dumps(comparison, sort_keys=True), encoding="utf-8")
+    latest_comparison_path = output_root / "latest" / "comparison.json"
+    latest_comparison_path.write_text(json.dumps(comparison, sort_keys=True), encoding="utf-8")
+
+
 def test_alpha_evidence_chain_complete_artifacts_are_collectible(tmp_path: Path) -> None:
     output_root = _seed_complete_shadow_chain(tmp_path)
 
-    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
+    )
 
-    assert payload["status"] == "OK"
+    assert payload["status"] == "PASS"
     assert payload["can_start_20_60_day_evidence_collection"] is True
     assert payload["reporting_status"] == "CURRENT"
     assert not payload["blocked_reasons"]
     assert {row["strategy_id"] for row in payload["strategies"]} == set(REQUIRED_SLUGS)
     assert all(row["status"] == "PASS" for row in payload["strategies"])
+
+
+def test_alpha_evidence_chain_current_day_missing_ranks_is_pending_before_eod_import(tmp_path: Path) -> None:
+    output_root = _seed_complete_shadow_chain(tmp_path, trade_date="2026-06-30")
+    _remove_holdings_rank_sources(output_root, "2026-06-30")
+
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-30",
+        now=BEFORE_EOD_NOW,
+    )
+
+    assert payload["status"] == "PENDING_EOD_IMPORT"
+    assert payload["can_start_20_60_day_evidence_collection"] is False
+    assert not payload["blocked_reasons"]
+    assert payload["pending_reasons"]
+    assert all(row["status"] == "PENDING_EOD_IMPORT" for row in payload["strategies"])
+    assert all(row["missing_fields"] == ["holdings_ranks"] for row in payload["strategies"])
+    assert all(row["missing_fields_actionable"] is False for row in payload["strategies"])
+
+
+def test_alpha_evidence_chain_current_day_missing_ranks_blocks_after_publication_deadline(tmp_path: Path) -> None:
+    output_root = _seed_complete_shadow_chain(tmp_path, trade_date="2026-06-30")
+    _remove_holdings_rank_sources(output_root, "2026-06-30")
+
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-30",
+        now=AFTER_PUBLICATION_NOW,
+    )
+
+    assert payload["status"] == "BLOCKED_MISSING"
+    assert payload["can_start_20_60_day_evidence_collection"] is False
+    assert payload["blocked_reasons"]
+    assert not payload["pending_reasons"]
+    assert all(row["status"] == "BLOCKED_MISSING" for row in payload["strategies"])
+    assert all(row["missing_fields"] == ["holdings_ranks"] for row in payload["strategies"])
+    assert all(row["missing_fields_actionable"] is True for row in payload["strategies"])
 
 
 def test_alpha_evidence_chain_uses_ranked_holdings_when_rank_table_is_unavailable(tmp_path: Path) -> None:
@@ -114,9 +176,13 @@ def test_alpha_evidence_chain_uses_ranked_holdings_when_rank_table_is_unavailabl
     for slug in REQUIRED_SLUGS:
         (dated / f"{slug}.json").unlink()
 
-    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
+    )
 
-    assert payload["status"] == "OK"
+    assert payload["status"] == "PASS"
     for row in payload["strategies"]:
         ranks = row["evidence"]["holdings_ranks"]
         assert row["status"] == "PASS"
@@ -147,9 +213,13 @@ def test_alpha_evidence_chain_falls_back_to_nav_series_for_missing_drawdown(tmp_
     second = "2026-06-24," + ",".join(second_values[slug] for slug in REQUIRED_SLUGS) + ",1.0\n"
     (output_root / "performance" / "shadow_nav_series.csv").write_text(header + first + second, encoding="utf-8")
 
-    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
+    )
 
-    assert payload["status"] == "OK"
+    assert payload["status"] == "PASS"
     by_slug = {row["strategy_id"]: row for row in payload["strategies"]}
     assert by_slug["caerus_polaris_alpha"]["evidence"]["drawdown"] == -0.05
     assert by_slug["caerus_orion_alpha"]["evidence"]["drawdown"] == -0.1
@@ -171,7 +241,11 @@ def test_alpha_evidence_chain_prefers_nav_series_drawdown_over_contaminated_eval
     second = "2026-06-24,0.9,1.01,1.02,1.03,1.04,1.0\n"
     (output_root / "performance" / "shadow_nav_series.csv").write_text(header + first + second, encoding="utf-8")
 
-    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
+    )
     by_slug = {row["strategy_id"]: row for row in payload["strategies"]}
 
     assert by_slug["caerus_polaris"]["evidence"]["drawdown"] == -0.1
@@ -207,9 +281,13 @@ def test_alpha_evidence_chain_derives_hhi_cash_and_top5_from_holdings_weights(tm
         row["avg_cash_weight"] = None
     evaluation_path.write_text(json.dumps(evaluation, sort_keys=True), encoding="utf-8")
 
-    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+    payload = build_alpha_evidence_chain_payload(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
+    )
 
-    assert payload["status"] == "OK"
+    assert payload["status"] == "PASS"
     for row in payload["strategies"]:
         evidence = row["evidence"]
         assert row["status"] == "PASS"
@@ -230,12 +308,13 @@ def test_alpha_evidence_chain_backfill_marks_provenance_and_ignores_latest_point
         strategy_slugs=REQUIRED_ALPHA_EVIDENCE_SLUGS,
         backfilled=True,
         generated_at="2026-06-30T00:00:00Z",
+        now=AFTER_PUBLICATION_NOW,
     )
 
     dated = output_root / "2026-06-24"
     saved = json.loads((dated / "alpha_evidence_chain.json").read_text(encoding="utf-8"))
 
-    assert payload["status"] == "OK"
+    assert payload["status"] == "PASS"
     assert payload["reporting_status"] == "NOT_ASSESSED"
     assert payload["backfilled"] is True
     assert payload["generated_at"] == "2026-06-30T00:00:00Z"
@@ -248,9 +327,10 @@ def test_alpha_evidence_chain_missing_shadow_artifacts_blocks_collection(tmp_pat
     payload = build_alpha_evidence_chain_payload(
         output_root=tmp_path / "outputs" / "shadow_candidates",
         trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
     )
 
-    assert payload["status"] == "BLOCKED"
+    assert payload["status"] == "BLOCKED_MISSING"
     assert payload["can_start_20_60_day_evidence_collection"] is False
     assert payload["blocked_reasons"]
 
@@ -258,10 +338,14 @@ def test_alpha_evidence_chain_missing_shadow_artifacts_blocks_collection(tmp_pat
 def test_alpha_evidence_chain_writer_creates_json_and_markdown(tmp_path: Path) -> None:
     output_root = _seed_complete_shadow_chain(tmp_path)
 
-    payload = write_alpha_evidence_chain_artifacts(output_root=output_root, trade_date="2026-06-24")
+    payload = write_alpha_evidence_chain_artifacts(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        now=AFTER_PUBLICATION_NOW,
+    )
 
     dated = output_root / "2026-06-24"
-    assert payload["status"] == "OK"
+    assert payload["status"] == "PASS"
     assert (dated / "alpha_evidence_chain.json").exists()
     assert (dated / "alpha_evidence_chain.md").exists()
     assert "Alpha Evidence Chain" in (dated / "alpha_evidence_chain.md").read_text(encoding="utf-8")
