@@ -310,14 +310,19 @@ def _strategy_payload(
     effective_n = _first_number(concentration.get("effective_n"), eval_row.get("avg_effective_n"), derived_concentration.get("effective_n"))
     eval_drawdown = _first_number(eval_row.get("max_drawdown"))
     nav_series_drawdown = _nav_series_drawdown(nav_rows=nav_rows, slug=slug, trade_date=trade_date)
+    drawdown = _first_number(nav_series_drawdown, eval_drawdown)
+    drawdown_source = (
+        "shadow_nav_series"
+        if nav_series_drawdown is not None
+        else "shadow_evaluation"
+        if eval_drawdown is not None
+        else None
+    )
     evidence = {
         "nav": _first_number((nav_row or {}).get(slug), eval_row.get("nav")),
         "return": _first_number(eval_row.get("daily_return")),
-        "drawdown": _first_number(
-            eval_drawdown,
-            nav_series_drawdown,
-        ),
-        "drawdown_source": "shadow_evaluation" if eval_drawdown is not None else "derived_from_nav_series" if nav_series_drawdown is not None else None,
+        "drawdown": drawdown,
+        "drawdown_source": drawdown_source,
         "turnover": _first_number((strategy_artifact or {}).get("expected_turnover"), comparison_row.get("expected_turnover"), eval_row.get("avg_turnover")),
         "holdings_ranks": {
             "holdings_count": len(holdings),
@@ -619,8 +624,8 @@ def _field_provenance(*, row: dict[str, Any], output_root: Path) -> dict[str, An
         "drawdown": _provenance(
             "drawdown",
             missing,
-            [nav_series] if drawdown_source == "derived_from_nav_series" else [shadow_evaluation],
-            derived=drawdown_source == "derived_from_nav_series",
+            [nav_series] if drawdown_source == "shadow_nav_series" else [shadow_evaluation],
+            derived=drawdown_source == "shadow_nav_series",
         ),
         "turnover": _provenance("turnover", missing, [strategy_snapshot, comparison, shadow_evaluation]),
         "holdings_ranks": _provenance(

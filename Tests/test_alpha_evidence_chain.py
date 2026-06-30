@@ -157,6 +157,27 @@ def test_alpha_evidence_chain_falls_back_to_nav_series_for_missing_drawdown(tmp_
     assert by_slug["caerus_orion_alpha"]["status"] == "PASS"
 
 
+def test_alpha_evidence_chain_prefers_nav_series_drawdown_over_contaminated_evaluation(tmp_path: Path) -> None:
+    output_root = _seed_complete_shadow_chain(tmp_path)
+    dated = output_root / "2026-06-24"
+    evaluation_path = dated / "shadow_evaluation.json"
+    evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+    evaluation["strategies"]["caerus_polaris"]["max_drawdown"] = -0.99
+    evaluation_path.write_text(json.dumps(evaluation, sort_keys=True), encoding="utf-8")
+    (output_root / "latest" / "shadow_evaluation.json").write_text(json.dumps(evaluation, sort_keys=True), encoding="utf-8")
+
+    header = "date," + ",".join(REQUIRED_SLUGS) + ",spy_benchmark\n"
+    first = "2026-06-23," + ",".join("1.0" for _ in REQUIRED_SLUGS) + ",1.0\n"
+    second = "2026-06-24,0.9,1.01,1.02,1.03,1.04,1.0\n"
+    (output_root / "performance" / "shadow_nav_series.csv").write_text(header + first + second, encoding="utf-8")
+
+    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+    by_slug = {row["strategy_id"]: row for row in payload["strategies"]}
+
+    assert by_slug["caerus_polaris"]["evidence"]["drawdown"] == -0.1
+    assert by_slug["caerus_polaris"]["evidence"]["drawdown_source"] == "shadow_nav_series"
+
+
 def test_alpha_evidence_chain_derives_hhi_cash_and_top5_from_holdings_weights(tmp_path: Path) -> None:
     output_root = _seed_complete_shadow_chain(tmp_path)
     dated = output_root / "2026-06-24"

@@ -484,6 +484,10 @@ def _as_float(value: object) -> float | None:
         return None
 
 
+def _floats_close(left: float, right: float) -> bool:
+    return abs(left - right) <= max(1e-8, abs(right) * 1e-8)
+
+
 def _weight_hhi(weights: pd.Series) -> float:
     gross = float(weights.sum()) if not weights.empty else 0.0
     if gross <= 0.0:
@@ -958,11 +962,21 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
         slug: _strategy_label(slug)
         for slug in (*_model_strategy_slugs(trade_date=trade_date), BENCHMARK_SLUG)
     }
+    nav_history_by_slug: dict[str, tuple[list[float] | None, str | None]] = {
+        slug: extract_authoritative_nav_history(
+            output_root=output_root,
+            performance_history=performance_history,
+            strategy_slug=slug,
+            trade_date=trade_date,
+        )
+        for slug in strategy_names
+    }
     spy_current = ((current_performance.get("strategies") or {}).get(BENCHMARK_SLUG) or {})
-    spy_cumulative_return = (
-        round(float(spy_current["nav"]) - 1.0, 10)
-        if spy_current.get("nav") is not None
-        else None
+    spy_nav_history, spy_nav_source = nav_history_by_slug.get(BENCHMARK_SLUG, (None, None))
+    spy_cumulative_return = _authoritative_cumulative_return(
+        current_nav=spy_current.get("nav"),
+        nav_history=spy_nav_history,
+        nav_history_source=spy_nav_source,
     )
     for slug, strategy_name in strategy_names.items():
         current = ((current_performance.get("strategies") or {}).get(slug) or {})
@@ -971,7 +985,12 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
         data_reason = current_performance.get("data_reason")
         return_convention = current_performance.get("return_convention")
         nav = current.get("nav")
-        cumulative_return = round(float(nav) - 1.0, 10) if nav is not None else None
+        nav_history, nav_history_source = nav_history_by_slug.get(slug, (None, None))
+        cumulative_return = _authoritative_cumulative_return(
+            current_nav=nav,
+            nav_history=nav_history,
+            nav_history_source=nav_history_source,
+        )
         excess_return_vs_spy = (
             round(cumulative_return - spy_cumulative_return, 10)
             if slug != BENCHMARK_SLUG and cumulative_return is not None and spy_cumulative_return is not None
@@ -980,7 +999,6 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
             else None
         )
         valid_daily_returns = extract_valid_daily_returns(performance_history=performance_history, strategy_slug=slug)
-        nav_history = extract_chain_nav_history(performance_history=performance_history, strategy_slug=slug)
         turnover_history = extract_strategy_metric_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="expected_turnover")
         concentration_history = extract_strategy_top3_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
         cash_history = extract_strategy_concentration_field_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="cash_weight")
@@ -997,10 +1015,14 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
             "daily_return": current.get("daily_return"),
             "nav": nav,
             "cumulative_return": cumulative_return,
+            "cumulative_return_source": nav_history_source or "shadow_performance",
             "excess_return_vs_spy": excess_return_vs_spy,
             "rolling_count_of_valid_days": len(valid_daily_returns),
+            "nav_observation_count": len(nav_history or []),
+            "nav_history_source": nav_history_source,
             "realized_volatility_ann": compute_realized_volatility_ann(valid_daily_returns),
             "max_drawdown": compute_max_drawdown(nav_history),
+            "max_drawdown_source": nav_history_source,
             "avg_turnover": round(sum(turnover_history) / len(turnover_history), 10) if turnover_history else None,
             "avg_top_3_concentration": round(sum(concentration_history) / len(concentration_history), 10) if concentration_history else None,
             "avg_cash_weight": avg_cash_weight,
@@ -1035,7 +1057,12 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
     for slug in (*_model_strategy_slugs(trade_date=trade_date), BENCHMARK_SLUG):
         evaluation = (shadow_evaluation.get("strategies") or {}).get(slug) or {}
         daily_returns = extract_valid_daily_returns(performance_history=performance_history, strategy_slug=slug)
-        nav_history = extract_chain_nav_history(performance_history=performance_history, strategy_slug=slug)
+        nav_history, nav_history_source = extract_authoritative_nav_history(
+            output_root=output_root,
+            performance_history=performance_history,
+            strategy_slug=slug,
+            trade_date=trade_date,
+        )
         turnover_history = extract_strategy_metric_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, field="expected_turnover")
         top3_history = extract_strategy_top3_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug)
         top5_history = extract_strategy_top_concentration_history(output_root=output_root, history_dates=history_dates, strategy_slug=slug, top_n=5)
@@ -1059,6 +1086,7 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
             "risk_metrics": {
                 "realized_volatility_ann": evaluation.get("realized_volatility_ann"),
                 "max_drawdown": evaluation.get("max_drawdown"),
+                "max_drawdown_source": evaluation.get("max_drawdown_source") or nav_history_source,
                 "downside_volatility_proxy": compute_downside_volatility(daily_returns),
                 "drawdown_recovery_speed_days": compute_drawdown_recovery_speed(nav_history),
             },
@@ -1074,6 +1102,8 @@ def build_longitudinal_metrics_payload(*, output_root: Path, trade_date: str, sh
                 "alpha_per_dollar_deployed_proxy": evaluation.get("alpha_per_dollar_deployed_proxy"),
             },
             "valid_observation_windows": len(daily_returns),
+            "nav_observation_windows": len(nav_history or []),
+            "nav_history_source": nav_history_source,
             "available_observation_windows": len(history_dates),
         }
     for slug, payload in strategies.items():
@@ -1345,6 +1375,97 @@ def extract_chain_nav_history(*, performance_history: list[tuple[str, dict | Non
         seen_strategy = True
         navs.append(float(nav))
     return navs
+
+
+def extract_authoritative_nav_history(
+    *,
+    output_root: Path,
+    performance_history: list[tuple[str, dict | None]],
+    strategy_slug: str,
+    trade_date: str,
+) -> tuple[list[float] | None, str | None]:
+    navs = extract_nav_series_history(
+        output_root=output_root,
+        performance_history=performance_history,
+        strategy_slug=strategy_slug,
+        trade_date=trade_date,
+    )
+    if navs:
+        return navs, "shadow_nav_series"
+    return extract_chain_nav_history(performance_history=performance_history, strategy_slug=strategy_slug), "shadow_performance"
+
+
+def _authoritative_cumulative_return(
+    *,
+    current_nav: object,
+    nav_history: list[float] | None,
+    nav_history_source: str | None,
+) -> float | None:
+    if nav_history_source == "shadow_nav_series" and nav_history:
+        first_nav = nav_history[0]
+        latest_nav = nav_history[-1]
+        if first_nav > 0.0:
+            return round(float(latest_nav / first_nav - 1.0), 10)
+    nav = _as_float(current_nav)
+    return round(float(nav - 1.0), 10) if nav is not None else None
+
+
+def extract_nav_series_history(
+    *,
+    output_root: Path,
+    performance_history: list[tuple[str, dict | None]],
+    strategy_slug: str,
+    trade_date: str,
+) -> list[float] | None:
+    path = output_root / "performance" / "shadow_nav_series.csv"
+    if not path.exists():
+        return None
+    try:
+        frame = pd.read_csv(path, dtype=str).fillna("")
+    except Exception:
+        return None
+    if "date" not in frame.columns or strategy_slug not in frame.columns:
+        return None
+
+    current = next((payload for date, payload in performance_history if date == trade_date), None)
+    if isinstance(current, dict) and current.get("status") == "BROKEN_CHAIN":
+        return None
+
+    navs: list[float] = []
+    last_csv_date: str | None = None
+    for _, row in frame.sort_values("date").iterrows():
+        row_date = str(row.get("date") or "")
+        if not row_date or row_date > trade_date:
+            continue
+        value = _as_float(row.get(strategy_slug))
+        if value is None:
+            continue
+        navs.append(value)
+        last_csv_date = row_date
+
+    if last_csv_date != trade_date:
+        current_strategy = ((current or {}).get("strategies") or {}).get(strategy_slug) or {}
+        if (
+            isinstance(current, dict)
+            and current.get("data_status") == "OK"
+            and current.get("status") != "BROKEN_CHAIN"
+            and current_strategy.get("nav") is not None
+        ):
+            current_nav = _as_float(current_strategy.get("nav"))
+            previous_nav = _as_float(current_strategy.get("previous_nav"))
+            daily_return = _as_float(current_strategy.get("daily_return"))
+            if current_nav is not None and not navs:
+                navs.append(current_nav)
+            elif (
+                current_nav is not None
+                and previous_nav is not None
+                and daily_return is not None
+                and _floats_close(previous_nav, navs[-1])
+                and _floats_close(current_nav, navs[-1] * (1.0 + daily_return))
+            ):
+                navs.append(current_nav)
+
+    return navs or None
 
 
 def extract_strategy_metric_history(*, output_root: Path, history_dates: list[str], strategy_slug: str, field: str) -> list[float]:

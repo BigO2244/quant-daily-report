@@ -13,6 +13,7 @@ from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.shadow_tracking.run import (
     build_comparison_markdown,
     build_longitudinal_metrics_payload,
+    build_shadow_evaluation_payload,
     build_shadow_performance_payload,
     build_phase_c_promotion_readiness_payload,
     build_stability_surface_payload,
@@ -555,6 +556,62 @@ def test_phase_c_metrics_are_deterministic_and_no_lookahead(tmp_path: Path) -> N
     assert "2026-05-06" not in first["history_dates"]
     assert first["strategies"]["caerus_orion"]["rolling_returns"]["5D"] == 0.05
     assert first["strategies"]["caerus_orion"]["rolling_excess_return"]["vs_spy"]["5D"] == 0.04
+
+
+def test_shadow_evaluation_uses_nav_series_for_drawdown_when_dated_navs_have_mixed_bases(tmp_path: Path) -> None:
+    out_dir = tmp_path / "shadow"
+    _write_nav_series(
+        out_dir / "performance" / "shadow_nav_series.csv",
+        [
+            {
+                "date": "2026-06-08",
+                "caerus_polaris": 2.0,
+                "caerus_orion": 2.0,
+                "caerus_lyra": 2.0,
+                "spy_benchmark": 2.0,
+            },
+            {
+                "date": "2026-06-09",
+                "caerus_polaris": 1.8,
+                "caerus_orion": 1.8,
+                "caerus_lyra": 1.8,
+                "spy_benchmark": 1.8,
+            },
+        ],
+    )
+    for date, nav, previous_nav, daily_return in [
+        ("2026-06-08", 40.0, 39.0, 0.0),
+        ("2026-06-09", 1.8, 2.0, -0.1),
+        ("2026-06-10", 1.98, 1.8, 0.1),
+    ]:
+        dated = out_dir / date
+        _write_json(
+            dated / "shadow_performance.json",
+            {
+                "trade_date": date,
+                "status": "OK",
+                "data_status": "OK",
+                "return_convention": "weights_as_of_t",
+                "strategies": {
+                    slug: {
+                        "daily_return": daily_return,
+                        "previous_nav": previous_nav,
+                        "nav": nav,
+                    }
+                    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
+                },
+            },
+        )
+
+    evaluation = build_shadow_evaluation_payload(output_root=out_dir, trade_date="2026-06-10")
+
+    polaris = evaluation["strategies"]["caerus_polaris"]
+    assert polaris["max_drawdown"] == -0.1
+    assert polaris["max_drawdown_source"] == "shadow_nav_series"
+    assert polaris["nav_history_source"] == "shadow_nav_series"
+    assert polaris["nav_observation_count"] == 3
+    assert polaris["cumulative_return"] == -0.01
+    assert polaris["cumulative_return_source"] == "shadow_nav_series"
 
 
 def test_phase_c_stability_and_promotion_transitions() -> None:
