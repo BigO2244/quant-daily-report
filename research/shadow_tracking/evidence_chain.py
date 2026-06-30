@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +183,7 @@ def annotate_backfilled_payload(
     output_root: Path,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
-    generated = generated_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    generated = generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     payload = dict(payload)
     payload["backfilled"] = True
     payload["generated_at"] = generated
