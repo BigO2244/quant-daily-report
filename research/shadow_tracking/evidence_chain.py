@@ -294,7 +294,7 @@ def _strategy_payload(
         "display_name": entry.display_name if entry else slug,
         "source_variant": ((entry.shadow_tracking or {}).get("source_variant") if entry else None),
         "baseline_strategy_id": ((entry.shadow_tracking or {}).get("baseline_strategy_id") if entry else None),
-        "status": "COLLECTIBLE" if not missing else "BLOCKED",
+        "status": "PASS" if not missing else "BLOCKED",
         "missing_fields": missing,
         "evidence": evidence,
         "source_artifacts": {

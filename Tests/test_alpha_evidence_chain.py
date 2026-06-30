@@ -104,7 +104,7 @@ def test_alpha_evidence_chain_complete_artifacts_are_collectible(tmp_path: Path)
     assert payload["reporting_status"] == "CURRENT"
     assert not payload["blocked_reasons"]
     assert {row["strategy_id"] for row in payload["strategies"]} == set(REQUIRED_SLUGS)
-    assert all(row["status"] == "COLLECTIBLE" for row in payload["strategies"])
+    assert all(row["status"] == "PASS" for row in payload["strategies"])
 
 
 def test_alpha_evidence_chain_missing_shadow_artifacts_blocks_collection(tmp_path: Path) -> None:
