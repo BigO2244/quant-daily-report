@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from research.shadow_tracking.evidence_chain import (
+    REQUIRED_ALPHA_EVIDENCE_SLUGS,
     build_alpha_evidence_chain_payload,
     write_alpha_evidence_chain_artifacts,
 )
@@ -154,6 +155,72 @@ def test_alpha_evidence_chain_falls_back_to_nav_series_for_missing_drawdown(tmp_
     assert by_slug["caerus_orion_alpha"]["evidence"]["drawdown"] == -0.1
     assert by_slug["caerus_polaris_alpha"]["status"] == "PASS"
     assert by_slug["caerus_orion_alpha"]["status"] == "PASS"
+
+
+def test_alpha_evidence_chain_derives_hhi_cash_and_top5_from_holdings_weights(tmp_path: Path) -> None:
+    output_root = _seed_complete_shadow_chain(tmp_path)
+    dated = output_root / "2026-06-24"
+    for slug in REQUIRED_SLUGS:
+        artifact_path = dated / f"{slug}.json"
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        artifact["weight_concentration"] = {
+            "holdings_count": 3,
+            "max_weight": 0.25,
+            "top3_concentration": 0.75,
+        }
+        artifact_path.write_text(json.dumps(artifact, sort_keys=True), encoding="utf-8")
+    comparison_path = dated / "comparison.json"
+    comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+    for row in comparison["strategies"].values():
+        row["weight_concentration"] = {
+            "holdings_count": 3,
+            "max_weight": 0.25,
+            "top3_concentration": 0.75,
+        }
+    comparison_path.write_text(json.dumps(comparison, sort_keys=True), encoding="utf-8")
+    evaluation_path = dated / "shadow_evaluation.json"
+    evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+    for row in evaluation["strategies"].values():
+        row["avg_hhi"] = None
+        row["avg_effective_n"] = None
+        row["avg_cash_weight"] = None
+    evaluation_path.write_text(json.dumps(evaluation, sort_keys=True), encoding="utf-8")
+
+    payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date="2026-06-24")
+
+    assert payload["status"] == "OK"
+    for row in payload["strategies"]:
+        evidence = row["evidence"]
+        assert row["status"] == "PASS"
+        assert evidence["concentration"]["top5_concentration"] == 0.75
+        assert evidence["concentration"]["gross_exposure"] == 0.75
+        assert evidence["concentration"]["source"] == "derived_from_holdings"
+        assert evidence["hhi_effective_n"]["hhi"] == 0.3333333333
+        assert round(evidence["hhi_effective_n"]["effective_n"], 6) == 3.0
+        assert evidence["cash_exposure"] == 0.25
+
+
+def test_alpha_evidence_chain_backfill_marks_provenance_and_ignores_latest_pointer(tmp_path: Path) -> None:
+    output_root = _seed_complete_shadow_chain(tmp_path)
+    payload = write_alpha_evidence_chain_artifacts(
+        output_root=output_root,
+        trade_date="2026-06-24",
+        assess_latest_pointer=False,
+        strategy_slugs=REQUIRED_ALPHA_EVIDENCE_SLUGS,
+        backfilled=True,
+        generated_at="2026-06-30T00:00:00Z",
+    )
+
+    dated = output_root / "2026-06-24"
+    saved = json.loads((dated / "alpha_evidence_chain.json").read_text(encoding="utf-8"))
+
+    assert payload["status"] == "OK"
+    assert payload["reporting_status"] == "NOT_ASSESSED"
+    assert payload["backfilled"] is True
+    assert payload["generated_at"] == "2026-06-30T00:00:00Z"
+    assert payload["derived_from"]
+    assert saved["backfilled"] is True
+    assert all("field_provenance" in row for row in payload["strategies"])
 
 
 def test_alpha_evidence_chain_missing_shadow_artifacts_blocks_collection(tmp_path: Path) -> None:

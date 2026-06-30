@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,13 @@ LATEST_REQUIRED_ARTIFACTS = (
 PERFORMANCE_REQUIRED_ARTIFACTS = (
     "performance/shadow_nav_series.csv",
 )
+REQUIRED_ALPHA_EVIDENCE_SLUGS = (
+    "caerus_polaris",
+    "caerus_polaris_alpha",
+    "caerus_orion",
+    "caerus_orion_alpha",
+    "caerus_lyra",
+)
 
 
 def build_alpha_evidence_chain_payload(
@@ -43,6 +50,7 @@ def build_alpha_evidence_chain_payload(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     trade_date: str | None = None,
     assess_latest_pointer: bool = True,
+    strategy_slugs: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     output_root = Path(output_root)
     resolved_trade_date = trade_date or latest_dated_trade_date(output_root)
@@ -59,7 +67,7 @@ def build_alpha_evidence_chain_payload(
     artifacts = _artifact_status(output_root=output_root, dated_dir=dated_dir)
 
     strategies = []
-    for slug in required_strategy_slugs(trade_date=resolved_trade_date):
+    for slug in strategy_slugs or required_strategy_slugs(trade_date=resolved_trade_date):
         strategy_payload = _strategy_payload(
             slug=slug,
             output_root=output_root,
@@ -80,7 +88,8 @@ def build_alpha_evidence_chain_payload(
     ]
     evidence_ready = not blocked and bool(resolved_trade_date)
     reporting_current = latest_status["status"] == "CURRENT"
-    status = "OK" if evidence_ready and reporting_current else "WARN" if evidence_ready else "BLOCKED"
+    reporting_not_assessed = latest_status["status"] == "NOT_ASSESSED"
+    status = "OK" if evidence_ready and (reporting_current or reporting_not_assessed) else "WARN" if evidence_ready else "BLOCKED"
     return {
         "schema_version": SCHEMA_VERSION,
         "trade_date": resolved_trade_date,
@@ -139,12 +148,22 @@ def write_alpha_evidence_chain_artifacts(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     trade_date: str | None = None,
     assess_latest_pointer: bool = True,
+    strategy_slugs: tuple[str, ...] | None = None,
+    backfilled: bool = False,
+    generated_at: str | None = None,
 ) -> dict[str, Any]:
     payload = build_alpha_evidence_chain_payload(
         output_root=output_root,
         trade_date=trade_date,
         assess_latest_pointer=assess_latest_pointer,
+        strategy_slugs=strategy_slugs,
     )
+    if backfilled:
+        payload = annotate_backfilled_payload(
+            payload=payload,
+            output_root=Path(output_root),
+            generated_at=generated_at,
+        )
     resolved_trade_date = payload.get("trade_date") or trade_date
     if not resolved_trade_date:
         return payload
@@ -158,6 +177,23 @@ def write_alpha_evidence_chain_artifacts(
     return payload
 
 
+def annotate_backfilled_payload(
+    *,
+    payload: dict[str, Any],
+    output_root: Path,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    generated = generated_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    payload = dict(payload)
+    payload["backfilled"] = True
+    payload["generated_at"] = generated
+    payload["derived_from"] = _payload_source_paths(payload=payload)
+    payload["backfill_caveats"] = _backfill_caveats(payload)
+    for row in payload.get("strategies") or []:
+        row["field_provenance"] = _field_provenance(row=row, output_root=output_root)
+    return payload
+
+
 def render_alpha_evidence_chain_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Alpha Evidence Chain",
@@ -166,6 +202,7 @@ def render_alpha_evidence_chain_markdown(payload: dict[str, Any]) -> str:
         f"- Status: `{payload.get('status')}`",
         f"- Reporting status: `{payload.get('reporting_status')}`",
         f"- 20/60-day evidence collection can start: `{payload.get('can_start_20_60_day_evidence_collection')}`",
+        f"- Backfilled: `{payload.get('backfilled', False)}`",
         "- Runtime impact: `NO_RUNTIME_CHANGE`",
         "",
         "## Daily Checklist",
@@ -194,6 +231,12 @@ def render_alpha_evidence_chain_markdown(payload: dict[str, Any]) -> str:
         )
     lines.extend(
         [
+            "",
+            "## Backfill Provenance",
+            "",
+            f"- Generated at: `{payload.get('generated_at') or 'NA'}`",
+            f"- Derived from: `{len(payload.get('derived_from') or [])}` source artifact(s)",
+            f"- Caveats: `{'; '.join(payload.get('backfill_caveats') or []) or 'None'}`",
             "",
             "## Latest Pointer",
             "",
@@ -262,15 +305,19 @@ def _strategy_payload(
     holdings = _first_non_empty_list((strategy_artifact or {}).get("holdings"), comparison_row.get("holdings"))
     rank_table = _first_non_empty_list((strategy_artifact or {}).get("rank_table"), comparison_row.get("rank_table"))
     ranked_holdings_count = _ranked_holdings_count(holdings)
-    hhi = _first_number(concentration.get("hhi"), eval_row.get("avg_hhi"))
-    effective_n = _first_number(concentration.get("effective_n"), eval_row.get("avg_effective_n"))
+    derived_concentration = _derive_concentration_from_holdings(holdings)
+    hhi = _first_number(concentration.get("hhi"), eval_row.get("avg_hhi"), derived_concentration.get("hhi"))
+    effective_n = _first_number(concentration.get("effective_n"), eval_row.get("avg_effective_n"), derived_concentration.get("effective_n"))
+    eval_drawdown = _first_number(eval_row.get("max_drawdown"))
+    nav_series_drawdown = _nav_series_drawdown(nav_rows=nav_rows, slug=slug, trade_date=trade_date)
     evidence = {
         "nav": _first_number((nav_row or {}).get(slug), eval_row.get("nav")),
         "return": _first_number(eval_row.get("daily_return")),
         "drawdown": _first_number(
-            eval_row.get("max_drawdown"),
-            _nav_series_drawdown(nav_rows=nav_rows, slug=slug, trade_date=trade_date),
+            eval_drawdown,
+            nav_series_drawdown,
         ),
+        "drawdown_source": "shadow_evaluation" if eval_drawdown is not None else "derived_from_nav_series" if nav_series_drawdown is not None else None,
         "turnover": _first_number((strategy_artifact or {}).get("expected_turnover"), comparison_row.get("expected_turnover"), eval_row.get("avg_turnover")),
         "holdings_ranks": {
             "holdings_count": len(holdings),
@@ -280,15 +327,16 @@ def _strategy_payload(
             "status": "PRESENT" if holdings and (rank_table or ranked_holdings_count) else "MISSING",
         },
         "concentration": {
-            "top3_concentration": _first_number(concentration.get("top3_concentration"), eval_row.get("avg_top_3_concentration")),
-            "top5_concentration": _first_number(concentration.get("top5_concentration")),
-            "gross_exposure": _first_number(concentration.get("gross_exposure")),
+            "top3_concentration": _first_number(concentration.get("top3_concentration"), eval_row.get("avg_top_3_concentration"), derived_concentration.get("top3_concentration")),
+            "top5_concentration": _first_number(concentration.get("top5_concentration"), derived_concentration.get("top5_concentration")),
+            "gross_exposure": _first_number(concentration.get("gross_exposure"), derived_concentration.get("gross_exposure")),
+            "source": "artifact" if concentration.get("hhi") is not None or concentration.get("cash_weight") is not None else "derived_from_holdings" if derived_concentration else None,
         },
         "hhi_effective_n": {
             "hhi": hhi,
             "effective_n": effective_n,
         },
-        "cash_exposure": _first_number(concentration.get("cash_weight"), eval_row.get("avg_cash_weight")),
+        "cash_exposure": _first_number(concentration.get("cash_weight"), eval_row.get("avg_cash_weight"), derived_concentration.get("cash_weight")),
         "artifact_freshness": {
             "dated_artifact_trade_date": (evaluation or {}).get("trade_date"),
             "requested_trade_date": trade_date,
@@ -441,6 +489,37 @@ def _first_non_empty_list(*items: Any) -> list[Any]:
     return fallback
 
 
+def _derive_concentration_from_holdings(holdings: list[Any]) -> dict[str, float]:
+    weights = sorted(
+        [
+            float(item.get("target_weight"))
+            for item in holdings
+            if isinstance(item, dict) and _first_number(item.get("target_weight")) is not None
+        ],
+        reverse=True,
+    )
+    if not weights:
+        return {}
+    gross = round(float(sum(weights)), 10)
+    if gross > 0.0:
+        normalized = [weight / gross for weight in weights]
+        hhi = round(float(sum(weight * weight for weight in normalized)), 10)
+        effective_n = round(float(1.0 / hhi), 10) if hhi > 0.0 else 0.0
+    else:
+        hhi = 0.0
+        effective_n = 0.0
+    return {
+        "holdings_count": float(len(weights)),
+        "max_weight": round(float(weights[0]), 10),
+        "top3_concentration": round(float(sum(weights[:3])), 10),
+        "top5_concentration": round(float(sum(weights[:5])), 10),
+        "gross_exposure": gross,
+        "cash_weight": round(float(max(0.0, 1.0 - gross)), 10),
+        "hhi": hhi,
+        "effective_n": effective_n,
+    }
+
+
 def _first_number(*items: Any) -> float | None:
     for item in items:
         try:
@@ -491,6 +570,104 @@ def _nav_series_drawdown(*, nav_rows: list[dict[str, str]], slug: str, trade_dat
         if peak > 0.0:
             max_drawdown = min(max_drawdown, (nav / peak) - 1.0)
     return round(float(max_drawdown), 10)
+
+
+def _payload_source_paths(*, payload: dict[str, Any]) -> list[str]:
+    paths: set[str] = set()
+    for section in (payload.get("artifact_status") or {}).values():
+        if not isinstance(section, list):
+            continue
+        for row in section:
+            if isinstance(row, dict) and row.get("status") == "PRESENT":
+                paths.add(str(row.get("path")))
+    for strategy in payload.get("strategies") or []:
+        for value in (strategy.get("source_artifacts") or {}).values():
+            paths.add(str(value))
+    return sorted(path for path in paths if "<date>" not in path)
+
+
+def _backfill_caveats(payload: dict[str, Any]) -> list[str]:
+    caveats = []
+    if (payload.get("latest_pointer") or {}).get("status") == "NOT_ASSESSED":
+        caveats.append("latest pointer intentionally not assessed for historical backfill")
+    for row in payload.get("strategies") or []:
+        evidence = row.get("evidence") or {}
+        if ((evidence.get("concentration") or {}).get("source")) == "derived_from_holdings":
+            caveats.append("concentration risk metrics derived from retained holdings weights")
+            break
+    for row in payload.get("strategies") or []:
+        if ((row.get("evidence") or {}).get("holdings_ranks") or {}).get("rank_source") == "holdings_momentum_rank":
+            caveats.append("rank evidence accepted from holdings momentum_rank fields")
+            break
+    return sorted(set(caveats))
+
+
+def _field_provenance(*, row: dict[str, Any], output_root: Path) -> dict[str, Any]:
+    artifacts = row.get("source_artifacts") or {}
+    evidence = row.get("evidence") or {}
+    missing = set(row.get("missing_fields") or [])
+    strategy_snapshot = artifacts.get("strategy_snapshot")
+    comparison = artifacts.get("comparison")
+    shadow_evaluation = artifacts.get("shadow_evaluation")
+    nav_series = artifacts.get("nav_series") or str(output_root / "performance" / "shadow_nav_series.csv")
+    concentration_source = (evidence.get("concentration") or {}).get("source")
+    rank_source = (evidence.get("holdings_ranks") or {}).get("rank_source")
+    drawdown_source = evidence.get("drawdown_source")
+    return {
+        "nav": _provenance("nav", missing, [nav_series, shadow_evaluation]),
+        "return": _provenance("return", missing, [shadow_evaluation]),
+        "drawdown": _provenance(
+            "drawdown",
+            missing,
+            [nav_series] if drawdown_source == "derived_from_nav_series" else [shadow_evaluation],
+            derived=drawdown_source == "derived_from_nav_series",
+        ),
+        "turnover": _provenance("turnover", missing, [strategy_snapshot, comparison, shadow_evaluation]),
+        "holdings_ranks": _provenance(
+            "holdings_ranks",
+            missing,
+            [strategy_snapshot, comparison],
+            caveat=f"rank_source={rank_source}" if rank_source else None,
+        ),
+        "concentration": _provenance(
+            "concentration",
+            missing,
+            [strategy_snapshot, comparison, shadow_evaluation],
+            derived=concentration_source == "derived_from_holdings",
+        ),
+        "hhi_effective_n": _provenance(
+            "hhi_effective_n",
+            missing,
+            [strategy_snapshot, comparison, shadow_evaluation],
+            derived=concentration_source == "derived_from_holdings",
+        ),
+        "cash_exposure": _provenance(
+            "cash_exposure",
+            missing,
+            [strategy_snapshot, comparison, shadow_evaluation],
+            derived=concentration_source == "derived_from_holdings",
+        ),
+        "artifact_freshness": _provenance("artifact_freshness", missing, [shadow_evaluation]),
+        "observed_day_count": _provenance("observed_day_count", missing, [shadow_evaluation]),
+    }
+
+
+def _provenance(
+    field: str,
+    missing: set[str],
+    sources: list[str | None],
+    *,
+    derived: bool = False,
+    caveat: str | None = None,
+) -> dict[str, Any]:
+    present = field not in missing
+    row = {
+        "status": "MISSING" if not present else "DERIVED" if derived else "PRESENT",
+        "sources": [source for source in sources if source],
+    }
+    if caveat:
+        row["caveat"] = caveat
+    return row
 
 
 def _looks_like_date(value: str) -> bool:

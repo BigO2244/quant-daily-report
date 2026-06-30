@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from research.shadow_tracking.evidence_chain import (  # noqa: E402
     DEFAULT_OUTPUT_ROOT,
+    REQUIRED_ALPHA_EVIDENCE_SLUGS,
     build_alpha_evidence_chain_payload,
     write_alpha_evidence_chain_artifacts,
 )
@@ -26,16 +27,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trade-date", default=None, help="YYYY-MM-DD. Defaults to latest dated shadow artifact.")
     parser.add_argument("--write", action="store_true", help="Write alpha_evidence_chain.json/md into the dated shadow folder.")
     parser.add_argument("--strict", action="store_true", help="Exit 1 unless all daily evidence fields are collectible.")
+    parser.add_argument("--no-latest-pointer", action="store_true", help="Do not assess latest/ pointer freshness; intended for historical backfill checks.")
+    parser.add_argument("--all-five", action="store_true", help="Require Polaris, Orion, Lyra, Polaris_Alpha, and Orion_Alpha regardless of observation_start_date.")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output_root = Path(args.output_dir)
+    assess_latest_pointer = not args.no_latest_pointer
+    strategy_slugs = REQUIRED_ALPHA_EVIDENCE_SLUGS if args.all_five else None
     if args.write:
-        payload = write_alpha_evidence_chain_artifacts(output_root=output_root, trade_date=args.trade_date)
+        payload = write_alpha_evidence_chain_artifacts(
+            output_root=output_root,
+            trade_date=args.trade_date,
+            assess_latest_pointer=assess_latest_pointer,
+            strategy_slugs=strategy_slugs,
+        )
     else:
-        payload = build_alpha_evidence_chain_payload(output_root=output_root, trade_date=args.trade_date)
+        payload = build_alpha_evidence_chain_payload(
+            output_root=output_root,
+            trade_date=args.trade_date,
+            assess_latest_pointer=assess_latest_pointer,
+            strategy_slugs=strategy_slugs,
+        )
     print(
         json.dumps(
             {
