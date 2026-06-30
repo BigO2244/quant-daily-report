@@ -68,6 +68,7 @@ def build_alpha_evidence_chain_payload(
             evaluation=evaluation,
             comparison=comparison,
             nav_row=nav_row,
+            nav_rows=nav_rows,
             latest_status=latest_status,
         )
         strategies.append(strategy_payload)
@@ -247,6 +248,7 @@ def _strategy_payload(
     evaluation: dict[str, Any] | None,
     comparison: dict[str, Any] | None,
     nav_row: dict[str, str] | None,
+    nav_rows: list[dict[str, str]],
     latest_status: dict[str, Any],
 ) -> dict[str, Any]:
     entry = load_strategy_registry().get(slug)
@@ -257,19 +259,25 @@ def _strategy_payload(
         (strategy_artifact or {}).get("weight_concentration"),
         comparison_row.get("weight_concentration"),
     )
-    holdings = _first_list((strategy_artifact or {}).get("holdings"), comparison_row.get("holdings"))
-    rank_table = _first_list((strategy_artifact or {}).get("rank_table"))
+    holdings = _first_non_empty_list((strategy_artifact or {}).get("holdings"), comparison_row.get("holdings"))
+    rank_table = _first_non_empty_list((strategy_artifact or {}).get("rank_table"), comparison_row.get("rank_table"))
+    ranked_holdings_count = _ranked_holdings_count(holdings)
     hhi = _first_number(concentration.get("hhi"), eval_row.get("avg_hhi"))
     effective_n = _first_number(concentration.get("effective_n"), eval_row.get("avg_effective_n"))
     evidence = {
         "nav": _first_number((nav_row or {}).get(slug), eval_row.get("nav")),
         "return": _first_number(eval_row.get("daily_return")),
-        "drawdown": _first_number(eval_row.get("max_drawdown")),
+        "drawdown": _first_number(
+            eval_row.get("max_drawdown"),
+            _nav_series_drawdown(nav_rows=nav_rows, slug=slug, trade_date=trade_date),
+        ),
         "turnover": _first_number((strategy_artifact or {}).get("expected_turnover"), comparison_row.get("expected_turnover"), eval_row.get("avg_turnover")),
         "holdings_ranks": {
             "holdings_count": len(holdings),
-            "rank_rows": len(rank_table),
-            "status": "PRESENT" if holdings and rank_table else "MISSING",
+            "rank_rows": len(rank_table) if rank_table else ranked_holdings_count,
+            "ranked_holdings_count": ranked_holdings_count,
+            "rank_source": "rank_table" if rank_table else "holdings_momentum_rank" if ranked_holdings_count else None,
+            "status": "PRESENT" if holdings and (rank_table or ranked_holdings_count) else "MISSING",
         },
         "concentration": {
             "top3_concentration": _first_number(concentration.get("top3_concentration"), eval_row.get("avg_top_3_concentration")),
@@ -422,6 +430,17 @@ def _first_list(*items: Any) -> list[Any]:
     return []
 
 
+def _first_non_empty_list(*items: Any) -> list[Any]:
+    fallback: list[Any] = []
+    for item in items:
+        if not isinstance(item, list):
+            continue
+        if item:
+            return item
+        fallback = item
+    return fallback
+
+
 def _first_number(*items: Any) -> float | None:
     for item in items:
         try:
@@ -440,6 +459,38 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _ranked_holdings_count(holdings: list[Any]) -> int:
+    count = 0
+    for item in holdings:
+        if not isinstance(item, dict):
+            continue
+        rank = item.get("momentum_rank", item.get("rank"))
+        if _first_number(rank) is not None:
+            count += 1
+    return count
+
+
+def _nav_series_drawdown(*, nav_rows: list[dict[str, str]], slug: str, trade_date: str | None) -> float | None:
+    navs: list[float] = []
+    for row in sorted(nav_rows, key=lambda item: str(item.get("date") or "")):
+        row_date = str(row.get("date") or "")
+        if trade_date and row_date and row_date > trade_date:
+            continue
+        value = _first_number(row.get(slug))
+        if value is not None:
+            navs.append(value)
+    if not navs:
+        return None
+    peak = navs[0]
+    max_drawdown = 0.0
+    for nav in navs:
+        if nav > peak:
+            peak = nav
+        if peak > 0.0:
+            max_drawdown = min(max_drawdown, (nav / peak) - 1.0)
+    return round(float(max_drawdown), 10)
 
 
 def _looks_like_date(value: str) -> bool:
