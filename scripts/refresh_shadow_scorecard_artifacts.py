@@ -14,6 +14,7 @@ from core.strategy_registry import load_strategy_registry
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.alpha_lab_v2.engine import build_target_snapshot
 from research.flow_detection.data import ensure_price_panel, load_universe
+from research.shadow_tracking.evidence_chain import write_alpha_evidence_chain_artifacts
 from research.shadow_tracking import run as shadow
 from research.shadow_tracking.strategies import build_shadow_definitions, shadow_tracking_observation_start
 
@@ -268,6 +269,11 @@ def _publish_latest(output_root: Path, trade_date: str) -> dict[str, Any]:
             continue
         (latest_dir / artifact).write_bytes(source.read_bytes())
         published.append(artifact)
+    for artifact in ("alpha_evidence_chain.json", "alpha_evidence_chain.md"):
+        source = dated_dir / artifact
+        if source.exists():
+            (latest_dir / artifact).write_bytes(source.read_bytes())
+            published.append(artifact)
     return {
         "status": "OK" if not missing else "PARTIAL",
         "latest_dir": str(latest_dir),
@@ -331,11 +337,19 @@ def main(argv: list[str] | None = None) -> int:
     nav_status = _append_nav_series(output_root=output_root, shadow_performance=shadow_performance)
     feedback_summary = write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
     publish_status = _publish_latest(output_root, trade_date)
+    evidence_chain = write_alpha_evidence_chain_artifacts(output_root=output_root, trade_date=trade_date)
+    publish_status = _publish_latest(output_root, trade_date)
     result = {
         "trade_date": trade_date,
         "status": "OK" if nav_status.get("status") == "OK" and publish_status.get("status") == "OK" else "PARTIAL",
         "panel_meta": panel_meta,
         "nav_series": nav_status,
+        "alpha_evidence_chain": {
+            "status": evidence_chain.get("status"),
+            "can_start_20_60_day_evidence_collection": evidence_chain.get("can_start_20_60_day_evidence_collection"),
+            "reporting_status": evidence_chain.get("reporting_status"),
+            "path": str(dated_dir / "alpha_evidence_chain.json"),
+        },
         "feedback_loop": {
             "status": feedback_summary.get("status"),
             "path": str(dated_dir / "feedback_loop_summary.json"),

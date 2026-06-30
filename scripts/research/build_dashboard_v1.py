@@ -1304,6 +1304,15 @@ class DashboardV1Builder:
                 )
             artifact_required = bool(entry.active_in_shadow_tracking or entry.status in {"paper", "shadow"})
             artifact_status = "PRESENT" if metrics else "NOT_REQUIRED" if not artifact_required else "MISSING"
+            promotion_readiness = metrics.get("promotion_readiness") or (
+                "BASELINE" if entry.role == "baseline" else "RESEARCH" if lifecycle == "research" else "WATCHLIST"
+            )
+            evidence_eligible_for_promotion = bool(
+                entry.eligible_for_promotion
+                and artifact_status == "PRESENT"
+                and not shadow_section.get("is_stale")
+                and promotion_readiness == "PROMOTION_ELIGIBLE"
+            )
             variant_class = (
                 "alpha"
                 if "alpha" in entry.strategy_id.lower() or "alpha" in entry.display_name.lower()
@@ -1327,8 +1336,10 @@ class DashboardV1Builder:
                     "baseline_strategy_id": tracking.get("baseline_strategy_id"),
                     "execution_impact": entry.execution_impact,
                     "eligible_for_shadow": entry.eligible_for_shadow,
-                    "eligible_for_promotion": entry.eligible_for_promotion,
-                    "promotion_readiness": metrics.get("promotion_readiness") or ("BASELINE" if entry.role == "baseline" else "RESEARCH" if lifecycle == "research" else "WATCHLIST"),
+                    "registry_eligible_for_promotion": entry.eligible_for_promotion,
+                    "evidence_eligible_for_promotion": evidence_eligible_for_promotion,
+                    "eligible_for_promotion": evidence_eligible_for_promotion,
+                    "promotion_readiness": promotion_readiness,
                     "artifact_status": artifact_status,
                     "data_status": metrics.get("data_status") or ("NO_DATA" if artifact_status == "MISSING" else "OK" if artifact_status == "PRESENT" else "NOT_REQUIRED"),
                     "today_return": metrics.get("daily_return"),
