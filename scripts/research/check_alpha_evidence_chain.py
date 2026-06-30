@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from research.shadow_tracking.evidence_chain import (  # noqa: E402
     build_alpha_evidence_chain_payload,
     write_alpha_evidence_chain_artifacts,
 )
+from paper.trading_calendar import ET_TZ  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,7 +31,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--strict", action="store_true", help="Exit 1 unless all daily evidence fields are collectible.")
     parser.add_argument("--no-latest-pointer", action="store_true", help="Do not assess latest/ pointer freshness; intended for historical backfill checks.")
     parser.add_argument("--all-five", action="store_true", help="Require Polaris, Orion, Lyra, Polaris_Alpha, and Orion_Alpha regardless of observation_start_date.")
+    parser.add_argument("--now", default=None, help="Timezone-aware ISO timestamp used to classify pending vs blocked artifact state.")
+    parser.add_argument("--expected-publish-time", default=None, help="Override expected publication deadline as HH:MM ET.")
     return parser
+
+
+def _parse_now(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ET_TZ)
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,12 +50,15 @@ def main(argv: list[str] | None = None) -> int:
     output_root = Path(args.output_dir)
     assess_latest_pointer = not args.no_latest_pointer
     strategy_slugs = REQUIRED_ALPHA_EVIDENCE_SLUGS if args.all_five else None
+    now = _parse_now(args.now)
     if args.write:
         payload = write_alpha_evidence_chain_artifacts(
             output_root=output_root,
             trade_date=args.trade_date,
             assess_latest_pointer=assess_latest_pointer,
             strategy_slugs=strategy_slugs,
+            now=now,
+            expected_publish_time=args.expected_publish_time,
         )
     else:
         payload = build_alpha_evidence_chain_payload(
@@ -50,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
             trade_date=args.trade_date,
             assess_latest_pointer=assess_latest_pointer,
             strategy_slugs=strategy_slugs,
+            now=now,
+            expected_publish_time=args.expected_publish_time,
         )
     print(
         json.dumps(
@@ -57,8 +75,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": payload["status"],
                 "trade_date": payload.get("trade_date"),
                 "reporting_status": payload.get("reporting_status"),
+                "publication_window_status": (payload.get("latest_pointer_time_status") or {}).get("publication_window_status"),
+                "evidence_clock_status": payload.get("evidence_clock_status"),
                 "can_start_20_60_day_evidence_collection": payload.get("can_start_20_60_day_evidence_collection"),
                 "blocked_reasons": payload.get("blocked_reasons"),
+                "pending_reasons": payload.get("pending_reasons"),
             },
             indent=2,
             sort_keys=True,
