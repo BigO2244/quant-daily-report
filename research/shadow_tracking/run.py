@@ -15,6 +15,7 @@ from research.flow_detection.data import ensure_price_panel, load_universe
 
 from core.feedback_loop_artifacts import write_feedback_loop_artifacts
 
+from .evidence_chain import write_alpha_evidence_chain_artifacts
 from .strategies import build_shadow_definitions, shadow_tracking_active_on
 
 
@@ -95,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[SHADOW] feedback loop artifacts written for trade_date={trade_date}")
         except Exception as exc:
             print(f"[SHADOW] feedback loop artifacts skipped: {exc}")
+        write_alpha_evidence_chain_artifacts(output_root=output_root, trade_date=trade_date, assess_latest_pointer=False)
+        print(f"[SHADOW] alpha evidence-chain checklist written for trade_date={trade_date}")
         print(f"[SHADOW] evaluation summary written for trade_date={trade_date}")
         print("[SHADOW] delta status: NO_PRIOR")
         print(f"[SHADOW] wrote {dated_dir}/...")
@@ -167,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     (output_root / "performance").mkdir(parents=True, exist_ok=True)
     nav_series.to_csv(output_root / "performance" / "shadow_nav_series.csv", index=False)
     (output_root / "performance" / "shadow_summary.json").write_text(json.dumps(summary, indent=2))
+    write_alpha_evidence_chain_artifacts(output_root=output_root, trade_date=trade_date, assess_latest_pointer=False)
+    print(f"[SHADOW] alpha evidence-chain checklist written for trade_date={trade_date}")
     return 0
 
 

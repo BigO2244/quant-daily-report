@@ -67,7 +67,9 @@ def _publish_shadow_latest(shadow_output_dir: Path, trade_date: str) -> dict[str
     dated_dir = shadow_output_dir / trade_date
     latest_dir = shadow_output_dir / "latest"
     artifacts = ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json", "feedback_loop_summary.json")
+    optional_artifacts = ("alpha_evidence_chain.json", "alpha_evidence_chain.md")
     missing: list[str] = []
+    published: list[str] = []
     latest_dir.mkdir(parents=True, exist_ok=True)
     for artifact in artifacts:
         source = dated_dir / artifact
@@ -75,9 +77,15 @@ def _publish_shadow_latest(shadow_output_dir: Path, trade_date: str) -> dict[str
             missing.append(artifact)
             continue
         (latest_dir / artifact).write_bytes(source.read_bytes())
+        published.append(artifact)
+    for artifact in optional_artifacts:
+        source = dated_dir / artifact
+        if source.exists():
+            (latest_dir / artifact).write_bytes(source.read_bytes())
+            published.append(artifact)
     return {
         "latest_dir": str(latest_dir),
-        "published_artifacts": [artifact for artifact in artifacts if artifact not in missing],
+        "published_artifacts": published,
         "missing_artifacts": missing,
         "status": "OK" if not missing else "PARTIAL",
     }

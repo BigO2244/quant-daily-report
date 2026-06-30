@@ -448,6 +448,13 @@ def test_dashboard_v1_surfaces_alpha_sleeves_and_live_pilot_evidence(tmp_path: P
     assert "Polaris_Alpha" in sleeve_names
     assert "Orion_Alpha" in sleeve_names
     assert "Caerus Lyra" in sleeve_names
+    rows_by_name = {row["display_name"]: row for row in payload["sections"]["sleeve_inventory"]["rows"]}
+    assert rows_by_name["Polaris_Alpha"]["registry_eligible_for_promotion"] is True
+    assert rows_by_name["Polaris_Alpha"]["eligible_for_promotion"] is False
+    assert rows_by_name["Polaris_Alpha"]["evidence_eligible_for_promotion"] is False
+    assert rows_by_name["Orion_Alpha"]["registry_eligible_for_promotion"] is True
+    assert rows_by_name["Orion_Alpha"]["eligible_for_promotion"] is False
+    assert rows_by_name["Orion_Alpha"]["evidence_eligible_for_promotion"] is False
     assert payload["sections"]["baseline_alpha_comparison"]["summary"]["pair_count"] == 2
     assert payload["sections"]["live_pilot"]["status"] == "SUBMITTED"
     assert payload["sections"]["live_pilot"]["metrics"]["fill_rate"] == 1.0
