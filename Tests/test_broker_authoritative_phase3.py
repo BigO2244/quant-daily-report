@@ -901,3 +901,65 @@ def test_phase3_reports_risk_cash_target_when_postsell_cash_below_target(tmp_pat
     assert float(rebudget["risk_cash_target_buy_budget"]) == pytest.approx(0.0)
     assert "buy_blocked_risk_cash_target" in rebudget["reason_codes"]
     assert rebudget["skipped_buy_orders"][0]["block_reason"] == "buy_blocked_risk_cash_target"
+
+
+def test_phase3_rebudget_continues_after_unaffordable_whole_share_candidate():
+    cfg = broker.PaperConfig(
+        initial_equity=10000.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=50.0,
+        max_trades_per_day=5,
+    )
+    targets = pd.DataFrame(
+        [
+            {"ticker": "HIGH", "target_weight": 0.60, "sleeve": "core"},
+            {"ticker": "LOW", "target_weight": 0.10, "sleeve": "core"},
+        ]
+    )
+    prices = pd.Series({"HIGH": 1000.0, "LOW": 50.0})
+
+    rebuilt, meta, skipped = broker._rebuild_post_sell_buy_trades(
+        holdings=pd.DataFrame(columns=["ticker", "sleeve", "shares"]),
+        targets=targets,
+        prices=prices,
+        total_equity=2000.0,
+        buy_budget=150.0,
+        cfg=cfg,
+        cash_at_decision=650.0,
+        buying_power_at_decision=150.0,
+        risk_cash_target=500.0,
+        broker_buying_power_constraint=150.0,
+        buy_budget_basis="broker_buying_power",
+    )
+
+    assert meta["status"] == "REBUILT"
+    assert rebuilt["ticker"].tolist() == ["LOW"]
+    assert float(meta["recomputed_buy_notional"]) == pytest.approx(150.0)
+    high_skip = next(row for row in skipped if row["ticker"] == "HIGH")
+    assert high_skip["block_reason"] == "buy_blocked_insufficient_buying_power"
+    assert high_skip["remaining_buy_budget_at_decision"] == pytest.approx(150.0)
+    assert high_skip["buying_power_at_buy_decision"] == pytest.approx(150.0)
+    assert high_skip["projected_cash_after_allowed_buy"] == pytest.approx(650.0)
+
+
+def test_phase3_apply_buy_budget_preserves_legitimate_insufficient_buying_power():
+    kept, skipped = broker._apply_buy_budget(
+        [
+            {"ticker": "AAA", "side": "BUY", "quantity": 1.0, "price": 200.0, "notional": 200.0},
+            {"ticker": "BBB", "side": "BUY", "quantity": 1.0, "price": 200.0, "notional": 200.0},
+        ],
+        250.0,
+        buy_budget_basis="broker_buying_power",
+        cash_at_decision=250.0,
+        buying_power_at_decision=250.0,
+        account_status_clean=True,
+        account_status="ACTIVE",
+    )
+
+    assert [row["ticker"] for row in kept] == ["AAA"]
+    assert [row["ticker"] for row in skipped] == ["BBB"]
+    assert skipped[0]["block_reason"] == "buy_blocked_insufficient_buying_power"
+    assert skipped[0]["buying_power_at_buy_decision"] == pytest.approx(250.0)
+    assert skipped[0]["account_status_clean_for_buying_power"] is True

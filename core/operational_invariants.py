@@ -617,22 +617,33 @@ def build_execution_reliability_report(
         target_attainment=target_attainment,
     )
     target_status = str(target_attainment.get("status") or "").strip()
+    underdeployment_reason = _clean_reason(target_attainment.get("underdeployment_reason_code"))
+    underdeployment_classification = _clean_reason(target_attainment.get("underdeployment_classification"))
+    target_operator_action = _clean_reason(target_attainment.get("operator_action"))
     cash_drift_abs = abs(cash_drift) if cash_drift is not None else None
     if cash_drift_abs is not None and cash_drift_abs > float(cash_weight_tolerance):
+        reason_code = underdeployment_reason or "target_cash_materially_differs_from_actual_cash"
         results.append(
             _result(
                 invariant_id="target_cash_actual_cash_drift",
                 status=STATUS_WARN,
                 severity=SEVERITY_WARNING,
-                reason_code="target_cash_materially_differs_from_actual_cash",
+                reason_code=reason_code,
                 human_summary="Actual cash weight materially differs from intended target cash weight after execution.",
-                operator_action="Inspect target-attainment and posttrade cash artifacts; classify as pending fills, stale snapshot, or execution underdeployment.",
+                operator_action=target_operator_action
+                or "Inspect target-attainment and posttrade cash artifacts; classify as pending fills, stale snapshot, or execution underdeployment.",
                 evidence={
                     "target_cash_weight": target_cash_weight,
                     "actual_cash_weight": actual_cash_weight,
                     "cash_target_drift": cash_drift,
                     "cash_weight_tolerance": float(cash_weight_tolerance),
                     "target_attainment_status": target_status or None,
+                    "underdeployment_classification": underdeployment_classification,
+                    "underdeployment_reason_code": underdeployment_reason,
+                    "residual_undeployed_cash": target_attainment.get("residual_undeployed_cash"),
+                    "pending_buy_count": target_attainment.get("pending_buy_count"),
+                    "partial_buy_count": target_attainment.get("partial_buy_count"),
+                    "posttrade_unresolved_orders_count": target_attainment.get("posttrade_unresolved_orders_count"),
                 },
             )
         )

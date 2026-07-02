@@ -598,6 +598,59 @@ def test_posttrade_capture_marks_buy_timeout_and_unresolved_recon(tmp_path, monk
     assert recon_payload["manual_intervention_required"] is True
 
 
+class _PartialBuyAlpaca:
+    def get_order(self, order_id):
+        return {
+            "id": order_id,
+            "status": "partially_filled",
+            "filled_qty": "1",
+            "filled_at": "2026-06-12T13:36:40+00:00",
+        }
+
+    def find_order_by_client_id(self, client_id):
+        return self.get_order(client_id)
+
+    def get_account(self):
+        return {"cash": "910.0", "equity": "10000.0", "buying_power": "910.0", "status": "ACTIVE"}
+
+    def get_positions(self):
+        return [{"symbol": "BBB", "qty": "1", "current_price": "90.0", "market_value": "90.0"}]
+
+
+def test_posttrade_capture_keeps_partial_buy_unresolved_until_terminal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    submitted = [
+        {"alpaca_order_id": "buy-bbb", "order_id": "day:BBB:BUY", "ticker": "BBB", "side": "BUY", "quantity": 2}
+    ]
+
+    state = broker._capture_alpaca_posttrade_state(
+        alpaca=_PartialBuyAlpaca(),
+        run_date="2026-06-12",
+        holdings_prev=pd.DataFrame(columns=["ticker", "sleeve", "shares"]),
+        submitted_orders=submitted,
+        cfg=broker.PaperConfig(
+            initial_equity=10000.0,
+            benchmark_ticker="SPY",
+            slippage_bps=0.0,
+            allow_fractional=True,
+            min_trade_dollars=1.0,
+        ),
+        raise_on_failure=True,
+        buy_fill_timeout_seconds=0.0,
+        buy_fill_poll_interval_seconds=0.0,
+    )
+
+    recon_payload = json.loads(Path(state["posttrade_recon_path"]).read_text(encoding="utf-8"))
+    assert state["buy_phase_status"] == broker.BUY_PHASE_TIMEOUT
+    assert state["pending_buy_count"] == 1
+    assert state["partial_buy_count"] == 1
+    assert state["posttrade_unresolved_orders"][0]["reason"] == "partial_buy_fill_remaining_unresolved"
+    assert state["posttrade_unresolved_orders"][0]["remaining_quantity"] == pytest.approx(1.0)
+    assert state["posttrade_recon_status"] == "NOT_COMPARABLE"
+    assert recon_payload["manual_intervention_required"] is True
+    assert recon_payload["unresolved_submitted_orders_count"] == 1
+
+
 def test_posttrade_capture_marks_rejected_buy_failed_without_fabricating_fill(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     submitted = [

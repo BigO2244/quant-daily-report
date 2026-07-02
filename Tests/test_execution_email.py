@@ -218,6 +218,13 @@ def test_execution_email_surfaces_reliability_and_target_attainment_artifacts(tm
                 "submitted_buy_count": 2,
                 "filled_buy_count": 1,
                 "pending_buy_count": 1,
+                "partial_buy_count": 1,
+                "posttrade_unresolved_orders_count": 1,
+                "underdeployment_classification": "pending_incomplete_fill_timing",
+                "underdeployment_reason_code": "underdeployment_pending_incomplete_buy_fills",
+                "action_required": True,
+                "operator_action": "Refresh broker order state before treating the run as clean.",
+                "residual_undeployed_cash": 734.56,
                 "missing_intended_buys": [{"symbol": "VZ", "side": "BUY", "reason": "buy_blocked_insufficient_buying_power"}],
                 "warnings": ["cash_target_drift"],
                 "actual_posttrade_cash": 1234.56,
@@ -247,6 +254,13 @@ def test_execution_email_surfaces_reliability_and_target_attainment_artifacts(tm
     assert "Status | WARN_CASH_DRIFT" in body
     assert "Target cash weight | 5.00%" in body
     assert "Achieved cash weight | 12.34%" in body
+    assert "Underdeployment class | pending_incomplete_fill_timing" in body
+    assert "Reason code | underdeployment_pending_incomplete_buy_fills" in body
+    assert "Action required | YES" in body
+    assert "Operator action | Refresh broker order state before treating the run as clean." in body
+    assert "Residual undeployed cash | $734.56" in body
+    assert "Partial buys | 1" in body
+    assert "Unresolved orders | 1" in body
     assert "Missing intended buys | VZ:BUY:buy_blocked_insufficient_buying_power" in body
     assert "Execution Reliability" in html
     assert "Target Attainment" in html
