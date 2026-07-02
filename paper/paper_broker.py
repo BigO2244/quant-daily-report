@@ -2412,8 +2412,24 @@ def _resolve_filled_orders_for_recon(
         resolved["filled_at"] = filled_at
         resolved["seconds_to_fill"] = _seconds_between(order.get("submitted_at"), filled_at)
         orders_for_recon.append(resolved)
-        if filled_qty + 1e-12 < submitted_qty:
+        quantity_tolerance = max(1e-8, submitted_qty * 1e-6)
+        if filled_qty + quantity_tolerance < submitted_qty:
             partial_count += 1
+            if side == "BUY" and unresolved_orders is not None:
+                unresolved_orders.append(
+                    {
+                        "order_id": str(order.get("order_id") or "").strip(),
+                        "alpaca_order_id": alpaca_order_id,
+                        "ticker": symbol,
+                        "side": side,
+                        "submitted_quantity": float(submitted_qty),
+                        "filled_quantity": float(filled_qty),
+                        "remaining_quantity": float(max(0.0, submitted_qty - filled_qty)),
+                        "resolved_order_status": status or "UNKNOWN",
+                        "reason": "partial_buy_fill_remaining_unresolved",
+                    }
+                )
+                pending_count += 1
         else:
             filled_count += 1
 
@@ -2515,7 +2531,7 @@ def _is_buy_order(order: Mapping[str, object]) -> bool:
 
 def _is_buy_observation_terminal(status: str) -> bool:
     normalized = str(status or "").upper().replace("ORDERSTATUS.", "")
-    return normalized in ORDER_TERMINAL_STATUSES or normalized == "PARTIALLY_FILLED"
+    return normalized in ORDER_TERMINAL_STATUSES
 
 
 def _sell_phase_block_reason(status: str | None, completion_reason: str | None) -> str:
@@ -2578,7 +2594,8 @@ def _buy_observation_counts(buy_orders: List[Dict[str, object]]) -> Dict[str, in
             counts["failed_buy_count"] += 1
         elif filled_qty is not None and filled_qty > 1e-12:
             counts["filled_buy_count"] += 1
-            if submitted_qty > 0 and filled_qty + 1e-12 < submitted_qty:
+            quantity_tolerance = max(1e-8, submitted_qty * 1e-6)
+            if status != "PARTIALLY_FILLED" and submitted_qty > 0 and filled_qty + quantity_tolerance < submitted_qty:
                 counts["partial_buy_count"] += 1
         if not _is_buy_observation_terminal(status):
             counts["pending_buy_count"] += 1
@@ -3439,6 +3456,11 @@ def _rebuild_post_sell_buy_trades(
     cfg: PaperConfig,
     max_buy_orders: int | None = None,
     zero_budget_block_reason: str | None = None,
+    cash_at_decision: float | None = None,
+    buying_power_at_decision: float | None = None,
+    risk_cash_target: float | None = None,
+    broker_buying_power_constraint: float | None = None,
+    buy_budget_basis: str | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, object], List[Dict[str, object]]]:
     cols = ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
     reason_codes: List[str] = []
@@ -3474,6 +3496,54 @@ def _rebuild_post_sell_buy_trades(
     cash_buffer = max(0.0, min(1.0, cash_buffer))
     deadband_pct = float(getattr(cfg, "rebalance_deadband_pct", 0.0) or 0.0)
     equity_value = max(0.0, float(total_equity or 0.0))
+    cash_decision = _coerce_float(cash_at_decision, None)
+    buying_power_decision = _coerce_float(buying_power_at_decision, None)
+    risk_target = _coerce_float(risk_cash_target, None)
+    broker_constraint = _coerce_float(broker_buying_power_constraint, None)
+    budget_basis = str(buy_budget_basis or "").strip() or None
+
+    def _budget_skip_payload(
+        candidate: Dict[str, object],
+        *,
+        block_reason: str,
+        spent_before_order: float,
+        remaining_budget: float,
+        allowed_notional: float | None = None,
+    ) -> Dict[str, object]:
+        requested_notional = float(candidate.get("notional") or 0.0)
+        payload = {
+            **candidate,
+            "block_reason": block_reason,
+            "requested_notional": float(requested_notional),
+            "buy_budget_at_decision": float(buy_budget),
+            "spent_before_order": float(spent_before_order),
+            "remaining_buy_budget_at_decision": float(max(0.0, remaining_budget)),
+            "min_trade_dollars": float(cfg.min_trade_dollars),
+        }
+        if allowed_notional is not None:
+            payload["allowed_notional"] = float(max(0.0, allowed_notional))
+        if budget_basis:
+            payload["buy_budget_basis"] = budget_basis
+        if cash_decision is not None:
+            projected_after_requested = cash_decision - spent_before_order - requested_notional
+            payload["cash_at_buy_decision"] = float(cash_decision)
+            payload["projected_cash_after_requested_buy"] = float(projected_after_requested)
+            if allowed_notional is not None:
+                payload["projected_cash_after_allowed_buy"] = float(
+                    cash_decision - spent_before_order - float(max(0.0, allowed_notional))
+                )
+        if buying_power_decision is not None:
+            payload["buying_power_at_buy_decision"] = float(buying_power_decision)
+        if broker_constraint is not None:
+            payload["broker_buying_power_constraint"] = float(broker_constraint)
+        if risk_target is not None:
+            payload["target_cash_constraint"] = float(risk_target)
+            if cash_decision is not None:
+                payload["target_cash_constraint_breached_by_requested_buy"] = bool(
+                    cash_decision - spent_before_order - requested_notional
+                    < float(risk_target) - 1e-9
+                )
+        return payload
 
     for _, row in targets.copy().sort_values(["target_weight", "ticker"], ascending=[False, True]).iterrows():
         ticker = str(row.get("ticker") or "").upper().strip()
@@ -3551,10 +3621,17 @@ def _rebuild_post_sell_buy_trades(
         max_buy_orders = max(0, int(max_buy_orders))
     spent = 0.0
     for candidate in candidates:
-        if max_buy_orders > 0 and len(kept_rows) >= max_buy_orders:
-            skipped.append({**candidate, "block_reason": "max_trades_per_day"})
-            continue
         remaining_budget = max(0.0, float(buy_budget) - spent)
+        if max_buy_orders > 0 and len(kept_rows) >= max_buy_orders:
+            skipped.append(
+                _budget_skip_payload(
+                    candidate,
+                    block_reason="max_trades_per_day",
+                    spent_before_order=spent,
+                    remaining_budget=remaining_budget,
+                )
+            )
+            continue
         requested_shares = float(candidate["shares"])
         price = float(candidate["price"])
         requested_notional = float(candidate["notional"])
@@ -3572,20 +3649,25 @@ def _rebuild_post_sell_buy_trades(
         allowed_notional = allowed_shares * price
         if allowed_shares <= 1e-12:
             skipped.append(
-                {
-                    **candidate,
-                    "block_reason": zero_budget_block_reason
+                _budget_skip_payload(
+                    candidate,
+                    block_reason=zero_budget_block_reason
                     or BUY_BLOCKED_INSUFFICIENT_BUYING_POWER,
-                }
+                    spent_before_order=spent,
+                    remaining_budget=remaining_budget,
+                    allowed_notional=0.0,
+                )
             )
             continue
         if allowed_notional + 1e-9 < float(cfg.min_trade_dollars):
             skipped.append(
-                {
-                    **candidate,
-                    "block_reason": "min_trade_dollars_after_budget_clip",
-                    "allowed_notional": float(allowed_notional),
-                }
+                _budget_skip_payload(
+                    candidate,
+                    block_reason="min_trade_dollars_after_budget_clip",
+                    spent_before_order=spent,
+                    remaining_budget=remaining_budget,
+                    allowed_notional=allowed_notional,
+                )
             )
             continue
 
@@ -5384,6 +5466,17 @@ def run_paper_day(
                                     cfg=cfg,
                                     max_buy_orders=max_rebudget_buy_orders,
                                     zero_budget_block_reason=zero_budget_block_reason,
+                                    cash_at_decision=postsell_cash_confirmed,
+                                    buying_power_at_decision=postsell_buying_power_confirmed,
+                                    risk_cash_target=_coerce_float(
+                                        post_sell_budget_meta.get("risk_cash_target"),
+                                        None,
+                                    ),
+                                    broker_buying_power_constraint=_coerce_float(
+                                        post_sell_budget_meta.get("broker_safeguard_buy_budget"),
+                                        None,
+                                    ),
+                                    buy_budget_basis=buy_budget_basis,
                                 )
                             )
                             if rebuilt_buy_trades is not None and not rebuilt_buy_trades.empty:

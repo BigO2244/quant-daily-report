@@ -241,6 +241,7 @@ def test_target_cash_materially_above_intended_cash_warns_with_evidence(tmp_path
     monkeypatch.chdir(tmp_path)
     run_root = _run_root(tmp_path)
     _write_base_run(run_root)
+    _write_precompute(tmp_path)
     _write_json(
         run_root / "audit" / f"execution_target_attainment_{TRADE_DATE}.json",
         {
@@ -262,6 +263,45 @@ def test_target_cash_materially_above_intended_cash_warns_with_evidence(tmp_path
     assert invariant["reason_code"] == "target_cash_materially_differs_from_actual_cash"
     assert invariant["evidence"]["target_cash_weight"] == 0.05
     assert invariant["evidence"]["actual_cash_weight"] == 0.21
+
+
+def test_target_cash_drift_uses_underdeployment_reason_and_action(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_root = _run_root(tmp_path)
+    _write_base_run(run_root)
+    _write_precompute(tmp_path)
+    _write_json(
+        run_root / "audit" / f"execution_target_attainment_{TRADE_DATE}.json",
+        {
+            "status": "WARN_UNDERDEPLOYED_PENDING_BUY_FILLS",
+            "target_cash_weight": 0.05,
+            "achieved_cash_weight": 0.1447,
+            "cash_target_drift": 0.0947,
+            "underdeployment_classification": "pending_incomplete_fill_timing",
+            "underdeployment_reason_code": "underdeployment_pending_incomplete_buy_fills",
+            "operator_action": "Refresh broker order state before treating the run as clean.",
+            "residual_undeployed_cash": 1020.28,
+            "pending_buy_count": 2,
+            "partial_buy_count": 2,
+            "posttrade_unresolved_orders_count": 2,
+        },
+    )
+
+    report = build_execution_reliability_report(
+        run_root=run_root,
+        trade_date=TRADE_DATE,
+        run_id=RUN_ID,
+    )
+
+    invariant = _result(report, "target_cash_actual_cash_drift")
+    assert invariant["status"] == "WARN"
+    assert invariant["reason_code"] == "underdeployment_pending_incomplete_buy_fills"
+    assert invariant["operator_action"] == "Refresh broker order state before treating the run as clean."
+    assert invariant["evidence"]["underdeployment_classification"] == "pending_incomplete_fill_timing"
+    assert report["top_failure_reason"] == "underdeployment_pending_incomplete_buy_fills"
+    assert report["recommended_operator_actions"] == [
+        "Refresh broker order state before treating the run as clean."
+    ]
 
 
 def test_reconciliation_mismatch_fails_with_model_broker_fields(tmp_path: Path, monkeypatch) -> None:

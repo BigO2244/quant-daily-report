@@ -12,9 +12,16 @@ SCHEMA_VERSION = "execution_target_attainment.v1"
 OK_TARGET_ATTAINED = "OK_TARGET_ATTAINED"
 WARN_CASH_DRIFT = "WARN_CASH_DRIFT"
 WARN_RECONCILED_BUT_UNDERDEPLOYED = "WARN_RECONCILED_BUT_UNDERDEPLOYED"
+WARN_UNDERDEPLOYED_PENDING_BUY_FILLS = "WARN_UNDERDEPLOYED_PENDING_BUY_FILLS"
 WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY = "WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY"
 FAIL_EXECUTION_INCOMPLETE = "FAIL_EXECUTION_INCOMPLETE"
 UNKNOWN_INSUFFICIENT_ARTIFACTS = "UNKNOWN_INSUFFICIENT_ARTIFACTS"
+
+UNDERDEPLOYMENT_NONE = "none"
+UNDERDEPLOYMENT_PENDING_INCOMPLETE_FILL = "pending_incomplete_fill_timing"
+UNDERDEPLOYMENT_AVOIDABLE_REBUDGET = "avoidable_rebudget_underdeployment"
+UNDERDEPLOYMENT_BROKER_RISK_BLOCKED = "legitimate_broker_or_risk_blocked_underdeployment"
+UNDERDEPLOYMENT_REPORTING_MISMATCH = "reporting_accounting_mismatch"
 
 DEFAULT_CASH_WEIGHT_DRIFT_TOLERANCE = 0.02
 DEFAULT_NOTIONAL_DRIFT_TOLERANCE_FLOOR = 25.0
@@ -25,6 +32,17 @@ _INCOMPLETE_EXECUTION_STATUSES = {"FAILED", "HALTED", "PARTIAL", "ERROR"}
 _FILLED_STATUSES = {"FILLED", "PARTIALLY_FILLED"}
 _PENDING_STATUSES = {"PENDING_NEW", "NEW", "ACCEPTED", "PENDING_REPLACE", "PENDING_CANCEL"}
 _SELL_SIDES = {"SELL", "CLOSE", "REDUCE"}
+_BUY_INCOMPLETE_PHASE_STATUSES = {"BUY_PHASE_PARTIAL", "BUY_PHASE_TIMEOUT"}
+_HARD_CONSTRAINT_REASONS = {
+    "buy_blocked_insufficient_buying_power",
+    "buy_blocked_risk_cash_target",
+    "buy_blocked_asset_validation_failed",
+    "buy_blocked_pending_sells_required_for_cash",
+    "min_trade_dollars",
+    "min_trade_dollars_after_budget_clip",
+    "whole_share_sub_one_drop",
+    "max_trades_per_day",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -141,6 +159,25 @@ def _pending_count(rows: list[Any], side: str) -> int:
         status = _normalized_order_status(row)
         filled_qty = _to_float(row.get("filled_quantity") if row.get("filled_quantity") is not None else row.get("filled_qty"))
         if status in _PENDING_STATUSES and float(filled_qty or 0.0) <= 0.0:
+            count += 1
+    return count
+
+
+def _partial_count(rows: list[Any], side: str) -> int:
+    count = 0
+    for row in _side_orders(rows, side):
+        status = _normalized_order_status(row)
+        filled_qty = _to_float(row.get("filled_quantity") if row.get("filled_quantity") is not None else row.get("filled_qty"))
+        submitted_qty = _order_qty(row)
+        if status == "PARTIALLY_FILLED":
+            count += 1
+            continue
+        if (
+            filled_qty is not None
+            and submitted_qty is not None
+            and filled_qty > 1e-12
+            and filled_qty + max(1e-8, submitted_qty * 1e-6) < submitted_qty
+        ):
             count += 1
     return count
 
@@ -419,6 +456,85 @@ def _missing_intended_buys(
     return out
 
 
+def _underdeployment_classification(
+    *,
+    material_underdeployment: bool,
+    pending_incomplete_buy_fills: bool,
+    expected_post_buy_cash: float | None,
+    target_cash_dollars: float | None,
+    notional_tolerance: float,
+    dollar_drift: float | None,
+    suppressed_intended_buys: list[dict[str, Any]],
+    skipped_buy_orders: list[Any],
+) -> tuple[str, str, str]:
+    if not material_underdeployment:
+        return UNDERDEPLOYMENT_NONE, "target_cash_within_tolerance", "No operator action required."
+
+    if pending_incomplete_buy_fills:
+        return (
+            UNDERDEPLOYMENT_PENDING_INCOMPLETE_FILL,
+            "underdeployment_pending_incomplete_buy_fills",
+            (
+                "Refresh broker order state and do not treat the run as clean until "
+                "partial or pending buy orders are filled, canceled, or explicitly reconciled."
+            ),
+        )
+
+    suppressed_reasons = {
+        str(row.get("reason") or row.get("block_reason") or "").strip()
+        for row in suppressed_intended_buys
+        if isinstance(row, Mapping)
+    }
+    skipped_reasons = {
+        str(row.get("block_reason") or row.get("reason") or "").strip()
+        for row in skipped_buy_orders
+        if isinstance(row, Mapping)
+    }
+    constraint_reasons = {reason for reason in suppressed_reasons | skipped_reasons if reason}
+    if constraint_reasons and all(reason in _HARD_CONSTRAINT_REASONS for reason in constraint_reasons):
+        return (
+            UNDERDEPLOYMENT_BROKER_RISK_BLOCKED,
+            "underdeployment_broker_or_risk_blocked",
+            (
+                "Preserve the broker/risk constraint evidence and review whether the cash "
+                "target should be considered blocked rather than cleanly attained."
+            ),
+        )
+
+    if (
+        expected_post_buy_cash is not None
+        and target_cash_dollars is not None
+        and expected_post_buy_cash > target_cash_dollars + float(notional_tolerance)
+    ):
+        return (
+            UNDERDEPLOYMENT_AVOIDABLE_REBUDGET,
+            "avoidable_rebudget_underdeployment",
+            (
+                "Review post-sell rebudget allocation before the next cycle; residual buy "
+                "budget remained above the cash target without a hard broker or risk block."
+            ),
+        )
+
+    if dollar_drift is not None and abs(dollar_drift) > float(notional_tolerance):
+        return (
+            UNDERDEPLOYMENT_REPORTING_MISMATCH,
+            "underdeployment_reporting_accounting_mismatch",
+            (
+                "Reconcile submitted, filled, and posttrade cash artifacts before treating "
+                "the target-attainment result as execution truth."
+            ),
+        )
+
+    return (
+        UNDERDEPLOYMENT_AVOIDABLE_REBUDGET,
+        "avoidable_rebudget_underdeployment",
+        (
+            "Review post-sell rebudget allocation before the next cycle; material cash "
+            "underdeployment remains unexplained by hard constraints."
+        ),
+    )
+
+
 def build_execution_target_attainment(
     *,
     outputs_root: str | Path = "outputs",
@@ -533,6 +649,11 @@ def build_execution_target_attainment(
         if execution_results.get("pending_buy_count") is not None
         else None
     )
+    execution_result_partial_buy_count = (
+        _to_int(execution_results.get("partial_buy_count"))
+        if execution_results.get("partial_buy_count") is not None
+        else None
+    )
     filled_buy_count = (
         execution_result_filled_buy_count
         if execution_result_filled_buy_count is not None
@@ -544,6 +665,30 @@ def build_execution_target_attainment(
         if execution_result_pending_buy_count is not None
         else _pending_count(filled_source_orders, "BUY")
     )
+    partial_buy_count = (
+        execution_result_partial_buy_count
+        if execution_result_partial_buy_count is not None
+        else _partial_count(filled_source_orders, "BUY")
+    )
+    buy_phase_status = str(
+        execution_results.get("buy_phase_status")
+        or execution_payload.get("buy_phase_status")
+        or operator_summary.get("buy_phase_status")
+        or ""
+    ).strip()
+    buy_phase_completion_reason = str(
+        execution_results.get("buy_phase_completion_reason")
+        or execution_payload.get("buy_phase_completion_reason")
+        or operator_summary.get("buy_phase_completion_reason")
+        or ""
+    ).strip()
+    posttrade_unresolved_orders_count = _to_int(
+        execution_results.get("posttrade_unresolved_orders_count")
+        or execution_payload.get("posttrade_unresolved_orders_count")
+        or operator_summary.get("posttrade_unresolved_orders_count")
+    )
+    if partial_buy_count > 0 and _upper(buy_phase_status) in _BUY_INCOMPLETE_PHASE_STATUSES:
+        pending_buy_count = max(pending_buy_count, partial_buy_count)
     submitted_buy_notional = (
         _to_float(post_sell_rebudget.get("final_submitted_buy_notional"))
         or _notional(submitted_orders, "BUY")
@@ -623,6 +768,16 @@ def build_execution_target_attainment(
     )
     cash_drift_warning = abs(cash_target_drift) > float(cash_weight_drift_tolerance) if cash_target_drift is not None else False
     expected_post_buy_cash = _to_float(post_sell_rebudget.get("estimated_ending_cash"))
+    target_cash_dollars = (
+        actual_posttrade_equity * target_cash_weight
+        if actual_posttrade_equity is not None and target_cash_weight is not None
+        else _to_float(post_sell_rebudget.get("risk_cash_target"))
+    )
+    residual_undeployed_cash = (
+        actual_posttrade_cash - target_cash_dollars
+        if actual_posttrade_cash is not None and target_cash_dollars is not None
+        else None
+    )
     dollar_drift = (
         actual_posttrade_cash - expected_post_buy_cash
         if actual_posttrade_cash is not None and expected_post_buy_cash is not None
@@ -638,6 +793,15 @@ def build_execution_target_attainment(
         )
     )
     notional_drift_warning = abs(dollar_drift) > resolved_notional_tolerance if dollar_drift is not None else False
+    pending_incomplete_buy_fills = bool(
+        submitted_buy_count > 0
+        and (
+            pending_buy_count > 0
+            or partial_buy_count > 0
+            or posttrade_unresolved_orders_count > 0
+            or _upper(buy_phase_status) in _BUY_INCOMPLETE_PHASE_STATUSES
+        )
+    )
     posttrade_cash_snapshot_stale = bool(
         submitted_buy_count > 0
         and pending_buy_count > 0
@@ -656,6 +820,8 @@ def build_execution_target_attainment(
         posttrade_cash_snapshot_stage = explicit_posttrade_snapshot_stage
     elif actual_cash_source.get("source") == "post_sell_rebudget_ending_cash":
         posttrade_cash_snapshot_stage = "post_sell"
+    elif pending_incomplete_buy_fills and _upper(buy_phase_status) == "BUY_PHASE_TIMEOUT":
+        posttrade_cash_snapshot_stage = "buy_timeout"
     elif posttrade_cash_snapshot_stale:
         posttrade_cash_snapshot_stage = "pre_buy"
     elif submitted_buy_count > 0 and filled_buy_count >= submitted_buy_count:
@@ -679,6 +845,23 @@ def build_execution_target_attainment(
     if target_cash_weight is None or achieved_cash_weight is None:
         missing_required.append("cash_weights")
 
+    material_underdeployment = bool(
+        cash_target_drift is not None
+        and cash_target_drift > float(cash_weight_drift_tolerance)
+    )
+    underdeployment_classification, underdeployment_reason_code, operator_action = (
+        _underdeployment_classification(
+            material_underdeployment=material_underdeployment,
+            pending_incomplete_buy_fills=pending_incomplete_buy_fills,
+            expected_post_buy_cash=expected_post_buy_cash,
+            target_cash_dollars=target_cash_dollars,
+            notional_tolerance=resolved_notional_tolerance,
+            dollar_drift=dollar_drift,
+            suppressed_intended_buys=suppressed_intended_buys,
+            skipped_buy_orders=_as_list(post_sell_rebudget.get("skipped_buy_orders")),
+        )
+    )
+
     if missing_required:
         status = UNKNOWN_INSUFFICIENT_ARTIFACTS
     elif not _execution_complete(
@@ -688,6 +871,8 @@ def build_execution_target_attainment(
         rejected_count=rejected_count,
     ):
         status = FAIL_EXECUTION_INCOMPLETE
+    elif material_underdeployment and pending_incomplete_buy_fills:
+        status = WARN_UNDERDEPLOYED_PENDING_BUY_FILLS
     elif posttrade_cash_snapshot_stale:
         status = WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY
     elif _reconciliation_passed(reconciliation_status) and cash_target_drift is not None and cash_target_drift > float(cash_weight_drift_tolerance):
@@ -706,8 +891,12 @@ def build_execution_target_attainment(
         warnings.append("post_buy_cash_drift")
     if posttrade_cash_snapshot_stale:
         warnings.append("posttrade cash snapshot appears stale or pre-buy")
+    if pending_incomplete_buy_fills:
+        warnings.append("pending or incomplete buy fills")
     if status == WARN_RECONCILED_BUT_UNDERDEPLOYED:
         warnings.append("reconciliation passed despite target cash miss")
+    if material_underdeployment and underdeployment_reason_code != "target_cash_within_tolerance":
+        warnings.append(underdeployment_reason_code)
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -723,12 +912,32 @@ def build_execution_target_attainment(
         "submitted_buy_count": submitted_buy_count,
         "filled_buy_count": filled_buy_count,
         "pending_buy_count": pending_buy_count,
+        "partial_buy_count": partial_buy_count,
+        "posttrade_unresolved_orders_count": posttrade_unresolved_orders_count,
+        "buy_phase_status": buy_phase_status or None,
+        "buy_phase_completion_reason": buy_phase_completion_reason or None,
         "submitted_sell_count": submitted_sell_count,
         "filled_sell_count": filled_sell_count,
         "target_cash_weight": _round(target_cash_weight),
         "achieved_cash_weight": _round(achieved_cash_weight),
         "cash_target_drift": _round(cash_target_drift),
         "cash_drift_warning": bool(cash_drift_warning),
+        "target_cash_dollars": _round(target_cash_dollars, 2),
+        "residual_undeployed_cash": _round(residual_undeployed_cash, 2),
+        "underdeployment_classification": underdeployment_classification,
+        "underdeployment_reason_code": underdeployment_reason_code,
+        "operator_action": operator_action,
+        "action_required": bool(
+            material_underdeployment
+            or status
+            in {
+                WARN_UNDERDEPLOYED_PENDING_BUY_FILLS,
+                WARN_RECONCILED_BUT_UNDERDEPLOYED,
+                WARN_CASH_DRIFT,
+                WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY,
+                FAIL_EXECUTION_INCOMPLETE,
+            }
+        ),
         "pre_sell_cash": _round(post_sell_rebudget.get("pre_sell_cash"), 2),
         "post_sell_cash": _round(post_sell_rebudget.get("post_sell_cash"), 2),
         "expected_post_buy_cash": _round(expected_post_buy_cash, 2),
