@@ -17,6 +17,7 @@ Confirmed operator decisions in force (Option A):
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Mapping
 
 from transition import (
@@ -43,12 +44,21 @@ LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION = (
 )
 LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER = "LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER"
 LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE = "LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE"
+LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP = "live_pilot_total_notional_exceeds_cap"
+
+# Live-pilot fail-closed policy (FR-104 pilot, operator decision 2026-07-06): an
+# intended buy whose FULL incremental need exceeds the approved cap is HALTED, not
+# silently right-sized to the cap. The shared engine would clip-and-deploy (paper
+# semantics); for a first live-money run an over-cap intent is an anomaly to stop on.
+# Relax to clip-and-deploy only after live behavior is trusted.
+BLOCK_OVER_CAP_INTENT = "OVER_CAP_INTENT"
 
 # Engine block_reason -> capital_gate.v1 constant (the live lane's operator-facing code).
 _BLOCK_REASON_TO_GATE_CONSTANT = {
     BLOCK_ROTATION_UNSUPPORTED: LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     BLOCK_BUYING_POWER_UNAVAILABLE: LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE,
     BLOCK_INSUFFICIENT_BUYING_POWER: LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
+    BLOCK_OVER_CAP_INTENT: LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP,
     # Option A never sells, so SELLS_NOT_FILLED only arises from unresolved open sell
     # orders in the snapshot; surface it as an insufficient-capital block for the lane.
     BLOCK_SELLS_NOT_FILLED: LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
@@ -186,6 +196,35 @@ def live_capital_policy(approved_cap_usd: float | None) -> CapitalPolicy:
     )
 
 
+def _apply_over_cap_policy(plan: TransitionPlan, approved_cap_usd: float | None) -> TransitionPlan:
+    """Fail-closed over-cap halt for the live pilot (FR-104).
+
+    The shared engine clips an over-cap need down to the cap and deploys it. For the
+    live pilot we instead HALT: if the FULL incremental need of any intended buy
+    exceeds the approved cap, block the run (no order) rather than silently
+    right-sizing. Uses the pre-clip incremental need (diagnostics) x reference price.
+    """
+    cap = _safe_float(approved_cap_usd)
+    if plan.blocked or cap is None:
+        return plan
+    incremental = plan.diagnostics.get("incremental_need_shares") or {}
+    for b in plan.buy_orders_intended:
+        full_need = float(incremental.get(b.symbol) or 0.0) * float(b.price)
+        if full_need > cap + 1e-6:
+            diag = dict(plan.diagnostics)
+            diag["over_cap_intent"] = True
+            diag["over_cap_symbol"] = b.symbol
+            diag["over_cap_full_need_usd"] = round(full_need, 6)
+            return replace(
+                plan,
+                blocked=True,
+                block_reason=BLOCK_OVER_CAP_INTENT,
+                buy_orders_intended=(),
+                diagnostics=diag,
+            )
+    return plan
+
+
 def compute_live_transition(
     *,
     pre_snapshot: Mapping[str, Any],
@@ -195,7 +234,7 @@ def compute_live_transition(
     max_orders: int = 1,
 ) -> TransitionPlan:
     account = account_from_snapshot(pre_snapshot)
-    return compute_transition(
+    engine_plan = compute_transition(
         current_holdings=holdings_from_snapshot(pre_snapshot),
         target_holdings=target_from_plan(plan, equity=account.equity or 0.0),
         account_snapshot=account,
@@ -203,6 +242,7 @@ def compute_live_transition(
         order_policy=order_policy_from_env(env),
         mode_constraints=ModeConstraints(sells_supported=False, max_orders=max_orders),
     )
+    return _apply_over_cap_policy(engine_plan, approved_cap_usd)
 
 
 # --------------------------------------------------------------------------- #
@@ -289,6 +329,12 @@ def _operator_action(engine_reason: str | None) -> str:
         )
     if engine_reason == BLOCK_SELLS_NOT_FILLED:
         return "Unresolved live sell orders remain; buys are blocked until they fully resolve."
+    if engine_reason == BLOCK_OVER_CAP_INTENT:
+        return (
+            "The intended buy's full need exceeds the approved cap. The pilot halts on "
+            "over-cap intents rather than silently right-sizing them; review the target "
+            "and cap, and leave the kill switch engaged until re-approved."
+        )
     return "Broker buying power, approved cap, and planned buy notional permit this live-pilot buy gate."
 
 

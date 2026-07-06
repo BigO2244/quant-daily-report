@@ -507,34 +507,37 @@ def test_repeated_unfilled_live_buy_attempts_escalate_from_artifacts(tmp_path: P
     assert results["unfilled_buy_count"] == 0
 
 
-def test_over_cap_plan_is_clipped_to_cap_and_deployed(tmp_path: Path) -> None:
-    # Behavior change (Phase 2): an intent whose full need ($600) exceeds the approved
-    # cap ($500) is CLIPPED to the cap by the engine and deployed, never exceeding it —
-    # rather than blocked. The cap stays a hard ceiling; the clip is recorded as
-    # evidence. (Previously validate_live_pilot_plan blocked over-cap plans.)
+def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path) -> None:
+    # Fail-closed pilot policy (operator decision 2026-07-06): an intent whose full
+    # need ($600) exceeds the approved cap ($500) is HALTED, not silently right-sized.
+    # The engine would clip-and-deploy; the live lane blocks instead until live
+    # behavior is trusted.
     broker = FakeBroker()
 
     result = run_live_pilot(
         plan={"trades": [{"ticker": "AAPL", "side": "BUY", "shares": 6, "limit_price": 100}]},
         broker=broker,
         env=_env(dry_run="0"),
-        run_id="run-clip",
+        run_id="run-blocked",
         output_root=tmp_path / "outputs" / "live_pilot",
         now_et=_market_open_now(),
     )
 
-    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-clip"
-    assert result["terminal_status"] == "SUBMITTED"
-    assert broker.submit_calls == 1
-    transition_plan = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
-    buy = transition_plan["buy_orders_intended"][0]
-    assert buy["symbol"] == "AAPL"
-    assert buy["shares"] == 5.0  # floor(500/100): clipped from 6
-    assert buy["notional"] == 500.0  # exactly the cap, never above it
-    assert buy["reason"] == "transition_buy_capital_clipped"
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-blocked"
+    assert result["terminal_status"] == "BLOCKED"
+    assert broker.submit_calls == 0
+    assert "live_pilot_total_notional_exceeds_cap" in result["reason_code"]
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "BLOCKED"
+    assert gate_state["block_reason"] == "live_pilot_total_notional_exceeds_cap"
+    assert gate_state["broker_orders_submitted"] == 0
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
-    assert capital_gate["decision"] == "ALLOWED"
-    assert capital_gate["tradable_capital_usd"] == 500.0
+    assert capital_gate["decision"] == "BLOCKED"
+    assert capital_gate["buy_block_reason"] == "live_pilot_total_notional_exceeds_cap"
+    transition_plan = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition_plan["blocked"] is True
+    assert transition_plan["buy_orders_intended"] == []
+    assert transition_plan["diagnostics"]["over_cap_intent"] is True
 
 
 def test_rejected_order_produces_failed_reconciliation(tmp_path: Path) -> None:
