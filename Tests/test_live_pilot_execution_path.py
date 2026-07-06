@@ -5,7 +5,12 @@ import datetime as dt
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from scripts.live_pilot_execute import refresh_live_pilot_reconciliation, run_live_pilot
+from scripts.live_pilot_execute import (
+    LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
+    LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
+    refresh_live_pilot_reconciliation,
+    run_live_pilot,
+)
 
 
 ET = ZoneInfo("America/New_York")
@@ -15,26 +20,38 @@ class FakeBroker:
     paper = False
     base_url = "https://api.alpaca.markets"
 
-    def __init__(self, *, order_status: str = "accepted") -> None:
+    def __init__(
+        self,
+        *,
+        order_status: str = "accepted",
+        buying_power: str = "500",
+        cash: str | None = None,
+        equity: str = "500",
+        positions: list[dict[str, object]] | None = None,
+    ) -> None:
         self.submit_calls = 0
         self.market_calls = 0
         self.limit_calls = 0
         self.submitted_methods: list[str] = []
         self.order_status = order_status
         self.open_orders: list[dict[str, object]] = []
+        self.buying_power = buying_power
+        self.cash = cash if cash is not None else buying_power
+        self.equity = equity
+        self.positions = list(positions or [])
 
     def get_account(self):
         return {
             "id": "acct-123",
             "status": "ACTIVE",
-            "cash": "500",
-            "equity": "500",
-            "buying_power": "500",
-            "portfolio_value": "500",
+            "cash": self.cash,
+            "equity": self.equity,
+            "buying_power": self.buying_power,
+            "portfolio_value": self.equity,
         }
 
     def get_positions(self):
-        return []
+        return list(self.positions)
 
     def get_asset(self, symbol):
         return {
@@ -149,6 +166,29 @@ def _limit_plan() -> dict[str, object]:
     }
 
 
+def _all_plan() -> dict[str, object]:
+    return {
+        "trades": [
+            {
+                "ticker": "ALL",
+                "side": "BUY",
+                "shares": 1,
+                "limit_price": 250.33,
+                "order_type": "market",
+                "sleeve": "polaris",
+                "sleeve_source": "precompute_live_strategy_id",
+                "source_strategy_id": "polaris",
+                "source_signal_sleeve": "sleeve_trend",
+                "sleeve_provenance": {
+                    "sleeve_source": "precompute_live_strategy_id",
+                    "source_strategy_id": "polaris",
+                    "source_signal_sleeve": "sleeve_trend",
+                },
+            },
+        ]
+    }
+
+
 def _market_open_now() -> dt.datetime:
     return dt.datetime(2026, 3, 17, 9, 35, tzinfo=ET)
 
@@ -241,6 +281,94 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     gate_state = _gate_state(run_root)
     assert gate_state["decision"] == "ALLOWED"
     assert gate_state["broker_orders_submitted"] == 1
+
+
+def test_existing_live_positions_block_buy_before_broker_submission_and_record_capital_gate(
+    tmp_path: Path,
+) -> None:
+    broker = FakeBroker(
+        buying_power="0.88",
+        cash="0.88",
+        equity="506.82",
+        positions=[
+            {"symbol": "ABBV", "qty": "1.186242896", "market_value": "303.227409", "cost_basis": "299.400361"},
+            {"symbol": "ALL", "qty": "0.420274014", "market_value": "104.061947", "cost_basis": "100.996048"},
+            {"symbol": "C", "qty": "0.68975031", "market_value": "98.654987", "cost_basis": "98.668782"},
+        ],
+    )
+
+    result = run_live_pilot(
+        plan=_all_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-existing-positions",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-existing-positions"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    assert broker.market_calls == 0
+    assert broker.limit_calls == 0
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "BLOCKED"
+    assert gate_state["block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert gate_state["broker_orders_submitted"] == 0
+
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["decision"] == "BLOCKED"
+    assert capital_gate["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert capital_gate["live_buying_power_before"] == 0.88
+    assert capital_gate["approved_cap_usd"] == 500.0
+    assert capital_gate["planned_buy_notional_usd"] == 250.33
+    assert capital_gate["tradable_capital_usd"] == 0.88
+    assert capital_gate["required_sell_count"] == 3
+    assert capital_gate["sell_first_supported"] is False
+    assert capital_gate["rebudget_after_sell_supported"] is False
+    assert capital_gate["broker_orders_submitted"] == 0
+    assert [row["symbol"] for row in capital_gate["live_positions_before"]] == ["ABBV", "ALL", "C"]
+
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert submitted["orders"] == []
+    reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
+    assert reconciliation["status"] == "BLOCKED_PRE_SUBMISSION"
+    assert reconciliation["state"] == "BLOCKED"
+    assert reconciliation["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    results = json.loads((run_root / "execution_results.json").read_text())
+    assert results["status"] == "BLOCKED"
+    assert results["broker_responses"] == []
+    assert results["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+
+
+def test_insufficient_live_buying_power_blocks_even_when_approved_cap_allows_plan(
+    tmp_path: Path,
+) -> None:
+    broker = FakeBroker(buying_power="0.88", cash="0.88", equity="500")
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_env(dry_run="0"),
+        run_id="run-insufficient-buying-power",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-insufficient-buying-power"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+    assert broker.submit_calls == 0
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["live_positions_before"] == []
+    assert capital_gate["live_buying_power_before"] == 0.88
+    assert capital_gate["approved_cap_usd"] == 500.0
+    assert capital_gate["planned_buy_notional_usd"] == 50.0
+    assert capital_gate["tradable_capital_usd"] == 0.88
+    assert capital_gate["buy_block_reason"] == LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert submitted["orders"] == []
 
 
 def test_missing_cap_blocks_before_broker_submission_and_writes_gate_state(tmp_path: Path) -> None:
