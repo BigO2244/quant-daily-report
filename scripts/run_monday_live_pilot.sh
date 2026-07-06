@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Manual LIVE_PILOT bridge runner. This script is intentionally not referenced
-# by cron and must be run by an operator from an interactive shell.
+# Manual LIVE_PILOT bridge runner. Scheduled live-pilot automation uses
+# scripts/cron_live_pilot_execute.sh; this bridge remains operator-run.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,11 +30,25 @@ export MODE="live_pilot"
 export TRADING_MODE="live_pilot"
 export ALPACA_PAPER="0"
 export ALPACA_BASE_URL="https://api.alpaca.markets"
-export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-100}"
+export APPROVED_LIVE_PILOT_CAP_USD="${APPROVED_LIVE_PILOT_CAP_USD:-500}"
+export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
+RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
+GATE_RUN_ID="${REPORT_DATE}T${RUN_TS}_live_pilot_manual_gate"
+export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}"
 export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-1}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
-export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-1}"
+export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"
+
+write_gate_state_blocked() {
+    local reason="$1"
+    "${PYTHON_BIN}" scripts/live_pilot_write_gate_state.py \
+        --run-id "${GATE_RUN_ID}" \
+        --trade-date "${REPORT_DATE}" \
+        --decision BLOCKED \
+        --block-reason "${reason}" \
+        --output-root outputs/live_pilot >/dev/null || true
+}
 
 require_eq() {
     local name="$1"
@@ -42,6 +56,7 @@ require_eq() {
     local actual="${!name:-}"
     if [[ "${actual}" != "${expected}" ]]; then
         echo "FATAL: ${name} must be ${expected}; got '${actual:-<unset>}'" >&2
+        write_gate_state_blocked "invalid_${name}"
         exit 1
     fi
 }
@@ -51,6 +66,7 @@ require_present() {
     local actual="${!name:-}"
     if [[ -z "${actual}" ]]; then
         echo "FATAL: ${name} is required" >&2
+        write_gate_state_blocked "missing_${name}"
         exit 1
     fi
 }
@@ -58,36 +74,47 @@ require_present() {
 require_eq TRADING_MODE live_pilot
 require_eq ALPACA_PAPER 0
 require_eq CAERUS_LIVE_PILOT_APPROVED 1
+if [[ -z "${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}" ]]; then
+    echo "FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP is required for LIVE_PILOT" >&2
+    write_gate_state_blocked "missing_positive_live_pilot_capital_cap"
+    exit 1
+fi
 require_eq CAERUS_LIVE_PILOT_MAX_ORDERS 1
 require_present CAERUS_LIVE_PILOT_SLEEVE_ID
 require_present CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH
 
 if [[ "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets" && "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets/" ]]; then
     echo "FATAL: ALPACA_BASE_URL must be https://api.alpaca.markets for LIVE_PILOT" >&2
+    write_gate_state_blocked "invalid_live_pilot_endpoint"
     exit 1
 fi
 
 if [[ "${CAERUS_LIVE_PILOT_KILL_SWITCH:-0}" == "1" ]]; then
     echo "FATAL: CAERUS_LIVE_PILOT_KILL_SWITCH=1" >&2
+    write_gate_state_blocked "live_pilot_kill_switch_enabled"
     exit 1
 fi
 
-"${PYTHON_BIN}" - <<'PY'
+if ! "${PYTHON_BIN}" - <<'PY'
 import os
 import sys
 
+approved_cap = float(os.environ["APPROVED_LIVE_PILOT_CAP_USD"])
 try:
     cap = float(os.environ.get("CAERUS_LIVE_PILOT_CAPITAL_CAP", ""))
 except ValueError:
     print("FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be numeric", file=sys.stderr)
     raise SystemExit(1)
-if cap <= 0 or cap > 100:
-    print("FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be > 0 and <= 100", file=sys.stderr)
+if cap <= 0 or cap > approved_cap:
+    print(f"FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be > 0 and <= {approved_cap:.0f}", file=sys.stderr)
     raise SystemExit(1)
 PY
+then
+    write_gate_state_blocked "live_pilot_capital_cap_invalid"
+    exit 1
+fi
 
 mkdir -p outputs/live_pilot/logs outputs/live_pilot/plans
-RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 LOG_PATH="outputs/live_pilot/logs/monday_live_pilot_${RUN_TS}.log"
 
 exec > >(tee -a "${LOG_PATH}") 2>&1
@@ -116,8 +143,11 @@ set -e
 echo "${BUILD_OUTPUT}"
 if [[ "${BUILD_STATUS}" -ne 0 ]]; then
     echo "live_pilot_plan_builder_exit_code=${BUILD_STATUS}"
+    write_gate_state_blocked "live_pilot_plan_builder_failed"
+    exit "${BUILD_STATUS}"
 fi
 
+set +e
 PLAN_PATH="$(
     BUILD_OUTPUT="${BUILD_OUTPUT}" "${PYTHON_BIN}" - <<'PY'
 import json
@@ -135,6 +165,12 @@ if not path:
 print(path)
 PY
 )"
+PLAN_STATUS=$?
+set -e
+if [[ "${PLAN_STATUS}" -ne 0 ]]; then
+    write_gate_state_blocked "live_pilot_plan_blocked"
+    exit "${PLAN_STATUS}"
+fi
 
 echo "plan_path=${PLAN_PATH}"
 

@@ -2,7 +2,7 @@
 
 Status: Active
 Owner: Caerus Research Program
-Last Updated: 2026-06-03
+Last Updated: 2026-07-06
 
 ---
 
@@ -22,11 +22,16 @@ This document is strategic context only. For authoritative FR status and the ope
 
 | Strategy | Status | Objective |
 |-----------|-----------|-----------|
-| Polaris | Active Shadow Leader | Core momentum and quality portfolio |
-| Orion | Active Shadow | Secondary factor expression |
-| Lyra | Active Shadow | Secondary factor expression |
+| Polaris | Active Paper Baseline | Core momentum and quality paper execution baseline |
+| Orion | Shadow Challenger / Default LIVE_PILOT Sleeve | Secondary factor expression; default live-pilot sleeve only when gated and approved |
+| Lyra | Shadow Challenger | Secondary factor expression |
+| Cassiopeia | Research Only | Event-driven research lane; not an execution sleeve |
 | Constrained Lyra | Research | Concentration-controlled variant |
 | Argo | Concept | Regime and allocation overlay |
+
+Named strategy labels are governance identities. They are distinct from
+functional alpha-stack sleeves and from the separate capped live-pilot execution
+lane.
 
 ---
 

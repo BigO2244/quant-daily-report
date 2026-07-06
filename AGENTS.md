@@ -88,8 +88,10 @@ Benchmark:
 - SPY
 
 Execution:
-- Only Polaris sends orders
-- Orion and Lyra generate artifacts only
+- Polaris sends regular paper orders
+- `LIVE_PILOT` is a separate gated FR-104 lane; Orion is the default
+  live-pilot sleeve only when all live-pilot approvals pass
+- Orion and Lyra otherwise generate artifacts only
 
 Automation:
 - Shadow runs automatically after precompute via:
@@ -246,12 +248,18 @@ sleeve scoring, allocation, reconciliation, and writes the precompute bundle.
 ### Current Strategy State
 
 - **Paper execution model**: Caerus Polaris
-- **Shadow-only daily models**: Caerus Orion, Caerus Lyra
+- **Shadow daily models**: Caerus Orion, Caerus Lyra
+- **Default FR-104 `LIVE_PILOT` sleeve**: Caerus Orion, only when all
+  live-pilot approval gates pass
 - **Benchmark**: SPY
 - **Promotion state**:
   - Polaris: paper
-  - Orion: shadow only
+  - Orion: shadow challenger / default live-pilot sleeve under FR-104 gates
   - Lyra: shadow only
+
+Named strategy labels are governance identities. They are distinct from
+functional alpha-stack sleeves and from the capped FR-104 live-pilot execution
+lane.
 
 ### Alpha Stack (alpha_stack/)
 
@@ -794,8 +802,9 @@ Runtime separation:
   `python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-05-11 --baseline-valid-days 16 --strict`.
 - For promotion governance review, run
   `python3 scripts/audit_shadow_promotion_readiness.py`; Polaris remains the
-  paper baseline, and Orion/Lyra are artifact-only challengers until explicitly
-  promoted through governance.
+  paper baseline, Orion is the default FR-104 live-pilot sleeve only under
+  explicit live-pilot approvals, and Lyra remains an artifact-only challenger
+  until explicitly promoted through governance.
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute now also triggers `scripts/run_shadow_candidates_daily.sh`

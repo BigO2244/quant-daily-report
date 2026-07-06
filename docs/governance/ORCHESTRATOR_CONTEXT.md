@@ -24,10 +24,12 @@ Caerus is a paper-traded quantitative investment platform with deterministic
 artifacts and an explicit research-to-production promotion ladder.
 
 - Polaris is the current paper execution baseline.
-- Orion is the primary shadow candidate.
+- Orion is the primary shadow candidate and the default FR-104 live-pilot
+  sleeve only when all live-pilot approval gates pass.
 - Lyra is the shadow challenger.
 - SPY is the benchmark anchor.
-- Only Polaris sends orders. Orion and Lyra produce artifacts only.
+- Polaris sends regular paper orders. Outside the separately gated `$500` FR-104
+  live-pilot lane, Orion and Lyra produce artifacts only.
 - Execution integrity and target attainment are in observation after the June
   12 FR-070 remediation. New FR-070 implementation work requires classified
   evidence from the next run.

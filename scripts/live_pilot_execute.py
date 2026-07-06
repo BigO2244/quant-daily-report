@@ -22,6 +22,7 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_asset,
     validate_live_pilot_plan,
 )
+from core.live_pilot_gate_state import write_live_pilot_gate_state
 from paper.trading_calendar import ET_TZ, market_session_status
 from paper.run_manager import generate_run_id, safe_write_text
 
@@ -801,6 +802,8 @@ def _write_blocked_artifacts(
     *,
     run_root: Path,
     run_id: str,
+    trade_date: str,
+    env: Mapping[str, str],
     reason_code: str,
     operator_action: str,
     preflight: Mapping[str, Any],
@@ -833,6 +836,17 @@ def _write_blocked_artifacts(
         "operator_action": operator_action,
         **entry_summary,
     }
+    write_live_pilot_gate_state(
+        run_root=run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        env=env,
+        repo_root=REPO_ROOT,
+        decision="BLOCKED",
+        block_reason=reason_code,
+        broker_orders_submitted=0,
+        base_url=str(preflight.get("base_url") or ""),
+    )
     _write_json(run_root / "live_pilot_orders_intended.json", {"orders": intended})
     _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": submitted})
     blocked_snapshot = {
@@ -870,7 +884,7 @@ def _write_blocked_artifacts(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_id,
-            trade_date=str(preflight.get("trade_date") or os.getenv("REPORT_DATE") or ""),
+            trade_date=trade_date,
             terminal_status="BLOCKED",
             reason_code=reason_code,
             intended=intended,
@@ -939,6 +953,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code=gate.reason_code,
             operator_action=gate.operator_action,
             preflight=preflight,
@@ -950,6 +966,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code="live_pilot_pre_snapshot_failed",
             operator_action=f"Resolve read-only broker snapshot failure before live pilot: {exc}",
             preflight=preflight,
@@ -971,6 +989,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code=account_reason,
             operator_action="Expected live pilot account id/hash does not match broker account.",
             preflight=preflight,
@@ -1045,6 +1065,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code=";".join(plan_validation.reason_codes),
             operator_action=plan_validation.operator_action,
             preflight=preflight,
@@ -1061,6 +1083,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code=";".join(asset_errors),
             operator_action="Unsupported or non-tradable assets blocked before submission.",
             preflight=preflight,
@@ -1076,6 +1100,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code=str(open_order_check.get("status") or "BLOCKED_OPEN_PILOT_ORDER"),
             operator_action=str(open_order_check.get("operator_action") or "Open pilot order blocks duplicate submission."),
             preflight=preflight,
@@ -1089,6 +1115,8 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
             reason_code=f"live_pilot_market_closed:{market_hours_gate.get('reason_code')}",
             operator_action=str(market_hours_gate.get("operator_action") or "Market is closed."),
             preflight=preflight,
@@ -1215,6 +1243,17 @@ def run_live_pilot(
             "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
             "dry_run": bool(gate.dry_run),
         },
+    )
+    write_live_pilot_gate_state(
+        run_root=run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        env=environ,
+        repo_root=REPO_ROOT,
+        decision="ALLOWED",
+        block_reason=None,
+        broker_orders_submitted=0 if gate.dry_run else len(submitted),
+        base_url=base_url,
     )
 
     terminal_status = (

@@ -12,14 +12,22 @@ This document is the current architecture reference for Alpha Stack. It reflects
 - `Caerus Lyra` / `caerus_lyra`
   - secondary shadow challenger
   - derived from the Alpha Lab v2 challenger combination: H1 weekly rebalance + H6 top-5 concentration
+- `Cassiopeia` / `caerus_cassiopeia`
+  - research-only event-driven identity; not an execution sleeve
 - `SPY` / `spy_benchmark`
   - benchmark
 
 Current promotion state:
 - Polaris = paper
-- Orion = shadow only
-- Lyra = shadow only
+- Orion = shadow challenger; default FR-104 `LIVE_PILOT` sleeve only when all
+  live-pilot approval gates pass
+- Lyra = shadow challenger
+- Cassiopeia = research only
 - promotion ladder remains `research -> backtest -> shadow -> paper -> live`
+
+Named strategy labels are governance identities. They are distinct from
+functional Alpha Stack sleeves and from the capped FR-104 live-pilot execution
+lane.
 
 ## Purpose and Governance
 

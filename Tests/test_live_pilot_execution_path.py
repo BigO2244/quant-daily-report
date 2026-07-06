@@ -88,13 +88,19 @@ class FakeBroker:
 def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
     return {
         "TRADING_MODE": "live_pilot",
+        "ALPACA_PAPER": "0",
+        "ALPACA_BASE_URL": "https://api.alpaca.markets",
         "CAERUS_LIVE_PILOT_APPROVED": "1",
-        "CAERUS_LIVE_PILOT_CAPITAL_CAP": "100",
+        "CAERUS_LIVE_PILOT_CAPITAL_CAP": "500",
         "CAERUS_LIVE_PILOT_SLEEVE_ID": "polaris",
         "CAERUS_LIVE_PILOT_ACCOUNT_ID": "acct-123",
         "CAERUS_LIVE_PILOT_MAX_ORDERS": max_orders,
         "CAERUS_LIVE_PILOT_DRY_RUN": dry_run,
     }
+
+
+def _gate_state(run_root: Path) -> dict[str, object]:
+    return json.loads((run_root / "live_pilot_gate_state.json").read_text(encoding="utf-8"))
 
 
 def _plan() -> dict[str, object]:
@@ -173,9 +179,20 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     assert (run_root / "live_pilot_reconciliation.json").exists()
     assert (run_root / "live_pilot_evidence_metrics.json").exists()
     assert (run_root / "live_pilot_capital_usage.json").exists()
+    assert (run_root / "live_pilot_gate_state.json").exists()
     assert (run_root / "live_pilot_operator_summary.json").exists()
     assert (run_root / "execution_results.json").exists()
     assert not (tmp_path / "outputs" / "runs").exists()
+
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "ALLOWED"
+    assert gate_state["alpaca_endpoint_category"] == "live"
+    assert gate_state["ALPACA_PAPER"] == "0"
+    assert gate_state["configured_cap_usd"] == 500.0
+    assert gate_state["approved_max_cap_usd"] == 500.0
+    assert gate_state["effective_cap_usd"] == 500.0
+    assert gate_state["cap_source"] == "env"
+    assert gate_state["broker_orders_submitted"] == 0
 
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"][0]["status"] == "DRY_RUN_NOT_SUBMITTED"
@@ -221,6 +238,61 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     assert evidence["slippage_bps"] is not None
     usage = json.loads((run_root / "live_pilot_capital_usage.json").read_text())
     assert usage["submitted_notional_usd"] == 50
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "ALLOWED"
+    assert gate_state["broker_orders_submitted"] == 1
+
+
+def test_missing_cap_blocks_before_broker_submission_and_writes_gate_state(tmp_path: Path) -> None:
+    broker = FakeBroker()
+    env = _env(dry_run="0")
+    env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP")
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-missing-cap",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-missing-cap"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "missing_positive_live_pilot_capital_cap"
+    assert broker.submit_calls == 0
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "BLOCKED"
+    assert gate_state["block_reason"] == "missing_positive_live_pilot_capital_cap"
+    assert gate_state["cap_source"] == "missing"
+    assert gate_state["configured_cap_usd"] is None
+    assert gate_state["effective_cap_usd"] is None
+    assert gate_state["broker_orders_submitted"] == 0
+
+
+def test_kill_switch_blocks_before_broker_submission_and_writes_gate_state(tmp_path: Path) -> None:
+    broker = FakeBroker()
+    env = _env(dry_run="0")
+    env["CAERUS_LIVE_PILOT_KILL_SWITCH"] = "1"
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-kill-switch",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-kill-switch"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "live_pilot_kill_switch_enabled"
+    assert broker.submit_calls == 0
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "BLOCKED"
+    assert gate_state["block_reason"] == "live_pilot_kill_switch_enabled"
+    assert gate_state["kill_switch_set"] is True
+    assert gate_state["broker_orders_submitted"] == 0
 
 
 def test_live_buy_limit_plan_is_submitted_as_market_with_policy_metadata(tmp_path: Path) -> None:
@@ -309,7 +381,7 @@ def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path
     broker = FakeBroker()
 
     result = run_live_pilot(
-        plan={"trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1, "limit_price": 150}]},
+        plan={"trades": [{"ticker": "AAPL", "side": "BUY", "shares": 6, "limit_price": 100}]},
         broker=broker,
         env=_env(dry_run="0"),
         run_id="run-blocked",
@@ -322,6 +394,10 @@ def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path
     assert broker.submit_calls == 0
     summary = json.loads((run_root / "live_pilot_operator_summary.json").read_text())
     assert "live_pilot_total_notional_exceeds_cap" in summary["reason_code"]
+    gate_state = _gate_state(run_root)
+    assert gate_state["decision"] == "BLOCKED"
+    assert gate_state["block_reason"] == "live_pilot_total_notional_exceeds_cap"
+    assert gate_state["broker_orders_submitted"] == 0
 
 
 def test_rejected_order_produces_failed_reconciliation(tmp_path: Path) -> None:

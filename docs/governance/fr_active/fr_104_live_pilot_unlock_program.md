@@ -4,15 +4,15 @@ Status: `LEVEL_2_5_PILOT_EVIDENCE_COLLECTION_READY_WITH_MANUAL_APPROVAL`
 Date: `2026-06-19`  
 Execution Impact: `DISABLED_BY_DEFAULT`  
 Capital Impact: `$0`  
-Pilot Engineering Cap: `$100`
+Pilot Engineering Cap: `$500`
 
 ## Objective
 
 FR-104 adds a code-supported, test-covered `LIVE_PILOT` execution path for a
-tightly capped `$100` pilot evidence-collection lane. It does not approve
-capital scaling, add credentials to git or scheduled runtimes, enable cron,
-change strategy selection, alter sizing/allocation, or make any promotion or
-production claim.
+tightly capped `$500` pilot evidence-collection lane. It does not approve
+capital scaling, add credentials to git, bypass scheduled approval gates, change
+strategy selection, alter sizing/allocation, or make any promotion or production
+claim.
 
 FR-104 is Level 2.5 under FR-100: forward evidence collection before perfect
 certainty exists. It is not Level 3 pilot-capital readiness.
@@ -24,8 +24,9 @@ certainty exists. It is not Level 3 pilot-capital readiness.
 - `paper_broker.run_paper_day()` continues to refuse `TRADING_MODE=live` and
   `TRADING_MODE=live_pilot`.
 - `LIVE_PREFLIGHT` remains observe-only and never submits.
-- `scripts/live_pilot_execute.py` is the only FR-104 manual live-pilot path.
-- Existing cron remains paper-forced and is not live-pilot enabled.
+- `scripts/live_pilot_execute.py` is the only FR-104 live-pilot executor.
+- The normal paper cron remains paper-forced; the separate live-pilot cron lane
+  is isolated below and disabled/gated unless live-pilot approvals are set.
 
 ## Required Controls
 
@@ -35,7 +36,7 @@ Live pilot submission requires all of the following:
 - `ALPACA_PAPER=0`
 - live Alpaca endpoint
 - `CAERUS_LIVE_PILOT_APPROVED=1`
-- `CAERUS_LIVE_PILOT_CAPITAL_CAP` present, positive, and `<= 100`
+- `CAERUS_LIVE_PILOT_CAPITAL_CAP` present, positive, and `<= 500`
 - `CAERUS_LIVE_PILOT_SLEEVE_ID` present
 - `CAERUS_LIVE_PILOT_ACCOUNT_ID` or `CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH` present
 - `CAERUS_LIVE_PILOT_MAX_ORDERS` present and positive
@@ -55,7 +56,9 @@ FR-104 has a separate VM cron lane from the paper execution lane:
   current-date live-pilot plan from the precompute bundle, validates the plan,
   runs a dry-run executor pass, and submits only when
   `CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1`,
-  `CAERUS_LIVE_PILOT_CRON_APPROVED=1`, and
+  `CAERUS_LIVE_PILOT_CRON_APPROVED=1`,
+  `CAERUS_LIVE_PILOT_APPROVED=1`,
+  an explicit `CAERUS_LIVE_PILOT_CAPITAL_CAP` is present and `<= 500`, and
   `CAERUS_LIVE_PILOT_SUBMIT_APPROVED=1`.
 - `scripts/cron_live_pilot_confirm.sh` sends the confirmation email from the
   isolated live-pilot run's `execution_results.json` via explicit results-path
@@ -66,6 +69,12 @@ FR-104 has a separate VM cron lane from the paper execution lane:
 
 The normal paper cron remains paper-forced and continues to use
 `outputs/workflow/<trade_date>/execution.json`.
+
+`CAERUS_LIVE_PILOT_CAPITAL_CAP` is the authoritative live-pilot cap variable.
+Live entrypoints do not default a missing cap. A missing, non-positive,
+non-numeric, or greater-than-`$500` cap fails closed before live-pilot
+submission. `CAERUS_LIVE_PILOT_APPROVED` also defaults closed and must be set
+explicitly to `1`; schedule/cron/submit flags alone are insufficient.
 
 ## Order Policy
 
@@ -104,6 +113,7 @@ FR-104 writes only under:
 Required artifacts:
 
 - `live_pilot_execution_payload.json`
+- `live_pilot_gate_state.json`
 - `live_pilot_preflight.json`
 - `live_pilot_orders_intended.json`
 - `live_pilot_orders_submitted.json`
@@ -120,6 +130,19 @@ Required artifacts:
 
 It does not write to `outputs/runs`, `outputs/broker`, `outputs/paper_state`,
 or `outputs/orders_sent`.
+
+## Gate State Audit
+
+Every attempted live-pilot executor run, and every scheduled/manual refusal
+that blocks before the executor starts, writes:
+
+`outputs/live_pilot/runs/<RUN_ID>/live_pilot_gate_state.json`
+
+The artifact is redacted and records only control state: timestamp, git SHA,
+trading mode, endpoint category (`live`/`paper`/`other`/`unset`), `ALPACA_PAPER`,
+schedule/cron/submit/live-pilot approval flags, kill-switch state, configured
+cap, approved max cap, effective cap, cap source, max orders, sleeve id,
+`ALLOWED`/`BLOCKED` decision, block reason, and broker order count.
 
 ## Reconciliation States
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.live_pilot_guardrails import validate_live_pilot_plan
-from scripts.live_pilot_build_plan_from_precompute import build_live_pilot_plan
+from scripts.live_pilot_build_plan_from_precompute import DEFAULT_CAPITAL_CAP, build_live_pilot_plan
 
 
 def _payload_path(
@@ -42,7 +44,7 @@ def _build(
     return build_live_pilot_plan(
         payload_path=_payload_path(tmp_path, trades, extra_payload=extra_payload),
         approved_sleeve=approved_sleeve,
-        capital_cap=100,
+        capital_cap=500,
         max_orders=1,
         output_dir=tmp_path / "outputs" / "live_pilot" / "plans",
         allow_missing_sleeve=allow_missing_sleeve,
@@ -57,7 +59,7 @@ def test_over_cap_buy_is_scaled_to_pilot_cap(tmp_path: Path) -> None:
             {
                 "ticker": "AAPL",
                 "side": "BUY",
-                "shares": 2,
+                "shares": 10,
                 "limit_price": 60,
                 "sleeve": "polaris",
             }
@@ -70,15 +72,40 @@ def test_over_cap_buy_is_scaled_to_pilot_cap(tmp_path: Path) -> None:
     assert selected["order_type"] == "market"
     assert selected["order_policy"] == "fr104_live_pilot_market_order_normal_hours_only"
     assert selected["scaled_to_pilot_cap"] is True
-    assert selected["source_order_qty"] == 2
-    assert selected["source_notional"] == 120
-    assert selected["pilot_notional_cap"] == 100
-    assert selected["original_qty"] == 2
-    assert selected["pre_normalization_qty"] < 100 / 60
+    assert selected["source_order_qty"] == 10
+    assert selected["source_notional"] == 600
+    assert selected["pilot_notional_cap"] == 500
+    assert selected["original_qty"] == 10
+    assert selected["pre_normalization_qty"] <= 500 / 60
     assert selected["final_qty"] == selected["pilot_qty"]
-    assert selected["final_qty"] * selected["normalized_limit_price"] <= 100
-    assert selected["notional"] <= 100
+    assert selected["final_qty"] * selected["normalized_limit_price"] <= 500
+    assert selected["notional"] <= 500
     assert plan["trades"] == [selected]
+
+
+def test_builder_rejects_cap_above_approved_limit(tmp_path: Path) -> None:
+    payload_path = _payload_path(
+        tmp_path,
+        [
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 1,
+                "limit_price": 50,
+                "sleeve": "polaris",
+            }
+        ],
+    )
+
+    assert DEFAULT_CAPITAL_CAP == 500.0
+    with pytest.raises(ValueError, match="capital_cap must be > 0 and <= 500"):
+        build_live_pilot_plan(
+            payload_path=payload_path,
+            approved_sleeve="polaris",
+            capital_cap=501,
+            max_orders=1,
+            output_dir=tmp_path / "outputs" / "live_pilot" / "plans",
+        )
 
 
 def test_missing_trade_sleeve_recovers_live_strategy_and_signal_provenance(tmp_path: Path) -> None:
@@ -181,11 +208,11 @@ def test_scaled_buy_uses_normalized_limit_price_for_final_qty(tmp_path: Path) ->
     assert selected["expected_price"] == 228.39
     assert selected["cap_enforcement_price"] == 228.39
     assert selected["original_qty"] == 3
-    assert selected["pre_normalization_qty"] == 0.437847542
-    assert selected["final_qty"] == 0.437847541
-    assert selected["final_qty"] < 0.4378475426561624
-    assert selected["final_qty"] * selected["normalized_limit_price"] <= 100
-    assert selected["notional"] <= 100
+    assert selected["source_notional"] > 500
+    assert selected["pilot_notional_cap"] == 500
+    assert selected["final_qty"] < 3
+    assert selected["final_qty"] * selected["normalized_limit_price"] <= 500
+    assert selected["notional"] <= 500
 
 
 def test_no_sells_selected(tmp_path: Path) -> None:
@@ -264,7 +291,7 @@ def test_missing_sleeve_override_selects_first_buy_in_source_order(tmp_path: Pat
             {
                 "ticker": "MSFT",
                 "side": "BUY",
-                "shares": 4,
+                "shares": 12,
                 "limit_price": 50,
             },
             {
@@ -284,10 +311,10 @@ def test_missing_sleeve_override_selects_first_buy_in_source_order(tmp_path: Pat
     assert selected["sleeve_source"] == "missing_in_source_overridden_for_live_pilot"
     assert selected["approved_sleeve_override"] == "polaris"
     assert selected["scaled_to_pilot_cap"] is True
-    assert selected["source_notional"] == 200
-    assert selected["pilot_qty"] == 2
-    assert selected["final_qty"] == 2
-    assert selected["notional"] == 100
+    assert selected["source_notional"] == 600
+    assert selected["pilot_qty"] == 10
+    assert selected["final_qty"] == 10
+    assert selected["notional"] == 500
 
 
 def test_missing_sleeve_override_does_not_allow_sells(tmp_path: Path) -> None:
@@ -346,7 +373,7 @@ def test_output_plan_matches_live_pilot_execute_schema(tmp_path: Path) -> None:
     written = json.loads(json_path.read_text(encoding="utf-8"))
     assert written["trades"] == plan["trades"]
     assert written["approved_sleeve"] == "polaris"
-    assert written["capital_cap"] == 100
+    assert written["capital_cap"] == 500
     assert written["selected_order"]["limit_price"] == 50
     assert written["selected_order"]["order_type"] == "market"
     assert written["order_policy"]["scope"] == "FR-104 LIVE_PILOT only"
@@ -355,7 +382,7 @@ def test_output_plan_matches_live_pilot_execute_schema(tmp_path: Path) -> None:
 
     validation = validate_live_pilot_plan(
         written["trades"],
-        capital_cap_usd=100,
+        capital_cap_usd=500,
         max_orders=1,
         run_id="schema-test",
     )

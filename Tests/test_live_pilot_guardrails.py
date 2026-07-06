@@ -7,10 +7,12 @@ import pytest
 from brokers.alpaca_broker import AlpacaBroker
 from core.live_pilot_guardrails import (
     LIVE_PILOT_ACCOUNT_ID_ENV,
+    LIVE_PILOT_APPROVED_MAX_CAP_USD,
     LIVE_PILOT_APPROVED_ENV,
     LIVE_PILOT_CAPITAL_CAP_ENV,
     LIVE_PILOT_DRY_RUN_ENV,
     LIVE_PILOT_KILL_SWITCH_ENV,
+    LIVE_PILOT_MAX_CAP_USD,
     LIVE_PILOT_MAX_ORDERS_ENV,
     LIVE_PILOT_MODE,
     LIVE_PILOT_SLEEVE_ID_ENV,
@@ -48,7 +50,7 @@ def _clear(monkeypatch: pytest.MonkeyPatch) -> None:
 def _approve(monkeypatch: pytest.MonkeyPatch, *, dry_run: str = "1") -> None:
     monkeypatch.setenv("TRADING_MODE", LIVE_PILOT_MODE)
     monkeypatch.setenv(LIVE_PILOT_APPROVED_ENV, "1")
-    monkeypatch.setenv(LIVE_PILOT_CAPITAL_CAP_ENV, "100")
+    monkeypatch.setenv(LIVE_PILOT_CAPITAL_CAP_ENV, "500")
     monkeypatch.setenv(LIVE_PILOT_SLEEVE_ID_ENV, "polaris")
     monkeypatch.setenv(LIVE_PILOT_ACCOUNT_ID_ENV, "acct-123")
     monkeypatch.setenv(LIVE_PILOT_MAX_ORDERS_ENV, "1")
@@ -77,7 +79,8 @@ def test_live_pilot_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None
     ("env_name", "env_value", "reason"),
     [
         (LIVE_PILOT_APPROVED_ENV, None, "missing_live_pilot_approval"),
-        (LIVE_PILOT_CAPITAL_CAP_ENV, "101", "live_pilot_capital_cap_exceeds_program_limit"),
+        (LIVE_PILOT_CAPITAL_CAP_ENV, None, "missing_positive_live_pilot_capital_cap"),
+        (LIVE_PILOT_CAPITAL_CAP_ENV, "501", "live_pilot_capital_cap_exceeds_program_limit"),
         (LIVE_PILOT_SLEEVE_ID_ENV, None, "missing_live_pilot_sleeve_id"),
         (LIVE_PILOT_ACCOUNT_ID_ENV, None, "missing_live_pilot_expected_account_id"),
         (LIVE_PILOT_MAX_ORDERS_ENV, None, "missing_positive_live_pilot_max_orders"),
@@ -104,6 +107,40 @@ def test_live_pilot_refuses_missing_or_invalid_gates(
 
     assert result.status == "BLOCKED"
     assert result.reason_code == reason
+    assert result.live_orders_allowed is False
+
+
+def test_live_pilot_accepts_approved_500_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch, dry_run="0")
+
+    result = validate_live_pilot_submission_guardrails(
+        broker_paper=False,
+        base_url="https://api.alpaca.markets",
+        order_notional=500.0,
+    )
+
+    assert LIVE_PILOT_APPROVED_MAX_CAP_USD == 500.0
+    assert LIVE_PILOT_MAX_CAP_USD == LIVE_PILOT_APPROVED_MAX_CAP_USD
+    assert result.status == "PASS"
+    assert result.capital_cap_usd == 500.0
+    assert result.live_orders_allowed is True
+
+
+def test_live_pilot_kill_switch_blocks_submission(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch, dry_run="0")
+    monkeypatch.setenv(LIVE_PILOT_KILL_SWITCH_ENV, "1")
+
+    result = build_live_pilot_gate_result(
+        broker_paper=False,
+        base_url="https://api.alpaca.markets",
+        order_notional=50.0,
+        submission_intent=True,
+    )
+
+    assert result.status == "BLOCKED"
+    assert result.reason_code == "live_pilot_kill_switch_enabled"
     assert result.live_orders_allowed is False
 
 
@@ -175,13 +212,13 @@ def test_live_pilot_live_submit_requires_notional_under_cap(monkeypatch: pytest.
         validate_live_pilot_submission_guardrails(
             broker_paper=False,
             base_url="https://api.alpaca.markets",
-            order_notional=101.0,
+            order_notional=501.0,
         )
 
     result = validate_live_pilot_submission_guardrails(
         broker_paper=False,
         base_url="https://api.alpaca.markets",
-        order_notional=99.0,
+        order_notional=500.0,
     )
     assert result.status == "PASS"
     assert result.live_orders_allowed is True
@@ -230,7 +267,7 @@ def test_live_pilot_limit_price_normalization(monkeypatch: pytest.MonkeyPatch) -
                 "normalized_limit_price": 228.39,
             }
         ],
-        capital_cap_usd=100,
+        capital_cap_usd=500,
         max_orders=1,
         run_id="run-price-normalization",
     )
@@ -246,13 +283,13 @@ def test_plan_validation_blocks_over_cap_and_too_many_orders(monkeypatch: pytest
     _clear(monkeypatch)
     _approve(monkeypatch)
     trades = [
-        {"ticker": "AAPL", "side": "BUY", "shares": 1, "limit_price": 75},
-        {"ticker": "MSFT", "side": "BUY", "shares": 1, "limit_price": 30},
+        {"ticker": "AAPL", "side": "BUY", "shares": 4, "limit_price": 100},
+        {"ticker": "MSFT", "side": "BUY", "shares": 2, "limit_price": 60},
     ]
 
     result = validate_live_pilot_plan(
         trades,
-        capital_cap_usd=100,
+        capital_cap_usd=500,
         max_orders=1,
         run_id="run-1",
     )
@@ -279,7 +316,7 @@ def test_plan_validation_normalizes_limit_price(monkeypatch: pytest.MonkeyPatch)
                 "limit_price": 228.38999938964844,
             }
         ],
-        capital_cap_usd=100,
+        capital_cap_usd=500,
         max_orders=1,
         run_id="run-1",
     )
@@ -289,7 +326,7 @@ def test_plan_validation_normalizes_limit_price(monkeypatch: pytest.MonkeyPatch)
     assert order.original_limit_price == 228.38999938964844
     assert order.normalized_limit_price == 228.39
     assert order.limit_price == 228.39
-    assert order.notional <= 100
+    assert order.notional <= 500
 
 
 def test_plan_validation_allows_fr104_market_order_with_cap_price(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,7 +343,7 @@ def test_plan_validation_allows_fr104_market_order_with_cap_price(monkeypatch: p
                 "expected_price": 50,
             }
         ],
-        capital_cap_usd=100,
+        capital_cap_usd=500,
         max_orders=1,
         run_id="run-1",
     )
@@ -337,7 +374,7 @@ def test_plan_validation_blocks_unsupported_orders(
 
     result = validate_live_pilot_plan(
         [trade],
-        capital_cap_usd=100,
+        capital_cap_usd=500,
         max_orders=1,
         run_id="run-1",
     )

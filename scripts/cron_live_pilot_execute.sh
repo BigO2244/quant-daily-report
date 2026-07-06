@@ -42,11 +42,15 @@ export WORKFLOW_KIND="live_pilot"
 export CAERUS_LIVE_PILOT_CRON_CONTEXT="1"
 export ALPACA_PAPER="0"
 export ALPACA_BASE_URL="https://api.alpaca.markets"
-export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-100}"
+export APPROVED_LIVE_PILOT_CAP_USD="${APPROVED_LIVE_PILOT_CAP_USD:-500}"
+GATE_RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
+GATE_RUN_ID="${REPORT_DATE}T${GATE_RUN_TS}_live_pilot_cron_gate"
+GATE_RUN_ROOT="outputs/live_pilot/runs/${GATE_RUN_ID}"
+export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}"
 export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-1}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
-export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-1}"
+export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"
 export CAERUS_LIVE_PILOT_SUBMIT_APPROVED="${CAERUS_LIVE_PILOT_SUBMIT_APPROVED:-0}"
 export CAERUS_LIVE_PILOT_SCHEDULE_ENABLED="${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED:-0}"
 export CAERUS_LIVE_PILOT_CRON_APPROVED="${CAERUS_LIVE_PILOT_CRON_APPROVED:-0}"
@@ -116,6 +120,16 @@ print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
 }
 
+write_gate_state_blocked() {
+    local reason="$1"
+    "${PYTHON_BIN}" scripts/live_pilot_write_gate_state.py \
+        --run-id "${GATE_RUN_ID}" \
+        --trade-date "${REPORT_DATE}" \
+        --decision BLOCKED \
+        --block-reason "${reason}" \
+        --output-root outputs/live_pilot >/dev/null || true
+}
+
 if ! truthy "${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"; then
     echo "LIVE_PILOT schedule disabled: set CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1 to enable scheduled dry-run/live-pilot lifecycle."
     write_live_pilot_pointer "disabled" "" "" "schedule_disabled"
@@ -125,20 +139,59 @@ fi
 
 if ! truthy "${CAERUS_LIVE_PILOT_CRON_APPROVED}"; then
     echo "FATAL: CAERUS_LIVE_PILOT_CRON_APPROVED must be 1 for scheduled LIVE_PILOT execution."
-    write_live_pilot_pointer "blocked" "" "" "missing_live_pilot_cron_approval"
+    write_gate_state_blocked "missing_live_pilot_cron_approval"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "missing_live_pilot_cron_approval"
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
+    exit 1
+fi
+
+if ! truthy "${CAERUS_LIVE_PILOT_APPROVED}"; then
+    echo "FATAL: CAERUS_LIVE_PILOT_APPROVED must be 1 for scheduled LIVE_PILOT execution."
+    write_gate_state_blocked "missing_live_pilot_approval"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "missing_live_pilot_approval"
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
+    exit 1
+fi
+
+if [[ -z "${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}" ]]; then
+    echo "FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP is required for scheduled LIVE_PILOT execution."
+    write_gate_state_blocked "missing_positive_live_pilot_capital_cap"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "missing_positive_live_pilot_capital_cap"
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
     exit 1
 fi
 
 if [[ "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets" && "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets/" ]]; then
     echo "FATAL: ALPACA_BASE_URL must be https://api.alpaca.markets for LIVE_PILOT" >&2
-    write_live_pilot_pointer "blocked" "" "" "invalid_live_pilot_endpoint"
+    write_gate_state_blocked "invalid_live_pilot_endpoint"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "invalid_live_pilot_endpoint"
     exit 1
 fi
 
 if [[ "${CAERUS_LIVE_PILOT_KILL_SWITCH:-0}" == "1" ]]; then
     echo "FATAL: CAERUS_LIVE_PILOT_KILL_SWITCH=1" >&2
-    write_live_pilot_pointer "blocked" "" "" "live_pilot_kill_switch_enabled"
+    write_gate_state_blocked "live_pilot_kill_switch_enabled"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_kill_switch_enabled"
+    exit 1
+fi
+
+if ! "${PYTHON_BIN}" - <<'PY'
+import os
+import sys
+
+approved_cap = float(os.environ["APPROVED_LIVE_PILOT_CAP_USD"])
+try:
+    cap = float(os.environ.get("CAERUS_LIVE_PILOT_CAPITAL_CAP", ""))
+except ValueError:
+    print("FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be numeric", file=sys.stderr)
+    raise SystemExit(1)
+if cap <= 0 or cap > approved_cap:
+    print(f"FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be > 0 and <= {approved_cap:.0f}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+    write_gate_state_blocked "live_pilot_capital_cap_invalid"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_capital_cap_invalid"
     exit 1
 fi
 
@@ -149,7 +202,8 @@ if ! "${PYTHON_BIN}" -m core.precompute_bundle_validation \
     --trade-date "${REPORT_DATE}" \
     --json-output "${BUNDLE_VALIDATION_PATH}"; then
     echo "FATAL: precompute bundle validation failed for LIVE_PILOT; details=${BUNDLE_VALIDATION_PATH}"
-    write_live_pilot_pointer "blocked" "" "" "precompute_bundle_validation_failed"
+    write_gate_state_blocked "precompute_bundle_validation_failed"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "precompute_bundle_validation_failed"
     exit 1
 fi
 echo "OK: precompute bundle validated at ${BUNDLE_DIR}"
@@ -169,10 +223,12 @@ set -e
 echo "${BUILD_OUTPUT}"
 if [[ "${BUILD_STATUS}" -ne 0 ]]; then
     echo "live_pilot_plan_builder_exit_code=${BUILD_STATUS}"
-    write_live_pilot_pointer "blocked" "" "" "live_pilot_plan_blocked"
+    write_gate_state_blocked "live_pilot_plan_blocked"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_plan_blocked"
     exit "${BUILD_STATUS}"
 fi
 
+set +e
 PLAN_PATH="$(
     BUILD_OUTPUT="${BUILD_OUTPUT}" "${PYTHON_BIN}" - <<'PY'
 import json
@@ -184,9 +240,18 @@ if payload.get("status") != "READY_FOR_MANUAL_APPROVAL":
 print(str(payload.get("json_path") or ""))
 PY
 )"
+PLAN_STATUS=$?
+set -e
+if [[ "${PLAN_STATUS}" -ne 0 ]]; then
+    echo "FATAL: live pilot plan blocked"
+    write_gate_state_blocked "live_pilot_plan_blocked"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_plan_blocked"
+    exit "${PLAN_STATUS}"
+fi
 if [[ -z "${PLAN_PATH}" ]]; then
     echo "FATAL: live pilot plan did not report json_path"
-    write_live_pilot_pointer "blocked" "" "" "live_pilot_plan_missing_path"
+    write_gate_state_blocked "live_pilot_plan_missing_path"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_plan_missing_path"
     exit 1
 fi
 echo "plan_path=${PLAN_PATH}"
