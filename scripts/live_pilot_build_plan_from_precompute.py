@@ -370,6 +370,48 @@ def precompute_payload_path_for_date(trade_date: str, precompute_root: Path = DE
     return path
 
 
+def _target_portfolio_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Full target portfolio for the Transition Engine (schema caerus.transition_target.v1).
+
+    One row per qualifying name with its target weight (from the source signal when
+    present), the normalized reference price, and the source (pre-cap) notional. The
+    engine does its own capital sizing and max_orders selection, so these are targets,
+    not final orders. Ranked by target weight desc, then symbol, for stable priority.
+    """
+    rows: list[dict[str, Any]] = []
+    for c in candidates:
+        price = _safe_positive_float(c.get("normalized_limit_price")) or _safe_positive_float(
+            c.get("limit_price")
+        )
+        if price is None:
+            continue
+        rows.append(
+            {
+                "symbol": c.get("ticker"),
+                "target_weight": c.get("source_signal_target_weight"),
+                "price": float(price),
+                "target_notional": _safe_positive_float(c.get("source_notional"))
+                or _safe_positive_float(c.get("notional")),
+                "sleeve": c.get("sleeve"),
+                "sleeve_source": c.get("sleeve_source"),
+                "sleeve_provenance": c.get("sleeve_provenance"),
+                "source_strategy_id": c.get("source_strategy_id"),
+                "source_signal_sleeve": c.get("source_signal_sleeve"),
+                "source_signal_target_weight": c.get("source_signal_target_weight"),
+                "source_signal_raw_score": c.get("source_signal_raw_score"),
+                "source_precompute_index": c.get("source_precompute_index"),
+                "approved_sleeve_override": c.get("approved_sleeve_override"),
+            }
+        )
+    rows.sort(
+        key=lambda r: (
+            -(float(r["target_weight"]) if r.get("target_weight") is not None else -1.0),
+            str(r.get("symbol") or ""),
+        )
+    )
+    return rows
+
+
 def build_live_pilot_plan(
     *,
     payload_path: Path,
@@ -418,6 +460,13 @@ def build_live_pilot_plan(
             int(row.get("source_precompute_index") or 0),
         ),
     )
+    # Workstream C Phase 2: emit the FULL target portfolio (all qualifying names +
+    # weights + reference prices), retiring reliance on the single-order narrowing.
+    # The live executor's Transition Engine consumes this to select the buy by target
+    # weight priority (max_orders=1) and to size it against the live snapshot. The
+    # legacy ``selected_order``/``trades`` single-order fields are retained for
+    # backward compatibility but are no longer the live path's source of truth.
+    target_portfolio = _target_portfolio_from_candidates(candidates)
     selected = candidates[:1]
     for extra in candidates[1:]:
         rejected.append(
@@ -471,6 +520,8 @@ def build_live_pilot_plan(
             "paper_or_production_impact": "none",
         },
         "selected_order": selected[0] if selected else None,
+        "target_portfolio_schema": "caerus.transition_target.v1",
+        "target_portfolio": target_portfolio,
         "rejected_orders_with_reasons": rejected,
         "required_dry_run_command": dry_run_command,
         "required_live_command": live_command,

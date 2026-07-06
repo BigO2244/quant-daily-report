@@ -25,6 +25,13 @@ from core.live_pilot_guardrails import (
 from core.live_pilot_gate_state import write_live_pilot_gate_state
 from paper.trading_calendar import ET_TZ, market_session_status
 from paper.run_manager import generate_run_id, safe_write_text
+from scripts.live_pilot_transition import (
+    LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER as _ADAPTER_BLOCK_INSUFFICIENT,
+    buy_intents_to_trades,
+    capital_gate_artifact,
+    compute_live_transition,
+    transition_plan_artifact,
+)
 
 
 def _now_utc() -> str:
@@ -343,80 +350,32 @@ def _capital_gate_report_fields(capital_gate: Mapping[str, Any] | None) -> dict[
 
 def _build_live_pilot_capital_gate(
     *,
+    transition_plan: Any,
     pre_snapshot: Mapping[str, Any],
-    intended: list[dict[str, Any]],
     approved_cap_usd: float | None,
 ) -> dict[str, Any]:
-    account = pre_snapshot.get("account") if isinstance(pre_snapshot.get("account"), Mapping) else {}
+    """Thin wrapper mapping the shared Transition Engine's blocking output to the
+    ``live_pilot_capital_gate.v1`` evidence shape.
+
+    Workstream C Phase 2: the capital decision (rotation-required, buying-power
+    adequacy, cap-as-ceiling) now comes from ``transition.compute_transition`` via
+    ``scripts.live_pilot_transition``, not a parallel implementation here. The gate
+    artifact schema/fields are preserved; ``required_sell_count`` now reflects the
+    engine's actual sell intents (exits + reduces) rather than "any position held".
+    """
     positions_before = _active_live_positions(pre_snapshot.get("positions") or [])
     open_orders_before = [
         _open_order_public_row(order)
         for order in (pre_snapshot.get("open_orders") or [])
         if isinstance(order, Mapping)
     ]
-    live_buying_power = _safe_float((account or {}).get("buying_power"))
-    approved_cap = _safe_float(approved_cap_usd)
-    planned_buy_notional = _planned_buy_notional(intended)
-    strategy_allocation_cap = planned_buy_notional if planned_buy_notional > 0 else None
-
-    cap_candidates = [
-        value
-        for value in (live_buying_power, approved_cap, strategy_allocation_cap)
-        if value is not None and value >= 0
-    ]
-    tradable_capital = min(cap_candidates) if cap_candidates and live_buying_power is not None else None
-    required_sell_count = len(positions_before) if planned_buy_notional > 0 else 0
-
-    decision = "ALLOWED"
-    buy_block_reason: str | None = None
-    operator_action = (
-        "Broker buying power, approved cap, and planned buy notional permit this live-pilot buy gate."
+    return capital_gate_artifact(
+        transition_plan,
+        positions_before=positions_before,
+        open_orders_before=open_orders_before,
+        approved_cap_usd=approved_cap_usd,
+        generated_at=_now_utc(),
     )
-    if planned_buy_notional > 0 and required_sell_count > 0 and not LIVE_PILOT_SELL_FIRST_SUPPORTED:
-        decision = "BLOCKED"
-        buy_block_reason = LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
-        operator_action = (
-            "Existing live positions require sell-first rotation before any new live-pilot buy. "
-            "The current live-pilot lane does not automate sell-first fill confirmation and rebudget; "
-            "leave the kill switch enabled until a separately reviewed rotation path is approved."
-        )
-    elif planned_buy_notional > 0 and live_buying_power is None:
-        decision = "BLOCKED"
-        buy_block_reason = LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE
-        operator_action = (
-            "Live broker buying power was unavailable, so approved pilot cap cannot be treated as spendable cash."
-        )
-    elif (
-        planned_buy_notional > 0
-        and tradable_capital is not None
-        and planned_buy_notional > tradable_capital + 1e-6
-    ):
-        decision = "BLOCKED"
-        buy_block_reason = LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
-        operator_action = (
-            "Live broker buying power is below the planned buy notional. "
-            "Approved pilot cap is a maximum risk limit, not a substitute for broker buying power."
-        )
-
-    return {
-        "schema_version": "live_pilot_capital_gate.v1",
-        "generated_at": _now_utc(),
-        "decision": decision,
-        "block_reason": buy_block_reason,
-        "live_positions_before": positions_before,
-        "live_open_orders_before": open_orders_before,
-        "live_buying_power_before": live_buying_power,
-        "approved_cap_usd": approved_cap,
-        "required_sell_count": required_sell_count,
-        "sell_first_supported": LIVE_PILOT_SELL_FIRST_SUPPORTED,
-        "rebudget_after_sell_supported": LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED,
-        "strategy_allocation_cap_usd": strategy_allocation_cap,
-        "planned_buy_notional_usd": planned_buy_notional,
-        "tradable_capital_usd": tradable_capital,
-        "buy_block_reason": buy_block_reason,
-        "broker_orders_submitted": 0,
-        "operator_action": operator_action,
-    }
 
 
 def _status_norm(status: object) -> str:
@@ -1180,7 +1139,63 @@ def run_live_pilot(
             preflight=preflight,
         )
 
-    source_trades = _trades_from_plan(plan)
+    # --- Transition Engine (Workstream C Phase 2, Option A) --------------------
+    # Full target portfolio + broker snapshot -> keep/reduce/sell/buy/block. This
+    # replaces the buy-only narrowing: the engine selects the single buy by target
+    # weight priority (max_orders=1), sizes it against min(cash, buying_power, cap,
+    # incremental need) with the $100 min-trade floor, and blocks on rotation (sells
+    # unsupported under Option A) or insufficient buying power. Cap is a ceiling,
+    # never treated as spendable cash. The capital gate is now a thin wrapper over
+    # this engine output.
+    transition_plan = compute_live_transition(
+        pre_snapshot=pre_snapshot,
+        plan=plan,
+        approved_cap_usd=gate.capital_cap_usd,
+        env=environ,
+        max_orders=int(gate.max_orders or 1),
+    )
+    capital_gate = _build_live_pilot_capital_gate(
+        transition_plan=transition_plan,
+        pre_snapshot=pre_snapshot,
+        approved_cap_usd=gate.capital_cap_usd,
+    )
+    _write_json(
+        run_root / "live_pilot_transition_plan.json",
+        transition_plan_artifact(transition_plan, generated_at=_now_utc()),
+    )
+    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
+    if transition_plan.blocked:
+        reason_code = str(capital_gate.get("buy_block_reason") or capital_gate.get("block_reason") or "")
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code=reason_code or _ADAPTER_BLOCK_INSUFFICIENT,
+            operator_action=str(
+                capital_gate.get("operator_action")
+                or "Live-pilot transition engine blocked before broker submission."
+            ),
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+
+    # Engine-selected buy intent(s) become the source trades for validation/submission.
+    source_trades = buy_intents_to_trades(transition_plan, source_plan=plan)
+    if not source_trades:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code="live_pilot_transition_no_actionable_buy",
+            operator_action=(
+                "Transition engine produced no buy intent (holdings already satisfy the "
+                "target within the min-trade floor); no live order required."
+            ),
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
     plan_validation = validate_live_pilot_plan(
         source_trades,
         env=environ,
@@ -1307,30 +1322,8 @@ def run_live_pilot(
             intended=intended,
         )
 
-    capital_gate = _build_live_pilot_capital_gate(
-        pre_snapshot=pre_snapshot,
-        intended=intended,
-        approved_cap_usd=gate.capital_cap_usd,
-    )
-    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
-    if capital_gate.get("decision") == "BLOCKED":
-        reason_code = str(capital_gate.get("buy_block_reason") or capital_gate.get("block_reason") or "")
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=reason_code or LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
-            operator_action=str(
-                capital_gate.get("operator_action")
-                or "Live-pilot capital gate blocked before broker submission."
-            ),
-            preflight=preflight,
-            intended=intended,
-            open_order_check=open_order_check,
-            capital_gate=capital_gate,
-        )
-
+    # Capital gate already ran (and wrote its artifact) via the Transition Engine
+    # immediately after the broker snapshot; nothing re-checks it here.
     submitted: list[dict[str, Any]] = []
     submit_errors: list[str] = []
     max_slippage_bps = _safe_float(environ.get(LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV))
