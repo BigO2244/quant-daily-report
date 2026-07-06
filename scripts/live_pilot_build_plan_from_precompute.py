@@ -13,11 +13,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.live_pilot_guardrails import normalize_live_pilot_limit_price, validate_live_pilot_plan
+from core.live_pilot_guardrails import (
+    LIVE_PILOT_APPROVED_MAX_CAP_USD,
+    normalize_live_pilot_limit_price,
+    validate_live_pilot_plan,
+)
 from paper.run_manager import safe_write_text
 
 
-DEFAULT_CAPITAL_CAP = 100.0
+DEFAULT_CAPITAL_CAP = LIVE_PILOT_APPROVED_MAX_CAP_USD
 DEFAULT_MAX_ORDERS = 1
 DEFAULT_OUTPUT_DIR = Path("outputs/live_pilot/plans")
 DEFAULT_PRECOMPUTE_ROOT = Path("outputs/precompute")
@@ -378,8 +382,8 @@ def build_live_pilot_plan(
 ) -> dict[str, Any]:
     if not str(approved_sleeve or "").strip():
         raise ValueError("approved_sleeve is required")
-    if float(capital_cap) <= 0 or float(capital_cap) > DEFAULT_CAPITAL_CAP:
-        raise ValueError("capital_cap must be > 0 and <= 100")
+    if float(capital_cap) <= 0 or float(capital_cap) > LIVE_PILOT_APPROVED_MAX_CAP_USD:
+        raise ValueError(f"capital_cap must be > 0 and <= {LIVE_PILOT_APPROVED_MAX_CAP_USD:.0f}")
     if int(max_orders) != 1:
         raise ValueError("FR-104 Phase 1 requires max_orders=1")
 

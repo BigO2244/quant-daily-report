@@ -416,7 +416,7 @@ def test_dashboard_v1_surfaces_alpha_sleeves_and_live_pilot_evidence(tmp_path: P
             {
                 "trade_date": report_date,
                 "status": "READY_FOR_MANUAL_APPROVAL",
-                "capital_cap": 100.0,
+                "capital_cap": 500.0,
                 "order_policy": {"scope": "FR-104 LIVE_PILOT only", "order_type": "market", "paper_or_production_impact": "none"},
                 "selected_order": {"ticker": "AAPL", "qty": 1, "expected_price": 50, "order_type": "market"},
             }
@@ -428,7 +428,7 @@ def test_dashboard_v1_surfaces_alpha_sleeves_and_live_pilot_evidence(tmp_path: P
         encoding="utf-8",
     )
     (run_root / "live_pilot_evidence_metrics.json").write_text(
-        json.dumps({"submitted_count": 1, "accepted_count": 1, "filled_count": 1, "fill_rate": 1.0, "rejected_count": 0, "reconciliation_clean_rate": 1.0, "cash_deployment_rate": 0.5, "capital_cap_usd": 100.0, "idle_cash_reason": "partial_cap_deployment"}),
+        json.dumps({"submitted_count": 1, "accepted_count": 1, "filled_count": 1, "fill_rate": 1.0, "rejected_count": 0, "reconciliation_clean_rate": 1.0, "cash_deployment_rate": 0.5, "capital_cap_usd": 500.0, "idle_cash_reason": "partial_cap_deployment"}),
         encoding="utf-8",
     )
     (run_root / "live_pilot_reconciliation.json").write_text(json.dumps({"status": "CLEAN", "state": "CLEAN", "open_count": 0}), encoding="utf-8")

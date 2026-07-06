@@ -26,17 +26,26 @@ def test_monday_live_pilot_runner_contract() -> None:
     assert "require_eq TRADING_MODE live_pilot" in text
     assert "require_eq ALPACA_PAPER 0" in text
     assert "https://api.alpaca.markets" in text
-    assert "CAERUS_LIVE_PILOT_CAPITAL_CAP:-100" in text
+    assert "APPROVED_LIVE_PILOT_CAP_USD:-500" in text
+    assert "CAERUS_LIVE_PILOT_CAPITAL_CAP:-}" in text
+    assert "CAERUS_LIVE_PILOT_APPROVED:-0" in text
+    assert "CAERUS_LIVE_PILOT_CAPITAL_CAP is required for LIVE_PILOT" in text
+    assert "CAERUS_LIVE_PILOT_CAPITAL_CAP must be > 0 and <= {approved_cap:.0f}" in text
     assert "CAERUS_LIVE_PILOT_MAX_ORDERS:-1" in text
     assert "CAERUS_LIVE_PILOT_SLEEVE_ID:-orion" in text
     assert "CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85" in text
     assert "scripts/live_pilot_build_plan_from_precompute.py" in text
     assert "live_pilot_plan_builder_exit_code=${BUILD_STATUS}" in text
+    assert "scripts/live_pilot_write_gate_state.py" in text
+    assert "write_gate_state_blocked" in text
+    assert "missing_positive_live_pilot_capital_cap" in text
+    assert "live_pilot_kill_switch_enabled" in text
     assert "CAERUS_LIVE_PILOT_DRY_RUN=1" in text
     assert "CAERUS_LIVE_PILOT_SUBMIT_APPROVED:-0" in text
     assert "require_eq CAERUS_LIVE_PILOT_SUBMIT_APPROVED 1" in text
     assert "CAERUS_LIVE_PILOT_DRY_RUN=0" in text
     assert text.index("CAERUS_LIVE_PILOT_DRY_RUN=1") < text.index("CAERUS_LIVE_PILOT_SUBMIT_APPROVED:-0")
     assert text.index("CAERUS_LIVE_PILOT_SUBMIT_APPROVED:-0") < text.index("CAERUS_LIVE_PILOT_DRY_RUN=0")
-    assert "scripts/cron_" not in text
+    assert "intentionally not referenced by cron" not in text
+    assert "Scheduled live-pilot automation uses" in text
     assert "scripts/run_precomputed_alpaca_execution.py" not in text

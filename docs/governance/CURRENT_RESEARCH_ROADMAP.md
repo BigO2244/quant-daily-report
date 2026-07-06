@@ -58,13 +58,15 @@ editing code or specs.
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
 - **Production posture:** paper remains the production posture. A separate,
-  manual, tightly capped FR-104 Level 2.5 live-pilot evidence lane may collect
+  tightly capped `$500` FR-104 Level 2.5 live-pilot evidence lane may collect
   forward broker/operational evidence only when explicitly approved; it is not
-  production, not cron-enabled, not dynamic allocation, and not proof of
-  promotion readiness. No shorting, no leverage.
+  production, not dynamic allocation, and not proof of promotion readiness. No
+  shorting, no leverage.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
 - **Shadow (non-blocking):** Caerus Orion, Caerus Lyra, Polaris_Alpha,
   Orion_Alpha. SPY = benchmark.
+- **Default FR-104 live-pilot sleeve:** Caerus Orion, only when all live-pilot
+  approval gates pass; otherwise Orion remains non-blocking shadow.
 - **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
   Orion_Alpha (`caerus_orion_alpha`) are forward shadow-only concentration
   variants activated 2026-06-23. Polaris_Alpha is Top 4 / 20% cap versus the
@@ -120,7 +122,7 @@ framework, and FR-065 dashboard decision-grade consolidation.
 |----------|------------------------|-----------------|--------|-----|--------|--------------------|--------------|
 | Polaris | security_selection / core_momentum | paper | growth_engine_v4 | yes | yes | no | paper_control |
 | Polaris_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 4 / 20% cap; compare only against preserved Polaris baseline; no capital |
-| Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_only |
+| Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_challenger; default_fr104_live_pilot_sleeve_when_approved |
 | Orion_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 3 / 25% cap; compare only against preserved Orion baseline; no capital |
 | Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
 | Phoenix | security_selection / crisis_reversal | research / not_viable_current_phase_b | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts; PIT liquidity evidence is decision-grade but current Phase B candidate fails 5% ADV capacity policy; not Shadow-readiness eligible |
