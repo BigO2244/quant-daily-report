@@ -333,15 +333,6 @@ def _open_order_public_row(order: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _planned_buy_notional(intended: list[dict[str, Any]]) -> float:
-    total = 0.0
-    for row in intended:
-        if _order_side(row) != "BUY":
-            continue
-        total += float(_safe_float(row.get("notional")) or 0.0)
-    return round(total, 6)
-
-
 def _capital_gate_report_fields(capital_gate: Mapping[str, Any] | None) -> dict[str, Any]:
     if not capital_gate:
         return {}
@@ -1163,7 +1154,8 @@ def run_live_pilot(
         run_root / "live_pilot_transition_plan.json",
         transition_plan_artifact(transition_plan, generated_at=_now_utc()),
     )
-    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
+    # capital_gate.json is written by _write_blocked_artifacts on the blocked paths and
+    # once inline below on the allowed path (avoids the previous double-write).
     if transition_plan.blocked:
         reason_code = str(capital_gate.get("buy_block_reason") or capital_gate.get("block_reason") or "")
         return _write_blocked_artifacts(
@@ -1196,6 +1188,9 @@ def run_live_pilot(
             preflight=preflight,
             capital_gate=capital_gate,
         )
+
+    # Allowed path: write the capital-gate evidence exactly once.
+    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
     plan_validation = validate_live_pilot_plan(
         source_trades,
         env=environ,
