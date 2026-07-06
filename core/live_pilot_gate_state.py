@@ -15,6 +15,7 @@ from core.live_pilot_guardrails import (
     LIVE_PILOT_MAX_CAP_USD,
     LIVE_PILOT_MAX_ORDERS_ENV,
     LIVE_PILOT_SLEEVE_ID_ENV,
+    kill_switch_engaged,
 )
 from paper.run_manager import safe_write_text
 
@@ -120,7 +121,7 @@ def build_live_pilot_gate_state(
         "cron_approved": _truthy(environ.get("CAERUS_LIVE_PILOT_CRON_APPROVED")),
         "submit_approved": _truthy(environ.get("CAERUS_LIVE_PILOT_SUBMIT_APPROVED")),
         "live_pilot_approved": _truthy(environ.get(LIVE_PILOT_APPROVED_ENV)),
-        "kill_switch_set": _truthy(environ.get(LIVE_PILOT_KILL_SWITCH_ENV)),
+        "kill_switch_set": kill_switch_engaged(environ.get(LIVE_PILOT_KILL_SWITCH_ENV)),
         "configured_cap_usd": configured_cap,
         "approved_max_cap_usd": LIVE_PILOT_MAX_CAP_USD,
         "effective_cap_usd": effective_cap,

@@ -55,6 +55,9 @@ def _approve(monkeypatch: pytest.MonkeyPatch, *, dry_run: str = "1") -> None:
     monkeypatch.setenv(LIVE_PILOT_ACCOUNT_ID_ENV, "acct-123")
     monkeypatch.setenv(LIVE_PILOT_MAX_ORDERS_ENV, "1")
     monkeypatch.setenv(LIVE_PILOT_DRY_RUN_ENV, dry_run)
+    # Kill switch fails closed: arming live now requires an explicit recognized
+    # "off" value; an unset/garbage value blocks. Disarm it for the approve fixture.
+    monkeypatch.setenv(LIVE_PILOT_KILL_SWITCH_ENV, "0")
 
 
 def test_live_pilot_mode_is_canonical() -> None:

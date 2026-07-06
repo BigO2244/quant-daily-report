@@ -113,6 +113,8 @@ def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
         "CAERUS_LIVE_PILOT_ACCOUNT_ID": "acct-123",
         "CAERUS_LIVE_PILOT_MAX_ORDERS": max_orders,
         "CAERUS_LIVE_PILOT_DRY_RUN": dry_run,
+        # Kill switch fails closed: unset/garbage blocks; arming requires explicit "off".
+        "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
     }
 
 

@@ -57,14 +57,33 @@ _TERMINAL_NEEDS_REASON = {
 }
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json_checked(path: Path) -> tuple[dict[str, Any], str | None]:
+    """Read a JSON object, distinguishing *missing* from *present-but-unreadable*.
+
+    Returns ``(payload, error)``:
+    - missing file            -> ``({}, None)``  (legitimately absent / optional)
+    - corrupt / unparseable    -> ``({}, "unreadable_json:<ExcType>")``
+    - present but not a JSON obj -> ``({}, "non_object_json")``
+    - valid object             -> ``(payload, None)``
+
+    Unlike a bare ``except: return {}`` swallow, a present-but-broken artifact is
+    surfaced as an explicit error so the reliability report can fail closed on it
+    instead of silently treating a corrupt run as a clean no-op.
+    """
     if not path.exists():
-        return {}
+        return {}, None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    except Exception as exc:  # corrupt / unreadable content is NOT a silent {}
+        return {}, f"unreadable_json:{type(exc).__name__}"
+    if not isinstance(payload, dict):
+        return {}, "non_object_json"
+    return payload, None
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    payload, _error = _read_json_checked(path)
+    return payload
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -530,14 +549,29 @@ def build_execution_reliability_report(
     precompute_payload_path = Path("outputs") / "precompute" / trade_date / "planned_execution_payload.json"
     precompute_contract_path = Path("outputs") / "precompute" / trade_date / "contract.json"
 
-    execution_payload = _read_json(execution_payload_path)
-    execution_results = _read_json(execution_results_path)
-    operator_summary = _read_json(operator_summary_path)
-    execution_integrity = _read_json(execution_integrity_path)
-    target_attainment = _read_json(target_attainment_path)
-    reconciliation = _read_json(posttrade_recon_path)
-    precompute_payload = _read_json(precompute_payload_path)
-    precompute_contract = _read_json(precompute_contract_path)
+    _artifact_reads = {
+        "execution_payload": _read_json_checked(execution_payload_path),
+        "execution_results": _read_json_checked(execution_results_path),
+        "operator_summary": _read_json_checked(operator_summary_path),
+        "execution_integrity": _read_json_checked(execution_integrity_path),
+        "target_attainment": _read_json_checked(target_attainment_path),
+        "reconciliation": _read_json_checked(posttrade_recon_path),
+        "precompute_payload": _read_json_checked(precompute_payload_path),
+        "precompute_contract": _read_json_checked(precompute_contract_path),
+    }
+    execution_payload = _artifact_reads["execution_payload"][0]
+    execution_results = _artifact_reads["execution_results"][0]
+    operator_summary = _artifact_reads["operator_summary"][0]
+    execution_integrity = _artifact_reads["execution_integrity"][0]
+    target_attainment = _artifact_reads["target_attainment"][0]
+    reconciliation = _artifact_reads["reconciliation"][0]
+    precompute_payload = _artifact_reads["precompute_payload"][0]
+    precompute_contract = _artifact_reads["precompute_contract"][0]
+    artifact_read_errors = [
+        {"artifact": name, "error": error}
+        for name, (_payload, error) in _artifact_reads.items()
+        if error is not None
+    ]
 
     counts = _counts(
         execution_payload=execution_payload,
@@ -552,6 +586,25 @@ def build_execution_reliability_report(
     market_calendar = _market_calendar_evidence(trade_date)
     expected_market_closed_day = market_calendar.get("reason") == "MARKET_CLOSED_DAY"
     results: list[dict[str, Any]] = []
+
+    if artifact_read_errors:
+        results.append(
+            _result(
+                invariant_id="execution_artifact_readable",
+                status=STATUS_FAIL,
+                severity=SEVERITY_CRITICAL,
+                reason_code="execution_artifact_unreadable",
+                human_summary=(
+                    "A required execution artifact is present but unreadable/corrupt; "
+                    "a corrupt run must not be silently classified as a clean no-op."
+                ),
+                operator_action=(
+                    "Inspect the corrupt artifact(s) and treat the run as failed until the "
+                    "evidence is restored; do not conclude NO_ACTION or success."
+                ),
+                evidence={"artifact_read_errors": artifact_read_errors},
+            )
+        )
 
     if expected_market_closed_day:
         results.append(
