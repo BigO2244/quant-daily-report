@@ -45,6 +45,7 @@ LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION = (
 LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER = "LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER"
 LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE = "LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE"
 LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP = "live_pilot_total_notional_exceeds_cap"
+LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME = "live_pilot_equity_exceeds_cap_regime"
 
 # Live-pilot fail-closed policy (FR-104 pilot, operator decision 2026-07-06): an
 # intended buy whose FULL incremental need exceeds the approved cap is HALTED, not
@@ -53,12 +54,26 @@ LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP = "live_pilot_total_notional_exceeds_cap"
 # Relax to clip-and-deploy only after live behavior is trusted.
 BLOCK_OVER_CAP_INTENT = "OVER_CAP_INTENT"
 
+# Live-pilot equity-regime guard (operator decision 2026-07-06). The engine sizes
+# targets to weight x live-account-equity and applies the approved cap PER RUN, not as
+# a total-exposure ceiling. That is only correct while account equity ~= cap (the pilot
+# is funded at ~$500 == the cap). If equity exceeds this ceiling, weight-based targets
+# would be sized well above the cap and the per-run cap would not bound total exposure
+# (a partly-held over-target name could be topped up past the cap). Rather than make the
+# cap exposure-aware now, we HALT if equity leaves the cap regime.
+#   TODO / FR (deferred): when the pilot account is funded above the cap, replace this
+#   guard with an exposure-aware cap (cap_remaining = approved_cap - current_exposure)
+#   so weight-based targets can be sized correctly above the cap. Until then: block.
+LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD = 600.0
+BLOCK_EQUITY_EXCEEDS_CAP_REGIME = "EQUITY_EXCEEDS_CAP_REGIME"
+
 # Engine block_reason -> capital_gate.v1 constant (the live lane's operator-facing code).
 _BLOCK_REASON_TO_GATE_CONSTANT = {
     BLOCK_ROTATION_UNSUPPORTED: LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     BLOCK_BUYING_POWER_UNAVAILABLE: LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE,
     BLOCK_INSUFFICIENT_BUYING_POWER: LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
     BLOCK_OVER_CAP_INTENT: LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP,
+    BLOCK_EQUITY_EXCEEDS_CAP_REGIME: LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME,
     # Option A never sells, so SELLS_NOT_FILLED only arises from unresolved open sell
     # orders in the snapshot; surface it as an insufficient-capital block for the lane.
     BLOCK_SELLS_NOT_FILLED: LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
@@ -196,31 +211,132 @@ def live_capital_policy(approved_cap_usd: float | None) -> CapitalPolicy:
     )
 
 
+def _blocked_plan(
+    plan: TransitionPlan, *, reason: str, extra_diag: Mapping[str, Any] | None = None
+) -> TransitionPlan:
+    """Return a fail-closed copy of ``plan``: blocked, no buys, deployed reset to 0."""
+    diag = dict(plan.diagnostics)
+    diag["deployed_buy_notional"] = 0.0
+    if extra_diag:
+        diag.update(extra_diag)
+    return replace(
+        plan,
+        blocked=True,
+        block_reason=reason,
+        buy_orders_intended=(),
+        diagnostics=diag,
+    )
+
+
+def _apply_equity_regime_policy(plan: TransitionPlan, account: AccountSnapshot) -> TransitionPlan:
+    """Halt if account equity leaves the cap regime (equity ~= cap).
+
+    See LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD: the engine sizes targets to
+    weight x equity and applies the cap per-run, which only bounds total exposure while
+    equity ~= cap. Above the ceiling, block rather than mis-size.
+    """
+    if plan.blocked:
+        return plan
+    equity = account.equity
+    if equity is not None and float(equity) > LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD:
+        return _blocked_plan(
+            plan,
+            reason=BLOCK_EQUITY_EXCEEDS_CAP_REGIME,
+            extra_diag={
+                "equity_usd": float(equity),
+                "equity_cap_regime_ceiling_usd": LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD,
+            },
+        )
+    return plan
+
+
+def _apply_unpriceable_holdings_policy(
+    plan: TransitionPlan, pre_snapshot: Mapping[str, Any]
+) -> TransitionPlan:
+    """Fail closed on a held position we cannot value.
+
+    A live position with a missing/non-positive market_value maps to price 0.0 and is
+    silently skipped by the engine's exit loop, defeating the Option A rotation guard.
+    We cannot classify an unpriceable holding keep/sell, so treat it as rotation-required
+    (block) rather than ignoring it.
+    """
+    if plan.blocked:
+        return plan
+    for raw in pre_snapshot.get("positions") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        qty = _safe_float(raw.get("qty"))
+        if qty is None or abs(qty) <= 1e-12:
+            continue
+        market_value = _safe_float(raw.get("market_value"))
+        if market_value is None or market_value <= 0:
+            return _blocked_plan(
+                plan,
+                reason=BLOCK_ROTATION_UNSUPPORTED,
+                extra_diag={
+                    "unpriceable_holding_symbol": _norm(raw.get("symbol")),
+                    "unpriceable_holding_reason": "missing_or_nonpositive_market_value",
+                },
+            )
+    return plan
+
+
+def _apply_buying_power_policy(plan: TransitionPlan, account: AccountSnapshot) -> TransitionPlan:
+    """Treat buying_power <= 0 (a real 0.0, not just None) as UNAVAILABLE.
+
+    Broker buying power is the truth for live; cash must never substitute for it. The
+    shared engine only blocks on None (and otherwise falls back to sizing against cash),
+    so a legitimate 0.0 buying power must be blocked here to restore the merged-gate
+    behavior.
+    """
+    if plan.blocked:
+        return plan
+    bp = account.buying_power
+    planned = float(plan.diagnostics.get("planned_buy_notional") or 0.0)
+    if bp is not None and float(bp) <= 0.0 and planned > 0.0:
+        return _blocked_plan(
+            plan,
+            reason=BLOCK_BUYING_POWER_UNAVAILABLE,
+            extra_diag={"buying_power_nonpositive": True},
+        )
+    return plan
+
+
 def _apply_over_cap_policy(plan: TransitionPlan, approved_cap_usd: float | None) -> TransitionPlan:
     """Fail-closed over-cap halt for the live pilot (FR-104).
 
     The shared engine clips an over-cap need down to the cap and deploys it. For the
     live pilot we instead HALT: if the FULL incremental need of any intended buy
-    exceeds the approved cap, block the run (no order) rather than silently
-    right-sizing. Uses the pre-clip incremental need (diagnostics) x reference price.
+    exceeds the approved cap, block the run (no order) rather than silently right-sizing.
+    Fails closed if the incremental need for a buy symbol is missing (cannot verify).
     """
     cap = _safe_float(approved_cap_usd)
     if plan.blocked or cap is None:
         return plan
     incremental = plan.diagnostics.get("incremental_need_shares") or {}
     for b in plan.buy_orders_intended:
-        full_need = float(incremental.get(b.symbol) or 0.0) * float(b.price)
-        if full_need > cap + 1e-6:
-            diag = dict(plan.diagnostics)
-            diag["over_cap_intent"] = True
-            diag["over_cap_symbol"] = b.symbol
-            diag["over_cap_full_need_usd"] = round(full_need, 6)
-            return replace(
+        need_shares = incremental.get(b.symbol)
+        if need_shares is None:
+            # Fail closed: cannot verify this buy against the cap ceiling.
+            return _blocked_plan(
                 plan,
-                blocked=True,
-                block_reason=BLOCK_OVER_CAP_INTENT,
-                buy_orders_intended=(),
-                diagnostics=diag,
+                reason=BLOCK_OVER_CAP_INTENT,
+                extra_diag={
+                    "over_cap_intent": True,
+                    "over_cap_symbol": b.symbol,
+                    "over_cap_reason": "missing_incremental_need",
+                },
+            )
+        full_need = float(need_shares) * float(b.price)
+        if full_need > cap + 1e-6:
+            return _blocked_plan(
+                plan,
+                reason=BLOCK_OVER_CAP_INTENT,
+                extra_diag={
+                    "over_cap_intent": True,
+                    "over_cap_symbol": b.symbol,
+                    "over_cap_full_need_usd": round(full_need, 6),
+                },
             )
     return plan
 
@@ -242,7 +358,13 @@ def compute_live_transition(
         order_policy=order_policy_from_env(env),
         mode_constraints=ModeConstraints(sells_supported=False, max_orders=max_orders),
     )
-    return _apply_over_cap_policy(engine_plan, approved_cap_usd)
+    # Live-pilot fail-closed guards, in priority order. Each is a no-op once the plan is
+    # already blocked, so the first applicable reason wins.
+    guarded = _apply_equity_regime_policy(engine_plan, account)
+    guarded = _apply_unpriceable_holdings_policy(guarded, pre_snapshot)
+    guarded = _apply_buying_power_policy(guarded, account)
+    guarded = _apply_over_cap_policy(guarded, approved_cap_usd)
+    return guarded
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +456,12 @@ def _operator_action(engine_reason: str | None) -> str:
             "The intended buy's full need exceeds the approved cap. The pilot halts on "
             "over-cap intents rather than silently right-sizing them; review the target "
             "and cap, and leave the kill switch engaged until re-approved."
+        )
+    if engine_reason == BLOCK_EQUITY_EXCEEDS_CAP_REGIME:
+        return (
+            "Account equity exceeds the pilot cap regime; the live sizing model assumes "
+            "equity is approximately the approved cap. Halt until either the account is "
+            "brought back to the cap regime or an exposure-aware cap is approved."
         )
     return "Broker buying power, approved cap, and planned buy notional permit this live-pilot buy gate."
 

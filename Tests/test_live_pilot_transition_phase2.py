@@ -14,6 +14,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from scripts.live_pilot_execute import (
+    LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE,
     LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
     run_live_pilot,
@@ -169,7 +170,8 @@ def test_july6_variant_blocks_on_buying_power_when_no_rotation(tmp_path: Path) -
 # 2. Clean slate — one weight-priority buy, sized, dry-run boundary
 # --------------------------------------------------------------------------- #
 def test_clean_slate_selects_highest_weight_and_halts_dry_run(tmp_path: Path) -> None:
-    broker = FakeBroker(buying_power="1000", cash="1000", equity="1000")
+    # Pilot regime: equity ~= the $500 cap.
+    broker = FakeBroker(buying_power="500", cash="500", equity="500")
     # Two targets; BBB has the higher weight -> engine selects BBB (max_orders=1),
     # NOT precompute row order (AAA is listed first).
     plan = {"target_portfolio": [
@@ -187,8 +189,8 @@ def test_clean_slate_selects_highest_weight_and_halts_dry_run(tmp_path: Path) ->
     buys = transition["buy_orders_intended"]
     assert len(buys) == 1
     assert buys[0]["symbol"] == "BBB"  # highest weight, not first row
-    # BBB target = 0.3*1000 = $300 -> 6 shares @ $50; sized by min(bp, cap, need)=min(1000,500,300)=300.
-    assert buys[0]["notional"] == 300.0
+    # BBB target = 0.3*500 = $150 -> 3 shares @ $50; sized by min(bp, cap, need)=min(500,500,150)=150.
+    assert buys[0]["notional"] == 150.0
     assert buys[0]["notional"] <= 500.0  # within cap
     intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
     assert intended["orders"][0]["symbol"] == "BBB"
@@ -196,12 +198,55 @@ def test_clean_slate_selects_highest_weight_and_halts_dry_run(tmp_path: Path) ->
 
 def test_clean_slate_min_trade_floor_blocks_dust(tmp_path: Path) -> None:
     # A sub-$100 residual need now produces NO order (min-trade is new to live).
-    broker = FakeBroker(buying_power="1000", cash="1000", equity="1000")
-    plan = {"target_portfolio": [_target_row("AAA", 0.05, 100.0)]}  # $50 target < $100 floor
+    broker = FakeBroker(buying_power="500", cash="500", equity="500")
+    plan = {"target_portfolio": [_target_row("AAA", 0.05, 100.0)]}  # $25 target < $100 floor
     result, run_root = _run(broker, plan, run_id="run-dust", tmp_path=tmp_path)
     assert result["terminal_status"] == "BLOCKED"
     assert result["reason_code"] == "live_pilot_transition_no_actionable_buy"
     assert broker.submit_calls == 0
+
+
+def test_buying_power_zero_blocks_unavailable(tmp_path: Path) -> None:
+    # #1: a real 0.0 buying power (unsettled cash) must block, NOT size against cash.
+    # This is the live account's condition today (~$8 free cash -> bp at/near 0).
+    broker = FakeBroker(buying_power="0", cash="500", equity="500")
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}  # $200 target need
+    result, run_root = _run(broker, plan, dry_run="0", run_id="run-bp0", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE
+    assert broker.submit_calls == 0
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["decision"] == "BLOCKED"
+    assert capital_gate["live_buying_power_before"] == 0.0  # 0.0 is visible in evidence
+
+
+def test_unpriceable_held_position_blocks_rotation(tmp_path: Path) -> None:
+    # #2: a held position with missing market_value must fail closed (rotation-required),
+    # never be silently skipped by the engine's price<=0 exit loop.
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"symbol": "XYZ", "qty": "2"}],  # no market_value
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-unpriceable", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["diagnostics"]["unpriceable_holding_symbol"] == "XYZ"
+
+
+def test_equity_above_cap_regime_blocks(tmp_path: Path) -> None:
+    # #3-guard: equity above the $600 cap-regime ceiling halts (sizing model assumes
+    # equity ~= cap). Deferred: exposure-aware cap when the account is funded above cap.
+    broker = FakeBroker(buying_power="5000", cash="5000", equity="5000")
+    plan = {"target_portfolio": [_target_row("AAA", 0.1, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-equity-regime", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "live_pilot_equity_exceeds_cap_regime"
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["diagnostics"]["equity_usd"] == 5000.0
 
 
 # --------------------------------------------------------------------------- #
@@ -209,11 +254,12 @@ def test_clean_slate_min_trade_floor_blocks_dust(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 def test_held_and_targeted_buys_only_incremental(tmp_path: Path) -> None:
     # Hold 1 share of AAA @ $100; target 3 shares. No other holdings (no rotation).
+    # Pilot regime: equity ~= the $500 cap (weight 0.6 * $500 = $300 target = 3 sh).
     broker = FakeBroker(
-        buying_power="1000", cash="1000", equity="1000",
+        buying_power="500", cash="500", equity="500",
         positions=[{"symbol": "AAA", "qty": "1", "market_value": "100"}],
     )
-    plan = {"target_portfolio": [_target_row("AAA", 0.3, 100.0)]}
+    plan = {"target_portfolio": [_target_row("AAA", 0.6, 100.0)]}
 
     result, run_root = _run(broker, plan, dry_run="1", run_id="run-held", tmp_path=tmp_path)
 
