@@ -844,6 +844,37 @@ def _operator_execution_status(execution_payload: dict[str, object]) -> str:
     return "skipped"
 
 
+def _expected_market_closed_day(paper_summary: dict[str, object] | None) -> bool:
+    summary = paper_summary or {}
+    market_guard = summary.get("market_guard") if isinstance(summary, dict) else None
+    market_guard = market_guard if isinstance(market_guard, dict) else {}
+    reason = str(
+        market_guard.get("reason")
+        or summary.get("market_reason")
+        or summary.get("reason_code")
+        or ""
+    ).strip().upper()
+    return reason == "MARKET_CLOSED_DAY" and market_guard.get("is_trading_day") is False
+
+
+def _apply_market_closed_day_semantics(
+    execution_payload: dict[str, object],
+    paper_summary: dict[str, object] | None,
+) -> bool:
+    if not _expected_market_closed_day(paper_summary):
+        return False
+    execution_payload["execution_status"] = "MARKET_CLOSED"
+    execution_payload["operator_execution_status"] = "skipped"
+    execution_payload["halt_reason"] = None
+    execution_payload["execution_reason"] = "MARKET_CLOSED_DAY"
+    execution_payload["reason"] = "MARKET_CLOSED_DAY"
+    execution_payload["reason_code"] = "MARKET_CLOSED_DAY"
+    execution_payload["operator_action_required"] = False
+    execution_payload["market_closed_expected_skip"] = True
+    execution_payload.pop("planned_payload_drop_diagnostics", None)
+    return True
+
+
 def _enforce_buy_observation_contract(
     execution_payload: dict[str, object],
     paper_summary: dict[str, object],
@@ -940,6 +971,7 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "broker_responses": list((paper_summary or {}).get("alpaca_submissions") or []),
         "execution_outcome": payload.get("execution_outcome"),
         "execution_reason": payload.get("execution_reason"),
+        "reason_code": payload.get("reason_code"),
         "cash_rebalance_status": payload.get("cash_rebalance_status"),
         "broker_reject_status": payload.get("broker_reject_status"),
         "broker_reject_message": payload.get("broker_reject_message"),
@@ -1017,6 +1049,9 @@ def _write_execution_results_reliability_metadata(
             "execution_reliability_status": reliability_payload.get("overall_status"),
             "execution_reliability_top_reason": reliability_payload.get("top_failure_reason"),
             "execution_reliability_clean_run_streak": trend.get("clean_run_streak"),
+            "execution_reliability_operator_action_required": bool(
+                reliability_payload.get("operator_action_required")
+            ),
         }
     )
     safe_write_text(out_path, json.dumps(results, indent=2, default=str) + "\n", allow_overwrite=True)
@@ -1615,16 +1650,20 @@ def main(argv: list[str] | None = None) -> int:
             or execution_payload.get("executable_trades_count")
             or 0
         )
+        market_closed_expected_skip = _apply_market_closed_day_semantics(execution_payload, paper_summary)
         if (
             planned_payload_trade_count > 0
             and (submitted_count == 0 or executable_trades_count == 0)
             and not str(execution_payload.get("halt_reason") or "").strip()
+            and not market_closed_expected_skip
         ):
             reason = "planned_payload_trades_dropped_before_execution"
             execution_payload["execution_status"] = "HALTED"
             execution_payload["halt_reason"] = reason
             execution_payload["execution_reason"] = reason
             execution_payload["reason"] = reason
+            execution_payload["reason_code"] = reason
+            execution_payload["operator_action_required"] = True
             execution_payload["planned_payload_drop_diagnostics"] = {
                 "planned_payload_trade_count": planned_payload_trade_count,
                 "executable_trades_count": executable_trades_count,
@@ -1870,7 +1909,9 @@ def main(argv: list[str] | None = None) -> int:
             execution_payload_written=True,
             execution_stage_reached=True,
             terminal_status=(
-                "failed_pre_execution"
+                "market_closed"
+                if execution_payload.get("market_closed_expected_skip")
+                else "failed_pre_execution"
                 if execution_payload["operator_execution_status"] in {"failed", "partial"}
                 else ("no_action" if execution_payload["operator_execution_status"] == "skipped" else "success")
             ),
@@ -1887,7 +1928,11 @@ def main(argv: list[str] | None = None) -> int:
             broker_reject_status=(paper_summary or {}).get("broker_reject_status"),
             broker_reject_message=(paper_summary or {}).get("broker_reject_message"),
             execution_outcome=(paper_summary or {}).get("execution_outcome"),
-            execution_reason=(paper_summary or {}).get("execution_reason"),
+            execution_reason=execution_payload.get("execution_reason")
+            or (paper_summary or {}).get("execution_reason"),
+            reason_code=execution_payload.get("reason_code"),
+            operator_action_required=execution_payload.get("operator_action_required"),
+            market_closed_expected_skip=execution_payload.get("market_closed_expected_skip"),
             cash_rebalance_status=(paper_summary or {}).get("cash_rebalance_status"),
             broker_preflight_status=pretrade_policy.get("broker_preflight_status"),
             broker_preflight_account_status=pretrade_policy.get("broker_preflight_account_status"),
@@ -2022,6 +2067,9 @@ def main(argv: list[str] | None = None) -> int:
                 execution_reliability_top_reason=reliability_payload.get("top_failure_reason"),
                 execution_reliability_top_invariant=reliability_payload.get("top_failure_invariant_id"),
                 execution_reliability_clean_run_streak=trend_metrics.get("clean_run_streak"),
+                execution_reliability_operator_action_required=bool(
+                    reliability_payload.get("operator_action_required")
+                ),
                 execution_reliability_readiness_artifact=str(
                     Path("outputs") / "reliability" / "reliability_readiness.json"
                 ),

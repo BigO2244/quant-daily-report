@@ -84,6 +84,21 @@ def _us_market_holiday_dates(year: int) -> frozenset[str]:
     return frozenset(day.isoformat() for day in holidays)
 
 
+@lru_cache(maxsize=None)
+def _us_market_early_close_dates(year: int) -> frozenset[str]:
+    holiday_dates = _us_market_holiday_dates(year)
+    early_closes = {
+        _nth_weekday(year, 11, calendar.THURSDAY, 4) + dt.timedelta(days=1),
+        dt.date(year, 12, 24),
+        dt.date(year, 7, 3),
+    }
+    return frozenset(
+        day.isoformat()
+        for day in early_closes
+        if day.weekday() < 5 and day.isoformat() not in holiday_dates
+    )
+
+
 def _is_weekday(date_str: str) -> bool:
     return pd.Timestamp(date_str).weekday() < 5
 
@@ -99,6 +114,19 @@ def is_trading_day(date_str: str) -> bool:
         | _us_market_holiday_dates(date_obj.year + 1)
     )
     return date_obj.isoformat() not in holiday_dates
+
+
+def is_early_close_day(date_str: str) -> bool:
+    if not is_trading_day(date_str):
+        return False
+
+    date_obj = pd.Timestamp(date_str).date()
+    early_close_dates = (
+        _us_market_early_close_dates(date_obj.year - 1)
+        | _us_market_early_close_dates(date_obj.year)
+        | _us_market_early_close_dates(date_obj.year + 1)
+    )
+    return date_obj.isoformat() in early_close_dates
 
 
 def next_trading_day(date_str: str) -> str:
@@ -119,17 +147,28 @@ def prev_trading_day(date_str: str) -> str:
             return cand
 
 
+def _parse_hhmm(value: str) -> dt.time:
+    hour, minute = [int(x) for x in value.split(":", 1)]
+    return dt.time(hour=hour, minute=minute)
+
+
+def _session_close_time(date_str: str, cutoff_time_et: str) -> dt.time:
+    if is_early_close_day(date_str):
+        return dt.time(hour=13, minute=0)
+    return _parse_hhmm(cutoff_time_et)
+
+
 def market_session_status(
     run_date: str,
     now_et: dt.datetime | None,
     cutoff_time_et: str,
 ) -> MarketSessionStatus:
-    cutoff_hour, cutoff_minute = [int(x) for x in cutoff_time_et.split(":", 1)]
     run_day = pd.Timestamp(run_date).date()
     session_open_et = dt.datetime.combine(run_day, dt.time(hour=9, minute=30), tzinfo=ET_TZ)
+    session_close_time = _session_close_time(run_date, cutoff_time_et)
     session_close_et = dt.datetime.combine(
         run_day,
-        dt.time(hour=cutoff_hour, minute=cutoff_minute),
+        session_close_time,
         tzinfo=ET_TZ,
     )
 
@@ -142,7 +181,11 @@ def market_session_status(
     if now_et is not None:
         now_day = now_et.date().isoformat()
         today_open_et = dt.datetime.combine(now_et.date(), dt.time(hour=9, minute=30), tzinfo=ET_TZ)
-        today_close_et = dt.datetime.combine(now_et.date(), dt.time(hour=cutoff_hour, minute=cutoff_minute), tzinfo=ET_TZ)
+        today_close_et = dt.datetime.combine(
+            now_et.date(),
+            _session_close_time(now_day, cutoff_time_et),
+            tzinfo=ET_TZ,
+        )
         if is_trading_day(now_day) and now_et < today_open_et:
             next_open_et = today_open_et
         elif is_trading_day(now_day) and today_open_et <= now_et <= today_close_et:

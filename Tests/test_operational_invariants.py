@@ -13,8 +13,8 @@ from core.operational_invariants import (
 )
 
 
-TRADE_DATE = "2026-06-19"
-RUN_ID = "2026-06-19T093506-0400_reliability"
+TRADE_DATE = "2026-06-18"
+RUN_ID = "2026-06-18T093506-0400_reliability"
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> Path:
@@ -134,6 +134,97 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
     assert report["overall_status"] == "FAIL"
     assert report["top_failure_reason"] == "planned_payload_trades_dropped_before_execution"
     assert "Halt the run" in report["recommended_operator_actions"][0]
+
+
+def test_market_closed_day_nonempty_planned_payload_zero_submitted_is_expected_skip(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    trade_date = "2026-07-03"
+    run_id = "2026-07-03T093506-0400_reliability"
+    run_root = tmp_path / "outputs" / "runs" / run_id
+    (run_root / "audit").mkdir(parents=True)
+    (run_root / "broker").mkdir(parents=True)
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "execution_status": "MARKET_CLOSED",
+            "operator_execution_status": "skipped",
+            "planned_payload_trade_count": 8,
+            "planner_intended_trades_count": 8,
+            "execution_eligible_trades_count": 0,
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "orders_filled_count": 0,
+            "execution_reason": "MARKET_CLOSED_DAY",
+            "reason": "MARKET_CLOSED_DAY",
+            "reason_code": "MARKET_CLOSED_DAY",
+            "operator_action_required": False,
+            "market_closed_expected_skip": True,
+            "bundle_status": "MISSING",
+            "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}],
+        },
+    )
+    _write_json(
+        run_root / "execution_results.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "status": "MARKET_CLOSED",
+            "planned_payload_trade_count": 8,
+            "executable_trades_count": 0,
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "orders_filled_count": 0,
+            "execution_reason": "MARKET_CLOSED_DAY",
+            "reason": "MARKET_CLOSED_DAY",
+            "reason_code": "MARKET_CLOSED_DAY",
+            "broker_responses": [],
+        },
+    )
+    _write_json(
+        run_root / "operator_summary.json",
+        {
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "terminal_status": "market_closed",
+            "operator_execution_status": "skipped",
+            "planned_payload_trade_count": 8,
+            "planner_intended_trades_count": 8,
+            "execution_eligible_trades_count": 0,
+            "submitted_count": 0,
+            "accepted_count": 0,
+            "reason_code": "MARKET_CLOSED_DAY",
+            "operator_action_required": False,
+            "market_closed_expected_skip": True,
+            "bundle_status": "MISSING",
+        },
+    )
+
+    report = build_execution_reliability_report(
+        run_root=run_root,
+        trade_date=trade_date,
+        run_id=run_id,
+    )
+
+    planned = _result(report, "planned_payload_nonempty_zero_execution")
+    required_precompute = _result(report, "required_precompute_artifacts")
+    terminal_reason = _result(report, "terminal_status_requires_reason")
+    assert planned["status"] == "PASS"
+    assert planned["reason_code"] == "MARKET_CLOSED_DAY"
+    assert required_precompute["status"] == "PASS"
+    assert required_precompute["evidence"]["expected_precompute"] is False
+    assert terminal_reason["status"] == "PASS"
+    assert report["overall_status"] == "PASS"
+    assert report["classification"] == RELIABILITY_GREEN
+    assert report["operator_action_required"] is False
+    assert report["recommended_operator_actions"] == []
+    assert report["top_failure_reason"] is None
+    assert report["market_calendar"]["reason"] == "MARKET_CLOSED_DAY"
+    assert report["market_calendar"]["is_trading_day"] is False
 
 
 def test_empty_planned_payload_zero_submitted_is_legitimate_no_action(tmp_path: Path, monkeypatch) -> None:

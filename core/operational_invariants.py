@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from paper.run_manager import safe_write_text
+from paper.trading_calendar import XNYS_CALENDAR_NAME, is_trading_day
 
 
 STATUS_PASS = "PASS"
@@ -47,6 +48,7 @@ _TERMINAL_NEEDS_REASON = {
     "NO_ACTION",
     "SKIPPED",
     "SKIPPED_DUPLICATE",
+    "MARKET_CLOSED",
     "HALTED",
     "FAILED",
     "FAIL",
@@ -225,6 +227,25 @@ def _execution_reason(
             if reason:
                 return reason
     return None
+
+
+def _market_calendar_evidence(trade_date: Any) -> dict[str, Any]:
+    parsed = _parse_trade_date(trade_date)
+    if parsed is None:
+        return {
+            "calendar_name": XNYS_CALENDAR_NAME,
+            "trade_date": str(trade_date or ""),
+            "is_trading_day": None,
+            "reason": "MARKET_CALENDAR_DATE_INVALID",
+        }
+    date_str = parsed.isoformat()
+    open_session = is_trading_day(date_str)
+    return {
+        "calendar_name": XNYS_CALENDAR_NAME,
+        "trade_date": date_str,
+        "is_trading_day": open_session,
+        "reason": "MARKET_OPEN_DAY" if open_session else "MARKET_CLOSED_DAY",
+    }
 
 
 def _target_cash_values(
@@ -528,9 +549,23 @@ def build_execution_reliability_report(
         execution_results=execution_results,
         operator_summary=operator_summary,
     )
+    market_calendar = _market_calendar_evidence(trade_date)
+    expected_market_closed_day = market_calendar.get("reason") == "MARKET_CLOSED_DAY"
     results: list[dict[str, Any]] = []
 
-    if counts["planned_payload_trade_count"] > 0 and (
+    if expected_market_closed_day:
+        results.append(
+            _result(
+                invariant_id="planned_payload_nonempty_zero_execution",
+                status=STATUS_PASS,
+                severity=SEVERITY_INFO,
+                reason_code="MARKET_CLOSED_DAY",
+                human_summary="Zero submitted orders are expected on a full market-closed day.",
+                operator_action="No operator action required.",
+                evidence=counts | {"market_calendar": market_calendar},
+            )
+        )
+    elif counts["planned_payload_trade_count"] > 0 and (
         counts["executable_trades_count"] == 0 or counts["submitted_count"] == 0
     ):
         results.append(
@@ -705,8 +740,15 @@ def build_execution_reliability_report(
         _upper(execution_payload.get("bundle_status")),
         _upper(operator_summary.get("bundle_status")),
     ]
-    stale_markers = [status for status in precompute_statuses if "STALE" in status or status in {"FAILED", "MISSING"}]
-    expected_precompute = _upper(execution_payload.get("execution_source")) == "PLANNED_PAYLOAD_EXACT" or counts["planned_payload_trade_count"] > 0
+    stale_markers = [
+        status
+        for status in precompute_statuses
+        if not expected_market_closed_day and ("STALE" in status or status in {"FAILED", "MISSING"})
+    ]
+    expected_precompute = not expected_market_closed_day and (
+        _upper(execution_payload.get("execution_source")) == "PLANNED_PAYLOAD_EXACT"
+        or counts["planned_payload_trade_count"] > 0
+    )
     missing_precompute = expected_precompute and not precompute_payload_path.exists()
     if missing_precompute or stale_markers:
         results.append(
@@ -720,6 +762,7 @@ def build_execution_reliability_report(
                 evidence={
                     "expected_precompute": expected_precompute,
                     "stale_markers": stale_markers,
+                    "market_calendar": market_calendar,
                     "planned_execution_payload": _source_probe(precompute_payload_path),
                     "precompute_contract": _source_probe(precompute_contract_path),
                 },
@@ -736,6 +779,7 @@ def build_execution_reliability_report(
                 operator_action="No operator action required.",
                 evidence={
                     "expected_precompute": expected_precompute,
+                    "market_calendar": market_calendar,
                     "planned_execution_payload": _source_probe(precompute_payload_path),
                     "precompute_contract": _source_probe(precompute_contract_path),
                 },
@@ -902,6 +946,8 @@ def build_execution_reliability_report(
         "summary_counts": summary_counts,
         "trend_metrics": trend_metrics,
         "recommended_operator_actions": recommended_actions,
+        "operator_action_required": bool(recommended_actions),
+        "market_calendar": market_calendar,
         "source_artifact_paths": source_artifacts,
     }
 

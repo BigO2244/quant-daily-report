@@ -39,3 +39,26 @@ def test_juneteenth_and_observed_fixed_holidays_are_market_closed() -> None:
 def test_early_close_dates_remain_trading_sessions() -> None:
     assert trading_calendar.is_trading_day("2026-11-27") is True
     assert trading_calendar.is_trading_day("2026-12-24") is True
+    assert trading_calendar.is_early_close_day("2026-11-27") is True
+    assert trading_calendar.is_early_close_day("2026-12-24") is True
+    assert trading_calendar.is_early_close_day("2026-07-03") is False
+
+
+def test_early_close_session_uses_one_pm_close() -> None:
+    before_close = trading_calendar.market_session_status(
+        run_date="2026-11-27",
+        now_et=dt.datetime(2026, 11, 27, 12, 59, tzinfo=ZoneInfo("America/New_York")),
+        cutoff_time_et="15:45",
+    )
+    after_close = trading_calendar.market_session_status(
+        run_date="2026-11-27",
+        now_et=dt.datetime(2026, 11, 27, 13, 1, tzinfo=ZoneInfo("America/New_York")),
+        cutoff_time_et="15:45",
+    )
+
+    assert before_close.is_trading_day is True
+    assert before_close.is_open_now is True
+    assert before_close.session_close_et.isoformat() == "2026-11-27T13:00:00-05:00"
+    assert after_close.is_trading_day is True
+    assert after_close.is_open_now is False
+    assert after_close.reason == "AFTER_MARKET_CUTOFF"
