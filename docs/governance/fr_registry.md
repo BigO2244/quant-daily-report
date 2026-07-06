@@ -11,6 +11,11 @@ Methodology belongs in `docs/governance/fr_governance_model.md`.
 The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md`
 is the canonical strategic doctrine for strategy, sleeve, promotion, and
 portfolio-construction work.
+The Phase 2 Alpha Strategy at
+`docs/governance/caerus_phase2_alpha_strategy.md` is the canonical gate for
+future alpha-generation research. New research FRs should cite its Phase 2
+Hypothesis, expected contribution, required evidence, RDP/data readiness status,
+and promotion-gate impact in their notes or linked packet.
 
 ## FR File Location Audit
 
@@ -58,10 +63,8 @@ Archived copies are retained for auditability.
 | FR-072 | Governance Hygiene Agent | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_072_governance_hygiene_agent.md` | ACTIVE | Read-only governance auditor is implemented with deterministic tests; output artifacts only, no auto-patch, auto-commit, or cron. Phase B scheduling requires separate approval. |
 | FR-073 | Sleeve Numeric Diagnostics and Cash-Routing Explainability | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Diagnostic-only sleeve numeric trace and cash-route explainability. Produces `outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json` when available; no execution, allocation, sizing, ranking, or risk-threshold behavior change. |
 | FR-074 | Execution Reliability Framework | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_074_execution_reliability_framework.md` | ACTIVE | Phase A observe-first operational invariant framework. Produces `outputs/runs/<RUN_ID>/audit/execution_reliability_report_<TRADE_DATE>.json`, normalizes existing execution integrity, target-attainment, reconciliation, precompute, and sleeve numeric evidence, and surfaces deterministic reliability score/status in operator summary without changing strategy, sleeve, sizing, allocation, cash policy, or broker submission semantics. |
-| FR-DH | Data Hydration Governance Package | `DRAFT_RESEARCH` | `docs/governance/fr_active/data_hydration/fr_dh_000_data_hydration_index.md` | ACTIVE | Read-only/observe-only foundation for canonical research data hydration: catalog, source policy, credential-safe probes, raw/normalized/feature/manifest layout, freshness, P1/P2/P3 normalization, fundamental and macro feature artifacts, validators, model-facing API scaffolding, data observability manifest, data-trust summary, advisory sleeve migration readiness, and dashboard/email trust visibility planning. No execution, broker, scheduler, allocation, model-consumer, sleeve-consumer, or promotion behavior change. |
-
-| FR-085 | Shadow Scorecard Publication Integrity Gates | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Reporting-integrity publication gates for the Shadow CIO scorecard (freshness + internal-consistency). Implemented on branch `fix/scorecard-publication-gates` (draft PR #117, commit `2ee5cd5`); not yet deployed. Moves to the deployed tables after merge and observation. |
-| FR-086 | Shadow Refresh Alpha Inception Handling & NAV Restatement | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | NAV-continuity freeze root-caused to mixed/legacy-scale history; date-aware alpha inception handling + VM NAV restatement (29 rows, 2026-05-12 → 2026-06-23). Implemented on branch `fix/shadow-refresh-freeze` (draft PR #118, commit `7529c95`); not yet deployed. Moves to the deployed tables after merge and observation. |
+| FR-105 | Global Portfolio Optimizer and Decision Provenance | `ACTIVE_RESEARCH` | `docs/governance/fr_active/fr_105_global_portfolio_optimizer_and_decision_provenance.md` | ACTIVE | Research-only initiative for PIT global optimizer, optimizer-derived holding count, and decision provenance. No trading, allocation, sizing, broker submission, scheduler, sleeve, risk-policy, or promotion behavior change. The initiating prompt suggested FR-075, but FR-075 is already occupied by the operational controls framework. |
+| FR-DH | Data Hydration Governance Package | `DRAFT_RESEARCH` | `docs/governance/fr_active/data_hydration/fr_dh_000_data_hydration_index.md` | ACTIVE | Read-only/observe-only foundation for canonical research data hydration: catalog, source policy, credential-safe probes, raw/normalized/feature/manifest layout, freshness, P1/P2/P3 normalization, fundamental and macro feature artifacts, validators, model-facing API scaffolding, data observability manifest, data-trust summary, advisory sleeve migration readiness, architecture retrospective at `docs/architecture/research_data_platform.md`, and dashboard/email trust visibility planning. No execution, broker, scheduler, allocation, model-consumer, sleeve-consumer, or promotion behavior change. |
 
 ## FR Numbering Exceptions
 
@@ -134,6 +137,12 @@ and past their observation criteria:
   and non-promotional. FR-068 incompleteness blocks decision-grade historical
   conclusions and promotions, not the collection of forward pilot evidence
   under FR-104 controls.
+- FR-105: Global Portfolio Optimizer and Decision Provenance
+  (`ACTIVE_RESEARCH`) is research-only and non-executional. It opens the next
+  governed optimizer/provenance lane after the 2026-06-25 execution transparency
+  audit. It does not authorize optimizer replacement, allocation changes,
+  sleeve top-N changes, broker submission changes, live/paper promotion, or
+  production concentration changes.
 - FR-DH: Data Hydration Governance Package (`DRAFT_RESEARCH`) is a non-numbered
   governance and read-only implementation category for canonical research data
   hydration. It does not consume a numeric FR id or change execution, broker
@@ -142,6 +151,9 @@ and past their observation criteria:
   FR-DH-013 adds the canonical research data catalog as the master inventory and
   data dictionary for datasets that may be ingested, hydrated, validated,
   exposed, changed, or retired.
+  `docs/architecture/research_data_platform.md` is the permanent technical
+  retrospective for the implemented RDP architecture and observe-only migration
+  evidence.
   The read-only observability manifest summarizes freshness, coverage,
   validation, lineage, PIT status, source artifacts, versions/stages, and
   blocker reasons for cataloged datasets without changing consumers.

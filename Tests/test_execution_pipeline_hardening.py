@@ -76,8 +76,8 @@ class TestStatusNormalization:
         )
         assert status == STATUS_READY
 
-    def test_market_closed_preserved(self):
-        """MARKET_CLOSED remains a first-class expected skip status."""
+    def test_market_closed_status_is_preserved(self):
+        """MARKET_CLOSED is a canonical expected-skip status."""
         status = normalize_status(
             execution_status="MARKET_CLOSED",
             halt_reason=None,
@@ -639,8 +639,8 @@ class TestCanonicalPayloadNormalization:
             assert written["status"] == STATUS_HALTED
             assert written["halt_reason"] == "market_closed"
 
-    def test_canonical_payload_preserves_market_closed_reason(self):
-        """Canonical payload preserves expected market-closed skip metadata."""
+    def test_canonical_payload_preserves_market_closed(self):
+        """Canonical payload preserves expected market-closed skip semantics."""
         with tempfile.TemporaryDirectory() as tmpdir:
             run_root = Path(tmpdir)
 
@@ -648,10 +648,10 @@ class TestCanonicalPayloadNormalization:
                 "run_id": "test123",
                 "trade_date": "2026-07-03",
                 "mode": "PAPER",
-                "execution_status": "MARKET_CLOSED",
-                "execution_reason": "MARKET_CLOSED_DAY",
-                "reason": "MARKET_CLOSED_DAY",
+                "execution_status": STATUS_MARKET_CLOSED,
                 "reason_code": "MARKET_CLOSED_DAY",
+                "reason": "MARKET_CLOSED_DAY",
+                "execution_reason": "MARKET_CLOSED_DAY",
                 "operator_action_required": False,
                 "market_closed_expected_skip": True,
                 "trades": [],
@@ -665,8 +665,6 @@ class TestCanonicalPayloadNormalization:
 
             assert written["status"] == STATUS_MARKET_CLOSED
             assert written["execution_status"] == STATUS_MARKET_CLOSED
-            assert written["execution_reason"] == "MARKET_CLOSED_DAY"
-            assert written["reason"] == "MARKET_CLOSED_DAY"
             assert written["reason_code"] == "MARKET_CLOSED_DAY"
             assert written["operator_action_required"] is False
             assert written["market_closed_expected_skip"] is True

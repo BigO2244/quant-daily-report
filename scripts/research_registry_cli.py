@@ -156,6 +156,14 @@ def _integrity_objects_by_run_id(query: RegistryQuery) -> dict[str, Any]:
 
 
 def _run_record(run_obj: Any, integrity_obj: Any | None = None) -> dict[str, Any]:
+    execution_results = run_obj.data.get("execution_results") if isinstance(run_obj.data.get("execution_results"), dict) else {}
+    execution_payload = run_obj.data.get("execution_payload") if isinstance(run_obj.data.get("execution_payload"), dict) else {}
+    lifecycle_summary = (
+        execution_results.get("candidate_trade_lifecycle_summary")
+        or execution_payload.get("candidate_trade_lifecycle_summary")
+        or run_obj.data.get("candidate_trade_lifecycle_summary")
+        or {}
+    )
     return {
         "trade_date": run_obj.data.get("trade_date") or run_obj.identity.get("trade_date"),
         "run_id": run_obj.data.get("run_id"),
@@ -164,6 +172,15 @@ def _run_record(run_obj: Any, integrity_obj: Any | None = None) -> dict[str, Any
         "submitted_count": run_obj.data.get("submitted_count"),
         "accepted_count": run_obj.data.get("accepted_count"),
         "rejected_count": run_obj.data.get("rejected_count"),
+        "planned_payload_trade_count": execution_results.get("planned_payload_trade_count") or execution_payload.get("planned_payload_trade_count") or lifecycle_summary.get("precompute_candidates"),
+        "executable_filter_passed_count": execution_results.get("executable_filter_passed_count") or execution_payload.get("executable_filter_passed_count") or lifecycle_summary.get("passed_executable_filter"),
+        "executable_trades_count": execution_results.get("executable_trades_count") or execution_payload.get("execution_eligible_trades_count") or execution_payload.get("executable_trades_count"),
+        "final_executable_trades_count": execution_results.get("final_executable_trades_count") or execution_results.get("executable_trades_count") or execution_payload.get("execution_eligible_trades_count") or execution_payload.get("executable_trades_count"),
+        "intended_orders_count": execution_results.get("intended_orders_count") or execution_payload.get("intended_orders_count") or lifecycle_summary.get("intended_orders"),
+        "filled_count": execution_results.get("orders_filled_count") or execution_payload.get("orders_filled_count") or lifecycle_summary.get("filled"),
+        "candidate_trade_lifecycle_artifact": execution_results.get("candidate_trade_lifecycle_artifact") or execution_payload.get("candidate_trade_lifecycle_artifact"),
+        "candidate_trade_lifecycle_reasons": lifecycle_summary.get("suppression_reason_counts") or {},
+        "candidate_trade_clipping_reasons": lifecycle_summary.get("clipping_reason_counts") or {},
         "integrity_status": (
             integrity_obj.data.get("status")
             if integrity_obj is not None

@@ -54,6 +54,13 @@ def _fmt_number(value: object, *, digits: int = 2) -> str:
     return f"{numeric:.{digits}f}"
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return default
+
+
 def _first_present(*values: Any) -> Any:
     for value in values:
         if value not in (None, ""):
@@ -141,6 +148,14 @@ def _latest_live_pilot_plan(repo_root: Path) -> Path | None:
         return None
     plans = sorted(plans_root.glob("live_pilot_plan_*.json"), key=lambda item: (item.stat().st_mtime, item.name))
     return plans[-1] if plans else None
+
+
+def _source_date_warning(label: str, source_trade_date: Any, requested_trade_date: str | None) -> str | None:
+    source = str(source_trade_date or "").strip()
+    requested = str(requested_trade_date or "").strip()
+    if not source or not requested or source == requested:
+        return None
+    return f"{label} source trade date {source} differs from email trade date {requested}"
 
 
 def _role_for(strategy_id: str, registry_role: str, manifest: Mapping[str, Any], raw: Mapping[str, Any]) -> str:
@@ -243,32 +258,44 @@ def build_dynamic_sleeve_rows(repo_root: Path | str, trade_date: str) -> dict[st
         sleeve_id = str(manifest.get("sleeve_id") or key).strip()
         if not sleeve_id:
             continue
+        manifest_stage = str(manifest.get("lifecycle_stage") or "unavailable")
+        inactive_manifest_only = manifest_stage.strip().lower() in {
+            "research",
+            "spec_only",
+            "planned",
+            "inactive",
+        }
         rows.append(
             {
                 "strategy_id": strategy_id or sleeve_id,
                 "display_name": str(manifest.get("display_name") or sleeve_id),
                 "sleeve_id": sleeve_id,
                 "role": "alpha" if "alpha" in sleeve_id.lower() else "manifest_only",
-                "lifecycle": str(manifest.get("lifecycle_stage") or "research"),
+                "lifecycle": manifest_stage,
                 "registry_status": "manifest_only",
-                "manifest_stage": str(manifest.get("lifecycle_stage") or "unavailable"),
-                "artifact_status": "UNAVAILABLE",
-                "data_status": "UNAVAILABLE",
+                "manifest_stage": manifest_stage,
+                "artifact_status": "INACTIVE_NOT_EXPECTED" if inactive_manifest_only else "UNAVAILABLE",
+                "data_status": "NOT_EXPECTED" if inactive_manifest_only else "UNAVAILABLE",
                 "today_return": "unavailable",
                 "since_inception_return": "unavailable",
                 "turnover": "unavailable",
                 "concentration": "unavailable",
-                "readiness": "UNAVAILABLE",
+                "readiness": "not_applicable" if inactive_manifest_only else "UNAVAILABLE",
                 "readiness_confidence": "unavailable",
                 "artifact_path": "unavailable",
             }
         )
+
+    shadow_warning = None
+    if shadow_source not in {"CURRENT_DATE", "MISSING"}:
+        shadow_warning = f"Shadow artifacts are {shadow_source}; requested trade date is {trade_date}"
 
     return {
         "status": "OK" if rows and registry_error is None else "DEGRADED" if rows else "UNAVAILABLE",
         "registry_error": registry_error,
         "shadow_source": shadow_source,
         "shadow_dir": str(shadow_dir) if shadow_dir else "unavailable",
+        "source_warning": shadow_warning,
         "rows": rows,
     }
 
@@ -280,18 +307,22 @@ def _open_order_count(snapshot: Mapping[str, Any]) -> int:
     return 0
 
 
-def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
+def build_live_pilot_account_payload(repo_root: Path | str, trade_date: str | None = None) -> dict[str, Any]:
     root = Path(repo_root)
     run_root = _latest_live_pilot_run(root)
     latest_plan = _latest_live_pilot_plan(root)
     if run_root is None:
         plan_payload = _load_json(latest_plan) if latest_plan else {}
+        latest_plan_trade_date = plan_payload.get("trade_date")
         return {
             "status": "NO_LIVE_PILOT_RUN",
             "latest_run_id": "unavailable",
             "latest_run_root": "unavailable",
             "latest_plan_path": str(latest_plan) if latest_plan else "unavailable",
             "latest_plan_status": plan_payload.get("status") or "unavailable",
+            "latest_plan_trade_date": latest_plan_trade_date or "unavailable",
+            "source_trade_date": latest_plan_trade_date or "unavailable",
+            "source_warning": _source_date_warning("Live pilot plan", latest_plan_trade_date, trade_date),
             "account": {},
             "open_orders": [],
             "positions": [],
@@ -371,7 +402,12 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         execution_results.get("remaining_blocked_or_suppressed_buy_count"),
         summary.get("remaining_blocked_or_suppressed_buy_count"),
         evidence.get("remaining_blocked_or_suppressed_buy_count"),
-        max(int(approved_buy_count or 0) - int(submitted_buy_count or 0), 0),
+        max(_safe_int(approved_buy_count) - _safe_int(submitted_buy_count), 0),
+    )
+    source_trade_date = _first_present(
+        summary.get("trade_date"),
+        execution_results.get("trade_date"),
+        evidence.get("trade_date"),
     )
     return {
         "status": "OK",
@@ -379,6 +415,9 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         "latest_run_root": str(run_root),
         "latest_plan_path": summary.get("plan_path") or "unavailable",
         "latest_plan_status": "unavailable",
+        "latest_run_trade_date": source_trade_date or "unavailable",
+        "source_trade_date": source_trade_date or "unavailable",
+        "source_warning": _source_date_warning("Live pilot run", source_trade_date, trade_date),
         "account": account,
         "open_orders": open_orders,
         "positions": positions,
@@ -393,7 +432,7 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         "remaining_blocked_or_suppressed_buy_count": remaining_blocked_or_suppressed_buy_count,
         "blocked_or_suppressed_buy_reason": (
             summary.get("reason_code")
-            if int(remaining_blocked_or_suppressed_buy_count or 0) > 0
+            if _safe_int(remaining_blocked_or_suppressed_buy_count) > 0
             else "none"
         ),
         "entry_execution_policy": _first_present(
@@ -454,7 +493,7 @@ def _paper_live_divergence(repo_root: Path) -> str:
 
 def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dict[str, str]:
     sleeve_payload = build_dynamic_sleeve_rows(repo_root, trade_date)
-    live_payload = build_live_pilot_account_payload(repo_root)
+    live_payload = build_live_pilot_account_payload(repo_root, trade_date)
 
     text_lines = [
         "",
@@ -480,7 +519,9 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
                     str(row.get("readiness")),
                 ]
             )
-        )
+    )
+    if sleeve_payload.get("source_warning"):
+        text_lines.append(f"Shadow source warning: {sleeve_payload.get('source_warning')}")
     if sleeve_payload.get("registry_error"):
         text_lines.append(f"Registry warning: {sleeve_payload.get('registry_error')}")
 
@@ -493,6 +534,7 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
             f"Status: {live_payload.get('status')}",
             f"Latest live pilot run id: {live_payload.get('latest_run_id')}",
             f"Latest live pilot run root: {live_payload.get('latest_run_root')}",
+            f"Live pilot source trade date: {live_payload.get('source_trade_date')}",
             f"Cash: {_fmt_money(account.get('cash'))}",
             f"Equity: {_fmt_money(account.get('equity') or account.get('portfolio_value'))}",
             f"Buying power: {_fmt_money(account.get('buying_power'))}",
@@ -517,6 +559,8 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
             f"Blocked/suppressed reason: {live_payload.get('blocked_or_suppressed_buy_reason')}",
         ]
     )
+    if live_payload.get("source_warning"):
+        text_lines.append(f"Live pilot source warning: {live_payload.get('source_warning')}")
 
     sleeve_rows_html = "".join(
         "<tr>"
@@ -544,6 +588,12 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
         "<h3>Dynamic Sleeve Inventory</h3>"
         f"<p><b>Status:</b> {html.escape(str(sleeve_payload.get('status')))}; "
         f"<b>Shadow artifact source:</b> {html.escape(str(sleeve_payload.get('shadow_source')))}</p>"
+        + (
+            f"<p><b>Shadow source warning:</b> {html.escape(str(sleeve_payload.get('source_warning')))}</p>"
+            if sleeve_payload.get("source_warning")
+            else ""
+        )
+        +
         f"<table style='{html_table_style}'>"
         "<thead><tr>"
         + "".join(
@@ -567,7 +617,14 @@ def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dic
         "<h3>Live Pilot / Account</h3>"
         f"<p><b>Status:</b> {html.escape(str(live_payload.get('status')))} | "
         f"<b>Run:</b> {html.escape(str(live_payload.get('latest_run_id')))} | "
-        f"<b>Reconciliation:</b> {html.escape(str(live_payload.get('reconciliation_status')))}</p>"
+        f"<b>Reconciliation:</b> {html.escape(str(live_payload.get('reconciliation_status')))} | "
+        f"<b>Source trade date:</b> {html.escape(str(live_payload.get('source_trade_date')))}</p>"
+        + (
+            f"<p><b>Live pilot source warning:</b> {html.escape(str(live_payload.get('source_warning')))}</p>"
+            if live_payload.get("source_warning")
+            else ""
+        )
+        +
         f"<p><b>Cash:</b> {html.escape(_fmt_money(account.get('cash')))} | "
         f"<b>Equity:</b> {html.escape(_fmt_money(account.get('equity') or account.get('portfolio_value')))} | "
         f"<b>Buying power:</b> {html.escape(_fmt_money(account.get('buying_power')))} | "

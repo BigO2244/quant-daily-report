@@ -156,6 +156,51 @@ def test_detects_missing_doctrine_references(tmp_path: Path) -> None:
     assert "AGENTS.md" in doctrine_files
 
 
+def test_phase2_alpha_gate_warns_when_required_fields_missing(tmp_path: Path) -> None:
+    _fixture_repo(tmp_path)
+    _write(
+        tmp_path / "docs/governance/CURRENT_RESEARCH_ROADMAP.md",
+        "# Roadmap\n\n"
+        "See docs/governance/caerus_investment_doctrine.md.\n\n"
+        "Phase 2 Alpha Gate:\n"
+        "- Expected alpha/risk contribution: event alpha.\n",
+    )
+
+    payload = gha._build_audit(tmp_path, gha._today_from_args("2026-06-11"))
+
+    findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["category"] == "phase2_alpha_gate"
+    ]
+    assert findings
+    assert findings[0]["severity"] == "WARN"
+    assert "Phase 2 Hypothesis" in findings[0]["message"]
+
+
+def test_phase2_alpha_gate_accepts_complete_block(tmp_path: Path) -> None:
+    _fixture_repo(tmp_path)
+    _write(
+        tmp_path / "docs/governance/CURRENT_RESEARCH_ROADMAP.md",
+        "# Roadmap\n\n"
+        "See docs/governance/caerus_investment_doctrine.md.\n\n"
+        "Phase 2 Alpha Gate:\n"
+        "- Phase 2 Hypothesis: P2-H1.\n"
+        "- Expected alpha/risk contribution: event alpha.\n"
+        "- Required evidence: PIT event study.\n"
+        "- RDP/data readiness status: observe-only.\n"
+        "- Promotion gate impact: research-only.\n",
+    )
+
+    payload = gha._build_audit(tmp_path, gha._today_from_args("2026-06-11"))
+
+    assert not any(
+        finding["category"] == "phase2_alpha_gate"
+        and finding["file"] == "docs/governance/CURRENT_RESEARCH_ROADMAP.md"
+        for finding in payload["findings"]
+    )
+
+
 def test_registry_paths_resolve_from_repo_root() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     assert gha._resolve_repo_relative_path(repo_root, "docs/governance/fr_archive/fr_050_phoenix_research_spec.md").exists()

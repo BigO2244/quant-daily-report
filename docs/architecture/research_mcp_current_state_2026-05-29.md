@@ -3,6 +3,25 @@
 **Snapshot date:** 2026-05-29 · **Author:** Caerus engineering ·
 **Type:** point-in-time conformance + roadmap audit
 
+Historical status: this is a point-in-time snapshot, not the current MCP
+capability inventory. Verify current tool and capability counts from
+`research_registry/`, `research_registry/mcp_server/`, and current tests before
+making present-tense claims.
+
+## Document Contract
+
+| Field | Value |
+|---|---|
+| Purpose | Record point-in-time Research MCP implementation state as of 2026-05-29. |
+| Owner | Caerus engineering named in header; repository verification still required for current-state claims. |
+| Inputs | Research MCP code, research registry code, tests, and generated MCP artifacts available on 2026-05-29. |
+| Outputs | Historical MCP capability and gap assessment. |
+| Related Documents | `docs/architecture/caerus_research_mcp_architecture.md`, `docs/architecture/semantics/README.md`, `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Tests | Research registry and MCP tests listed in `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Implementation | `research_registry/`, `research_registry/mcp_server/`, MCP scripts. |
+| Related Artifacts | `outputs/research_mcp/`, `outputs/shadow_candidates/`. |
+| Known Gaps | Historical snapshot; refresh from code/tests before using it as current capability inventory. |
+
 This document is a deliberate counter-balance to
 [`caerus_research_mcp_architecture.md`](caerus_research_mcp_architecture.md),
 which is the **aspirational** design intent (1320 lines, drafted
@@ -67,7 +86,7 @@ wrap** with four terminal statuses: `OK`, `NEEDS_DATA`,
 broken by registry order (deterministic). No LLM call, no external
 network, no execution-path coupling.
 
-### A.4 Capability matrix (canonical snapshot)
+### A.4 Capability matrix (point-in-time snapshot)
 
 | Capability | Status | Routed tool | Required artifacts | Questions answered today |
 |---|---|---|---|---|

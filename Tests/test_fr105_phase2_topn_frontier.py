@@ -237,22 +237,14 @@ def _phase01_completeness(*, sparse: bool = False, waived_score_source: bool = F
     }
 
 
-def _write_inputs(
-    root: Path,
-    *,
-    sparse: bool = False,
-    waived_score_source: bool = False,
-) -> tuple[Path, Path]:
+def _write_inputs(root: Path, *, sparse: bool = False, waived_score_source: bool = False) -> tuple[Path, Path]:
     out = root / "outputs" / "research" / "fr_105" / CONTRACT_ID
     contract = out / "global_optimizer_replay_contract.json"
     baseline = out / "phase1_current_policy_baseline.json"
     completeness = out / "phase01_artifact_completeness.json"
     _write_json(contract, _phase0_contract(sparse=sparse))
     _write_json(baseline, _phase1_baseline(sparse=sparse))
-    _write_json(
-        completeness,
-        _phase01_completeness(sparse=sparse, waived_score_source=waived_score_source),
-    )
+    _write_json(completeness, _phase01_completeness(sparse=sparse, waived_score_source=waived_score_source))
     return contract, baseline
 
 
@@ -306,10 +298,7 @@ def test_phase2_preserves_score_source_waiver_context_while_blocking_ranking(tmp
     assert gate["alpha_chase_evaluation_ready"] is False
     assert gate["shadow_comparison_ready"] is False
     assert gate["waived_gaps"] == ["score_source"]
-    assert (
-        gate["score_source_unavailable_waiver"]["reason"]
-        == "historical_non_weight_score_source_not_retained"
-    )
+    assert gate["score_source_unavailable_waiver"]["reason"] == "historical_non_weight_score_source_not_retained"
     assert frontier["score_source_status"]["reason"] == "score_source_unavailable_for_score_driven_ranking"
     assert frontier["data_quality"]["diagnostics"] == [
         "phase01_score_source_unavailable_blocks_score_driven_ranking"

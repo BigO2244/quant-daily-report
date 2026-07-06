@@ -400,6 +400,30 @@ def _artifact_status_fixture(tmp_path: Path) -> Path:
     _write_json(run / "execution_results.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "status": "EXECUTED"})
     _write_json(run / "operator_summary.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "terminal_status": "success"})
     _write_json(run / "audit" / "execution_integrity.json", {"run_id": "phase6-run", "trade_date": "2026-05-28", "status": "OK"})
+    _write_json(
+        run / "audit" / "candidate_trade_lifecycle_2026-05-28.json",
+        {
+            "schema_version": "candidate_trade_lifecycle.v1",
+            "trade_date": "2026-05-28",
+            "counts": {
+                "precompute_candidates": 8,
+                "passed_executable_filter": 6,
+                "intended_orders": 6,
+                "submitted": 2,
+                "accepted": 2,
+                "filled": 2,
+                "suppressed": 6,
+                "clipped": 1,
+                "suppression_reason_counts": {
+                    "buy_blocked_insufficient_buying_power": 4,
+                    "min_notional": 2,
+                },
+                "clipping_reason_counts": {
+                    "post_sell_rebudget_capital_clipped": 1,
+                },
+            },
+        },
+    )
 
     broker = outputs / "broker"
     _write_json(broker / "broker_snapshot_latest.json", {"trade_date": "2026-05-28"})
@@ -473,6 +497,18 @@ def test_artifact_status_discovers_latest_artifacts_read_only(tmp_path: Path) ->
     assert payload["latest_precompute"]["missing_required"] == []
     assert payload["latest_execution"]["run_id"] == "phase6-run"
     assert payload["latest_execution"]["integrity_status"] == "OK"
+    assert payload["latest_execution"]["planned_payload_trade_count"] == 8
+    assert payload["latest_execution"]["executable_filter_passed_count"] == 6
+    assert payload["latest_execution"]["intended_orders_count"] == 6
+    assert payload["latest_execution"]["filled_count"] == 2
+    assert payload["latest_execution"]["candidate_trade_lifecycle_reasons"] == {
+        "buy_blocked_insufficient_buying_power": 4,
+        "min_notional": 2,
+    }
+    assert payload["latest_execution"]["candidate_trade_clipping_reasons"] == {
+        "post_sell_rebudget_capital_clipped": 1,
+    }
+    assert payload["latest_execution"]["files"]["candidate_trade_lifecycle"]["exists"] is True
     assert payload["latest_broker_confirmation"]["status"] == "OK"
     assert payload["latest_shadow"]["trade_date"] == "2026-05-28"
     assert payload["latest_research_packet"]["packet_status"] == "READY"

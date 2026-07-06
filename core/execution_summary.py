@@ -35,9 +35,17 @@ EXECUTION_HISTORY_COLUMNS = [
     "broker_status",
     "reconciliation_status",
     "signals_generated",
+    "planned_payload_trade_count",
+    "executable_filter_passed_count",
+    "executable_trades_count",
+    "final_executable_trades_count",
+    "intended_orders_count",
     "orders_submitted",
+    "orders_accepted",
     "orders_filled",
     "orders_rejected",
+    "candidate_trade_lifecycle_artifact",
+    "candidate_trade_lifecycle_reasons",
     "turnover",
     "trade_decision",
     "primary_reason",
@@ -109,11 +117,106 @@ def _infer_status(
     return "UNKNOWN"
 
 
+def _as_dict(value: Any) -> dict:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _count_filled_responses(responses: list[Any]) -> int | None:
+    if not responses:
+        return None
+    filled_statuses = {"FILLED", "FILLED_ESTIMATE"}
+    count = 0
+    for raw in responses:
+        row = raw if isinstance(raw, dict) else {}
+        status = str(row.get("latest_status") or row.get("status") or "").upper()
+        try:
+            filled_qty = float(row.get("filled_qty") or 0.0)
+        except (TypeError, ValueError):
+            filled_qty = 0.0
+        if status in filled_statuses or filled_qty > 1e-12:
+            count += 1
+    return count
+
+
+def _extract_submitted_tickers_by_side(
+    execution_payload: dict | None,
+    execution_results: dict | None,
+    side: str,
+) -> str:
+    lifecycle_candidates = _as_list(
+        _as_dict(execution_results).get("candidate_trade_lifecycle")
+        or _as_dict(execution_payload).get("candidate_trade_lifecycle")
+    )
+    tickers = {
+        str(row.get("ticker") or "").strip().upper()
+        for row in lifecycle_candidates
+        if isinstance(row, dict)
+        and bool(row.get("submitted"))
+        and str(row.get("side") or "").upper() == side.upper()
+        and str(row.get("ticker") or "").strip()
+    }
+    if lifecycle_candidates:
+        return "|".join(sorted(tickers))
+
+    broker_rows = _as_list(_as_dict(execution_results).get("broker_responses"))
+    tickers = {
+        str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+        for row in broker_rows
+        if isinstance(row, dict)
+        and str(row.get("side") or "").upper() == side.upper()
+        and str(row.get("ticker") or row.get("symbol") or "").strip()
+    }
+    if broker_rows:
+        return "|".join(sorted(tickers))
+
+    return _extract_tickers_by_side(execution_payload, side)
+
+
+def _candidate_lifecycle_reason_summary(
+    execution_payload: dict | None,
+    execution_results: dict | None,
+) -> str:
+    lifecycle_candidates = _as_list(
+        _as_dict(execution_results).get("candidate_trade_lifecycle")
+        or _as_dict(execution_payload).get("candidate_trade_lifecycle")
+    )
+    parts: list[str] = []
+    for raw in lifecycle_candidates:
+        row = raw if isinstance(raw, dict) else {}
+        reason = str(row.get("decision_reason") or row.get("suppression_or_clipping_reason") or "").strip()
+        ticker = str(row.get("ticker") or "").strip().upper()
+        side = str(row.get("side") or "").strip().upper()
+        if ticker and side and reason:
+            parts.append(f"{ticker} {side}:{reason}")
+    return "|".join(parts)
+
+
 def build_execution_summary(
     run_id: str,
     trade_date: str,
     execution_payload: dict | None = None,
     paper_summary: dict | None = None,
+    execution_results: dict | None = None,
     health_payload: dict | None = None,
     nav_snapshot: dict | None = None,
     reconciliation_result: dict | None = None,
@@ -126,6 +229,7 @@ def build_execution_summary(
         trade_date: Trading date (YYYY-MM-DD format)
         execution_payload: Execution payload from planner/executor
         paper_summary: Paper trading summary
+        execution_results: Broker execution results artifact
         health_payload: Health check result
         nav_snapshot: NAV snapshot with equity/cash/holdings
         reconciliation_result: Reconciliation result
@@ -133,9 +237,12 @@ def build_execution_summary(
     Returns:
         Dict with summary fields (deterministic, non-blocking on missing data)
     """
-    # Extract tickers as pipe-delimited strings
-    buys = _extract_tickers_by_side(execution_payload, "BUY")
-    sells = _extract_tickers_by_side(execution_payload, "SELL")
+    execution_results_safe = execution_results or {}
+
+    # Extract submitted tickers when broker/lifecycle data is available; fall
+    # back to the execution payload for pre-broker/no-action runs.
+    buys = _extract_submitted_tickers_by_side(execution_payload, execution_results_safe, "BUY")
+    sells = _extract_submitted_tickers_by_side(execution_payload, execution_results_safe, "SELL")
     
     # Extract counts from execution payload
     trades_list = (execution_payload or {}).get("trades") or []
@@ -163,11 +270,86 @@ def build_execution_summary(
     paper_summary_safe = paper_summary or {}
     signals_generated = len((paper_summary_safe.get("signals", []) or []))
     
-    # Orders submitted/filled/rejected (from health or execution)
+    lifecycle_summary = _as_dict(
+        execution_results_safe.get("candidate_trade_lifecycle_summary")
+        or _as_dict(execution_payload).get("candidate_trade_lifecycle_summary")
+        or paper_summary_safe.get("candidate_trade_lifecycle_summary")
+    )
+    submission_summary = _as_dict(paper_summary_safe.get("alpaca_submission_summary"))
+    execution_filter = _as_dict(paper_summary_safe.get("execution_filter"))
+
+    planned_payload_trade_count = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("planned_payload_trade_count"),
+            _as_dict(execution_payload).get("planned_payload_trade_count"),
+            paper_summary_safe.get("planned_payload_trade_count"),
+            lifecycle_summary.get("precompute_candidates"),
+        )
+    )
+    final_executable_trades_count = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("executable_trades_count"),
+            _as_dict(execution_payload).get("execution_eligible_trades_count"),
+            _as_dict(execution_payload).get("executable_trades_count"),
+        )
+    )
+    executable_filter_passed_count = _to_int_or_none(
+        _first_present(
+            lifecycle_summary.get("passed_executable_filter"),
+            execution_filter.get("kept"),
+            final_executable_trades_count,
+        )
+    )
+    executable_trades_count = final_executable_trades_count
+    intended_orders_count = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("intended_orders_count"),
+            _as_dict(execution_payload).get("intended_orders_count"),
+            lifecycle_summary.get("intended_orders"),
+            submission_summary.get("initial_intended_orders"),
+            _as_dict(execution_payload).get("planner_intended_trades_count"),
+        )
+    )
+    lifecycle_reason_summary = _candidate_lifecycle_reason_summary(execution_payload, execution_results_safe)
+
+    # Orders submitted/accepted/filled/rejected (from execution results first).
     health_safe = health_payload or {}
-    orders_submitted = health_safe.get("planned_trade_count")
-    orders_filled = health_safe.get("executed_trade_count")
-    orders_rejected = None  # Not readily available; marked best-effort
+    orders_submitted = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("submitted_count"),
+            execution_results_safe.get("orders_submitted_count"),
+            _as_dict(execution_payload).get("submitted_count"),
+            _as_dict(execution_payload).get("orders_submitted_count"),
+            submission_summary.get("submit_success"),
+            health_safe.get("orders_submitted_count"),
+        )
+    )
+    orders_accepted = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("accepted_count"),
+            _as_dict(execution_payload).get("accepted_count"),
+            lifecycle_summary.get("accepted"),
+            orders_submitted,
+        )
+    )
+    orders_filled = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("orders_filled_count"),
+            execution_results_safe.get("filled_count"),
+            _as_dict(execution_payload).get("orders_filled_count"),
+            paper_summary_safe.get("orders_filled_count"),
+            lifecycle_summary.get("filled"),
+            _count_filled_responses(_as_list(execution_results_safe.get("broker_responses"))),
+            health_safe.get("executed_trade_count"),
+        )
+    )
+    orders_rejected = _to_int_or_none(
+        _first_present(
+            execution_results_safe.get("rejected_count"),
+            _as_dict(execution_payload).get("rejected_count"),
+            submission_summary.get("submit_failed"),
+        )
+    )
     
     # Status inference
     planner_status = _infer_status(
@@ -182,11 +364,17 @@ def build_execution_summary(
     
     payload_status = "CREATED" if execution_payload else "MISSING"
     
-    execution_payload_status = (execution_payload or {}).get("status", "UNKNOWN")
-    if execution_payload_status == "EXECUTED":
+    execution_payload_status = _first_present(
+        execution_results_safe.get("status"),
+        (execution_payload or {}).get("status"),
+        (execution_payload or {}).get("execution_status"),
+        "UNKNOWN",
+    )
+    execution_payload_status_upper = str(execution_payload_status).upper()
+    if execution_payload_status_upper in {"EXECUTED", "RECONCILED_SUCCESS", "SUCCESS"}:
         execution_status = "SUCCESS"
-    elif execution_payload_status in ("HALTED", "SKIPPED_DUPLICATE", "NO_ACTION"):
-        execution_status = execution_payload_status
+    elif execution_payload_status_upper in ("HALTED", "SKIPPED_DUPLICATE", "NO_ACTION", "PARTIAL"):
+        execution_status = execution_payload_status_upper
     elif health_safe.get("status") == "FAIL":
         execution_status = "FAILED"
     else:
@@ -199,13 +387,18 @@ def build_execution_summary(
     
     # Trade decision
     trade_decision = "UNKNOWN"
-    if execution_payload:
-        exec_status = str((execution_payload or {}).get("status", "")).upper()
-        if exec_status == "EXECUTED":
+    if execution_payload or execution_results_safe:
+        exec_status = str(
+            (execution_results_safe or {}).get("status")
+            or (execution_payload or {}).get("status")
+            or (execution_payload or {}).get("execution_status")
+            or ""
+        ).upper()
+        if exec_status in {"EXECUTED", "RECONCILED_SUCCESS", "SUCCESS"} or int(orders_submitted or 0) > 0:
             trade_decision = "EXECUTED"
         elif exec_status in ("HALTED", "BLOCKED"):
             trade_decision = "EXECUTION_BLOCKED"
-        elif int((execution_payload or {}).get("executable_trades_count", 0)) == 0:
+        elif int(executable_filter_passed_count or executable_trades_count or 0) == 0:
             trade_decision = "NO_TRADES_MODEL"
         else:
             trade_decision = "UNKNOWN"
@@ -216,8 +409,12 @@ def build_execution_summary(
         halt_reason = execution_payload.get("halt_reason")
         if halt_reason:
             primary_reason = str(halt_reason).lower()
-        elif int((execution_payload or {}).get("executable_trades_count", 0)) > 0:
+        elif int(orders_submitted or 0) > 0:
             primary_reason = "orders_submitted"
+        elif lifecycle_summary.get("suppressed"):
+            primary_reason = "candidate_suppression"
+        elif int(executable_filter_passed_count or executable_trades_count or 0) > 0:
+            primary_reason = "executable_not_submitted"
         else:
             primary_reason = execution_payload.get("status_reason") or "unknown"
     
@@ -238,9 +435,22 @@ def build_execution_summary(
         "broker_status": broker_status,
         "reconciliation_status": recon_status,
         "signals_generated": signals_generated,
+        "planned_payload_trade_count": planned_payload_trade_count,
+        "executable_filter_passed_count": executable_filter_passed_count,
+        "executable_trades_count": executable_trades_count,
+        "final_executable_trades_count": final_executable_trades_count,
+        "intended_orders_count": intended_orders_count,
         "orders_submitted": orders_submitted,
+        "orders_accepted": orders_accepted,
         "orders_filled": orders_filled,
         "orders_rejected": orders_rejected,
+        "candidate_trade_lifecycle_artifact": _first_present(
+            _as_dict(execution_payload).get("candidate_trade_lifecycle_artifact"),
+            execution_results_safe.get("candidate_trade_lifecycle_artifact"),
+            paper_summary_safe.get("candidate_trade_lifecycle_artifact"),
+            lifecycle_summary.get("artifact_path"),
+        ),
+        "candidate_trade_lifecycle_reasons": lifecycle_reason_summary,
         "trade_decision": trade_decision,
         "primary_reason": primary_reason,
     }
@@ -280,9 +490,16 @@ def write_execution_summary_text(
         f"  Buys: {summary.get('buys') or '(none)'}",
         f"  Sells: {summary.get('sells') or '(none)'}",
         f"  Signals Generated: {summary.get('signals_generated', 'UNKNOWN')}",
+        f"  Planned Payload Trades: {summary.get('planned_payload_trade_count', 'UNKNOWN')}",
+        f"  Executable Filter Passed: {summary.get('executable_filter_passed_count', 'UNKNOWN')}",
+        f"  Intended Orders: {summary.get('intended_orders_count', 'UNKNOWN')}",
+        f"  Final Executable Trades: {summary.get('final_executable_trades_count', 'UNKNOWN')}",
         f"  Orders Submitted: {summary.get('orders_submitted', 'UNKNOWN')}",
+        f"  Orders Accepted: {summary.get('orders_accepted', 'UNKNOWN')}",
         f"  Orders Filled: {summary.get('orders_filled', 'UNKNOWN')}",
         f"  Orders Rejected: {summary.get('orders_rejected', 'UNKNOWN')}",
+        f"  Candidate Lifecycle: {summary.get('candidate_trade_lifecycle_artifact') or '(none)'}",
+        f"  Candidate Lifecycle Reasons: {summary.get('candidate_trade_lifecycle_reasons') or '(none)'}",
         "",
         "PORTFOLIO SNAPSHOT",
         f"  Total Assets Held: {summary.get('total_assets_held', 'UNKNOWN')}",
@@ -363,9 +580,16 @@ def write_latest_execution_summary(
         f"  Buys: {summary.get('buys') or '(none)'}",
         f"  Sells: {summary.get('sells') or '(none)'}",
         f"  Signals Generated: {summary.get('signals_generated', 'UNKNOWN')}",
+        f"  Planned Payload Trades: {summary.get('planned_payload_trade_count', 'UNKNOWN')}",
+        f"  Executable Filter Passed: {summary.get('executable_filter_passed_count', 'UNKNOWN')}",
+        f"  Intended Orders: {summary.get('intended_orders_count', 'UNKNOWN')}",
+        f"  Final Executable Trades: {summary.get('final_executable_trades_count', 'UNKNOWN')}",
         f"  Orders Submitted: {summary.get('orders_submitted', 'UNKNOWN')}",
+        f"  Orders Accepted: {summary.get('orders_accepted', 'UNKNOWN')}",
         f"  Orders Filled: {summary.get('orders_filled', 'UNKNOWN')}",
         f"  Orders Rejected: {summary.get('orders_rejected', 'UNKNOWN')}",
+        f"  Candidate Lifecycle: {summary.get('candidate_trade_lifecycle_artifact') or '(none)'}",
+        f"  Candidate Lifecycle Reasons: {summary.get('candidate_trade_lifecycle_reasons') or '(none)'}",
         "",
         "PORTFOLIO SNAPSHOT",
         f"  Total Assets Held: {summary.get('total_assets_held', 'UNKNOWN')}",
@@ -421,9 +645,17 @@ def update_execution_history_csv(
         "broker_status": str(summary.get("broker_status", "")),
         "reconciliation_status": str(summary.get("reconciliation_status", "")),
         "signals_generated": summary.get("signals_generated"),
+        "planned_payload_trade_count": summary.get("planned_payload_trade_count"),
+        "executable_filter_passed_count": summary.get("executable_filter_passed_count"),
+        "executable_trades_count": summary.get("executable_trades_count"),
+        "final_executable_trades_count": summary.get("final_executable_trades_count"),
+        "intended_orders_count": summary.get("intended_orders_count"),
         "orders_submitted": summary.get("orders_submitted"),
+        "orders_accepted": summary.get("orders_accepted"),
         "orders_filled": summary.get("orders_filled"),
         "orders_rejected": summary.get("orders_rejected"),
+        "candidate_trade_lifecycle_artifact": str(summary.get("candidate_trade_lifecycle_artifact") or ""),
+        "candidate_trade_lifecycle_reasons": str(summary.get("candidate_trade_lifecycle_reasons") or ""),
         "turnover": str(summary.get("turnover", "")),
         "trade_decision": str(summary.get("trade_decision", "")),
         "primary_reason": str(summary.get("primary_reason", "")),
@@ -485,6 +717,7 @@ def write_execution_artifacts(
     run_dir: Path,
     execution_payload: dict | None = None,
     paper_summary: dict | None = None,
+    execution_results: dict | None = None,
     health_payload: dict | None = None,
     nav_snapshot: dict | None = None,
     reconciliation_result: dict | None = None,
@@ -498,6 +731,7 @@ def write_execution_artifacts(
         run_dir: Run directory path
         execution_payload: Execution payload dict
         paper_summary: Paper summary dict  
+        execution_results: Broker execution results artifact
         health_payload: Health check payload
         nav_snapshot: NAV snapshot
         reconciliation_result: Reconciliation result
@@ -510,6 +744,15 @@ def write_execution_artifacts(
     """
     run_dir = Path(run_dir)
     results = {}
+    if execution_results is None:
+        results_path = run_dir / "execution_results.json"
+        try:
+            if results_path.exists():
+                loaded_results = json.loads(results_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_results, dict):
+                    execution_results = loaded_results
+        except Exception as exc:
+            logger.warning("[EXECUTION_SUMMARY] failed to read execution_results: %s", exc)
     
     try:
         # Build master summary
@@ -518,6 +761,7 @@ def write_execution_artifacts(
             trade_date=trade_date,
             execution_payload=execution_payload,
             paper_summary=paper_summary,
+            execution_results=execution_results,
             health_payload=health_payload,
             nav_snapshot=nav_snapshot,
             reconciliation_result=reconciliation_result,

@@ -3,15 +3,16 @@ last_reviewed: 2026-05-21
 owner: architecture
 category: architecture
 criticality: critical
-canonical: true
+canonical: false
+canonical_status: Aspirational design intent; current capability claims require repository verification
 related_systems: [research, governance, attribution, regime, shadow, alpha_stack]
 ---
 
-# Caerus Research MCP — Canonical Institutional Architecture
+# Caerus Research MCP — Institutional Architecture Design Intent
 
 > **Status banner (2026-05-29):** this document is the **aspirational
 > design intent** as drafted on 2026-05-21, before implementation. For
-> what the MCP **actually does today** (capability matrix, maturity
+> what the MCP **did as of 2026-05-29** (capability matrix, maturity
 > level, gaps, next investments) see
 > [`research_mcp_current_state_2026-05-29.md`](research_mcp_current_state_2026-05-29.md).
 > For the running operator interface see
@@ -23,6 +24,20 @@ related_systems: [research, governance, attribution, regime, shadow, alpha_stack
 **Date:** 2026-05-21
 **Classification:** Institutional Research Infrastructure
 **Constraint:** READ-ONLY — No execution, deployment, or mutation authority
+
+## Document Contract
+
+| Field | Value |
+|---|---|
+| Purpose | Preserve the aspirational Research MCP institutional architecture and read-only boundary. |
+| Owner | `architecture` in front matter. |
+| Inputs | Research MCP design intent, semantic contract layer, research registry architecture. |
+| Outputs | Design reference for Research MCP evolution. |
+| Related Documents | `docs/architecture/research_mcp_current_state_2026-05-29.md`, `docs/architecture/semantics/README.md`, `docs/architecture/research_registry_v1_foundation.md`. |
+| Related Tests | Research registry and MCP tests listed in `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Implementation | `research_registry/`, `research_registry/mcp_server/`. |
+| Related Artifacts | `outputs/research_mcp/`, `outputs/shadow_candidates/`. |
+| Known Gaps | Aspirational design may differ from current implementation; current capability claims require repository verification. |
 
 ---
 

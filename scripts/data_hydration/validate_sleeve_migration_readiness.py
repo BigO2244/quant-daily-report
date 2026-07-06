@@ -59,8 +59,8 @@ def _validate_sleeve_row(row: dict[str, Any], seen: set[str]) -> list[str]:
     if status not in ALLOWED_STATUS:
         errors.append(f"{sleeve_id}: invalid migration_readiness_status {status}")
     requirements = row.get("dataset_requirements") or []
-    blocking = [item.get("dataset_id") for item in requirements if item.get("requirement_status") == "BLOCKED"]
-    warnings = [item.get("dataset_id") for item in requirements if item.get("requirement_status") == "WARN"]
+    blocking = _unique([item.get("dataset_id") for item in requirements if item.get("requirement_status") == "BLOCKED"])
+    warnings = _unique([item.get("dataset_id") for item in requirements if item.get("requirement_status") == "WARN"])
     if row.get("blocking_dataset_ids") != blocking:
         errors.append(f"{sleeve_id}: blocking_dataset_ids mismatch")
     if row.get("warning_dataset_ids") != warnings:
@@ -75,6 +75,17 @@ def _validate_sleeve_row(row: dict[str, Any], seen: set[str]) -> list[str]:
         if item.get("requirement_status") not in ALLOWED_REQUIREMENT_STATUS:
             errors.append(f"{sleeve_id}: invalid requirement_status for {item.get('dataset_id')}")
     return errors
+
+
+def _unique(values: list[Any]) -> list[Any]:
+    seen = set()
+    unique_values = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique_values.append(value)
+    return unique_values
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

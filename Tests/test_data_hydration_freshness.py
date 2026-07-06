@@ -41,3 +41,18 @@ def test_dataset_freshness_artifact_is_valid(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["datasets"][0]["freshness_status"] == "WARN_PARTIAL"
     assert payload["datasets"][0]["PIT_safe_status"] == "PIT_SAFE_SAMPLE_FILING_DATE_PRESENT"
+
+
+def test_dataset_freshness_validator_requires_named_rows(tmp_path: Path) -> None:
+    run_swarm(
+        repo_root=tmp_path,
+        limit_sample=True,
+        as_of_date="2026-06-24",
+        dataset_ids={"ohlcv_prices"},
+        adapter_registry={"yahoo_chart_public": PartialAdapter()},
+    )
+
+    path = tmp_path / "data" / "manifests" / "dataset_freshness.json"
+    errors = validate_freshness_artifact(path, required_dataset_ids={"ohlcv_prices", "security_master_pit"})
+
+    assert "missing required freshness row: security_master_pit" in errors

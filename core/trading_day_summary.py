@@ -86,6 +86,8 @@ def _build_execution_summary(
     operator_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     responses = execution_results.get("broker_responses") or []
+    lifecycle_summary = execution_results.get("candidate_trade_lifecycle_summary")
+    lifecycle_summary = lifecycle_summary if isinstance(lifecycle_summary, dict) else {}
     submitted = int(execution_results.get("submitted_count") or 0)
     accepted = int(execution_results.get("accepted_count") or 0)
     rejected = int(execution_results.get("rejected_count") or 0)
@@ -173,8 +175,31 @@ def _build_execution_summary(
     )
 
     return {
+        "planned_payload_trade_count": (
+            execution_results.get("planned_payload_trade_count")
+            or lifecycle_summary.get("precompute_candidates")
+        ),
+        "executable_filter_passed_count": (
+            execution_results.get("executable_filter_passed_count")
+            or lifecycle_summary.get("passed_executable_filter")
+        ),
+        "executable_trades_count": (
+            execution_results.get("executable_trades_count")
+        ),
+        "final_executable_trades_count": (
+            execution_results.get("final_executable_trades_count")
+            or execution_results.get("executable_trades_count")
+        ),
+        "intended_orders_count": (
+            execution_results.get("intended_orders_count")
+            or lifecycle_summary.get("intended_orders")
+        ),
         "orders_submitted": submitted,
         "orders_accepted": accepted,
+        "orders_filled": (
+            execution_results.get("orders_filled_count")
+            or lifecycle_summary.get("filled")
+        ),
         "orders_rejected": rejected,
         "duplicate_orders": duplicates,
         "buy_orders": buy_orders,
@@ -196,6 +221,10 @@ def _build_execution_summary(
         "precompute_bundle_found": precompute_bundle_found,
         "bundle_report_date": bundle_report_date,
         "execution_window_status": execution_window_status,
+        "candidate_trade_lifecycle_artifact": execution_results.get("candidate_trade_lifecycle_artifact"),
+        "candidate_trade_lifecycle_summary": lifecycle_summary,
+        "candidate_trade_lifecycle_reasons": lifecycle_summary.get("suppression_reason_counts") or {},
+        "candidate_trade_clipping_reasons": lifecycle_summary.get("clipping_reason_counts") or {},
     }
 
 

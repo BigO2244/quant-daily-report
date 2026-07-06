@@ -683,9 +683,6 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     status_display = status
     if broker_snapshot_fallback and operator_execution_status == "executed":
         status_display = "EXECUTED — BROKER SNAPSHOT FALLBACK"
-    elif status == "MARKET_CLOSED":
-        reason_text = str(payload.get("reason_code") or payload.get("halt_reason") or "MARKET_CLOSED_DAY")
-        status_display = f"MARKET_CLOSED — {reason_text}"
 
     header_items = [
         f"<li><b>Mode:</b> {escape(mode)}</li>",

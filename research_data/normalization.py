@@ -34,6 +34,7 @@ def normalize_p1(
     repo_root: Path,
     as_of_date: str | None = None,
     dataset_ids: set[str] | None = None,
+    symbols: set[str] | None = None,
 ) -> dict[str, Any]:
     repo_root = Path(repo_root)
     selected = set(dataset_ids or P1_DATASETS)
@@ -43,6 +44,7 @@ def normalize_p1(
     run_metadata = _latest_hydration_metadata(repo_root)
     effective_as_of = as_of_date or run_metadata.get("summary", {}).get("as_of_date") or datetime.now(UTC).date().isoformat()
     generated_at = utc_now_iso()
+    normalized_symbols = {str(symbol).strip().upper() for symbol in (symbols or set()) if str(symbol).strip()}
     results: list[dict[str, Any]] = []
 
     normalizers = {
@@ -53,7 +55,7 @@ def normalize_p1(
     }
     for dataset_id in sorted(selected):
         try:
-            results.append(normalizers[dataset_id](repo_root, effective_as_of, generated_at, run_metadata))
+            results.append(normalizers[dataset_id](repo_root, effective_as_of, generated_at, run_metadata, normalized_symbols))
         except FileNotFoundError as exc:
             results.append(
                 _result(
@@ -191,9 +193,11 @@ def normalize_p3(
     return manifest
 
 
-def _normalize_ohlcv_prices(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
-    path = _require_first(
+def _normalize_ohlcv_prices(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any], symbols: set[str] | None = None) -> dict[str, Any]:
+    path = _require_latest_or_first(
         repo_root,
+        run_metadata,
+        "ohlcv_prices",
         [
             "data/raw/ohlcv_prices/yahoo_chart_public/ohlcv_prices_sample.json",
             "data/raw/ohlcv_prices/nasdaq_sharadar/sharadar_sep_sample.json",
@@ -201,8 +205,13 @@ def _normalize_ohlcv_prices(repo_root: Path, as_of_date: str, generated_at: str,
     )
     payload = read_json(path)
     rows = _normalize_yahoo_ohlcv(payload, as_of_date, generated_at, path)
+    rows = _filter_symbol_rows(rows, symbols, ("source_symbol",))
     artifact = repo_root / "data" / "normalized" / "prices" / "ohlcv_prices.json"
     normalized = _dataset_payload("ohlcv_prices", as_of_date, generated_at, [path], rows)
+    normalized["coverage"] = _symbol_coverage(
+        queried_symbols=payload.get("symbols") or [payload.get("symbol")],
+        covered_symbols=[row.get("source_symbol") for row in rows],
+    )
     validation = _validate_required(rows, ["security_id", "source_symbol", "trade_date", "close", "price_source", "as_of_date", "ingestion_timestamp"])
     validation.extend(_validate_date_lte(rows, "trade_date", "as_of_date"))
     normalized["validation"] = _validation_payload(validation)
@@ -210,9 +219,11 @@ def _normalize_ohlcv_prices(repo_root: Path, as_of_date: str, generated_at: str,
     return _result_from_payload("ohlcv_prices", artifact, normalized, generated_at, as_of_date, run_metadata)
 
 
-def _normalize_security_master(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
-    path = _require_first(
+def _normalize_security_master(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any], symbols: set[str] | None = None) -> dict[str, Any]:
+    path = _require_latest_or_first(
         repo_root,
+        run_metadata,
+        "security_master_pit",
         [
             "data/raw/security_master_pit/nasdaq_sharadar/sharadar_tickers_sample.json",
             "data/raw/security_master_pit/sec_edgar_public/company_tickers_sample.json",
@@ -223,26 +234,43 @@ def _normalize_security_master(repo_root: Path, as_of_date: str, generated_at: s
         rows = _normalize_sec_company_tickers(payload, as_of_date, generated_at, path)
     else:
         rows = _normalize_sharadar_tickers(payload, as_of_date, generated_at, path)
+    rows = _filter_symbol_rows(rows, symbols, ("ticker", "source_symbol"))
     artifact = repo_root / "data" / "normalized" / "security_master" / "security_master.json"
     normalized = _dataset_payload("security_master_pit", as_of_date, generated_at, [path], rows)
+    normalized["security_master_grade"] = _security_master_grade(rows)
+    normalized["coverage"] = _symbol_coverage(
+        queried_symbols=payload.get("queried_symbols") or [],
+        covered_symbols=[row.get("ticker") for row in rows],
+    )
     validation = _validate_required(rows, ["security_id", "ticker", "asset_type", "is_active", "effective_start_date", "as_of_date", "source", "ingestion_timestamp"])
     validation.extend(_validate_date_lte(rows, "effective_start_date", "as_of_date"))
+    validation.extend(_validate_security_master_pit(rows))
     normalized["validation"] = _validation_payload(validation)
     write_json(artifact, normalized)
     return _result_from_payload("security_master_pit", artifact, normalized, generated_at, as_of_date, run_metadata)
 
 
-def _normalize_corporate_actions(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
-    path = _require_first(
+def _normalize_corporate_actions(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any], symbols: set[str] | None = None) -> dict[str, Any]:
+    path = _require_latest_or_first(
         repo_root,
+        run_metadata,
+        "corporate_actions",
         [
+            "data/raw/corporate_actions/yahoo_chart_public/corporate_actions_sample.json",
             "data/raw/corporate_actions/nasdaq_sharadar/sharadar_actions_sample.json",
         ],
     )
     payload = read_json(path)
-    rows = _normalize_sharadar_actions(payload, as_of_date, generated_at, path)
+    rows = _normalize_yahoo_actions(payload, as_of_date, generated_at, path) if payload.get("source_name") == "yahoo_chart_public" else _normalize_sharadar_actions(payload, as_of_date, generated_at, path)
+    rows = _filter_symbol_rows(rows, symbols, ("source_symbol", "ticker"))
     artifact = repo_root / "data" / "normalized" / "corporate_actions" / "actions.json"
     normalized = _dataset_payload("corporate_actions", as_of_date, generated_at, [path], rows)
+    queried = payload.get("symbols") or sorted({row.get("ticker") for row in payload.get("rows") or [] if row.get("ticker")})
+    normalized["coverage"] = _symbol_coverage(
+        queried_symbols=queried,
+        covered_symbols=queried,
+        action_symbols=[row.get("source_symbol") for row in rows],
+    )
     validation = _validate_required(rows, ["corporate_action_id", "security_id", "action_type", "effective_date", "as_of_date", "source", "ingestion_timestamp"])
     validation.extend(_validate_date_lte(rows, "effective_date", "as_of_date"))
     normalized["validation"] = _validation_payload(validation)
@@ -250,7 +278,7 @@ def _normalize_corporate_actions(repo_root: Path, as_of_date: str, generated_at:
     return _result_from_payload("corporate_actions", artifact, normalized, generated_at, as_of_date, run_metadata)
 
 
-def _normalize_dataset_freshness(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any]) -> dict[str, Any]:
+def _normalize_dataset_freshness(repo_root: Path, as_of_date: str, generated_at: str, run_metadata: dict[str, Any], symbols: set[str] | None = None) -> dict[str, Any]:
     path = _require_first(repo_root, ["data/manifests/dataset_freshness.json"])
     payload = read_json(path)
     rows = []
@@ -643,21 +671,33 @@ def _normalize_news_metadata(repo_root: Path, as_of_date: str, generated_at: str
 
 
 def _normalize_yahoo_ohlcv(payload: dict[str, Any], as_of_date: str, generated_at: str, path: Path) -> list[dict[str, Any]]:
+    if payload.get("symbol_payloads"):
+        rows = []
+        for symbol_payload in payload.get("symbol_payloads") or []:
+            rows.extend(_normalize_yahoo_ohlcv_symbol(symbol_payload, as_of_date, generated_at, path))
+        return rows
+    return _normalize_yahoo_ohlcv_symbol(payload, as_of_date, generated_at, path)
+
+
+def _normalize_yahoo_ohlcv_symbol(payload: dict[str, Any], as_of_date: str, generated_at: str, path: Path) -> list[dict[str, Any]]:
     source_payload = payload.get("source_payload") or {}
     result = ((source_payload.get("chart") or {}).get("result") or [{}])[0]
     timestamps = result.get("timestamp") or [row.get("timestamp") for row in payload.get("rows", [])]
     quote = (((result.get("indicators") or {}).get("quote") or [{}])[0])
     adjclose = (((result.get("indicators") or {}).get("adjclose") or [{}])[0]).get("adjclose") or []
+    symbol = str(payload.get("symbol") or "UNKNOWN").replace("%5E", "^")
     rows = []
     for idx, timestamp in enumerate(timestamps):
         if timestamp in (None, ""):
             continue
         trade_date = datetime.fromtimestamp(int(timestamp), UTC).date().isoformat()
+        if trade_date > as_of_date:
+            continue
         close = _list_get(quote.get("close") or [], idx)
         rows.append(
             {
-                "security_id": f"YAHOO:{payload.get('symbol', 'UNKNOWN').replace('%5E', '^')}",
-                "source_symbol": payload.get("symbol"),
+                "security_id": f"YAHOO:{symbol}",
+                "source_symbol": symbol,
                 "trade_date": trade_date,
                 "open": _list_get(quote.get("open") or [], idx),
                 "high": _list_get(quote.get("high") or [], idx),
@@ -669,7 +709,7 @@ def _normalize_yahoo_ohlcv(payload: dict[str, Any], as_of_date: str, generated_a
                 "adjustment_policy": "source_adjusted_close_when_available",
                 "as_of_date": as_of_date,
                 "ingestion_timestamp": generated_at,
-                "source_retrieved_at": generated_at,
+                "source_retrieved_at": payload.get("retrieved_at") or generated_at,
                 "source_artifact_digest": _sha256(path),
             }
         )
@@ -682,6 +722,7 @@ def _normalize_sharadar_tickers(payload: dict[str, Any], as_of_date: str, genera
         permaticker = item.get("permaticker")
         is_delisted = str(item.get("isdelisted") or "").upper() in {"Y", "YES", "TRUE", "1"}
         first_price_date = _date_or_default(item.get("firstpricedate"), as_of_date)
+        last_price_date = _date_or_default(item.get("lastpricedate"), as_of_date) if item.get("lastpricedate") else None
         rows.append(
             {
                 "security_id": f"SHARADAR:{permaticker}" if permaticker not in (None, "") else f"SHARADAR_TICKER:{item.get('ticker')}",
@@ -689,16 +730,25 @@ def _normalize_sharadar_tickers(payload: dict[str, Any], as_of_date: str, genera
                 "ticker": item.get("ticker"),
                 "name": item.get("name"),
                 "exchange": item.get("exchange"),
-                "asset_type": "equity_or_unit",
+                "asset_type": item.get("category") or "equity_or_unit",
+                "category": item.get("category"),
+                "scale_market_cap": item.get("scalemarketcap"),
                 "is_active": not is_delisted,
                 "listing_date": item.get("firstpricedate"),
-                "delisting_date": item.get("lastpricedate") if is_delisted else None,
+                "delisting_date": last_price_date if is_delisted else None,
+                "first_available_date": first_price_date,
+                "last_available_date": last_price_date,
                 "effective_start_date": first_price_date,
-                "effective_end_date": item.get("lastpricedate") if is_delisted else None,
+                "effective_end_date": last_price_date if is_delisted else None,
                 "as_of_date": as_of_date,
                 "source": "nasdaq_sharadar",
+                "source_table": payload.get("source_table") or "SHARADAR/TICKERS",
                 "ingestion_timestamp": generated_at,
                 "source_artifact_digest": _sha256(path),
+                "is_current_reference": False,
+                "pit_grade_status": "PIT_GRADE_SHARADAR_TICKERS_DATE_WINDOWS",
+                "PIT_safe_status": "PIT_GRADE_SHARADAR_TICKERS_DATE_WINDOWS",
+                "validation_status": "PASS",
             }
         )
     return rows
@@ -706,7 +756,8 @@ def _normalize_sharadar_tickers(payload: dict[str, Any], as_of_date: str, genera
 
 def _normalize_sec_company_tickers(payload: dict[str, Any], as_of_date: str, generated_at: str, path: Path) -> list[dict[str, Any]]:
     rows = []
-    for item in payload.values():
+    source_rows = payload.get("rows_by_index") if isinstance(payload.get("rows_by_index"), dict) else payload
+    for item in source_rows.values():
         cik = item.get("cik_str")
         rows.append(
             {
@@ -716,17 +767,62 @@ def _normalize_sec_company_tickers(payload: dict[str, Any], as_of_date: str, gen
                 "name": item.get("title"),
                 "exchange": None,
                 "asset_type": "unknown_sec_company_ticker",
+                "category": None,
+                "scale_market_cap": None,
                 "is_active": True,
                 "listing_date": None,
                 "delisting_date": None,
+                "first_available_date": None,
+                "last_available_date": None,
                 "effective_start_date": as_of_date,
                 "effective_end_date": None,
                 "as_of_date": as_of_date,
                 "source": "sec_edgar_public",
+                "source_table": "SEC/company_tickers",
                 "ingestion_timestamp": generated_at,
                 "source_artifact_digest": _sha256(path),
+                "is_current_reference": True,
+                "pit_grade_status": "CURRENT_REFERENCE_ONLY",
+                "PIT_safe_status": "PIT_LIMITED_CURRENT_COMPANY_TICKERS_ONLY",
+                "validation_status": "WARN_CURRENT_REFERENCE_ONLY",
             }
         )
+    return rows
+
+
+def _normalize_yahoo_actions(payload: dict[str, Any], as_of_date: str, generated_at: str, path: Path) -> list[dict[str, Any]]:
+    rows = []
+    symbol_payloads = payload.get("symbol_payloads") or [{"symbol": payload.get("symbol"), "rows": payload.get("rows") or []}]
+    for symbol_payload in symbol_payloads:
+        for item in symbol_payload.get("rows") or []:
+            action_type = str(item.get("action") or "").strip().lower()
+            ticker = item.get("ticker") or symbol_payload.get("symbol")
+            effective_date = _date_or_default(item.get("date"), as_of_date)
+            value = item.get("value")
+            raw_key = "|".join(str(part) for part in ("yahoo_chart_public", ticker, effective_date, action_type, value))
+            rows.append(
+                {
+                    "corporate_action_id": hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:24],
+                    "security_id": f"YAHOO:{ticker}",
+                    "source_symbol": ticker,
+                    "action_type": action_type,
+                    "announcement_date": None,
+                    "ex_date": effective_date if action_type == "dividend" else None,
+                    "record_date": None,
+                    "payable_date": None,
+                    "effective_date": effective_date,
+                    "cash_amount": value if action_type == "dividend" else None,
+                    "split_ratio": value if action_type == "split" else None,
+                    "adjustment_factor": None,
+                    "old_ticker": None,
+                    "new_ticker": None,
+                    "as_of_date": as_of_date,
+                    "source": "yahoo_chart_public",
+                    "ingestion_timestamp": generated_at,
+                    "source_artifact_digest": _sha256(path),
+                    "security_id_resolution_status": "SOURCE_SYMBOL_QUERY_COVERED",
+                }
+            )
     return rows
 
 
@@ -982,12 +1078,123 @@ def _validate_release_date_unverified(rows: list[dict[str, Any]], dataset_id: st
     return [f"{dataset_id}: FRED public CSV rows do not include release_date; PIT status remains observe-only"]
 
 
+def _validate_security_master_pit(rows: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for idx, row in enumerate(rows):
+        ticker = str(row.get("ticker") or "")
+        if not row.get("source_security_id"):
+            errors.append(f"row {idx} missing permanent source identifier")
+        if not row.get("effective_start_date"):
+            errors.append(f"row {idx} missing effective_start_date")
+        if row.get("is_current_reference") is True or row.get("pit_grade_status") == "CURRENT_REFERENCE_ONLY":
+            errors.append(f"row {idx} uses current-reference security master fallback")
+        if row.get("is_active") is False and not row.get("effective_end_date"):
+            errors.append(f"row {idx} inactive/delisted security missing effective_end_date")
+        if row.get("delisting_date") and row.get("is_active") is True:
+            errors.append(f"row {idx} has delisting_date but is_active is true")
+        if row.get("effective_end_date") and row.get("effective_start_date") and str(row["effective_end_date"]) < str(row["effective_start_date"]):
+            errors.append(f"row {idx} effective_end_date precedes effective_start_date")
+        if ticker:
+            by_ticker.setdefault(ticker, []).append(row)
+    for ticker, ticker_rows in by_ticker.items():
+        sorted_rows = sorted(ticker_rows, key=lambda item: str(item.get("effective_start_date") or ""))
+        seen_windows: set[tuple[str, str]] = set()
+        previous_end: str | None = None
+        for row in sorted_rows:
+            start = str(row.get("effective_start_date") or "")
+            end = str(row.get("effective_end_date") or "9999-12-31")
+            window = (start, end)
+            if window in seen_windows:
+                errors.append(f"{ticker}: duplicate effective window {start}..{end}")
+            seen_windows.add(window)
+            if previous_end and start and start <= previous_end:
+                errors.append(f"{ticker}: overlapping effective windows around {start}")
+            previous_end = end
+    return errors
+
+
+def _security_master_grade(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    statuses = sorted({str(row.get("pit_grade_status") or "UNKNOWN") for row in rows})
+    pit_rows = sum(1 for row in rows if str(row.get("pit_grade_status") or "").startswith("PIT_GRADE"))
+    current_reference_rows = sum(1 for row in rows if row.get("is_current_reference") is True)
+    if rows and pit_rows == len(rows):
+        status = "PIT_GRADE"
+    elif current_reference_rows:
+        status = "CURRENT_REFERENCE_ONLY"
+    elif rows:
+        status = "PARTIAL_PIT_GRADE"
+    else:
+        status = "EMPTY"
+    return {
+        "status": status,
+        "pit_grade_row_count": pit_rows,
+        "current_reference_row_count": current_reference_rows,
+        "status_values": statuses,
+    }
+
+
 def _require_first(repo_root: Path, candidates: list[str]) -> Path:
     for rel_path in candidates:
         path = repo_root / rel_path
         if path.exists():
             return path
     raise FileNotFoundError(f"none of the candidate artifacts exist: {candidates}")
+
+
+def _require_latest_or_first(repo_root: Path, run_metadata: dict[str, Any], dataset_id: str, candidates: list[str]) -> Path:
+    latest = _latest_success_artifact(repo_root, run_metadata, dataset_id)
+    if latest is not None:
+        return latest
+    return _require_first(repo_root, candidates)
+
+
+def _latest_success_artifact(repo_root: Path, run_metadata: dict[str, Any], dataset_id: str) -> Path | None:
+    for row in run_metadata.get("datasets") or []:
+        if row.get("dataset_id") != dataset_id:
+            continue
+        if row.get("final_status") not in {"OK", "PARTIAL"}:
+            return None
+        artifact = row.get("artifact_path")
+        if not artifact:
+            return None
+        path = Path(str(artifact))
+        path = path if path.is_absolute() else repo_root / path
+        return path if path.exists() else None
+    return None
+
+
+def _symbol_coverage(
+    *,
+    queried_symbols: list[Any],
+    covered_symbols: list[Any],
+    action_symbols: list[Any] | None = None,
+) -> dict[str, Any]:
+    queried = sorted({str(symbol).upper() for symbol in queried_symbols if symbol not in (None, "")})
+    covered = sorted({str(symbol).upper() for symbol in covered_symbols if symbol not in (None, "")})
+    payload: dict[str, Any] = {
+        "queried_symbols": queried,
+        "covered_symbols": covered,
+        "missing_symbols": sorted(set(queried) - set(covered)),
+        "coverage_pct": round(len(set(covered) & set(queried)) / len(queried), 6) if queried else None,
+    }
+    if action_symbols is not None:
+        payload["action_symbols"] = sorted({str(symbol).upper() for symbol in action_symbols if symbol not in (None, "")})
+        payload["query_covered_symbols"] = queried
+        payload["missing_query_symbols"] = []
+    return payload
+
+
+def _filter_symbol_rows(rows: list[dict[str, Any]], symbols: set[str] | None, fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    if not symbols:
+        return rows
+    wanted = {str(symbol).upper() for symbol in symbols}
+    filtered = []
+    for row in rows:
+        values = {str(row.get(field) or "").upper() for field in fields}
+        if values & wanted:
+            filtered.append(row)
+    return filtered
 
 
 def _sha256(path: Path) -> str:

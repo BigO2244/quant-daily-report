@@ -87,11 +87,18 @@ def _us_market_holiday_dates(year: int) -> frozenset[str]:
 @lru_cache(maxsize=None)
 def _us_market_early_close_dates(year: int) -> frozenset[str]:
     holiday_dates = _us_market_holiday_dates(year)
-    early_closes = {
-        _nth_weekday(year, 11, calendar.THURSDAY, 4) + dt.timedelta(days=1),
-        dt.date(year, 12, 24),
-        dt.date(year, 7, 3),
-    }
+    early_closes: set[dt.date] = set()
+
+    thanksgiving = _nth_weekday(year, 11, calendar.THURSDAY, 4)
+    day_after_thanksgiving = thanksgiving + dt.timedelta(days=1)
+    early_closes.add(day_after_thanksgiving)
+
+    christmas_eve = dt.date(year, 12, 24)
+    early_closes.add(christmas_eve)
+
+    independence_eve = dt.date(year, 7, 4) - dt.timedelta(days=1)
+    early_closes.add(independence_eve)
+
     return frozenset(
         day.isoformat()
         for day in early_closes
@@ -119,7 +126,6 @@ def is_trading_day(date_str: str) -> bool:
 def is_early_close_day(date_str: str) -> bool:
     if not is_trading_day(date_str):
         return False
-
     date_obj = pd.Timestamp(date_str).date()
     early_close_dates = (
         _us_market_early_close_dates(date_obj.year - 1)
@@ -127,6 +133,18 @@ def is_early_close_day(date_str: str) -> bool:
         | _us_market_early_close_dates(date_obj.year + 1)
     )
     return date_obj.isoformat() in early_close_dates
+
+
+def _parse_hhmm(value: str) -> dt.time:
+    hour, minute = [int(x) for x in value.split(":", 1)]
+    return dt.time(hour=hour, minute=minute)
+
+
+def _session_close_time(date_str: str, cutoff_time_et: str) -> dt.time:
+    cutoff_time = _parse_hhmm(cutoff_time_et)
+    if is_early_close_day(date_str):
+        return min(cutoff_time, dt.time(hour=13, minute=0))
+    return cutoff_time
 
 
 def next_trading_day(date_str: str) -> str:
@@ -147,30 +165,15 @@ def prev_trading_day(date_str: str) -> str:
             return cand
 
 
-def _parse_hhmm(value: str) -> dt.time:
-    hour, minute = [int(x) for x in value.split(":", 1)]
-    return dt.time(hour=hour, minute=minute)
-
-
-def _session_close_time(date_str: str, cutoff_time_et: str) -> dt.time:
-    if is_early_close_day(date_str):
-        return dt.time(hour=13, minute=0)
-    return _parse_hhmm(cutoff_time_et)
-
-
 def market_session_status(
     run_date: str,
     now_et: dt.datetime | None,
     cutoff_time_et: str,
 ) -> MarketSessionStatus:
     run_day = pd.Timestamp(run_date).date()
+    close_time = _session_close_time(run_date, cutoff_time_et)
     session_open_et = dt.datetime.combine(run_day, dt.time(hour=9, minute=30), tzinfo=ET_TZ)
-    session_close_time = _session_close_time(run_date, cutoff_time_et)
-    session_close_et = dt.datetime.combine(
-        run_day,
-        session_close_time,
-        tzinfo=ET_TZ,
-    )
+    session_close_et = dt.datetime.combine(run_day, close_time, tzinfo=ET_TZ)
 
     if now_et is not None:
         if now_et.tzinfo is None:

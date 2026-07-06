@@ -12,7 +12,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -44,12 +46,32 @@ def _yn(val: bool | None) -> str:
     return "YES" if val else "NO"
 
 
-def print_morning_report(summary: dict) -> None:
+def _source_warning(summary: dict, expected_date: str | None = None) -> str | None:
+    trade_date_raw = str(summary.get("trade_date") or "").strip()
+    if not trade_date_raw:
+        return "summary artifact has no trade_date"
+    expected_raw = str(expected_date or dt.date.today().isoformat()).strip()
+    try:
+        trade_date = dt.date.fromisoformat(trade_date_raw)
+        expected = dt.date.fromisoformat(expected_raw)
+    except ValueError:
+        return None
+    age_days = (expected - trade_date).days
+    if age_days > 3:
+        return (
+            f"summary trade_date {trade_date.isoformat()} is {age_days} days older "
+            f"than report date {expected.isoformat()}"
+        )
+    return None
+
+
+def print_morning_report(summary: dict, expected_date: str | None = None) -> None:
     exec_s = summary.get("execution_summary") or {}
     port_s = summary.get("portfolio_state") or {}
     email_s = summary.get("email_summary") or {}
     dash_s = summary.get("dashboard") or {}
     bench_s = summary.get("benchmark") or {}
+    warning = _source_warning(summary, expected_date)
 
     # Derive portfolio total (market value + cash)
     mv = port_s.get("portfolio_market_value")
@@ -68,6 +90,8 @@ def print_morning_report(summary: dict) -> None:
     print(f"  Run ID:      {summary.get('run_id', 'N/A')}")
     print(f"  Trade Date:  {summary.get('trade_date', 'N/A')}")
     print(f"  Generated:   {summary.get('generated_at', 'N/A')}")
+    if warning:
+        print(f"  Source Warning: {warning}")
     print()
 
     print("  EXECUTION")
@@ -140,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n  [ERROR] Could not parse {path}: {exc}\n", file=sys.stderr)
         return 1
 
-    print_morning_report(summary)
+    print_morning_report(summary, expected_date=os.environ.get("REPORT_DATE"))
     return 0
 
 

@@ -19,7 +19,6 @@ _spec = importlib.util.spec_from_file_location(
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 _build_confirmation_email = _mod._build_confirmation_email
-_load_results = _mod._load_results
 refresh_live_pilot_confirmation_status = _mod.refresh_live_pilot_confirmation_status
 
 
@@ -123,32 +122,6 @@ def test_confirmation_email_renders_live_pilot_buy_lifecycle(tmp_path):
     assert "Prior unfilled attempts: 3" in body_text
     assert "prior_unfilled_attempts_reached_three_session_limit" in body_text
     assert "Live Pilot Buy Lifecycle" in body_html
-
-
-def test_confirmation_email_loads_explicit_live_pilot_results_path(tmp_path, monkeypatch):
-    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-live"
-    run_root.mkdir(parents=True)
-    results_path = run_root / "execution_results.json"
-    results_path.write_text(
-        json.dumps(
-            _results(
-                mode="LIVE_PILOT",
-                status="SUBMITTED",
-                operator_execution_status="executed",
-                submitted_count=1,
-                accepted_count=1,
-                trade_date="2026-06-26",
-            )
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("TRADING_CONFIRMATION_RESULTS_PATH", str(results_path))
-
-    results, loaded_path = _load_results("2026-06-26")
-
-    assert loaded_path == results_path
-    assert results["mode"] == "LIVE_PILOT"
-    assert results["submitted_count"] == 1
 
 
 def test_confirmation_email_renders_reliability_and_target_attainment_from_run_artifacts(tmp_path):

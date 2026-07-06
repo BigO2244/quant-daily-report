@@ -13,6 +13,21 @@ List the intended work boundaries, including whether the task is documentation,
 diagnostics, tests, research-only code, execution-adjacent code, or runtime
 behavior.
 
+## Phase 2 Alpha Gate
+
+Use this block for any new sleeve, new dataset, new feature family, vendor
+request, or promotion proposal. Cite
+`docs/governance/caerus_phase2_alpha_strategy.md`.
+
+- Phase 2 Hypothesis:
+- Expected alpha/risk contribution:
+- Required evidence:
+- RDP/data readiness status:
+- Promotion gate impact:
+- Dataset dependency:
+- Measurement plan:
+- Stop/defer condition:
+
 ## Non-Goals
 
 List what Codex must not solve in this task.

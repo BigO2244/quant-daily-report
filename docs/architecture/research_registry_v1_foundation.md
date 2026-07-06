@@ -13,6 +13,20 @@ This implementation note describes the initial deterministic registry
 foundation. The frozen semantic contracts in `docs/architecture/semantics/`
 remain authoritative; this document is only an implementation map.
 
+## Document Contract
+
+| Field | Value |
+|---|---|
+| Purpose | Map the initial deterministic Research Registry implementation to semantic contracts. |
+| Owner | `architecture` in front matter. |
+| Inputs | Semantic contracts, research registry package, conformance tests. |
+| Outputs | Implementation map for the v1 registry foundation. |
+| Related Documents | `docs/architecture/semantics/README.md`, `docs/architecture/research_registry_query_layer.md`, `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Tests | Research registry tests listed in `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Implementation | `research_registry/`. |
+| Related Artifacts | Registry SQLite indexes and research registry generated artifacts. |
+| Known Gaps | Current implementation state should be refreshed from code/tests before present-tense claims. |
+
 ## Scope
 
 Implemented scope:

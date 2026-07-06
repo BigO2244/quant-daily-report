@@ -14,6 +14,29 @@ The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md
 is the canonical strategic north star for strategy, sleeve, promotion, and
 portfolio-construction work unless explicitly amended.
 
+The Phase 2 Alpha Strategy at
+`docs/governance/caerus_phase2_alpha_strategy.md` is the canonical decision
+framework for post-RDP alpha-generation work.
+
+Post-RDP strategic sequencing is recorded in
+`docs/governance/post_rdp_strategic_assessment.md`. It evaluates the remaining
+Phoenix, Cassiopeia, Cygnus, Argo, Value, Quality, future-sleeve, and dataset
+priorities after completion of the read-only Research Data Platform foundation.
+
+Phase 2 Alpha Gate: any new sleeve, new dataset, or promotion proposal must
+cite:
+
+- Phase 2 Hypothesis: the hypothesis ID from
+  `docs/governance/caerus_phase2_alpha_strategy.md`.
+- Expected alpha/risk contribution: what return, risk, diversification,
+  explainability, or governance value is expected.
+- Required evidence: PIT data, validation, benchmark, overlap, capacity, and
+  observation artifacts needed before promotion.
+- RDP/data readiness status: catalog, freshness, validation, lineage, PIT, and
+  migration/parity state.
+- Promotion gate impact: whether the work is research-only, observe-only,
+  shadow-readiness, paper-readiness, or a defer/stop decision.
+
 Priority note 2026-06-17: FR-070 cash-gating / post-sell buy-budget remediation
 remains in observation/monitoring. The 2026-06-17 high-cash target was not an
 execution defect; the trend sleeve was invalidated for non-finite terminal
@@ -58,15 +81,13 @@ editing code or specs.
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
 - **Production posture:** paper remains the production posture. A separate,
-  tightly capped `$500` FR-104 Level 2.5 live-pilot evidence lane may collect
+  manual, tightly capped FR-104 Level 2.5 live-pilot evidence lane may collect
   forward broker/operational evidence only when explicitly approved; it is not
-  production, not dynamic allocation, and not proof of promotion readiness. No
-  shorting, no leverage.
+  production, not cron-enabled, not dynamic allocation, and not proof of
+  promotion readiness. No shorting, no leverage.
 - **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
 - **Shadow (non-blocking):** Caerus Orion, Caerus Lyra, Polaris_Alpha,
   Orion_Alpha. SPY = benchmark.
-- **Default FR-104 live-pilot sleeve:** Caerus Orion, only when all live-pilot
-  approval gates pass; otherwise Orion remains non-blocking shadow.
 - **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
   Orion_Alpha (`caerus_orion_alpha`) are forward shadow-only concentration
   variants activated 2026-06-23. Polaris_Alpha is Top 4 / 20% cap versus the
@@ -102,7 +123,8 @@ editing code or specs.
 | FR-067 | Vela (proposed) | Small-cap momentum sleeve (capacity-advantaged venue test); Stage 0 PIT source gate | `fr_archive/fr_067_vela_research_spec.md` | STAGE0_CLOSED_PASS 2026-06-10 — Sharadar delisted-price coverage verified (100/100, pct 1.0, median 0.999); approved as PIT price/security source for FR-068. Caveats: no S&P 600 membership (market-cap band); Cygnus v1 consensus still blocked | `scripts/research/verify_sharadar_coverage.py` | not yet registered |
 | FR-068 | — (operational) | Point-in-Time universe foundation + Polaris/Orion/Lyra rebaseline (survivorship remediation) | `research/pit_universe_architecture_2026-06-10.md`; Orion/Lyra PIT artifact: `outputs/research/pit_rebaseline/orion_lyra_matched_2026-06-17.json`; packet: `fr_active/fr_068_orion_lyra_pit_rebaseline_packet.md`; resolver certification: `reports/pit_universe_certification.md` | PHASES 1-4 COMPLETE; resolver certification added 2026-06-22 — PIT universe (20,618 secs, 14,790 delisted) + Universe(as_of_date); caerus_large_cap family (1,600; 354 delisted) + full SEP price hydration; `Universe(as_of_date, "caerus_large_cap")` now resolves the family artifact for canonical research access. Polaris priced rebaseline = MATERIAL (Sharpe 1.05->0.85, MaxDD -43%->-54%). Orion/Lyra matched PIT artifact generated with 2,767 observations and no statistically meaningful Lyra lead. Remaining decision-grade blocker: current-scale `scalemarketcap` large-cap membership must be replaced by PIT-valid, survivorship-free, security-id keyed, date-effective membership; DAILY market cap is one acceptable implementation, not the sole approved path. | `research/pit_universe.py`, `scripts/research/build_pit_universe_from_sharadar.py`, `scripts/research/hydrate_sharadar_sep.py`, `research/pit_large_cap_family.py`, `research/run_polaris_pit_priced_rebaseline.py`, `scripts/research/build_orion_lyra_pit_rebaseline.py` | n/a |
 | FR-069 | — (architecture) | Research Lab / modular sleeve architecture (research-only scaffold; no production refactor) | `fr_active/fr_069_research_lab_modular_sleeve_architecture.md`; Phase A package: `fr_active/fr_069_phase_a_architecture_package.md`; Phase B scaffold: `fr_active/fr_069_phase_b_scaffolding.md`; Phase C readiness: `fr_active/fr_069_phase_c_readiness.md` | PHASE_B_IMPLEMENTED_RESEARCH_ONLY — research-only sleeve manifest, manifest validator, evidence-envelope validator, read-only MCP inventory, Polaris parity plan, Orion/Lyra PIT evidence plan, future sleeve onboarding placeholders, and Phase C readiness lifecycle gates. FR-069 child lane opened 2026-06-22 for canonical PIT replay panel, decision tapes, replay certification, allocator baseline, and exposure-matched framework. Phase C implementation requires separate owner approval even after scaffold validation/tests pass | `research_registry/sleeves/manifest.json`, `research_registry/sleeves/evidence.py`, `scripts/research/validate_sleeve_manifest.py`, `scripts/research/validate_sleeve_evidence.py`, `fr069_sleeve_inventory` | research-only |
-| FR-DH | Cross-strategy research data | Data Hydration Governance Package | `fr_active/data_hydration/fr_dh_000_data_hydration_index.md`; catalog: `fr_active/data_hydration/fr_dh_013_canonical_research_data_catalog.md` | DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION - canonical research data catalog, hydration swarm, source policy matrix, credential-safe Sharadar probes, dataset freshness manifest, P1/P2/P3 observe-only normalization, fundamental and macro feature artifacts, data observability manifest, data-trust summary, advisory sleeve migration readiness, validation, and internal `research_data` APIs are implemented as read-only research-data foundation. No execution, broker, scheduler, allocation, model, sleeve-consumer, promotion, or trading behavior change. | `research_data/`, `scripts/data_hydration/`, `Tests/test_data_hydration_catalog.py`, `Tests/test_data_hydration_swarm.py`, `Tests/test_data_hydration_p1_normalization.py`, `Tests/test_data_hydration_p2_normalization.py`, `Tests/test_data_hydration_p3_normalization.py`, `Tests/test_data_hydration_feature_store.py`, `Tests/test_data_hydration_observability.py`, `Tests/test_data_trust_summary.py`, `Tests/test_sleeve_migration_readiness.py`, `data/manifests/p1_normalization_schema.template.json` | observe-only research data |
+| FR-105 | Cross-strategy portfolio research | Global Portfolio Optimizer and Decision Provenance | `fr_active/fr_105_global_portfolio_optimizer_and_decision_provenance.md` | ACTIVE_RESEARCH — research-only initiative for global optimizer replay, optimizer-derived holding count, decision provenance, and opportunity-cost reporting. The requested FR-075 number is already occupied by the operational controls framework, so this initiative uses the next open numeric lane. No trading, allocation, sizing, broker, scheduler, sleeve, risk-policy, or promotion behavior change. | future PIT optimizer/provenance research artifacts only | research-only |
+| FR-DH | Cross-strategy research data | Data Hydration Governance Package | `fr_active/data_hydration/fr_dh_000_data_hydration_index.md`; catalog: `fr_active/data_hydration/fr_dh_013_canonical_research_data_catalog.md`; architecture: `docs/architecture/research_data_platform.md` | DRAFT_RESEARCH / READ_ONLY_IMPLEMENTATION - canonical research data catalog, hydration swarm, source policy matrix, credential-safe Sharadar probes, dataset freshness manifest, P1/P2/P3 observe-only normalization, fundamental and macro feature artifacts, data observability manifest, data-trust summary, advisory sleeve migration readiness, validation, and internal `research_data` APIs are implemented as read-only research-data foundation. No execution, broker, scheduler, allocation, model, sleeve-consumer, promotion, or trading behavior change. | `research_data/`, `scripts/data_hydration/`, `Tests/test_data_hydration_catalog.py`, `Tests/test_data_hydration_swarm.py`, `Tests/test_data_hydration_p1_normalization.py`, `Tests/test_data_hydration_p2_normalization.py`, `Tests/test_data_hydration_p3_normalization.py`, `Tests/test_data_hydration_feature_store.py`, `Tests/test_data_hydration_observability.py`, `Tests/test_data_trust_summary.py`, `Tests/test_sleeve_migration_readiness.py`, `data/manifests/p1_normalization_schema.template.json` | observe-only research data |
 
 Note: FR-056 and FR-057 are later design drafts (created 2026-06-08) that duplicate or
 contradict the canonical FR-051/FR-053 research specs (created 2026-06-03). They are
@@ -129,7 +151,7 @@ migration cannot depend on uncataloged datasets.
 |----------|------------------------|-----------------|--------|-----|--------|--------------------|--------------|
 | Polaris | security_selection / core_momentum | paper | growth_engine_v4 | yes | yes | no | paper_control |
 | Polaris_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 4 / 20% cap; compare only against preserved Polaris baseline; no capital |
-| Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_challenger; default_fr104_live_pilot_sleeve_when_approved |
+| Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_only |
 | Orion_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 3 / 25% cap; compare only against preserved Orion baseline; no capital |
 | Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
 | Phoenix | security_selection / crisis_reversal | research / not_viable_current_phase_b | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts; PIT liquidity evidence is decision-grade but current Phase B candidate fails 5% ADV capacity policy; not Shadow-readiness eligible |

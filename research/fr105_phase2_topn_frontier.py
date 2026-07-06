@@ -253,14 +253,9 @@ def phase01_completeness_gate(
     summary = _as_dict(payload.get("summary"))
     readiness = _as_dict(payload.get("readiness"))
     blocking_gaps = list(_as_list(readiness.get("blocking_gaps")))
-    status = str(
-        readiness.get("status")
-        or (READY if summary.get("complete") is True and not blocking_gaps else BLOCKED_ARTIFACT_GAPS)
-    )
+    status = str(readiness.get("status") or (READY if summary.get("complete") is True and not blocking_gaps else BLOCKED_ARTIFACT_GAPS))
     if not blocking_gaps and status != READY_WITH_SCORE_SOURCE_UNAVAILABLE:
-        blocking_gaps = list(_as_list(summary.get("missing_fields"))) + list(
-            _as_list(summary.get("unavailable_fields"))
-        )
+        blocking_gaps = list(_as_list(summary.get("missing_fields"))) + list(_as_list(summary.get("unavailable_fields")))
     complete = summary.get("complete") is True
     ready = status == READY and complete and not blocking_gaps
     waiver = _as_dict(readiness.get("score_source_unavailable_waiver"))
@@ -271,9 +266,7 @@ def phase01_completeness_gate(
         "blocking_gaps": sorted({str(gap) for gap in blocking_gaps if str(gap)}),
         "waived_gaps": [str(gap) for gap in _as_list(readiness.get("waived_gaps"))],
         "historical_replay_ready": readiness.get("historical_replay_ready") is True or complete,
-        "score_driven_ranking_replayable": (
-            readiness.get("score_driven_ranking_replayable") is True or complete
-        ),
+        "score_driven_ranking_replayable": readiness.get("score_driven_ranking_replayable") is True or complete,
         "alpha_chase_evaluation_ready": readiness.get("alpha_chase_evaluation_ready") is True or complete,
         "shadow_comparison_ready": readiness.get("shadow_comparison_ready") is True or complete,
         "score_source_unavailable_waiver": waiver,
@@ -709,10 +702,7 @@ def _blocked_phase2_frontier(
             },
             "unavailable_fields": unavailable,
         },
-        "score_source_status": {
-            "status": "UNAVAILABLE",
-            "reason": SCORE_SOURCE_REPLAY_GAP if score_gap else BLOCKED_ARTIFACT_GAPS,
-        },
+        "score_source_status": {"status": "UNAVAILABLE", "reason": SCORE_SOURCE_REPLAY_GAP if score_gap else BLOCKED_ARTIFACT_GAPS},
         "selected_universe_status": {"status": "UNAVAILABLE", "reason": BLOCKED_ARTIFACT_GAPS},
         "constraint_summary": {"status": "UNAVAILABLE", "reason": BLOCKED_ARTIFACT_GAPS},
         "candidate_pool": {

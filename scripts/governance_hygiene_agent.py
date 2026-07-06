@@ -79,6 +79,14 @@ FR_PATH_RE = re.compile(r"fr_(\d{3})_[A-Za-z0-9_]+\.md")
 REF_RE = re.compile(
     r"(?P<ref>(?:\.\./)?(?:docs/governance/|fr_active/|fr_archive/|docs/|AGENTS\.md|README\.md)[A-Za-z0-9_./\-]+\.md|(?:\.\./)?(?:AGENTS\.md|README\.md))"
 )
+PHASE2_ALPHA_GATE_RE = re.compile(r"^\s*(?:#+\s*)?Phase 2 Alpha Gate\b", re.IGNORECASE)
+PHASE2_ALPHA_GATE_FIELDS = (
+    "Phase 2 Hypothesis",
+    "Expected alpha/risk contribution",
+    "Required evidence",
+    "RDP/data readiness status",
+    "Promotion gate impact",
+)
 
 
 @dataclass(frozen=True)
@@ -196,6 +204,39 @@ def _normalize_repo_path(repo_root: Path, ref: str, source: Path | None = None) 
 
 def _extract_refs_from_line(line: str) -> list[str]:
     return [match.group("ref") for match in REF_RE.finditer(line)]
+
+
+def _phase2_alpha_gate_findings(repo_root: Path, paths: Iterable[Path]) -> list[Finding]:
+    findings: list[Finding] = []
+    for path in paths:
+        if not path.exists() or path.suffix.lower() != ".md":
+            continue
+        rel = str(path.relative_to(repo_root))
+        lines = _read_text(path).splitlines()
+        for idx, line in enumerate(lines):
+            if not PHASE2_ALPHA_GATE_RE.search(line):
+                continue
+            block = "\n".join(lines[idx : idx + 35]).lower()
+            missing = [field for field in PHASE2_ALPHA_GATE_FIELDS if field.lower() not in block]
+            if not missing:
+                continue
+            findings.append(
+                Finding(
+                    severity="WARN",
+                    category="phase2_alpha_gate",
+                    file=rel,
+                    line=idx + 1,
+                    message=(
+                        "Phase 2 Alpha Gate block is missing required fields: "
+                        + ", ".join(missing)
+                    ),
+                    suggested_action=(
+                        "Add Phase 2 Hypothesis, expected alpha/risk contribution, required evidence, "
+                        "RDP/data readiness status, and promotion gate impact before treating the item as a Phase 2 research proposal."
+                    ),
+                )
+            )
+    return findings
 
 
 def _git_lines(repo_root: Path, args: list[str]) -> list[str]:
@@ -472,6 +513,14 @@ def _build_audit(repo_root: Path, today: dt.date) -> dict[str, object]:
                     suggested_action="Add a short canonical-doctrine note or link to the doctrine in this document.",
                 )
             )
+
+    phase2_docs = [
+        path
+        for path in sorted((repo_root / "docs/governance").rglob("*.md"))
+        if path.is_file()
+    ]
+    phase2_docs.extend([repo_root / "AGENTS.md", repo_root / "README.md"])
+    findings.extend(_phase2_alpha_gate_findings(repo_root, phase2_docs))
 
     # FR files must be represented in the registry.
     fr_files = {}

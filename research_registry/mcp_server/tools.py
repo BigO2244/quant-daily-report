@@ -893,6 +893,14 @@ def _integrity_objects_by_run_id(query: RegistryQuery) -> dict[str, Any]:
 
 
 def _run_record(run_obj: Any, integrity_obj: Any | None = None) -> dict[str, Any]:
+    execution_results = run_obj.data.get("execution_results") if isinstance(run_obj.data.get("execution_results"), dict) else {}
+    execution_payload = run_obj.data.get("execution_payload") if isinstance(run_obj.data.get("execution_payload"), dict) else {}
+    lifecycle_summary = (
+        execution_results.get("candidate_trade_lifecycle_summary")
+        or execution_payload.get("candidate_trade_lifecycle_summary")
+        or run_obj.data.get("candidate_trade_lifecycle_summary")
+        or {}
+    )
     return {
         "trade_date": run_obj.data.get("trade_date") or run_obj.identity.get("trade_date"),
         "run_id": run_obj.data.get("run_id"),
@@ -901,6 +909,15 @@ def _run_record(run_obj: Any, integrity_obj: Any | None = None) -> dict[str, Any
         "submitted_count": run_obj.data.get("submitted_count"),
         "accepted_count": run_obj.data.get("accepted_count"),
         "rejected_count": run_obj.data.get("rejected_count"),
+        "planned_payload_trade_count": execution_results.get("planned_payload_trade_count") or execution_payload.get("planned_payload_trade_count") or lifecycle_summary.get("precompute_candidates"),
+        "executable_filter_passed_count": execution_results.get("executable_filter_passed_count") or execution_payload.get("executable_filter_passed_count") or lifecycle_summary.get("passed_executable_filter"),
+        "executable_trades_count": execution_results.get("executable_trades_count") or execution_payload.get("execution_eligible_trades_count") or execution_payload.get("executable_trades_count"),
+        "final_executable_trades_count": execution_results.get("final_executable_trades_count") or execution_results.get("executable_trades_count") or execution_payload.get("execution_eligible_trades_count") or execution_payload.get("executable_trades_count"),
+        "intended_orders_count": execution_results.get("intended_orders_count") or execution_payload.get("intended_orders_count") or lifecycle_summary.get("intended_orders"),
+        "filled_count": execution_results.get("orders_filled_count") or execution_payload.get("orders_filled_count") or lifecycle_summary.get("filled"),
+        "candidate_trade_lifecycle_artifact": execution_results.get("candidate_trade_lifecycle_artifact") or execution_payload.get("candidate_trade_lifecycle_artifact"),
+        "candidate_trade_lifecycle_reasons": lifecycle_summary.get("suppression_reason_counts") or {},
+        "candidate_trade_clipping_reasons": lifecycle_summary.get("clipping_reason_counts") or {},
         "integrity_status": integrity_obj.data.get("status") if integrity_obj else run_obj.data.get("execution_integrity_status"),
         "object_id": run_obj.object_id,
     }
@@ -1121,11 +1138,20 @@ def _latest_execution_status(root: Path) -> dict[str, Any]:
     results = _read_json(latest / "execution_results.json")
     summary = _read_json(latest / "operator_summary.json")
     integrity = _read_json(latest / "audit" / "execution_integrity.json")
+    lifecycle_artifact = results.get("candidate_trade_lifecycle_artifact") or payload.get("candidate_trade_lifecycle_artifact")
+    lifecycle_path = Path(str(lifecycle_artifact)) if lifecycle_artifact else (
+        latest / "audit" / f"candidate_trade_lifecycle_{payload.get('trade_date') or results.get('trade_date') or summary.get('trade_date') or latest.name[:10]}.json"
+    )
+    lifecycle_summary = results.get("candidate_trade_lifecycle_summary") or payload.get("candidate_trade_lifecycle_summary") or {}
+    if not lifecycle_summary and lifecycle_path.exists():
+        lifecycle_payload = _read_json(lifecycle_path)
+        lifecycle_summary = lifecycle_payload.get("counts") or {}
     files = {
         "execution_payload": _file_probe(latest / "execution_payload.json"),
         "execution_results": _file_probe(latest / "execution_results.json"),
         "operator_summary": _file_probe(latest / "operator_summary.json"),
         "execution_integrity": _file_probe(latest / "audit" / "execution_integrity.json"),
+        "candidate_trade_lifecycle": _file_probe(lifecycle_path),
     }
     return {
         "status": "OK" if files["operator_summary"]["exists"] or files["execution_payload"]["exists"] else "NEEDS_OPERATOR",
@@ -1135,6 +1161,19 @@ def _latest_execution_status(root: Path) -> dict[str, Any]:
         "execution_status": summary.get("terminal_status") or results.get("status") or payload.get("status") or payload.get("execution_status"),
         "operator_execution_status": summary.get("operator_execution_status") or payload.get("operator_execution_status"),
         "integrity_status": integrity.get("status") or summary.get("execution_integrity_status"),
+        "planned_payload_trade_count": results.get("planned_payload_trade_count") or payload.get("planned_payload_trade_count") or lifecycle_summary.get("precompute_candidates"),
+        "executable_filter_passed_count": results.get("executable_filter_passed_count") or payload.get("executable_filter_passed_count") or lifecycle_summary.get("passed_executable_filter"),
+        "executable_trades_count": results.get("executable_trades_count") or payload.get("execution_eligible_trades_count") or payload.get("executable_trades_count"),
+        "final_executable_trades_count": results.get("final_executable_trades_count") or results.get("executable_trades_count") or payload.get("execution_eligible_trades_count") or payload.get("executable_trades_count"),
+        "intended_orders_count": results.get("intended_orders_count") or payload.get("intended_orders_count") or lifecycle_summary.get("intended_orders"),
+        "submitted_count": results.get("submitted_count") or payload.get("submitted_count"),
+        "accepted_count": results.get("accepted_count") or payload.get("accepted_count"),
+        "filled_count": results.get("orders_filled_count") or payload.get("orders_filled_count") or lifecycle_summary.get("filled"),
+        "rejected_count": results.get("rejected_count") or payload.get("rejected_count"),
+        "candidate_trade_lifecycle_artifact": str(lifecycle_path),
+        "candidate_trade_lifecycle_summary": lifecycle_summary,
+        "candidate_trade_lifecycle_reasons": lifecycle_summary.get("suppression_reason_counts") or {},
+        "candidate_trade_clipping_reasons": lifecycle_summary.get("clipping_reason_counts") or {},
         "files": files,
     }
 

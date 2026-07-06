@@ -137,8 +137,8 @@ def normalize_status(
       - NO_ACTION: no trades proposed after constraints
       - READY: trades exist and can be executed
       - HALTED: execution cannot proceed (blocker)
+      - MARKET_CLOSED: expected full-session market closure
       - EXECUTED: orders submitted to broker (set by executor only)
-      - MARKET_CLOSED: execution intentionally skipped on a closed market day
       - SKIPPED_DUPLICATE: already executed this run_id (set by executor only)
 
     Args:
@@ -149,13 +149,12 @@ def normalize_status(
     Returns:
         Normalized status string
     """
-    raw_status = str(execution_status or "").strip().upper()
-
+    raw_status = (execution_status or "").upper()
     if raw_status == STATUS_MARKET_CLOSED:
         return STATUS_MARKET_CLOSED
 
     # If explicitly halted or halt reason present
-    if halt_reason or raw_status == "HALTED":
+    if halt_reason or raw_status == STATUS_HALTED:
         return STATUS_HALTED
 
     # If no executable trades
@@ -212,8 +211,8 @@ def write_canonical_execution_payload(
         "halt_reason": halt_reason,
         "execution_outcome": (payload or {}).get("execution_outcome"),
         "execution_reason": (payload or {}).get("execution_reason"),
-        "reason_code": (payload or {}).get("reason_code"),
         "cash_rebalance_status": (payload or {}).get("cash_rebalance_status"),
+        "reason_code": (payload or {}).get("reason_code"),
         "broker_reject_status": (payload or {}).get("broker_reject_status"),
         "broker_reject_message": (payload or {}).get("broker_reject_message"),
         "submitted_count": int((payload or {}).get("submitted_count") or 0),

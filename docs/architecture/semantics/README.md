@@ -165,7 +165,7 @@ clause governed by the freeze require a successor freeze (v2).
 | `docs/governance/change_lineage_standard.md` | Governs prose lineage notes. Spec 3 governs machine-readable lineage. Both are required; neither replaces the other. |
 | `docs/governance/governance_taxonomy.md` | Defines FR categories and lifecycle. Spec 4 formalises their semantics for MCP consumption. |
 | `docs/governance/fr_governance_model.md` | Defines FR process. Spec 4 references it as the authoritative lifecycle definition. |
-| `docs/governance/research_integrity_hardening_plan.md` | Defines FR-024..029 deliverables. Spec 2 incorporates their surface labels as canonical. |
+| `docs/governance/fr_registry.md`, `docs/governance/fr_active_backlog.md` | Define current FR-024..029 status and routing. Spec 2 incorporates their surface labels as canonical. |
 
 This layer does not supersede any existing canonical document. It
 *formalises* the semantics they collectively imply.

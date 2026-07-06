@@ -60,6 +60,9 @@ SOURCE_PLAN: dict[str, list[str]] = {
     "alternative_datasets": ["gdelt_public_news"],
 }
 
+DEFAULT_SLEEVE_MANIFEST = Path("research_registry/sleeves/manifest.json")
+DEFAULT_LEGACY_CANDIDATES_ROOT = Path("outputs/shadow_candidates")
+
 
 def default_adapters() -> dict[str, BaseHydrationAdapter]:
     adapters: list[BaseHydrationAdapter] = [
@@ -87,6 +90,9 @@ def run_swarm(
     as_of_date: str | None = None,
     dataset_ids: set[str] | None = None,
     source_names: set[str] | None = None,
+    symbols: set[str] | None = None,
+    sleeve_id: str | None = None,
+    legacy_candidates_root: Path | None = None,
     timeout_seconds: int = 12,
     adapter_registry: dict[str, BaseHydrationAdapter] | None = None,
 ) -> dict[str, Any]:
@@ -103,6 +109,8 @@ def run_swarm(
         dry_run=dry_run,
         limit_sample=limit_sample,
         timeout_seconds=timeout_seconds,
+        symbols=tuple(_resolve_symbols(repo_root, as_of_date or default_as_of_date(), symbols=symbols, sleeve_id=sleeve_id, legacy_candidates_root=legacy_candidates_root)),
+        sleeve_id=sleeve_id,
     )
 
     all_attempts: list[dict[str, Any]] = []
@@ -128,6 +136,9 @@ def run_swarm(
         "attempt_count": len(all_attempts),
         "successful_dataset_count": sum(1 for row in dataset_summaries if row["hydration_succeeded"]),
         "blocked_dataset_count": sum(1 for row in dataset_summaries if not row["hydration_succeeded"]),
+        "focused_symbols": list(context.symbols),
+        "focused_symbol_count": len(context.symbols),
+        "focused_sleeve_id": sleeve_id,
         "broker_submission_invoked": False,
         "runtime_impact": "read_only_data_hydration_only_no_trading_path_changes",
     }
@@ -356,6 +367,61 @@ def _build_capability_matrix(dataset_summaries: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _resolve_symbols(
+    repo_root: Path,
+    as_of_date: str,
+    *,
+    symbols: set[str] | None,
+    sleeve_id: str | None,
+    legacy_candidates_root: Path | None,
+) -> list[str]:
+    resolved = {_clean_symbol(symbol) for symbol in (symbols or set()) if _clean_symbol(symbol)}
+    if sleeve_id:
+        resolved.update(_sleeve_symbols(repo_root, as_of_date, sleeve_id=sleeve_id, legacy_candidates_root=legacy_candidates_root))
+    return sorted(resolved)
+
+
+def _sleeve_symbols(repo_root: Path, as_of_date: str, *, sleeve_id: str, legacy_candidates_root: Path | None) -> list[str]:
+    strategy_id = _strategy_id_for_sleeve(repo_root, sleeve_id)
+    root = legacy_candidates_root if legacy_candidates_root else DEFAULT_LEGACY_CANDIDATES_ROOT
+    root = root if root.is_absolute() else repo_root / root
+    candidate = _find_legacy_candidate(root, strategy_id, as_of_date)
+    if candidate is None:
+        return []
+    payload = json.loads(candidate.read_text(encoding="utf-8"))
+    symbols = {_clean_symbol(row.get("ticker") or row.get("symbol")) for row in payload.get("holdings") or []}
+    symbols.update(_clean_symbol(row.get("ticker") or row.get("symbol")) for row in payload.get("rank_table") or [])
+    symbols.update(_clean_symbol(symbol) for symbol in (payload.get("target_weights") or {}).keys())
+    return sorted(symbol for symbol in symbols if symbol)
+
+
+def _strategy_id_for_sleeve(repo_root: Path, sleeve_id: str) -> str:
+    path = repo_root / DEFAULT_SLEEVE_MANIFEST
+    if path.exists():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for row in payload.get("sleeves") or []:
+            if row.get("sleeve_id") == sleeve_id:
+                return str(row.get("strategy_id") or sleeve_id)
+    return f"caerus_{sleeve_id}" if not sleeve_id.startswith("caerus_") else sleeve_id
+
+
+def _find_legacy_candidate(root: Path, strategy_id: str, as_of_date: str) -> Path | None:
+    if not root.exists():
+        return None
+    candidates = []
+    for dated_dir in root.iterdir():
+        if not dated_dir.is_dir() or dated_dir.name > as_of_date:
+            continue
+        candidate = dated_dir / f"{strategy_id}.json"
+        if candidate.exists():
+            candidates.append(candidate)
+    return sorted(candidates)[-1] if candidates else None
+
+
+def _clean_symbol(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the read-only FR-DH data hydration swarm.")
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
@@ -364,6 +430,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--datasets", "--only", nargs="+", default=[], help="Dataset ids to run as a focused subset.")
     parser.add_argument("--source", action="append", default=[], help="Source adapter name to run. Repeatable.")
     parser.add_argument("--sources", nargs="+", default=[], help="Source adapter names to run as a focused subset.")
+    parser.add_argument("--sleeve", "--sleeve-id", dest="sleeve_id", default=None, help="Resolve symbols from the latest legacy candidate for this sleeve.")
+    parser.add_argument("--symbol", action="append", default=[], help="Symbol to hydrate. Repeatable.")
+    parser.add_argument("--symbols", nargs="+", default=[], help="Symbols to hydrate as a focused universe.")
+    parser.add_argument("--legacy-candidates-root", type=Path, default=None)
     parser.add_argument("--env-file", default=None, help="Optional env file with Nasdaq Data Link credentials. Secret values are never logged.")
     parser.add_argument("--timeout-seconds", type=int, default=12)
     parser.add_argument("--dry-run", action="store_true", help="Classify all datasets without network/source calls.")
@@ -377,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
         _load_env_file(args.env_file)
     dataset_ids = set(args.dataset or []) | set(args.datasets or [])
     source_names = set(args.source or []) | set(args.sources or [])
+    symbols = set(args.symbol or []) | set(args.symbols or [])
     payload = run_swarm(
         repo_root=args.repo_root,
         dry_run=bool(args.dry_run),
@@ -384,6 +455,9 @@ def main(argv: list[str] | None = None) -> int:
         as_of_date=str(args.as_of_date),
         dataset_ids=dataset_ids or None,
         source_names=source_names or None,
+        symbols=symbols or None,
+        sleeve_id=args.sleeve_id,
+        legacy_candidates_root=args.legacy_candidates_root,
         timeout_seconds=int(args.timeout_seconds),
     )
     print(json.dumps(payload["summary"], indent=2, sort_keys=True))

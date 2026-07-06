@@ -40,11 +40,11 @@ class NasdaqSharadarAdapter(BaseHydrationAdapter):
             table="SHARADAR/TICKERS",
             params={
                 "table": "SEP",
-                "qopts.columns": "ticker,permaticker,name,exchange,isdelisted,firstpricedate,lastpricedate",
+                "qopts.columns": "ticker,permaticker,name,exchange,isdelisted,category,scalemarketcap,firstpricedate,lastpricedate",
                 "qopts.per_page": 5,
             },
             effective_date_available=True,
-            pit_safe_status="PIT_SAFE_SAMPLE_SECURITY_DATES_PRESENT",
+            pit_safe_status="PIT_GRADE_SHARADAR_TICKERS_DATE_WINDOWS",
         ),
         "corporate_actions": SharadarProbe(
             table="SHARADAR/ACTIONS",
@@ -100,7 +100,12 @@ class NasdaqSharadarAdapter(BaseHydrationAdapter):
             )
 
         probe = self._PROBES[dataset_id]
-        params_list = _fundamentals_probe_params() if dataset_id == "fundamentals_pit" else [probe.params]
+        if dataset_id == "fundamentals_pit":
+            params_list = _fundamentals_probe_params()
+        elif dataset_id == "security_master_pit" and context.symbols:
+            params_list = _security_master_probe_params(context.symbols)
+        else:
+            params_list = [probe.params]
         return self._hydrate_from_probe_params(dataset, context, started_at, probe, params_list, api_key)
 
     def _hydrate_from_probe_params(
@@ -113,6 +118,8 @@ class NasdaqSharadarAdapter(BaseHydrationAdapter):
         api_key: str,
     ) -> HydrationResult:
         attempted: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
+        columns: list[str] = []
         for params in params_list:
             attempted.append({"table": probe.table, "params": _sanitize_params(params)})
             try:
@@ -135,6 +142,9 @@ class NasdaqSharadarAdapter(BaseHydrationAdapter):
                     recommended_user_action="Inspect the approved Sharadar table schema and update the adapter parser.",
                 )
             if rows:
+                all_rows.extend(rows)
+                if len(params_list) > 1 and str(dataset["dataset_id"]) == "security_master_pit":
+                    continue
                 artifact = context.output_path("raw", dataset["dataset_id"], self.source_name, _artifact_name(probe.table))
                 write_json(
                     artifact,
@@ -158,6 +168,35 @@ class NasdaqSharadarAdapter(BaseHydrationAdapter):
                     pit_safe_status=probe.pit_safe_status,
                     validation_status="VALIDATED_NASDAQ_DATA_LINK_DATATABLE_SHAPE",
                 )
+
+        if all_rows:
+            deduped = _dedupe_rows(all_rows)
+            artifact = context.output_path("raw", dataset["dataset_id"], self.source_name, _artifact_name(probe.table))
+            write_json(
+                artifact,
+                {
+                    "source_table": probe.table,
+                    "sample_params": _sanitize_params(params_list[0]),
+                    "attempted_probes": attempted,
+                    "queried_symbols": list(context.symbols),
+                    "columns": columns,
+                    "rows": deduped,
+                },
+            )
+            covered = {str(row.get("ticker") or "").upper() for row in deduped}
+            missing = sorted(set(context.symbols) - covered)
+            return self.result(
+                dataset,
+                context,
+                status="OK" if not missing else "PARTIAL",
+                started_at=started_at,
+                records_written=len(deduped),
+                artifact_path=artifact,
+                effective_date_available=probe.effective_date_available,
+                filing_date_available=probe.filing_date_available,
+                pit_safe_status=probe.pit_safe_status if not missing else "PIT_PARTIAL_SHARADAR_TICKERS_MISSING_SYMBOLS",
+                validation_status="VALIDATED_PIT_SECURITY_MASTER_SHAPE" if not missing else f"VALIDATED_PARTIAL_PIT_SECURITY_MASTER_MISSING:{','.join(missing)}",
+            )
 
         return self.result(
             dataset,
@@ -235,6 +274,19 @@ def _artifact_name(table: str) -> str:
     return table.lower().replace("/", "_") + "_sample.json"
 
 
+def _security_master_probe_params(symbols: tuple[str, ...]) -> list[dict[str, Any]]:
+    columns = "ticker,permaticker,name,exchange,isdelisted,category,scalemarketcap,firstpricedate,lastpricedate"
+    return [
+        {
+            "table": "SEP",
+            "ticker": symbol,
+            "qopts.columns": columns,
+            "qopts.per_page": 10,
+        }
+        for symbol in sorted(set(symbols))
+    ]
+
+
 def _fundamentals_probe_params() -> list[dict[str, Any]]:
     columns = "ticker,calendardate,datekey,reportperiod,dimension,revenue,netinc"
     return [
@@ -277,3 +329,15 @@ def _sanitize_params(params: dict[str, Any]) -> dict[str, Any]:
 
 def _attempts_json(attempted: list[dict[str, Any]]) -> str:
     return json.dumps(attempted, sort_keys=True, separators=(",", ":"))
+
+
+def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = set()
+    deduped = []
+    for row in rows:
+        key = tuple(sorted(row.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped

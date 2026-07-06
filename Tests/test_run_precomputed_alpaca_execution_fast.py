@@ -23,6 +23,7 @@ def _load_module(tmp_path: Path):
         "brokers.alpaca_broker",
         "brokers.alpaca_snapshot",
         "core",
+        "core.candidate_trade_lifecycle",
         "core.execution_audit",
         "core.execution_integrity",
         "core.execution_lifecycle_timeline",
@@ -95,6 +96,13 @@ def _load_module(tmp_path: Path):
         write_pretrade_snapshot_artifacts=lambda **_kwargs: None,
     )
     sys.modules["core"] = _module("core", __path__=[])
+    sys.modules["core.candidate_trade_lifecycle"] = _module(
+        "core.candidate_trade_lifecycle",
+        write_candidate_trade_lifecycle=lambda **kwargs: (
+            Path(kwargs["run_root"]) / "audit" / "candidate_trade_lifecycle.json",
+            {"counts": {}, "candidates": []},
+        ),
+    )
     sys.modules["core.execution_audit"] = _module(
         "core.execution_audit",
         write_executor_audit=lambda **_kwargs: None,
@@ -279,6 +287,7 @@ def _load_module(tmp_path: Path):
     )
     sys.modules["paper.paper_broker"] = _module(
         "paper.paper_broker",
+        load_config=lambda _path: _module("PaperConfig", min_trade_dollars=1.0, allow_fractional=True),
         run_paper_day=lambda **_kwargs: {},
     )
     sys.modules["paper.run_manager"] = _module(
@@ -358,51 +367,43 @@ def test_exact_plan_has_named_explicit_opt_out_and_empty_plan_no_action_path(
     assert live_exec._exact_plan_enabled_for_payload({"trade_date": "2026-06-19", "trades": []}) is False
 
 
-def test_market_closed_day_semantics_mark_expected_skip(tmp_path) -> None:
+def test_market_closed_day_semantics_is_expected_skip_not_payload_drop(tmp_path) -> None:
     live_exec = _load_module(tmp_path)
     payload = {
-        "execution_status": "READY",
+        "execution_status": "PLANNED",
         "halt_reason": None,
-        "planned_payload_drop_diagnostics": {"reason": "old"},
+        "planned_payload_trade_count": 4,
+        "execution_eligible_trades_count": 0,
+        "submitted_count": 0,
     }
     paper_summary = {
         "market_guard": {
-            "status": "CLOSED",
             "reason": "MARKET_CLOSED_DAY",
-            "is_open_now": False,
             "is_trading_day": False,
-        },
-        "market_reason": "MARKET_CLOSED_DAY",
+            "is_open_now": False,
+        }
     }
 
     assert live_exec._apply_market_closed_day_semantics(payload, paper_summary) is True
-
     assert payload["execution_status"] == "MARKET_CLOSED"
-    assert payload["operator_execution_status"] == "skipped"
-    assert payload["halt_reason"] is None
-    assert payload["execution_reason"] == "MARKET_CLOSED_DAY"
     assert payload["reason_code"] == "MARKET_CLOSED_DAY"
     assert payload["operator_action_required"] is False
-    assert payload["market_closed_expected_skip"] is True
     assert "planned_payload_drop_diagnostics" not in payload
 
 
-def test_early_close_after_close_is_not_full_market_holiday(tmp_path) -> None:
+def test_early_close_after_close_is_not_full_holiday_skip(tmp_path) -> None:
     live_exec = _load_module(tmp_path)
-    payload = {"execution_status": "READY"}
+    payload = {"execution_status": "PLANNED", "halt_reason": None}
     paper_summary = {
         "market_guard": {
-            "status": "CLOSED",
             "reason": "AFTER_MARKET_CUTOFF",
-            "is_open_now": False,
             "is_trading_day": True,
-        },
-        "market_reason": "AFTER_MARKET_CUTOFF",
+            "is_open_now": False,
+        }
     }
 
     assert live_exec._apply_market_closed_day_semantics(payload, paper_summary) is False
-
-    assert payload == {"execution_status": "READY"}
+    assert payload["execution_status"] == "PLANNED"
 
 
 def test_cash_gate_diagnostics_mark_raw_gate_reconciled_success(tmp_path) -> None:

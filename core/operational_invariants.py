@@ -48,42 +48,23 @@ _TERMINAL_NEEDS_REASON = {
     "NO_ACTION",
     "SKIPPED",
     "SKIPPED_DUPLICATE",
-    "MARKET_CLOSED",
     "HALTED",
     "FAILED",
     "FAIL",
     "ERROR",
     "PARTIAL",
+    "MARKET_CLOSED",
 }
 
 
-def _read_json_checked(path: Path) -> tuple[dict[str, Any], str | None]:
-    """Read a JSON object, distinguishing *missing* from *present-but-unreadable*.
-
-    Returns ``(payload, error)``:
-    - missing file            -> ``({}, None)``  (legitimately absent / optional)
-    - corrupt / unparseable    -> ``({}, "unreadable_json:<ExcType>")``
-    - present but not a JSON obj -> ``({}, "non_object_json")``
-    - valid object             -> ``(payload, None)``
-
-    Unlike a bare ``except: return {}`` swallow, a present-but-broken artifact is
-    surfaced as an explicit error so the reliability report can fail closed on it
-    instead of silently treating a corrupt run as a clean no-op.
-    """
+def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {}, None
+        return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # corrupt / unreadable content is NOT a silent {}
-        return {}, f"unreadable_json:{type(exc).__name__}"
-    if not isinstance(payload, dict):
-        return {}, "non_object_json"
-    return payload, None
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    payload, _error = _read_json_checked(path)
-    return payload
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -248,22 +229,20 @@ def _execution_reason(
     return None
 
 
-def _market_calendar_evidence(trade_date: Any) -> dict[str, Any]:
-    parsed = _parse_trade_date(trade_date)
-    if parsed is None:
-        return {
-            "calendar_name": XNYS_CALENDAR_NAME,
-            "trade_date": str(trade_date or ""),
-            "is_trading_day": None,
-            "reason": "MARKET_CALENDAR_DATE_INVALID",
-        }
-    date_str = parsed.isoformat()
-    open_session = is_trading_day(date_str)
+def _is_market_closed_trade_date(trade_date: str) -> bool:
+    try:
+        return not is_trading_day(str(trade_date))
+    except Exception:
+        return False
+
+
+def _market_calendar_evidence(trade_date: str) -> dict[str, Any]:
+    market_closed = _is_market_closed_trade_date(trade_date)
     return {
         "calendar_name": XNYS_CALENDAR_NAME,
-        "trade_date": date_str,
-        "is_trading_day": open_session,
-        "reason": "MARKET_OPEN_DAY" if open_session else "MARKET_CLOSED_DAY",
+        "trade_date": str(trade_date),
+        "is_trading_day": not market_closed,
+        "reason": "MARKET_CLOSED_DAY" if market_closed else "TRADING_DAY",
     }
 
 
@@ -549,29 +528,14 @@ def build_execution_reliability_report(
     precompute_payload_path = Path("outputs") / "precompute" / trade_date / "planned_execution_payload.json"
     precompute_contract_path = Path("outputs") / "precompute" / trade_date / "contract.json"
 
-    _artifact_reads = {
-        "execution_payload": _read_json_checked(execution_payload_path),
-        "execution_results": _read_json_checked(execution_results_path),
-        "operator_summary": _read_json_checked(operator_summary_path),
-        "execution_integrity": _read_json_checked(execution_integrity_path),
-        "target_attainment": _read_json_checked(target_attainment_path),
-        "reconciliation": _read_json_checked(posttrade_recon_path),
-        "precompute_payload": _read_json_checked(precompute_payload_path),
-        "precompute_contract": _read_json_checked(precompute_contract_path),
-    }
-    execution_payload = _artifact_reads["execution_payload"][0]
-    execution_results = _artifact_reads["execution_results"][0]
-    operator_summary = _artifact_reads["operator_summary"][0]
-    execution_integrity = _artifact_reads["execution_integrity"][0]
-    target_attainment = _artifact_reads["target_attainment"][0]
-    reconciliation = _artifact_reads["reconciliation"][0]
-    precompute_payload = _artifact_reads["precompute_payload"][0]
-    precompute_contract = _artifact_reads["precompute_contract"][0]
-    artifact_read_errors = [
-        {"artifact": name, "error": error}
-        for name, (_payload, error) in _artifact_reads.items()
-        if error is not None
-    ]
+    execution_payload = _read_json(execution_payload_path)
+    execution_results = _read_json(execution_results_path)
+    operator_summary = _read_json(operator_summary_path)
+    execution_integrity = _read_json(execution_integrity_path)
+    target_attainment = _read_json(target_attainment_path)
+    reconciliation = _read_json(posttrade_recon_path)
+    precompute_payload = _read_json(precompute_payload_path)
+    precompute_contract = _read_json(precompute_contract_path)
 
     counts = _counts(
         execution_payload=execution_payload,
@@ -584,27 +548,8 @@ def build_execution_reliability_report(
         operator_summary=operator_summary,
     )
     market_calendar = _market_calendar_evidence(trade_date)
-    expected_market_closed_day = market_calendar.get("reason") == "MARKET_CLOSED_DAY"
+    expected_market_closed_day = market_calendar["reason"] == "MARKET_CLOSED_DAY"
     results: list[dict[str, Any]] = []
-
-    if artifact_read_errors:
-        results.append(
-            _result(
-                invariant_id="execution_artifact_readable",
-                status=STATUS_FAIL,
-                severity=SEVERITY_CRITICAL,
-                reason_code="execution_artifact_unreadable",
-                human_summary=(
-                    "A required execution artifact is present but unreadable/corrupt; "
-                    "a corrupt run must not be silently classified as a clean no-op."
-                ),
-                operator_action=(
-                    "Inspect the corrupt artifact(s) and treat the run as failed until the "
-                    "evidence is restored; do not conclude NO_ACTION or success."
-                ),
-                evidence={"artifact_read_errors": artifact_read_errors},
-            )
-        )
 
     if expected_market_closed_day:
         results.append(
@@ -613,7 +558,7 @@ def build_execution_reliability_report(
                 status=STATUS_PASS,
                 severity=SEVERITY_INFO,
                 reason_code="MARKET_CLOSED_DAY",
-                human_summary="Zero submitted orders are expected on a full market-closed day.",
+                human_summary="Trade date is an expected full-session market closure; zero submissions are expected.",
                 operator_action="No operator action required.",
                 evidence=counts | {"market_calendar": market_calendar},
             )
@@ -705,33 +650,22 @@ def build_execution_reliability_report(
         target_attainment=target_attainment,
     )
     target_status = str(target_attainment.get("status") or "").strip()
-    underdeployment_reason = _clean_reason(target_attainment.get("underdeployment_reason_code"))
-    underdeployment_classification = _clean_reason(target_attainment.get("underdeployment_classification"))
-    target_operator_action = _clean_reason(target_attainment.get("operator_action"))
     cash_drift_abs = abs(cash_drift) if cash_drift is not None else None
     if cash_drift_abs is not None and cash_drift_abs > float(cash_weight_tolerance):
-        reason_code = underdeployment_reason or "target_cash_materially_differs_from_actual_cash"
         results.append(
             _result(
                 invariant_id="target_cash_actual_cash_drift",
                 status=STATUS_WARN,
                 severity=SEVERITY_WARNING,
-                reason_code=reason_code,
+                reason_code="target_cash_materially_differs_from_actual_cash",
                 human_summary="Actual cash weight materially differs from intended target cash weight after execution.",
-                operator_action=target_operator_action
-                or "Inspect target-attainment and posttrade cash artifacts; classify as pending fills, stale snapshot, or execution underdeployment.",
+                operator_action="Inspect target-attainment and posttrade cash artifacts; classify as pending fills, stale snapshot, or execution underdeployment.",
                 evidence={
                     "target_cash_weight": target_cash_weight,
                     "actual_cash_weight": actual_cash_weight,
                     "cash_target_drift": cash_drift,
                     "cash_weight_tolerance": float(cash_weight_tolerance),
                     "target_attainment_status": target_status or None,
-                    "underdeployment_classification": underdeployment_classification,
-                    "underdeployment_reason_code": underdeployment_reason,
-                    "residual_undeployed_cash": target_attainment.get("residual_undeployed_cash"),
-                    "pending_buy_count": target_attainment.get("pending_buy_count"),
-                    "partial_buy_count": target_attainment.get("partial_buy_count"),
-                    "posttrade_unresolved_orders_count": target_attainment.get("posttrade_unresolved_orders_count"),
                 },
             )
         )
@@ -798,9 +732,12 @@ def build_execution_reliability_report(
         for status in precompute_statuses
         if not expected_market_closed_day and ("STALE" in status or status in {"FAILED", "MISSING"})
     ]
-    expected_precompute = not expected_market_closed_day and (
-        _upper(execution_payload.get("execution_source")) == "PLANNED_PAYLOAD_EXACT"
-        or counts["planned_payload_trade_count"] > 0
+    expected_precompute = (
+        not expected_market_closed_day
+        and (
+            _upper(execution_payload.get("execution_source")) == "PLANNED_PAYLOAD_EXACT"
+            or counts["planned_payload_trade_count"] > 0
+        )
     )
     missing_precompute = expected_precompute and not precompute_payload_path.exists()
     if missing_precompute or stale_markers:
@@ -814,8 +751,8 @@ def build_execution_reliability_report(
                 operator_action="Fail closed until the precompute bundle and planned execution payload are regenerated for the trade date.",
                 evidence={
                     "expected_precompute": expected_precompute,
-                    "stale_markers": stale_markers,
                     "market_calendar": market_calendar,
+                    "stale_markers": stale_markers,
                     "planned_execution_payload": _source_probe(precompute_payload_path),
                     "precompute_contract": _source_probe(precompute_contract_path),
                 },

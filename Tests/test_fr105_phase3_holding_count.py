@@ -312,10 +312,7 @@ def _write_inputs(
     _write_json(contract, _phase0_contract())
     _write_json(baseline, _phase1_baseline(sparse=sparse))
     _write_json(frontier, _phase2_frontier(sparse=sparse, tie_fixture=tie_fixture))
-    _write_json(
-        completeness,
-        _phase01_completeness(sparse=sparse, waived_score_source=waived_score_source),
-    )
+    _write_json(completeness, _phase01_completeness(sparse=sparse, waived_score_source=waived_score_source))
     return contract, baseline, frontier
 
 
@@ -369,18 +366,10 @@ def test_phase3_preserves_score_source_waiver_context_while_blocking_shadow(tmp_
     assert gate["alpha_chase_evaluation_ready"] is False
     assert gate["shadow_comparison_ready"] is False
     assert gate["waived_gaps"] == ["score_source"]
-    assert (
-        gate["score_source_unavailable_waiver"]["reason"]
-        == "historical_non_weight_score_source_not_retained"
-    )
-    assert (
-        artifact["selected_research_variant"]["fallback_reason"]
-        == "score_source_unavailable_for_score_driven_ranking"
-    )
+    assert gate["score_source_unavailable_waiver"]["reason"] == "historical_non_weight_score_source_not_retained"
+    assert artifact["selected_research_variant"]["fallback_reason"] == "score_source_unavailable_for_score_driven_ranking"
 
-    shadow = json.loads(
-        (out_path.parent / "shadow_alpha_chase_comparison.json").read_text(encoding="utf-8")
-    )
+    shadow = json.loads((out_path.parent / "shadow_alpha_chase_comparison.json").read_text(encoding="utf-8"))
     assert shadow["readiness"]["blocking_gaps"] == ["score_source_unavailable_for_score_driven_ranking"]
     assert shadow["recommendations"]["allowed"] is False
 

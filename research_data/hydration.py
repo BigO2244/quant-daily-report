@@ -64,6 +64,8 @@ class HydrationContext:
     limit_sample: bool = False
     timeout_seconds: int = 12
     user_agent: str = "CaerusDataHydration/0.1 research-data-contact@example.invalid"
+    symbols: tuple[str, ...] = ()
+    sleeve_id: str | None = None
 
     def output_path(self, area: str, dataset_id: str, source_name: str, filename: str) -> Path:
         clean_source = source_name.replace("/", "_").replace(" ", "_")

@@ -86,6 +86,32 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
     equality_gate, equality_gate_error = _read_json(equality_gate_path)
     timeline, timeline_error = _read_json(timeline_json_path)
     integrity, integrity_error = _read_json(integrity_path)
+    lifecycle_artifact = (
+        execution_results.get("candidate_trade_lifecycle_artifact")
+        or execution_payload.get("candidate_trade_lifecycle_artifact")
+    )
+    lifecycle_trade_date = _text(
+        latest.get("trade_date")
+        or execution_payload.get("trade_date")
+        or execution_results.get("trade_date")
+        or run_root.name[:10]
+    )
+    lifecycle_path = Path(str(lifecycle_artifact)) if lifecycle_artifact else (
+        run_root / "audit" / f"candidate_trade_lifecycle_{lifecycle_trade_date}.json"
+    )
+    warnings = []
+    lifecycle_summary = (
+        execution_results.get("candidate_trade_lifecycle_summary")
+        or execution_payload.get("candidate_trade_lifecycle_summary")
+        or {}
+    )
+    if not lifecycle_summary and lifecycle_path.exists():
+        lifecycle_payload, lifecycle_error = _read_json(lifecycle_path)
+        if lifecycle_error:
+            warnings.append(f"candidate_trade_lifecycle:{lifecycle_error}")
+        lifecycle_summary = dict(lifecycle_payload.get("counts") or {}) if lifecycle_payload else {}
+    else:
+        lifecycle_error = None
 
     provenance = dict(timeline.get("provenance") or {})
     if not provenance:
@@ -102,7 +128,6 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
         for finding in _as_list(integrity.get("findings"))
         if isinstance(finding, Mapping) and _text(finding.get("code"))
     ]
-    warnings = []
     if timeline_error:
         warnings.append(f"execution_timeline_json:{timeline_error}")
     if operator_error:
@@ -144,6 +169,17 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
         "submitted_count": _to_int(execution_results.get("submitted_count") or execution_payload.get("submitted_count") or operator_summary.get("submitted_count")),
         "accepted_count": _to_int(execution_results.get("accepted_count") or execution_payload.get("accepted_count") or operator_summary.get("accepted_count")),
         "rejected_count": _to_int(execution_results.get("rejected_count") or execution_payload.get("rejected_count") or operator_summary.get("rejected_count")),
+        "planned_payload_trade_count": _to_int(execution_results.get("planned_payload_trade_count") or execution_payload.get("planned_payload_trade_count") or lifecycle_summary.get("precompute_candidates")),
+        "executable_filter_passed_count": _to_int(execution_results.get("executable_filter_passed_count") or execution_payload.get("executable_filter_passed_count") or lifecycle_summary.get("passed_executable_filter")),
+        "executable_trades_count": _to_int(execution_results.get("executable_trades_count") or execution_payload.get("execution_eligible_trades_count") or execution_payload.get("executable_trades_count")),
+        "final_executable_trades_count": _to_int(execution_results.get("final_executable_trades_count") or execution_results.get("executable_trades_count") or execution_payload.get("execution_eligible_trades_count") or execution_payload.get("executable_trades_count")),
+        "intended_orders_count": _to_int(execution_results.get("intended_orders_count") or execution_payload.get("intended_orders_count") or lifecycle_summary.get("intended_orders")),
+        "filled_count": _to_int(execution_results.get("orders_filled_count") or execution_payload.get("orders_filled_count") or lifecycle_summary.get("filled")),
+        "candidate_trade_lifecycle_artifact": str(lifecycle_path),
+        "candidate_trade_lifecycle_present": bool(lifecycle_path.exists()),
+        "candidate_trade_lifecycle_summary": lifecycle_summary,
+        "candidate_trade_lifecycle_reasons": lifecycle_summary.get("suppression_reason_counts") or {},
+        "candidate_trade_clipping_reasons": lifecycle_summary.get("clipping_reason_counts") or {},
         "asset_validation_status": execution_payload.get("asset_validation_status") or execution_results.get("asset_validation_status"),
         "invalid_asset_count": _to_int(execution_payload.get("invalid_asset_count") or execution_results.get("invalid_asset_count")),
         "invalid_symbols": list(execution_payload.get("invalid_symbols") or execution_results.get("invalid_symbols") or []),
@@ -170,6 +206,7 @@ def build_latest_execution_timeline_status(repo_root: str | Path = _REPO_ROOT) -
             "execution_timeline_json": _path_record(timeline_json_path),
             "execution_timeline_md": _path_record(timeline_md_path),
             "execution_integrity": _path_record(integrity_path),
+            "candidate_trade_lifecycle": _path_record(lifecycle_path),
         },
     }
 
@@ -195,6 +232,16 @@ def render_text(payload: Mapping[str, Any]) -> str:
         "submitted_count",
         "accepted_count",
         "rejected_count",
+        "planned_payload_trade_count",
+        "executable_filter_passed_count",
+        "executable_trades_count",
+        "final_executable_trades_count",
+        "intended_orders_count",
+        "filled_count",
+        "candidate_trade_lifecycle_artifact",
+        "candidate_trade_lifecycle_present",
+        "candidate_trade_lifecycle_reasons",
+        "candidate_trade_clipping_reasons",
         "asset_validation_status",
         "invalid_asset_count",
         "invalid_symbols",

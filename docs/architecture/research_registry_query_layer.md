@@ -14,6 +14,20 @@ Research Registry. The frozen SEM-001 through SEM-008 contracts remain
 authoritative. This layer does not add transport, orchestration,
 execution, broker access, dashboard integration, or mutation APIs.
 
+## Document Contract
+
+| Field | Value |
+|---|---|
+| Purpose | Document the read-only Research Registry query layer and stop boundary. |
+| Owner | `architecture` in front matter. |
+| Inputs | Research registry implementation, semantic contracts, query-layer tests. |
+| Outputs | Implementation reference for deterministic local registry queries. |
+| Related Documents | `docs/architecture/semantics/README.md`, `docs/architecture/research_registry_v1_foundation.md`, `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Tests | Query and registry tests listed in `docs/architecture/DOCUMENT_INVENTORY.md`. |
+| Related Implementation | `research_registry/query/`, `research_registry/`. |
+| Related Artifacts | Registry indexes and MCP/research generated artifacts. |
+| Known Gaps | Current implementation state should be refreshed from code/tests before present-tense claims. |
+
 ## Scope
 
 Package: `research_registry/query/`

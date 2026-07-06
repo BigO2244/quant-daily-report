@@ -22,7 +22,6 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_asset,
     validate_live_pilot_plan,
 )
-from core.live_pilot_gate_state import write_live_pilot_gate_state
 from paper.trading_calendar import ET_TZ, market_session_status
 from paper.run_manager import generate_run_id, safe_write_text
 
@@ -66,62 +65,6 @@ def _trades_from_plan(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [trade for trade in trades if isinstance(trade, Mapping)]
 
 
-def _trade_date_from_context(
-    *,
-    plan: Mapping[str, Any] | None,
-    env: Mapping[str, str],
-    now_et: dt.datetime | None,
-) -> str:
-    value = str((plan or {}).get("trade_date") or env.get("REPORT_DATE") or "").strip()
-    if value:
-        return value
-    if now_et is not None:
-        return now_et.astimezone(ET_TZ).date().isoformat()
-    return dt.datetime.now(ET_TZ).date().isoformat()
-
-
-PLAN_PROVENANCE_KEYS = (
-    "ticker",
-    "sleeve",
-    "sleeve_source",
-    "sleeve_provenance",
-    "source_strategy_id",
-    "source_signal_sleeve",
-    "source_signal_target_weight",
-    "source_signal_raw_score",
-    "source_precompute_index",
-    "source_reason",
-    "limit_price_source",
-    "scaled_to_pilot_cap",
-    "source_notional",
-    "pilot_notional_cap",
-    "source_order_qty",
-    "original_qty",
-    "pre_normalization_qty",
-    "pilot_qty",
-    "final_qty",
-    "scale_reason",
-    "approved_sleeve_override",
-)
-
-
-def _plan_provenance_by_client_id(
-    orders: list[Any],
-    source_trades: list[Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for order, source_trade in zip(orders, source_trades):
-        client_order_id = str(getattr(order, "client_order_id", "") or "").strip()
-        if not client_order_id:
-            continue
-        out[client_order_id] = {
-            key: source_trade.get(key)
-            for key in PLAN_PROVENANCE_KEYS
-            if key in source_trade
-        }
-    return out
-
-
 def _public_account(account: Mapping[str, Any] | None) -> dict[str, Any]:
     account = dict(account or {})
     account_id = str(account.get("id") or "").strip()
@@ -150,30 +93,7 @@ OPEN_ORDER_STATUSES = frozenset(
     }
 )
 
-LIVE_PILOT_ENTRY_EXECUTION_POLICY = "live_pilot_buy_market_order_immediate"
-LIVE_PILOT_ENTRY_ESCALATION_SESSION_LIMIT = 3
 NO_ESCALATION_REASON = "none"
-LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION = (
-    "LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION"
-)
-LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER = "LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER"
-LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE = "LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE"
-LIVE_PILOT_SELL_FIRST_SUPPORTED = False
-LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED = False
-
-CAPITAL_GATE_REPORT_KEYS = (
-    "live_positions_before",
-    "live_open_orders_before",
-    "live_buying_power_before",
-    "approved_cap_usd",
-    "required_sell_count",
-    "sell_first_supported",
-    "rebudget_after_sell_supported",
-    "strategy_allocation_cap_usd",
-    "planned_buy_notional_usd",
-    "tradable_capital_usd",
-    "buy_block_reason",
-)
 
 
 def _safe_float(value: object) -> float | None:
@@ -288,137 +208,6 @@ def _broker_snapshot(broker: Any) -> dict[str, Any]:
     }
 
 
-def _position_public_row(position: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "symbol": str(position.get("symbol") or "").strip().upper(),
-        "qty": position.get("qty"),
-        "market_value": position.get("market_value"),
-        "cost_basis": position.get("cost_basis"),
-        "side": position.get("side"),
-    }
-
-
-def _active_live_positions(positions: Any) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if not isinstance(positions, list):
-        return rows
-    for raw in positions:
-        if not isinstance(raw, Mapping):
-            continue
-        row = _position_public_row(raw)
-        qty = _safe_float(row.get("qty"))
-        if qty is not None and abs(qty) <= 1e-12:
-            continue
-        if not row.get("symbol"):
-            continue
-        rows.append(row)
-    return rows
-
-
-def _open_order_public_row(order: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "symbol": _symbol(order),
-        "side": str(order.get("side") or "").strip().upper(),
-        "qty": order.get("qty"),
-        "notional": order.get("notional"),
-        "status": order.get("status"),
-        "client_order_id": _client_order_id(order),
-    }
-
-
-def _planned_buy_notional(intended: list[dict[str, Any]]) -> float:
-    total = 0.0
-    for row in intended:
-        if _order_side(row) != "BUY":
-            continue
-        total += float(_safe_float(row.get("notional")) or 0.0)
-    return round(total, 6)
-
-
-def _capital_gate_report_fields(capital_gate: Mapping[str, Any] | None) -> dict[str, Any]:
-    if not capital_gate:
-        return {}
-    return {key: capital_gate.get(key) for key in CAPITAL_GATE_REPORT_KEYS if key in capital_gate}
-
-
-def _build_live_pilot_capital_gate(
-    *,
-    pre_snapshot: Mapping[str, Any],
-    intended: list[dict[str, Any]],
-    approved_cap_usd: float | None,
-) -> dict[str, Any]:
-    account = pre_snapshot.get("account") if isinstance(pre_snapshot.get("account"), Mapping) else {}
-    positions_before = _active_live_positions(pre_snapshot.get("positions") or [])
-    open_orders_before = [
-        _open_order_public_row(order)
-        for order in (pre_snapshot.get("open_orders") or [])
-        if isinstance(order, Mapping)
-    ]
-    live_buying_power = _safe_float((account or {}).get("buying_power"))
-    approved_cap = _safe_float(approved_cap_usd)
-    planned_buy_notional = _planned_buy_notional(intended)
-    strategy_allocation_cap = planned_buy_notional if planned_buy_notional > 0 else None
-
-    cap_candidates = [
-        value
-        for value in (live_buying_power, approved_cap, strategy_allocation_cap)
-        if value is not None and value >= 0
-    ]
-    tradable_capital = min(cap_candidates) if cap_candidates and live_buying_power is not None else None
-    required_sell_count = len(positions_before) if planned_buy_notional > 0 else 0
-
-    decision = "ALLOWED"
-    buy_block_reason: str | None = None
-    operator_action = (
-        "Broker buying power, approved cap, and planned buy notional permit this live-pilot buy gate."
-    )
-    if planned_buy_notional > 0 and required_sell_count > 0 and not LIVE_PILOT_SELL_FIRST_SUPPORTED:
-        decision = "BLOCKED"
-        buy_block_reason = LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
-        operator_action = (
-            "Existing live positions require sell-first rotation before any new live-pilot buy. "
-            "The current live-pilot lane does not automate sell-first fill confirmation and rebudget; "
-            "leave the kill switch enabled until a separately reviewed rotation path is approved."
-        )
-    elif planned_buy_notional > 0 and live_buying_power is None:
-        decision = "BLOCKED"
-        buy_block_reason = LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE
-        operator_action = (
-            "Live broker buying power was unavailable, so approved pilot cap cannot be treated as spendable cash."
-        )
-    elif (
-        planned_buy_notional > 0
-        and tradable_capital is not None
-        and planned_buy_notional > tradable_capital + 1e-6
-    ):
-        decision = "BLOCKED"
-        buy_block_reason = LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
-        operator_action = (
-            "Live broker buying power is below the planned buy notional. "
-            "Approved pilot cap is a maximum risk limit, not a substitute for broker buying power."
-        )
-
-    return {
-        "schema_version": "live_pilot_capital_gate.v1",
-        "generated_at": _now_utc(),
-        "decision": decision,
-        "block_reason": buy_block_reason,
-        "live_positions_before": positions_before,
-        "live_open_orders_before": open_orders_before,
-        "live_buying_power_before": live_buying_power,
-        "approved_cap_usd": approved_cap,
-        "required_sell_count": required_sell_count,
-        "sell_first_supported": LIVE_PILOT_SELL_FIRST_SUPPORTED,
-        "rebudget_after_sell_supported": LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED,
-        "strategy_allocation_cap_usd": strategy_allocation_cap,
-        "planned_buy_notional_usd": planned_buy_notional,
-        "tradable_capital_usd": tradable_capital,
-        "buy_block_reason": buy_block_reason,
-        "broker_orders_submitted": 0,
-        "operator_action": operator_action,
-    }
-
-
 def _status_norm(status: object) -> str:
     value = str(status or "").strip().lower()
     if "." in value:
@@ -448,22 +237,8 @@ def _load_json_if_present(path: Path) -> Any:
         return {}
 
 
-def _orders_payload_rows(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        rows = payload
-    elif isinstance(payload, Mapping):
-        rows = payload.get("orders") or payload.get("trades") or []
-    else:
-        rows = []
-    return [dict(row) for row in rows if isinstance(row, Mapping)]
-
-
 def _order_side(row: Mapping[str, Any]) -> str:
     return str(row.get("side") or "").strip().upper()
-
-
-def _order_symbol(row: Mapping[str, Any]) -> str:
-    return str(row.get("symbol") or row.get("ticker") or "").strip().upper()
 
 
 def _submitted_order_type(row: Mapping[str, Any]) -> str:
@@ -488,106 +263,6 @@ def _is_unfilled_submitted_buy(row: Mapping[str, Any]) -> bool:
     order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
     bucket = _status_bucket(row.get("status") or order.get("status"))
     return bucket in {"accepted_open", "partial", "unresolved"}
-
-
-def _attempt_trade_date(run_root: Path, summary: Mapping[str, Any], row: Mapping[str, Any]) -> str | None:
-    for value in (
-        row.get("trade_date"),
-        summary.get("trade_date"),
-        summary.get("generated_at"),
-        summary.get("submitted_at"),
-        run_root.name,
-    ):
-        raw = str(value or "").strip()
-        if len(raw) >= 10 and raw[4:5] == "-" and raw[7:8] == "-":
-            return raw[:10]
-    return None
-
-
-def _prior_unfilled_buy_attempts(
-    *,
-    output_root: Path | str,
-    current_run_id: str,
-    symbol: str,
-) -> list[dict[str, Any]]:
-    runs_root = Path(output_root) / "runs"
-    if not runs_root.exists():
-        return []
-    symbol_norm = str(symbol or "").strip().upper()
-    attempts: list[dict[str, Any]] = []
-    for run_root in sorted(path for path in runs_root.iterdir() if path.is_dir()):
-        if run_root.name == current_run_id:
-            continue
-        submitted_payload = _load_json_if_present(run_root / "live_pilot_orders_submitted.json")
-        summary = _load_json_if_present(run_root / "live_pilot_operator_summary.json")
-        summary = summary if isinstance(summary, Mapping) else {}
-        for row in _orders_payload_rows(submitted_payload):
-            if _order_symbol(row) != symbol_norm or not _is_unfilled_submitted_buy(row):
-                continue
-            attempts.append(
-                {
-                    "run_id": str(summary.get("run_id") or run_root.name),
-                    "trade_date": _attempt_trade_date(run_root, summary, row),
-                    "symbol": symbol_norm,
-                    "side": "BUY",
-                    "status": str(row.get("status") or ""),
-                    "submitted_order_type": _submitted_order_type(row) or None,
-                    "client_order_id": str(row.get("client_order_id") or ""),
-                    "reason": "prior_live_buy_submitted_not_filled",
-                }
-            )
-    return attempts
-
-
-def _entry_policy_for_order(
-    order: Any,
-    *,
-    output_root: Path | str,
-    run_id: str,
-) -> dict[str, Any]:
-    approved_order_type = str(getattr(order, "order_type", "") or "limit").strip().lower()
-    side = str(getattr(order, "side", "") or "").strip().upper()
-    if side != "BUY":
-        passive = approved_order_type == "limit"
-        return {
-            "entry_execution_policy": "not_applicable_non_buy_order",
-            "approved_order_type": approved_order_type,
-            "submitted_order_type": approved_order_type,
-            "order_type_submitted": approved_order_type,
-            "is_marketable": approved_order_type == "market",
-            "is_passive": passive,
-            "marketable_or_passive": "passive" if passive else "marketable",
-            "prior_unfilled_attempts": 0,
-            "prior_unfilled_attempts_detail": [],
-            "escalation_reason": "not_applicable_non_buy_order",
-        }
-
-    prior_attempts = _prior_unfilled_buy_attempts(
-        output_root=output_root,
-        current_run_id=run_id,
-        symbol=str(getattr(order, "symbol", "") or ""),
-    )
-    prior_count = len(prior_attempts)
-    if prior_count >= LIVE_PILOT_ENTRY_ESCALATION_SESSION_LIMIT:
-        escalation_reason = "prior_unfilled_attempts_reached_three_session_limit"
-    elif prior_count > 0:
-        escalation_reason = "prior_unfilled_live_buy_attempts_detected"
-    elif approved_order_type != "market":
-        escalation_reason = "approved_limit_buy_overridden_to_market"
-    else:
-        escalation_reason = NO_ESCALATION_REASON
-    return {
-        "entry_execution_policy": LIVE_PILOT_ENTRY_EXECUTION_POLICY,
-        "approved_order_type": approved_order_type,
-        "submitted_order_type": "market",
-        "order_type_submitted": "market",
-        "is_marketable": True,
-        "is_passive": False,
-        "marketable_or_passive": "marketable",
-        "prior_unfilled_attempts": prior_count,
-        "prior_unfilled_attempts_detail": prior_attempts,
-        "escalation_reason": escalation_reason,
-    }
 
 
 def _entry_policy_summary(
@@ -662,7 +337,6 @@ def _entry_policy_summary(
 def _build_live_pilot_execution_results(
     *,
     run_id: str,
-    trade_date: str,
     terminal_status: str,
     reason_code: object,
     intended: list[dict[str, Any]],
@@ -670,7 +344,6 @@ def _build_live_pilot_execution_results(
     reconciliation: Mapping[str, Any],
     dry_run: bool,
     run_root: Path,
-    extra_fields: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     entry_summary = _entry_policy_summary(
         intended=intended,
@@ -712,18 +385,10 @@ def _build_live_pilot_execution_results(
     return {
         "schema_version": "live_pilot_execution_results.v1",
         "run_id": run_id,
-        "trade_date": trade_date,
         "mode": LIVE_PILOT_MODE.upper(),
         "status": terminal_status,
         "reason": reason_code,
         "halt_reason": None if terminal_status in {"DRY_RUN", "SUBMITTED"} else reason_code,
-        "operator_execution_status": (
-            "dry_run"
-            if dry_run
-            else "executed"
-            if terminal_status == "SUBMITTED"
-            else "halted"
-        ),
         "submitted_count": submitted_count,
         "accepted_count": int(reconciliation.get("accepted_count") or 0),
         "rejected_count": int(reconciliation.get("rejected_count") or 0),
@@ -742,7 +407,6 @@ def _build_live_pilot_execution_results(
         "order_lifecycle": submitted,
         "run_root": str(run_root),
         **entry_summary,
-        **dict(extra_fields or {}),
     }
 
 
@@ -894,7 +558,6 @@ def _build_evidence_metrics(
     reconciliation: Mapping[str, Any],
     capital_cap_usd: float | None,
     open_order_check: Mapping[str, Any] | None = None,
-    capital_gate: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     submitted_count = 0 if dry_run else len(submitted)
     accepted_count = int(reconciliation.get("accepted_count") or 0)
@@ -933,7 +596,7 @@ def _build_evidence_metrics(
         idle_reason = "partial_cap_deployment"
     else:
         idle_reason = "capital_deployed_within_cap"
-    metrics = {
+    return {
         "schema_version": "live_pilot_evidence_metrics.v1",
         "generated_at": _now_utc(),
         "intended_count": len(intended),
@@ -951,43 +614,27 @@ def _build_evidence_metrics(
         "capital_cap_usd": capital_cap_usd,
         "idle_cash_reason": idle_reason,
     }
-    metrics.update(_capital_gate_report_fields(capital_gate))
-    return metrics
 
 
 def _write_blocked_artifacts(
     *,
     run_root: Path,
     run_id: str,
-    trade_date: str,
-    env: Mapping[str, str],
     reason_code: str,
     operator_action: str,
     preflight: Mapping[str, Any],
     intended: list[dict[str, Any]] | None = None,
     open_order_check: Mapping[str, Any] | None = None,
-    capital_gate: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     intended = intended or []
     submitted: list[dict[str, Any]] = []
     dry_run = bool(preflight.get("dry_run"))
-    capital_gate_fields = _capital_gate_report_fields(capital_gate)
     reconciliation = _reconcile(
         dry_run=dry_run,
         intended=intended,
         submitted=submitted,
         errors=[reason_code],
     )
-    if capital_gate:
-        reconciliation.update(
-            {
-                "status": "BLOCKED_PRE_SUBMISSION",
-                "state": "BLOCKED",
-                "operator_action": operator_action,
-                "idle_cash_reason": reason_code,
-                **capital_gate_fields,
-            }
-        )
     entry_summary = _entry_policy_summary(
         intended=intended,
         submitted=submitted,
@@ -1004,23 +651,9 @@ def _write_blocked_artifacts(
         "submitted_count": 0,
         "operator_action": operator_action,
         **entry_summary,
-        **capital_gate_fields,
     }
-    write_live_pilot_gate_state(
-        run_root=run_root,
-        run_id=run_id,
-        trade_date=trade_date,
-        env=env,
-        repo_root=REPO_ROOT,
-        decision="BLOCKED",
-        block_reason=reason_code,
-        broker_orders_submitted=0,
-        base_url=str(preflight.get("base_url") or ""),
-    )
     _write_json(run_root / "live_pilot_orders_intended.json", {"orders": intended})
     _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": submitted})
-    if capital_gate:
-        _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
     blocked_snapshot = {
         "captured_at": _now_utc(),
         "status": "NOT_CAPTURED_BLOCKED_BEFORE_BROKER_SNAPSHOT",
@@ -1045,26 +678,17 @@ def _write_blocked_artifacts(
                 reconciliation=reconciliation,
                 capital_cap_usd=_safe_float(preflight.get("capital_cap_usd")),
                 open_order_check=open_order_check,
-                capital_gate=capital_gate,
             ),
             **entry_summary,
         },
     )
-    _write_json(
-        run_root / "live_pilot_capital_usage.json",
-        {
-            "schema_version": "live_pilot_capital_usage.v1",
-            "capital_used_usd": 0.0,
-            **capital_gate_fields,
-        },
-    )
+    _write_json(run_root / "live_pilot_capital_usage.json", {"capital_used_usd": 0.0})
     _write_json(run_root / "live_pilot_operator_summary.json", summary)
     _write_json(run_root / "live_pilot_preflight.json", dict(preflight))
     _write_json(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_id,
-            trade_date=trade_date,
             terminal_status="BLOCKED",
             reason_code=reason_code,
             intended=intended,
@@ -1072,7 +696,6 @@ def _write_blocked_artifacts(
             reconciliation=reconciliation,
             dry_run=dry_run,
             run_root=run_root,
-            extra_fields=capital_gate_fields,
         ),
     )
     return summary
@@ -1090,11 +713,6 @@ def run_live_pilot(
 ) -> dict[str, Any]:
     environ = env if env is not None else os.environ
     run_id = str(run_id or environ.get("RUN_ID") or generate_run_id())
-    trade_date = _trade_date_from_context(
-        plan=plan,
-        env=environ,
-        now_et=now_et,
-    )
     run_root = Path(output_root) / "runs" / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
@@ -1110,7 +728,6 @@ def run_live_pilot(
     preflight = gate.to_dict()
     preflight["schema_version"] = "live_pilot_preflight.v1"
     preflight["run_id"] = run_id
-    preflight["trade_date"] = trade_date
     preflight["generated_at"] = _now_utc()
     preflight["orders_submitted"] = 0
     _write_json(run_root / "live_pilot_preflight.json", preflight)
@@ -1119,14 +736,11 @@ def run_live_pilot(
         "schema_version": "live_pilot_execution_payload.v1",
         "generated_at": _now_utc(),
         "run_id": run_id,
-        "trade_date": trade_date,
         "mode": LIVE_PILOT_MODE,
         "plan_path": plan_path,
         "dry_run": bool(gate.dry_run),
         "paper_paths_touched": False,
-        "order_policy": LIVE_PILOT_ENTRY_EXECUTION_POLICY,
-        "entry_execution_policy": LIVE_PILOT_ENTRY_EXECUTION_POLICY,
-        "entry_escalation_session_limit": LIVE_PILOT_ENTRY_ESCALATION_SESSION_LIMIT,
+        "order_policy": "fr104_live_pilot_market_order_normal_hours_only",
     }
     _write_json(run_root / "live_pilot_execution_payload.json", payload)
 
@@ -1134,8 +748,6 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
             reason_code=gate.reason_code,
             operator_action=gate.operator_action,
             preflight=preflight,
@@ -1147,8 +759,6 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
             reason_code="live_pilot_pre_snapshot_failed",
             operator_action=f"Resolve read-only broker snapshot failure before live pilot: {exc}",
             preflight=preflight,
@@ -1157,57 +767,32 @@ def run_live_pilot(
 
     account_public = pre_snapshot.get("account") or {}
     account_hash = str(account_public.get("account_id_hash") or "")
-    # Route the account-hash match through the orchestrated gate result so the
-    # pinned-account check is a single authoritative decision (fail closed on a
-    # missing broker id or a mismatch) rather than an ad-hoc executor-only check.
+    account_match = False
+    account_reason = "missing_actual_account_id"
+    # Only compare raw account id when the broker exposes it through get_account.
     raw_account = broker.get_account() if hasattr(broker, "get_account") else {}
-    account_gate = build_live_pilot_gate_result(
-        broker_paper=broker_paper,
-        base_url=base_url,
-        env=environ,
-        account_id=(raw_account or {}).get("id"),
-        account_id_hash=account_hash,
-        enforce_account_match=True,
-    )
-    if not account_gate.account_id_match:
+    account_match, account_reason = expected_account_matches((raw_account or {}).get("id"), environ)
+    if not account_match and account_hash:
+        expected_hash = str(environ.get("CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH") or "").strip().lower()
+        account_match = bool(expected_hash and account_hash.lower() == expected_hash)
+        account_reason = "account_id_hash_match" if account_match else account_reason
+    if not account_match:
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=account_gate.account_match_reason or "live_pilot_account_id_mismatch",
+            reason_code=account_reason,
             operator_action="Expected live pilot account id/hash does not match broker account.",
             preflight=preflight,
         )
 
-    source_trades = _trades_from_plan(plan)
     plan_validation = validate_live_pilot_plan(
-        source_trades,
+        _trades_from_plan(plan),
         env=environ,
         capital_cap_usd=float(gate.capital_cap_usd or 0.0),
         max_orders=int(gate.max_orders or 0),
         run_id=run_id,
     )
-    plan_provenance_by_client_id = _plan_provenance_by_client_id(
-        plan_validation.orders,
-        source_trades,
-    )
-    policy_by_client_id = {
-        order.client_order_id: _entry_policy_for_order(
-            order,
-            output_root=output_root,
-            run_id=run_id,
-        )
-        for order in plan_validation.orders
-    }
-    intended = [
-        {
-            **plan_provenance_by_client_id.get(order.client_order_id, {}),
-            **order.to_dict(),
-            **policy_by_client_id.get(order.client_order_id, {}),
-        }
-        for order in plan_validation.orders
-    ]
+    intended = [order.to_dict() for order in plan_validation.orders]
     intended_payload = plan_validation.to_dict()
     intended_payload["orders"] = intended
     intended_payload.update(
@@ -1218,39 +803,10 @@ def run_live_pilot(
         )
     )
     _write_json(run_root / "live_pilot_orders_intended.json", intended_payload)
-    _write_json(
-        run_root / "live_pilot_entry_attempt_history.json",
-        {
-        "schema_version": "live_pilot_entry_attempt_history.v1",
-            "generated_at": _now_utc(),
-            "run_id": run_id,
-            "trade_date": trade_date,
-            "orders": [
-                {
-                    "symbol": row.get("symbol"),
-                    "side": row.get("side"),
-                    "approved_order_type": row.get("approved_order_type"),
-                    "submitted_order_type": row.get("submitted_order_type"),
-                    "entry_execution_policy": row.get("entry_execution_policy"),
-                    "prior_unfilled_attempts": row.get("prior_unfilled_attempts"),
-                    "prior_unfilled_attempts_detail": row.get("prior_unfilled_attempts_detail"),
-                    "escalation_reason": row.get("escalation_reason"),
-                    "sleeve": row.get("sleeve"),
-                    "sleeve_source": row.get("sleeve_source"),
-                    "source_strategy_id": row.get("source_strategy_id"),
-                    "source_signal_sleeve": row.get("source_signal_sleeve"),
-                    "sleeve_provenance": row.get("sleeve_provenance"),
-                }
-                for row in intended
-            ],
-        },
-    )
     if plan_validation.status != "PASS":
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
             reason_code=";".join(plan_validation.reason_codes),
             operator_action=plan_validation.operator_action,
             preflight=preflight,
@@ -1267,8 +823,6 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
             reason_code=";".join(asset_errors),
             operator_action="Unsupported or non-tradable assets blocked before submission.",
             preflight=preflight,
@@ -1284,8 +838,6 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
             reason_code=str(open_order_check.get("status") or "BLOCKED_OPEN_PILOT_ORDER"),
             operator_action=str(open_order_check.get("operator_action") or "Open pilot order blocks duplicate submission."),
             preflight=preflight,
@@ -1299,36 +851,10 @@ def run_live_pilot(
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
             reason_code=f"live_pilot_market_closed:{market_hours_gate.get('reason_code')}",
             operator_action=str(market_hours_gate.get("operator_action") or "Market is closed."),
             preflight=preflight,
             intended=intended,
-        )
-
-    capital_gate = _build_live_pilot_capital_gate(
-        pre_snapshot=pre_snapshot,
-        intended=intended,
-        approved_cap_usd=gate.capital_cap_usd,
-    )
-    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
-    if capital_gate.get("decision") == "BLOCKED":
-        reason_code = str(capital_gate.get("buy_block_reason") or capital_gate.get("block_reason") or "")
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=reason_code or LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
-            operator_action=str(
-                capital_gate.get("operator_action")
-                or "Live-pilot capital gate blocked before broker submission."
-            ),
-            preflight=preflight,
-            intended=intended,
-            open_order_check=open_order_check,
-            capital_gate=capital_gate,
         )
 
     submitted: list[dict[str, Any]] = []
@@ -1337,9 +863,7 @@ def run_live_pilot(
     if gate.dry_run:
         submitted = [
             {
-                **plan_provenance_by_client_id.get(order.client_order_id, {}),
                 **order.to_dict(),
-                **policy_by_client_id.get(order.client_order_id, {}),
                 "status": "DRY_RUN_NOT_SUBMITTED",
                 "order": None,
             }
@@ -1347,10 +871,8 @@ def run_live_pilot(
         ]
     else:
         for order in plan_validation.orders:
-            policy = policy_by_client_id.get(order.client_order_id, {})
-            submitted_order_type = str(policy.get("submitted_order_type") or order.order_type).strip().lower()
             try:
-                if submitted_order_type == "market":
+                if order.order_type == "market":
                     broker_result = broker.submit_market_order(
                         symbol=order.symbol,
                         qty=order.qty,
@@ -1371,16 +893,13 @@ def run_live_pilot(
                     )
                     submitted_price = order.limit_price
                 submitted_row = {
-                    **plan_provenance_by_client_id.get(order.client_order_id, {}),
                     **order.to_dict(),
-                    **policy,
                     "status": str((broker_result or {}).get("status") or "accepted"),
                     "order": broker_result,
-                    "submitted_order_type": submitted_order_type,
-                    "order_type_submitted": submitted_order_type,
+                    "submitted_order_type": order.order_type,
                     "submitted_price": submitted_price,
                     "fill_price": _fill_price({"order": broker_result}),
-                    "submission_policy": policy.get("entry_execution_policy") or LIVE_PILOT_ENTRY_EXECUTION_POLICY,
+                    "submission_policy": "fr104_live_pilot_market_order_normal_hours_only",
                 }
                 slip = _slippage_bps(submitted_row)
                 submitted_row["slippage_bps"] = slip
@@ -1394,14 +913,11 @@ def run_live_pilot(
                 submit_errors.append(f"{order.symbol}:broker_submit_failed:{exc}")
                 submitted.append(
                     {
-                        **plan_provenance_by_client_id.get(order.client_order_id, {}),
                         **order.to_dict(),
-                        **policy,
                         "status": "REJECTED",
                         "error": str(exc),
-                        "submitted_order_type": submitted_order_type,
-                        "order_type_submitted": submitted_order_type,
-                        "submission_policy": policy.get("entry_execution_policy") or LIVE_PILOT_ENTRY_EXECUTION_POLICY,
+                        "submitted_order_type": order.order_type,
+                        "submission_policy": "fr104_live_pilot_market_order_normal_hours_only",
                     }
                 )
 
@@ -1432,7 +948,6 @@ def run_live_pilot(
         reconciliation=reconciliation,
         capital_cap_usd=gate.capital_cap_usd,
         open_order_check=open_order_check,
-        capital_gate=capital_gate,
     )
     entry_summary = _entry_policy_summary(
         intended=intended,
@@ -1451,19 +966,7 @@ def run_live_pilot(
             "filled_notional_usd": evidence_metrics.get("filled_notional_usd"),
             "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
             "dry_run": bool(gate.dry_run),
-            **_capital_gate_report_fields(capital_gate),
         },
-    )
-    write_live_pilot_gate_state(
-        run_root=run_root,
-        run_id=run_id,
-        trade_date=trade_date,
-        env=environ,
-        repo_root=REPO_ROOT,
-        decision="ALLOWED",
-        block_reason=None,
-        broker_orders_submitted=0 if gate.dry_run else len(submitted),
-        base_url=base_url,
     )
 
     terminal_status = (
@@ -1475,7 +978,6 @@ def run_live_pilot(
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_id,
-        "trade_date": trade_date,
         "mode": LIVE_PILOT_MODE.upper(),
         "terminal_status": terminal_status,
         "reason_code": reconciliation.get("status"),
@@ -1490,14 +992,12 @@ def run_live_pilot(
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
         **entry_summary,
-        **_capital_gate_report_fields(capital_gate),
     }
     _write_json(run_root / "live_pilot_operator_summary.json", summary)
     _write_json(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_id,
-            trade_date=trade_date,
             terminal_status=terminal_status,
             reason_code=reconciliation.get("status"),
             intended=intended,
@@ -1505,7 +1005,6 @@ def run_live_pilot(
             reconciliation=reconciliation,
             dry_run=bool(gate.dry_run),
             run_root=run_root,
-            extra_fields=_capital_gate_report_fields(capital_gate),
         ),
     )
     return summary
@@ -1605,15 +1104,6 @@ def refresh_live_pilot_reconciliation(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_root.name,
-            trade_date=str(
-                (
-                    json.loads((run_root / "live_pilot_preflight.json").read_text(encoding="utf-8"))
-                    if (run_root / "live_pilot_preflight.json").exists()
-                    else {}
-                ).get("trade_date")
-                or os.getenv("REPORT_DATE")
-                or ""
-            ),
             terminal_status=str(summary.get("terminal_status") or ""),
             reason_code=reconciliation.get("status"),
             intended=[dict(row) for row in intended if isinstance(row, Mapping)],

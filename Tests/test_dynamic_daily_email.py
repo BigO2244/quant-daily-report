@@ -147,16 +147,16 @@ def _write_shadow(root: Path, trade_date: str) -> None:
     )
 
 
-def _write_live_pilot_run(root: Path) -> None:
+def _write_live_pilot_run(root: Path, trade_date: str | None = None) -> None:
     run = root / "outputs" / "live_pilot" / "runs" / "run-1"
-    _write_json(
-        run / "live_pilot_operator_summary.json",
-        {
-            "run_id": "run-1",
-            "terminal_status": "SUBMITTED",
-            "reason_code": "CLEAN",
-        },
-    )
+    summary = {
+        "run_id": "run-1",
+        "terminal_status": "SUBMITTED",
+        "reason_code": "CLEAN",
+    }
+    if trade_date:
+        summary["trade_date"] = trade_date
+    _write_json(run / "live_pilot_operator_summary.json", summary)
     _write_json(run / "live_pilot_reconciliation.json", {"status": "CLEAN"})
     _write_json(
         run / "live_pilot_broker_snapshot_post.json",
@@ -223,6 +223,7 @@ def _write_live_pilot_run(root: Path) -> None:
     _write_json(
         run / "execution_results.json",
         {
+            **({"trade_date": trade_date} if trade_date else {}),
             "approved_buy_count": 1,
             "submitted_buy_count": 1,
             "unfilled_buy_count": 0,
@@ -249,6 +250,7 @@ def test_dynamic_sections_include_registry_manifest_alpha_and_live_account(tmp_p
     assert "Caerus Polaris | paper | baseline" in rendered["text"]
     assert "Polaris_Alpha | shadow | alpha" in rendered["text"]
     assert "Manifest Only Sleeve" in rendered["text"]
+    assert "Manifest Only Sleeve | spec_only | manifest_only | INACTIVE_NOT_EXPECTED | NOT_EXPECTED" in rendered["text"]
     assert "Open orders: 1" in rendered["text"]
     assert "Filled pilot orders: 1" in rendered["text"]
     assert "Fill rate: 100.00%" in rendered["text"]
@@ -260,6 +262,7 @@ def test_dynamic_sections_include_registry_manifest_alpha_and_live_account(tmp_p
     assert "Submitted order type: market" in rendered["text"]
     assert "Marketable/passive orders: 1/0" in rendered["text"]
     assert "Prior unfilled attempts: 2" in rendered["text"]
+    assert "Live pilot source trade date: unavailable" in rendered["text"]
     assert "Polaris_Alpha" in rendered["html"]
 
 
@@ -282,3 +285,20 @@ def test_execution_email_uses_dynamic_sections_when_repo_root_is_supplied(tmp_pa
     assert "Dynamic Sleeve Inventory" in body
     assert "Polaris_Alpha" in body
     assert "Caerus Future" in body
+
+
+def test_dynamic_sections_prominently_label_stale_shadow_and_live_pilot_sources(tmp_path: Path) -> None:
+    requested_trade_date = "2026-06-23"
+    stale_trade_date = "2026-06-22"
+    _write_registry(tmp_path)
+    _write_manifest(tmp_path)
+    _write_shadow(tmp_path, stale_trade_date)
+    _write_live_pilot_run(tmp_path, stale_trade_date)
+
+    rendered = render_dynamic_email_sections(tmp_path, requested_trade_date)
+
+    assert "Shadow source warning: Shadow artifacts are LATEST_AVAILABLE:2026-06-22; requested trade date is 2026-06-23" in rendered["text"]
+    assert "Live pilot source trade date: 2026-06-22" in rendered["text"]
+    assert "Live pilot source warning: Live pilot run source trade date 2026-06-22 differs from email trade date 2026-06-23" in rendered["text"]
+    assert "Shadow source warning" in rendered["html"]
+    assert "Live pilot source warning" in rendered["html"]

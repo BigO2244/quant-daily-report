@@ -2,7 +2,7 @@
 
 Status: Active
 Owner: Caerus Research Program
-Last Updated: 2026-07-06
+Last Updated: 2026-06-03
 
 ---
 
@@ -16,10 +16,17 @@ Future portfolio construction should avoid concentration in highly correlated st
 
 This document is strategic context only. For authoritative FR status and the operational FR queue, use `fr_registry.md` and `fr_active_backlog.md`.
 
+Phase 2 alpha-generation governance now lives at
+`docs/governance/caerus_phase2_alpha_strategy.md`. New sleeve, dataset, feature,
+vendor, or promotion proposals should use that document's Phase 2 Alpha Gate and
+must tie work to a measurable investment hypothesis.
+
 Data Hydration governance now lives under
 `docs/governance/fr_active/data_hydration/fr_dh_000_data_hydration_index.md`,
 with the canonical research data catalog at
 `docs/governance/fr_active/data_hydration/fr_dh_013_canonical_research_data_catalog.md`.
+The permanent architecture retrospective is
+`docs/architecture/research_data_platform.md`.
 It is a draft research package with read-only implementation for canonical
 research data, PIT-safety, cataloged dataset inventory, hydration discovery,
 freshness monitoring, P1/P2/P3 observe-only normalization, fundamental and
@@ -34,16 +41,11 @@ migration, or promotion behavior.
 
 | Strategy | Status | Objective |
 |-----------|-----------|-----------|
-| Polaris | Active Paper Baseline | Core momentum and quality paper execution baseline |
-| Orion | Shadow Challenger / Default LIVE_PILOT Sleeve | Secondary factor expression; default live-pilot sleeve only when gated and approved |
-| Lyra | Shadow Challenger | Secondary factor expression |
-| Cassiopeia | Research Only | Event-driven research lane; not an execution sleeve |
+| Polaris | Active Shadow Leader | Core momentum and quality portfolio |
+| Orion | Active Shadow | Secondary factor expression |
+| Lyra | Active Shadow | Secondary factor expression |
 | Constrained Lyra | Research | Concentration-controlled variant |
 | Argo | Concept | Regime and allocation overlay |
-
-Named strategy labels are governance identities. They are distinct from
-functional alpha-stack sleeves and from the separate capped live-pilot execution
-lane.
 
 ---
 

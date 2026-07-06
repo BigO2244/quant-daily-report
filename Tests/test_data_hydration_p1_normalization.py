@@ -119,6 +119,8 @@ def test_research_data_api_loads_p1_normalized_rows(tmp_path: Path) -> None:
 
     assert prices[0]["security_id"] == "YAHOO:SPY"
     assert master[0]["security_id"] == "SHARADAR:199059"
+    assert master[0]["pit_grade_status"] == "PIT_GRADE_SHARADAR_TICKERS_DATE_WINDOWS"
+    assert master[0]["is_current_reference"] is False
     assert actions[0]["action_type"] == "dividend"
     assert actions[0]["effective_date"] == "2026-05-11"
     assert freshness[0]["dataset_id"] == "ohlcv_prices"
@@ -158,3 +160,41 @@ def test_validate_p1_normalization_detects_row_count_drift(tmp_path: Path) -> No
     )
 
     assert any("artifact row_count mismatch" in error for error in errors)
+
+
+def test_sec_security_master_fallback_is_current_reference_warning(tmp_path: Path) -> None:
+    write_json(
+        tmp_path / "data/raw/security_master_pit/sec_edgar_public/company_tickers_sample.json",
+        {
+            "queried_symbols": ["AAA"],
+            "row_count": 1,
+            "rows_by_index": {"0": {"cik_str": 123, "ticker": "AAA", "title": "AAA INC"}},
+        },
+    )
+
+    manifest = normalize_p1(repo_root=tmp_path, as_of_date="2026-06-24", dataset_ids={"security_master_pit"})
+    payload = (tmp_path / "data/normalized/security_master/security_master.json").read_text(encoding="utf-8")
+
+    assert manifest["datasets"][0]["status"] == "WARN"
+    assert "CURRENT_REFERENCE_ONLY" in payload
+    assert "current-reference security master fallback" in payload
+    assert validate_p1_normalization_artifact(tmp_path / "data/manifests/p1_normalization_manifest.json", repo_root=tmp_path) == []
+
+
+def test_validate_p1_normalization_detects_security_master_window_overlap(tmp_path: Path) -> None:
+    _seed_p1_raw(tmp_path)
+    normalize_p1(repo_root=tmp_path, as_of_date="2026-06-24", dataset_ids={"security_master_pit"})
+    artifact = tmp_path / "data/normalized/security_master/security_master.json"
+    payload = artifact.read_text(encoding="utf-8")
+    payload = payload.replace('"row_count": 1', '"row_count": 2', 1)
+    payload = payload.replace('"pit_grade_row_count": 1', '"pit_grade_row_count": 2', 1)
+    payload = payload.replace('"rows": [', '"rows": [', 1)
+    import json
+
+    data = json.loads(payload)
+    data["rows"].append(dict(data["rows"][0]))
+    artifact.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    errors = validate_p1_normalization_artifact(tmp_path / "data/manifests/p1_normalization_manifest.json", repo_root=tmp_path)
+
+    assert any("duplicate effective window" in error for error in errors)

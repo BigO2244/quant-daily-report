@@ -112,6 +112,8 @@ def _validate_normalized_dataset_artifact(dataset_id: str, artifact_path: Path, 
     else:
         errors.extend(_validate_source_artifacts(dataset_id, source_artifacts, repo_root))
     errors.extend(_validate_row_dates(dataset_id, rows))
+    if dataset_id == "security_master_pit":
+        errors.extend(_validate_security_master_artifact(payload, rows))
     return errors
 
 
@@ -148,6 +150,54 @@ def _validate_row_dates(dataset_id: str, rows: list[dict[str, Any]]) -> list[str
             text = str(value)[:10]
             if len(text) == 10 and text > str(as_of_date)[:10]:
                 errors.append(f"{dataset_id}: row {idx} violates {field} <= as_of_date: {text} > {as_of_date}")
+    return errors
+
+
+def _validate_security_master_artifact(payload: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    validation = payload.get("validation") or {}
+    validation_errors = [str(item) for item in validation.get("errors") or []]
+    grade = payload.get("security_master_grade") or {}
+    if grade.get("status") not in {"PIT_GRADE", "CURRENT_REFERENCE_ONLY", "PARTIAL_PIT_GRADE", "EMPTY"}:
+        errors.append(f"security_master_pit: invalid security_master_grade status {grade.get('status')}")
+    pit_count = sum(1 for row in rows if str(row.get("pit_grade_status") or "").startswith("PIT_GRADE"))
+    current_count = sum(1 for row in rows if row.get("is_current_reference") is True)
+    if int(grade.get("pit_grade_row_count") or 0) != pit_count:
+        errors.append("security_master_pit: pit_grade_row_count mismatch")
+    if int(grade.get("current_reference_row_count") or 0) != current_count:
+        errors.append("security_master_pit: current_reference_row_count mismatch")
+    by_ticker: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for idx, row in enumerate(rows):
+        for field in ("security_id", "source_security_id", "ticker", "source_table", "effective_start_date", "pit_grade_status", "validation_status"):
+            if row.get(field) in (None, ""):
+                errors.append(f"security_master_pit: row {idx} missing {field}")
+        if row.get("is_current_reference") is True and validation.get("status") != "WARN":
+            errors.append(f"security_master_pit: row {idx} current-reference fallback must keep artifact validation at WARN")
+        if row.get("is_current_reference") is True and not any("current-reference security master fallback" in item for item in validation_errors):
+            errors.append(f"security_master_pit: row {idx} current-reference fallback missing validation warning")
+        if str(row.get("pit_grade_status") or "").startswith("PIT_GRADE") and row.get("is_current_reference") is True:
+            errors.append(f"security_master_pit: row {idx} cannot be both PIT-grade and current-reference")
+        if row.get("is_active") is False and not row.get("effective_end_date"):
+            errors.append(f"security_master_pit: row {idx} inactive security missing effective_end_date")
+        if row.get("delisting_date") and row.get("is_active") is True:
+            errors.append(f"security_master_pit: row {idx} active security has delisting_date")
+        ticker = str(row.get("ticker") or "")
+        if ticker:
+            by_ticker.setdefault(ticker, []).append((idx, row))
+    for ticker, indexed_rows in by_ticker.items():
+        sorted_rows = sorted(indexed_rows, key=lambda item: str(item[1].get("effective_start_date") or ""))
+        seen_windows: set[tuple[str, str]] = set()
+        previous_end: str | None = None
+        for idx, row in sorted_rows:
+            start = str(row.get("effective_start_date") or "")
+            end = str(row.get("effective_end_date") or "9999-12-31")
+            window = (start, end)
+            if window in seen_windows:
+                errors.append(f"security_master_pit: {ticker} duplicate effective window {start}..{end}")
+            seen_windows.add(window)
+            if previous_end and start and start <= previous_end:
+                errors.append(f"security_master_pit: {ticker} overlapping effective window at row {idx}")
+            previous_end = end
     return errors
 
 

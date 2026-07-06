@@ -515,6 +515,19 @@ class TestWriteTradingDaySummary:
         assert rc == 0
         assert "QUANT SYSTEM — MORNING REPORT" in out
 
+    def test_morning_report_warns_on_stale_summary_source(self, capsys):
+        morning_report.print_morning_report(
+            {
+                "run_id": "stale-run",
+                "trade_date": "2024-01-15",
+                "generated_at": "2024-01-15T21:00:00Z",
+            },
+            expected_date="2026-06-26",
+        )
+        out = capsys.readouterr().out
+        assert "Source Warning:" in out
+        assert "summary trade_date 2024-01-15" in out
+
     def test_write_returns_none_on_internal_error(self, tmp_path):
         """Non-blocking: must not raise."""
         # Pass a run_root that makes build crash by being a file, not dir

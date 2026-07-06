@@ -69,9 +69,66 @@ def _seed_observability(root: Path) -> None:
     )
 
 
+def _seed_polaris_coverage(root: Path) -> None:
+    write_json(
+        root / "outputs/shadow_candidates/2026-06-24/caerus_polaris.json",
+        {
+            "strategy_slug": "caerus_polaris",
+            "trade_date": "2026-06-24",
+            "holdings": [{"ticker": "AAA", "target_weight": 1.0}],
+        },
+    )
+    write_json(
+        root / "data/normalized/prices/ohlcv_prices.json",
+        {
+            "dataset_id": "ohlcv_prices",
+            "row_count": 1,
+            "coverage": {"covered_symbols": ["AAA"]},
+            "rows": [{"source_symbol": "AAA", "trade_date": "2026-06-24", "as_of_date": "2026-06-24"}],
+        },
+    )
+    write_json(
+        root / "data/normalized/security_master/security_master.json",
+        {
+            "dataset_id": "security_master_pit",
+            "row_count": 1,
+            "coverage": {"covered_symbols": ["AAA"]},
+            "security_master_grade": {
+                "status": "PIT_GRADE",
+                "pit_grade_row_count": 1,
+                "current_reference_row_count": 0,
+                "status_values": ["PIT_GRADE_SHARADAR_TICKERS_DATE_WINDOWS"],
+            },
+            "rows": [{"ticker": "AAA", "as_of_date": "2026-06-24"}],
+        },
+    )
+    write_json(
+        root / "data/normalized/corporate_actions/actions.json",
+        {
+            "dataset_id": "corporate_actions",
+            "row_count": 0,
+            "coverage": {"query_covered_symbols": ["AAA"], "covered_symbols": ["AAA"]},
+            "rows": [],
+        },
+    )
+    write_json(
+        root / "data/normalized/freshness/dataset_freshness.json",
+        {
+            "dataset_id": "dataset_freshness",
+            "row_count": 3,
+            "rows": [
+                {"dataset_id": "ohlcv_prices"},
+                {"dataset_id": "security_master_pit"},
+                {"dataset_id": "corporate_actions"},
+            ],
+        },
+    )
+
+
 def test_sleeve_migration_readiness_classifies_ready_and_blocked_sleeves(tmp_path: Path) -> None:
     _seed_sleeves(tmp_path)
     _seed_observability(tmp_path)
+    _seed_polaris_coverage(tmp_path)
 
     payload = build_sleeve_migration_readiness(repo_root=tmp_path, as_of_date="2026-06-24")
 
@@ -87,8 +144,45 @@ def test_sleeve_migration_readiness_classifies_ready_and_blocked_sleeves(tmp_pat
 def test_validate_sleeve_migration_readiness_accepts_clean_artifact(tmp_path: Path) -> None:
     _seed_sleeves(tmp_path)
     _seed_observability(tmp_path)
+    _seed_polaris_coverage(tmp_path)
     build_sleeve_migration_readiness(repo_root=tmp_path, as_of_date="2026-06-24")
 
     errors = validate_sleeve_migration_readiness(tmp_path / "outputs/research/data_migration/2026-06-24/migration_readiness.json")
 
     assert errors == []
+
+
+def test_sleeve_migration_readiness_blocks_ready_dataset_with_missing_symbol_coverage(tmp_path: Path) -> None:
+    _seed_sleeves(tmp_path)
+    _seed_observability(tmp_path)
+    write_json(
+        tmp_path / "outputs/shadow_candidates/2026-06-24/caerus_polaris.json",
+        {"strategy_slug": "caerus_polaris", "trade_date": "2026-06-24", "holdings": [{"ticker": "AAA", "target_weight": 1.0}]},
+    )
+
+    payload = build_sleeve_migration_readiness(repo_root=tmp_path, as_of_date="2026-06-24")
+
+    sleeves = {row["sleeve_id"]: row for row in payload["sleeves"]}
+    assert sleeves["polaris"]["migration_readiness_status"] == "BLOCKED"
+    assert "ohlcv_prices" in sleeves["polaris"]["blocking_dataset_ids"]
+    assert sleeves["polaris"]["symbol_coverage"]["status"] == "BLOCKED"
+
+
+def test_sleeve_migration_readiness_warns_on_current_reference_security_master(tmp_path: Path) -> None:
+    _seed_sleeves(tmp_path)
+    _seed_observability(tmp_path)
+    _seed_polaris_coverage(tmp_path)
+    security_path = tmp_path / "data/normalized/security_master/security_master.json"
+    payload = security_path.read_text(encoding="utf-8")
+    payload = payload.replace('"status": "PIT_GRADE"', '"status": "CURRENT_REFERENCE_ONLY"', 1)
+    payload = payload.replace('"pit_grade_row_count": 1', '"pit_grade_row_count": 0', 1)
+    payload = payload.replace('"current_reference_row_count": 0', '"current_reference_row_count": 1', 1)
+    security_path.write_text(payload, encoding="utf-8")
+
+    result = build_sleeve_migration_readiness(repo_root=tmp_path, as_of_date="2026-06-24")
+
+    sleeves = {row["sleeve_id"]: row for row in result["sleeves"]}
+    assert sleeves["polaris"]["migration_readiness_status"] == "WARN"
+    assert "security_master_pit" in sleeves["polaris"]["warning_dataset_ids"]
+    security_coverage = sleeves["polaris"]["symbol_coverage"]["coverage_by_dataset"]["security_master_pit"]
+    assert security_coverage["pit_grade_status"] == "CURRENT_REFERENCE_ONLY"

@@ -139,6 +139,69 @@ class TestBuildExecutionSummary:
         assert summary["buys_count"] == 2
         assert summary["sells_count"] == 1
         assert summary["payload_status"] == "CREATED"
+
+    def test_summary_keeps_planned_intended_submitted_and_filled_distinct(self):
+        payload = {
+            "status": "READY",
+            "execution_status": "RECONCILED_SUCCESS",
+            "planned_payload_trade_count": 8,
+            "execution_eligible_trades_count": 2,
+            "candidate_trade_lifecycle_summary": {
+                "precompute_candidates": 8,
+                "passed_executable_filter": 6,
+                "intended_orders": 6,
+                "submitted": 2,
+                "accepted": 2,
+                "filled": 2,
+                "clipped": 1,
+                "suppressed": 6,
+                "artifact_path": "outputs/runs/run/audit/candidate_trade_lifecycle_2026-06-25.json",
+            },
+            "candidate_trade_lifecycle": [
+                {"ticker": "MAR", "side": "SELL", "submitted": True},
+                {"ticker": "SPG", "side": "BUY", "submitted": True},
+                {
+                    "ticker": "VZ",
+                    "side": "BUY",
+                    "submitted": False,
+                    "decision_reason": "buy_blocked_insufficient_buying_power",
+                },
+            ],
+        }
+        results = {
+            "status": "RECONCILED_SUCCESS",
+            "submitted_count": 2,
+            "accepted_count": 2,
+            "orders_filled_count": 2,
+            "rejected_count": 0,
+            "planned_payload_trade_count": 8,
+            "executable_filter_passed_count": 6,
+            "executable_trades_count": 2,
+            "final_executable_trades_count": 2,
+            "candidate_trade_lifecycle_summary": payload["candidate_trade_lifecycle_summary"],
+            "candidate_trade_lifecycle": payload["candidate_trade_lifecycle"],
+        }
+
+        summary = build_execution_summary(
+            run_id="run",
+            trade_date="2026-06-25",
+            execution_payload=payload,
+            execution_results=results,
+        )
+
+        assert summary["planned_payload_trade_count"] == 8
+        assert summary["executable_filter_passed_count"] == 6
+        assert summary["executable_trades_count"] == 2
+        assert summary["final_executable_trades_count"] == 2
+        assert summary["intended_orders_count"] == 6
+        assert summary["orders_submitted"] == 2
+        assert summary["orders_accepted"] == 2
+        assert summary["orders_filled"] == 2
+        assert summary["orders_rejected"] == 0
+        assert summary["buys"] == "SPG"
+        assert summary["sells"] == "MAR"
+        assert summary["execution_status"] == "SUCCESS"
+        assert summary["candidate_trade_lifecycle_reasons"] == "VZ BUY:buy_blocked_insufficient_buying_power"
     
     def test_summary_with_nav_snapshot(self):
         nav = {

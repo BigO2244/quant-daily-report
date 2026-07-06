@@ -39,6 +39,7 @@ from brokers.alpaca_snapshot import (
     write_pretrade_snapshot_artifacts,
 )
 from core.execution_audit import write_executor_audit, write_planner_audit
+from core.candidate_trade_lifecycle import write_candidate_trade_lifecycle
 from core.execution_integrity import write_execution_integrity_audit
 from core.execution_lifecycle_timeline import write_execution_lifecycle_timeline
 from core.execution_payload import (
@@ -66,7 +67,7 @@ from core.timing_policy import classify_timing, current_et
 from core.trading_day_summary import write_trading_day_summary
 from core.trading_mode import canonical_trading_mode_label
 from paper.build_execution_email import build_execution_email_text
-from paper.paper_broker import run_paper_day
+from paper.paper_broker import load_config, run_paper_day
 from paper.run_manager import ensure_dir, get_run_dir, get_run_id, safe_write_text
 from paper.state_paths import ensure_paper_state_files
 from reconciliation import ensure_sent_ledger_exists, pre_trade_reconcile_and_classify
@@ -854,7 +855,8 @@ def _expected_market_closed_day(paper_summary: dict[str, object] | None) -> bool
         or summary.get("reason_code")
         or ""
     ).strip().upper()
-    return reason == "MARKET_CLOSED_DAY" and market_guard.get("is_trading_day") is False
+    is_trading_day = market_guard.get("is_trading_day")
+    return reason == "MARKET_CLOSED_DAY" and is_trading_day is False
 
 
 def _apply_market_closed_day_semantics(
@@ -863,12 +865,14 @@ def _apply_market_closed_day_semantics(
 ) -> bool:
     if not _expected_market_closed_day(paper_summary):
         return False
+
+    reason = "MARKET_CLOSED_DAY"
     execution_payload["execution_status"] = "MARKET_CLOSED"
     execution_payload["operator_execution_status"] = "skipped"
     execution_payload["halt_reason"] = None
-    execution_payload["execution_reason"] = "MARKET_CLOSED_DAY"
-    execution_payload["reason"] = "MARKET_CLOSED_DAY"
-    execution_payload["reason_code"] = "MARKET_CLOSED_DAY"
+    execution_payload["execution_reason"] = reason
+    execution_payload["reason"] = reason
+    execution_payload["reason_code"] = reason
     execution_payload["operator_action_required"] = False
     execution_payload["market_closed_expected_skip"] = True
     execution_payload.pop("planned_payload_drop_diagnostics", None)
@@ -1013,11 +1017,32 @@ def _write_execution_results(run_root: Path, payload: dict[str, object], paper_s
         "reconciliation_override_applied": bool(payload.get("reconciliation_override_applied")),
         "cash_gate_diagnostics": payload.get("cash_gate_diagnostics"),
         "planned_payload_trade_count": int(payload.get("planned_payload_trade_count") or 0),
+        "executable_filter_passed_count": int(
+            dict(payload.get("candidate_trade_lifecycle_summary") or {}).get("passed_executable_filter")
+            or dict((paper_summary or {}).get("execution_filter") or {}).get("kept")
+            or payload.get("execution_eligible_trades_count")
+            or payload.get("executable_trades_count")
+            or 0
+        ),
         "executable_trades_count": int(
             payload.get("execution_eligible_trades_count")
             or payload.get("executable_trades_count")
             or 0
         ),
+        "final_executable_trades_count": int(
+            payload.get("execution_eligible_trades_count")
+            or payload.get("executable_trades_count")
+            or 0
+        ),
+        "intended_orders_count": int(
+            dict(payload.get("candidate_trade_lifecycle_summary") or {}).get("intended_orders")
+            or payload.get("intended_orders_count")
+            or payload.get("planner_intended_trades_count")
+            or 0
+        ),
+        "candidate_trade_lifecycle_artifact": payload.get("candidate_trade_lifecycle_artifact"),
+        "candidate_trade_lifecycle_summary": payload.get("candidate_trade_lifecycle_summary"),
+        "candidate_trade_lifecycle": list(payload.get("candidate_trade_lifecycle") or []),
         "exact_plan_enabled": bool(payload.get("exact_plan_enabled")),
         "execution_source": payload.get("execution_source"),
         "reason": payload.get("reason") or payload.get("execution_reason") or payload.get("halt_reason"),
@@ -1650,7 +1675,10 @@ def main(argv: list[str] | None = None) -> int:
             or execution_payload.get("executable_trades_count")
             or 0
         )
-        market_closed_expected_skip = _apply_market_closed_day_semantics(execution_payload, paper_summary)
+        market_closed_expected_skip = _apply_market_closed_day_semantics(
+            execution_payload,
+            paper_summary,
+        )
         if (
             planned_payload_trade_count > 0
             and (submitted_count == 0 or executable_trades_count == 0)
@@ -1662,8 +1690,6 @@ def main(argv: list[str] | None = None) -> int:
             execution_payload["halt_reason"] = reason
             execution_payload["execution_reason"] = reason
             execution_payload["reason"] = reason
-            execution_payload["reason_code"] = reason
-            execution_payload["operator_action_required"] = True
             execution_payload["planned_payload_drop_diagnostics"] = {
                 "planned_payload_trade_count": planned_payload_trade_count,
                 "executable_trades_count": executable_trades_count,
@@ -1856,6 +1882,31 @@ def main(argv: list[str] | None = None) -> int:
         execution_payload["pdt_constrained"] = bool(pretrade_policy.get("pdt_constrained"))
         execution_payload["capital_constrained_no_trades"] = capital_constrained_no_trades
 
+        try:
+            lifecycle_cfg = load_config("paper/config_paper.json")
+            lifecycle_path, lifecycle_payload = write_candidate_trade_lifecycle(
+                run_id=run_id,
+                trade_date=trade_date,
+                run_root=run_root,
+                planned_payload=planned_payload,
+                paper_summary=paper_summary,
+                execution_payload=execution_payload,
+                min_trade_dollars=float(lifecycle_cfg.min_trade_dollars),
+                allow_fractional=bool(lifecycle_cfg.allow_fractional),
+            )
+            lifecycle_summary = dict(lifecycle_payload.get("counts") or {})
+            lifecycle_summary["artifact_path"] = str(lifecycle_path)
+            execution_payload["candidate_trade_lifecycle_artifact"] = str(lifecycle_path)
+            execution_payload["candidate_trade_lifecycle_summary"] = lifecycle_summary
+            execution_payload["candidate_trade_lifecycle"] = list(
+                lifecycle_payload.get("candidates") or []
+            )
+            execution_payload["intended_orders_count"] = int(lifecycle_summary.get("intended_orders") or 0)
+            paper_summary["candidate_trade_lifecycle_artifact"] = str(lifecycle_path)
+            paper_summary["candidate_trade_lifecycle_summary"] = dict(lifecycle_summary)
+        except Exception as exc:
+            logger.warning("[CANDIDATE_LIFECYCLE] artifact skipped: %s", exc)
+
         write_planner_audit(
             run_id=run_id,
             trade_date=trade_date,
@@ -1909,9 +1960,7 @@ def main(argv: list[str] | None = None) -> int:
             execution_payload_written=True,
             execution_stage_reached=True,
             terminal_status=(
-                "market_closed"
-                if execution_payload.get("market_closed_expected_skip")
-                else "failed_pre_execution"
+                "failed_pre_execution"
                 if execution_payload["operator_execution_status"] in {"failed", "partial"}
                 else ("no_action" if execution_payload["operator_execution_status"] == "skipped" else "success")
             ),
@@ -1928,8 +1977,7 @@ def main(argv: list[str] | None = None) -> int:
             broker_reject_status=(paper_summary or {}).get("broker_reject_status"),
             broker_reject_message=(paper_summary or {}).get("broker_reject_message"),
             execution_outcome=(paper_summary or {}).get("execution_outcome"),
-            execution_reason=execution_payload.get("execution_reason")
-            or (paper_summary or {}).get("execution_reason"),
+            execution_reason=(paper_summary or {}).get("execution_reason"),
             reason_code=execution_payload.get("reason_code"),
             operator_action_required=execution_payload.get("operator_action_required"),
             market_closed_expected_skip=execution_payload.get("market_closed_expected_skip"),
@@ -2067,9 +2115,6 @@ def main(argv: list[str] | None = None) -> int:
                 execution_reliability_top_reason=reliability_payload.get("top_failure_reason"),
                 execution_reliability_top_invariant=reliability_payload.get("top_failure_invariant_id"),
                 execution_reliability_clean_run_streak=trend_metrics.get("clean_run_streak"),
-                execution_reliability_operator_action_required=bool(
-                    reliability_payload.get("operator_action_required")
-                ),
                 execution_reliability_readiness_artifact=str(
                     Path("outputs") / "reliability" / "reliability_readiness.json"
                 ),
@@ -2077,6 +2122,9 @@ def main(argv: list[str] | None = None) -> int:
                     Path("outputs") / "reliability" / "reliability_history.json"
                 ),
                 execution_reliability_artifact=str(reliability_path),
+                execution_reliability_operator_action_required=bool(
+                    reliability_payload.get("operator_action_required")
+                ),
                 execution_reliability_actions=list(
                     reliability_payload.get("recommended_operator_actions") or []
                 ),

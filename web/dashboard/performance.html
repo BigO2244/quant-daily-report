@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caerus — Performance</title>
+<style>
+  :root{
+    --bg:#0a0d12; --panel:#10151c; --panel2:#0d1218; --line:#1d2630;
+    --ink:#e8eef5; --muted:#7d8aa0; --dim:#566073;
+    --pos:#3fd07f; --neg:#ff5d6c; --accent:#5ec8ff; --warn:#f5b53d;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 28px 64px}
+  .tag{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+  h1{font-family:var(--mono);font-size:26px;letter-spacing:.02em;margin:4px 0 2px;font-weight:600}
+  h2{font-family:var(--mono);font-size:14px;letter-spacing:.06em;margin:0;font-weight:600;color:var(--ink);text-transform:uppercase}
+  .sub{color:var(--muted);font-size:13px;margin:0}
+
+  /* header */
+  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap;
+    border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:24px}
+  .meta{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:96px}
+  .chip .k{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+  .chip .v{font-family:var(--mono);font-size:13px;margin-top:3px}
+  .chip.good .v{color:var(--pos)} .chip.warn .v{color:var(--warn)}
+
+  /* hero verdict */
+  .hero{background:linear-gradient(160deg,#101824,#0c1016);border:1px solid var(--line);
+    border-radius:14px;padding:26px 28px;margin-bottom:22px;
+    display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:8px}
+  .hero .big{font-family:var(--mono);font-size:52px;font-weight:600;line-height:1;letter-spacing:-.01em}
+  .hero .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+  .hero .ctx{color:var(--muted);font-size:13px;margin-top:10px}
+  .hcell{padding:4px 0}
+  .hcell.div{border-left:1px solid var(--line);padding-left:24px}
+  .hcell .num{font-family:var(--mono);font-size:30px;font-weight:600;line-height:1}
+  .hcell .foot{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:8px}
+  .pos{color:var(--pos)} .neg{color:var(--neg)} .accentc{color:var(--accent)}
+
+  /* layout */
+  .section-label{display:flex;align-items:baseline;gap:12px;margin:30px 0 12px}
+  .section-label .n{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.1em}
+  .section-label .d{color:var(--dim);font-size:12px}
+  .grid{display:grid;gap:14px}
+  .g-2{grid-template-columns:1fr 1fr}
+  .g-3{grid-template-columns:repeat(3,1fr)}
+  .g-curve{grid-template-columns:1fr}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .panel .phead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+  .panel .kick{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.05em}
+
+  /* stat tiles */
+  .tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .tile{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+  .tile .k{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+  .tile .v{font-family:var(--mono);font-size:19px;font-weight:600;margin-top:5px}
+  .tile .f{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:3px}
+
+  canvas{width:100%;display:block}
+  .cnote{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:8px;letter-spacing:.03em}
+
+  /* contributor / table */
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
+  th{text-align:right;color:var(--dim);font-weight:500;font-size:10.5px;letter-spacing:.06em;
+    text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:7px 8px;border-bottom:1px solid #161d26;color:var(--ink)}
+  tbody tr:last-child td{border-bottom:none}
+  .bar-row{display:flex;align-items:center;gap:10px;padding:7px 0}
+  .bar-row .tk{font-family:var(--mono);font-size:13px;width:54px}
+  .bar-track{flex:1;height:8px;background:#161d26;border-radius:4px;overflow:hidden;position:relative}
+  .bar-fill{height:100%;border-radius:4px}
+  .bar-row .amt{font-family:var(--mono);font-size:12.5px;width:92px;text-align:right}
+
+  /* fine print */
+  .fineprint{margin-top:28px;border-top:1px solid var(--line);padding-top:16px}
+  .fp-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .badge{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:7px;
+    padding:6px 11px;background:var(--panel2);color:var(--muted)}
+  .badge b{color:var(--ink)} .badge.ok b{color:var(--pos)} .badge.warn b{color:var(--warn)}
+  details.fp{margin-top:14px;font-family:var(--mono);font-size:12px}
+  details.fp summary{cursor:pointer;color:var(--muted);letter-spacing:.05em}
+  details.fp .body{margin-top:10px;color:var(--dim);line-height:1.7}
+  details.fp .body .row{display:flex;justify-content:space-between;border-bottom:1px solid #161d26;padding:5px 0}
+  .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <p class="tag">Caerus · Paper Track Record</p>
+      <h1>How Am I Performing?</h1>
+      <p class="sub">Since-inception return vs benchmark, how it was earned, and what the book looks like now.</p>
+    </div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <!-- 1. VERDICT -->
+  <div class="hero" id="hero"></div>
+
+  <!-- 2. THE CURVE -->
+  <div class="section-label"><span class="n">01 — THE CURVE</span><span class="d">growth of the book vs the market</span></div>
+  <div class="grid g-curve">
+    <div class="panel">
+      <div class="phead"><h2>Relative Performance</h2><span class="kick" id="curve-kick">—</span></div>
+      <canvas id="navChart" height="300"></canvas>
+      <div class="cnote">Both indexed to 100 at inception. Blue = Caerus paper book · Gray = SPY.</div>
+    </div>
+  </div>
+
+  <!-- 3. RISK -->
+  <div class="section-label"><span class="n">02 — RISK</span><span class="d">how the return was earned</span></div>
+  <div class="grid g-2">
+    <div class="panel">
+      <div class="phead"><h2>Drawdown</h2><span class="kick">loss from peak</span></div>
+      <canvas id="ddChart" height="220"></canvas>
+      <div class="cnote">Zero line = new equity high. Worst trough is the max drawdown.</div>
+    </div>
+    <div class="panel">
+      <div class="phead"><h2>Risk & Regime</h2><span class="kick" id="risk-kick">—</span></div>
+      <div class="tiles" id="riskTiles"></div>
+    </div>
+  </div>
+
+  <!-- 4. WHY -->
+  <div class="section-label"><span class="n">03 — WHY</span><span class="d">where the edge came from</span></div>
+  <div class="grid g-2">
+    <div class="panel">
+      <div class="phead"><h2>Cumulative Excess vs SPY</h2><span class="kick">edge over the market</span></div>
+      <canvas id="excessChart" height="220"></canvas>
+      <div class="cnote">Above zero = beating SPY on a cumulative basis since inception.</div>
+    </div>
+    <div class="panel">
+      <div class="phead"><h2>Top Contributors</h2><span class="kick">unrealized P&amp;L</span></div>
+      <div id="contrib"></div>
+    </div>
+  </div>
+
+  <!-- 5. POSITIONING -->
+  <div class="section-label"><span class="n">04 — POSITIONING</span><span class="d">what the money is in right now</span></div>
+  <div class="grid g-2">
+    <div class="panel">
+      <div class="phead"><h2>Book Construction</h2><span class="kick" id="pos-kick">—</span></div>
+      <div class="tiles" id="posTiles"></div>
+    </div>
+    <div class="panel">
+      <div class="phead"><h2>Largest Holdings</h2><span class="kick" id="hold-kick">—</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Weight</th><th>Value</th><th>Unreal P&amp;L</th><th>%</th></tr></thead>
+          <tbody id="holdBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINE PRINT -->
+  <div class="fineprint">
+    <div class="section-label" style="margin-top:0"><span class="n">FINE PRINT</span><span class="d">integrity &amp; governance — context, not headline</span></div>
+    <div class="fp-row" id="fpBadges"></div>
+    <details class="fp"><summary>Data freshness &amp; warnings</summary><div class="body" id="fpWarn"></div></details>
+  </div>
+</div>
+
+<script src="dashboard-data.js"></script>
+<script>
+(function(){
+  const D = window.DASHBOARD_V1;
+  if(!D){document.body.insertAdjacentHTML('afterbegin','<p style="color:#ff5d6c;font-family:monospace;padding:20px">dashboard-data.js not found next to this file.</p>');return;}
+  const S=D.sections, T=D.terminal, PH=S.performance_history, B=T.benchmark, sum=PH.summary;
+
+  const pct=(v,d=2)=>v==null?'—':(v>=0?'+':'')+(v*100).toFixed(d)+'%';
+  const pctp=(v,d=2)=>v==null?'—':(v*100).toFixed(d)+'%';
+  const money=v=>v==null?'—':v.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
+  const money2=v=>v==null?'—':v.toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
+  const sign=v=>v>=0?'pos':'neg';
+
+  /* ---- header meta ---- */
+  const fresh = !(PH.is_stale);
+  document.getElementById('meta').innerHTML = `
+    <div class="chip"><div class="k">Report Date</div><div class="v">${D.report_date}</div></div>
+    <div class="chip"><div class="k">Inception</div><div class="v">${sum.inception_date}</div></div>
+    <div class="chip ${fresh?'good':'warn'}"><div class="k">Data</div><div class="v">${fresh?'FRESH':'STALE'}</div></div>`;
+
+  /* ---- 1. VERDICT ---- */
+  const si=sum.since_inception_return, spy=sum.spy_since_inception_return, exc=si-spy;
+  const day=S.nav.day_return, dayPnl=S.nav.day_pnl;
+  document.getElementById('hero').innerHTML = `
+    <div class="hcell">
+      <div class="lbl">Since Inception · Caerus Paper Book</div>
+      <div class="big ${sign(si)}">${pct(si)}</div>
+      <div class="ctx">NAV ${money(sum.latest_nav)} · started at $10,000 on ${sum.inception_date} · ${B.up_days} up / ${B.down_days} down days</div>
+    </div>
+    <div class="hcell div">
+      <div class="lbl">Excess vs SPY</div>
+      <div class="num ${sign(exc)}">${pct(exc)}</div>
+      <div class="foot">SPY ${pct(spy)} over same window</div>
+    </div>
+    <div class="hcell div">
+      <div class="lbl">Today</div>
+      <div class="num ${sign(day)}">${pct(day)}</div>
+      <div class="foot ${sign(dayPnl)}">${(dayPnl>=0?'+':'')}${money2(dayPnl)} day P&L</div>
+    </div>`;
+
+  /* ---- chart helper ---- */
+  function lineChart(id, series, opts={}){
+    const cv=document.getElementById(id); if(!cv)return;
+    const dpr=window.devicePixelRatio||1;
+    const W=cv.clientWidth||cv.parentElement.clientWidth-36, H=opts.height||cv.height;
+    cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
+    const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
+    const padL=46,padR=12,padT=12,padB=22;
+    const all=series.flatMap(s=>s.data.map(p=>p.value));
+    let min=Math.min(...all),max=Math.max(...all);
+    if(opts.zero){min=Math.min(min,0);max=Math.max(max,0);}
+    const rng=(max-min)||1; min-=rng*0.08; max+=rng*0.08;
+    const n=series[0].data.length;
+    const X=i=>padL+(W-padL-padR)*(i/(n-1));
+    const Y=v=>padT+(H-padT-padB)*(1-(v-min)/(max-min));
+    // grid + y labels
+    ctx.font='10px monospace'; ctx.fillStyle='#566073'; ctx.strokeStyle='#161d26'; ctx.lineWidth=1;
+    const ticks=4;
+    for(let t=0;t<=ticks;t++){
+      const val=min+(max-min)*t/ticks, y=Y(val);
+      ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(W-padR,y);ctx.stroke();
+      ctx.textAlign='right';ctx.fillText(opts.yfmt?opts.yfmt(val):val.toFixed(0),padL-6,y+3);
+    }
+    // zero line
+    if(opts.zero && min<0 && max>0){
+      const y=Y(0);ctx.strokeStyle='#39465a';ctx.setLineDash([3,3]);
+      ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(W-padR,y);ctx.stroke();ctx.setLineDash([]);
+    }
+    // x labels (first/mid/last)
+    ctx.fillStyle='#566073';ctx.textAlign='center';
+    [0,Math.floor((n-1)/2),n-1].forEach(i=>{
+      const d=series[0].data[i].date.slice(5);
+      ctx.fillText(d, X(i), H-6);
+    });
+    // series
+    series.forEach(s=>{
+      if(s.fill){
+        const grad=ctx.createLinearGradient(0,padT,0,H-padB);
+        grad.addColorStop(0,s.fill);grad.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.beginPath();ctx.moveTo(X(0),Y(s.data[0].value));
+        s.data.forEach((p,i)=>ctx.lineTo(X(i),Y(p.value)));
+        ctx.lineTo(X(n-1),Y(opts.zero?0:min));ctx.lineTo(X(0),Y(opts.zero?0:min));
+        ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+      }
+      ctx.beginPath();ctx.lineWidth=s.w||2;ctx.strokeStyle=s.color;
+      ctx.lineJoin='round';
+      s.data.forEach((p,i)=>{i?ctx.lineTo(X(i),Y(p.value)):ctx.moveTo(X(i),Y(p.value));});
+      ctx.stroke();
+    });
+  }
+
+  /* ---- 2. CURVE ---- */
+  const navS=PH.series.nav_indexed, spyS=PH.series.spy_indexed;
+  document.getElementById('curve-kick').textContent=`indexed to 100 · ${navS.length} sessions`;
+  lineChart('navChart',[
+    {data:spyS,color:'#5b6678',w:1.6},
+    {data:navS,color:'#5ec8ff',w:2.4,fill:'rgba(94,200,255,0.14)'},
+  ],{height:300,yfmt:v=>v.toFixed(0)});
+
+  /* ---- 3. RISK ---- */
+  document.getElementById('risk-kick').textContent='regime '+S.regime_market_state.current_regime;
+  lineChart('ddChart',[{data:PH.series.drawdown,color:'#ff5d6c',w:2,fill:'rgba(255,93,108,0.16)'}],
+    {height:220,zero:true,yfmt:v=>(v*100).toFixed(0)+'%'});
+  const reg=S.regime_market_state;
+  const riskTiles=[
+    ['Max Drawdown',pct(sum.max_drawdown),'worst peak-to-trough',sign(sum.max_drawdown)],
+    ['Rolling 20D',pct(B.rolling_20d_return),'SPY '+pct(B.rolling_20d_spy_return),sign(B.rolling_20d_return)],
+    ['Rolling 5D',pct(B.rolling_5d_return),'SPY '+pct(B.rolling_5d_spy_return),sign(B.rolling_5d_return)],
+    ['VIX',reg.vix.toFixed(1),'regime '+reg.current_regime,reg.vix>25?'neg':'accentc'],
+  ];
+  document.getElementById('riskTiles').innerHTML=riskTiles.map(t=>
+    `<div class="tile"><div class="k">${t[0]}</div><div class="v ${t[3]}">${t[1]}</div><div class="f">${t[2]}</div></div>`).join('');
+
+  /* ---- 4. WHY ---- */
+  lineChart('excessChart',[{data:PH.series.excess_return_cumulative,color:'#8b7dff',w:2,fill:'rgba(139,125,255,0.16)'}],
+    {height:220,zero:true,yfmt:v=>(v*100).toFixed(1)+'%'});
+  const win=T.leaders.winners||[], lag=T.leaders.laggards||[];
+  const contrib=[...win.slice(0,5),...lag.slice(0,3)].sort((a,b)=>b.unrealized_pnl-a.unrealized_pnl);
+  const maxAbs=Math.max(...contrib.map(c=>Math.abs(c.unrealized_pnl)))||1;
+  document.getElementById('contrib').innerHTML=contrib.map(c=>{
+    const w=Math.abs(c.unrealized_pnl)/maxAbs*100, p=c.unrealized_pnl>=0;
+    return `<div class="bar-row"><span class="tk">${c.ticker}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${w}%;background:${p?'var(--pos)':'var(--neg)'};margin-left:${p?'0':'auto'};display:block"></span></span>
+      <span class="amt ${p?'pos':'neg'}">${p?'+':''}${money2(c.unrealized_pnl)}</span></div>`;
+  }).join('');
+
+  /* ---- 5. POSITIONING ---- */
+  const P=T.positioning;
+  document.getElementById('pos-kick').textContent=S.positions.summary.positions_count+' positions';
+  const posTiles=[
+    ['Invested',pctp(P.invested_ratio),'market value / equity','accentc'],
+    ['Cash',pctp(P.cash_ratio),'dry powder','accentc'],
+    ['Top-10 Conc.',pctp(P.top10_concentration),'sum of 10 largest',P.top10_concentration>0.8?'warn':'accentc'],
+    ['Largest Name',pctp(P.largest_position_weight),'single-name max',P.largest_position_weight>0.15?'warn':'accentc'],
+  ];
+  document.getElementById('posTiles').innerHTML=posTiles.map(t=>
+    `<div class="tile"><div class="k">${t[0]}</div><div class="v ${t[3]}">${t[1]}</div><div class="f">${t[2]}</div></div>`).join('');
+  const rows=[...S.positions.rows].sort((a,b)=>b.weight-a.weight).slice(0,8);
+  document.getElementById('hold-kick').textContent='top 8 by weight';
+  document.getElementById('holdBody').innerHTML=rows.map(r=>
+    `<tr><td>${r.ticker}</td><td style="text-align:right">${pctp(r.weight)}</td>
+     <td style="text-align:right">${money(r.market_value)}</td>
+     <td style="text-align:right" class="${sign(r.unrealized_pnl)}">${r.unrealized_pnl>=0?'+':''}${money2(r.unrealized_pnl)}</td>
+     <td style="text-align:right" class="${sign(r.unrealized_pnl_pct)}">${pct(r.unrealized_pnl_pct)}</td></tr>`).join('');
+
+  /* ---- FINE PRINT ---- */
+  const v=D.validation.checks||[];
+  const vp=v.filter(c=>c.status==='pass').length, vw=v.filter(c=>c.status==='warn').length, vf=v.filter(c=>c.status==='fail').length;
+  const warns=D.status.warnings||[];
+  document.getElementById('fpBadges').innerHTML=`
+    <div class="badge ${vf?'warn':'ok'}">Validation <b>${vp} pass · ${vw} warn · ${vf} fail</b></div>
+    <div class="badge ${fresh?'ok':'warn'}">Performance data <b>${PH.trust_level} · ${fresh?'fresh':'stale'}</b></div>
+    <div class="badge ${warns.length?'warn':'ok'}">Freshness warnings <b>${warns.length}</b></div>
+    <div class="badge">Sources <b>${(D.sources||[]).length} loaded</b></div>`;
+  document.getElementById('fpWarn').innerHTML = warns.length
+    ? warns.map(w=>`<div class="row"><span>${w.code}</span><span class="muted">${w.message}</span></div>`).join('')
+    : '<span class="muted">No freshness warnings.</span>';
+
+  window.addEventListener('resize',()=>{
+    lineChart('navChart',[{data:spyS,color:'#5b6678',w:1.6},{data:navS,color:'#5ec8ff',w:2.4,fill:'rgba(94,200,255,0.14)'}],{height:300,yfmt:v=>v.toFixed(0)});
+    lineChart('ddChart',[{data:PH.series.drawdown,color:'#ff5d6c',w:2,fill:'rgba(255,93,108,0.16)'}],{height:220,zero:true,yfmt:v=>(v*100).toFixed(0)+'%'});
+    lineChart('excessChart',[{data:PH.series.excess_return_cumulative,color:'#8b7dff',w:2,fill:'rgba(139,125,255,0.16)'}],{height:220,zero:true,yfmt:v=>(v*100).toFixed(1)+'%'});
+  });
+})();
+</script>
+</body>
+</html>

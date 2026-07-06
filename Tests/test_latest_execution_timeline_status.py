@@ -129,6 +129,52 @@ def test_valid_latest_timeline_summary(tmp_path: Path) -> None:
     assert payload["equality_gate_observe_status"] == "unavailable"
 
 
+def test_latest_timeline_surfaces_candidate_trade_lifecycle(tmp_path: Path) -> None:
+    run_root = _write_valid_latest_run(tmp_path)
+    _write_json(
+        run_root / "audit" / "candidate_trade_lifecycle_2026-05-28.json",
+        {
+            "schema_version": "candidate_trade_lifecycle.v1",
+            "trade_date": "2026-05-28",
+            "counts": {
+                "precompute_candidates": 8,
+                "passed_executable_filter": 6,
+                "intended_orders": 6,
+                "submitted": 2,
+                "accepted": 2,
+                "filled": 2,
+                "suppressed": 6,
+                "clipped": 1,
+                "suppression_reason_counts": {
+                    "buy_blocked_insufficient_buying_power": 4,
+                    "min_notional": 2,
+                },
+                "clipping_reason_counts": {
+                    "post_sell_rebudget_capital_clipped": 1,
+                },
+            },
+        },
+    )
+
+    payload = build_latest_execution_timeline_status(tmp_path)
+
+    assert payload["status"] == "OK"
+    assert payload["planned_payload_trade_count"] == 8
+    assert payload["executable_filter_passed_count"] == 6
+    assert payload["intended_orders_count"] == 6
+    assert payload["filled_count"] == 2
+    assert payload["candidate_trade_lifecycle_present"] is True
+    assert payload["candidate_trade_lifecycle_summary"]["suppressed"] == 6
+    assert payload["candidate_trade_lifecycle_reasons"] == {
+        "buy_blocked_insufficient_buying_power": 4,
+        "min_notional": 2,
+    }
+    assert payload["candidate_trade_clipping_reasons"] == {
+        "post_sell_rebudget_capital_clipped": 1,
+    }
+    assert payload["paths"]["candidate_trade_lifecycle"]["present"] is True
+
+
 def test_latest_timeline_surfaces_equality_gate_as_advisory(tmp_path: Path) -> None:
     run_root = _write_valid_latest_run(tmp_path)
     _write_json(

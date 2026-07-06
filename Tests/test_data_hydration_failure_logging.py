@@ -114,6 +114,44 @@ def test_sharadar_adapter_writes_partial_datatable_sample(monkeypatch, tmp_path:
     assert Path(result.artifact_path).exists()
 
 
+def test_sharadar_security_master_uses_focused_symbol_queries(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("NASDAQ_DATA_LINK_API_KEY", "not-logged")
+    calls: list[dict] = []
+
+    def fake_get(table: str, params: dict, api_key: str) -> dict:
+        calls.append(dict(params))
+        ticker = params["ticker"]
+        return {
+            "datatable": {
+                "columns": [
+                    {"name": "ticker"},
+                    {"name": "permaticker"},
+                    {"name": "name"},
+                    {"name": "exchange"},
+                    {"name": "isdelisted"},
+                    {"name": "category"},
+                    {"name": "scalemarketcap"},
+                    {"name": "firstpricedate"},
+                    {"name": "lastpricedate"},
+                ],
+                "data": [[ticker, 1000 + len(calls), f"{ticker} INC", "NASDAQ", "N", "Domestic Common Stock", "4 - Large", "2020-01-01", "2026-06-24"]],
+            }
+        }
+
+    adapter = NasdaqSharadarAdapter(get_fn=fake_get)
+    context = HydrationContext(repo_root=tmp_path, as_of_date="2026-06-24", limit_sample=True, symbols=("AAA", "BBB"))
+    dataset = {"dataset_id": "security_master_pit", "dataset_name": "Point-in-time security master", "fr_dh_reference": "FR-DH-013"}
+
+    result = adapter.hydrate(dataset, context)
+
+    assert result.status == "OK"
+    assert result.PIT_safe_status == "PIT_GRADE_SHARADAR_TICKERS_DATE_WINDOWS"
+    assert [call["ticker"] for call in calls] == ["AAA", "BBB"]
+    payload = json.loads(Path(result.artifact_path).read_text(encoding="utf-8"))
+    assert payload["queried_symbols"] == ["AAA", "BBB"]
+    assert {row["ticker"] for row in payload["rows"]} == {"AAA", "BBB"}
+
+
 def _fundamentals_dataset() -> dict:
     return {"dataset_id": "fundamentals_pit", "dataset_name": "Fundamentals", "fr_dh_reference": "FR-DH-013"}
 

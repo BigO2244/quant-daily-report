@@ -70,11 +70,30 @@ class SecEdgarAdapter(BaseHydrationAdapter):
     ) -> HydrationResult:
         url = "https://www.sec.gov/files/company_tickers.json"
         payload = request_get(url, timeout=context.timeout_seconds, headers=headers).json()
+        if context.symbols:
+            wanted = set(context.symbols)
+            payload = {
+                key: row
+                for key, row in payload.items()
+                if str((row or {}).get("ticker") or "").upper() in wanted
+            }
         count = len(payload)
         if count <= 0:
-            return self.result(dataset, context, status="EMPTY_RESULT", started_at=started_at, failure_reason="SEC company tickers returned empty payload.")
+            reason = "SEC company tickers returned empty payload."
+            if context.symbols:
+                reason = f"SEC company tickers returned no rows for requested symbols: {', '.join(context.symbols)}."
+            return self.result(dataset, context, status="EMPTY_RESULT", started_at=started_at, failure_reason=reason)
         artifact = context.output_path("raw", dataset["dataset_id"], self.source_name, "company_tickers_sample.json")
-        write_json(artifact, payload)
+        write_json(
+            artifact,
+            {
+                "queried_symbols": list(context.symbols),
+                "row_count": count,
+                "rows_by_index": payload,
+            }
+            if context.symbols
+            else payload,
+        )
         return self.result(
             dataset,
             context,

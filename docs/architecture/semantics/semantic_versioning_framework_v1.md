@@ -233,11 +233,11 @@ Object production MUST satisfy:
 - `surface.methodology_revision` (when applicable) MUST be a revision
   published under the declared `surface.nav_surface_type`.
 
-The compatibility matrix MUST be maintained in
-`docs/architecture/semantics/compatibility_matrix.md` (future expansion).
-Until that document exists, compatibility is defined by the publication
-dates of each version: a version published on date `D` is compatible
-with versions published before `D`, modulo MAJOR-bump rules above.
+When the compatibility matrix is created, it should be maintained in
+`docs/architecture/semantics/compatibility_matrix.md`. Until that document
+exists, compatibility is defined by the publication dates of each version: a
+version published on date `D` is compatible with versions published before
+`D`, modulo MAJOR-bump rules above.
 
 ---
 
