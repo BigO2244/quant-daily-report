@@ -12,6 +12,7 @@ STATUS_NO_ACTION = "NO_ACTION"
 STATUS_READY = "READY"
 STATUS_HALTED = "HALTED"
 STATUS_EXECUTED = "EXECUTED"
+STATUS_MARKET_CLOSED = "MARKET_CLOSED"
 STATUS_SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE"
 STATUS_IDEMPOTENT_REPLAY = "IDEMPOTENT_REPLAY"
 
@@ -137,6 +138,7 @@ def normalize_status(
       - READY: trades exist and can be executed
       - HALTED: execution cannot proceed (blocker)
       - EXECUTED: orders submitted to broker (set by executor only)
+      - MARKET_CLOSED: execution intentionally skipped on a closed market day
       - SKIPPED_DUPLICATE: already executed this run_id (set by executor only)
 
     Args:
@@ -147,8 +149,13 @@ def normalize_status(
     Returns:
         Normalized status string
     """
+    raw_status = str(execution_status or "").strip().upper()
+
+    if raw_status == STATUS_MARKET_CLOSED:
+        return STATUS_MARKET_CLOSED
+
     # If explicitly halted or halt reason present
-    if halt_reason or (execution_status or "").upper() == "HALTED":
+    if halt_reason or raw_status == "HALTED":
         return STATUS_HALTED
 
     # If no executable trades
@@ -205,6 +212,7 @@ def write_canonical_execution_payload(
         "halt_reason": halt_reason,
         "execution_outcome": (payload or {}).get("execution_outcome"),
         "execution_reason": (payload or {}).get("execution_reason"),
+        "reason_code": (payload or {}).get("reason_code"),
         "cash_rebalance_status": (payload or {}).get("cash_rebalance_status"),
         "broker_reject_status": (payload or {}).get("broker_reject_status"),
         "broker_reject_message": (payload or {}).get("broker_reject_message"),
@@ -220,6 +228,8 @@ def write_canonical_execution_payload(
         "planned_payload_trade_count": int((payload or {}).get("planned_payload_trade_count") or 0),
         "exact_plan_enabled": bool((payload or {}).get("exact_plan_enabled")),
         "reason": (payload or {}).get("reason"),
+        "operator_action_required": (payload or {}).get("operator_action_required"),
+        "market_closed_expected_skip": bool((payload or {}).get("market_closed_expected_skip")),
         "planned_payload_drop_diagnostics": (payload or {}).get("planned_payload_drop_diagnostics"),
         "proposed_trades_intent_count": planner_intended_count,
         "proposed_trades_intent": planner_intended_count,

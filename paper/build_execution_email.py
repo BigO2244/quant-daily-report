@@ -387,6 +387,14 @@ def build_execution_email_text(payload: dict[str, Any]) -> tuple[str, str]:
         lines.append(str(planning_disclaimer or "Planning email only — no orders were sent."))
         if pricing_disclaimer:
             lines.append(str(pricing_disclaimer))
+    elif status == "MARKET_CLOSED":
+        reason_text = str(payload.get("reason_code") or reason or "MARKET_CLOSED_DAY")
+        lines.append(f"Execution Status: MARKET_CLOSED — {reason_text}")
+        if planned_for:
+            lines.append(f"Planned For: {_fmt_planned_for(planned_for)}")
+        lines.append(str(planning_disclaimer or "No orders were sent; market was closed."))
+        if pricing_disclaimer:
+            lines.append(str(pricing_disclaimer))
     else:
         lines.append("Execution Status: READY")
         if plan_only and planned_for:
@@ -675,6 +683,9 @@ def build_execution_email_html(payload: dict[str, Any]) -> tuple[str, str]:
     status_display = status
     if broker_snapshot_fallback and operator_execution_status == "executed":
         status_display = "EXECUTED — BROKER SNAPSHOT FALLBACK"
+    elif status == "MARKET_CLOSED":
+        reason_text = str(payload.get("reason_code") or payload.get("halt_reason") or "MARKET_CLOSED_DAY")
+        status_display = f"MARKET_CLOSED — {reason_text}"
 
     header_items = [
         f"<li><b>Mode:</b> {escape(mode)}</li>",

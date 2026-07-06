@@ -358,6 +358,53 @@ def test_exact_plan_has_named_explicit_opt_out_and_empty_plan_no_action_path(
     assert live_exec._exact_plan_enabled_for_payload({"trade_date": "2026-06-19", "trades": []}) is False
 
 
+def test_market_closed_day_semantics_mark_expected_skip(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    payload = {
+        "execution_status": "READY",
+        "halt_reason": None,
+        "planned_payload_drop_diagnostics": {"reason": "old"},
+    }
+    paper_summary = {
+        "market_guard": {
+            "status": "CLOSED",
+            "reason": "MARKET_CLOSED_DAY",
+            "is_open_now": False,
+            "is_trading_day": False,
+        },
+        "market_reason": "MARKET_CLOSED_DAY",
+    }
+
+    assert live_exec._apply_market_closed_day_semantics(payload, paper_summary) is True
+
+    assert payload["execution_status"] == "MARKET_CLOSED"
+    assert payload["operator_execution_status"] == "skipped"
+    assert payload["halt_reason"] is None
+    assert payload["execution_reason"] == "MARKET_CLOSED_DAY"
+    assert payload["reason_code"] == "MARKET_CLOSED_DAY"
+    assert payload["operator_action_required"] is False
+    assert payload["market_closed_expected_skip"] is True
+    assert "planned_payload_drop_diagnostics" not in payload
+
+
+def test_early_close_after_close_is_not_full_market_holiday(tmp_path) -> None:
+    live_exec = _load_module(tmp_path)
+    payload = {"execution_status": "READY"}
+    paper_summary = {
+        "market_guard": {
+            "status": "CLOSED",
+            "reason": "AFTER_MARKET_CUTOFF",
+            "is_open_now": False,
+            "is_trading_day": True,
+        },
+        "market_reason": "AFTER_MARKET_CUTOFF",
+    }
+
+    assert live_exec._apply_market_closed_day_semantics(payload, paper_summary) is False
+
+    assert payload == {"execution_status": "READY"}
+
+
 def test_cash_gate_diagnostics_mark_raw_gate_reconciled_success(tmp_path) -> None:
     live_exec = _load_module(tmp_path)
 

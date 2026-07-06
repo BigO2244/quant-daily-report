@@ -27,6 +27,7 @@ from core.execution_payload import (
     STATUS_READY,
     STATUS_HALTED,
     STATUS_EXECUTED,
+    STATUS_MARKET_CLOSED,
     STATUS_SKIPPED_DUPLICATE,
 )
 from core.operator_summary import (
@@ -74,6 +75,15 @@ class TestStatusNormalization:
             executable_trades_count=5,
         )
         assert status == STATUS_READY
+
+    def test_market_closed_preserved(self):
+        """MARKET_CLOSED remains a first-class expected skip status."""
+        status = normalize_status(
+            execution_status="MARKET_CLOSED",
+            halt_reason=None,
+            executable_trades_count=0,
+        )
+        assert status == STATUS_MARKET_CLOSED
 
 
 class TestOperatorSummary:
@@ -628,6 +638,38 @@ class TestCanonicalPayloadNormalization:
             # Halt reason takes precedence
             assert written["status"] == STATUS_HALTED
             assert written["halt_reason"] == "market_closed"
+
+    def test_canonical_payload_preserves_market_closed_reason(self):
+        """Canonical payload preserves expected market-closed skip metadata."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+
+            payload = {
+                "run_id": "test123",
+                "trade_date": "2026-07-03",
+                "mode": "PAPER",
+                "execution_status": "MARKET_CLOSED",
+                "execution_reason": "MARKET_CLOSED_DAY",
+                "reason": "MARKET_CLOSED_DAY",
+                "reason_code": "MARKET_CLOSED_DAY",
+                "operator_action_required": False,
+                "market_closed_expected_skip": True,
+                "trades": [],
+                "executable_trades_count": 0,
+            }
+
+            path = write_canonical_execution_payload(payload, "2026-07-03", run_root=run_root)
+
+            with path.open("r") as f:
+                written = json.load(f)
+
+            assert written["status"] == STATUS_MARKET_CLOSED
+            assert written["execution_status"] == STATUS_MARKET_CLOSED
+            assert written["execution_reason"] == "MARKET_CLOSED_DAY"
+            assert written["reason"] == "MARKET_CLOSED_DAY"
+            assert written["reason_code"] == "MARKET_CLOSED_DAY"
+            assert written["operator_action_required"] is False
+            assert written["market_closed_expected_skip"] is True
 
 
 if __name__ == "__main__":
