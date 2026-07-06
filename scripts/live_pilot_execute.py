@@ -976,22 +976,25 @@ def run_live_pilot(
 
     account_public = pre_snapshot.get("account") or {}
     account_hash = str(account_public.get("account_id_hash") or "")
-    account_match = False
-    account_reason = "missing_actual_account_id"
-    # Only compare raw account id when the broker exposes it through get_account.
+    # Route the account-hash match through the orchestrated gate result so the
+    # pinned-account check is a single authoritative decision (fail closed on a
+    # missing broker id or a mismatch) rather than an ad-hoc executor-only check.
     raw_account = broker.get_account() if hasattr(broker, "get_account") else {}
-    account_match, account_reason = expected_account_matches((raw_account or {}).get("id"), environ)
-    if not account_match and account_hash:
-        expected_hash = str(environ.get("CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH") or "").strip().lower()
-        account_match = bool(expected_hash and account_hash.lower() == expected_hash)
-        account_reason = "account_id_hash_match" if account_match else account_reason
-    if not account_match:
+    account_gate = build_live_pilot_gate_result(
+        broker_paper=broker_paper,
+        base_url=base_url,
+        env=environ,
+        account_id=(raw_account or {}).get("id"),
+        account_id_hash=account_hash,
+        enforce_account_match=True,
+    )
+    if not account_gate.account_id_match:
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
             trade_date=trade_date,
             env=environ,
-            reason_code=account_reason,
+            reason_code=account_gate.account_match_reason or "live_pilot_account_id_mismatch",
             operator_action="Expected live pilot account id/hash does not match broker account.",
             preflight=preflight,
         )

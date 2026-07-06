@@ -52,6 +52,8 @@ class LivePilotGateResult:
     cron_approved: bool
     live_orders_allowed: bool
     operator_action: str
+    account_id_match: bool | None = None
+    account_match_reason: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -82,6 +84,8 @@ class LivePilotGateResult:
             "cron_approved": self.cron_approved,
             "live_orders_allowed": self.live_orders_allowed,
             "operator_action": self.operator_action,
+            "account_id_match": self.account_id_match,
+            "account_match_reason": self.account_match_reason,
         }
 
 
@@ -138,6 +142,20 @@ def _env_mapping(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
 
 def _truthy(value: object) -> bool:
     return str(value or "").strip().lower() in LIVE_ALLOWED_VALUES
+
+
+def kill_switch_engaged(value: object) -> bool:
+    """Return whether the live-pilot kill switch is engaged (blocking), fail-closed.
+
+    The kill switch is treated as ENGAGED unless the value is an explicitly
+    recognized "off" token (see ``FALSE_VALUES``). Unset, empty, unrecognized, or
+    unparseable values all resolve to engaged, so a typo or missing env var can
+    never silently disarm the only safeguard that stands between an approved lane
+    and a live broker submission. To arm live, an operator must set an explicit
+    recognized off value (e.g. ``0``/``false``/``off``).
+    """
+    raw = str(value if value is not None else "").strip().lower()
+    return raw not in FALSE_VALUES
 
 
 def _dry_run_enabled(value: object) -> bool:
@@ -223,6 +241,9 @@ def build_live_pilot_gate_result(
     env: Mapping[str, str] | None = None,
     order_notional: float | None = None,
     submission_intent: bool = False,
+    account_id: str | None = None,
+    account_id_hash: str = "",
+    enforce_account_match: bool = False,
 ) -> LivePilotGateResult:
     environ = _env_mapping(env)
     requested_mode = requested_mode_from_env(environ)
@@ -234,9 +255,11 @@ def build_live_pilot_gate_result(
     expected_hash = str(environ.get(LIVE_PILOT_ACCOUNT_ID_HASH_ENV) or "").strip()
     max_orders = _positive_int(environ.get(LIVE_PILOT_MAX_ORDERS_ENV))
     dry_run = _dry_run_enabled(environ.get(LIVE_PILOT_DRY_RUN_ENV))
-    kill_switch = _truthy(environ.get(LIVE_PILOT_KILL_SWITCH_ENV))
+    kill_switch = kill_switch_engaged(environ.get(LIVE_PILOT_KILL_SWITCH_ENV))
     cron_context = _cron_context(environ)
     cron_approved = _truthy(environ.get(LIVE_PILOT_CRON_APPROVED_ENV))
+    account_id_match: bool | None = None
+    account_match_reason: str | None = None
 
     def result(reason: str, action: str, *, status: str = "BLOCKED", allowed: bool = False) -> LivePilotGateResult:
         return LivePilotGateResult(
@@ -257,6 +280,8 @@ def build_live_pilot_gate_result(
             cron_approved=cron_approved,
             live_orders_allowed=allowed,
             operator_action=action,
+            account_id_match=account_id_match,
+            account_match_reason=account_match_reason,
         )
 
     if requested_mode == LIVE_PREFLIGHT_MODE:
@@ -316,6 +341,24 @@ def build_live_pilot_gate_result(
             "missing_live_pilot_expected_account_id",
             f"Set {LIVE_PILOT_ACCOUNT_ID_ENV} or {LIVE_PILOT_ACCOUNT_ID_HASH_ENV}.",
         )
+    if enforce_account_match:
+        # Wire the real account-hash match into the orchestrated gate result rather
+        # than only checking that an expected id/hash is configured. Mismatch (or a
+        # missing broker-reported account id) blocks before any submission.
+        matched, match_reason = expected_account_matches(account_id, environ)
+        actual_hash = str(account_id_hash or "").strip().lower()
+        if not matched and actual_hash:
+            env_hash = str(environ.get(LIVE_PILOT_ACCOUNT_ID_HASH_ENV) or "").strip().lower()
+            if env_hash and actual_hash == env_hash:
+                matched, match_reason = True, "account_id_hash_match"
+        account_id_match = matched
+        account_match_reason = match_reason
+        if not matched:
+            return result(
+                "live_pilot_account_id_mismatch",
+                "Expected live pilot account id/hash does not match the broker account; "
+                "block before any submission until the pinned account is restored.",
+            )
     if max_orders is None:
         return result(
             "missing_positive_live_pilot_max_orders",
