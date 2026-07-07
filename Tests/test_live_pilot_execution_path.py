@@ -34,6 +34,7 @@ class FakeBroker:
         self.market_calls = 0
         self.limit_calls = 0
         self.submitted_methods: list[str] = []
+        self.submitted_sides: list[str] = []
         self.order_status = order_status
         self.open_orders: list[dict[str, object]] = []
         self.buying_power = buying_power
@@ -81,6 +82,7 @@ class FakeBroker:
         self.submit_calls += 1
         self.market_calls += 1
         self.submitted_methods.append("market")
+        self.submitted_sides.append(str(kwargs.get("side") or "").upper())
         return {
             "id": f"order-{self.submit_calls}",
             "status": self.order_status,
@@ -95,6 +97,7 @@ class FakeBroker:
         self.submit_calls += 1
         self.limit_calls += 1
         self.submitted_methods.append("limit")
+        self.submitted_sides.append(str(kwargs.get("side") or "").upper())
         return {
             "id": f"order-{self.submit_calls}",
             "status": self.order_status,
@@ -196,6 +199,62 @@ def _all_plan() -> dict[str, object]:
     }
 
 
+class RotatingFakeBroker(FakeBroker):
+    def __init__(self, *, sell_fills: bool = True) -> None:
+        super().__init__(
+            order_status="filled",
+            buying_power="150",
+            cash="150",
+            equity="500",
+            positions=[{"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}],
+        )
+        self.sell_fills = sell_fills
+        self.orders_by_id: dict[str, dict[str, object]] = {}
+
+    def submit_market_order(self, **kwargs):
+        self.submit_calls += 1
+        self.market_calls += 1
+        side = str(kwargs.get("side") or "").upper()
+        symbol = str(kwargs.get("symbol") or "").upper()
+        qty = float(kwargs.get("qty") or 0.0)
+        estimated = float(kwargs.get("estimated_notional") or 0.0)
+        self.submitted_methods.append("market")
+        self.submitted_sides.append(side)
+        order_id = f"order-{self.submit_calls}"
+        status = "filled"
+        filled_qty = qty
+        filled_avg_price = estimated / qty if qty > 0 else None
+        if side == "SELL" and not self.sell_fills:
+            status = "accepted"
+            filled_qty = None
+            filled_avg_price = None
+        order = {
+            "id": order_id,
+            "status": status,
+            "symbol": symbol,
+            "side": side,
+            "client_order_id": kwargs.get("client_order_id"),
+            "filled_qty": str(filled_qty) if filled_qty is not None else None,
+            "filled_quantity": str(filled_qty) if filled_qty is not None else None,
+            "filled_avg_price": str(filled_avg_price) if filled_avg_price is not None else None,
+            "submitted_at": "2026-03-17T13:35:00+00:00",
+            "filled_at": "2026-03-17T13:35:02+00:00" if status == "filled" else None,
+        }
+        self.orders_by_id[order_id] = order
+        if side == "SELL" and status == "filled":
+            self.cash = str(float(self.cash) + estimated)
+            self.buying_power = str(float(self.buying_power) + estimated)
+            self.positions = [row for row in self.positions if row.get("symbol") != symbol]
+        elif side == "BUY" and status == "filled":
+            self.cash = str(float(self.cash) - estimated)
+            self.buying_power = str(float(self.buying_power) - estimated)
+            self.positions.append({"symbol": symbol, "qty": str(qty), "market_value": str(estimated)})
+        return order
+
+    def get_order(self, order_id):
+        return dict(self.orders_by_id.get(order_id, {}))
+
+
 def _market_open_now() -> dt.datetime:
     return dt.datetime(2026, 3, 17, 9, 35, tzinfo=ET)
 
@@ -290,12 +349,9 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     assert gate_state["decision"] == "ALLOWED"
     assert gate_state["broker_orders_submitted"] == 1
     ledger_records = _ledger_records(tmp_path / "outputs" / "live_pilot" / "live_trade_ledger.jsonl")
-    assert [row["event"] for row in ledger_records] == ["submitted", "filled"]
+    assert [row["event"] for row in ledger_records] == ["submitted"]
     assert ledger_records[0]["client_order_id"] == submitted["orders"][0]["client_order_id"]
-    assert ledger_records[0]["broker_order_id"] is None
-    assert ledger_records[1]["client_order_id"] == submitted["orders"][0]["client_order_id"]
-    assert ledger_records[1]["broker_order_id"] == "order-1"
-    assert ledger_records[1]["filled_qty"] == 1.0
+    assert ledger_records[0]["broker_order_id"] == "order-1"
 
 
 def test_live_trade_ledger_write_failure_does_not_propagate(tmp_path: Path, monkeypatch) -> None:
@@ -314,7 +370,7 @@ def test_live_trade_ledger_write_failure_does_not_propagate(tmp_path: Path, monk
     )
 
 
-def test_existing_live_positions_block_buy_before_broker_submission_and_record_capital_gate(
+def test_unwhitelisted_live_sell_blocks_before_broker_submission_and_records_capital_gate(
     tmp_path: Path,
 ) -> None:
     broker = FakeBroker(
@@ -339,25 +395,22 @@ def test_existing_live_positions_block_buy_before_broker_submission_and_record_c
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-existing-positions"
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert "sell_not_whitelisted" in result["reason_code"]
     assert broker.submit_calls == 0
     assert broker.market_calls == 0
     assert broker.limit_calls == 0
     gate_state = _gate_state(run_root)
     assert gate_state["decision"] == "BLOCKED"
-    assert gate_state["block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert "sell_not_whitelisted" in gate_state["block_reason"]
     assert gate_state["broker_orders_submitted"] == 0
 
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
-    assert capital_gate["decision"] == "BLOCKED"
-    assert capital_gate["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert capital_gate["decision"] == "ALLOWED"
     assert capital_gate["live_buying_power_before"] == 0.88
     assert capital_gate["approved_cap_usd"] == 500.0
-    assert capital_gate["planned_buy_notional_usd"] == 0  # engine: ALL held+targeted, whole-share incremental rounds to 0
-    assert capital_gate["tradable_capital_usd"] == 0.88
-    assert capital_gate["required_sell_count"] == 2  # engine counts actual exits ABBV,C (not "any position")
-    assert capital_gate["sell_first_supported"] is False
-    assert capital_gate["rebudget_after_sell_supported"] is False
+    assert capital_gate["required_sell_count"] >= 1
+    assert capital_gate["sell_first_supported"] is True
+    assert capital_gate["rebudget_after_sell_supported"] is True
     assert capital_gate["broker_orders_submitted"] == 0
     assert [row["symbol"] for row in capital_gate["live_positions_before"]] == ["ABBV", "ALL", "C"]
 
@@ -366,11 +419,81 @@ def test_existing_live_positions_block_buy_before_broker_submission_and_record_c
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
     assert reconciliation["status"] == "BLOCKED_PRE_SUBMISSION"
     assert reconciliation["state"] == "BLOCKED"
-    assert reconciliation["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert reconciliation["buy_block_reason"] is None
     results = json.loads((run_root / "execution_results.json").read_text())
     assert results["status"] == "BLOCKED"
     assert results["broker_responses"] == []
-    assert results["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+
+
+def _rotation_plan() -> dict[str, object]:
+    return {
+        "target_portfolio": [
+            {
+                "ticker": "NEW",
+                "symbol": "NEW",
+                "side": "BUY",
+                "target_weight": 0.4,
+                "price": 100,
+                "order_type": "market",
+                "sleeve": "polaris",
+            }
+        ]
+    }
+
+
+def test_core_routed_live_rotation_sells_settles_rebudgets_and_buys(tmp_path: Path) -> None:
+    broker = RotatingFakeBroker(sell_fills=True)
+    env = _env(dry_run="0", max_orders="1")
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "OLD"
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-rotation-core",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-rotation-core"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_sides == ["SELL", "BUY"]
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert [row["side"] for row in submitted["orders"]] == ["SELL", "BUY"]
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["sell_orders_intended"][0]["symbol"] == "OLD"
+    assert transition["buy_orders_intended"][0]["symbol"] == "NEW"
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["required_sell_count"] == 1
+    assert capital_gate["post_sell_buy_budget"]["post_sell_cash"] == 250.0
+    assert capital_gate["post_sell_buy_budget"]["buy_budget_after_safeguards"] == 250.0
+
+
+def test_core_routed_live_settlement_timeout_uses_actual_cash_and_does_not_overbuy(tmp_path: Path) -> None:
+    broker = RotatingFakeBroker(sell_fills=False)
+    env = _env(dry_run="0", max_orders="1")
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "OLD"
+    env["CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS"] = "0"
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-settlement-timeout",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-settlement-timeout"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_sides == ["SELL"]
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert [row["side"] for row in submitted["orders"]] == ["SELL"]
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["buy_orders_intended"] == []
+    assert transition["diagnostics"]["rebudget"]["reason_codes"] == ["live_pilot_sell_settlement_timeout"]
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["post_sell_buy_budget"]["post_sell_cash"] == 150.0
 
 
 def test_insufficient_live_buying_power_blocks_even_when_approved_cap_allows_plan(

@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping
+
+import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -24,15 +29,18 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_plan,
 )
 from core.live_pilot_gate_state import write_live_pilot_gate_state
+from execution.core import (
+    AccountSnapshot as CoreAccountSnapshot,
+    ExecutionRequest,
+    OrderIntent,
+    SubmitResult,
+    apply_capital_budget_and_execution_filter,
+    compute_transition_trades,
+    execute_lifecycle,
+    live_pilot_execution_config,
+)
 from paper.trading_calendar import ET_TZ, market_session_status
 from paper.run_manager import generate_run_id, safe_write_text
-from scripts.live_pilot_transition import (
-    LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER as _ADAPTER_BLOCK_INSUFFICIENT,
-    buy_intents_to_trades,
-    capital_gate_artifact,
-    compute_live_transition,
-    transition_plan_artifact,
-)
 
 
 def _now_utc() -> str:
@@ -166,8 +174,15 @@ LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION = (
 )
 LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER = "LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER"
 LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE = "LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE"
-LIVE_PILOT_SELL_FIRST_SUPPORTED = False
-LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED = False
+LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP = "live_pilot_total_notional_exceeds_cap"
+LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME = "live_pilot_equity_exceeds_cap_regime"
+LIVE_PILOT_EQUITY_UNAVAILABLE = "live_pilot_equity_unavailable"
+LIVE_PILOT_SELL_SETTLEMENT_TIMEOUT = "live_pilot_sell_settlement_timeout"
+LIVE_PILOT_MALFORMED_HOLDING = "live_pilot_malformed_holding"
+LIVE_PILOT_SELL_FIRST_SUPPORTED = True
+LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED = True
+LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS"
+LIVE_PILOT_SETTLEMENT_POLL_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_POLL_SECONDS"
 
 CAPITAL_GATE_REPORT_KEYS = (
     "live_positions_before",
@@ -340,34 +355,272 @@ def _capital_gate_report_fields(capital_gate: Mapping[str, Any] | None) -> dict[
     return {key: capital_gate.get(key) for key in CAPITAL_GATE_REPORT_KEYS if key in capital_gate}
 
 
+def _finite_float(value: object) -> float | None:
+    numeric = _safe_float(value)
+    if numeric is None or not math.isfinite(numeric):
+        return None
+    return float(numeric)
+
+
+def _derived_position_price(position: Mapping[str, Any]) -> float | None:
+    qty = _finite_float(position.get("qty"))
+    market_value = _finite_float(position.get("market_value"))
+    if qty is None or abs(qty) <= 1e-12:
+        return None
+    if market_value is None or market_value <= 0.0:
+        return None
+    price = abs(market_value / qty)
+    if not math.isfinite(price) or price <= 0.0:
+        return None
+    return float(price)
+
+
+def _malformed_holding_reason(position: Mapping[str, Any]) -> str | None:
+    symbol = str(position.get("symbol") or "").strip().upper()
+    qty = _finite_float(position.get("qty"))
+    market_value = _finite_float(position.get("market_value"))
+    reasons: list[str] = []
+    if not symbol:
+        reasons.append("missing_symbol")
+    if qty is None or abs(qty) <= 1e-12:
+        reasons.append("missing_zero_or_nonfinite_qty")
+    if market_value is None or market_value <= 0.0:
+        reasons.append("missing_nonpositive_or_nonfinite_market_value")
+    if not reasons and _derived_position_price(position) is None:
+        reasons.append("degenerate_price")
+    return ",".join(reasons) if reasons else None
+
+
+def _holding_frames_from_snapshot(pre_snapshot: Mapping[str, Any]) -> tuple[pd.DataFrame, pd.Series, list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    price_by_symbol: dict[str, float] = {}
+    malformed: list[dict[str, Any]] = []
+    for raw in pre_snapshot.get("positions") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        reason = _malformed_holding_reason(raw)
+        symbol = str(raw.get("symbol") or "").strip().upper()
+        if reason:
+            malformed.append({"symbol": symbol or None, "reason": reason, "position": dict(raw)})
+            continue
+        qty = float(_finite_float(raw.get("qty")) or 0.0)
+        price = float(_derived_position_price(raw) or 0.0)
+        if not symbol or abs(qty) <= 1e-12 or price <= 0.0:
+            continue
+        rows.append({"ticker": symbol, "sleeve": "live_pilot", "shares": abs(qty)})
+        price_by_symbol[symbol] = price
+    frame = pd.DataFrame(rows, columns=["ticker", "sleeve", "shares"])
+    return frame, pd.Series(price_by_symbol, dtype=float), malformed
+
+
+def _target_rows_from_plan(plan: Mapping[str, Any], *, equity: float) -> tuple[pd.DataFrame, pd.Series]:
+    rows = plan.get("target_portfolio")
+    if not isinstance(rows, list) or not rows:
+        rows = plan.get("trades") or plan.get("orders") or []
+    targets: list[dict[str, Any]] = []
+    price_by_symbol: dict[str, float] = {}
+    equity_value = float(equity or 0.0)
+    for raw in rows or []:
+        if not isinstance(raw, Mapping):
+            continue
+        symbol = str(raw.get("symbol") or raw.get("ticker") or "").strip().upper()
+        if not symbol:
+            continue
+        price = _finite_float(
+            raw.get("price")
+            or raw.get("limit_price")
+            or raw.get("expected_price")
+            or raw.get("normalized_limit_price")
+            or raw.get("entry_price")
+        )
+        if price is None or price <= 0.0:
+            continue
+        weight = _finite_float(raw.get("target_weight"))
+        if weight is None or weight <= 0.0:
+            notional = _finite_float(raw.get("notional"))
+            qty = _finite_float(raw.get("shares") or raw.get("qty") or raw.get("quantity"))
+            if notional is None and qty is not None:
+                notional = qty * price
+            if notional is None or notional <= 0.0:
+                continue
+            weight = (notional / equity_value) if equity_value > 0.0 else notional
+        targets.append({"ticker": symbol, "sleeve": str(raw.get("sleeve") or "live_pilot"), "target_weight": float(weight)})
+        price_by_symbol[symbol] = float(price)
+    frame = pd.DataFrame(targets, columns=["ticker", "sleeve", "target_weight"])
+    return frame, pd.Series(price_by_symbol, dtype=float)
+
+
+def _plan_rows_by_symbol(plan: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    rows = plan.get("target_portfolio")
+    if not isinstance(rows, list) or not rows:
+        rows = plan.get("trades") or plan.get("orders") or []
+    out: dict[str, Mapping[str, Any]] = {}
+    for raw in rows or []:
+        if not isinstance(raw, Mapping):
+            continue
+        symbol = str(raw.get("symbol") or raw.get("ticker") or "").strip().upper()
+        if symbol and symbol not in out:
+            out[symbol] = raw
+    return out
+
+
+def _build_core_request(
+    *,
+    pre_snapshot: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    run_id: str,
+) -> tuple[ExecutionRequest | None, list[dict[str, Any]]]:
+    account = pre_snapshot.get("account") if isinstance(pre_snapshot.get("account"), Mapping) else {}
+    equity = _finite_float((account or {}).get("equity") or (account or {}).get("portfolio_value"))
+    if equity is None or equity <= 0.0:
+        return None, [{"reason": LIVE_PILOT_EQUITY_UNAVAILABLE, "symbol": None}]
+    holdings, holding_prices, malformed = _holding_frames_from_snapshot(pre_snapshot)
+    targets, target_prices = _target_rows_from_plan(plan, equity=equity)
+    prices = holding_prices.copy()
+    for symbol, price in target_prices.items():
+        prices.loc[symbol] = float(price)
+    cash = float(_finite_float((account or {}).get("cash")) or 0.0)
+    planning_account = {
+        "cash": str(cash),
+        "equity": str(equity),
+        "portfolio_value": str(equity),
+        "buying_power": (account or {}).get("buying_power"),
+        "status": (account or {}).get("status") or "ACTIVE",
+    }
+    request = ExecutionRequest(
+        holdings=holdings,
+        targets=targets,
+        prices=prices,
+        total_equity=float(equity),
+        starting_cash=float(cash),
+        target_cash_weight=0.0,
+        planning_account=planning_account,
+        run_id=run_id,
+        price_basis="live_broker_snapshot",
+    )
+    return request, malformed
+
+
+def _max_incremental_need(request: ExecutionRequest) -> tuple[str | None, float]:
+    if request.targets is None or request.targets.empty:
+        return None, 0.0
+    held = (
+        request.holdings.set_index("ticker")["shares"].astype(float).to_dict()
+        if request.holdings is not None and not request.holdings.empty
+        else {}
+    )
+    max_symbol: str | None = None
+    max_need = 0.0
+    for _, row in request.targets.iterrows():
+        symbol = str(row.get("ticker") or "").strip().upper()
+        if not symbol or symbol not in request.prices.index:
+            continue
+        price = float(request.prices.loc[symbol])
+        if price <= 0.0:
+            continue
+        target_shares = float(row.get("target_weight") or 0.0) * float(request.total_equity) / price
+        current_shares = float(held.get(symbol, 0.0))
+        need = max(0.0, target_shares - current_shares) * price
+        if need > max_need:
+            max_symbol = symbol
+            max_need = float(need)
+    return max_symbol, float(max_need)
+
+
+def _core_rows_from_frame(frame: pd.DataFrame, *, plan: Mapping[str, Any]) -> list[dict[str, Any]]:
+    source_by_symbol = _plan_rows_by_symbol(plan)
+    rows: list[dict[str, Any]] = []
+    if frame is None or frame.empty:
+        return rows
+    for _, row in frame.iterrows():
+        symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+        source = source_by_symbol.get(symbol, {})
+        order_type = str(source.get("order_type") or "market").strip().lower()
+        if order_type not in {"market", "limit"}:
+            order_type = "market"
+        rows.append(
+            {
+                "ticker": symbol,
+                "symbol": symbol,
+                "side": str(row.get("side") or "").strip().upper(),
+                "shares": float(row.get("shares") or 0.0),
+                "qty": float(row.get("shares") or 0.0),
+                "limit_price": float(row.get("price") or 0.0),
+                "price": float(row.get("price") or 0.0),
+                "expected_price": float(row.get("price") or 0.0),
+                "cap_enforcement_price": float(row.get("price") or 0.0),
+                "notional": float(row.get("notional") or 0.0),
+                "order_type": order_type,
+                "source_reason": row.get("reason"),
+                **{key: source[key] for key in PLAN_PROVENANCE_KEYS if key in source},
+            }
+        )
+    return rows
+
+
+def _trade_frame_orders(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if frame is None or frame.empty:
+        return rows
+    for _, row in frame.iterrows():
+        rows.append(
+            {
+                "symbol": str(row.get("ticker") or row.get("symbol") or "").strip().upper(),
+                "side": str(row.get("side") or "").strip().upper(),
+                "shares": float(row.get("shares") or 0.0),
+                "price": float(row.get("price") or 0.0),
+                "notional": float(row.get("notional") or 0.0),
+                "reason": str(row.get("reason") or ""),
+            }
+        )
+    return rows
+
+
+def _frame_len(frame: Any) -> int:
+    return 0 if frame is None else int(len(frame))
+
+
 def _build_live_pilot_capital_gate(
     *,
-    transition_plan: Any,
+    result: Any,
     pre_snapshot: Mapping[str, Any],
     approved_cap_usd: float | None,
 ) -> dict[str, Any]:
-    """Thin wrapper mapping the shared Transition Engine's blocking output to the
-    ``live_pilot_capital_gate.v1`` evidence shape.
-
-    Workstream C Phase 2: the capital decision (rotation-required, buying-power
-    adequacy, cap-as-ceiling) now comes from ``transition.compute_transition`` via
-    ``scripts.live_pilot_transition``, not a parallel implementation here. The gate
-    artifact schema/fields are preserved; ``required_sell_count`` now reflects the
-    engine's actual sell intents (exits + reduces) rather than "any position held".
-    """
     positions_before = _active_live_positions(pre_snapshot.get("positions") or [])
     open_orders_before = [
         _open_order_public_row(order)
         for order in (pre_snapshot.get("open_orders") or [])
         if isinstance(order, Mapping)
     ]
-    return capital_gate_artifact(
-        transition_plan,
-        positions_before=positions_before,
-        open_orders_before=open_orders_before,
-        approved_cap_usd=approved_cap_usd,
-        generated_at=_now_utc(),
-    )
+    budget = dict(getattr(result, "capital_budget", {}) or {})
+    post_budget = dict(getattr(result, "post_sell_budget_meta", {}) or {})
+    sell_count = _frame_len(getattr(result, "sell_trades", None))
+    buy_count = _frame_len(getattr(result, "rebuilt_buy_trades", None))
+    blocked_reason = None
+    if buy_count == 0 and float(budget.get("requested_buy_notional") or 0.0) > 0.0:
+        blocked_reason = LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+    return {
+        "schema_version": "live_pilot_capital_gate.v1",
+        "generated_at": _now_utc(),
+        "decision": "ALLOWED" if blocked_reason is None else "BLOCKED",
+        "block_reason": blocked_reason,
+        "live_positions_before": positions_before,
+        "live_open_orders_before": open_orders_before,
+        "live_buying_power_before": budget.get("broker_buying_power_at_planning"),
+        "approved_cap_usd": _safe_float(approved_cap_usd),
+        "required_sell_count": sell_count,
+        "sell_first_supported": LIVE_PILOT_SELL_FIRST_SUPPORTED,
+        "rebudget_after_sell_supported": LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED,
+        "strategy_allocation_cap_usd": budget.get("requested_buy_notional") or None,
+        "planned_buy_notional_usd": budget.get("requested_buy_notional"),
+        "tradable_capital_usd": (budget.get("reserve_cash_policy") or {}).get("available_for_buys"),
+        "buy_block_reason": blocked_reason,
+        "broker_orders_submitted": int(
+            len(getattr(result, "submitted_sells", ()) or ())
+            + len(getattr(result, "submitted_buys", ()) or ())
+        ),
+        "post_sell_buy_budget": post_budget,
+    }
 
 
 def _status_norm(status: object) -> str:
@@ -988,6 +1241,847 @@ def _build_evidence_metrics(
     return metrics
 
 
+def _holdings_frame_from_broker_positions(positions: Any) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(positions, list):
+        return pd.DataFrame(columns=["ticker", "sleeve", "shares"])
+    for raw in positions:
+        if not isinstance(raw, Mapping):
+            continue
+        reason = _malformed_holding_reason(raw)
+        if reason:
+            continue
+        symbol = str(raw.get("symbol") or "").strip().upper()
+        qty = float(_finite_float(raw.get("qty")) or 0.0)
+        if symbol and abs(qty) > 1e-12:
+            rows.append({"ticker": symbol, "sleeve": "live_pilot", "shares": abs(qty)})
+    return pd.DataFrame(rows, columns=["ticker", "sleeve", "shares"])
+
+
+class LivePilotCoreAdapter:
+    """Core adapter for the isolated live-pilot executor.
+
+    The production broker methods are only exercised when the caller supplies a
+    broker; Phase 1d tests inject a fake broker. Sells are refreshed before buys,
+    and unresolved sell settlement returns the broker's actual refreshed account
+    with ``sell_phase_allows_buy=False`` so the core cannot size buys from expected
+    proceeds.
+    """
+
+    def __init__(
+        self,
+        *,
+        broker: Any,
+        env: Mapping[str, str],
+        run_root: Path,
+        output_root: Path | str,
+        run_id: str,
+        source_plan: Mapping[str, Any] | None = None,
+    ) -> None:
+        self.broker = broker
+        self.env = env
+        self.run_root = run_root
+        self.output_root = output_root
+        self.run_id = run_id
+        self.source_by_symbol = _plan_rows_by_symbol(source_plan or {})
+        self.submitted_rows: list[dict[str, Any]] = []
+        self.submit_errors: list[str] = []
+        self._sequence = 0
+
+    def _client_order_id(self, intent: OrderIntent) -> str:
+        self._sequence += 1
+        return f"caerus-live-pilot-{self.run_id}-{self._sequence}-{intent.symbol}".lower()[:48]
+
+    def _policy(self, intent: OrderIntent) -> dict[str, Any]:
+        source = self.source_by_symbol.get(intent.symbol, {})
+        order_type = str(source.get("order_type") or "market").strip().lower()
+        if order_type not in {"market", "limit"}:
+            order_type = "market"
+        order_like = SimpleNamespace(
+            symbol=intent.symbol,
+            side=intent.side,
+            order_type=order_type,
+        )
+        return _entry_policy_for_order(
+            order_like,
+            output_root=self.output_root,
+            run_id=self.run_id,
+        )
+
+    def submit(self, intent: OrderIntent) -> SubmitResult:
+        client_order_id = self._client_order_id(intent)
+        submitted_intent = OrderIntent(
+            symbol=intent.symbol,
+            side=intent.side,
+            shares=float(intent.shares),
+            price=float(intent.price),
+            notional=float(intent.notional),
+            reason=str(intent.reason or ""),
+            order=int(intent.order),
+            slippage_cost=float(intent.slippage_cost or 0.0),
+            client_order_id=client_order_id,
+        )
+        policy = self._policy(submitted_intent)
+        submitted_order_type = str(policy.get("submitted_order_type") or "market").strip().lower()
+        try:
+            if submitted_order_type == "limit":
+                broker_result = self.broker.submit_limit_order(
+                    symbol=submitted_intent.symbol,
+                    qty=submitted_intent.shares,
+                    side=submitted_intent.side,
+                    limit_price=submitted_intent.price,
+                    client_order_id=client_order_id,
+                    tif="day",
+                )
+                submitted_price = submitted_intent.price
+            else:
+                broker_result = self.broker.submit_market_order(
+                    symbol=submitted_intent.symbol,
+                    qty=submitted_intent.shares,
+                    side=submitted_intent.side,
+                    client_order_id=client_order_id,
+                    tif="day",
+                    estimated_notional=submitted_intent.notional,
+                )
+                submitted_price = None
+            broker_payload = broker_result if isinstance(broker_result, Mapping) else {}
+            status = str(broker_payload.get("status") or "accepted")
+            source = self.source_by_symbol.get(submitted_intent.symbol, {})
+            provenance = {key: source[key] for key in PLAN_PROVENANCE_KEYS if key in source}
+            row = {
+                **provenance,
+                "symbol": submitted_intent.symbol,
+                "ticker": submitted_intent.symbol,
+                "side": submitted_intent.side,
+                "qty": submitted_intent.shares,
+                "shares": submitted_intent.shares,
+                "limit_price": submitted_intent.price,
+                "expected_price": submitted_intent.price,
+                "cap_enforcement_price": submitted_intent.price,
+                "notional": submitted_intent.notional,
+                "client_order_id": client_order_id,
+                "status": status,
+                "order": broker_payload,
+                "submitted_order_type": submitted_order_type,
+                "order_type_submitted": submitted_order_type,
+                "submitted_price": submitted_price,
+                "fill_price": _fill_price({"order": broker_payload}),
+                "submission_policy": policy.get("entry_execution_policy"),
+                "source_reason": submitted_intent.reason,
+                **policy,
+            }
+            row["slippage_bps"] = _slippage_bps(row)
+            self.submitted_rows.append(row)
+            return SubmitResult(
+                intent=submitted_intent,
+                status=status,
+                broker_order_id=str(broker_payload.get("id") or "") or None,
+                filled_qty=_safe_float(
+                    broker_payload.get("filled_qty")
+                    or broker_payload.get("filled_quantity")
+                    or (submitted_intent.shares if _status_bucket(status) == "filled" else None)
+                ),
+                filled_notional=None,
+                raw=broker_payload,
+            )
+        except Exception as exc:
+            self.submit_errors.append(f"{submitted_intent.symbol}:broker_submit_failed:{exc}")
+            source = self.source_by_symbol.get(submitted_intent.symbol, {})
+            provenance = {key: source[key] for key in PLAN_PROVENANCE_KEYS if key in source}
+            row = {
+                **provenance,
+                "symbol": submitted_intent.symbol,
+                "ticker": submitted_intent.symbol,
+                "side": submitted_intent.side,
+                "qty": submitted_intent.shares,
+                "shares": submitted_intent.shares,
+                "limit_price": submitted_intent.price,
+                "expected_price": submitted_intent.price,
+                "notional": submitted_intent.notional,
+                "client_order_id": client_order_id,
+                "status": "REJECTED",
+                "error": str(exc),
+                "submitted_order_type": submitted_order_type,
+                "order_type_submitted": submitted_order_type,
+                "source_reason": submitted_intent.reason,
+                **policy,
+            }
+            self.submitted_rows.append(row)
+            return SubmitResult(
+                intent=submitted_intent,
+                status="REJECTED",
+                broker_order_id=None,
+                raw={"error": str(exc)},
+            )
+
+    def snapshot(self) -> CoreAccountSnapshot:
+        account = self.broker.get_account() if hasattr(self.broker, "get_account") else {}
+        positions = self.broker.get_positions() if hasattr(self.broker, "get_positions") else []
+        return CoreAccountSnapshot(
+            account=dict(account or {}),
+            holdings=_holdings_frame_from_broker_positions(positions),
+            raw={"snapshot_source": "live_pilot_adapter"},
+        )
+
+    def wait_or_refresh(self, submitted_sells: list[SubmitResult] | tuple[SubmitResult, ...]) -> CoreAccountSnapshot:
+        timeout = max(0.0, float(_safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV)) or 0.0))
+        poll = max(0.0, float(_safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_POLL_ENV)) or 0.0))
+        deadline = time.monotonic() + timeout
+        sell_records: list[dict[str, Any]] = []
+        pending: list[str] = []
+        while True:
+            sell_records = []
+            pending = []
+            for result in submitted_sells or []:
+                order_id = str(result.broker_order_id or "").strip()
+                broker_order: Mapping[str, Any] = result.raw if isinstance(result.raw, Mapping) else {}
+                if order_id and hasattr(self.broker, "get_order"):
+                    refreshed = self.broker.get_order(order_id)
+                    if isinstance(refreshed, Mapping):
+                        broker_order = refreshed
+                status = str(broker_order.get("status") or result.status or "").strip()
+                bucket = _status_bucket(status)
+                if bucket != "filled":
+                    pending.append(order_id or result.intent.client_order_id or result.intent.symbol)
+                filled_qty = _safe_float(
+                    broker_order.get("filled_qty")
+                    or broker_order.get("filled_quantity")
+                    or result.filled_qty
+                )
+                fill_price = _safe_float(
+                    broker_order.get("filled_avg_price")
+                    or broker_order.get("avg_fill_price")
+                    or result.intent.price
+                )
+                filled_notional = (
+                    float(filled_qty) * float(fill_price)
+                    if filled_qty is not None and fill_price is not None
+                    else 0.0
+                )
+                sell_records.append(
+                    {
+                        "symbol": result.intent.symbol,
+                        "broker_order_id": order_id or None,
+                        "status": status,
+                        "filled_qty": filled_qty,
+                        "filled_notional": filled_notional,
+                    }
+                )
+            if not pending or time.monotonic() >= deadline:
+                break
+            time.sleep(poll)
+        snapshot = self.snapshot()
+        confirmed_proceeds = float(sum(float(row.get("filled_notional") or 0.0) for row in sell_records))
+        raw = dict(snapshot.raw or {})
+        raw["sell_fill_meta"] = {
+            "sell_orders": sell_records,
+            "confirmed_sell_proceeds": confirmed_proceeds,
+            "pending_sell_order_ids": list(pending),
+            "fill_model": "broker_refresh_until_settled",
+        }
+        raw["pending_sell_order_ids"] = list(pending)
+        raw["sell_phase_allows_buy"] = not bool(pending)
+        if pending:
+            raw["sell_phase_block_reason"] = LIVE_PILOT_SELL_SETTLEMENT_TIMEOUT
+        return CoreAccountSnapshot(account=snapshot.account, holdings=snapshot.holdings, raw=raw)
+
+
+def _split_execution_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if frame is None or frame.empty or "side" not in frame.columns:
+        empty = pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
+        return empty.copy(), empty.copy()
+    sides = frame["side"].astype(str).str.upper()
+    return frame[sides.isin({"SELL", "CLOSE", "REDUCE"})].copy(), frame[sides.eq("BUY")].copy()
+
+
+def _limit_planning_buy_orders(frame: pd.DataFrame, *, max_buy_orders: int | None) -> pd.DataFrame:
+    if frame is None or frame.empty or max_buy_orders is None or "side" not in frame.columns:
+        return frame
+    limit = max(0, int(max_buy_orders))
+    sides = frame["side"].astype(str).str.upper()
+    sells = frame[~sides.eq("BUY")].copy()
+    buys = frame[sides.eq("BUY")].copy()
+    if len(buys) <= limit:
+        return frame
+    return pd.concat([sells, buys.head(limit)], ignore_index=True, sort=False).reindex(columns=frame.columns)
+
+
+def _transition_artifact_from_core(
+    *,
+    result: Any | None,
+    raw_trades: pd.DataFrame | None,
+    executable_trades: pd.DataFrame | None,
+    generated_at: str,
+) -> dict[str, Any]:
+    sell_frame, buy_frame = _split_execution_frame(executable_trades)
+    final_buys = getattr(result, "rebuilt_buy_trades", None) if result is not None else buy_frame
+    final_sells = getattr(result, "sell_trades", None) if result is not None else sell_frame
+    sell_orders = _trade_frame_orders(final_sells)
+    buy_orders = _trade_frame_orders(final_buys)
+    return {
+        "schema_version": "caerus.execution_core_transition_plan.v1",
+        "generated_at": generated_at,
+        "blocked": False,
+        "block_reason": None,
+        "holdings_to_sell": [row["symbol"] for row in sell_orders],
+        "holdings_to_increase": [row["symbol"] for row in buy_orders],
+        "holdings_to_keep": [],
+        "holdings_to_reduce": [],
+        "sell_orders_intended": sell_orders,
+        "buy_orders_intended": buy_orders,
+        "raw_trades": _trade_frame_orders(raw_trades if raw_trades is not None else pd.DataFrame()),
+        "executable_trades": _trade_frame_orders(executable_trades if executable_trades is not None else pd.DataFrame()),
+        "rebudget_skipped": list(getattr(result, "rebudget_skipped", []) or []) if result is not None else [],
+        "diagnostics": {
+            "post_sell_budget": dict(getattr(result, "post_sell_budget_meta", {}) or {}) if result is not None else {},
+            "rebudget": dict(getattr(result, "rebudget_meta", {}) or {}) if result is not None else {},
+            "capital_budget": dict(getattr(result, "capital_budget", {}) or {}) if result is not None else {},
+        },
+    }
+
+
+def _write_blocked_transition_artifact(
+    *,
+    run_root: Path,
+    reason: str,
+    diagnostics: Mapping[str, Any] | None = None,
+) -> None:
+    _write_json(
+        run_root / "live_pilot_transition_plan.json",
+        {
+            "schema_version": "caerus.execution_core_transition_plan.v1",
+            "generated_at": _now_utc(),
+            "blocked": True,
+            "block_reason": reason,
+            "holdings_to_sell": [],
+            "holdings_to_increase": [],
+            "holdings_to_keep": [],
+            "holdings_to_reduce": [],
+            "sell_orders_intended": [],
+            "buy_orders_intended": [],
+            "diagnostics": dict(diagnostics or {}),
+        },
+    )
+
+
+def _capital_gate_from_planning(
+    *,
+    pre_snapshot: Mapping[str, Any],
+    capital_budget: Mapping[str, Any],
+    sell_trades: pd.DataFrame,
+    approved_cap_usd: float | None,
+    block_reason: str | None = None,
+) -> dict[str, Any]:
+    positions_before = _active_live_positions(pre_snapshot.get("positions") or [])
+    open_orders_before = [
+        _open_order_public_row(order)
+        for order in (pre_snapshot.get("open_orders") or [])
+        if isinstance(order, Mapping)
+    ]
+    return {
+        "schema_version": "live_pilot_capital_gate.v1",
+        "generated_at": _now_utc(),
+        "decision": "BLOCKED" if block_reason else "ALLOWED",
+        "block_reason": block_reason,
+        "live_positions_before": positions_before,
+        "live_open_orders_before": open_orders_before,
+        "live_buying_power_before": capital_budget.get("broker_buying_power_at_planning"),
+        "approved_cap_usd": _safe_float(approved_cap_usd),
+        "required_sell_count": int(len(sell_trades) if sell_trades is not None else 0),
+        "sell_first_supported": LIVE_PILOT_SELL_FIRST_SUPPORTED,
+        "rebudget_after_sell_supported": LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED,
+        "strategy_allocation_cap_usd": capital_budget.get("requested_buy_notional") or None,
+        "planned_buy_notional_usd": capital_budget.get("requested_buy_notional"),
+        "tradable_capital_usd": (capital_budget.get("reserve_cash_policy") or {}).get("available_for_buys"),
+        "buy_block_reason": block_reason,
+        "broker_orders_submitted": 0,
+    }
+
+
+def _intended_from_validation(
+    *,
+    orders: list[Any],
+    source_trades: list[Mapping[str, Any]],
+    output_root: Path | str,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    provenance = _plan_provenance_by_client_id(orders, source_trades)
+    return [
+        {
+            **provenance.get(order.client_order_id, {}),
+            **order.to_dict(),
+            **_entry_policy_for_order(order, output_root=output_root, run_id=run_id),
+        }
+        for order in orders
+    ]
+
+
+def _intended_from_submitted(submitted: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    omitted = {"status", "order", "error", "fill_price", "slippage_bps", "slippage_warning"}
+    return [{key: value for key, value in row.items() if key not in omitted} for row in submitted]
+
+
+def _run_live_pilot_core_path(
+    *,
+    plan: Mapping[str, Any],
+    broker: Any,
+    env: Mapping[str, str],
+    gate: Any,
+    preflight: Mapping[str, Any],
+    pre_snapshot: Mapping[str, Any],
+    run_root: Path,
+    run_id: str,
+    trade_date: str,
+    output_root: Path | str,
+    now_et: dt.datetime | None,
+) -> dict[str, Any]:
+    request, malformed = _build_core_request(pre_snapshot=pre_snapshot, plan=plan, run_id=run_id)
+    if request is None:
+        _write_blocked_transition_artifact(
+            run_root=run_root,
+            reason=LIVE_PILOT_EQUITY_UNAVAILABLE,
+            diagnostics={"equity_unavailable": True},
+        )
+        capital_gate = _capital_gate_from_planning(
+            pre_snapshot=pre_snapshot,
+            capital_budget={},
+            sell_trades=pd.DataFrame(),
+            approved_cap_usd=gate.capital_cap_usd,
+            block_reason=LIVE_PILOT_EQUITY_UNAVAILABLE,
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=LIVE_PILOT_EQUITY_UNAVAILABLE,
+            operator_action="Broker account equity was unavailable; block before any live pilot submission.",
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+    config = live_pilot_execution_config(
+        approved_cap_usd=gate.capital_cap_usd,
+        allow_fractional=str(env.get("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL") or "").strip().lower()
+        in {"1", "true", "yes", "y", "on"},
+        max_orders=int(gate.max_orders or 1),
+        ledger_output_root=output_root,
+        ledger_enabled=not bool(gate.dry_run),
+    )
+    if malformed and str(config.constraints.malformed_holding_policy) == "fail_closed":
+        _write_blocked_transition_artifact(
+            run_root=run_root,
+            reason=LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
+            diagnostics={
+                "unpriceable_holding_symbol": malformed[0].get("symbol"),
+                "unpriceable_holding_reason": malformed[0].get("reason"),
+            },
+        )
+        capital_gate = _capital_gate_from_planning(
+            pre_snapshot=pre_snapshot,
+            capital_budget={},
+            sell_trades=pd.DataFrame(),
+            approved_cap_usd=gate.capital_cap_usd,
+            block_reason=LIVE_PILOT_MALFORMED_HOLDING,
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
+            operator_action=f"Malformed live holding blocks execution: {malformed[0].get('reason')}",
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+    if (
+        config.constraints.equity_collar_max_usd is not None
+        and request.total_equity > float(config.constraints.equity_collar_max_usd)
+    ):
+        _write_blocked_transition_artifact(
+            run_root=run_root,
+            reason=LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME,
+            diagnostics={
+                "equity_usd": float(request.total_equity),
+                "equity_cap_regime_ceiling_usd": float(config.constraints.equity_collar_max_usd),
+            },
+        )
+        capital_gate = _capital_gate_from_planning(
+            pre_snapshot=pre_snapshot,
+            capital_budget={},
+            sell_trades=pd.DataFrame(),
+            approved_cap_usd=gate.capital_cap_usd,
+            block_reason=LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME,
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME,
+            operator_action="Account equity exceeds the approved live-pilot cap regime.",
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+    raw_bp = _finite_float(request.planning_account.get("buying_power"))
+    if raw_bp is not None and raw_bp <= 0.0:
+        _write_blocked_transition_artifact(
+            run_root=run_root,
+            reason=LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE,
+            diagnostics={"buying_power_nonpositive": True},
+        )
+        capital_gate = _capital_gate_from_planning(
+            pre_snapshot=pre_snapshot,
+            capital_budget={"broker_buying_power_at_planning": raw_bp},
+            sell_trades=pd.DataFrame(),
+            approved_cap_usd=gate.capital_cap_usd,
+            block_reason=LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE,
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE,
+            operator_action="Live broker buying_power is non-positive; block before any submit.",
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+    over_cap_symbol, full_need = _max_incremental_need(request)
+    if (
+        config.capital.approved_cap_usd is not None
+        and str(config.capital.over_cap_behavior or "").lower() == "block"
+        and full_need > float(config.capital.approved_cap_usd) + 1e-9
+    ):
+        capital_gate = _capital_gate_from_planning(
+            pre_snapshot=pre_snapshot,
+            capital_budget={
+                "requested_buy_notional": full_need,
+                "broker_buying_power_at_planning": raw_bp,
+                "reserve_cash_policy": {"available_for_buys": gate.capital_cap_usd},
+            },
+            sell_trades=pd.DataFrame(),
+            approved_cap_usd=gate.capital_cap_usd,
+            block_reason=LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP,
+        )
+        _write_json(
+            run_root / "live_pilot_transition_plan.json",
+            {
+                "schema_version": "caerus.execution_core_transition_plan.v1",
+                "generated_at": _now_utc(),
+                "blocked": True,
+                "block_reason": LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP,
+                "diagnostics": {
+                    "over_cap_intent": True,
+                    "over_cap_symbol": over_cap_symbol,
+                    "over_cap_full_need_usd": full_need,
+                },
+                "sell_orders_intended": [],
+                "buy_orders_intended": [],
+            },
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP,
+            operator_action="Live-pilot full incremental need exceeds the approved cap; block instead of clipping.",
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+
+    raw_trades, _trade_meta = compute_transition_trades(request=request, config=config)
+    capital_trades, capital_budget, executable_trades, _execution_filter = apply_capital_budget_and_execution_filter(
+        trades=raw_trades,
+        planning_account=request.planning_account,
+        config=config,
+    )
+    executable_trades = _limit_planning_buy_orders(
+        executable_trades,
+        max_buy_orders=int(gate.max_orders or 1),
+    )
+    sell_trades, _buy_trades = _split_execution_frame(executable_trades)
+    capital_gate = _capital_gate_from_planning(
+        pre_snapshot=pre_snapshot,
+        capital_budget=capital_budget,
+        sell_trades=sell_trades,
+        approved_cap_usd=gate.capital_cap_usd,
+    )
+    _write_json(
+        run_root / "live_pilot_transition_plan.json",
+        _transition_artifact_from_core(
+            result=None,
+            raw_trades=raw_trades,
+            executable_trades=executable_trades,
+            generated_at=_now_utc(),
+        ),
+    )
+    source_trades = _core_rows_from_frame(executable_trades, plan=plan)
+    if not source_trades:
+        reason_code = (
+            LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+            if float(capital_budget.get("requested_buy_notional") or 0.0) > 0.0
+            or full_need + 1e-9 >= float(config.orders.min_trade_usd)
+            else "live_pilot_transition_no_actionable_order"
+        )
+        capital_gate["planned_buy_notional_usd"] = max(
+            float(capital_gate.get("planned_buy_notional_usd") or 0.0),
+            float(full_need or 0.0),
+        )
+        capital_gate["decision"] = "BLOCKED"
+        capital_gate["block_reason"] = reason_code
+        capital_gate["buy_block_reason"] = reason_code
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=reason_code,
+            operator_action="Execution core produced no actionable live-pilot order.",
+            preflight=preflight,
+            capital_gate=capital_gate,
+        )
+    plan_validation = validate_live_pilot_plan(
+        source_trades,
+        env=env,
+        capital_cap_usd=float(gate.capital_cap_usd or 0.0),
+        max_orders=int(gate.max_orders or 0),
+        run_id=run_id,
+    )
+    intended = _intended_from_validation(
+        orders=plan_validation.orders,
+        source_trades=source_trades,
+        output_root=output_root,
+        run_id=run_id,
+    )
+    intended_payload = plan_validation.to_dict()
+    intended_payload["orders"] = intended
+    intended_payload.update(_entry_policy_summary(intended=intended, submitted=[], dry_run=bool(gate.dry_run)))
+    _write_json(run_root / "live_pilot_orders_intended.json", intended_payload)
+    _write_json(
+        run_root / "live_pilot_entry_attempt_history.json",
+        {
+            "schema_version": "live_pilot_entry_attempt_history.v1",
+            "generated_at": _now_utc(),
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "orders": intended,
+        },
+    )
+    if plan_validation.status != "PASS":
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=";".join(plan_validation.reason_codes),
+            operator_action=plan_validation.operator_action,
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+        )
+    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
+
+    asset_errors: list[str] = []
+    for order in plan_validation.orders:
+        asset = broker.get_asset(order.symbol) if hasattr(broker, "get_asset") else None
+        error = validate_live_pilot_asset(asset, order.symbol)
+        if error:
+            asset_errors.append(error)
+    if asset_errors:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=";".join(asset_errors),
+            operator_action="Unsupported or non-tradable assets blocked before submission.",
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+        )
+
+    open_order_check = _open_pilot_order_check(
+        broker,
+        intended_symbols={order.symbol for order in plan_validation.orders},
+    )
+    _write_json(run_root / "live_pilot_open_order_check.json", open_order_check)
+    if bool(open_order_check.get("block_submission")):
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=str(open_order_check.get("status") or "BLOCKED_OPEN_PILOT_ORDER"),
+            operator_action=str(open_order_check.get("operator_action") or "Open pilot order blocks duplicate submission."),
+            preflight=preflight,
+            intended=intended,
+            open_order_check=open_order_check,
+            capital_gate=capital_gate,
+        )
+
+    market_hours_gate = _normal_market_hours_gate(now_et=now_et)
+    _write_json(run_root / "live_pilot_market_hours_gate.json", market_hours_gate)
+    if not gate.dry_run and market_hours_gate.get("status") != "PASS":
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=f"live_pilot_market_closed:{market_hours_gate.get('reason_code')}",
+            operator_action=str(market_hours_gate.get("operator_action") or "Market is closed."),
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+        )
+
+    submitted: list[dict[str, Any]]
+    submit_errors: list[str] = []
+    if gate.dry_run:
+        submitted = [
+            {**row, "status": "DRY_RUN_NOT_SUBMITTED", "order": None}
+            for row in intended
+        ]
+        result = SimpleNamespace(
+            capital_budget=capital_budget,
+            post_sell_budget_meta={},
+            sell_trades=sell_trades,
+            rebuilt_buy_trades=_split_execution_frame(executable_trades)[1],
+            submitted_sells=(),
+            submitted_buys=(),
+            rebudget_skipped=[],
+            rebudget_meta={},
+        )
+    else:
+        adapter = LivePilotCoreAdapter(
+            broker=broker,
+            env=env,
+            run_root=run_root,
+            output_root=output_root,
+            run_id=run_id,
+            source_plan=plan,
+        )
+        result = execute_lifecycle(request=request, adapter=adapter, config=config)
+        submitted = list(adapter.submitted_rows)
+        submit_errors = list(adapter.submit_errors)
+        intended = _intended_from_submitted(submitted)
+        _write_json(
+            run_root / "live_pilot_orders_intended.json",
+            {
+                **plan_validation.to_dict(),
+                "orders": intended,
+                **_entry_policy_summary(intended=intended, submitted=[], dry_run=False),
+            },
+        )
+        capital_gate = _build_live_pilot_capital_gate(
+            result=result,
+            pre_snapshot=pre_snapshot,
+            approved_cap_usd=gate.capital_cap_usd,
+        )
+        _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
+        _write_json(
+            run_root / "live_pilot_transition_plan.json",
+            _transition_artifact_from_core(
+                result=result,
+                raw_trades=result.raw_trades,
+                executable_trades=result.executable_trades,
+                generated_at=_now_utc(),
+            ),
+        )
+
+    _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": submitted})
+    try:
+        post_snapshot = _broker_snapshot(broker)
+    except Exception as exc:
+        post_snapshot = {"captured_at": _now_utc(), "status": "SNAPSHOT_FAILED", "error": str(exc)}
+        submit_errors.append(f"post_snapshot_failed:{exc}")
+    _write_json(run_root / "live_pilot_broker_snapshot_post.json", post_snapshot)
+
+    reconciliation = _reconcile(dry_run=bool(gate.dry_run), intended=intended, submitted=submitted, errors=submit_errors)
+    _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    evidence_metrics = _build_evidence_metrics(
+        dry_run=bool(gate.dry_run),
+        intended=intended,
+        submitted=submitted,
+        reconciliation=reconciliation,
+        capital_cap_usd=gate.capital_cap_usd,
+        open_order_check=open_order_check,
+        capital_gate=capital_gate,
+    )
+    entry_summary = _entry_policy_summary(intended=intended, submitted=submitted, dry_run=bool(gate.dry_run))
+    evidence_metrics.update(entry_summary)
+    _write_json(run_root / "live_pilot_evidence_metrics.json", evidence_metrics)
+    _write_json(
+        run_root / "live_pilot_capital_usage.json",
+        {
+            "schema_version": "live_pilot_capital_usage.v1",
+            "capital_cap_usd": gate.capital_cap_usd,
+            "planned_notional_usd": plan_validation.total_notional,
+            "submitted_notional_usd": 0.0
+            if gate.dry_run
+            else sum(float(row.get("notional") or 0.0) for row in submitted if row.get("status") != "REJECTED"),
+            "filled_notional_usd": evidence_metrics.get("filled_notional_usd"),
+            "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+            "dry_run": bool(gate.dry_run),
+            **_capital_gate_report_fields(capital_gate),
+        },
+    )
+    write_live_pilot_gate_state(
+        run_root=run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        env=env,
+        repo_root=REPO_ROOT,
+        decision="ALLOWED",
+        block_reason=None,
+        broker_orders_submitted=0 if gate.dry_run else len(submitted),
+        base_url=str(preflight.get("base_url") or ""),
+    )
+    terminal_status = (
+        "DRY_RUN"
+        if gate.dry_run
+        else ("SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION")
+    )
+    summary = {
+        "schema_version": "live_pilot_operator_summary.v1",
+        "generated_at": _now_utc(),
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "mode": LIVE_PILOT_MODE.upper(),
+        "terminal_status": terminal_status,
+        "reason_code": reconciliation.get("status"),
+        "live_orders_allowed": bool(gate.live_orders_allowed),
+        "dry_run": bool(gate.dry_run),
+        "intended_count": len(intended),
+        "submitted_count": 0 if gate.dry_run else len(submitted),
+        "filled_count": reconciliation.get("filled_count"),
+        "fill_rate": evidence_metrics.get("fill_rate"),
+        "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+        "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
+        "operator_action": reconciliation.get("operator_action"),
+        "run_root": str(run_root),
+        **entry_summary,
+        **_capital_gate_report_fields(capital_gate),
+    }
+    _write_json(run_root / "live_pilot_operator_summary.json", summary)
+    _write_json(
+        run_root / "execution_results.json",
+        _build_live_pilot_execution_results(
+            run_id=run_id,
+            trade_date=trade_date,
+            terminal_status=terminal_status,
+            reason_code=reconciliation.get("status"),
+            intended=intended,
+            submitted=submitted,
+            reconciliation=reconciliation,
+            dry_run=bool(gate.dry_run),
+            run_root=run_root,
+            extra_fields=_capital_gate_report_fields(capital_gate),
+        ),
+    )
+    return summary
+
+
 def _write_blocked_artifacts(
     *,
     run_root: Path,
@@ -1131,9 +2225,13 @@ def run_live_pilot(
     run_root = Path(output_root) / "runs" / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
-    broker = broker or AlpacaBroker.from_env()
-    broker_paper = bool(getattr(broker, "paper", True))
-    base_url = str(getattr(broker, "base_url", "") or "")
+    if broker is None:
+        alpaca_paper_raw = str(environ.get("ALPACA_PAPER") or "1").strip().lower()
+        broker_paper = alpaca_paper_raw not in {"0", "false", "no", "n", "off"}
+        base_url = str(environ.get("ALPACA_BASE_URL") or "").strip()
+    else:
+        broker_paper = bool(getattr(broker, "paper", True))
+        base_url = str(getattr(broker, "base_url", "") or "")
     gate = build_live_pilot_gate_result(
         broker_paper=broker_paper,
         base_url=base_url,
@@ -1174,6 +2272,11 @@ def run_live_pilot(
             preflight=preflight,
         )
 
+    if broker is None:
+        broker = AlpacaBroker.from_env()
+        broker_paper = bool(getattr(broker, "paper", broker_paper))
+        base_url = str(getattr(broker, "base_url", "") or base_url)
+
     try:
         pre_snapshot = _broker_snapshot(broker)
     except Exception as exc:
@@ -1213,398 +2316,19 @@ def run_live_pilot(
             preflight=preflight,
         )
 
-    # --- Transition Engine (Workstream C Phase 2, Option A) --------------------
-    # Full target portfolio + broker snapshot -> keep/reduce/sell/buy/block. This
-    # replaces the buy-only narrowing: the engine selects the single buy by target
-    # weight priority (max_orders=1), sizes it against min(cash, buying_power, cap,
-    # incremental need) with the $100 min-trade floor, and blocks on rotation (sells
-    # unsupported under Option A) or insufficient buying power. Cap is a ceiling,
-    # never treated as spendable cash. The capital gate is now a thin wrapper over
-    # this engine output.
-    transition_plan = compute_live_transition(
-        pre_snapshot=pre_snapshot,
+    return _run_live_pilot_core_path(
         plan=plan,
-        approved_cap_usd=gate.capital_cap_usd,
+        broker=broker,
         env=environ,
-        max_orders=int(gate.max_orders or 1),
-    )
-    capital_gate = _build_live_pilot_capital_gate(
-        transition_plan=transition_plan,
+        gate=gate,
+        preflight=preflight,
         pre_snapshot=pre_snapshot,
-        approved_cap_usd=gate.capital_cap_usd,
-    )
-    _write_json(
-        run_root / "live_pilot_transition_plan.json",
-        transition_plan_artifact(transition_plan, generated_at=_now_utc()),
-    )
-    # capital_gate.json is written by _write_blocked_artifacts on the blocked paths and
-    # once inline below on the allowed path (avoids the previous double-write).
-    if transition_plan.blocked:
-        reason_code = str(capital_gate.get("buy_block_reason") or capital_gate.get("block_reason") or "")
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=reason_code or _ADAPTER_BLOCK_INSUFFICIENT,
-            operator_action=str(
-                capital_gate.get("operator_action")
-                or "Live-pilot transition engine blocked before broker submission."
-            ),
-            preflight=preflight,
-            capital_gate=capital_gate,
-        )
-
-    # Engine-selected buy intent(s) become the source trades for validation/submission.
-    source_trades = buy_intents_to_trades(transition_plan, source_plan=plan)
-    if not source_trades:
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code="live_pilot_transition_no_actionable_buy",
-            operator_action=(
-                "Transition engine produced no buy intent (holdings already satisfy the "
-                "target within the min-trade floor); no live order required."
-            ),
-            preflight=preflight,
-            capital_gate=capital_gate,
-        )
-
-    # Allowed path: write the capital-gate evidence exactly once.
-    _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
-    plan_validation = validate_live_pilot_plan(
-        source_trades,
-        env=environ,
-        capital_cap_usd=float(gate.capital_cap_usd or 0.0),
-        max_orders=int(gate.max_orders or 0),
-        run_id=run_id,
-    )
-    plan_provenance_by_client_id = _plan_provenance_by_client_id(
-        plan_validation.orders,
-        source_trades,
-    )
-    policy_by_client_id = {
-        order.client_order_id: _entry_policy_for_order(
-            order,
-            output_root=output_root,
-            run_id=run_id,
-        )
-        for order in plan_validation.orders
-    }
-    intended = [
-        {
-            **plan_provenance_by_client_id.get(order.client_order_id, {}),
-            **order.to_dict(),
-            **policy_by_client_id.get(order.client_order_id, {}),
-        }
-        for order in plan_validation.orders
-    ]
-    intended_payload = plan_validation.to_dict()
-    intended_payload["orders"] = intended
-    intended_payload.update(
-        _entry_policy_summary(
-            intended=intended,
-            submitted=[],
-            dry_run=bool(gate.dry_run),
-        )
-    )
-    _write_json(run_root / "live_pilot_orders_intended.json", intended_payload)
-    _write_json(
-        run_root / "live_pilot_entry_attempt_history.json",
-        {
-        "schema_version": "live_pilot_entry_attempt_history.v1",
-            "generated_at": _now_utc(),
-            "run_id": run_id,
-            "trade_date": trade_date,
-            "orders": [
-                {
-                    "symbol": row.get("symbol"),
-                    "side": row.get("side"),
-                    "approved_order_type": row.get("approved_order_type"),
-                    "submitted_order_type": row.get("submitted_order_type"),
-                    "entry_execution_policy": row.get("entry_execution_policy"),
-                    "prior_unfilled_attempts": row.get("prior_unfilled_attempts"),
-                    "prior_unfilled_attempts_detail": row.get("prior_unfilled_attempts_detail"),
-                    "escalation_reason": row.get("escalation_reason"),
-                    "sleeve": row.get("sleeve"),
-                    "sleeve_source": row.get("sleeve_source"),
-                    "source_strategy_id": row.get("source_strategy_id"),
-                    "source_signal_sleeve": row.get("source_signal_sleeve"),
-                    "sleeve_provenance": row.get("sleeve_provenance"),
-                }
-                for row in intended
-            ],
-        },
-    )
-    if plan_validation.status != "PASS":
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=";".join(plan_validation.reason_codes),
-            operator_action=plan_validation.operator_action,
-            preflight=preflight,
-            intended=intended,
-        )
-
-    asset_errors: list[str] = []
-    for order in plan_validation.orders:
-        asset = broker.get_asset(order.symbol) if hasattr(broker, "get_asset") else None
-        error = validate_live_pilot_asset(asset, order.symbol)
-        if error:
-            asset_errors.append(error)
-    if asset_errors:
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=";".join(asset_errors),
-            operator_action="Unsupported or non-tradable assets blocked before submission.",
-            preflight=preflight,
-            intended=intended,
-        )
-
-    open_order_check = _open_pilot_order_check(
-        broker,
-        intended_symbols={order.symbol for order in plan_validation.orders},
-    )
-    _write_json(run_root / "live_pilot_open_order_check.json", open_order_check)
-    if bool(open_order_check.get("block_submission")):
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=str(open_order_check.get("status") or "BLOCKED_OPEN_PILOT_ORDER"),
-            operator_action=str(open_order_check.get("operator_action") or "Open pilot order blocks duplicate submission."),
-            preflight=preflight,
-            intended=intended,
-            open_order_check=open_order_check,
-        )
-
-    market_hours_gate = _normal_market_hours_gate(now_et=now_et)
-    _write_json(run_root / "live_pilot_market_hours_gate.json", market_hours_gate)
-    if not gate.dry_run and market_hours_gate.get("status") != "PASS":
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
-            env=environ,
-            reason_code=f"live_pilot_market_closed:{market_hours_gate.get('reason_code')}",
-            operator_action=str(market_hours_gate.get("operator_action") or "Market is closed."),
-            preflight=preflight,
-            intended=intended,
-        )
-
-    # Capital gate already ran (and wrote its artifact) via the Transition Engine
-    # immediately after the broker snapshot; nothing re-checks it here.
-    submitted: list[dict[str, Any]] = []
-    submit_errors: list[str] = []
-    max_slippage_bps = _safe_float(environ.get(LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV))
-    if gate.dry_run:
-        submitted = [
-            {
-                **plan_provenance_by_client_id.get(order.client_order_id, {}),
-                **order.to_dict(),
-                **policy_by_client_id.get(order.client_order_id, {}),
-                "status": "DRY_RUN_NOT_SUBMITTED",
-                "order": None,
-            }
-            for order in plan_validation.orders
-        ]
-    else:
-        for order in plan_validation.orders:
-            policy = policy_by_client_id.get(order.client_order_id, {})
-            submitted_order_type = str(policy.get("submitted_order_type") or order.order_type).strip().lower()
-            try:
-                _record_live_order_submitted(
-                    order=order,
-                    run_root=run_root,
-                    output_root=output_root,
-                    env=environ,
-                    submitted_order_type=submitted_order_type,
-                )
-                if submitted_order_type == "market":
-                    broker_result = broker.submit_market_order(
-                        symbol=order.symbol,
-                        qty=order.qty,
-                        side=order.side,
-                        client_order_id=order.client_order_id,
-                        tif="day",
-                        estimated_notional=order.notional,
-                    )
-                    submitted_price = None
-                else:
-                    broker_result = broker.submit_limit_order(
-                        symbol=order.symbol,
-                        qty=order.qty,
-                        side=order.side,
-                        limit_price=order.limit_price,
-                        client_order_id=order.client_order_id,
-                        tif="day",
-                    )
-                    submitted_price = order.limit_price
-                submitted_row = {
-                    **plan_provenance_by_client_id.get(order.client_order_id, {}),
-                    **order.to_dict(),
-                    **policy,
-                    "status": str((broker_result or {}).get("status") or "accepted"),
-                    "order": broker_result,
-                    "submitted_order_type": submitted_order_type,
-                    "order_type_submitted": submitted_order_type,
-                    "submitted_price": submitted_price,
-                    "fill_price": _fill_price({"order": broker_result}),
-                    "submission_policy": policy.get("entry_execution_policy") or LIVE_PILOT_ENTRY_EXECUTION_POLICY,
-                }
-                slip = _slippage_bps(submitted_row)
-                submitted_row["slippage_bps"] = slip
-                submitted_row["slippage_warning"] = (
-                    bool(max_slippage_bps is not None and slip is not None and abs(slip) > max_slippage_bps)
-                )
-                submitted.append(
-                    submitted_row
-                )
-                _record_live_order_outcome(
-                    order=order,
-                    broker_result=broker_result,
-                    run_root=run_root,
-                    output_root=output_root,
-                    env=environ,
-                    submitted_order_type=submitted_order_type,
-                )
-            except Exception as exc:
-                _record_live_order_outcome(
-                    order=order,
-                    broker_result=None,
-                    run_root=run_root,
-                    output_root=output_root,
-                    env=environ,
-                    submitted_order_type=submitted_order_type,
-                    error=str(exc),
-                )
-                submit_errors.append(f"{order.symbol}:broker_submit_failed:{exc}")
-                submitted.append(
-                    {
-                        **plan_provenance_by_client_id.get(order.client_order_id, {}),
-                        **order.to_dict(),
-                        **policy,
-                        "status": "REJECTED",
-                        "error": str(exc),
-                        "submitted_order_type": submitted_order_type,
-                        "order_type_submitted": submitted_order_type,
-                        "submission_policy": policy.get("entry_execution_policy") or LIVE_PILOT_ENTRY_EXECUTION_POLICY,
-                    }
-                )
-
-    _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": submitted})
-
-    try:
-        post_snapshot = _broker_snapshot(broker)
-    except Exception as exc:
-        post_snapshot = {
-            "captured_at": _now_utc(),
-            "status": "SNAPSHOT_FAILED",
-            "error": str(exc),
-        }
-        submit_errors.append(f"post_snapshot_failed:{exc}")
-    _write_json(run_root / "live_pilot_broker_snapshot_post.json", post_snapshot)
-
-    reconciliation = _reconcile(
-        dry_run=bool(gate.dry_run),
-        intended=intended,
-        submitted=submitted,
-        errors=submit_errors,
-    )
-    _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
-    evidence_metrics = _build_evidence_metrics(
-        dry_run=bool(gate.dry_run),
-        intended=intended,
-        submitted=submitted,
-        reconciliation=reconciliation,
-        capital_cap_usd=gate.capital_cap_usd,
-        open_order_check=open_order_check,
-        capital_gate=capital_gate,
-    )
-    entry_summary = _entry_policy_summary(
-        intended=intended,
-        submitted=submitted,
-        dry_run=bool(gate.dry_run),
-    )
-    evidence_metrics.update(entry_summary)
-    _write_json(run_root / "live_pilot_evidence_metrics.json", evidence_metrics)
-    _write_json(
-        run_root / "live_pilot_capital_usage.json",
-        {
-            "schema_version": "live_pilot_capital_usage.v1",
-            "capital_cap_usd": gate.capital_cap_usd,
-            "planned_notional_usd": plan_validation.total_notional,
-            "submitted_notional_usd": 0.0 if gate.dry_run else sum(float(row.get("notional") or 0.0) for row in submitted if row.get("status") != "REJECTED"),
-            "filled_notional_usd": evidence_metrics.get("filled_notional_usd"),
-            "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
-            "dry_run": bool(gate.dry_run),
-            **_capital_gate_report_fields(capital_gate),
-        },
-    )
-    write_live_pilot_gate_state(
         run_root=run_root,
         run_id=run_id,
         trade_date=trade_date,
-        env=environ,
-        repo_root=REPO_ROOT,
-        decision="ALLOWED",
-        block_reason=None,
-        broker_orders_submitted=0 if gate.dry_run else len(submitted),
-        base_url=base_url,
+        output_root=output_root,
+        now_et=now_et,
     )
-
-    terminal_status = (
-        "DRY_RUN"
-        if gate.dry_run
-        else ("SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION")
-    )
-    summary = {
-        "schema_version": "live_pilot_operator_summary.v1",
-        "generated_at": _now_utc(),
-        "run_id": run_id,
-        "trade_date": trade_date,
-        "mode": LIVE_PILOT_MODE.upper(),
-        "terminal_status": terminal_status,
-        "reason_code": reconciliation.get("status"),
-        "live_orders_allowed": bool(gate.live_orders_allowed),
-        "dry_run": bool(gate.dry_run),
-        "intended_count": len(intended),
-        "submitted_count": 0 if gate.dry_run else len(submitted),
-        "filled_count": reconciliation.get("filled_count"),
-        "fill_rate": evidence_metrics.get("fill_rate"),
-        "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
-        "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
-        "operator_action": reconciliation.get("operator_action"),
-        "run_root": str(run_root),
-        **entry_summary,
-        **_capital_gate_report_fields(capital_gate),
-    }
-    _write_json(run_root / "live_pilot_operator_summary.json", summary)
-    _write_json(
-        run_root / "execution_results.json",
-        _build_live_pilot_execution_results(
-            run_id=run_id,
-            trade_date=trade_date,
-            terminal_status=terminal_status,
-            reason_code=reconciliation.get("status"),
-            intended=intended,
-            submitted=submitted,
-            reconciliation=reconciliation,
-            dry_run=bool(gate.dry_run),
-            run_root=run_root,
-            extra_fields=_capital_gate_report_fields(capital_gate),
-        ),
-    )
-    return summary
-
 
 
 def _extract_broker_order_id(row: Mapping[str, Any]) -> str:
