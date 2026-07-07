@@ -102,3 +102,87 @@ reason code.
 Across all changes, the approved cap is a **ceiling, never spendable cash**:
 `tradable_capital = min(cash, broker_buying_power, approved_cap, per-name need)`. The
 July-6 forbidden outcome (buy justified by cap alone) remains impossible.
+
+---
+
+## 5. Fail-closed capital-safety guards (multi-round code review, 2026-07-06)
+
+Four adversarial review rounds hardened the live path. All guards live in
+`scripts/live_pilot_transition.py::compute_live_transition`, run **after** the shared
+engine, in priority order **equity-regime → unpriceable-holdings → buying-power →
+over-cap**, and each returns a fail-closed `_blocked_plan` (no buys, `deployed_buy_notional=0`).
+
+**Fail-closed contract (operator directive 2026-07-06; V2.1 Principle 8 "fail closed for
+capital risk", Principle 2 "broker truth beats internal assumptions").** On the live
+lane, any missing / ambiguous / degenerate broker fact HALTS rather than proceeds. The
+shared engine is paper-oriented (it falls back to cash and clips to fit); the live guards
+override those defaults where they would be unsafe.
+
+### 5a. Shared real-holding predicate — closes the rotation bypass *by construction*
+The rotation guard and `holdings_from_snapshot` now derive from **one** predicate,
+`_position_is_real_holding` / `_holding_rejection_reasons` — not two parallel field lists
+that merely agree. A snapshot position counts as a real open holding **iff**: truthy
+`symbol` **AND** finite non-zero `qty` **AND** finite positive `market_value` **AND** a
+finite-positive derived `price = abs(market_value/qty)`. `holdings_from_snapshot` includes
+exactly the positions that pass; the guard blocks (`EXISTING_POSITIONS_REQUIRE_ROTATION`)
+on any Mapping position that fails. Because both sites key off the identical predicate —
+including the exact reference price the engine's exit loop uses (`if price <= 0: continue`)
+— **no missing/blank/non-finite field (symbol, qty, market_value) and no degenerate
+quotient (underflow to 0.0, overflow to inf) can hide a held position from the engine.**
+The final review (200k-case fuzz) found zero residual bypasses.
+- *Source:* review rounds 2–4; V2.1 §10 (forbidden divergence: "live buying duplicate
+  exposure because it ignored current holdings"), Principle 8.
+- *Evidence:* `test_live_pilot_transition_phase2.py` — `test_unpriceable_held_position_missing_market_value_blocks`, `test_uncountable_held_position_missing_qty_blocks`, `test_symbol_missing_holding_blocks_rotation`, `test_nonfinite_qty_holding_blocks_rotation`, `test_degenerate_price_underflow_blocks_rotation`, `test_degenerate_price_overflow_blocks_rotation`, `test_cleanly_priced_and_counted_holding_proceeds`.
+
+### 5b. buying_power ≤ 0 → UNAVAILABLE block
+A real `0.0` buying power (not just `None`) blocks (`LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE`);
+cash must never substitute for broker buying power. Restores the merged-gate behavior the
+shared engine's cash-fallback would have lost — this is the live account's condition today
+(~$8 free cash). Fires on `bp<=0 AND (buy_orders_intended OR planned_buy_notional>0)`.
+- *Source:* review #1; V2.1 Principle 2 (broker truth), Principle 8. **This is the highest-value fix.**
+- *Evidence:* `test_buying_power_zero_blocks_unavailable`, `test_bp_zero_with_planned_but_clipped_blocks`.
+
+### 5c. Equity cap-regime collar ($520) and equity-unavailable block
+The engine sizes targets to `weight × live-account-equity` and applies the cap **per run**,
+which only bounds total exposure while `equity ≈ cap`. Equity **> $520** (a tight collar
+over the ~$500 pilot funding) → block (`live_pilot_equity_exceeds_cap_regime`); equity
+**None** → distinct block (`live_pilot_equity_unavailable`, its own operator action, for a
+feed outage).
+- *Source:* operator decision 2026-07-06 (funding ~$500 ≈ cap; ceiling set to $520);
+  V2.1 §13.1 (cap is a ceiling). **Deferred TODO (§7).**
+- *Evidence:* `test_equity_above_cap_regime_blocks`, `test_equity_tight_collar_blocks_just_above_ceiling`, `test_missing_equity_blocks`.
+
+---
+
+## 6. Kill-switch proof (unchanged safeguard, re-verified on the rewired path)
+The kill switch remains the operator-controlled go-live gate and is upstream of the entire
+engine/submit rewire. In `run_live_pilot`: `gate = build_live_pilot_gate_result(...)` (kill
+switch fails closed per Task 0) then `if gate.status != "PASS": return _write_blocked_artifacts(...)`
+**before** the broker snapshot, the engine step, and the submit loop. With the switch
+engaged no path reaches `broker.submit_market_order`.
+- *Source:* Task 0 (kill switch fail-closed) + Phase 2 confirmed decisions.
+- *Evidence:* `test_live_pilot_execution_path.py::test_kill_switch_blocks_before_broker_submission_and_writes_gate_state` (kill switch "1", `dry_run="0"`, asserts `submit_calls==0`), against the refactored path.
+- **Go-live checklist item (operator-only):** setting the explicit kill-switch off-token is the single remaining step before the pilot resumes.
+
+---
+
+## 7. Documented TODOs (deferred, non-blocking — not fixed in this workstream)
+
+Per the operator directive, remaining PLAUSIBLE/LOW items are recorded here, not fixed now:
+1. **Exposure-aware cap (FR, deferred).** When the pilot account is funded **above** the
+   cap, replace the equity-regime collar (§5c) with `cap_remaining = approved_cap −
+   current_exposure` so weight-based targets can be sized correctly above the cap. Until
+   then the collar halts. (`LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD`.)
+2. **Over-cap relaxation (deferred).** Relax the fail-closed over-cap **halt** (§4) to
+   clip-and-deploy once live behavior is trusted.
+3. **Blocked-plan evidence nit (LOW).** `_blocked_plan` leaves `holdings_to_increase` /
+   `buy_needs` populated on a blocked plan (a symbol whose buy was removed still appears
+   under "increase"). Execution is unaffected (blocked paths early-return before
+   submission); artifact-consistency only.
+4. **Recompute vs reuse (LOW/style).** `holdings_from_snapshot` recomputes
+   `abs(market_value/qty)` rather than reusing the predicate's value — deterministic float
+   ops, no divergence; a cleanup, not a defect.
+5. **Contradictory short data (PLAUSIBLE/LOW).** A `market_value>0, qty<0` position
+   (impossible from Alpaca; a real short has `mv<0`, which is rejected) is *included* (not
+   dropped) and handled by the engine without crash/inf; long-only sizing merely grows the
+   buy need. Not a bypass.
