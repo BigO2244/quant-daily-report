@@ -233,7 +233,7 @@ def test_unpriceable_held_position_missing_market_value_blocks(tmp_path: Path) -
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["diagnostics"]["unpriceable_holding_symbol"] == "XYZ"
-    assert "missing_or_nonpositive_market_value" in transition["diagnostics"]["unpriceable_holding_reason"]
+    assert "missing_nonpositive_or_nonfinite_market_value" in transition["diagnostics"]["unpriceable_holding_reason"]
 
 
 def test_uncountable_held_position_missing_qty_blocks(tmp_path: Path) -> None:
@@ -250,7 +250,55 @@ def test_uncountable_held_position_missing_qty_blocks(tmp_path: Path) -> None:
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["diagnostics"]["unpriceable_holding_symbol"] == "XYZ"
-    assert "missing_or_zero_qty" in transition["diagnostics"]["unpriceable_holding_reason"]
+    assert "missing_zero_or_nonfinite_qty" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_symbol_missing_holding_blocks_rotation(tmp_path: Path) -> None:
+    # Shared-predicate guarantee: a position with qty+market_value but NO symbol is a
+    # real holding that holdings_from_snapshot drops -> must fail closed, not skip.
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"qty": "2", "market_value": "200"}],  # no symbol
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-nosym", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert "missing_symbol" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_nonfinite_qty_holding_blocks_rotation(tmp_path: Path) -> None:
+    # Non-finite qty (inf) would map to price 0.0 in the engine and be dropped -> block.
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"symbol": "XYZ", "qty": "inf", "market_value": "200"}],
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-inf", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert "missing_zero_or_nonfinite_qty" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_bp_zero_with_planned_but_clipped_blocks(tmp_path: Path) -> None:
+    # bp=0.0 (real), cash below min-trade so the sized buy is clipped away entirely
+    # (buy_orders_intended empty) while planned_buy_notional>0. This case is caught by
+    # the engine's deployed<=0 INSUFFICIENT_BUYING_POWER backstop; the bp-guard OR
+    # (buy_orders_intended OR planned>0) is defense-in-depth behind it. Either way the
+    # run fails closed with no submission.
+    broker = FakeBroker(buying_power="0", cash="50", equity="500")
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}  # need $200 > $50 budget
+    result, run_root = _run(broker, plan, dry_run="0", run_id="run-bp0clip", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["buy_orders_intended"] == []  # sized buy was clipped away
+    assert transition["diagnostics"]["planned_buy_notional"] > 0  # but a need existed
 
 
 def test_cleanly_priced_and_counted_holding_proceeds(tmp_path: Path) -> None:
@@ -274,7 +322,7 @@ def test_missing_equity_blocks(tmp_path: Path) -> None:
     plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
     result, run_root = _run(broker, plan, dry_run="1", run_id="run-noeq", tmp_path=tmp_path)
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "live_pilot_equity_exceeds_cap_regime"
+    assert result["reason_code"] == "live_pilot_equity_unavailable"
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["diagnostics"]["equity_unavailable"] is True

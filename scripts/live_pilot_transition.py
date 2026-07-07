@@ -17,6 +17,7 @@ Confirmed operator decisions in force (Option A):
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Any, Mapping
 
@@ -46,6 +47,7 @@ LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER = "LIVE_PILOT_BLOCKED_INSUFFICIENT_
 LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE = "LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE"
 LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP = "live_pilot_total_notional_exceeds_cap"
 LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME = "live_pilot_equity_exceeds_cap_regime"
+LIVE_PILOT_EQUITY_UNAVAILABLE = "live_pilot_equity_unavailable"
 
 # Live-pilot fail-closed policy (FR-104 pilot, operator decision 2026-07-06): an
 # intended buy whose FULL incremental need exceeds the approved cap is HALTED, not
@@ -68,6 +70,7 @@ BLOCK_OVER_CAP_INTENT = "OVER_CAP_INTENT"
 #   so weight-based targets can be sized correctly above the cap. Until then: block.
 LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD = 520.0
 BLOCK_EQUITY_EXCEEDS_CAP_REGIME = "EQUITY_EXCEEDS_CAP_REGIME"
+BLOCK_EQUITY_UNAVAILABLE = "EQUITY_UNAVAILABLE"
 
 # Engine block_reason -> capital_gate.v1 constant (the live lane's operator-facing code).
 _BLOCK_REASON_TO_GATE_CONSTANT = {
@@ -76,6 +79,7 @@ _BLOCK_REASON_TO_GATE_CONSTANT = {
     BLOCK_INSUFFICIENT_BUYING_POWER: LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
     BLOCK_OVER_CAP_INTENT: LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP,
     BLOCK_EQUITY_EXCEEDS_CAP_REGIME: LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME,
+    BLOCK_EQUITY_UNAVAILABLE: LIVE_PILOT_EQUITY_UNAVAILABLE,
     # Option A never sells, so SELLS_NOT_FILLED only arises from unresolved open sell
     # orders in the snapshot; surface it as an insufficient-capital block for the lane.
     BLOCK_SELLS_NOT_FILLED: LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
@@ -106,21 +110,51 @@ def gate_block_reason(engine_reason: str | None) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
+# Shared "is this a real holding?" predicate (single source of truth)
+# --------------------------------------------------------------------------- #
+def _holding_rejection_reasons(raw: Mapping[str, Any]) -> list[str]:
+    """Reasons a snapshot position is NOT a clean real open holding; empty == real.
+
+    This is the SINGLE source of the field checks. Both holdings_from_snapshot
+    (inclusion) and the rotation guard (fail-closed) derive their decision from it, so
+    no missing/blank/non-finite field (symbol, qty, market_value, or a future one) can
+    be checked in one place but not the other. A real holding requires: truthy symbol,
+    finite non-zero qty, and finite positive market_value.
+    """
+    reasons: list[str] = []
+    if not _norm(raw.get("symbol")):
+        reasons.append("missing_symbol")
+    qty = _safe_float(raw.get("qty"))
+    if qty is None or not math.isfinite(qty) or abs(qty) <= 1e-12:
+        reasons.append("missing_zero_or_nonfinite_qty")
+    market_value = _safe_float(raw.get("market_value"))
+    if market_value is None or not math.isfinite(market_value) or market_value <= 0:
+        reasons.append("missing_nonpositive_or_nonfinite_market_value")
+    return reasons
+
+
+def _position_is_real_holding(raw: Any) -> bool:
+    """True iff ``raw`` is a snapshot position that counts as a clean real open holding."""
+    return isinstance(raw, Mapping) and not _holding_rejection_reasons(raw)
+
+
+# --------------------------------------------------------------------------- #
 # Snapshot / plan -> engine contracts
 # --------------------------------------------------------------------------- #
 def holdings_from_snapshot(pre_snapshot: Mapping[str, Any]) -> Holdings:
-    """Broker positions -> engine Holdings. Reference price = market_value / qty."""
+    """Broker positions -> engine Holdings. Reference price = market_value / qty.
+
+    Includes exactly the positions that pass _position_is_real_holding, so the price
+    division is always well-defined (finite non-zero qty, finite positive market_value).
+    """
     positions: list[Position] = []
     for raw in pre_snapshot.get("positions") or []:
-        if not isinstance(raw, Mapping):
+        if not _position_is_real_holding(raw):
             continue
-        symbol = _norm(raw.get("symbol"))
         qty = _safe_float(raw.get("qty"))
-        if not symbol or qty is None or abs(qty) <= 1e-12:
-            continue
         market_value = _safe_float(raw.get("market_value"))
-        price = abs(market_value / qty) if market_value is not None and qty != 0 else 0.0
-        positions.append(Position(symbol=symbol, shares=qty, price=price))
+        price = abs(market_value / qty)
+        positions.append(Position(symbol=_norm(raw.get("symbol")), shares=qty, price=price))
     return Holdings(tuple(positions))
 
 
@@ -247,10 +281,12 @@ def _apply_equity_regime_policy(plan: TransitionPlan, account: AccountSnapshot) 
         return plan
     equity = account.equity
     if equity is None:
-        # Fail closed: without equity we cannot confirm the account is in the cap regime.
+        # Fail closed with a DISTINCT reason: missing equity (e.g. a data-feed gap) is
+        # semantically different from equity exceeding the cap, so the operator is not
+        # misdirected to investigate an over-funded account.
         return _blocked_plan(
             plan,
-            reason=BLOCK_EQUITY_EXCEEDS_CAP_REGIME,
+            reason=BLOCK_EQUITY_UNAVAILABLE,
             extra_diag={"equity_usd": None, "equity_unavailable": True},
         )
     if float(equity) > LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD:
@@ -282,24 +318,21 @@ def _apply_unpriceable_holdings_policy(
         return plan
     for raw in pre_snapshot.get("positions") or []:
         if not isinstance(raw, Mapping):
+            # Not a position object at all (list-level garbage), same as holdings_from_snapshot.
             continue
-        qty = _safe_float(raw.get("qty"))
-        market_value = _safe_float(raw.get("market_value"))
-        countable = qty is not None and abs(qty) > 1e-12
-        priceable = market_value is not None and market_value > 0
-        if countable and priceable:
+        if _position_is_real_holding(raw):
+            # Clean holding: holdings_from_snapshot includes it and the engine accounts
+            # for it (rotation/keep/increase). Nothing to fail closed on.
             continue
-        reasons: list[str] = []
-        if not countable:
-            reasons.append("missing_or_zero_qty")
-        if not priceable:
-            reasons.append("missing_or_nonpositive_market_value")
+        # A position entry the engine would silently DROP because it is not a clean real
+        # holding. We cannot rule out a mis-dropped real holding, so fail closed. Uses the
+        # SAME field checks as the inclusion predicate (via _holding_rejection_reasons).
         return _blocked_plan(
             plan,
             reason=BLOCK_ROTATION_UNSUPPORTED,
             extra_diag={
-                "unpriceable_holding_symbol": _norm(raw.get("symbol")),
-                "unpriceable_holding_reason": ",".join(reasons),
+                "unpriceable_holding_symbol": _norm(raw.get("symbol")) or None,
+                "unpriceable_holding_reason": ",".join(_holding_rejection_reasons(raw)),
             },
         )
     return plan
@@ -316,10 +349,12 @@ def _apply_buying_power_policy(plan: TransitionPlan, account: AccountSnapshot) -
     if plan.blocked:
         return plan
     bp = account.buying_power
-    # Key off the raw broker fact + the presence of an actual buy intent, not the
-    # engine's derived planned_buy_notional, so the bp<=0 safety cannot be decoupled by
-    # a future sizing-model change.
-    if bp is not None and float(bp) <= 0.0 and plan.buy_orders_intended:
+    # Fire on the raw broker fact plus ANY signal of buy intent -- either a sized buy
+    # (buy_orders_intended) OR a pre-sizing need (planned_buy_notional > 0). The OR of
+    # both is strictly more fail-closed than either alone: it also catches a bp=0 run
+    # whose candidates were all clipped away by sizing, without decoupling from the fact.
+    planned = float(plan.diagnostics.get("planned_buy_notional") or 0.0)
+    if bp is not None and float(bp) <= 0.0 and (plan.buy_orders_intended or planned > 0.0):
         return _blocked_plan(
             plan,
             reason=BLOCK_BUYING_POWER_UNAVAILABLE,
@@ -488,6 +523,12 @@ def _operator_action(engine_reason: str | None) -> str:
             "Account equity exceeds the pilot cap regime; the live sizing model assumes "
             "equity is approximately the approved cap. Halt until either the account is "
             "brought back to the cap regime or an exposure-aware cap is approved."
+        )
+    if engine_reason == BLOCK_EQUITY_UNAVAILABLE:
+        return (
+            "Broker account equity was unavailable in the snapshot (likely a data-feed "
+            "gap); the pilot cannot confirm the account is in the cap regime. Halt and "
+            "verify the broker snapshot before any live action."
         )
     return "Broker buying power, approved cap, and planned buy notional permit this live-pilot buy gate."
 
