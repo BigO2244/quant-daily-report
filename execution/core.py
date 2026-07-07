@@ -17,7 +17,6 @@ from paper.paper_broker import (
     _normalize_and_filter_executable_trades,
     _post_sell_buy_budget,
     _rebuild_post_sell_buy_trades,
-    build_rebalance_trades,
 )
 
 
@@ -132,8 +131,10 @@ class ExecutionRequest:
     run_id: str
     price_basis: str = "fixture_price"
     precomputed_trades: tuple[dict[str, Any], ...] = ()
+    precomputed_trade_plan_used: bool = False
     rebudget_total_equity: float | None = None
     artifact_expectations: Mapping[str, Any] = field(default_factory=dict)
+    capital_budget_override: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,93 @@ class ExecutionResult:
     final_buy_orders: list[dict[str, Any]]
     submitted_sells: tuple[SubmitResult, ...]
     submitted_buys: tuple[SubmitResult, ...]
+
+
+def compute_transition_trades(
+    *,
+    request: ExecutionRequest,
+    config: ExecutionCoreConfig,
+) -> tuple[pd.DataFrame, Mapping[str, Any]]:
+    """Compute paper's transition trade frame without submitting orders."""
+
+    cfg = config.paper_config
+    if request.precomputed_trade_plan_used or request.precomputed_trades:
+        raw_trades = _precomputed_trades_frame(request.precomputed_trades)
+        trade_meta: dict[str, Any] = {
+            "source": "precomputed_execution_payload",
+            "precomputed_trade_plan_used": True,
+            "deadband_skipped": [],
+            "deadband_skipped_count": 0,
+            "cash_sweep_added_shares": 0,
+            "cash_sweep_iterations": 0,
+            "cash_sweep_tickers": [],
+            "cash_sweep_remaining_dollars": None,
+            "target_cash_weight": float(request.target_cash_weight),
+        }
+        return raw_trades, trade_meta
+
+    from paper import paper_broker as paper_broker_module
+
+    return paper_broker_module.build_rebalance_trades(
+        holdings=request.holdings,
+        targets=request.targets,
+        prices=request.prices,
+        total_equity=float(request.total_equity),
+        starting_cash=float(request.starting_cash),
+        target_cash_weight=float(request.target_cash_weight),
+        cfg=cfg,
+    )
+
+
+def apply_capital_budget_and_execution_filter(
+    *,
+    trades: pd.DataFrame,
+    planning_account: Mapping[str, Any],
+    config: ExecutionCoreConfig,
+    precomputed_trade_plan_used: bool = False,
+) -> tuple[pd.DataFrame, Mapping[str, Any], pd.DataFrame, Mapping[str, Any]]:
+    """Apply paper's capital budget and executable-trade filter."""
+
+    cfg = config.paper_config
+    requested_buy_notional = (
+        float(
+            trades.loc[
+                trades["side"].astype(str).str.upper() == "BUY",
+                "notional",
+            ].astype(float).sum()
+        )
+        if trades is not None and not trades.empty
+        else 0.0
+    )
+    expected_sell_proceeds = (
+        float(
+            trades.loc[
+                trades["side"].astype(str).str.upper().isin({"SELL", "CLOSE", "REDUCE"}),
+                "notional",
+            ].astype(float).sum()
+        )
+        if trades is not None and not trades.empty
+        else 0.0
+    )
+    capital_budget = _build_capital_budget(
+        broker_cash=planning_account.get("cash"),
+        broker_equity=planning_account.get("equity")
+        or planning_account.get("portfolio_value"),
+        broker_buying_power=planning_account.get("buying_power"),
+        expected_sell_proceeds=expected_sell_proceeds,
+        requested_buy_notional=requested_buy_notional,
+    )
+    if precomputed_trade_plan_used:
+        capital_trades = trades.copy()
+        capital_budget = dict(capital_budget)
+        capital_budget["capital_budget_application"] = "skipped_precomputed_trade_plan"
+        capital_budget["allowed_buy_notional"] = requested_buy_notional
+        capital_budget["capital_constraint_triggered"] = False
+        capital_budget["clipped_or_deferred_buys_count"] = 0
+    else:
+        capital_trades, capital_budget = _apply_capital_budget_to_trades(trades, cfg, capital_budget)
+    executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(capital_trades, cfg)
+    return capital_trades, capital_budget, executable_trades, execution_filter_stats
 
 
 def paper_execution_config(
@@ -361,70 +449,24 @@ def execute_lifecycle(
     """Run paper's sell-first/rebudget/buy lifecycle behind an adapter boundary."""
 
     cfg = config.paper_config
-    precomputed_trade_plan_used = bool(request.precomputed_trades)
-    if precomputed_trade_plan_used:
-        raw_trades = _precomputed_trades_frame(request.precomputed_trades)
-        trade_meta: dict[str, Any] = {
-            "source": "precomputed_execution_payload",
-            "precomputed_trade_plan_used": True,
-            "deadband_skipped": [],
-            "deadband_skipped_count": 0,
-            "cash_sweep_added_shares": 0,
-            "cash_sweep_iterations": 0,
-            "cash_sweep_tickers": [],
-            "cash_sweep_remaining_dollars": None,
-            "target_cash_weight": float(request.target_cash_weight),
-        }
-    else:
-        raw_trades, trade_meta = build_rebalance_trades(
-            holdings=request.holdings,
-            targets=request.targets,
-            prices=request.prices,
-            total_equity=float(request.total_equity),
-            starting_cash=float(request.starting_cash),
-            target_cash_weight=float(request.target_cash_weight),
-            cfg=cfg,
-        )
-
-    requested_buy_notional = (
-        float(
-            raw_trades.loc[
-                raw_trades["side"].astype(str).str.upper() == "BUY",
-                "notional",
-            ].astype(float).sum()
-        )
-        if raw_trades is not None and not raw_trades.empty
-        else 0.0
+    precomputed_trade_plan_used = bool(
+        request.precomputed_trade_plan_used or request.precomputed_trades
     )
-    expected_sell_proceeds = (
-        float(
-            raw_trades.loc[
-                raw_trades["side"].astype(str).str.upper().isin({"SELL", "CLOSE", "REDUCE"}),
-                "notional",
-            ].astype(float).sum()
+    raw_trades, trade_meta = compute_transition_trades(
+        request=request,
+        config=config,
+    )
+    capital_trades, capital_budget, executable_trades, execution_filter_stats = (
+        apply_capital_budget_and_execution_filter(
+            trades=raw_trades,
+            planning_account=request.planning_account,
+            config=config,
+            precomputed_trade_plan_used=precomputed_trade_plan_used,
         )
-        if raw_trades is not None and not raw_trades.empty
-        else 0.0
     )
-    capital_budget = _build_capital_budget(
-        broker_cash=request.planning_account.get("cash"),
-        broker_equity=request.planning_account.get("equity")
-        or request.planning_account.get("portfolio_value"),
-        broker_buying_power=request.planning_account.get("buying_power"),
-        expected_sell_proceeds=expected_sell_proceeds,
-        requested_buy_notional=requested_buy_notional,
-    )
-    if precomputed_trade_plan_used:
-        capital_trades = raw_trades.copy()
-        capital_budget = dict(capital_budget)
-        capital_budget["capital_budget_application"] = "skipped_precomputed_trade_plan"
-        capital_budget["allowed_buy_notional"] = requested_buy_notional
-        capital_budget["capital_constraint_triggered"] = False
-        capital_budget["clipped_or_deferred_buys_count"] = 0
-    else:
-        capital_trades, capital_budget = _apply_capital_budget_to_trades(raw_trades, cfg, capital_budget)
-
-    executable_trades, execution_filter_stats = _normalize_and_filter_executable_trades(capital_trades, cfg)
+    if request.capital_budget_override:
+        capital_budget = dict(request.capital_budget_override)
+    requested_buy_notional = float(capital_budget.get("requested_buy_notional") or 0.0)
     sell_trades, original_buy_trades = _split_trades(executable_trades, capital_trades)
 
     submitted_sells = tuple(
@@ -444,9 +486,10 @@ def execute_lifecycle(
         else request.holdings.copy()
     )
     sell_fill_meta = dict(post_sell_snapshot.raw.get("sell_fill_meta") or {})
+    sell_phase_allows_buy = bool(post_sell_snapshot.raw.get("sell_phase_allows_buy", True))
 
     capital_constraint_clear = not bool(capital_budget.get("capital_constraint_triggered"))
-    if sell_orders_present and config.constraints.rebudget_after_sell:
+    if sell_orders_present and config.constraints.rebudget_after_sell and sell_phase_allows_buy:
         buy_budget, post_sell_budget_meta = _post_sell_buy_budget(
             account=post_sell_account,
             cfg=cfg,
@@ -454,6 +497,12 @@ def execute_lifecycle(
             fallback_equity=float(request.total_equity),
             capital_constraint_clear=capital_constraint_clear,
         )
+        pending_sell_order_ids = list(post_sell_snapshot.raw.get("pending_sell_order_ids") or [])
+        if pending_sell_order_ids:
+            buy_budget = 0.0
+            post_sell_budget_meta = dict(post_sell_budget_meta)
+            post_sell_budget_meta["buy_budget_after_safeguards"] = 0.0
+            post_sell_budget_meta["pending_sell_order_ids"] = list(pending_sell_order_ids)
         max_rebudget_buy_orders = max(0, int(cfg.max_trades_per_day or 0) - int(len(sell_trades)))
         if config.constraints.max_buy_orders is not None:
             max_rebudget_buy_orders = min(max_rebudget_buy_orders, int(config.constraints.max_buy_orders))
@@ -461,7 +510,9 @@ def execute_lifecycle(
             max_rebudget_buy_orders = min(max_rebudget_buy_orders, 1)
         zero_budget_block_reason = None
         if float(buy_budget or 0.0) <= 1e-9:
-            if float(post_sell_budget_meta.get("risk_cash_target_buy_budget") or 0.0) <= 1e-9:
+            if pending_sell_order_ids:
+                zero_budget_block_reason = BUY_BLOCKED_RISK_CASH_TARGET
+            elif float(post_sell_budget_meta.get("risk_cash_target_buy_budget") or 0.0) <= 1e-9:
                 zero_budget_block_reason = BUY_BLOCKED_RISK_CASH_TARGET
         rebuilt_buy_trades, rebudget_meta, rebudget_skipped = _rebuild_post_sell_buy_trades(
             holdings=post_sell_holdings,
@@ -478,6 +529,30 @@ def execute_lifecycle(
             max_buy_orders=max_rebudget_buy_orders,
             zero_budget_block_reason=zero_budget_block_reason,
         )
+    elif sell_orders_present and not sell_phase_allows_buy:
+        buy_budget, post_sell_budget_meta = _post_sell_buy_budget(
+            account=post_sell_account,
+            cfg=cfg,
+            target_cash_weight=float(request.target_cash_weight),
+            fallback_equity=float(request.total_equity),
+            capital_constraint_clear=capital_constraint_clear,
+        )
+        rebuilt_buy_trades = original_buy_trades.iloc[0:0].copy()
+        block_reason = str(
+            post_sell_snapshot.raw.get("sell_phase_block_reason")
+            or "sell_phase_not_fully_confirmed"
+        )
+        rebudget_meta = {
+            "status": "SKIPPED",
+            "reason_codes": [block_reason],
+            "candidate_count": int(len(original_buy_trades)),
+            "recomputed_requested_buy_notional": requested_buy_notional,
+            "recomputed_buy_notional": 0.0,
+        }
+        rebudget_skipped = [
+            {**row.to_dict(), "block_reason": block_reason}
+            for _, row in original_buy_trades.iterrows()
+        ]
     else:
         buy_budget, buy_budget_basis = _compute_buy_budget(
             post_sell_account,
