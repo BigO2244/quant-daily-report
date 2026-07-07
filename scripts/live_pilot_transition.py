@@ -103,6 +103,20 @@ def _norm(symbol: object) -> str:
     return str(symbol or "").strip().upper()
 
 
+def _derived_position_price(market_value_raw: object, qty_raw: object) -> float | None:
+    """Return the engine reference price for a clean broker position, else None."""
+    qty = _safe_float(qty_raw)
+    market_value = _safe_float(market_value_raw)
+    if qty is None or not math.isfinite(qty) or abs(qty) <= 1e-12:
+        return None
+    if market_value is None or not math.isfinite(market_value) or market_value <= 0:
+        return None
+    price = abs(market_value / qty)
+    if not math.isfinite(price) or price <= 0.0:
+        return None
+    return price
+
+
 def gate_block_reason(engine_reason: str | None) -> str | None:
     if engine_reason is None:
         return None
@@ -130,17 +144,12 @@ def _holding_rejection_reasons(raw: Mapping[str, Any]) -> list[str]:
     market_value = _safe_float(raw.get("market_value"))
     if market_value is None or not math.isfinite(market_value) or market_value <= 0:
         reasons.append("missing_nonpositive_or_nonfinite_market_value")
-    # Validate the value the engine actually keys on: price = abs(market_value / qty),
-    # the same reference price holdings_from_snapshot builds. qty and market_value can
-    # each pass individually yet produce a degenerate quotient -- underflow to 0.0 (tiny
-    # mv / huge qty) or overflow to inf (huge mv / tiny qty) -- which the engine treats
-    # as unpriceable (price <= 0 / non-finite). Coupling the predicate to the quotient
-    # closes that arithmetic asymmetry by construction. Only computed when qty/mv passed
-    # (so the division is safe: qty is finite non-zero).
-    if not reasons:
-        price = abs(market_value / qty)
-        if not math.isfinite(price) or price <= 0.0:
-            reasons.append("degenerate_price")
+    # Validate the exact reference price the engine will consume. qty and market_value
+    # can each pass individually yet produce a degenerate quotient -- underflow to 0.0
+    # or overflow to inf -- which the engine treats as unpriceable. Only classify this
+    # after the field-level checks pass, preserving reason-code ordering.
+    if not reasons and _derived_position_price(raw.get("market_value"), raw.get("qty")) is None:
+        reasons.append("degenerate_price")
     return reasons
 
 
@@ -153,18 +162,19 @@ def _position_is_real_holding(raw: Any) -> bool:
 # Snapshot / plan -> engine contracts
 # --------------------------------------------------------------------------- #
 def holdings_from_snapshot(pre_snapshot: Mapping[str, Any]) -> Holdings:
-    """Broker positions -> engine Holdings. Reference price = market_value / qty.
+    """Broker positions -> engine Holdings.
 
     Includes exactly the positions that pass _position_is_real_holding, so the price
-    division is always well-defined (finite non-zero qty, finite positive market_value).
+    derivation is always well-defined (finite non-zero qty, finite positive market_value).
     """
     positions: list[Position] = []
     for raw in pre_snapshot.get("positions") or []:
         if not _position_is_real_holding(raw):
             continue
         qty = _safe_float(raw.get("qty"))
-        market_value = _safe_float(raw.get("market_value"))
-        price = abs(market_value / qty)
+        price = _derived_position_price(raw.get("market_value"), raw.get("qty"))
+        if qty is None or price is None:
+            continue
         positions.append(Position(symbol=_norm(raw.get("symbol")), shares=qty, price=price))
     return Holdings(tuple(positions))
 
