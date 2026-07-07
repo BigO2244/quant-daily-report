@@ -129,7 +129,7 @@ def _plan() -> dict[str, object]:
                 "ticker": "AAPL",
                 "side": "BUY",
                 "shares": 1,
-                "limit_price": 50,
+                "limit_price": 150,
                 "order_type": "market",
                 "sleeve": "polaris",
                 "sleeve_source": "precompute_live_strategy_id",
@@ -152,7 +152,7 @@ def _limit_plan() -> dict[str, object]:
                 "ticker": "AAPL",
                 "side": "BUY",
                 "shares": 1,
-                "limit_price": 50,
+                "limit_price": 150,
                 "order_type": "limit",
                 "sleeve": "polaris",
                 "sleeve_source": "precompute_live_strategy_id",
@@ -268,7 +268,7 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     assert submitted["orders"][0]["entry_execution_policy"] == "live_pilot_buy_market_order_immediate"
     assert submitted["orders"][0]["is_marketable"] is True
     assert submitted["orders"][0]["is_passive"] is False
-    assert submitted["orders"][0]["expected_price"] == 50
+    assert submitted["orders"][0]["expected_price"] == 150
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
     assert reconciliation["status"] == "CLEAN"
     assert reconciliation["state"] == "CLEAN"
@@ -279,7 +279,7 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     assert evidence["average_time_to_fill_seconds"] == 2.0
     assert evidence["slippage_bps"] is not None
     usage = json.loads((run_root / "live_pilot_capital_usage.json").read_text())
-    assert usage["submitted_notional_usd"] == 50
+    assert usage["submitted_notional_usd"] == 150
     gate_state = _gate_state(run_root)
     assert gate_state["decision"] == "ALLOWED"
     assert gate_state["broker_orders_submitted"] == 1
@@ -324,9 +324,9 @@ def test_existing_live_positions_block_buy_before_broker_submission_and_record_c
     assert capital_gate["buy_block_reason"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
     assert capital_gate["live_buying_power_before"] == 0.88
     assert capital_gate["approved_cap_usd"] == 500.0
-    assert capital_gate["planned_buy_notional_usd"] == 250.33
+    assert capital_gate["planned_buy_notional_usd"] == 0  # engine: ALL held+targeted, whole-share incremental rounds to 0
     assert capital_gate["tradable_capital_usd"] == 0.88
-    assert capital_gate["required_sell_count"] == 3
+    assert capital_gate["required_sell_count"] == 2  # engine counts actual exits ABBV,C (not "any position")
     assert capital_gate["sell_first_supported"] is False
     assert capital_gate["rebudget_after_sell_supported"] is False
     assert capital_gate["broker_orders_submitted"] == 0
@@ -366,7 +366,7 @@ def test_insufficient_live_buying_power_blocks_even_when_approved_cap_allows_pla
     assert capital_gate["live_positions_before"] == []
     assert capital_gate["live_buying_power_before"] == 0.88
     assert capital_gate["approved_cap_usd"] == 500.0
-    assert capital_gate["planned_buy_notional_usd"] == 50.0
+    assert capital_gate["planned_buy_notional_usd"] == 150.0
     assert capital_gate["tradable_capital_usd"] == 0.88
     assert capital_gate["buy_block_reason"] == LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
@@ -508,6 +508,10 @@ def test_repeated_unfilled_live_buy_attempts_escalate_from_artifacts(tmp_path: P
 
 
 def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path) -> None:
+    # Fail-closed pilot policy (operator decision 2026-07-06): an intent whose full
+    # need ($600) exceeds the approved cap ($500) is HALTED, not silently right-sized.
+    # The engine would clip-and-deploy; the live lane blocks instead until live
+    # behavior is trusted.
     broker = FakeBroker()
 
     result = run_live_pilot(
@@ -522,12 +526,18 @@ def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-blocked"
     assert result["terminal_status"] == "BLOCKED"
     assert broker.submit_calls == 0
-    summary = json.loads((run_root / "live_pilot_operator_summary.json").read_text())
-    assert "live_pilot_total_notional_exceeds_cap" in summary["reason_code"]
+    assert "live_pilot_total_notional_exceeds_cap" in result["reason_code"]
     gate_state = _gate_state(run_root)
     assert gate_state["decision"] == "BLOCKED"
     assert gate_state["block_reason"] == "live_pilot_total_notional_exceeds_cap"
     assert gate_state["broker_orders_submitted"] == 0
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["decision"] == "BLOCKED"
+    assert capital_gate["buy_block_reason"] == "live_pilot_total_notional_exceeds_cap"
+    transition_plan = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition_plan["blocked"] is True
+    assert transition_plan["buy_orders_intended"] == []
+    assert transition_plan["diagnostics"]["over_cap_intent"] is True
 
 
 def test_rejected_order_produces_failed_reconciliation(tmp_path: Path) -> None:
@@ -608,7 +618,7 @@ def test_refresh_existing_run_reconciles_open_broker_order(tmp_path: Path) -> No
                         "symbol": "AAPL",
                         "side": "BUY",
                         "qty": 1,
-                        "limit_price": 50,
+                        "limit_price": 150,
                         "status": "OrderStatus.PENDING_NEW",
                         "order": {"id": "broker-order-1", "status": "OrderStatus.PENDING_NEW"},
                     }
@@ -645,7 +655,7 @@ def test_refresh_existing_market_order_updates_stale_pending_to_filled(tmp_path:
                         "symbol": "AAPL",
                         "side": "BUY",
                         "qty": 1,
-                        "limit_price": 50,
+                        "limit_price": 150,
                         "status": "OrderStatus.PENDING_NEW",
                         "submitted_order_type": "market",
                         "order_type_submitted": "market",
