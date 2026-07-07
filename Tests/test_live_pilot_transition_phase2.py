@@ -284,6 +284,40 @@ def test_nonfinite_qty_holding_blocks_rotation(tmp_path: Path) -> None:
     assert "missing_zero_or_nonfinite_qty" in transition["diagnostics"]["unpriceable_holding_reason"]
 
 
+def test_degenerate_price_underflow_blocks_rotation(tmp_path: Path) -> None:
+    # qty and market_value each pass individually, but abs(mv/qty) UNDERFLOWS to 0.0
+    # (a price the engine treats as unpriceable and silently drops). The shared predicate
+    # now validates the quotient, so this fails closed.
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"symbol": "XYZ", "qty": "1e300", "market_value": "1e-300"}],
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-underflow", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert "degenerate_price" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_degenerate_price_overflow_blocks_rotation(tmp_path: Path) -> None:
+    # Overflow counterpart: huge mv / small (but above the zero-threshold) qty ->
+    # abs(mv/qty) = inf (would produce an inf-notional intent). qty=1e-11 clears the
+    # abs(qty)>1e-12 countability check, so the degenerate-price check is what blocks it.
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"symbol": "XYZ", "qty": "1e-11", "market_value": "1e300"}],
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-overflow", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert "degenerate_price" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
 def test_bp_zero_with_planned_but_clipped_blocks(tmp_path: Path) -> None:
     # bp=0.0 (real), cash below min-trade so the sized buy is clipped away entirely
     # (buy_orders_intended empty) while planned_buy_notional>0. This case is caught by

@@ -130,6 +130,17 @@ def _holding_rejection_reasons(raw: Mapping[str, Any]) -> list[str]:
     market_value = _safe_float(raw.get("market_value"))
     if market_value is None or not math.isfinite(market_value) or market_value <= 0:
         reasons.append("missing_nonpositive_or_nonfinite_market_value")
+    # Validate the value the engine actually keys on: price = abs(market_value / qty),
+    # the same reference price holdings_from_snapshot builds. qty and market_value can
+    # each pass individually yet produce a degenerate quotient -- underflow to 0.0 (tiny
+    # mv / huge qty) or overflow to inf (huge mv / tiny qty) -- which the engine treats
+    # as unpriceable (price <= 0 / non-finite). Coupling the predicate to the quotient
+    # closes that arithmetic asymmetry by construction. Only computed when qty/mv passed
+    # (so the division is safe: qty is finite non-zero).
+    if not reasons:
+        price = abs(market_value / qty)
+        if not math.isfinite(price) or price <= 0.0:
+            reasons.append("degenerate_price")
     return reasons
 
 
