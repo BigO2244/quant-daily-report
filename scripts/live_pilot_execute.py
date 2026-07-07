@@ -178,11 +178,14 @@ LIVE_PILOT_TOTAL_NOTIONAL_EXCEEDS_CAP = "live_pilot_total_notional_exceeds_cap"
 LIVE_PILOT_EQUITY_EXCEEDS_CAP_REGIME = "live_pilot_equity_exceeds_cap_regime"
 LIVE_PILOT_EQUITY_UNAVAILABLE = "live_pilot_equity_unavailable"
 LIVE_PILOT_SELL_SETTLEMENT_TIMEOUT = "live_pilot_sell_settlement_timeout"
+LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED = "live_pilot_sell_settlement_cash_not_reflected"
 LIVE_PILOT_MALFORMED_HOLDING = "live_pilot_malformed_holding"
 LIVE_PILOT_SELL_FIRST_SUPPORTED = True
 LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED = True
 LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS"
 LIVE_PILOT_SETTLEMENT_POLL_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_POLL_SECONDS"
+LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR = 0.95
+LIVE_PILOT_SETTLEMENT_DOLLAR_TOLERANCE = 0.01
 
 CAPITAL_GATE_REPORT_KEYS = (
     "live_positions_before",
@@ -1276,6 +1279,7 @@ class LivePilotCoreAdapter:
         run_root: Path,
         output_root: Path | str,
         run_id: str,
+        pre_sell_account: Mapping[str, Any] | None = None,
         source_plan: Mapping[str, Any] | None = None,
     ) -> None:
         self.broker = broker
@@ -1283,6 +1287,7 @@ class LivePilotCoreAdapter:
         self.run_root = run_root
         self.output_root = output_root
         self.run_id = run_id
+        self.pre_sell_account = dict(pre_sell_account or {})
         self.source_by_symbol = _plan_rows_by_symbol(source_plan or {})
         self.submitted_rows: list[dict[str, Any]] = []
         self.submit_errors: list[str] = []
@@ -1423,12 +1428,61 @@ class LivePilotCoreAdapter:
             raw={"snapshot_source": "live_pilot_adapter"},
         )
 
+    def _settlement_reflection(
+        self,
+        *,
+        account: Mapping[str, Any],
+        expected_freed: float,
+    ) -> dict[str, Any]:
+        required_delta = max(0.0, float(expected_freed or 0.0)) * LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR
+        pre_buying_power = _finite_float(self.pre_sell_account.get("buying_power"))
+        post_buying_power = _finite_float(account.get("buying_power"))
+        pre_cash = _finite_float(self.pre_sell_account.get("cash"))
+        post_cash = _finite_float(account.get("cash"))
+        tolerance = LIVE_PILOT_SETTLEMENT_DOLLAR_TOLERANCE
+        bp_reflected = (
+            pre_buying_power is not None
+            and post_buying_power is not None
+            and post_buying_power + tolerance >= pre_buying_power + required_delta
+        )
+        cash_reflected = (
+            pre_cash is not None
+            and post_cash is not None
+            and post_cash + tolerance >= pre_cash + required_delta
+        )
+        return {
+            "expected_freed_proceeds": float(expected_freed or 0.0),
+            "required_reflected_delta": float(required_delta),
+            "reflection_factor": LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR,
+            "dollar_tolerance": tolerance,
+            "pre_sell_buying_power": pre_buying_power,
+            "post_sell_buying_power": post_buying_power,
+            "pre_sell_cash": pre_cash,
+            "post_sell_cash": post_cash,
+            "buying_power_reflected": bool(bp_reflected),
+            "cash_reflected": bool(cash_reflected),
+            # Fail closed: live buys require both cash and buying_power to reflect
+            # at least 95% of submitted sell notional before rebudget runs.
+            "settlement_reflected": bool(bp_reflected and cash_reflected and expected_freed > 0.0),
+        }
+
     def wait_or_refresh(self, submitted_sells: list[SubmitResult] | tuple[SubmitResult, ...]) -> CoreAccountSnapshot:
         timeout = max(0.0, float(_safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV)) or 0.0))
         poll = max(0.0, float(_safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_POLL_ENV)) or 0.0))
         deadline = time.monotonic() + timeout
+        expected_freed = float(
+            sum(
+                max(0.0, float(getattr(result.intent, "notional", 0.0) or 0.0))
+                for result in submitted_sells or []
+            )
+        )
         sell_records: list[dict[str, Any]] = []
         pending: list[str] = []
+        snapshot = self.snapshot()
+        settlement_reflection = self._settlement_reflection(
+            account=snapshot.account,
+            expected_freed=expected_freed,
+        )
         while True:
             sell_records = []
             pending = []
@@ -1467,22 +1521,34 @@ class LivePilotCoreAdapter:
                         "filled_notional": filled_notional,
                     }
                 )
-            if not pending or time.monotonic() >= deadline:
+            snapshot = self.snapshot()
+            settlement_reflection = self._settlement_reflection(
+                account=snapshot.account,
+                expected_freed=expected_freed,
+            )
+            if (
+                not pending and settlement_reflection["settlement_reflected"]
+            ) or time.monotonic() >= deadline:
                 break
             time.sleep(poll)
-        snapshot = self.snapshot()
         confirmed_proceeds = float(sum(float(row.get("filled_notional") or 0.0) for row in sell_records))
         raw = dict(snapshot.raw or {})
         raw["sell_fill_meta"] = {
             "sell_orders": sell_records,
             "confirmed_sell_proceeds": confirmed_proceeds,
+            "expected_freed_proceeds": expected_freed,
+            "settlement_reflection": dict(settlement_reflection),
             "pending_sell_order_ids": list(pending),
             "fill_model": "broker_refresh_until_settled",
         }
         raw["pending_sell_order_ids"] = list(pending)
-        raw["sell_phase_allows_buy"] = not bool(pending)
+        raw["sell_phase_allows_buy"] = bool(
+            not pending and settlement_reflection["settlement_reflected"]
+        )
         if pending:
             raw["sell_phase_block_reason"] = LIVE_PILOT_SELL_SETTLEMENT_TIMEOUT
+        elif not settlement_reflection["settlement_reflected"]:
+            raw["sell_phase_block_reason"] = LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED
         return CoreAccountSnapshot(account=snapshot.account, holdings=snapshot.holdings, raw=raw)
 
 
@@ -1536,6 +1602,7 @@ def _transition_artifact_from_core(
             "post_sell_budget": dict(getattr(result, "post_sell_budget_meta", {}) or {}) if result is not None else {},
             "rebudget": dict(getattr(result, "rebudget_meta", {}) or {}) if result is not None else {},
             "capital_budget": dict(getattr(result, "capital_budget", {}) or {}) if result is not None else {},
+            "sell_fill_meta": dict(getattr(result, "sell_fill_meta", {}) or {}) if result is not None else {},
         },
     }
 
@@ -1959,6 +2026,7 @@ def _run_live_pilot_core_path(
             run_root=run_root,
             output_root=output_root,
             run_id=run_id,
+            pre_sell_account=request.planning_account,
             source_plan=plan,
         )
         result = execute_lifecycle(request=request, adapter=adapter, config=config)

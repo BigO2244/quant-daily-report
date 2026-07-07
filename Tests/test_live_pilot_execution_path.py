@@ -9,6 +9,7 @@ import core.live_trade_ledger as live_trade_ledger
 from scripts.live_pilot_execute import (
     LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
+    LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED,
     refresh_live_pilot_reconciliation,
     run_live_pilot,
 )
@@ -200,7 +201,7 @@ def _all_plan() -> dict[str, object]:
 
 
 class RotatingFakeBroker(FakeBroker):
-    def __init__(self, *, sell_fills: bool = True) -> None:
+    def __init__(self, *, sell_fills: bool = True, settle_cash: bool = True) -> None:
         super().__init__(
             order_status="filled",
             buying_power="150",
@@ -209,6 +210,7 @@ class RotatingFakeBroker(FakeBroker):
             positions=[{"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}],
         )
         self.sell_fills = sell_fills
+        self.settle_cash = settle_cash
         self.orders_by_id: dict[str, dict[str, object]] = {}
 
     def submit_market_order(self, **kwargs):
@@ -241,7 +243,7 @@ class RotatingFakeBroker(FakeBroker):
             "filled_at": "2026-03-17T13:35:02+00:00" if status == "filled" else None,
         }
         self.orders_by_id[order_id] = order
-        if side == "SELL" and status == "filled":
+        if side == "SELL" and status == "filled" and self.settle_cash:
             self.cash = str(float(self.cash) + estimated)
             self.buying_power = str(float(self.buying_power) + estimated)
             self.positions = [row for row in self.positions if row.get("symbol") != symbol]
@@ -467,6 +469,67 @@ def test_core_routed_live_rotation_sells_settles_rebudgets_and_buys(tmp_path: Pa
     assert capital_gate["required_sell_count"] == 1
     assert capital_gate["post_sell_buy_budget"]["post_sell_cash"] == 250.0
     assert capital_gate["post_sell_buy_budget"]["buy_budget_after_safeguards"] == 250.0
+
+
+def test_core_routed_live_filled_sell_with_reflected_cash_allows_buy(tmp_path: Path) -> None:
+    broker = RotatingFakeBroker(sell_fills=True, settle_cash=True)
+    env = _env(dry_run="0", max_orders="1")
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "OLD"
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-filled-reflected-settlement",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-filled-reflected-settlement"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_sides == ["SELL", "BUY"]
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert [row["side"] for row in transition["buy_orders_intended"]] == ["BUY"]
+    settlement = transition["diagnostics"]["sell_fill_meta"]["settlement_reflection"]
+    assert settlement["buying_power_reflected"] is True
+    assert settlement["cash_reflected"] is True
+    assert settlement["settlement_reflected"] is True
+    assert settlement["post_sell_buying_power"] == 250.0
+    assert settlement["post_sell_cash"] == 250.0
+
+
+def test_core_routed_live_filled_sell_with_stale_cash_blocks_buys(tmp_path: Path) -> None:
+    broker = RotatingFakeBroker(sell_fills=True, settle_cash=False)
+    env = _env(dry_run="0", max_orders="1")
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "OLD"
+    env["CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS"] = "0"
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-filled-stale-settlement",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-filled-stale-settlement"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_sides == ["SELL"]
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert [row["side"] for row in submitted["orders"]] == ["SELL"]
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["buy_orders_intended"] == []
+    assert transition["diagnostics"]["rebudget"]["reason_codes"] == [
+        LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED
+    ]
+    settlement = transition["diagnostics"]["sell_fill_meta"]["settlement_reflection"]
+    assert settlement["buying_power_reflected"] is False
+    assert settlement["cash_reflected"] is False
+    assert settlement["post_sell_buying_power"] == 150.0
+    assert settlement["post_sell_cash"] == 150.0
+    capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
+    assert capital_gate["post_sell_buy_budget"]["post_sell_cash"] == 150.0
 
 
 def test_core_routed_live_settlement_timeout_uses_actual_cash_and_does_not_overbuy(tmp_path: Path) -> None:
