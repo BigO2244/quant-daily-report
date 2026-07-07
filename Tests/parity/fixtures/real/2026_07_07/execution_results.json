@@ -1,0 +1,1810 @@
+{
+  "run_id": "2026-07-07T093509-0400_b6bf4a2",
+  "trade_date": "2026-07-07",
+  "mode": "PAPER",
+  "status": "EXECUTED",
+  "halt_reason": null,
+  "submitted_count": 4,
+  "accepted_count": 4,
+  "rejected_count": 0,
+  "orders_filled_count": 4,
+  "duplicate_count": 0,
+  "broker_responses": [
+    {
+      "trade_date": "2026-07-07",
+      "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+      "client_order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+      "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e",
+      "symbol": "CVS",
+      "ticker": "CVS",
+      "side": "SELL",
+      "quantity": 6.0,
+      "status": "OrderStatus.FILLED",
+      "latest_status": "OrderStatus.FILLED",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "filled_qty": "6",
+      "filled_at": "2026-07-07 13:36:49.887800+00:00",
+      "last_polled_at": "2026-07-07T13:36:56.648153+00:00",
+      "seconds_to_fill": 83.632897,
+      "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+      "mode": "alpaca"
+    },
+    {
+      "trade_date": "2026-07-07",
+      "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+      "client_order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+      "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b",
+      "symbol": "WBD",
+      "ticker": "WBD",
+      "side": "SELL",
+      "quantity": 38.0,
+      "status": "OrderStatus.FILLED",
+      "latest_status": "OrderStatus.FILLED",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "filled_qty": "38",
+      "filled_at": "2026-07-07 13:36:55.570513+00:00",
+      "last_polled_at": "2026-07-07T13:36:56.679930+00:00",
+      "seconds_to_fill": 89.086367,
+      "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+      "mode": "alpaca"
+    },
+    {
+      "trade_date": "2026-07-07",
+      "order_id": "2026-07-07:main:growth_engine_v4:PNC:BUY",
+      "client_order_id": "2026-07-07:main:growth_engine_v4:PNC:BUY",
+      "alpaca_order_id": "fdf3414e-8818-45e9-b2c9-eccbadd96905",
+      "symbol": "PNC",
+      "ticker": "PNC",
+      "side": "BUY",
+      "quantity": 2.557669259710094,
+      "status": "OrderStatus.FILLED",
+      "latest_status": "OrderStatus.FILLED",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "filled_qty": "2.557669259",
+      "filled_at": "2026-07-07 13:37:14.458779+00:00",
+      "last_polled_at": "2026-07-07T13:37:16.615431+00:00",
+      "seconds_to_fill": 17.064586,
+      "submitted_at": "2026-07-07 13:36:57.394193+00:00",
+      "mode": "alpaca"
+    },
+    {
+      "trade_date": "2026-07-07",
+      "order_id": "2026-07-07:main:growth_engine_v4:GE:BUY",
+      "client_order_id": "2026-07-07:main:growth_engine_v4:GE:BUY",
+      "alpaca_order_id": "c74a0d01-867a-458c-97a6-f77faa727800",
+      "symbol": "GE",
+      "ticker": "GE",
+      "side": "BUY",
+      "quantity": 1.5477244259663088,
+      "status": "OrderStatus.FILLED",
+      "latest_status": "OrderStatus.FILLED",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "filled_qty": "1.547724425",
+      "filled_at": "2026-07-07 13:37:03.333823+00:00",
+      "last_polled_at": "2026-07-07T13:37:16.649899+00:00",
+      "seconds_to_fill": 5.75958,
+      "submitted_at": "2026-07-07 13:36:57.574243+00:00",
+      "mode": "alpaca"
+    }
+  ],
+  "execution_outcome": null,
+  "execution_reason": null,
+  "reason_code": null,
+  "cash_rebalance_status": null,
+  "broker_reject_status": null,
+  "broker_reject_message": null,
+  "asset_validation_status": "PASS",
+  "invalid_symbols": [],
+  "non_tradable_symbols": [],
+  "asset_validation_reason": "all_assets_active_tradable",
+  "invalid_asset_count": 0,
+  "order_lifecycle": [
+    {
+      "symbol": "CVS",
+      "ticker": "CVS",
+      "side": "SELL",
+      "qty": 6.0,
+      "client_order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+      "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e",
+      "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+      "latest_status": "OrderStatus.FILLED",
+      "filled_qty": "6",
+      "filled_at": "2026-07-07 13:36:49.887800+00:00",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "last_polled_at": "2026-07-07T13:36:56.648153+00:00",
+      "seconds_to_fill": 83.632897
+    },
+    {
+      "symbol": "WBD",
+      "ticker": "WBD",
+      "side": "SELL",
+      "qty": 38.0,
+      "client_order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+      "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b",
+      "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+      "latest_status": "OrderStatus.FILLED",
+      "filled_qty": "38",
+      "filled_at": "2026-07-07 13:36:55.570513+00:00",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "last_polled_at": "2026-07-07T13:36:56.679930+00:00",
+      "seconds_to_fill": 89.086367
+    },
+    {
+      "symbol": "PNC",
+      "ticker": "PNC",
+      "side": "BUY",
+      "qty": 2.557669259710094,
+      "client_order_id": "2026-07-07:main:growth_engine_v4:PNC:BUY",
+      "alpaca_order_id": "fdf3414e-8818-45e9-b2c9-eccbadd96905",
+      "submitted_at": "2026-07-07 13:36:57.394193+00:00",
+      "latest_status": "OrderStatus.FILLED",
+      "filled_qty": "2.557669259",
+      "filled_at": "2026-07-07 13:37:14.458779+00:00",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "last_polled_at": "2026-07-07T13:37:16.615431+00:00",
+      "seconds_to_fill": 17.064586
+    },
+    {
+      "symbol": "GE",
+      "ticker": "GE",
+      "side": "BUY",
+      "qty": 1.5477244259663088,
+      "client_order_id": "2026-07-07:main:growth_engine_v4:GE:BUY",
+      "alpaca_order_id": "c74a0d01-867a-458c-97a6-f77faa727800",
+      "submitted_at": "2026-07-07 13:36:57.574243+00:00",
+      "latest_status": "OrderStatus.FILLED",
+      "filled_qty": "1.547724425",
+      "filled_at": "2026-07-07 13:37:03.333823+00:00",
+      "first_seen_status": "OrderStatus.PENDING_NEW",
+      "last_polled_at": "2026-07-07T13:37:16.649899+00:00",
+      "seconds_to_fill": 5.75958
+    }
+  ],
+  "sell_submit_started_at": "2026-07-07T13:35:26.167808+00:00",
+  "sell_submit_completed_at": "2026-07-07T13:35:26.540998+00:00",
+  "buy_submit_started_at": "2026-07-07T13:36:57.310630+00:00",
+  "buy_submit_completed_at": "2026-07-07T13:36:57.636528+00:00",
+  "buy_phase_status": "BUY_PHASE_COMPLETED",
+  "buy_phase_completion_reason": "all_buy_orders_filled",
+  "buy_fill_poll_count": 7,
+  "buy_fill_observation_window_seconds": 18.921052,
+  "posttrade_snapshot_stage": "post_buy",
+  "posttrade_snapshot_timestamp": "2026-07-07T13:37:16.882704+00:00",
+  "actual_posttrade_cash_source": "posttrade_account_snapshot",
+  "submitted_buy_count": 2,
+  "filled_buy_count": 2,
+  "pending_buy_count": 0,
+  "pending_sell_count_at_buy_decision": 0,
+  "buying_power_at_buy_decision": 32528.15,
+  "cash_at_buy_decision": 2169.49,
+  "skipped_buy_count": 0,
+  "blocked_buy_count": 0,
+  "buy_phase_decision_reason": "buy_submitted_using_available_buying_power",
+  "timing_status": "degraded_late",
+  "operator_execution_status": "executed",
+  "raw_execution_status": "READY",
+  "raw_operator_execution_status": "executed",
+  "raw_execution_reason": null,
+  "final_execution_status": "READY",
+  "final_operator_execution_status": "executed",
+  "final_execution_reason": null,
+  "reconciled_to_target_state": false,
+  "reconciliation_override_applied": false,
+  "cash_gate_diagnostics": {
+    "schema_version": "cash_gate_diagnostics.v1",
+    "cash_before_sells": 545.59,
+    "equity_before_sells": 10673.46,
+    "buying_power_before_sells": 30540.39,
+    "estimated_sell_proceeds_planned": 1601.0274427700044,
+    "estimated_sell_proceeds_submitted": 1601.0274427700044,
+    "sell_submit_started_at": "2026-07-07T13:35:26.167808+00:00",
+    "sell_submit_completed_at": "2026-07-07T13:35:26.540998+00:00",
+    "sell_phase_status": "COMPLETED",
+    "sell_phase_completion_reason": "positions_confirmed",
+    "sell_phase_polls": 30,
+    "sell_phase_observed_statuses_at_buy_decision": {
+      "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.FILLED",
+      "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.FILLED"
+    },
+    "sell_phase_poll_observations": [
+      {
+        "poll": 1,
+        "observed_at_utc": "2026-07-07T13:35:26.706199+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30537.15,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PENDING_NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PENDING_NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PENDING_NEW",
+            "latest_status": "OrderStatus.PENDING_NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:26.675381+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PENDING_NEW",
+            "latest_status": "OrderStatus.PENDING_NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:26.706155+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 2,
+        "observed_at_utc": "2026-07-07T13:35:29.845623+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30540.92,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:29.813747+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:29.845481+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 3,
+        "observed_at_utc": "2026-07-07T13:35:32.979444+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30534.8,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:32.947701+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:32.979347+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 4,
+        "observed_at_utc": "2026-07-07T13:35:36.113526+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30530.98,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:36.081796+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:36.113418+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 5,
+        "observed_at_utc": "2026-07-07T13:35:39.293965+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30521.54,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:39.263166+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:39.293877+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 6,
+        "observed_at_utc": "2026-07-07T13:35:42.441577+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30525.22,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:42.408921+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:42.441442+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 7,
+        "observed_at_utc": "2026-07-07T13:35:45.582144+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30527.47,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:45.549155+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:45.581906+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 8,
+        "observed_at_utc": "2026-07-07T13:35:48.743254+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30527.51,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:48.707900+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:48.743093+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 9,
+        "observed_at_utc": "2026-07-07T13:35:51.904596+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30526.07,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:51.869409+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:51.904461+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 10,
+        "observed_at_utc": "2026-07-07T13:35:55.046029+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30523.2,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.NEW"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:55.014349+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:55.045918+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 11,
+        "observed_at_utc": "2026-07-07T13:35:58.188986+00:00",
+        "account_cash": 545.59,
+        "account_buying_power": 30518.22,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:35:58.156386+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:35:58.188861+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 12,
+        "observed_at_utc": "2026-07-07T13:36:01.424608+00:00",
+        "account_cash": 967.67,
+        "account_buying_power": 31034.73,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:36:01.390276+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:01.424481+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 13,
+        "observed_at_utc": "2026-07-07T13:36:04.595551+00:00",
+        "account_cash": 967.67,
+        "account_buying_power": 31043.46,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:36:04.561402+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:04.595453+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 14,
+        "observed_at_utc": "2026-07-07T13:36:07.735638+00:00",
+        "account_cash": 967.67,
+        "account_buying_power": 31042.2,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:36:07.703262+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:07.735549+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 15,
+        "observed_at_utc": "2026-07-07T13:36:10.905421+00:00",
+        "account_cash": 967.67,
+        "account_buying_power": 31072.05,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:36:10.858330+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:10.905295+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 16,
+        "observed_at_utc": "2026-07-07T13:36:14.044980+00:00",
+        "account_cash": 967.67,
+        "account_buying_power": 31055.22,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:36:14.013362+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:14.044877+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 17,
+        "observed_at_utc": "2026-07-07T13:36:17.202039+00:00",
+        "account_cash": 967.67,
+        "account_buying_power": 31043.79,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.NEW",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.NEW",
+            "latest_status": "OrderStatus.NEW",
+            "filled_qty": "0",
+            "filled_at": null,
+            "last_polled_at": "2026-07-07T13:36:17.170431+00:00",
+            "seconds_to_fill": null,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:17.201943+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 18,
+        "observed_at_utc": "2026-07-07T13:36:20.349754+00:00",
+        "account_cash": 1071.28,
+        "account_buying_power": 31157.54,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "1",
+            "filled_at": "2026-07-07 13:36:17.492474+00:00",
+            "last_polled_at": "2026-07-07T13:36:20.309051+00:00",
+            "seconds_to_fill": 51.237571,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:20.349633+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 19,
+        "observed_at_utc": "2026-07-07T13:36:23.492351+00:00",
+        "account_cash": 1071.28,
+        "account_buying_power": 31167.08,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "1",
+            "filled_at": "2026-07-07 13:36:17.492474+00:00",
+            "last_polled_at": "2026-07-07T13:36:23.455613+00:00",
+            "seconds_to_fill": 51.237571,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:23.492218+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 20,
+        "observed_at_utc": "2026-07-07T13:36:26.630787+00:00",
+        "account_cash": 1071.28,
+        "account_buying_power": 31162.55,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "1",
+            "filled_at": "2026-07-07 13:36:17.492474+00:00",
+            "last_polled_at": "2026-07-07T13:36:26.596187+00:00",
+            "seconds_to_fill": 51.237571,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:26.630687+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 21,
+        "observed_at_utc": "2026-07-07T13:36:29.787211+00:00",
+        "account_cash": 1071.28,
+        "account_buying_power": 31173.96,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "1",
+            "filled_at": "2026-07-07 13:36:17.492474+00:00",
+            "last_polled_at": "2026-07-07T13:36:29.748083+00:00",
+            "seconds_to_fill": 51.237571,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:29.787088+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 22,
+        "observed_at_utc": "2026-07-07T13:36:32.936753+00:00",
+        "account_cash": 1485.92,
+        "account_buying_power": 31670.13,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "5",
+            "filled_at": "2026-07-07 13:36:30.608844+00:00",
+            "last_polled_at": "2026-07-07T13:36:32.905068+00:00",
+            "seconds_to_fill": 64.353941,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:32.936665+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 23,
+        "observed_at_utc": "2026-07-07T13:36:36.282897+00:00",
+        "account_cash": 1485.92,
+        "account_buying_power": 31669.29,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "5",
+            "filled_at": "2026-07-07 13:36:30.608844+00:00",
+            "last_polled_at": "2026-07-07T13:36:36.250064+00:00",
+            "seconds_to_fill": 64.353941,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "16",
+            "filled_at": "2026-07-07 13:35:58.118371+00:00",
+            "last_polled_at": "2026-07-07T13:36:36.282768+00:00",
+            "seconds_to_fill": 31.634225,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 24,
+        "observed_at_utc": "2026-07-07T13:36:39.414257+00:00",
+        "account_cash": 1617.77,
+        "account_buying_power": 31829.38,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "5",
+            "filled_at": "2026-07-07 13:36:30.608844+00:00",
+            "last_polled_at": "2026-07-07T13:36:39.383496+00:00",
+            "seconds_to_fill": 64.353941,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "21",
+            "filled_at": "2026-07-07 13:36:36.854920+00:00",
+            "last_polled_at": "2026-07-07T13:36:39.414149+00:00",
+            "seconds_to_fill": 70.370774,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 25,
+        "observed_at_utc": "2026-07-07T13:36:42.557366+00:00",
+        "account_cash": 1617.77,
+        "account_buying_power": 31830.88,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "5",
+            "filled_at": "2026-07-07 13:36:30.608844+00:00",
+            "last_polled_at": "2026-07-07T13:36:42.524502+00:00",
+            "seconds_to_fill": 64.353941,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "21",
+            "filled_at": "2026-07-07 13:36:36.854920+00:00",
+            "last_polled_at": "2026-07-07T13:36:42.557232+00:00",
+            "seconds_to_fill": 70.370774,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 26,
+        "observed_at_utc": "2026-07-07T13:36:45.790004+00:00",
+        "account_cash": 1617.77,
+        "account_buying_power": 31828.68,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "5",
+            "filled_at": "2026-07-07 13:36:30.608844+00:00",
+            "last_polled_at": "2026-07-07T13:36:45.754165+00:00",
+            "seconds_to_fill": 64.353941,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "21",
+            "filled_at": "2026-07-07 13:36:36.854920+00:00",
+            "last_polled_at": "2026-07-07T13:36:45.789866+00:00",
+            "seconds_to_fill": 70.370774,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 27,
+        "observed_at_utc": "2026-07-07T13:36:48.928656+00:00",
+        "account_cash": 1617.77,
+        "account_buying_power": 31844.97,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.PARTIALLY_FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "5",
+            "filled_at": "2026-07-07 13:36:30.608844+00:00",
+            "last_polled_at": "2026-07-07T13:36:48.896174+00:00",
+            "seconds_to_fill": 64.353941,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "21",
+            "filled_at": "2026-07-07 13:36:36.854920+00:00",
+            "last_polled_at": "2026-07-07T13:36:48.928530+00:00",
+            "seconds_to_fill": 70.370774,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 28,
+        "observed_at_utc": "2026-07-07T13:36:52.096027+00:00",
+        "account_cash": 1721.2,
+        "account_buying_power": 31966.59,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.FILLED",
+            "latest_status": "OrderStatus.FILLED",
+            "filled_qty": "6",
+            "filled_at": "2026-07-07 13:36:49.887800+00:00",
+            "last_polled_at": "2026-07-07T13:36:52.064264+00:00",
+            "seconds_to_fill": 83.632897,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "21",
+            "filled_at": "2026-07-07 13:36:36.854920+00:00",
+            "last_polled_at": "2026-07-07T13:36:52.095925+00:00",
+            "seconds_to_fill": 70.370774,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 29,
+        "observed_at_utc": "2026-07-07T13:36:55.240808+00:00",
+        "account_cash": 1721.2,
+        "account_buying_power": 31979.72,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.PARTIALLY_FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.FILLED",
+            "latest_status": "OrderStatus.FILLED",
+            "filled_qty": "6",
+            "filled_at": "2026-07-07 13:36:49.887800+00:00",
+            "last_polled_at": "2026-07-07T13:36:55.208221+00:00",
+            "seconds_to_fill": 83.632897,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.PARTIALLY_FILLED",
+            "latest_status": "OrderStatus.PARTIALLY_FILLED",
+            "filled_qty": "21",
+            "filled_at": "2026-07-07 13:36:36.854920+00:00",
+            "last_polled_at": "2026-07-07T13:36:55.240719+00:00",
+            "seconds_to_fill": 70.370774,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      },
+      {
+        "poll": 30,
+        "observed_at_utc": "2026-07-07T13:36:56.680058+00:00",
+        "account_cash": 2169.49,
+        "account_buying_power": 32528.15,
+        "observed_statuses": {
+          "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.FILLED",
+          "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.FILLED"
+        },
+        "orders": [
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+            "ticker": "CVS",
+            "side": "SELL",
+            "estimated_notional": 610.9488109588624,
+            "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+            "status": "OrderStatus.FILLED",
+            "latest_status": "OrderStatus.FILLED",
+            "filled_qty": "6",
+            "filled_at": "2026-07-07 13:36:49.887800+00:00",
+            "last_polled_at": "2026-07-07T13:36:56.648153+00:00",
+            "seconds_to_fill": 83.632897,
+            "alpaca_order_id": "721a5fac-54ab-4b57-8f85-d4c80571cd6e"
+          },
+          {
+            "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+            "ticker": "WBD",
+            "side": "SELL",
+            "estimated_notional": 990.078631811142,
+            "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+            "status": "OrderStatus.FILLED",
+            "latest_status": "OrderStatus.FILLED",
+            "filled_qty": "38",
+            "filled_at": "2026-07-07 13:36:55.570513+00:00",
+            "last_polled_at": "2026-07-07T13:36:56.679930+00:00",
+            "seconds_to_fill": 89.086367,
+            "alpaca_order_id": "7ab78216-a0cf-4a73-887d-c870770a4b9b"
+          }
+        ]
+      }
+    ],
+    "pending_sell_count_at_buy_decision": 0,
+    "cash_after_sell_submission": 2169.49,
+    "buying_power_after_sell_submission": 32528.15,
+    "buy_budget_at_decision": 1233.642958729522,
+    "buy_budget_basis": "broker_buying_power",
+    "buy_phase_decision_reason": "buy_submitted_using_available_buying_power",
+    "buy_submit_started_at": "2026-07-07T13:36:57.310630+00:00",
+    "buy_submit_completed_at": "2026-07-07T13:36:57.636528+00:00",
+    "buy_notional_submitted_immediate": 1233.642958729522,
+    "buy_notional_skipped_or_deferred": 0.0,
+    "buy_notional_skipped_or_deferred_due_to_cash": 0.0,
+    "budget_skipped_orders": [],
+    "cash_rebalance_status": null,
+    "raw_cash_gate_triggered": false,
+    "raw_cash_gate_reason": null,
+    "raw_execution_outcome": null,
+    "posttrade_cash": 939.73,
+    "buying_power_after_posttrade_repoll": 31063.59,
+    "posttrade_recon_status": "OK_RECONCILED",
+    "posttrade_sell_fill_observations": [
+      {
+        "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+        "ticker": "CVS",
+        "side": "SELL",
+        "status": "FILLED",
+        "filled_quantity": 6.0,
+        "filled_at": "2026-07-07 13:36:49.887800+00:00",
+        "submitted_at": "2026-07-07 13:35:26.254903+00:00",
+        "seconds_to_fill": 83.632897,
+        "fill_observation_source": "posttrade_order_repoll"
+      },
+      {
+        "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+        "ticker": "WBD",
+        "side": "SELL",
+        "status": "FILLED",
+        "filled_quantity": 38.0,
+        "filled_at": "2026-07-07 13:36:55.570513+00:00",
+        "submitted_at": "2026-07-07 13:35:26.484146+00:00",
+        "seconds_to_fill": 89.086367,
+        "fill_observation_source": "posttrade_order_repoll"
+      }
+    ],
+    "first_sell_fill_latency_seconds": 83.632897,
+    "temporary_cash_shortfall_later_resolved": false,
+    "raw_cash_gate_despite_final_reconciled_success": false,
+    "post_sell_rebudget": {
+      "schema_version": "post_sell_rebudget.v1",
+      "enabled": true,
+      "status": "REBUILT",
+      "reason_codes": [],
+      "pre_sell_cash": 545.59,
+      "pre_sell_buying_power": 30540.39,
+      "pre_sell_equity": 10673.46,
+      "sell_orders_submitted_count": 2,
+      "sell_orders_submitted": [
+        {
+          "order_id": "2026-07-07:main:growth_engine_v4:CVS:SELL",
+          "ticker": "CVS",
+          "side": "SELL",
+          "quantity": 6.0,
+          "order_type": "MKT",
+          "time_in_force": "DAY",
+          "notional": 610.9488109588624,
+          "reason": "removed_from_targets"
+        },
+        {
+          "order_id": "2026-07-07:main:growth_engine_v4:WBD:SELL",
+          "ticker": "WBD",
+          "side": "SELL",
+          "quantity": 38.0,
+          "order_type": "MKT",
+          "time_in_force": "DAY",
+          "notional": 990.078631811142,
+          "reason": "removed_from_targets"
+        }
+      ],
+      "sell_phase_status": "COMPLETED",
+      "sell_phase_completion_reason": "positions_confirmed",
+      "sell_phase_observed_statuses": {
+        "2026-07-07:main:growth_engine_v4:CVS:SELL": "ORDERSTATUS.FILLED",
+        "2026-07-07:main:growth_engine_v4:WBD:SELL": "ORDERSTATUS.FILLED"
+      },
+      "confirmed_sell_proceeds": 1623.8999999999996,
+      "post_sell_cash": 2169.49,
+      "post_sell_buying_power": 32528.15,
+      "post_sell_equity": 10687.42,
+      "risk_cash_target": 935.8470412704779,
+      "target_cash_weight": 0.0875652909,
+      "buy_budget_before_safeguards": 2169.49,
+      "broker_safeguard_buy_budget": 32428.15,
+      "risk_cash_target_buy_budget": 1233.642958729522,
+      "buy_budget_after_safeguards": 1233.642958729522,
+      "buy_budget_basis": "broker_buying_power",
+      "original_precomputed_buy_notional": 3020.039970397949,
+      "recomputed_requested_buy_notional": 4970.181434192492,
+      "recomputed_buy_notional": 1233.642958729522,
+      "final_submitted_buy_notional": 1233.642958729522,
+      "final_buy_orders_submitted": [
+        {
+          "order_id": "2026-07-07:main:growth_engine_v4:PNC:BUY",
+          "ticker": "PNC",
+          "side": "BUY",
+          "quantity": 2.557669259710094,
+          "order_type": "MKT",
+          "time_in_force": "DAY",
+          "notional": 647.5506844404724,
+          "reason": "post_sell_rebudget"
+        },
+        {
+          "order_id": "2026-07-07:main:growth_engine_v4:GE:BUY",
+          "ticker": "GE",
+          "side": "BUY",
+          "quantity": 1.5477244259663088,
+          "order_type": "MKT",
+          "time_in_force": "DAY",
+          "notional": 586.0922742890496,
+          "reason": "post_sell_rebudget_capital_clipped"
+        }
+      ],
+      "skipped_buy_orders": [
+        {
+          "ticker": "VRTX",
+          "side": "BUY",
+          "shares": 0.732232301087999,
+          "price": 529.5900268554688,
+          "slippage_cost": 0.0,
+          "notional": 387.78292399763507,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.057160352,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 387.78292399763507,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 548.0641172728427,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "WELL",
+          "side": "BUY",
+          "shares": 1.859874416458707,
+          "price": 232.69000244140625,
+          "slippage_cost": 0.0,
+          "notional": 432.7741825064856,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0532824354,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 432.7741825064856,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 503.0728587639922,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "ALL",
+          "side": "BUY",
+          "shares": 1.3513044561886174,
+          "price": 248.3699951171875,
+          "slippage_cost": 0.0,
+          "notional": 335.62348118540064,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0513128593,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 335.62348118540064,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 600.2235600850772,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "ABBV",
+          "side": "BUY",
+          "shares": 1.8458771263622726,
+          "price": 254.75999450683594,
+          "slippage_cost": 0.0,
+          "notional": 470.2556465723467,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0440449026,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 470.2556465723467,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 465.5913946981311,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "AVGO",
+          "side": "BUY",
+          "shares": 1.2458577909222943,
+          "price": 373.8999938964844,
+          "slippage_cost": 0.0,
+          "notional": 465.82622042173335,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0436300354,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 465.82622042173335,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 470.02082084874445,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "ELV",
+          "side": "BUY",
+          "shares": 0.5354312451055409,
+          "price": 408.1700134277344,
+          "slippage_cost": 0.0,
+          "notional": 218.54697850435716,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0434330666,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 218.54697850435716,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 717.3000627661206,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "NXPI",
+          "side": "BUY",
+          "shares": 1.5182673684076984,
+          "price": 280.510009765625,
+          "slippage_cost": 0.0,
+          "notional": 425.88919433887327,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0398894691,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 425.88919433887327,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 509.95784693160454,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "F",
+          "side": "BUY",
+          "shares": 28.200984758071165,
+          "price": 13.829999923706055,
+          "slippage_cost": 0.0,
+          "notional": 390.0196170525598,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0375813753,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 390.0196170525598,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 545.827424217918,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "PANW",
+          "side": "BUY",
+          "shares": 0.8265858962177347,
+          "price": 357.5299987792969,
+          "slippage_cost": 0.0,
+          "notional": 295.5292544657107,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0276797468,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 295.5292544657107,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 640.3177868047671,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        },
+        {
+          "ticker": "GEV",
+          "side": "BUY",
+          "shares": 0.24242011409667535,
+          "price": 1152.0400390625,
+          "slippage_cost": 0.0,
+          "notional": 279.2776777134696,
+          "reason": "post_sell_rebudget",
+          "target_weight": 0.0261575979,
+          "block_reason": "buy_blocked_insufficient_buying_power",
+          "requested_notional": 279.2776777134696,
+          "buy_budget_at_decision": 1233.642958729522,
+          "spent_before_order": 1233.642958729522,
+          "remaining_buy_budget_at_decision": 0.0,
+          "min_trade_dollars": 100.0,
+          "allowed_notional": 0.0,
+          "buy_budget_basis": "broker_buying_power",
+          "cash_at_buy_decision": 2169.49,
+          "projected_cash_after_requested_buy": 656.5693635570083,
+          "projected_cash_after_allowed_buy": 935.8470412704778,
+          "buying_power_at_buy_decision": 32528.15,
+          "broker_buying_power_constraint": 32428.15,
+          "target_cash_constraint": 935.8470412704779,
+          "target_cash_constraint_breached_by_requested_buy": true
+        }
+      ],
+      "estimated_ending_cash": 935.8470412704778,
+      "estimated_ending_cash_vs_risk_target": -1.1368683772161603e-13,
+      "ending_cash": 939.73,
+      "ending_cash_vs_risk_target": 3.8829587295221017,
+      "artifact_path": "outputs/runs/2026-07-07T093509-0400_b6bf4a2/broker/post_sell_rebudget_2026-07-07.json"
+    },
+    "post_sell_rebudget_artifact_path": "outputs/runs/2026-07-07T093509-0400_b6bf4a2/broker/post_sell_rebudget_2026-07-07.json",
+    "raw_execution_status": "READY",
+    "raw_operator_execution_status": "executed",
+    "raw_execution_reason": null,
+    "final_execution_status": "READY",
+    "final_operator_execution_status": "executed",
+    "final_execution_reason": null,
+    "reconciled_to_target_state": false,
+    "reconciliation_override_applied": false
+  },
+  "planned_payload_trade_count": 13,
+  "executable_trades_count": 4,
+  "exact_plan_enabled": true,
+  "execution_source": "planned_payload_exact",
+  "reason": null,
+  "execution_reliability_classification": "RELIABILITY_GREEN",
+  "execution_reliability_score": 100,
+  "execution_reliability_status": "PASS",
+  "execution_reliability_top_reason": null,
+  "execution_reliability_clean_run_streak": 1,
+  "execution_reliability_operator_action_required": false
+}

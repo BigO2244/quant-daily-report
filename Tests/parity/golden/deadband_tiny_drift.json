@@ -1,0 +1,210 @@
+{
+  "artifact_comparison": null,
+  "capital_budget": {
+    "explicit_components": {
+      "broker_budget": 8900.0,
+      "buy_budget_after_safeguards": 8900.0,
+      "expected_sell_proceeds_conservative": 0.0,
+      "post_sell_cash": 9000.0,
+      "reserve_cash_post_sell": 100.0,
+      "reserve_cash_pretrade": 100.0,
+      "risk_cash_target_buy_budget": 9000.0,
+      "risk_cash_target_term": 0.0,
+      "sell_proceeds_haircut": 0.95
+    },
+    "post_sell_buy_budget": {
+      "broker_safeguard_buy_budget": 8900.0,
+      "buy_budget_after_safeguards": 8900.0,
+      "buy_budget_basis": "broker_buying_power",
+      "buy_budget_before_safeguards": 9000.0,
+      "post_sell_buying_power": "9000.0",
+      "post_sell_cash": 9000.0,
+      "post_sell_equity": 10000.0,
+      "risk_cash_target": 0.0,
+      "risk_cash_target_buy_budget": 9000.0,
+      "target_cash_weight": 0.0
+    },
+    "pretrade_capital_budget": {
+      "allowed_buy_notional": 0.0,
+      "broker_buying_power_at_planning": 9000.0,
+      "broker_cash_at_planning": 9000.0,
+      "broker_equity_at_planning": 10000.0,
+      "capital_constraint_triggered": false,
+      "clipped_or_deferred_buys_count": 0,
+      "expected_sell_proceeds": 0.0,
+      "expected_sell_proceeds_conservative": 0.0,
+      "requested_buy_notional": 0.0,
+      "reserve_cash_policy": {
+        "available_for_buys": 8900.0,
+        "equity_reserve_pct": 0.005,
+        "min_cash_dollars": 100.0,
+        "reserve_cash": 100.0,
+        "sell_proceeds_haircut": 0.95
+      }
+    }
+  },
+  "execution_filter": {
+    "intents": [],
+    "min_trade_decisions": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 0
+    },
+    "stats": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 0,
+      "raw": 0,
+      "rounded": 0
+    }
+  },
+  "final_decision_output": {
+    "buy_count": 0,
+    "intent_order": [],
+    "intents": [],
+    "sell_count": 0
+  },
+  "inputs_summary": {
+    "config": {
+      "allow_fractional": true,
+      "benchmark_ticker": "SPY",
+      "cash_buffer_bps": 0.0,
+      "cash_target_weight_default": 0.0,
+      "halt_on_data_error": true,
+      "initial_equity": 10000.0,
+      "market_cutoff_time_et": "15:45",
+      "max_position_change_pct": 1.0,
+      "max_position_pct": 1.0,
+      "max_trades_per_day": 50,
+      "max_turnover_pct": 1.0,
+      "min_trade_dollars": 1.0,
+      "portfolio_id": "parity",
+      "rebalance_deadband_pct": 0.01,
+      "reconciliation_abs_tolerance_dollars": 1.0,
+      "reconciliation_bps_tolerance": 1.0,
+      "require_benchmark_price": true,
+      "risk_action": "warn",
+      "sent_ledger_path": "outputs/orders_sent/orders_sent.csv",
+      "slippage_bps": 0.0,
+      "strategy_version": "paper_native",
+      "trading_mode": "paper"
+    },
+    "holdings_count": 1,
+    "planning_account": {
+      "buying_power": "9000.0",
+      "cash": "9000.0",
+      "equity": "10000.0",
+      "status": "ACTIVE"
+    },
+    "post_sell_account_fixture": {
+      "buying_power": "9000.0",
+      "cash": "9000.0",
+      "equity": "10000.0",
+      "status": "ACTIVE"
+    },
+    "precomputed_trade_plan_used": false,
+    "prices_count": 1,
+    "rebudget_total_equity": null,
+    "starting_cash": 9000.0,
+    "target_cash_weight": 0.0,
+    "targets_count": 1,
+    "total_equity": 10000.0
+  },
+  "post_sell_rebudget": {
+    "enabled": true,
+    "ending_cash": null,
+    "ending_cash_vs_risk_target": null,
+    "estimated_ending_cash": 9000.0,
+    "estimated_ending_cash_vs_risk_target": 9000.0,
+    "final_buy_orders_submitted": [],
+    "final_submitted_buy_notional": 0.0,
+    "original_precomputed_buy_notional": 0.0,
+    "reason_codes": [
+      "no_sell_orders"
+    ],
+    "rebudget_total_equity": null,
+    "rebuilt_buy_intents": [],
+    "recomputed_buy_notional": 0.0,
+    "recomputed_requested_buy_notional": 0.0,
+    "resized_by_post_sell_rebudget": [],
+    "sell_orders_submitted": [],
+    "sell_orders_submitted_count": 0,
+    "skipped_buy_orders": [],
+    "status": "SKIPPED",
+    "suppressed_by_post_sell_rebudget": []
+  },
+  "scenario": {
+    "name": "deadband_tiny_drift",
+    "notes": "Target drift is below the 1% deadband and is surfaced in trade_meta.deadband_skipped.",
+    "price_basis": "fixture_price",
+    "source": "Synthetic parity fixture."
+  },
+  "schema_version": "paper_execution_parity.v1",
+  "sell_first_lifecycle": {
+    "broker_stub": "SynchronousSellFillBroker",
+    "post_sell_account": {
+      "buying_power": "9000.0",
+      "cash": "9000.0",
+      "equity": "10000.0",
+      "status": "ACTIVE"
+    },
+    "post_sell_holdings": [
+      {
+        "order": 1,
+        "shares": 10.0,
+        "sleeve": "parity",
+        "ticker": "TINY"
+      }
+    ],
+    "sell_fill": {
+      "confirmed_sell_proceeds": 0.0,
+      "fill_model": "synchronous_all_sells_filled",
+      "post_sell_cash_from_sync_fills": 9000.0,
+      "post_sell_cash_used_for_rebudget": 9000.0,
+      "sell_orders": []
+    }
+  },
+  "transition_computation": {
+    "deadband_decisions": [
+      {
+        "current_weight": 0.1,
+        "deadband_pct": 0.01,
+        "drift": 0.005,
+        "reason": "deadband_drift_below_threshold",
+        "target_weight": 0.105,
+        "ticker": "TINY"
+      }
+    ],
+    "raw_intent_order": [],
+    "raw_intents": [],
+    "slippage_bps": 0.0,
+    "trade_meta": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": 9000.0,
+      "cash_sweep_tickers": [],
+      "deadband_pct": 0.01,
+      "deadband_skipped": [
+        {
+          "current_weight": 0.1,
+          "deadband_pct": 0.01,
+          "drift": 0.005,
+          "reason": "deadband_drift_below_threshold",
+          "target_weight": 0.105,
+          "ticker": "TINY"
+        }
+      ],
+      "deadband_skipped_count": 1,
+      "overspend_prevented": false,
+      "scaled_tickers": [],
+      "target_cash_weight": 0.0,
+      "target_investable_dollars": 10000.0
+    },
+    "whole_share_sweep": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": 9000.0,
+      "cash_sweep_tickers": []
+    }
+  }
+}

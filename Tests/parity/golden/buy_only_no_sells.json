@@ -1,0 +1,353 @@
+{
+  "artifact_comparison": null,
+  "capital_budget": {
+    "explicit_components": {
+      "broker_budget": 9900.0,
+      "buy_budget_after_safeguards": 9900.0,
+      "expected_sell_proceeds_conservative": 0.0,
+      "post_sell_cash": 10000.0,
+      "reserve_cash_post_sell": 100.0,
+      "reserve_cash_pretrade": 100.0,
+      "risk_cash_target_buy_budget": 8000.0,
+      "risk_cash_target_term": 2000.0,
+      "sell_proceeds_haircut": 0.95
+    },
+    "post_sell_buy_budget": {
+      "broker_safeguard_buy_budget": 9900.0,
+      "buy_budget_after_safeguards": 9900.0,
+      "buy_budget_basis": "broker_buying_power",
+      "buy_budget_before_safeguards": 10000.0,
+      "post_sell_buying_power": "10000.0",
+      "post_sell_cash": 10000.0,
+      "post_sell_equity": 10000.0,
+      "risk_cash_target": 2000.0,
+      "risk_cash_target_buy_budget": 8000.0,
+      "target_cash_weight": 0.2
+    },
+    "pretrade_capital_budget": {
+      "allowed_buy_notional": 5000.0,
+      "broker_buying_power_at_planning": 10000.0,
+      "broker_cash_at_planning": 10000.0,
+      "broker_equity_at_planning": 10000.0,
+      "capital_constrained_no_trades": false,
+      "capital_constraint_triggered": false,
+      "clipped_or_deferred_buys_count": 0,
+      "expected_sell_proceeds": 0.0,
+      "expected_sell_proceeds_conservative": 0.0,
+      "requested_buy_notional": 5000.0,
+      "reserve_cash_policy": {
+        "available_for_buys": 9900.0,
+        "equity_reserve_pct": 0.005,
+        "min_cash_dollars": 100.0,
+        "reserve_cash": 100.0,
+        "sell_proceeds_haircut": 0.95
+      }
+    }
+  },
+  "execution_filter": {
+    "intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 3000.0,
+        "order": 1,
+        "price": 200.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 200.0,
+        "shares": 15.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "AAPL",
+        "ticker": "AAPL"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 2000.0,
+        "order": 2,
+        "price": 100.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 100.0,
+        "shares": 20.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "MSFT",
+        "ticker": "MSFT"
+      }
+    ],
+    "min_trade_decisions": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 2
+    },
+    "stats": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 2,
+      "raw": 2,
+      "rounded": 2
+    }
+  },
+  "final_decision_output": {
+    "buy_count": 2,
+    "intent_order": [
+      "AAPL",
+      "MSFT"
+    ],
+    "intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 3000.0,
+        "order": 1,
+        "price": 200.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 200.0,
+        "shares": 15.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "AAPL",
+        "ticker": "AAPL"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 2000.0,
+        "order": 2,
+        "price": 100.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 100.0,
+        "shares": 20.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "MSFT",
+        "ticker": "MSFT"
+      }
+    ],
+    "sell_count": 0
+  },
+  "inputs_summary": {
+    "config": {
+      "allow_fractional": true,
+      "benchmark_ticker": "SPY",
+      "cash_buffer_bps": 0.0,
+      "cash_target_weight_default": 0.0,
+      "halt_on_data_error": true,
+      "initial_equity": 10000.0,
+      "market_cutoff_time_et": "15:45",
+      "max_position_change_pct": 1.0,
+      "max_position_pct": 1.0,
+      "max_trades_per_day": 50,
+      "max_turnover_pct": 1.0,
+      "min_trade_dollars": 100.0,
+      "portfolio_id": "parity",
+      "rebalance_deadband_pct": 0.01,
+      "reconciliation_abs_tolerance_dollars": 1.0,
+      "reconciliation_bps_tolerance": 1.0,
+      "require_benchmark_price": true,
+      "risk_action": "warn",
+      "sent_ledger_path": "outputs/orders_sent/orders_sent.csv",
+      "slippage_bps": 0.0,
+      "strategy_version": "paper_native",
+      "trading_mode": "paper"
+    },
+    "holdings_count": 0,
+    "planning_account": {
+      "buying_power": "10000.0",
+      "cash": "10000.0",
+      "equity": "10000.0",
+      "status": "ACTIVE"
+    },
+    "post_sell_account_fixture": {
+      "buying_power": "10000.0",
+      "cash": "10000.0",
+      "equity": "10000.0",
+      "status": "ACTIVE"
+    },
+    "precomputed_trade_plan_used": false,
+    "prices_count": 2,
+    "rebudget_total_equity": null,
+    "starting_cash": 10000.0,
+    "target_cash_weight": 0.2,
+    "targets_count": 2,
+    "total_equity": 10000.0
+  },
+  "post_sell_rebudget": {
+    "enabled": true,
+    "ending_cash": null,
+    "ending_cash_vs_risk_target": null,
+    "estimated_ending_cash": 5000.0,
+    "estimated_ending_cash_vs_risk_target": 3000.0,
+    "final_buy_orders_submitted": [
+      {
+        "notional": 3000.0,
+        "order_id": "parity:buy_only_no_sells:paper_native:AAPL:BUY",
+        "order_type": "MKT",
+        "quantity": 15.0,
+        "reason": "rebalance_to_target",
+        "side": "BUY",
+        "ticker": "AAPL",
+        "time_in_force": "DAY"
+      },
+      {
+        "notional": 2000.0,
+        "order_id": "parity:buy_only_no_sells:paper_native:MSFT:BUY",
+        "order_type": "MKT",
+        "quantity": 20.0,
+        "reason": "rebalance_to_target",
+        "side": "BUY",
+        "ticker": "MSFT",
+        "time_in_force": "DAY"
+      }
+    ],
+    "final_submitted_buy_notional": 5000.0,
+    "original_precomputed_buy_notional": 5000.0,
+    "reason_codes": [
+      "no_sell_orders"
+    ],
+    "rebudget_total_equity": null,
+    "rebuilt_buy_intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 3000.0,
+        "order": 1,
+        "price": 200.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 200.0,
+        "shares": 15.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget",
+        "symbol": "AAPL",
+        "ticker": "AAPL"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 2000.0,
+        "order": 2,
+        "price": 100.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 100.0,
+        "shares": 20.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget",
+        "symbol": "MSFT",
+        "ticker": "MSFT"
+      }
+    ],
+    "recomputed_buy_notional": 5000.0,
+    "recomputed_requested_buy_notional": 5000.0,
+    "resized_by_post_sell_rebudget": [],
+    "sell_orders_submitted": [],
+    "sell_orders_submitted_count": 0,
+    "skipped_buy_orders": [],
+    "status": "SKIPPED",
+    "suppressed_by_post_sell_rebudget": []
+  },
+  "scenario": {
+    "name": "buy_only_no_sells",
+    "notes": "No sells are present; paper skips post-sell rebuild and preserves planned buys.",
+    "price_basis": "fixture_price",
+    "source": "Synthetic parity fixture."
+  },
+  "schema_version": "paper_execution_parity.v1",
+  "sell_first_lifecycle": {
+    "broker_stub": "SynchronousSellFillBroker",
+    "post_sell_account": {
+      "buying_power": "10000.0",
+      "cash": "10000.0",
+      "equity": "10000.0",
+      "status": "ACTIVE"
+    },
+    "post_sell_holdings": [],
+    "sell_fill": {
+      "confirmed_sell_proceeds": 0.0,
+      "fill_model": "synchronous_all_sells_filled",
+      "post_sell_cash_from_sync_fills": 10000.0,
+      "post_sell_cash_used_for_rebudget": 10000.0,
+      "sell_orders": []
+    }
+  },
+  "transition_computation": {
+    "deadband_decisions": [],
+    "raw_intent_order": [
+      "AAPL",
+      "MSFT"
+    ],
+    "raw_intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 3000.0,
+        "order": 1,
+        "price": 200.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 200.0,
+        "shares": 15.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "AAPL",
+        "ticker": "AAPL"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 2000.0,
+        "order": 2,
+        "price": 100.0,
+        "price_basis": "fixture_price",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 100.0,
+        "shares": 20.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "MSFT",
+        "ticker": "MSFT"
+      }
+    ],
+    "slippage_bps": 0.0,
+    "trade_meta": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": 3000.0,
+      "cash_sweep_tickers": [],
+      "deadband_pct": 0.01,
+      "deadband_skipped": [],
+      "deadband_skipped_count": 0,
+      "overspend_prevented": false,
+      "scaled_tickers": [],
+      "target_cash_weight": 0.2,
+      "target_investable_dollars": 8000.0
+    },
+    "whole_share_sweep": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": 3000.0,
+      "cash_sweep_tickers": []
+    }
+  }
+}

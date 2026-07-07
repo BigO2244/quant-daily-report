@@ -1,0 +1,1234 @@
+{
+  "artifact_comparison": {
+    "actual": {
+      "buys": [
+        "PNC",
+        "GE"
+      ],
+      "ending_cash": 939.73,
+      "estimated_ending_cash": 935.8470412705,
+      "post_sell_equity": 10687.42,
+      "skipped": [
+        "VRTX",
+        "WELL",
+        "ALL",
+        "ABBV",
+        "AVGO",
+        "ELV",
+        "NXPI",
+        "F",
+        "PANW",
+        "GEV"
+      ],
+      "target_cash_weight": 0.0875652909
+    },
+    "expected": {
+      "buys": [
+        "PNC",
+        "GE"
+      ],
+      "ending_cash": 939.73,
+      "estimated_ending_cash": 935.8470412705,
+      "post_sell_equity": 10687.42,
+      "skipped": [
+        "VRTX",
+        "WELL",
+        "ALL",
+        "ABBV",
+        "AVGO",
+        "ELV",
+        "NXPI",
+        "F",
+        "PANW",
+        "GEV"
+      ],
+      "source_run_id": "2026-07-07T093509-0400_b6bf4a2",
+      "target_cash_weight": 0.0875652909
+    }
+  },
+  "capital_budget": {
+    "explicit_components": {
+      "broker_budget": 32428.15,
+      "buy_budget_after_safeguards": 1233.6429587295,
+      "expected_sell_proceeds_conservative": 1520.9760706315,
+      "post_sell_cash": 2169.49,
+      "reserve_cash_post_sell": 100.0,
+      "reserve_cash_pretrade": 100.0,
+      "risk_cash_target_buy_budget": 1233.6429587295,
+      "risk_cash_target_term": 935.8470412705,
+      "sell_proceeds_haircut": 0.95
+    },
+    "post_sell_buy_budget": {
+      "broker_safeguard_buy_budget": 32428.15,
+      "buy_budget_after_safeguards": 1233.6429587295,
+      "buy_budget_basis": "broker_buying_power",
+      "buy_budget_before_safeguards": 2169.49,
+      "post_sell_buying_power": 32528.15,
+      "post_sell_cash": 2169.49,
+      "post_sell_equity": 10687.42,
+      "risk_cash_target": 935.8470412705,
+      "risk_cash_target_buy_budget": 1233.6429587295,
+      "target_cash_weight": 0.0875652909
+    },
+    "pretrade_capital_budget": {
+      "allowed_buy_notional": 3020.0399703979,
+      "broker_buying_power_at_planning": 30540.39,
+      "broker_cash_at_planning": 545.59,
+      "broker_equity_at_planning": 10673.46,
+      "capital_budget_application": "skipped_precomputed_trade_plan",
+      "capital_constraint_triggered": false,
+      "clipped_or_deferred_buys_count": 0,
+      "expected_sell_proceeds": 1601.02744277,
+      "expected_sell_proceeds_conservative": 1520.9760706315,
+      "requested_buy_notional": 3020.0399703979,
+      "reserve_cash_policy": {
+        "available_for_buys": 1966.5660706315,
+        "equity_reserve_pct": 0.005,
+        "min_cash_dollars": 100.0,
+        "reserve_cash": 100.0,
+        "sell_proceeds_haircut": 0.95
+      }
+    }
+  },
+  "execution_filter": {
+    "intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 610.9488109589,
+        "order": 1,
+        "price": 101.8248018265,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 6.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "execution_filter",
+        "symbol": "CVS",
+        "ticker": "CVS"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 990.0786318111,
+        "order": 2,
+        "price": 26.0547008371,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 38.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "execution_filter",
+        "symbol": "WBD",
+        "ticker": "WBD"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 254.7599945068,
+        "order": 3,
+        "price": 254.7599945068,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 254.7599945068,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "ABBV",
+        "ticker": "ABBV"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 248.3699951172,
+        "order": 4,
+        "price": 248.3699951172,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target_capital_clipped",
+        "reference_price": 248.3699951172,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "ALL",
+        "ticker": "ALL"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 373.8999938965,
+        "order": 5,
+        "price": 373.8999938965,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 373.8999938965,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "AVGO",
+        "ticker": "AVGO"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 387.2399978638,
+        "order": 6,
+        "price": 13.8299999237,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 13.8299999237,
+        "shares": 28.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "F",
+        "ticker": "F"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 378.6799926758,
+        "order": 7,
+        "price": 378.6799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 378.6799926758,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "GE",
+        "ticker": "GE"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 280.5100097656,
+        "order": 8,
+        "price": 280.5100097656,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 280.5100097656,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "NXPI",
+        "ticker": "NXPI"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 357.5299987793,
+        "order": 9,
+        "price": 357.5299987793,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 357.5299987793,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "PANW",
+        "ticker": "PANW"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 506.3599853516,
+        "order": 10,
+        "price": 253.1799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 253.1799926758,
+        "shares": 2.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "PNC",
+        "ticker": "PNC"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 232.6900024414,
+        "order": 11,
+        "price": 232.6900024414,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 232.6900024414,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "WELL",
+        "ticker": "WELL"
+      }
+    ],
+    "min_trade_decisions": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 11
+    },
+    "stats": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 11,
+      "raw": 11,
+      "rounded": 11
+    }
+  },
+  "final_decision_output": {
+    "buy_count": 2,
+    "intent_order": [
+      "CVS",
+      "WBD",
+      "PNC",
+      "GE"
+    ],
+    "intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 610.9488109589,
+        "order": 1,
+        "price": 101.8248018265,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 6.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "CVS",
+        "ticker": "CVS"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 990.0786318111,
+        "order": 2,
+        "price": 26.0547008371,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 38.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "WBD",
+        "ticker": "WBD"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 647.5506844405,
+        "order": 3,
+        "price": 253.1799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 253.1799926758,
+        "shares": 2.5576692597,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "PNC",
+        "ticker": "PNC"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 586.092274289,
+        "order": 4,
+        "price": 378.6799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget_capital_clipped",
+        "reference_price": 378.6799926758,
+        "shares": 1.547724426,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "GE",
+        "ticker": "GE"
+      }
+    ],
+    "sell_count": 2
+  },
+  "inputs_summary": {
+    "config": {
+      "allow_fractional": true,
+      "benchmark_ticker": "SPY",
+      "cash_buffer_bps": 0.0,
+      "cash_target_weight_default": 0.0875652909,
+      "halt_on_data_error": true,
+      "initial_equity": 10673.46,
+      "market_cutoff_time_et": "15:45",
+      "max_position_change_pct": 1.0,
+      "max_position_pct": 1.0,
+      "max_trades_per_day": 50,
+      "max_turnover_pct": 1.0,
+      "min_trade_dollars": 100.0,
+      "portfolio_id": "main",
+      "rebalance_deadband_pct": 0.01,
+      "reconciliation_abs_tolerance_dollars": 1.0,
+      "reconciliation_bps_tolerance": 1.0,
+      "require_benchmark_price": true,
+      "risk_action": "warn",
+      "sent_ledger_path": "outputs/orders_sent/orders_sent.csv",
+      "slippage_bps": 0.0,
+      "strategy_version": "growth_engine_v4",
+      "trading_mode": "paper"
+    },
+    "holdings_count": 32,
+    "planning_account": {
+      "buying_power": "30540.39",
+      "cash": "545.59",
+      "equity": "10673.46",
+      "status": "ACTIVE"
+    },
+    "post_sell_account_fixture": {
+      "buying_power": "32528.15",
+      "cash": "2169.49",
+      "equity": "10687.42",
+      "status": "ACTIVE"
+    },
+    "precomputed_trade_plan_used": true,
+    "prices_count": 12,
+    "rebudget_total_equity": 10676.73258,
+    "starting_cash": 545.59,
+    "target_cash_weight": 0.0875652909,
+    "targets_count": 12,
+    "total_equity": 10673.46
+  },
+  "post_sell_rebudget": {
+    "enabled": true,
+    "ending_cash": 939.73,
+    "ending_cash_vs_risk_target": 3.8829587295,
+    "estimated_ending_cash": 935.8470412705,
+    "estimated_ending_cash_vs_risk_target": -0.0,
+    "final_buy_orders_submitted": [
+      {
+        "notional": 647.5506844405,
+        "order_id": "parity:2026_07_07_real:paper_native:PNC:BUY",
+        "order_type": "MKT",
+        "quantity": 2.5576692597,
+        "reason": "post_sell_rebudget",
+        "side": "BUY",
+        "ticker": "PNC",
+        "time_in_force": "DAY"
+      },
+      {
+        "notional": 586.092274289,
+        "order_id": "parity:2026_07_07_real:paper_native:GE:BUY",
+        "order_type": "MKT",
+        "quantity": 1.547724426,
+        "reason": "post_sell_rebudget_capital_clipped",
+        "side": "BUY",
+        "ticker": "GE",
+        "time_in_force": "DAY"
+      }
+    ],
+    "final_submitted_buy_notional": 1233.6429587295,
+    "original_precomputed_buy_notional": 3020.0399703979,
+    "reason_codes": [],
+    "rebudget_total_equity": 10676.73258,
+    "rebuilt_buy_intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 647.5506844405,
+        "order": 1,
+        "price": 253.1799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 253.1799926758,
+        "shares": 2.5576692597,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget",
+        "symbol": "PNC",
+        "ticker": "PNC"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 586.092274289,
+        "order": 2,
+        "price": 378.6799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget_capital_clipped",
+        "reference_price": 378.6799926758,
+        "shares": 1.547724426,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget",
+        "symbol": "GE",
+        "ticker": "GE"
+      }
+    ],
+    "recomputed_buy_notional": 1233.6429587295,
+    "recomputed_requested_buy_notional": 4970.1814345097,
+    "resized_by_post_sell_rebudget": [
+      {
+        "original_notional": 378.6799926758,
+        "original_shares": 1.0,
+        "rebudgeted_notional": 586.092274289,
+        "rebudgeted_shares": 1.547724426,
+        "symbol": "GE"
+      },
+      {
+        "original_notional": 506.3599853516,
+        "original_shares": 2.0,
+        "rebudgeted_notional": 647.5506844405,
+        "rebudgeted_shares": 2.5576692597,
+        "symbol": "PNC"
+      }
+    ],
+    "sell_orders_submitted": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 610.9488109589,
+        "order": 1,
+        "price": 101.8248018265,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 6.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "sell_first",
+        "symbol": "CVS",
+        "ticker": "CVS"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 990.0786318111,
+        "order": 2,
+        "price": 26.0547008371,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 38.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "sell_first",
+        "symbol": "WBD",
+        "ticker": "WBD"
+      }
+    ],
+    "sell_orders_submitted_count": 2,
+    "skipped_buy_orders": [
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 387.7829239976,
+        "order": 1,
+        "price": 529.5900268555,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 529.5900268555,
+        "shares": 0.7322323011,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "VRTX",
+        "ticker": "VRTX"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 432.7741825065,
+        "order": 2,
+        "price": 232.6900024414,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 232.6900024414,
+        "shares": 1.8598744165,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "WELL",
+        "ticker": "WELL"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 335.6234811854,
+        "order": 3,
+        "price": 248.3699951172,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 248.3699951172,
+        "shares": 1.3513044562,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "ALL",
+        "ticker": "ALL"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 470.2556465723,
+        "order": 4,
+        "price": 254.7599945068,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 254.7599945068,
+        "shares": 1.8458771264,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "ABBV",
+        "ticker": "ABBV"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 465.8262204217,
+        "order": 5,
+        "price": 373.8999938965,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 373.8999938965,
+        "shares": 1.2458577909,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "AVGO",
+        "ticker": "AVGO"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 218.5469785044,
+        "order": 6,
+        "price": 408.1700134277,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 408.1700134277,
+        "shares": 0.5354312451,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "ELV",
+        "ticker": "ELV"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 425.8891943389,
+        "order": 7,
+        "price": 280.5100097656,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 280.5100097656,
+        "shares": 1.5182673684,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "NXPI",
+        "ticker": "NXPI"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 390.0196170526,
+        "order": 8,
+        "price": 13.8299999237,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 13.8299999237,
+        "shares": 28.2009847581,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "F",
+        "ticker": "F"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 295.5292544657,
+        "order": 9,
+        "price": 357.5299987793,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 357.5299987793,
+        "shares": 0.8265858962,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "PANW",
+        "ticker": "PANW"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 279.2776777135,
+        "order": 10,
+        "price": 1152.0400390625,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 1152.0400390625,
+        "shares": 0.2424201141,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "GEV",
+        "ticker": "GEV"
+      }
+    ],
+    "status": "REBUILT",
+    "suppressed_by_post_sell_rebudget": [
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 387.7829239976,
+        "requested_shares": 0.7322323011,
+        "symbol": "VRTX"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 432.7741825065,
+        "requested_shares": 1.8598744165,
+        "symbol": "WELL"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 335.6234811854,
+        "requested_shares": 1.3513044562,
+        "symbol": "ALL"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 470.2556465723,
+        "requested_shares": 1.8458771264,
+        "symbol": "ABBV"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 465.8262204217,
+        "requested_shares": 1.2458577909,
+        "symbol": "AVGO"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 218.5469785044,
+        "requested_shares": 0.5354312451,
+        "symbol": "ELV"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 425.8891943389,
+        "requested_shares": 1.5182673684,
+        "symbol": "NXPI"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 390.0196170526,
+        "requested_shares": 28.2009847581,
+        "symbol": "F"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 295.5292544657,
+        "requested_shares": 0.8265858962,
+        "symbol": "PANW"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 279.2776777135,
+        "requested_shares": 0.2424201141,
+        "symbol": "GEV"
+      }
+    ]
+  },
+  "scenario": {
+    "name": "2026_07_07_real",
+    "notes": "Ground-truth paper run anchor. Exact submitted sells come from execution_payload; original planned buys come from planned_execution_payload; post-sell target candidates and expected cash outputs come from post_sell_rebudget_2026-07-07.json.",
+    "price_basis": "real_run_precompute_prev_close",
+    "source": "Read-only VM artifact copy from /home/brettolson/quant-daily-report/outputs/runs/2026-07-07T093509-0400_b6bf4a2 plus referenced precompute target artifacts."
+  },
+  "schema_version": "paper_execution_parity.v1",
+  "sell_first_lifecycle": {
+    "broker_stub": "SynchronousSellFillBroker",
+    "post_sell_account": {
+      "buying_power": "32528.15",
+      "cash": "2169.49",
+      "equity": "10687.42",
+      "status": "ACTIVE"
+    },
+    "post_sell_holdings": [
+      {
+        "order": 1,
+        "shares": 0.854492087,
+        "sleeve": "main",
+        "ticker": "ALL"
+      },
+      {
+        "order": 2,
+        "shares": 0.658365895,
+        "sleeve": "main",
+        "ticker": "BNY"
+      },
+      {
+        "order": 3,
+        "shares": 0.344756014,
+        "sleeve": "main",
+        "ticker": "C"
+      },
+      {
+        "order": 4,
+        "shares": 0.193736727,
+        "sleeve": "main",
+        "ticker": "CB"
+      },
+      {
+        "order": 5,
+        "shares": 0.668310858,
+        "sleeve": "main",
+        "ticker": "CVS"
+      },
+      {
+        "order": 6,
+        "shares": 0.600671903,
+        "sleeve": "main",
+        "ticker": "ELV"
+      },
+      {
+        "order": 7,
+        "shares": 0.087315765,
+        "sleeve": "main",
+        "ticker": "EOG"
+      },
+      {
+        "order": 8,
+        "shares": 0.689792161,
+        "sleeve": "main",
+        "ticker": "EQIX"
+      },
+      {
+        "order": 9,
+        "shares": 0.811762623,
+        "sleeve": "main",
+        "ticker": "F"
+      },
+      {
+        "order": 10,
+        "shares": 6.0,
+        "sleeve": "main",
+        "ticker": "FTNT"
+      },
+      {
+        "order": 11,
+        "shares": 10.4200527,
+        "sleeve": "main",
+        "ticker": "GM"
+      },
+      {
+        "order": 12,
+        "shares": 0.490457649,
+        "sleeve": "main",
+        "ticker": "HLT"
+      },
+      {
+        "order": 13,
+        "shares": 0.974974353,
+        "sleeve": "main",
+        "ticker": "JNJ"
+      },
+      {
+        "order": 14,
+        "shares": 2.749529624,
+        "sleeve": "main",
+        "ticker": "KLAC"
+      },
+      {
+        "order": 15,
+        "shares": 0.62017829,
+        "sleeve": "main",
+        "ticker": "MAR"
+      },
+      {
+        "order": 16,
+        "shares": 0.643930139,
+        "sleeve": "main",
+        "ticker": "MDLZ"
+      },
+      {
+        "order": 17,
+        "shares": 10.862047449,
+        "sleeve": "main",
+        "ticker": "MNST"
+      },
+      {
+        "order": 18,
+        "shares": 1.752341547,
+        "sleeve": "main",
+        "ticker": "MO"
+      },
+      {
+        "order": 19,
+        "shares": 0.663197754,
+        "sleeve": "main",
+        "ticker": "MS"
+      },
+      {
+        "order": 20,
+        "shares": 1.24757638,
+        "sleeve": "main",
+        "ticker": "NEE"
+      },
+      {
+        "order": 21,
+        "shares": 0.949868996,
+        "sleeve": "main",
+        "ticker": "PLD"
+      },
+      {
+        "order": 22,
+        "shares": 0.662332339,
+        "sleeve": "main",
+        "ticker": "PNC"
+      },
+      {
+        "order": 23,
+        "shares": 0.091406546,
+        "sleeve": "main",
+        "ticker": "PSX"
+      },
+      {
+        "order": 24,
+        "shares": 2.228863886,
+        "sleeve": "main",
+        "ticker": "QCOM"
+      },
+      {
+        "order": 25,
+        "shares": 0.58255748,
+        "sleeve": "main",
+        "ticker": "SPG"
+      },
+      {
+        "order": 26,
+        "shares": 1.238900032,
+        "sleeve": "main",
+        "ticker": "STX"
+      },
+      {
+        "order": 27,
+        "shares": 0.489729778,
+        "sleeve": "main",
+        "ticker": "UNH"
+      },
+      {
+        "order": 28,
+        "shares": 0.420141727,
+        "sleeve": "main",
+        "ticker": "VRTX"
+      },
+      {
+        "order": 29,
+        "shares": 0.652855084,
+        "sleeve": "main",
+        "ticker": "VZ"
+      },
+      {
+        "order": 30,
+        "shares": 0.657227696,
+        "sleeve": "main",
+        "ticker": "WBD"
+      },
+      {
+        "order": 31,
+        "shares": 0.584933302,
+        "sleeve": "main",
+        "ticker": "WELL"
+      },
+      {
+        "order": 32,
+        "shares": 0.47912263,
+        "sleeve": "main",
+        "ticker": "WMB"
+      }
+    ],
+    "sell_fill": {
+      "confirmed_sell_proceeds": 1623.9,
+      "fill_model": "synchronous_all_sells_filled",
+      "post_sell_cash_from_sync_fills": 2146.61744277,
+      "post_sell_cash_used_for_rebudget": 2169.49,
+      "sell_orders": [
+        {
+          "fill_status": "FILLED",
+          "notional": 610.9488109589,
+          "shares": 6.0,
+          "symbol": "CVS"
+        },
+        {
+          "fill_status": "FILLED",
+          "notional": 990.0786318111,
+          "shares": 38.0,
+          "symbol": "WBD"
+        }
+      ]
+    }
+  },
+  "transition_computation": {
+    "deadband_decisions": [],
+    "raw_intent_order": [
+      "CVS",
+      "WBD",
+      "ABBV",
+      "ALL",
+      "AVGO",
+      "F",
+      "GE",
+      "NXPI",
+      "PANW",
+      "PNC",
+      "WELL"
+    ],
+    "raw_intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 610.9488109589,
+        "order": 1,
+        "price": 101.8248018265,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 6.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "build_rebalance_trades",
+        "symbol": "CVS",
+        "ticker": "CVS"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 990.0786318111,
+        "order": 2,
+        "price": 26.0547008371,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "removed_from_targets",
+        "reference_price": null,
+        "shares": 38.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": null,
+        "stage": "build_rebalance_trades",
+        "symbol": "WBD",
+        "ticker": "WBD"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 254.7599945068,
+        "order": 3,
+        "price": 254.7599945068,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 254.7599945068,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "ABBV",
+        "ticker": "ABBV"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 248.3699951172,
+        "order": 4,
+        "price": 248.3699951172,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target_capital_clipped",
+        "reference_price": 248.3699951172,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "ALL",
+        "ticker": "ALL"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 373.8999938965,
+        "order": 5,
+        "price": 373.8999938965,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 373.8999938965,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "AVGO",
+        "ticker": "AVGO"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 387.2399978638,
+        "order": 6,
+        "price": 13.8299999237,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 13.8299999237,
+        "shares": 28.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "F",
+        "ticker": "F"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 378.6799926758,
+        "order": 7,
+        "price": 378.6799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 378.6799926758,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "GE",
+        "ticker": "GE"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 280.5100097656,
+        "order": 8,
+        "price": 280.5100097656,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 280.5100097656,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "NXPI",
+        "ticker": "NXPI"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 357.5299987793,
+        "order": 9,
+        "price": 357.5299987793,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 357.5299987793,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "PANW",
+        "ticker": "PANW"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 506.3599853516,
+        "order": 10,
+        "price": 253.1799926758,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 253.1799926758,
+        "shares": 2.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "PNC",
+        "ticker": "PNC"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 232.6900024414,
+        "order": 11,
+        "price": 232.6900024414,
+        "price_basis": "real_run_precompute_prev_close",
+        "reason_code": "rebalance_to_target",
+        "reference_price": 232.6900024414,
+        "shares": 1.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "WELL",
+        "ticker": "WELL"
+      }
+    ],
+    "slippage_bps": 0.0,
+    "trade_meta": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": null,
+      "cash_sweep_tickers": [],
+      "deadband_skipped": [],
+      "deadband_skipped_count": 0,
+      "precomputed_trade_plan_used": true,
+      "source": "precomputed_execution_payload",
+      "target_cash_weight": 0.0875652909
+    },
+    "whole_share_sweep": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": null,
+      "cash_sweep_tickers": []
+    }
+  }
+}

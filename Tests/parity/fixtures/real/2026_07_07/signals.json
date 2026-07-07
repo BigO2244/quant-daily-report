@@ -1,0 +1,155 @@
+{
+  "snapshot_date": "2026-07-07",
+  "meta": {
+    "trade_date": "2026-07-07",
+    "asof_date": "2026-07-06",
+    "generated_at": "2026-07-07T11:02:06.065866+00:00"
+  },
+  "signals": [
+    {
+      "ticker": "ABBV",
+      "target_weight": 0.04404490260465175,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.04404490260465175
+    },
+    {
+      "ticker": "ALL",
+      "target_weight": 0.05131285926964211,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.05131285926964211
+    },
+    {
+      "ticker": "AVGO",
+      "target_weight": 0.05636495786523324,
+      "sleeve": "sleeve_mean_reversion",
+      "raw_score": 0.05636495786523324
+    },
+    {
+      "ticker": "ELV",
+      "target_weight": 0.04343306659790342,
+      "sleeve": "sleeve_2",
+      "raw_score": 0.04343306659790342
+    },
+    {
+      "ticker": "F",
+      "target_weight": 0.03758137528084109,
+      "sleeve": "sleeve_2",
+      "raw_score": 0.03758137528084109
+    },
+    {
+      "ticker": "FTNT",
+      "target_weight": 0.09999999999999999,
+      "sleeve": "sleeve_quality, sleeve_trend",
+      "raw_score": 0.09999999999999999
+    },
+    {
+      "ticker": "GE",
+      "target_weight": 0.05817375012970794,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.05817375012970794
+    },
+    {
+      "ticker": "GEV",
+      "target_weight": 0.026157597931291136,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.026157597931291136
+    },
+    {
+      "ticker": "GM",
+      "target_weight": 0.06763945600474888,
+      "sleeve": "sleeve_2",
+      "raw_score": 0.06763945600474888
+    },
+    {
+      "ticker": "KLAC",
+      "target_weight": 0.05976720637772973,
+      "sleeve": "sleeve_2",
+      "raw_score": 0.05976720637772973
+    },
+    {
+      "ticker": "MNST",
+      "target_weight": 0.09729222185917542,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.09729222185917542
+    },
+    {
+      "ticker": "NXPI",
+      "target_weight": 0.051532578948756534,
+      "sleeve": "sleeve_mean_reversion",
+      "raw_score": 0.051532578948756534
+    },
+    {
+      "ticker": "PANW",
+      "target_weight": 0.035759030461995606,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.035759030461995606
+    },
+    {
+      "ticker": "PNC",
+      "target_weight": 0.07635669199061548,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.07635669199061548
+    },
+    {
+      "ticker": "QCOM",
+      "target_weight": 0.04585084839919176,
+      "sleeve": "sleeve_quality",
+      "raw_score": 0.04585084839919176
+    },
+    {
+      "ticker": "STX",
+      "target_weight": 0.03829066887869586,
+      "sleeve": "sleeve_quality",
+      "raw_score": 0.03829066887869586
+    },
+    {
+      "ticker": "VRTX",
+      "target_weight": 0.05716035202842234,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.05716035202842234
+    },
+    {
+      "ticker": "WELL",
+      "target_weight": 0.05328243537139778,
+      "sleeve": "sleeve_trend",
+      "raw_score": 0.05328243537139778
+    }
+  ],
+  "cash_target_weight": 0.0,
+  "breaker": {
+    "mode": "off",
+    "source": "default",
+    "reason": "no BREAKER_MODE env var set; defaulting to OFF / full exposure",
+    "exposure_multiplier_today": 1.0,
+    "exposure_label_today": "OFF",
+    "invested_before_overlay": 1.0000000000000002,
+    "invested_after_overlay": 1.0000000000000002,
+    "cash_target_weight_today": 0.0
+  },
+  "market_analyzer": {
+    "date": "2026-07-07",
+    "premarket_score": 1.0,
+    "bearish_flag": false,
+    "signal_bucket": "RISK_ON",
+    "analyzer_version": "v1_breaker_vix_riskoff",
+    "notes": "derived from active breaker exposure, vix regime scale, and risk_off guard",
+    "vix_component": 1.0,
+    "trend_component": null,
+    "realized_vol_component": null,
+    "gap_risk_component": null,
+    "breadth_component": null,
+    "macro_component": null,
+    "breaker_component": 1.0,
+    "risk_off_component": 1.0,
+    "regime": "LOW",
+    "vix": 15.9399995803833
+  },
+  "strategy_identity": {
+    "live_strategy_id": "growth_engine_v4",
+    "execution_target_source": "outputs/precompute/2026-07-07/signals.json",
+    "execution_target_type": "precompute_signals",
+    "shadow_baseline_strategy": "caerus_polaris",
+    "shadow_baseline_source": "outputs/shadow_candidates/2026-07-07/caerus_polaris.json",
+    "live_tracks_shadow_baseline": false
+  }
+}
