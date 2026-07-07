@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from brokers.alpaca_broker import AlpacaBroker
+from core.live_trade_ledger import record_live_order
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
     LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV,
@@ -387,6 +388,88 @@ def _status_bucket(status: object) -> str:
     if value in {"accepted", "pending_new", "new", "done_for_day", "pending_replace", "pending_cancel"}:
         return "accepted_open"
     return "unresolved"
+
+
+def _ledger_outcome_event(status: object) -> str | None:
+    value = _status_norm(status)
+    if value == "expired":
+        return "expired"
+    bucket = _status_bucket(value)
+    if bucket == "filled":
+        return "filled"
+    if bucket == "rejected":
+        return "rejected"
+    return None
+
+
+def _ledger_filled_qty(order: Any, fallback_qty: Any) -> Any:
+    if isinstance(order, Mapping):
+        filled_qty = order.get("filled_qty")
+        if filled_qty is None:
+            filled_qty = order.get("filled_quantity")
+        if filled_qty not in (None, ""):
+            return filled_qty
+    return fallback_qty
+
+
+def _record_live_order_submitted(
+    *,
+    order: Any,
+    run_root: Path,
+    output_root: Path | str,
+    env: Mapping[str, str],
+    submitted_order_type: str,
+) -> None:
+    record_live_order(
+        event="submitted",
+        symbol=order.symbol,
+        side=order.side,
+        qty=order.qty,
+        filled_qty=None,
+        limit_price=order.limit_price if submitted_order_type == "limit" else None,
+        notional=order.notional,
+        client_order_id=order.client_order_id,
+        broker_order_id=None,
+        run_root=run_root,
+        status="SUBMIT_ATTEMPTED",
+        reason=None,
+        output_root=output_root,
+        env=env,
+    )
+
+
+def _record_live_order_outcome(
+    *,
+    order: Any,
+    broker_result: Mapping[str, Any] | None,
+    run_root: Path,
+    output_root: Path | str,
+    env: Mapping[str, str],
+    submitted_order_type: str,
+    error: str | None = None,
+) -> None:
+    broker_payload = broker_result if isinstance(broker_result, Mapping) else {}
+    status = "REJECTED" if error is not None else broker_payload.get("status")
+    event = "rejected" if error is not None else _ledger_outcome_event(status)
+    if event is None:
+        return
+    record_live_order(
+        event=event,
+        symbol=broker_payload.get("symbol") or order.symbol,
+        side=broker_payload.get("side") or order.side,
+        qty=broker_payload.get("qty") or order.qty,
+        filled_qty=_ledger_filled_qty(broker_payload, order.qty if event == "filled" else None),
+        limit_price=order.limit_price if submitted_order_type == "limit" else None,
+        notional=order.notional,
+        client_order_id=broker_payload.get("client_order_id") or order.client_order_id,
+        broker_order_id=broker_payload.get("id"),
+        run_root=run_root,
+        status=status,
+        reason=error or broker_payload.get("error"),
+        output_root=output_root,
+        env=env,
+        ts_utc=broker_payload.get("filled_at") if event == "filled" else None,
+    )
 
 
 def _load_json_if_present(path: Path) -> Any:
@@ -1338,6 +1421,13 @@ def run_live_pilot(
             policy = policy_by_client_id.get(order.client_order_id, {})
             submitted_order_type = str(policy.get("submitted_order_type") or order.order_type).strip().lower()
             try:
+                _record_live_order_submitted(
+                    order=order,
+                    run_root=run_root,
+                    output_root=output_root,
+                    env=environ,
+                    submitted_order_type=submitted_order_type,
+                )
                 if submitted_order_type == "market":
                     broker_result = broker.submit_market_order(
                         symbol=order.symbol,
@@ -1378,7 +1468,24 @@ def run_live_pilot(
                 submitted.append(
                     submitted_row
                 )
+                _record_live_order_outcome(
+                    order=order,
+                    broker_result=broker_result,
+                    run_root=run_root,
+                    output_root=output_root,
+                    env=environ,
+                    submitted_order_type=submitted_order_type,
+                )
             except Exception as exc:
+                _record_live_order_outcome(
+                    order=order,
+                    broker_result=None,
+                    run_root=run_root,
+                    output_root=output_root,
+                    env=environ,
+                    submitted_order_type=submitted_order_type,
+                    error=str(exc),
+                )
                 submit_errors.append(f"{order.symbol}:broker_submit_failed:{exc}")
                 submitted.append(
                     {

@@ -5,6 +5,7 @@ import datetime as dt
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import core.live_trade_ledger as live_trade_ledger
 from scripts.live_pilot_execute import (
     LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
@@ -122,6 +123,10 @@ def _gate_state(run_root: Path) -> dict[str, object]:
     return json.loads((run_root / "live_pilot_gate_state.json").read_text(encoding="utf-8"))
 
 
+def _ledger_records(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
 def _plan() -> dict[str, object]:
     return {
         "trades": [
@@ -213,6 +218,7 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     assert (run_root / "live_pilot_preflight.json").exists()
     assert (run_root / "live_pilot_orders_intended.json").exists()
     assert (run_root / "live_pilot_orders_submitted.json").exists()
+    assert not (tmp_path / "outputs" / "live_pilot" / "live_trade_ledger.jsonl").exists()
     assert (run_root / "live_pilot_entry_attempt_history.json").exists()
     assert (run_root / "live_pilot_broker_snapshot_pre.json").exists()
     assert (run_root / "live_pilot_broker_snapshot_post.json").exists()
@@ -283,6 +289,29 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     gate_state = _gate_state(run_root)
     assert gate_state["decision"] == "ALLOWED"
     assert gate_state["broker_orders_submitted"] == 1
+    ledger_records = _ledger_records(tmp_path / "outputs" / "live_pilot" / "live_trade_ledger.jsonl")
+    assert [row["event"] for row in ledger_records] == ["submitted", "filled"]
+    assert ledger_records[0]["client_order_id"] == submitted["orders"][0]["client_order_id"]
+    assert ledger_records[0]["broker_order_id"] is None
+    assert ledger_records[1]["client_order_id"] == submitted["orders"][0]["client_order_id"]
+    assert ledger_records[1]["broker_order_id"] == "order-1"
+    assert ledger_records[1]["filled_qty"] == 1.0
+
+
+def test_live_trade_ledger_write_failure_does_not_propagate(tmp_path: Path, monkeypatch) -> None:
+    def raise_fsync(_fd):
+        raise OSError("fsync failed")
+
+    monkeypatch.setattr(live_trade_ledger.os, "fsync", raise_fsync)
+
+    live_trade_ledger.record_live_order(
+        event="submitted",
+        symbol="AAPL",
+        side="BUY",
+        qty=1,
+        client_order_id="client-1",
+        output_root=tmp_path / "outputs" / "live_pilot",
+    )
 
 
 def test_existing_live_positions_block_buy_before_broker_submission_and_record_capital_gate(
