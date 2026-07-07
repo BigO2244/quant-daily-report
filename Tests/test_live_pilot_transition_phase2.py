@@ -220,24 +220,68 @@ def test_buying_power_zero_blocks_unavailable(tmp_path: Path) -> None:
     assert capital_gate["live_buying_power_before"] == 0.0  # 0.0 is visible in evidence
 
 
-def test_unpriceable_held_position_blocks_rotation(tmp_path: Path) -> None:
-    # #2: a held position with missing market_value must fail closed (rotation-required),
-    # never be silently skipped by the engine's price<=0 exit loop.
+def test_unpriceable_held_position_missing_market_value_blocks(tmp_path: Path) -> None:
+    # #2: valid qty but missing market_value -> not cleanly priceable -> fail closed.
     broker = FakeBroker(
         buying_power="500", cash="500", equity="500",
         positions=[{"symbol": "XYZ", "qty": "2"}],  # no market_value
     )
     plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
-    result, run_root = _run(broker, plan, dry_run="1", run_id="run-unpriceable", tmp_path=tmp_path)
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-nomv", tmp_path=tmp_path)
     assert result["terminal_status"] == "BLOCKED"
     assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["diagnostics"]["unpriceable_holding_symbol"] == "XYZ"
+    assert "missing_or_nonpositive_market_value" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_uncountable_held_position_missing_qty_blocks(tmp_path: Path) -> None:
+    # Generalized guard: present positive market_value but missing qty -> not cleanly
+    # countable -> fail closed. Must NOT be skipped just because market_value is present.
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"symbol": "XYZ", "market_value": "200"}],  # no qty
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-noqty", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["diagnostics"]["unpriceable_holding_symbol"] == "XYZ"
+    assert "missing_or_zero_qty" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_cleanly_priced_and_counted_holding_proceeds(tmp_path: Path) -> None:
+    # Both fields valid -> the guard skips the position and the run proceeds (dry-run).
+    # (AAA held+targeted, no exits, so no rotation.)
+    broker = FakeBroker(
+        buying_power="500", cash="500", equity="500",
+        positions=[{"symbol": "AAA", "qty": "1", "market_value": "100"}],
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.6, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-clean-hold", tmp_path=tmp_path)
+    assert result["terminal_status"] == "DRY_RUN"
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["blocked"] is False
+
+
+def test_missing_equity_blocks(tmp_path: Path) -> None:
+    # equity=None (broker omitted equity/portfolio_value) must fail closed explicitly.
+    broker = FakeBroker(buying_power="500", cash="500", equity=None)
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, run_root = _run(broker, plan, dry_run="1", run_id="run-noeq", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "live_pilot_equity_exceeds_cap_regime"
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["diagnostics"]["equity_unavailable"] is True
 
 
 def test_equity_above_cap_regime_blocks(tmp_path: Path) -> None:
-    # #3-guard: equity above the $600 cap-regime ceiling halts (sizing model assumes
+    # #3-guard: equity above the $520 cap-regime ceiling halts (sizing model assumes
     # equity ~= cap). Deferred: exposure-aware cap when the account is funded above cap.
     broker = FakeBroker(buying_power="5000", cash="5000", equity="5000")
     plan = {"target_portfolio": [_target_row("AAA", 0.1, 100.0)]}
@@ -247,6 +291,17 @@ def test_equity_above_cap_regime_blocks(tmp_path: Path) -> None:
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["diagnostics"]["equity_usd"] == 5000.0
+
+
+def test_equity_tight_collar_blocks_just_above_ceiling(tmp_path: Path) -> None:
+    # Tightened collar: equity $550 (below the old $600, above the new $520 ceiling)
+    # now blocks -- no top-up tolerance band above the $500 cap.
+    broker = FakeBroker(buying_power="550", cash="550", equity="550")
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+    result, _run_root = _run(broker, plan, dry_run="1", run_id="run-collar", tmp_path=tmp_path)
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "live_pilot_equity_exceeds_cap_regime"
+    assert broker.submit_calls == 0
 
 
 # --------------------------------------------------------------------------- #

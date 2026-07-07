@@ -58,13 +58,15 @@ BLOCK_OVER_CAP_INTENT = "OVER_CAP_INTENT"
 # targets to weight x live-account-equity and applies the approved cap PER RUN, not as
 # a total-exposure ceiling. That is only correct while account equity ~= cap (the pilot
 # is funded at ~$500 == the cap). If equity exceeds this ceiling, weight-based targets
-# would be sized well above the cap and the per-run cap would not bound total exposure
-# (a partly-held over-target name could be topped up past the cap). Rather than make the
-# cap exposure-aware now, we HALT if equity leaves the cap regime.
+# would be sized above the cap and the per-run cap would not bound total exposure (a
+# partly-held over-target name could be topped up past the cap). Rather than make the
+# cap exposure-aware now, we HALT if equity leaves the cap regime. Missing equity also
+# blocks (we cannot confirm the regime). The ceiling is a tight collar just above the
+# ~$500 pilot funding so there is no top-up tolerance band above the cap.
 #   TODO / FR (deferred): when the pilot account is funded above the cap, replace this
 #   guard with an exposure-aware cap (cap_remaining = approved_cap - current_exposure)
 #   so weight-based targets can be sized correctly above the cap. Until then: block.
-LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD = 600.0
+LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD = 520.0
 BLOCK_EQUITY_EXCEEDS_CAP_REGIME = "EQUITY_EXCEEDS_CAP_REGIME"
 
 # Engine block_reason -> capital_gate.v1 constant (the live lane's operator-facing code).
@@ -214,7 +216,13 @@ def live_capital_policy(approved_cap_usd: float | None) -> CapitalPolicy:
 def _blocked_plan(
     plan: TransitionPlan, *, reason: str, extra_diag: Mapping[str, Any] | None = None
 ) -> TransitionPlan:
-    """Return a fail-closed copy of ``plan``: blocked, no buys, deployed reset to 0."""
+    """Return a fail-closed copy of ``plan``: blocked, no buys, deployed reset to 0.
+
+    TODO (evidence nit, non-blocking): holdings_to_increase / buy_needs are left as the
+    engine computed them, so a blocked plan can still list an "increase" for a symbol
+    whose buy was removed. Execution is unaffected (blocked paths early-return before
+    submission); revisit for artifact consistency.
+    """
     diag = dict(plan.diagnostics)
     diag["deployed_buy_notional"] = 0.0
     if extra_diag:
@@ -238,7 +246,14 @@ def _apply_equity_regime_policy(plan: TransitionPlan, account: AccountSnapshot) 
     if plan.blocked:
         return plan
     equity = account.equity
-    if equity is not None and float(equity) > LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD:
+    if equity is None:
+        # Fail closed: without equity we cannot confirm the account is in the cap regime.
+        return _blocked_plan(
+            plan,
+            reason=BLOCK_EQUITY_EXCEEDS_CAP_REGIME,
+            extra_diag={"equity_usd": None, "equity_unavailable": True},
+        )
+    if float(equity) > LIVE_PILOT_EQUITY_CAP_REGIME_CEILING_USD:
         return _blocked_plan(
             plan,
             reason=BLOCK_EQUITY_EXCEEDS_CAP_REGIME,
@@ -253,12 +268,15 @@ def _apply_equity_regime_policy(plan: TransitionPlan, account: AccountSnapshot) 
 def _apply_unpriceable_holdings_policy(
     plan: TransitionPlan, pre_snapshot: Mapping[str, Any]
 ) -> TransitionPlan:
-    """Fail closed on a held position we cannot value.
+    """Fail closed on any held position we cannot cleanly count AND price.
 
-    A live position with a missing/non-positive market_value maps to price 0.0 and is
-    silently skipped by the engine's exit loop, defeating the Option A rotation guard.
-    We cannot classify an unpriceable holding keep/sell, so treat it as rotation-required
-    (block) rather than ignoring it.
+    A held position that maps to price 0.0 (missing market_value) or is uncountable
+    (missing qty) is silently dropped by holdings_from_snapshot and the engine's exit
+    loop, defeating the Option A rotation guard. The root property: a held open position
+    is safe to skip ONLY if it is BOTH cleanly countable (qty present, non-null, non-zero)
+    AND cleanly priceable (market_value present, non-null, positive). Both checks run
+    before any skip, so no single missing field (qty, market_value, or a future field)
+    can hide a real live holding. Anything failing either check -> rotation-required.
     """
     if plan.blocked:
         return plan
@@ -266,18 +284,24 @@ def _apply_unpriceable_holdings_policy(
         if not isinstance(raw, Mapping):
             continue
         qty = _safe_float(raw.get("qty"))
-        if qty is None or abs(qty) <= 1e-12:
-            continue
         market_value = _safe_float(raw.get("market_value"))
-        if market_value is None or market_value <= 0:
-            return _blocked_plan(
-                plan,
-                reason=BLOCK_ROTATION_UNSUPPORTED,
-                extra_diag={
-                    "unpriceable_holding_symbol": _norm(raw.get("symbol")),
-                    "unpriceable_holding_reason": "missing_or_nonpositive_market_value",
-                },
-            )
+        countable = qty is not None and abs(qty) > 1e-12
+        priceable = market_value is not None and market_value > 0
+        if countable and priceable:
+            continue
+        reasons: list[str] = []
+        if not countable:
+            reasons.append("missing_or_zero_qty")
+        if not priceable:
+            reasons.append("missing_or_nonpositive_market_value")
+        return _blocked_plan(
+            plan,
+            reason=BLOCK_ROTATION_UNSUPPORTED,
+            extra_diag={
+                "unpriceable_holding_symbol": _norm(raw.get("symbol")),
+                "unpriceable_holding_reason": ",".join(reasons),
+            },
+        )
     return plan
 
 
@@ -292,8 +316,10 @@ def _apply_buying_power_policy(plan: TransitionPlan, account: AccountSnapshot) -
     if plan.blocked:
         return plan
     bp = account.buying_power
-    planned = float(plan.diagnostics.get("planned_buy_notional") or 0.0)
-    if bp is not None and float(bp) <= 0.0 and planned > 0.0:
+    # Key off the raw broker fact + the presence of an actual buy intent, not the
+    # engine's derived planned_buy_notional, so the bp<=0 safety cannot be decoupled by
+    # a future sizing-model change.
+    if bp is not None and float(bp) <= 0.0 and plan.buy_orders_intended:
         return _blocked_plan(
             plan,
             reason=BLOCK_BUYING_POWER_UNAVAILABLE,
