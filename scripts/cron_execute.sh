@@ -34,6 +34,13 @@ export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 
+# --- Concentrated-alpha (top-5 conviction-weighted, 50% cap) ---
+# Must match cron_precompute so the execution-time RiskControls cap (0.50) does not
+# re-clip the concentrated book written at precompute. Overridable via .env.
+export CAERUS_CONCENTRATED_ALPHA="${CAERUS_CONCENTRATED_ALPHA:-1}"
+export CAERUS_CONCENTRATED_TOP_N="${CAERUS_CONCENTRATED_TOP_N:-5}"
+export CAERUS_CONCENTRATED_MAX_WEIGHT="${CAERUS_CONCENTRATED_MAX_WEIGHT:-0.50}"
+
 # --- Log setup ---
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"

@@ -4290,25 +4290,37 @@ def build_daily_snapshot(
     # scoring upstream is untouched; cash becomes the residual after concentration and
     # honors the engine's cash weight (risk-off) as a floor.
     if _concentrated_alpha_enabled() and not weights_df.empty:
-        from core.concentration import concentrate_targets
+        _broad_book = weights_df.copy()
+        try:
+            from core.concentration import concentrate_targets
 
-        _top_n, _max_w = _concentrated_alpha_params()
-        _names_before = len(weights_df)
-        weights_df = concentrate_targets(
-            weights_df,
-            top_n=_top_n,
-            max_position_weight=_max_w,
-            target_cash_weight=max(target_cash_weight_today, 0.05),
-        )
-        target_cash_weight_today = float(
-            max(0.0, min(1.0, 1.0 - float(weights_df["target_weight"].sum())))
-        )
-        invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
-        logger.info(
-            "[CONCENTRATED_ALPHA] top_n=%d cap=%.2f: %d -> %d names, cash_target=%.3f, names=%s",
-            _top_n, _max_w, _names_before, len(weights_df),
-            target_cash_weight_today, list(weights_df["ticker"]),
-        )
+            _top_n, _max_w = _concentrated_alpha_params()
+            _names_before = len(weights_df)
+            _concentrated = concentrate_targets(
+                weights_df,
+                top_n=_top_n,
+                max_position_weight=_max_w,
+                target_cash_weight=max(target_cash_weight_today, 0.05),
+            )
+            if _concentrated is None or _concentrated.empty:
+                raise ValueError("concentration produced an empty book")
+            weights_df = _concentrated
+            target_cash_weight_today = float(
+                max(0.0, min(1.0, 1.0 - float(weights_df["target_weight"].sum())))
+            )
+            invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
+            logger.info(
+                "[CONCENTRATED_ALPHA] top_n=%d cap=%.2f: %d -> %d names, cash_target=%.3f, names=%s",
+                _top_n, _max_w, _names_before, len(weights_df),
+                target_cash_weight_today, list(weights_df["ticker"]),
+            )
+        except Exception:
+            # Fail SAFE for unattended runs: never let concentration crash the daily
+            # pipeline. Fall back to the broad book (loud in logs) so paper keeps trading.
+            weights_df = _broad_book
+            logger.exception(
+                "[CONCENTRATED_ALPHA] concentration failed; falling back to broad book this run"
+            )
     if weights_df.empty:
         fallback_rows: list[dict[str, object]] = []
         for sleeve_name, details in (("sleeve_2", s2_details), ("charlie_munger", cm_details or {})):
