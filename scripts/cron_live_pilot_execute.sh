@@ -46,7 +46,10 @@ GATE_RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
 GATE_RUN_ID="${REPORT_DATE}T${GATE_RUN_TS}_live_pilot_cron_gate"
 GATE_RUN_ROOT="outputs/live_pilot/runs/${GATE_RUN_ID}"
 export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}"
-export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-1}"
+# Full rebalance: buys are capped by this ceiling as a blast-radius guard (NOT
+# "unlimited"). Sells are unaffected here (governed by the fail-closed sells master
+# gate + whitelist/wildcard). The env file may override; default is a generous 50.
+export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-50}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
 export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"

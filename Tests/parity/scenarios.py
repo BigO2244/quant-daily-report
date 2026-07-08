@@ -504,6 +504,57 @@ def _over_budget_suppression_scenario() -> PaperParityScenario:
     )
 
 
+def _full_rebalance_mixed_scenario() -> PaperParityScenario:
+    """Full account rebalance to target weights: over-weight, under-weight, absent, new.
+
+    Anchors the FR-104 live full-rebalance parity claim. A held name is over target
+    (OVR: sell down), one is under target (UND: buy more), one is absent from the
+    target (GONE: sell to zero), and one is new (NEW: buy from flat). A non-zero
+    ``target_cash_weight`` (0.30) exercises the cash-carry path so live must hold the
+    same cash paper holds. Numbers are chosen so the rebalance is exactly funded:
+
+      equity 10000, prices OVR=100 UND=50 GONE=200 NEW=25
+      holdings OVR=40 ($4000) UND=20 ($1000) GONE=5 ($1000); cash 4000
+      targets OVR 0.20 ($2000 -> 20sh, SELL 20), UND 0.30 ($3000 -> 60sh, BUY 40),
+              NEW 0.20 ($2000 -> 80sh, BUY 80); GONE absent (SELL 5)
+      sells 2000+1000=3000 -> post-sell cash 7000; buys 2000+2000=4000 ->
+      ending cash 3000 == 0.30 * 10000 (the cash target). No suppression.
+    """
+    total_equity = 10000.0
+    return PaperParityScenario(
+        name="full_rebalance_mixed",
+        source="Synthetic parity fixture for FR-104 live full rebalance.",
+        notes="Mixed over/under/absent/new names with a 30% cash target; exactly funded.",
+        holdings=(
+            {"ticker": "OVR", "sleeve": "parity", "shares": 40.0},
+            {"ticker": "UND", "sleeve": "parity", "shares": 20.0},
+            {"ticker": "GONE", "sleeve": "parity", "shares": 5.0},
+        ),
+        targets=(
+            {"ticker": "UND", "target_weight": 0.30, "sleeve": "parity"},
+            {"ticker": "OVR", "target_weight": 0.20, "sleeve": "parity"},
+            {"ticker": "NEW", "target_weight": 0.20, "sleeve": "parity"},
+        ),
+        prices={"OVR": 100.0, "UND": 50.0, "GONE": 200.0, "NEW": 25.0},
+        total_equity=total_equity,
+        starting_cash=4000.0,
+        target_cash_weight=0.30,
+        planning_account={
+            "cash": "4000.0",
+            "equity": str(total_equity),
+            "buying_power": "4000.0",
+            "status": "ACTIVE",
+        },
+        post_sell_account={
+            "cash": "7000.0",
+            "equity": str(total_equity),
+            "buying_power": "7000.0",
+            "status": "ACTIVE",
+        },
+        cfg_overrides=_cfg(initial_equity=total_equity, max_trades_per_day=50),
+    )
+
+
 def scenarios() -> tuple[PaperParityScenario, ...]:
     return (
         _july_2026_scenario(),
@@ -513,6 +564,7 @@ def scenarios() -> tuple[PaperParityScenario, ...]:
         _deadband_scenario(),
         _whole_share_sweep_scenario(),
         _over_budget_suppression_scenario(),
+        _full_rebalance_mixed_scenario(),
     )
 
 

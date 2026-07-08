@@ -5,9 +5,10 @@ import datetime as dt
 import json
 import os
 import sys
-from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Sequence
+
+import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -16,15 +17,36 @@ if str(REPO_ROOT) not in sys.path:
 from core.live_pilot_guardrails import (
     LIVE_PILOT_APPROVED_MAX_CAP_USD,
     normalize_live_pilot_limit_price,
-    validate_live_pilot_plan,
 )
+from core.risk_controls import (
+    RiskControls,
+    load_sector_map,
+    peak_equity_path,
+    update_peak_equity_state,
+)
+from paper.paper_broker import fetch_open_prices_yfinance, load_targets
 from paper.run_manager import safe_write_text
 
-
+# The live-pilot capital cap tracks the account's portfolio value (resolved
+# dynamically upstream in the cron lane / execution path). This constant is only a
+# non-zero placeholder default for ad-hoc CLI invocations; the cron always passes an
+# explicit ``--capital-cap`` equal to the resolved portfolio value.
 DEFAULT_CAPITAL_CAP = LIVE_PILOT_APPROVED_MAX_CAP_USD
-DEFAULT_MAX_ORDERS = 1
+# Full rebalance: the buy blast-radius ceiling. The executor enforces the buy count
+# from CAERUS_LIVE_PILOT_MAX_ORDERS; this is the plan-side default/echo.
+DEFAULT_MAX_ORDERS = 50
 DEFAULT_OUTPUT_DIR = Path("outputs/live_pilot/plans")
 DEFAULT_PRECOMPUTE_ROOT = Path("outputs/precompute")
+
+# Live-pilot peak-equity state is isolated from paper's state dir. Reusing paper's
+# peak (built from paper's ~$10k equity) against the live account's small portfolio
+# value would compute a spurious drawdown and trip the circuit breaker every run.
+LIVE_PILOT_STATE_DIR = Path("outputs/live_pilot/state")
+
+TARGET_PORTFOLIO_SCHEMA = "caerus.transition_target.v2"
+PLAN_SCHEMA_VERSION = "live_pilot_plan_from_precompute.v2"
+
+PriceFetcher = Callable[[Sequence[str], str], "pd.DataFrame"]
 
 
 def _now_utc() -> str:
@@ -68,292 +90,20 @@ def _first_nonempty(row: Mapping[str, Any], keys: Iterable[str]) -> Any:
     return None
 
 
-def _extract_trades(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    trades = payload.get("trades") or payload.get("orders") or payload.get("planned_trades") or []
-    if not isinstance(trades, list):
-        raise ValueError("planned execution payload trades/orders must be a list")
-    return [trade for trade in trades if isinstance(trade, Mapping)]
+def _is_supported_equity_symbol(symbol: str) -> bool:
+    """Reject anything that is not a plain us-equity ticker (fail-closed).
 
-
-def _payload_strategy_identity(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    value = payload.get("strategy_identity")
-    return value if isinstance(value, Mapping) else {}
-
-
-def _trade_sleeve_provenance(
-    trade: Mapping[str, Any],
-    payload: Mapping[str, Any],
-    source_signal: Mapping[str, Any] | None,
-) -> tuple[str, dict[str, Any]]:
-    value = _first_nonempty(
-        trade,
-        ("sleeve", "sleeve_id", "approved_sleeve", "strategy", "strategy_id", "strategy_name"),
-    )
-    source = "source_trade"
-    if value is None:
-        value = _first_nonempty(
-            payload,
-            ("sleeve", "sleeve_id", "approved_sleeve", "strategy", "strategy_id", "strategy_name"),
-        )
-        source = "source_payload"
-    strategy_identity = _payload_strategy_identity(payload)
-    if value is None:
-        value = _first_nonempty(
-            payload,
-            ("live_strategy_id",),
-        )
-        source = "precompute_live_strategy_id"
-    if value is None:
-        value = _first_nonempty(
-            strategy_identity,
-            ("live_strategy_id", "strategy_id", "strategy", "strategy_name"),
-        )
-        source = "precompute_strategy_identity"
-    if value is None and source_signal is not None:
-        value = _first_nonempty(
-            source_signal,
-            ("sleeve", "sleeve_id", "strategy", "strategy_id", "strategy_name"),
-        )
-        source = "precompute_signal_ticker_match"
-
-    signal_sleeve = None
-    signal_target_weight = None
-    signal_raw_score = None
-    if source_signal is not None:
-        signal_sleeve = _first_nonempty(
-            source_signal,
-            ("sleeve", "sleeve_id", "strategy", "strategy_id", "strategy_name"),
-        )
-        signal_target_weight = source_signal.get("target_weight")
-        signal_raw_score = source_signal.get("raw_score")
-
-    sleeve = str(value or "").strip()
-    return sleeve, {
-        "sleeve_source": source if sleeve else None,
-        "source_strategy_id": str(
-            payload.get("live_strategy_id")
-            or strategy_identity.get("live_strategy_id")
-            or strategy_identity.get("strategy_id")
-            or ""
-        ).strip() or None,
-        "source_strategy_identity": dict(strategy_identity) if strategy_identity else None,
-        "source_signal_sleeve": str(signal_sleeve or "").strip() or None,
-        "source_signal_target_weight": signal_target_weight,
-        "source_signal_raw_score": signal_raw_score,
-        "missing_source_trade_sleeve_recovered": value is not None
-        and _first_nonempty(
-            trade,
-            ("sleeve", "sleeve_id", "approved_sleeve", "strategy", "strategy_id", "strategy_name"),
-        )
-        is None,
-    }
-
-
-def _resolve_payload_relative_path(payload_path: Path, raw_path: object) -> Path | None:
-    raw = str(raw_path or "").strip()
-    if not raw:
-        return None
-    candidate = Path(raw)
-    if candidate.is_absolute():
-        return candidate
-    candidates = [candidate]
-    parts = list(payload_path.parts)
-    try:
-        outputs_index = parts.index("outputs")
-    except ValueError:
-        outputs_index = -1
-    if outputs_index > 0:
-        repo_root = Path(*parts[:outputs_index])
-        candidates.append(repo_root / candidate)
-    candidates.append(payload_path.parent / candidate.name)
-    for path in candidates:
-        if path.exists():
-            return path
-    return candidates[0]
-
-
-def _source_signal_lookup(payload_path: Path, payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
-    path = _resolve_payload_relative_path(payload_path, payload.get("execution_target_source"))
-    if path is None or not path.exists():
-        return {}
-    try:
-        source_payload = _read_json(path)
-    except Exception:
-        return {}
-    if not isinstance(source_payload, Mapping):
-        return {}
-    signals = source_payload.get("signals")
-    if not isinstance(signals, list):
-        return {}
-    out: dict[str, Mapping[str, Any]] = {}
-    for raw in signals:
-        if not isinstance(raw, Mapping):
-            continue
-        ticker = _clean_symbol(raw.get("ticker") or raw.get("symbol"))
-        if ticker and ticker not in out:
-            out[ticker] = raw
-    return out
-
-
-def _limit_price(trade: Mapping[str, Any]) -> tuple[float | None, str | None]:
-    for key in ("limit_price", "price", "entry_price"):
-        value = _safe_positive_float(trade.get(key))
-        if value is not None:
-            return value, key
-    return None, None
-
-
-def _shares(trade: Mapping[str, Any]) -> float | None:
-    return _safe_positive_float(_first_nonempty(trade, ("shares", "qty", "quantity")))
-
-
-def _floor_qty_for_cap(qty: float, *, cap: float, limit_price: float) -> float:
-    candidate = min(Decimal(str(qty)), Decimal(str(cap)) / Decimal(str(limit_price)))
-    return float(candidate.quantize(Decimal("0.000000001"), rounding=ROUND_DOWN))
-
-
-def _asset_class(trade: Mapping[str, Any]) -> str:
-    return str(trade.get("asset_class") or trade.get("class") or "us_equity").strip().lower()
-
-
-def _reject(
-    trade: Mapping[str, Any],
-    *,
-    index: int,
-    reasons: list[str],
-    sleeve: str | None = None,
-    sleeve_provenance: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "index": index,
-        "ticker": _clean_symbol(trade.get("ticker") or trade.get("symbol")),
-        "side": str(trade.get("side") or "").strip().upper(),
-        "sleeve": str(
-            sleeve
-            if sleeve is not None
-            else trade.get("sleeve")
-            or trade.get("sleeve_id")
-            or trade.get("strategy")
-            or ""
-        ).strip(),
-        "sleeve_provenance": dict(sleeve_provenance or {}),
-        "notional": _safe_float(trade.get("notional")),
-        "reasons": list(reasons),
-        "source_trade": dict(trade),
-    }
-
-
-def _candidate_order(
-    trade: Mapping[str, Any],
-    *,
-    index: int,
-    payload: Mapping[str, Any],
-    source_signal: Mapping[str, Any] | None,
-    approved_sleeve: str,
-    capital_cap: float,
-    allow_missing_sleeve: bool,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    reasons: list[str] = []
-    ticker = _clean_symbol(trade.get("ticker") or trade.get("symbol"))
-    side = str(trade.get("side") or "").strip().upper()
-    sleeve, sleeve_provenance = _trade_sleeve_provenance(trade, payload, source_signal)
-    shares = _shares(trade)
-    limit_price, limit_price_source = _limit_price(trade)
-    asset_class = _asset_class(trade)
-    missing_sleeve_overridden = False
-
-    if not ticker:
-        reasons.append("missing_ticker")
-    elif not ticker.replace(".", "").isalpha():
-        reasons.append("unsupported_symbol_format")
-    elif ticker.endswith("USD") and len(ticker) > 4:
-        reasons.append("unsupported_crypto_symbol")
-    if not sleeve:
-        if allow_missing_sleeve and side == "BUY":
-            sleeve = approved_sleeve
-            missing_sleeve_overridden = True
-            sleeve_provenance["sleeve_source"] = "missing_in_source_overridden_for_live_pilot"
-            sleeve_provenance["approved_sleeve_override"] = approved_sleeve
-        else:
-            reasons.append("missing_sleeve")
-    elif sleeve != approved_sleeve:
-        reasons.append(f"sleeve_mismatch:{sleeve}")
-    if side != "BUY":
-        reasons.append(f"unsupported_side:{side or 'missing'}")
-    if asset_class not in {"us_equity", "equity", "assetclass.us_equity"}:
-        reasons.append(f"unsupported_asset_class:{asset_class or 'missing'}")
-    if shares is None:
-        reasons.append("missing_positive_shares")
-    if limit_price is None:
-        reasons.append("missing_limit_price")
-
-    source_notional = None
-    original_limit_price = limit_price
-    normalized_limit_price = None
-    pre_normalization_qty = shares
-    final_qty = shares
-    scaled_to_pilot_cap = False
-    if shares is not None and limit_price is not None:
-        normalized_limit_price = normalize_live_pilot_limit_price(float(limit_price))
-        source_notional = round(float(shares) * float(limit_price), 6)
-        pre_normalization_qty = _floor_qty_for_cap(float(shares), cap=float(capital_cap), limit_price=float(limit_price))
-        final_qty = _floor_qty_for_cap(
-            float(pre_normalization_qty),
-            cap=float(capital_cap),
-            limit_price=float(normalized_limit_price),
-        )
-        scaled_to_pilot_cap = abs(float(final_qty) - float(shares)) > 1e-12
-
-    if reasons:
-        return None, _reject(
-            trade,
-            index=index,
-            reasons=reasons,
-            sleeve=sleeve,
-            sleeve_provenance=sleeve_provenance,
-        )
-
-    pilot_notional = float(Decimal(str(final_qty or 0.0)) * Decimal(str(normalized_limit_price or 0.0)))
-    order = {
-        "ticker": ticker,
-        "symbol": ticker,
-        "side": "BUY",
-        "shares": float(final_qty or 0.0),
-        "qty": float(final_qty or 0.0),
-        "limit_price": float(normalized_limit_price or 0.0),
-        "expected_price": float(normalized_limit_price or 0.0),
-        "cap_enforcement_price": float(normalized_limit_price or 0.0),
-        "original_limit_price": float(original_limit_price or 0.0),
-        "normalized_limit_price": float(normalized_limit_price or 0.0),
-        "notional": float(pilot_notional),
-        "order_type": "market",
-        "time_in_force": "day",
-        "order_policy": "fr104_live_pilot_market_order_normal_hours_only",
-        "sleeve": sleeve,
-        "source_precompute_index": index,
-        "source_reason": trade.get("reason"),
-        "limit_price_source": limit_price_source,
-        "scaled_to_pilot_cap": bool(scaled_to_pilot_cap),
-        "source_notional": float(source_notional or 0.0),
-        "pilot_notional_cap": float(capital_cap),
-        "source_order_qty": float(shares or 0.0),
-        "original_qty": float(shares or 0.0),
-        "pre_normalization_qty": float(pre_normalization_qty or 0.0),
-        "pilot_qty": float(final_qty or 0.0),
-        "final_qty": float(final_qty or 0.0),
-        "scale_reason": "live_pilot_cap" if scaled_to_pilot_cap else None,
-        "sleeve_source": sleeve_provenance.get("sleeve_source") or "source",
-        "sleeve_provenance": sleeve_provenance,
-        "source_strategy_id": sleeve_provenance.get("source_strategy_id"),
-        "source_signal_sleeve": sleeve_provenance.get("source_signal_sleeve"),
-        "source_signal_target_weight": sleeve_provenance.get("source_signal_target_weight"),
-        "source_signal_raw_score": sleeve_provenance.get("source_signal_raw_score"),
-        "approved_sleeve_override": approved_sleeve if missing_sleeve_overridden else None,
-    }
-    for key in ("stop_loss", "take_profit"):
-        if key in trade:
-            order[key] = trade.get(key)
-    return order, None
+    ``load_targets`` already rejects banned leveraged/inverse ETFs, so target names
+    are strategy equities. This is a defensive belt-and-suspenders check so a crypto
+    or malformed symbol can never slip into a live target row.
+    """
+    if not symbol or symbol == "CASH":
+        return False
+    if not symbol.replace(".", "").isalpha():
+        return False
+    if symbol.endswith("USD") and len(symbol) > 4:
+        return False
+    return True
 
 
 def latest_precompute_payload_path(precompute_root: Path = DEFAULT_PRECOMPUTE_ROOT) -> Path:
@@ -370,45 +120,153 @@ def precompute_payload_path_for_date(trade_date: str, precompute_root: Path = DE
     return path
 
 
-def _target_portfolio_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Full target portfolio for the Transition Engine (schema caerus.transition_target.v1).
+def _resolve_signals_path(payload_path: Path, payload: Mapping[str, Any]) -> Path:
+    """Locate the strategy target ``signals.json`` for the bundle.
 
-    One row per qualifying name with its target weight (from the source signal when
-    present), the normalized reference price, and the source (pre-cap) notional. The
-    engine does its own capital sizing and max_orders selection, so these are targets,
-    not final orders. Ranked by target weight desc, then symbol, for stable priority.
+    Primary: the ``signals.json`` beside the payload in the precompute bundle dir.
+    Fallback: an explicit ``execution_target_source`` pointer in the payload.
+    """
+    sibling = payload_path.parent / "signals.json"
+    if sibling.exists():
+        return sibling
+    raw = str(payload.get("execution_target_source") or "").strip()
+    if raw:
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = payload_path.parent / candidate.name
+        if candidate.exists():
+            return candidate
+    # Return the (missing) sibling so the caller fails closed with a clear path.
+    return sibling
+
+
+def _entry_prices_from_payload(payload: Mapping[str, Any]) -> dict[str, float]:
+    """Reference prices for names that CHANGED in the precompute (delta names).
+
+    The payload ``trades[]`` carry ``entry_price`` (the precompute's reference price)
+    only for tickers that changed. Full-target names not present here are priced via
+    the yfinance open fetch (the same source paper uses).
+    """
+    out: dict[str, float] = {}
+    trades = payload.get("trades") or payload.get("orders") or payload.get("planned_trades") or []
+    if not isinstance(trades, list):
+        return out
+    for trade in trades:
+        if not isinstance(trade, Mapping):
+            continue
+        symbol = _clean_symbol(trade.get("ticker") or trade.get("symbol"))
+        if not symbol:
+            continue
+        price = _safe_positive_float(
+            _first_nonempty(trade, ("entry_price", "price", "limit_price", "normalized_limit_price"))
+        )
+        if price is not None and symbol not in out:
+            out[symbol] = float(price)
+    return out
+
+
+def _yfinance_prices(
+    symbols: Sequence[str],
+    run_date: str,
+    *,
+    price_fetcher: PriceFetcher,
+) -> dict[str, float]:
+    if not symbols:
+        return {}
+    try:
+        frame = price_fetcher(list(symbols), run_date)
+    except Exception:
+        # Fail closed: any fetch error leaves these names unpriced, which blocks the
+        # plan below rather than silently dropping them from the rebalance.
+        return {}
+    out: dict[str, float] = {}
+    if frame is None or getattr(frame, "empty", True):
+        return out
+    for _, row in frame.iterrows():
+        symbol = _clean_symbol(row.get("ticker"))
+        price = _safe_positive_float(row.get("open") or row.get("price"))
+        if symbol and price is not None:
+            out[symbol] = float(price)
+    return out
+
+
+def _hydrate_prices(
+    symbols: Sequence[str],
+    *,
+    payload: Mapping[str, Any],
+    run_date: str,
+    price_fetcher: PriceFetcher,
+) -> tuple[dict[str, float], dict[str, str], list[str]]:
+    """Return (price_by_symbol, source_by_symbol, unpriced_symbols), fail-closed.
+
+    Per name: payload ``entry_price`` where present, else the yfinance open for the
+    remainder. Any symbol that still lacks a positive price is returned in
+    ``unpriced_symbols`` so the caller blocks the plan (mirrors the
+    ``live_pilot_capital_cap_unresolved`` fail-closed pattern) and the executor never
+    silently drops it.
+    """
+    entry_prices = _entry_prices_from_payload(payload)
+    price_by_symbol: dict[str, float] = {}
+    source_by_symbol: dict[str, str] = {}
+    need_fetch: list[str] = []
+    for symbol in symbols:
+        price = entry_prices.get(symbol)
+        if price is not None and price > 0:
+            price_by_symbol[symbol] = float(price)
+            source_by_symbol[symbol] = "payload_entry_price"
+        else:
+            need_fetch.append(symbol)
+
+    fetched = _yfinance_prices(need_fetch, run_date, price_fetcher=price_fetcher)
+    for symbol in need_fetch:
+        price = fetched.get(symbol)
+        if price is not None and price > 0:
+            price_by_symbol[symbol] = float(price)
+            source_by_symbol[symbol] = "yfinance_open"
+
+    unpriced = [s for s in symbols if s not in price_by_symbol]
+    return price_by_symbol, source_by_symbol, unpriced
+
+
+def _target_rows_from_weights(
+    weights: pd.DataFrame,
+    *,
+    approved_sleeve: str,
+    price_by_symbol: Mapping[str, float],
+    source_by_symbol: Mapping[str, str],
+    signal_sleeve_by_symbol: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Full target portfolio rows (schema caerus.transition_target.v2).
+
+    One row per risk-adjusted target name, each carrying a GUARANTEED positive price
+    and the approved sleeve (with source-signal sleeve preserved as provenance). The
+    executor's Transition Engine consumes these to rebalance the whole live account
+    to target weights, sizing against the live snapshot and enforcing caps/max_orders.
+    Ranked by target weight desc, then symbol, for stable priority.
     """
     rows: list[dict[str, Any]] = []
-    for c in candidates:
-        price = _safe_positive_float(c.get("normalized_limit_price")) or _safe_positive_float(
-            c.get("limit_price")
-        )
-        if price is None:
+    for _, w in weights.iterrows():
+        symbol = _clean_symbol(w.get("ticker"))
+        price = _safe_positive_float(price_by_symbol.get(symbol))
+        target_weight = _safe_float(w.get("target_weight"))
+        if not symbol or price is None or target_weight is None:
             continue
+        normalized_price = normalize_live_pilot_limit_price(float(price))
         rows.append(
             {
-                "symbol": c.get("ticker"),
-                "target_weight": c.get("source_signal_target_weight"),
-                "price": float(price),
-                "target_notional": _safe_positive_float(c.get("source_notional"))
-                or _safe_positive_float(c.get("notional")),
-                "sleeve": c.get("sleeve"),
-                "sleeve_source": c.get("sleeve_source"),
-                "sleeve_provenance": c.get("sleeve_provenance"),
-                "source_strategy_id": c.get("source_strategy_id"),
-                "source_signal_sleeve": c.get("source_signal_sleeve"),
-                "source_signal_target_weight": c.get("source_signal_target_weight"),
-                "source_signal_raw_score": c.get("source_signal_raw_score"),
-                "source_precompute_index": c.get("source_precompute_index"),
-                "approved_sleeve_override": c.get("approved_sleeve_override"),
+                "symbol": symbol,
+                "ticker": symbol,
+                "target_weight": float(target_weight),
+                "price": float(normalized_price),
+                "reference_price": float(price),
+                "price_source": source_by_symbol.get(symbol),
+                "order_type": "market",
+                "sleeve": approved_sleeve,
+                "source_signal_sleeve": signal_sleeve_by_symbol.get(symbol) or None,
+                "source_signal_target_weight": float(target_weight),
             }
         )
-    rows.sort(
-        key=lambda r: (
-            -(float(r["target_weight"]) if r.get("target_weight") is not None else -1.0),
-            str(r.get("symbol") or ""),
-        )
-    )
+    rows.sort(key=lambda r: (-(float(r["target_weight"])), str(r.get("symbol") or "")))
     return rows
 
 
@@ -421,72 +279,191 @@ def build_live_pilot_plan(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     allow_missing_sleeve: bool = False,
     allow_fractional: bool = False,
+    price_fetcher: PriceFetcher | None = None,
+    sector_map: Mapping[str, str] | None = None,
+    state_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Build a FULL rebalance target plan for the live pilot.
+
+    The plan is the strategy's risk-adjusted target weights over the ENTIRE target
+    universe (from ``signals.json``), sized to the live portfolio value. It uses the
+    SAME pipeline paper uses -- ``paper.paper_broker.load_targets`` then
+    ``core.risk_controls.RiskControls.apply_to_targets`` fed the LIVE equity -- so
+    there is one implementation and no drift. The executor rebalances the live
+    holdings to this target through the shared core, selling over-weight / removed
+    names and buying under-weight ones, honouring the safety gates.
+    """
     if not str(approved_sleeve or "").strip():
         raise ValueError("approved_sleeve is required")
     if float(capital_cap) <= 0:
         # No fixed program ceiling: the cap tracks the account's portfolio value
         # (resolved upstream in the cron lane / execution path). Must still be positive.
         raise ValueError("capital_cap must be > 0")
-    if int(max_orders) != 1:
-        raise ValueError("FR-104 Phase 1 requires max_orders=1")
+    if int(max_orders) <= 0:
+        raise ValueError("max_orders must be > 0")
+
+    price_fetcher = price_fetcher or fetch_open_prices_yfinance
 
     payload = _read_json(payload_path)
     if not isinstance(payload, Mapping):
         raise ValueError("planned execution payload must be a JSON object")
     trade_date = str(payload.get("trade_date") or payload_path.parent.name)
-    trades = _extract_trades(payload)
-    signal_lookup = _source_signal_lookup(payload_path, payload)
 
-    candidates: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    for index, trade in enumerate(trades):
-        candidate, rejection = _candidate_order(
-            trade,
-            index=index,
-            payload=payload,
-            source_signal=signal_lookup.get(_clean_symbol(trade.get("ticker") or trade.get("symbol"))),
+    signals_path = _resolve_signals_path(payload_path, payload)
+    if not signals_path.exists():
+        return _emit_blocked_plan(
+            output_dir=output_dir,
+            trade_date=trade_date,
             approved_sleeve=approved_sleeve,
             capital_cap=float(capital_cap),
-            allow_missing_sleeve=bool(allow_missing_sleeve),
+            max_orders=int(max_orders),
+            allow_fractional=bool(allow_fractional),
+            reason_code="live_pilot_signals_source_missing",
+            diagnostics={"signals_path": str(signals_path)},
         )
-        if candidate is not None:
-            candidates.append(candidate)
-        if rejection is not None:
-            rejected.append(rejection)
 
-    candidates = sorted(
-        candidates,
-        key=lambda row: (
-            1 if row.get("sleeve_source") == "missing_in_source_overridden_for_live_pilot" else 0,
-            int(row.get("source_precompute_index") or 0),
-        ),
+    # 1) Strategy target for the FULL universe (same loader paper uses).
+    payload_cash_default = _safe_float(payload.get("cash_target_weight")) or 0.0
+    targets, cash_target_weight, _snapshot_date, _asof = load_targets(
+        str(signals_path),
+        cash_target_weight_default=float(payload_cash_default),
     )
-    # Workstream C Phase 2: emit the FULL target portfolio (all qualifying names +
-    # weights + reference prices), retiring reliance on the single-order narrowing.
-    # The live executor's Transition Engine consumes this to select the buy by target
-    # weight priority (max_orders=1) and to size it against the live snapshot. The
-    # legacy ``selected_order``/``trades`` single-order fields are retained for
-    # backward compatibility but are no longer the live path's source of truth.
-    target_portfolio = _target_portfolio_from_candidates(candidates)
-    selected = candidates[:1]
-    for extra in candidates[1:]:
-        rejected.append(
-            {
-                "index": extra.get("source_precompute_index"),
-                "ticker": extra.get("ticker"),
-                "side": extra.get("side"),
-                "sleeve": extra.get("sleeve"),
-                "notional": extra.get("notional"),
-                "reasons": ["max_one_order_selected"],
-                "source_trade": extra,
-            }
+    signal_sleeve_by_symbol = {
+        _clean_symbol(row.get("ticker")): str(row.get("sleeve") or "").strip()
+        for _, row in targets.iterrows()
+    }
+
+    # 2) Risk controls at the LIVE portfolio size. current_equity is the resolved
+    #    dynamic cap (== the live portfolio value; an optional operator CAPITAL_CAP
+    #    only tightens it -- that IS "the portfolio size for Live"). Peak-equity is
+    #    tracked in a live-scoped state dir, isolated from paper's.
+    live_equity = float(capital_cap)
+    peak_path = peak_equity_path(state_dir=Path(state_dir) if state_dir else LIVE_PILOT_STATE_DIR)
+    peak_state = update_peak_equity_state(
+        current_equity=live_equity,
+        trade_date=trade_date,
+        source="live_pilot_dynamic_cap",
+        path=peak_path,
+    )
+    resolved_sector_map = dict(sector_map) if sector_map is not None else load_sector_map()
+    controls = RiskControls()
+    result = controls.apply_to_targets(
+        targets,
+        sector_map=resolved_sector_map,
+        cash_target_weight=cash_target_weight,
+        current_equity=live_equity,
+        peak_equity=_safe_float(peak_state.get("peak_equity")),
+    )
+    adjusted_weights = result.weights
+
+    # 3) Sanity: every target name must be a plain equity (fail-closed).
+    bad_symbols = [
+        _clean_symbol(w.get("ticker"))
+        for _, w in adjusted_weights.iterrows()
+        if not _is_supported_equity_symbol(_clean_symbol(w.get("ticker")))
+    ]
+    if bad_symbols:
+        return _emit_blocked_plan(
+            output_dir=output_dir,
+            trade_date=trade_date,
+            approved_sleeve=approved_sleeve,
+            capital_cap=float(capital_cap),
+            max_orders=int(max_orders),
+            allow_fractional=bool(allow_fractional),
+            reason_code="live_pilot_target_unsupported_symbol",
+            diagnostics={"unsupported_symbols": sorted(set(bad_symbols))},
+            risk_controls=result.to_artifact(),
         )
 
-    status = "READY_FOR_MANUAL_APPROVAL" if selected else "BLOCKED_NO_QUALIFYING_ORDER"
-    reason_code = "selected_one_order" if selected else "no_qualifying_live_pilot_order"
+    target_symbols = [_clean_symbol(w.get("ticker")) for _, w in adjusted_weights.iterrows()]
+
+    # 4) Price EVERY target name; fail closed if any name ends up unpriced.
+    price_by_symbol, source_by_symbol, unpriced = _hydrate_prices(
+        target_symbols,
+        payload=payload,
+        run_date=trade_date,
+        price_fetcher=price_fetcher,
+    )
+    if unpriced:
+        return _emit_blocked_plan(
+            output_dir=output_dir,
+            trade_date=trade_date,
+            approved_sleeve=approved_sleeve,
+            capital_cap=float(capital_cap),
+            max_orders=int(max_orders),
+            allow_fractional=bool(allow_fractional),
+            reason_code="live_pilot_target_unpriced",
+            diagnostics={"unpriced_targets": sorted(set(unpriced))},
+            risk_controls=result.to_artifact(),
+        )
+
+    target_portfolio = _target_rows_from_weights(
+        adjusted_weights,
+        approved_sleeve=approved_sleeve,
+        price_by_symbol=price_by_symbol,
+        source_by_symbol=source_by_symbol,
+        signal_sleeve_by_symbol=signal_sleeve_by_symbol,
+    )
+    if not target_portfolio:
+        return _emit_blocked_plan(
+            output_dir=output_dir,
+            trade_date=trade_date,
+            approved_sleeve=approved_sleeve,
+            capital_cap=float(capital_cap),
+            max_orders=int(max_orders),
+            allow_fractional=bool(allow_fractional),
+            reason_code="live_pilot_no_target_names",
+            diagnostics={"cash_target_weight": float(result.cash_target_weight)},
+            risk_controls=result.to_artifact(),
+        )
+
+    plan = _plan_scaffold(
+        trade_date=trade_date,
+        approved_sleeve=approved_sleeve,
+        capital_cap=float(capital_cap),
+        max_orders=int(max_orders),
+        allow_missing_sleeve=bool(allow_missing_sleeve),
+        allow_fractional=bool(allow_fractional),
+        output_dir=output_dir,
+        payload_path=payload_path,
+        signals_path=signals_path,
+    )
+    plan.update(
+        {
+            "status": "READY_FOR_MANUAL_APPROVAL",
+            "reason_code": "full_rebalance_target_ready",
+            "cash_target_weight": float(result.cash_target_weight),
+            "target_portfolio_schema": TARGET_PORTFOLIO_SCHEMA,
+            "target_portfolio": target_portfolio,
+            "target_name_count": len(target_portfolio),
+            "risk_controls": result.to_artifact(),
+            "price_sources": {row["symbol"]: row["price_source"] for row in target_portfolio},
+        }
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
     plan_path = output_dir / f"live_pilot_plan_{trade_date}.json"
     md_path = output_dir / f"live_pilot_plan_{trade_date}.md"
+    _write_json(plan_path, plan)
+    _write_text(md_path, render_markdown(plan, json_path=plan_path))
+    plan["json_path"] = str(plan_path)
+    plan["markdown_path"] = str(md_path)
+    return plan
+
+
+def _plan_scaffold(
+    *,
+    trade_date: str,
+    approved_sleeve: str,
+    capital_cap: float,
+    max_orders: int,
+    allow_missing_sleeve: bool,
+    allow_fractional: bool,
+    output_dir: Path,
+    payload_path: Path,
+    signals_path: Path,
+) -> dict[str, Any]:
+    plan_path = output_dir / f"live_pilot_plan_{trade_date}.json"
     dry_run_command = (
         "TRADING_MODE=live_pilot ALPACA_PAPER=0 ALPACA_BASE_URL=https://api.alpaca.markets "
         f"CAERUS_LIVE_PILOT_APPROVED=1 CAERUS_LIVE_PILOT_CAPITAL_CAP={float(capital_cap):g} "
@@ -498,13 +475,11 @@ def build_live_pilot_plan(
         f".venv/bin/python3 scripts/live_pilot_execute.py --plan {plan_path.as_posix()}"
     )
     live_command = dry_run_command.replace("CAERUS_LIVE_PILOT_DRY_RUN=1", "CAERUS_LIVE_PILOT_DRY_RUN=0")
-
-    plan = {
-        "schema_version": "live_pilot_plan_from_precompute.v1",
+    return {
+        "schema_version": PLAN_SCHEMA_VERSION,
         "generated_at": _now_utc(),
-        "status": status,
-        "reason_code": reason_code,
         "source_precompute_payload": str(payload_path),
+        "source_signals": str(signals_path),
         "trade_date": trade_date,
         "approved_sleeve": approved_sleeve,
         "capital_cap": float(capital_cap),
@@ -512,50 +487,68 @@ def build_live_pilot_plan(
         "allow_missing_sleeve": bool(allow_missing_sleeve),
         "allow_fractional": bool(allow_fractional),
         "order_policy": {
-            "scope": "FR-104 LIVE_PILOT only",
+            "scope": "FR-104 LIVE_PILOT full rebalance",
+            "model": "rebalance_to_risk_adjusted_target_weight",
             "order_type": "market",
             "time_in_force": "day",
             "normal_market_hours_only": True,
-            "cap_enforced_before_submission": True,
-            "cap_enforcement_price": "normalized expected price from source precompute",
-            "duplicate_open_order_policy": "skip_if_open_live_pilot_order_detected",
+            "buys_capped_by": "CAERUS_LIVE_PILOT_MAX_ORDERS",
+            "sells_gated_by": "CAERUS_LIVE_PILOT_SELLS_ENABLED + sell whitelist/wildcard",
+            "sizing": "live portfolio value via execution core (same engine as paper)",
             "paper_or_production_impact": "none",
         },
-        "selected_order": selected[0] if selected else None,
-        "target_portfolio_schema": "caerus.transition_target.v1",
-        "target_portfolio": target_portfolio,
-        "rejected_orders_with_reasons": rejected,
         "required_dry_run_command": dry_run_command,
         "required_live_command": live_command,
         "operator_confirmation": {
             "approved_sleeve": approved_sleeve,
             "capital_cap": float(capital_cap),
-            "selected_order": selected[0] if selected else None,
+            "max_orders": int(max_orders),
             "allow_missing_sleeve": bool(allow_missing_sleeve),
             "allow_fractional": bool(allow_fractional),
             "required_manual_review": True,
             "orders_submitted": 0,
         },
-        "trades": selected,
     }
 
-    # Prove the emitted plan is compatible with scripts/live_pilot_execute.py's
-    # live-pilot validation schema before writing it.
-    if selected:
-        validation_env = dict(os.environ)
-        if allow_fractional:
-            validation_env["CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"] = "1"
-        validation = validate_live_pilot_plan(
-            selected,
-            env=validation_env,
-            capital_cap_usd=float(capital_cap),
-            max_orders=int(max_orders),
-            run_id=f"plan-{trade_date}",
-        )
-        if validation.status != "PASS":
-            raise RuntimeError(f"emitted_live_pilot_plan_failed_validation:{validation.reason_codes}")
 
+def _emit_blocked_plan(
+    *,
+    output_dir: Path,
+    trade_date: str,
+    approved_sleeve: str,
+    capital_cap: float,
+    max_orders: int,
+    allow_fractional: bool,
+    reason_code: str,
+    diagnostics: Mapping[str, Any],
+    risk_controls: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    plan = _plan_scaffold(
+        trade_date=trade_date,
+        approved_sleeve=approved_sleeve,
+        capital_cap=float(capital_cap),
+        max_orders=int(max_orders),
+        allow_missing_sleeve=False,
+        allow_fractional=bool(allow_fractional),
+        output_dir=output_dir,
+        payload_path=Path(""),
+        signals_path=Path(""),
+    )
+    plan.update(
+        {
+            "status": "BLOCKED",
+            "reason_code": reason_code,
+            "cash_target_weight": 0.0,
+            "target_portfolio_schema": TARGET_PORTFOLIO_SCHEMA,
+            "target_portfolio": [],
+            "target_name_count": 0,
+            "block_diagnostics": dict(diagnostics),
+            "risk_controls": dict(risk_controls) if risk_controls is not None else None,
+        }
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = output_dir / f"live_pilot_plan_{trade_date}.json"
+    md_path = output_dir / f"live_pilot_plan_{trade_date}.md"
     _write_json(plan_path, plan)
     _write_text(md_path, render_markdown(plan, json_path=plan_path))
     plan["json_path"] = str(plan_path)
@@ -564,49 +557,36 @@ def build_live_pilot_plan(
 
 
 def render_markdown(plan: Mapping[str, Any], *, json_path: Path) -> str:
-    selected = plan.get("selected_order")
-    rejected = plan.get("rejected_orders_with_reasons") or []
+    target_portfolio = plan.get("target_portfolio") or []
     lines = [
-        "# LIVE_PILOT Plan From Precompute",
+        "# LIVE_PILOT Full Rebalance Plan From Precompute",
         "",
         f"Status: `{plan.get('status')}`",
+        f"Reason: `{plan.get('reason_code')}`",
         f"Trade Date: `{plan.get('trade_date')}`",
         f"Approved Sleeve: `{plan.get('approved_sleeve')}`",
-        f"Capital Cap: `${float(plan.get('capital_cap') or 0.0):.2f}`",
+        f"Capital Cap (portfolio value): `${float(plan.get('capital_cap') or 0.0):.2f}`",
+        f"Cash Target Weight: `{float(plan.get('cash_target_weight') or 0.0):.4f}`",
+        f"Max Buy Orders: `{plan.get('max_orders')}`",
+        f"Target Names: `{plan.get('target_name_count')}`",
         f"JSON Plan: `{json_path.as_posix()}`",
         "",
-        "## Selected Order",
+        "## Target Portfolio (risk-adjusted weights)",
         "",
     ]
-    if selected:
-        lines.extend(
-            [
-                f"- Ticker: `{selected.get('ticker')}`",
-                f"- Side: `{selected.get('side')}`",
-                f"- Shares: `{selected.get('shares')}`",
-                f"- Order Type: `{selected.get('order_type')}`",
-                f"- Expected/Cap Price: `{selected.get('expected_price') or selected.get('limit_price')}`",
-                f"- Notional: `${float(selected.get('notional') or 0.0):.2f}`",
-                f"- Sleeve: `{selected.get('sleeve')}`",
-                f"- Sleeve Source: `{selected.get('sleeve_source')}`",
-                f"- Source Signal Sleeve: `{selected.get('source_signal_sleeve') or 'n/a'}`",
-            ]
-        )
+    if target_portfolio:
+        lines.append("| Symbol | Target Weight | Ref Price | Price Source |")
+        lines.append("| --- | ---: | ---: | --- |")
+        for row in target_portfolio:
+            lines.append(
+                f"| `{row.get('symbol')}` | {float(row.get('target_weight') or 0.0):.4f} | "
+                f"{float(row.get('price') or 0.0):.2f} | {row.get('price_source')} |"
+            )
     else:
-        lines.append("No qualifying order selected.")
-    lines.extend(
-        [
-            "",
-            "## Rejected Orders",
-            "",
-        ]
-    )
-    if rejected:
-        for row in rejected:
-            reasons = ", ".join(str(reason) for reason in row.get("reasons") or [])
-            lines.append(f"- `{row.get('ticker') or 'UNKNOWN'}`: {reasons}")
-    else:
-        lines.append("None.")
+        lines.append("No target names (plan blocked).")
+        diagnostics = plan.get("block_diagnostics") or {}
+        if diagnostics:
+            lines.extend(["", "## Block Diagnostics", "", "```json", json.dumps(dict(diagnostics), indent=2, sort_keys=True), "```"])
     lines.extend(
         [
             "",
@@ -624,7 +604,8 @@ def render_markdown(plan: Mapping[str, Any], *, json_path: Path) -> str:
             "",
             "## Operator Confirmation",
             "",
-            "- Confirm the sleeve, cap, account hash, selected order, and dry-run artifact before any live attempt.",
+            "- Confirm the sleeve, cap (portfolio value), target weights, and dry-run artifact before any live attempt.",
+            "- Sells are gated by the fail-closed sells master flag + whitelist/wildcard; buys are capped by max_orders.",
             "- This builder does not submit orders.",
         ]
     )
@@ -632,7 +613,7 @@ def render_markdown(plan: Mapping[str, Any], *, json_path: Path) -> str:
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build a one-order LIVE_PILOT plan from precompute output")
+    parser = argparse.ArgumentParser(description="Build a full-rebalance LIVE_PILOT plan from precompute output")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--payload-path", default=None, help="Explicit planned_execution_payload.json path")
     source.add_argument("--trade-date", default=None, help="Trade date under outputs/precompute/<DATE>")
@@ -645,13 +626,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--allow-missing-sleeve",
         action="store_true",
         default=os.getenv("CAERUS_LIVE_PILOT_ALLOW_MISSING_SLEEVE", "").strip().lower() in {"1", "true", "yes", "y", "on"},
-        help="Allow missing source sleeve metadata only for isolated live pilot plan selection.",
+        help="Accepted for CLI compatibility; the full-rebalance builder stamps the approved sleeve on all target rows.",
     )
     parser.add_argument(
         "--allow-fractional",
         action="store_true",
         default=os.getenv("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL", "").strip().lower() in {"1", "true", "yes", "y", "on"},
-        help="Allow fractional quantity only for isolated live pilot plan validation.",
+        help="Echoed into the plan's dry-run/live commands; the executor enforces fractional policy.",
     )
     return parser.parse_args(argv)
 
@@ -675,8 +656,20 @@ def main(argv: list[str] | None = None) -> int:
         allow_missing_sleeve=bool(args.allow_missing_sleeve),
         allow_fractional=bool(args.allow_fractional),
     )
-    print(json.dumps({"status": plan.get("status"), "json_path": plan.get("json_path"), "markdown_path": plan.get("markdown_path")}, indent=2, sort_keys=True))
-    return 0 if plan.get("selected_order") else 1
+    print(
+        json.dumps(
+            {
+                "status": plan.get("status"),
+                "reason_code": plan.get("reason_code"),
+                "target_name_count": plan.get("target_name_count"),
+                "json_path": plan.get("json_path"),
+                "markdown_path": plan.get("markdown_path"),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0 if plan.get("status") == "READY_FOR_MANUAL_APPROVAL" else 1
 
 
 if __name__ == "__main__":

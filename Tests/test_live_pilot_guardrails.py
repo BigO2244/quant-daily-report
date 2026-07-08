@@ -307,6 +307,50 @@ def test_plan_validation_blocks_over_cap_and_too_many_orders(monkeypatch: pytest
     assert "live_pilot_total_notional_exceeds_cap" in result.reason_codes
 
 
+def test_full_rebalance_high_turnover_not_blocked_by_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    # FR-104 full rebalance: gross turnover (buys + sells) can exceed the cap, but the
+    # cap bounds deployed BUY notional only. Sells are exits and must not consume it.
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELLS_ENABLED", "1")
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELL_WHITELIST", "*")
+    trades = [
+        {"ticker": "OLD", "side": "SELL", "shares": 3, "limit_price": 100},   # $300 exit
+        {"ticker": "NEWA", "side": "BUY", "shares": 5, "limit_price": 30},     # $150
+        {"ticker": "NEWB", "side": "BUY", "shares": 5, "limit_price": 20},     # $100
+    ]
+    # Gross = $550 > $502 cap; buy notional = $250 <= cap -> must PASS.
+    result = validate_live_pilot_plan(
+        trades,
+        capital_cap_usd=502,
+        max_orders=50,
+        run_id="full-rebalance",
+    )
+    assert result.status == "PASS", result.reason_codes
+    assert result.total_notional == 550.0  # gross reported unchanged
+
+
+def test_full_rebalance_blocks_when_buys_exceed_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELLS_ENABLED", "1")
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELL_WHITELIST", "*")
+    trades = [
+        {"ticker": "OLD", "side": "SELL", "shares": 1, "limit_price": 50},     # $50 exit
+        {"ticker": "NEWA", "side": "BUY", "shares": 4, "limit_price": 100},     # $400
+        {"ticker": "NEWB", "side": "BUY", "shares": 4, "limit_price": 60},      # $240
+    ]
+    # Buy notional $640 > $502 cap -> BLOCKED even though sells are small.
+    result = validate_live_pilot_plan(
+        trades,
+        capital_cap_usd=502,
+        max_orders=50,
+        run_id="over-buy",
+    )
+    assert result.status == "BLOCKED"
+    assert "live_pilot_total_notional_exceeds_cap" in result.reason_codes
+
+
 def test_plan_validation_normalizes_limit_price(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear(monkeypatch)
     _approve(monkeypatch)

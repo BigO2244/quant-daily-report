@@ -485,6 +485,12 @@ def _build_core_request(
     for symbol, price in target_prices.items():
         prices.loc[symbol] = float(price)
     cash = float(_finite_float((account or {}).get("cash")) or 0.0)
+    # Carry the risk-adjusted cash target through execution so live matches paper.
+    # Paper holds this cash back (circuit breaker, sector trim); a legacy plan without
+    # the field defaults to 0.0 (prior behavior).
+    cash_target_weight = _finite_float(plan.get("cash_target_weight"))
+    if cash_target_weight is None or cash_target_weight < 0.0:
+        cash_target_weight = 0.0
     planning_account = {
         "cash": str(cash),
         "equity": str(equity),
@@ -498,7 +504,7 @@ def _build_core_request(
         prices=prices,
         total_equity=float(equity),
         starting_cash=float(cash),
-        target_cash_weight=0.0,
+        target_cash_weight=float(cash_target_weight),
         planning_account=planning_account,
         run_id=run_id,
         price_basis="live_broker_snapshot",

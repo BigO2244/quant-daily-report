@@ -578,7 +578,13 @@ def validate_live_pilot_plan(
     if buy_count > int(max_orders):
         errors.append("live_pilot_order_count_exceeds_max_orders")
         errors.append("live_pilot_buy_order_count_exceeds_max_orders")
-    if total > float(capital_cap_usd):
+    # The cap bounds deployed BUY notional (the "portfolio size for Live"), not gross
+    # turnover. A full rebalance sells over-weight/removed names AND buys under-weight
+    # ones; summing both sides would block legitimate high-turnover rebalances whose
+    # buys stay within the portfolio value. Sells are exits (they fund buys, gated by
+    # the fail-closed sells master flag + whitelist) and never consume the buying cap.
+    buy_notional = sum(order.notional for order in orders if order.side == "BUY")
+    if buy_notional > float(capital_cap_usd):
         errors.append("live_pilot_total_notional_exceeds_cap")
 
     if errors:
