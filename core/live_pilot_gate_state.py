@@ -102,10 +102,21 @@ def build_live_pilot_gate_state(
     block_reason: str | None = None,
     broker_orders_submitted: int = 0,
     base_url: str | None = None,
+    resolved_cap_usd: float | None = None,
+    cap_source_override: str | None = None,
+    portfolio_value_usd: float | None = None,
 ) -> dict[str, Any]:
     environ = env if env is not None else os.environ
-    configured_cap, cap_source = cap_source_from_env(environ)
-    effective_cap = configured_cap if cap_source == "env" else None
+    configured_cap, env_cap_source = cap_source_from_env(environ)
+    # The live cap is resolved dynamically from the account's portfolio value; the
+    # env cap (configured_cap) is only an optional lower override. When the caller
+    # provides the resolved cap (post-snapshot), report it as the effective cap.
+    if resolved_cap_usd is not None:
+        effective_cap = resolved_cap_usd
+        cap_source = cap_source_override or "portfolio_value"
+    else:
+        effective_cap = configured_cap if env_cap_source == "env" else None
+        cap_source = env_cap_source
     endpoint = base_url if base_url is not None else str(environ.get("ALPACA_BASE_URL") or "")
     trading_mode = str(environ.get("TRADING_MODE") or environ.get("MODE") or "").strip()
     return {
@@ -123,9 +134,10 @@ def build_live_pilot_gate_state(
         "live_pilot_approved": _truthy(environ.get(LIVE_PILOT_APPROVED_ENV)),
         "kill_switch_set": kill_switch_engaged(environ.get(LIVE_PILOT_KILL_SWITCH_ENV)),
         "configured_cap_usd": configured_cap,
-        "approved_max_cap_usd": LIVE_PILOT_MAX_CAP_USD,
+        "approved_max_cap_usd": None,  # no fixed program ceiling; cap tracks portfolio value
         "effective_cap_usd": effective_cap,
         "cap_source": cap_source,
+        "portfolio_value_usd": portfolio_value_usd,
         "max_orders": _safe_int(environ.get(LIVE_PILOT_MAX_ORDERS_ENV)),
         "sleeve_id": str(environ.get(LIVE_PILOT_SLEEVE_ID_ENV) or "").strip() or None,
         "dry_run": str(environ.get(LIVE_PILOT_DRY_RUN_ENV) or ""),
@@ -146,6 +158,9 @@ def write_live_pilot_gate_state(
     block_reason: str | None = None,
     broker_orders_submitted: int = 0,
     base_url: str | None = None,
+    resolved_cap_usd: float | None = None,
+    cap_source_override: str | None = None,
+    portfolio_value_usd: float | None = None,
 ) -> Path:
     run_root = Path(run_root)
     run_root.mkdir(parents=True, exist_ok=True)
@@ -158,6 +173,9 @@ def write_live_pilot_gate_state(
         block_reason=block_reason,
         broker_orders_submitted=broker_orders_submitted,
         base_url=base_url,
+        resolved_cap_usd=resolved_cap_usd,
+        cap_source_override=cap_source_override,
+        portfolio_value_usd=portfolio_value_usd,
     )
     path = run_root / LIVE_PILOT_GATE_STATE_FILENAME
     safe_write_text(

@@ -184,6 +184,31 @@ def _positive_int(value: object) -> int | None:
     return numeric if numeric > 0 else None
 
 
+def resolve_dynamic_cap(
+    portfolio_value: object,
+    env: Mapping[str, str] | None = None,
+) -> tuple[float | None, str]:
+    """Resolve the live-pilot capital ceiling from the broker account, fail-closed.
+
+    The cap is the account's current portfolio value (fully dynamic, no fixed
+    program ceiling). ``CAERUS_LIVE_PILOT_CAPITAL_CAP``, if set, is an OPTIONAL
+    lower manual ceiling (it can only tighten, never raise, the account-derived
+    cap). Returns ``(cap, source)``; ``(None, ...)`` means the cap could not be
+    resolved and the caller must block — a run must never size against an unknown
+    account value.
+    """
+    environ = _env_mapping(env)
+    pv = _positive_float(portfolio_value)
+    env_cap = _positive_float(environ.get(LIVE_PILOT_CAPITAL_CAP_ENV))
+    if pv is not None:
+        if env_cap is not None:
+            return min(pv, env_cap), "portfolio_value_env_capped"
+        return pv, "portfolio_value"
+    if env_cap is not None:
+        return env_cap, "env_fallback"
+    return None, "unavailable"
+
+
 def requested_mode_from_env(env: Mapping[str, str] | None = None) -> str:
     environ = _env_mapping(env)
     mode_raw = str(environ.get("MODE", "") or "").strip()
@@ -326,16 +351,10 @@ def build_live_pilot_gate_result(
             "missing_live_pilot_approval",
             f"Set {LIVE_PILOT_APPROVED_ENV}=1 only after manual approval.",
         )
-    if cap is None:
-        return result(
-            "missing_positive_live_pilot_capital_cap",
-            f"Set a positive {LIVE_PILOT_CAPITAL_CAP_ENV} at or below {LIVE_PILOT_MAX_CAP_USD:.0f}.",
-        )
-    if cap > LIVE_PILOT_MAX_CAP_USD:
-        return result(
-            "live_pilot_capital_cap_exceeds_program_limit",
-            f"Set {LIVE_PILOT_CAPITAL_CAP_ENV}<={LIVE_PILOT_MAX_CAP_USD:.0f}.",
-        )
+    # Capital cap is resolved dynamically from the broker account (portfolio value)
+    # AFTER the pre-trade snapshot — see resolve_dynamic_cap() and run_live_pilot.
+    # It is therefore not required or ceiling-checked at this pre-snapshot gate; the
+    # optional CAERUS_LIVE_PILOT_CAPITAL_CAP env only ever tightens the resolved cap.
     if sleeve is None:
         return result(
             "missing_live_pilot_sleeve_id",

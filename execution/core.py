@@ -293,7 +293,7 @@ def live_pilot_execution_config(
     approved_cap_usd: float | None,
     allow_fractional: bool = False,
     max_orders: int = 1,
-    equity_collar_max_usd: float | None = 520.0,
+    equity_collar_max_usd: float | None = None,
     ledger_output_root: str | Path | None = None,
     ledger_enabled: bool = True,
 ) -> ExecutionCoreConfig:
@@ -301,7 +301,10 @@ def live_pilot_execution_config(
 
     Phase 1B does not wire live to this core. This factory documents the intended
     same-path settings for Phase 1D: cap blocks instead of clipping, one max buy,
-    no paper reserve, equity collar, and fail-closed malformed holdings.
+    no paper reserve, and fail-closed malformed holdings. The equity collar is
+    disabled by default (None): the capital cap now tracks the account's portfolio
+    value, so there is no fixed account-size ceiling; the account-id pin is the
+    wrong-account guard.
     """
 
     cfg = PaperConfig(

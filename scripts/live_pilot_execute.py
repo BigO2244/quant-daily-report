@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime as dt
 import json
 import math
@@ -25,6 +26,7 @@ from core.live_pilot_guardrails import (
     account_id_hash,
     build_live_pilot_gate_result,
     expected_account_matches,
+    resolve_dynamic_cap,
     validate_live_pilot_asset,
     validate_live_pilot_plan,
 )
@@ -2094,6 +2096,11 @@ def _run_live_pilot_core_path(
             **_capital_gate_report_fields(capital_gate),
         },
     )
+    _cap_pv = _finite_float(
+        (pre_snapshot.get("account") or {}).get("portfolio_value")
+        or (pre_snapshot.get("account") or {}).get("equity")
+    )
+    _resolved_cap, _cap_source = resolve_dynamic_cap(_cap_pv, env)
     write_live_pilot_gate_state(
         run_root=run_root,
         run_id=run_id,
@@ -2104,6 +2111,9 @@ def _run_live_pilot_core_path(
         block_reason=None,
         broker_orders_submitted=0 if gate.dry_run else len(submitted),
         base_url=str(preflight.get("base_url") or ""),
+        resolved_cap_usd=gate.capital_cap_usd,
+        cap_source_override=_cap_source,
+        portfolio_value_usd=_cap_pv,
     )
     terminal_status = (
         "DRY_RUN"
@@ -2383,6 +2393,29 @@ def run_live_pilot(
             operator_action="Expected live pilot account id/hash does not match broker account.",
             preflight=preflight,
         )
+
+    # Resolve the capital cap dynamically from the account's current portfolio value
+    # (fully dynamic ceiling; an optional CAERUS_LIVE_PILOT_CAPITAL_CAP only tightens
+    # it). Fail closed if the account value is unknown and no override is set — a run
+    # must never size against an unknown account.
+    portfolio_value = _finite_float(
+        account_public.get("portfolio_value") or account_public.get("equity")
+    )
+    resolved_cap, cap_source = resolve_dynamic_cap(portfolio_value, environ)
+    if resolved_cap is None:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code="live_pilot_capital_cap_unresolved",
+            operator_action=(
+                "Live capital cap could not be resolved: broker portfolio value was "
+                "unavailable and no CAERUS_LIVE_PILOT_CAPITAL_CAP override is set."
+            ),
+            preflight=preflight,
+        )
+    gate = dataclasses.replace(gate, capital_cap_usd=resolved_cap)
 
     return _run_live_pilot_core_path(
         plan=plan,

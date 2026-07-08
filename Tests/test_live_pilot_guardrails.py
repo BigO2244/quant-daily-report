@@ -86,8 +86,9 @@ def test_live_pilot_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None
     ("env_name", "env_value", "reason"),
     [
         (LIVE_PILOT_APPROVED_ENV, None, "missing_live_pilot_approval"),
-        (LIVE_PILOT_CAPITAL_CAP_ENV, None, "missing_positive_live_pilot_capital_cap"),
-        (LIVE_PILOT_CAPITAL_CAP_ENV, "501", "live_pilot_capital_cap_exceeds_program_limit"),
+        # Capital cap is no longer required or ceiling-limited at the pre-snapshot
+        # gate: it is resolved dynamically from the account portfolio value after the
+        # broker snapshot (see resolve_dynamic_cap). The optional env cap only tightens.
         (LIVE_PILOT_SLEEVE_ID_ENV, None, "missing_live_pilot_sleeve_id"),
         (LIVE_PILOT_ACCOUNT_ID_ENV, None, "missing_live_pilot_expected_account_id"),
         (LIVE_PILOT_MAX_ORDERS_ENV, None, "missing_positive_live_pilot_max_orders"),

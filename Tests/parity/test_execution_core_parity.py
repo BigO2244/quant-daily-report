@@ -93,5 +93,5 @@ def test_execution_core_config_surface_documents_live_pilot_policy() -> None:
     assert config.capital.reserve_equity_pct == 0.0
     assert config.constraints.max_one_order is True
     assert config.constraints.max_buy_orders == 1
-    assert config.constraints.equity_collar_max_usd == 520.0
+    assert config.constraints.equity_collar_max_usd is None  # disabled; cap tracks portfolio value
     assert config.constraints.malformed_holding_policy == "fail_closed"

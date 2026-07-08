@@ -361,28 +361,40 @@ def test_missing_equity_blocks(tmp_path: Path) -> None:
     assert transition["diagnostics"]["equity_unavailable"] is True
 
 
-def test_equity_above_cap_regime_blocks(tmp_path: Path) -> None:
-    # #3-guard: equity above the $520 cap-regime ceiling halts (sizing model assumes
-    # equity ~= cap). Deferred: exposure-aware cap when the account is funded above cap.
+def _run_no_env_cap(broker, plan, *, equity, run_id, tmp_path):
+    # Drop the env cap override so the cap resolves purely from the account
+    # portfolio value (proves scaling with no fixed ceiling).
+    env = _env(dry_run="1")
+    env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP", None)
+    result = run_live_pilot(
+        plan=plan, broker=broker, env=env, run_id=run_id,
+        output_root=tmp_path / "outputs" / "live_pilot", now_et=_market_open(),
+    )
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / run_id
+    return result, run_root
+
+
+def test_equity_far_above_old_ceiling_now_scales(tmp_path: Path) -> None:
+    # Dynamic cap: the $520 equity collar was removed, so a $5,000 account no longer
+    # blocks -- the cap tracks the account's portfolio value and the run proceeds.
     broker = FakeBroker(buying_power="5000", cash="5000", equity="5000")
     plan = {"target_portfolio": [_target_row("AAA", 0.1, 100.0)]}
-    result, run_root = _run(broker, plan, dry_run="1", run_id="run-equity-regime", tmp_path=tmp_path)
-    assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "live_pilot_equity_exceeds_cap_regime"
-    assert broker.submit_calls == 0
-    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
-    assert transition["diagnostics"]["equity_usd"] == 5000.0
+    result, run_root = _run_no_env_cap(broker, plan, equity=5000, run_id="run-equity-regime", tmp_path=tmp_path)
+    assert result["terminal_status"] != "BLOCKED"
+    gate_state = json.loads((run_root / "live_pilot_gate_state.json").read_text())
+    assert gate_state["effective_cap_usd"] == 5000.0  # cap == portfolio value
+    assert gate_state["portfolio_value_usd"] == 5000.0
+    assert gate_state["cap_source"] == "portfolio_value"
 
 
-def test_equity_tight_collar_blocks_just_above_ceiling(tmp_path: Path) -> None:
-    # Tightened collar: equity $550 (below the old $600, above the new $520 ceiling)
-    # now blocks -- no top-up tolerance band above the $500 cap.
+def test_equity_moderately_above_old_ceiling_now_scales(tmp_path: Path) -> None:
+    # Equity $550 (above the removed $520 collar) also proceeds; cap == portfolio value.
     broker = FakeBroker(buying_power="550", cash="550", equity="550")
     plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
-    result, _run_root = _run(broker, plan, dry_run="1", run_id="run-collar", tmp_path=tmp_path)
-    assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "live_pilot_equity_exceeds_cap_regime"
-    assert broker.submit_calls == 0
+    result, run_root = _run_no_env_cap(broker, plan, equity=550, run_id="run-collar", tmp_path=tmp_path)
+    assert result["terminal_status"] != "BLOCKED"
+    gate_state = json.loads((run_root / "live_pilot_gate_state.json").read_text())
+    assert gate_state["effective_cap_usd"] == 550.0
 
 
 # --------------------------------------------------------------------------- #

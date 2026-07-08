@@ -301,10 +301,13 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     assert gate_state["decision"] == "ALLOWED"
     assert gate_state["alpaca_endpoint_category"] == "live"
     assert gate_state["ALPACA_PAPER"] == "0"
-    assert gate_state["configured_cap_usd"] == 500.0
-    assert gate_state["approved_max_cap_usd"] == 500.0
+    # Cap is now resolved from the account portfolio value (FakeBroker equity=500),
+    # tightened by the optional env cap (also 500). No fixed program ceiling.
+    assert gate_state["configured_cap_usd"] == 500.0  # optional env override still recorded
+    assert gate_state["approved_max_cap_usd"] is None  # no fixed program ceiling
     assert gate_state["effective_cap_usd"] == 500.0
-    assert gate_state["cap_source"] == "env"
+    assert gate_state["cap_source"] == "portfolio_value_env_capped"
+    assert gate_state["portfolio_value_usd"] == 500.0
     assert gate_state["broker_orders_submitted"] == 0
 
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
@@ -592,7 +595,9 @@ def test_insufficient_live_buying_power_blocks_even_when_approved_cap_allows_pla
     assert submitted["orders"] == []
 
 
-def test_missing_cap_blocks_before_broker_submission_and_writes_gate_state(tmp_path: Path) -> None:
+def test_missing_env_cap_resolves_from_account_portfolio_value(tmp_path: Path) -> None:
+    # No env cap: the cap resolves dynamically from the account portfolio value
+    # (FakeBroker equity/portfolio_value = 500), so a missing env cap no longer blocks.
     broker = FakeBroker()
     env = _env(dry_run="0")
     env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP")
@@ -601,22 +606,41 @@ def test_missing_cap_blocks_before_broker_submission_and_writes_gate_state(tmp_p
         plan=_plan(),
         broker=broker,
         env=env,
-        run_id="run-missing-cap",
+        run_id="run-no-env-cap",
         output_root=tmp_path / "outputs" / "live_pilot",
         now_et=_market_open_now(),
     )
 
-    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-missing-cap"
-    assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "missing_positive_live_pilot_capital_cap"
-    assert broker.submit_calls == 0
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-no-env-cap"
+    assert result["terminal_status"] != "BLOCKED"
     gate_state = _gate_state(run_root)
-    assert gate_state["decision"] == "BLOCKED"
-    assert gate_state["block_reason"] == "missing_positive_live_pilot_capital_cap"
-    assert gate_state["cap_source"] == "missing"
-    assert gate_state["configured_cap_usd"] is None
-    assert gate_state["effective_cap_usd"] is None
-    assert gate_state["broker_orders_submitted"] == 0
+    assert gate_state["decision"] == "ALLOWED"
+    assert gate_state["configured_cap_usd"] is None  # no env override present
+    assert gate_state["effective_cap_usd"] == 500.0  # from portfolio value
+    assert gate_state["cap_source"] == "portfolio_value"
+    assert gate_state["portfolio_value_usd"] == 500.0
+
+
+def test_unresolvable_cap_blocks_when_no_account_value_and_no_env_cap(tmp_path: Path) -> None:
+    # Fail-closed: account reports no portfolio value/equity AND no env override ->
+    # the cap cannot be resolved, so the run blocks before any broker submission.
+    broker = FakeBroker(equity="0")
+    env = _env(dry_run="0")
+    env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP")
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-cap-unresolved",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-cap-unresolved"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "live_pilot_capital_cap_unresolved"
+    assert broker.submit_calls == 0
 
 
 def test_kill_switch_blocks_before_broker_submission_and_writes_gate_state(tmp_path: Path) -> None:
