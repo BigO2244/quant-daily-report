@@ -1,0 +1,409 @@
+{
+  "artifact_comparison": null,
+  "capital_budget": {
+    "explicit_components": {
+      "broker_budget": 600.0,
+      "buy_budget_after_safeguards": 150.0,
+      "expected_sell_proceeds_conservative": 475.0,
+      "post_sell_cash": 700.0,
+      "reserve_cash_post_sell": 100.0,
+      "reserve_cash_pretrade": 100.0,
+      "risk_cash_target_buy_budget": 150.0,
+      "risk_cash_target_term": 550.0,
+      "sell_proceeds_haircut": 0.95
+    },
+    "post_sell_buy_budget": {
+      "broker_safeguard_buy_budget": 600.0,
+      "buy_budget_after_safeguards": 150.0,
+      "buy_budget_basis": "cash",
+      "buy_budget_before_safeguards": 700.0,
+      "post_sell_buying_power": 700.0,
+      "post_sell_cash": 700.0,
+      "post_sell_equity": 2000.0,
+      "risk_cash_target": 550.0,
+      "risk_cash_target_buy_budget": 150.0,
+      "target_cash_weight": 0.275
+    },
+    "pretrade_capital_budget": {
+      "allowed_buy_notional": 575.0,
+      "broker_buying_power_at_planning": 200.0,
+      "broker_cash_at_planning": 200.0,
+      "broker_equity_at_planning": 2000.0,
+      "capital_constrained_no_trades": false,
+      "capital_constraint_triggered": true,
+      "clipped_or_deferred_buys_count": 1,
+      "expected_sell_proceeds": 500.0,
+      "expected_sell_proceeds_conservative": 475.0,
+      "requested_buy_notional": 700.0,
+      "reserve_cash_policy": {
+        "available_for_buys": 575.0,
+        "equity_reserve_pct": 0.005,
+        "min_cash_dollars": 100.0,
+        "reserve_cash": 100.0,
+        "sell_proceeds_haircut": 0.95
+      }
+    }
+  },
+  "execution_filter": {
+    "intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 500.0,
+        "order": 1,
+        "price": 500.0,
+        "price_basis": "fixture_price",
+        "reason_code": "removed_from_targets",
+        "reference_price": 500.0,
+        "shares": 1.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "LEGACY",
+        "ticker": "LEGACY"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 575.0,
+        "order": 2,
+        "price": 300.0,
+        "price_basis": "fixture_price",
+        "reason_code": "cash_limited_capital_clipped",
+        "reference_price": 300.0,
+        "shares": 1.9166666667,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "execution_filter",
+        "symbol": "BIG",
+        "ticker": "BIG"
+      }
+    ],
+    "min_trade_decisions": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 2
+    },
+    "stats": {
+      "dropped_min_notional": 0,
+      "dropped_zero_shares": 0,
+      "kept": 2,
+      "raw": 2,
+      "rounded": 2
+    }
+  },
+  "final_decision_output": {
+    "buy_count": 1,
+    "intent_order": [
+      "LEGACY",
+      "BIG"
+    ],
+    "intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 500.0,
+        "order": 1,
+        "price": 500.0,
+        "price_basis": "fixture_price",
+        "reason_code": "removed_from_targets",
+        "reference_price": 500.0,
+        "shares": 1.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "LEGACY",
+        "ticker": "LEGACY"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 150.0,
+        "order": 2,
+        "price": 300.0,
+        "price_basis": "fixture_price",
+        "reason_code": "post_sell_rebudget_capital_clipped",
+        "reference_price": 300.0,
+        "shares": 0.5,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_final",
+        "symbol": "BIG",
+        "ticker": "BIG"
+      }
+    ],
+    "sell_count": 1
+  },
+  "inputs_summary": {
+    "config": {
+      "allow_fractional": true,
+      "benchmark_ticker": "SPY",
+      "cash_buffer_bps": 0.0,
+      "cash_target_weight_default": 0.0,
+      "halt_on_data_error": true,
+      "initial_equity": 2000.0,
+      "market_cutoff_time_et": "15:45",
+      "max_position_change_pct": 1.0,
+      "max_position_pct": 1.0,
+      "max_trades_per_day": 4,
+      "max_turnover_pct": 1.0,
+      "min_trade_dollars": 100.0,
+      "portfolio_id": "parity",
+      "rebalance_deadband_pct": 0.01,
+      "reconciliation_abs_tolerance_dollars": 1.0,
+      "reconciliation_bps_tolerance": 1.0,
+      "require_benchmark_price": true,
+      "risk_action": "warn",
+      "sent_ledger_path": "outputs/orders_sent/orders_sent.csv",
+      "slippage_bps": 0.0,
+      "strategy_version": "paper_native",
+      "trading_mode": "paper"
+    },
+    "holdings_count": 1,
+    "planning_account": {
+      "buying_power": "200.0",
+      "cash": "200.0",
+      "equity": "2000.0",
+      "status": "ACTIVE"
+    },
+    "post_sell_account_fixture": {
+      "buying_power": "700.0",
+      "cash": "700.0",
+      "equity": "2000.0",
+      "status": "ACTIVE"
+    },
+    "precomputed_trade_plan_used": false,
+    "prices_count": 4,
+    "rebudget_total_equity": null,
+    "starting_cash": 200.0,
+    "target_cash_weight": 0.275,
+    "targets_count": 3,
+    "total_equity": 2000.0
+  },
+  "post_sell_rebudget": {
+    "enabled": true,
+    "ending_cash": null,
+    "ending_cash_vs_risk_target": null,
+    "estimated_ending_cash": 550.0,
+    "estimated_ending_cash_vs_risk_target": 0.0,
+    "final_buy_orders_submitted": [
+      {
+        "notional": 150.0,
+        "order_id": "parity:post_sell_over_budget_suppression:paper_native:BIG:BUY",
+        "order_type": "MKT",
+        "quantity": 0.5,
+        "reason": "post_sell_rebudget_capital_clipped",
+        "side": "BUY",
+        "ticker": "BIG",
+        "time_in_force": "DAY"
+      }
+    ],
+    "final_submitted_buy_notional": 150.0,
+    "original_precomputed_buy_notional": 575.0,
+    "reason_codes": [],
+    "rebudget_total_equity": null,
+    "rebuilt_buy_intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 150.0,
+        "order": 1,
+        "price": 300.0,
+        "price_basis": "fixture_price",
+        "reason_code": "post_sell_rebudget_capital_clipped",
+        "reference_price": 300.0,
+        "shares": 0.5,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget",
+        "symbol": "BIG",
+        "ticker": "BIG"
+      }
+    ],
+    "recomputed_buy_notional": 150.0,
+    "recomputed_requested_buy_notional": 1900.0,
+    "resized_by_post_sell_rebudget": [
+      {
+        "original_notional": 575.0,
+        "original_shares": 1.9166666667,
+        "rebudgeted_notional": 150.0,
+        "rebudgeted_shares": 0.5,
+        "symbol": "BIG"
+      }
+    ],
+    "sell_orders_submitted": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 500.0,
+        "order": 1,
+        "price": 500.0,
+        "price_basis": "fixture_price",
+        "reason_code": "removed_from_targets",
+        "reference_price": 500.0,
+        "shares": 1.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "sell_first",
+        "symbol": "LEGACY",
+        "ticker": "LEGACY"
+      }
+    ],
+    "sell_orders_submitted_count": 1,
+    "skipped_buy_orders": [
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 600.0,
+        "order": 1,
+        "price": 200.0,
+        "price_basis": "fixture_price",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 200.0,
+        "shares": 3.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "MID",
+        "ticker": "MID"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "min_trade_decision": "kept",
+        "notional": 400.0,
+        "order": 2,
+        "price": 100.0,
+        "price_basis": "fixture_price",
+        "reason_code": "post_sell_rebudget",
+        "reference_price": 100.0,
+        "shares": 4.0,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "post_sell_rebudget_suppressed",
+        "symbol": "SMALL",
+        "ticker": "SMALL"
+      }
+    ],
+    "status": "REBUILT",
+    "suppressed_by_post_sell_rebudget": [
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 600.0,
+        "requested_shares": 3.0,
+        "symbol": "MID"
+      },
+      {
+        "block_reason": "buy_blocked_insufficient_buying_power",
+        "requested_notional": 400.0,
+        "requested_shares": 4.0,
+        "symbol": "SMALL"
+      }
+    ]
+  },
+  "scenario": {
+    "name": "post_sell_over_budget_suppression",
+    "notes": "A synchronous sell creates cash, but the risk-cash target leaves only one clipped buy budget and suppresses the remainder.",
+    "price_basis": "fixture_price",
+    "source": "Synthetic parity fixture."
+  },
+  "schema_version": "paper_execution_parity.v1",
+  "sell_first_lifecycle": {
+    "broker_stub": "SynchronousSellFillBroker",
+    "post_sell_account": {
+      "buying_power": "700.0",
+      "cash": "700.0",
+      "equity": "2000.0",
+      "status": "ACTIVE"
+    },
+    "post_sell_holdings": [],
+    "sell_fill": {
+      "confirmed_sell_proceeds": 500.0,
+      "fill_model": "synchronous_all_sells_filled",
+      "post_sell_cash_from_sync_fills": 700.0,
+      "post_sell_cash_used_for_rebudget": 700.0,
+      "sell_orders": [
+        {
+          "fill_status": "FILLED",
+          "notional": 500.0,
+          "shares": 1.0,
+          "symbol": "LEGACY"
+        }
+      ]
+    }
+  },
+  "transition_computation": {
+    "deadband_decisions": [],
+    "raw_intent_order": [
+      "LEGACY",
+      "BIG"
+    ],
+    "raw_intents": [
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 500.0,
+        "order": 1,
+        "price": 500.0,
+        "price_basis": "fixture_price",
+        "reason_code": "removed_from_targets",
+        "reference_price": 500.0,
+        "shares": 1.0,
+        "side": "SELL",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "LEGACY",
+        "ticker": "LEGACY"
+      },
+      {
+        "block_reason": null,
+        "min_trade_decision": "kept",
+        "notional": 700.0,
+        "order": 2,
+        "price": 300.0,
+        "price_basis": "fixture_price",
+        "reason_code": "cash_limited",
+        "reference_price": 300.0,
+        "shares": 2.3333333333,
+        "side": "BUY",
+        "slippage_cost": 0.0,
+        "slippage_per_share": 0.0,
+        "stage": "build_rebalance_trades",
+        "symbol": "BIG",
+        "ticker": "BIG"
+      }
+    ],
+    "slippage_bps": 0.0,
+    "trade_meta": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": 0.0,
+      "cash_sweep_tickers": [],
+      "deadband_pct": 0.01,
+      "deadband_skipped": [],
+      "deadband_skipped_count": 0,
+      "overspend_prevented": true,
+      "scaled_tickers": [
+        "BIG",
+        "MID",
+        "SMALL"
+      ],
+      "target_cash_weight": 0.275,
+      "target_investable_dollars": 1450.0
+    },
+    "whole_share_sweep": {
+      "cash_sweep_added_shares": 0,
+      "cash_sweep_iterations": 0,
+      "cash_sweep_remaining_dollars": 0.0,
+      "cash_sweep_tickers": []
+    }
+  }
+}

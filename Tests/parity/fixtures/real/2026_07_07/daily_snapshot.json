@@ -1,0 +1,641 @@
+{
+  "asof": "2026-07-07 00:00:00",
+  "cash_target": 0.0,
+  "target_cash_weight": 0.0,
+  "breaker": {
+    "mode": "off",
+    "source": "default",
+    "reason": "no BREAKER_MODE env var set; defaulting to OFF / full exposure",
+    "exposure_multiplier_today": 1.0,
+    "exposure_label_today": "OFF",
+    "invested_before_overlay": 1.0000000000000002,
+    "invested_after_overlay": 1.0000000000000002,
+    "cash_target_weight_today": 0.0
+  },
+  "market_analyzer": {
+    "date": "2026-07-07",
+    "premarket_score": 1.0,
+    "bearish_flag": false,
+    "signal_bucket": "RISK_ON",
+    "analyzer_version": "v1_breaker_vix_riskoff",
+    "notes": "derived from active breaker exposure, vix regime scale, and risk_off guard",
+    "vix_component": 1.0,
+    "trend_component": null,
+    "realized_vol_component": null,
+    "gap_risk_component": null,
+    "breadth_component": null,
+    "macro_component": null,
+    "breaker_component": 1.0,
+    "risk_off_component": 1.0,
+    "regime": "LOW",
+    "vix": 15.9399995803833
+  },
+  "sleeve_allocations": {
+    "sleeve_trend": 0.5495398416468996,
+    "sleeve_2": 0.20842110426122312,
+    "sleeve_quality": 0.13414151727788762,
+    "sleeve_mean_reversion": 0.10789753681398978,
+    "sleeve_defensive_etf": 0.0
+  },
+  "allocations": {
+    "risk_on": 1.0,
+    "cash": 0.0,
+    "sleeves": {
+      "sleeve_trend": 0.5495398416468996,
+      "sleeve_2": 0.20842110426122312,
+      "sleeve_quality": 0.13414151727788762,
+      "sleeve_mean_reversion": 0.10789753681398978,
+      "sleeve_defensive_etf": 0.0
+    },
+    "cash_reason": null
+  },
+  "sleeve_states": {
+    "sleeve_trend": {
+      "active": true,
+      "allocation_weight": 0.5495398416468996,
+      "has_equity_df": true,
+      "has_target_weights": true,
+      "reason": "active"
+    },
+    "sleeve_2": {
+      "active": false,
+      "allocation_weight": 0.20842110426122312,
+      "has_equity_df": false,
+      "has_target_weights": false,
+      "reason": "equity_df empty, target_weights empty"
+    },
+    "charlie_munger": {
+      "active": false,
+      "allocation_weight": 0.0,
+      "has_equity_df": false,
+      "has_target_weights": false,
+      "reason": "equity_df empty, target_weights empty, allocation <= 0"
+    },
+    "sleeve_defensive_etf": {
+      "active": false,
+      "allocation_weight": 0.0,
+      "has_equity_df": false,
+      "has_target_weights": false,
+      "reason": "equity_df empty, target_weights empty, allocation <= 0"
+    }
+  },
+  "performance_summary": {
+    "total_return": 0.03728839138803974,
+    "wtd": 0.0,
+    "mtd": -0.00046705010467074093,
+    "ytd": 0.01321167408121049
+  },
+  "orders": [
+    {
+      "action": "BUY",
+      "ticker": "ABBV",
+      "target_weight": 0.04404490260465175,
+      "execution_price": 254.75999450683594,
+      "shares": 1.79,
+      "notional": 456.872661716221
+    },
+    {
+      "action": "BUY",
+      "ticker": "ALL",
+      "target_weight": 0.051312859269642117,
+      "execution_price": 248.3699951171875,
+      "shares": 2.14,
+      "notional": 532.2623324932794
+    },
+    {
+      "action": "BUY",
+      "ticker": "AVGO",
+      "target_weight": 0.056364957865233246,
+      "execution_price": 373.8999938964844,
+      "shares": 1.56,
+      "notional": 584.6671647468244
+    },
+    {
+      "action": "BUY",
+      "ticker": "ELV",
+      "target_weight": 0.04343306659790342,
+      "execution_price": 408.1700134277344,
+      "shares": 1.1,
+      "notional": 450.5261578438884
+    },
+    {
+      "action": "BUY",
+      "ticker": "F",
+      "target_weight": 0.03758137528084109,
+      "execution_price": 13.829999923706055,
+      "shares": 28.19,
+      "notional": 389.82724311213894
+    },
+    {
+      "action": "BUY",
+      "ticker": "FTNT",
+      "target_weight": 0.1,
+      "execution_price": 162.35000610351562,
+      "shares": 6.39,
+      "notional": 1037.2883913880398
+    },
+    {
+      "action": "BUY",
+      "ticker": "GE",
+      "target_weight": 0.05817375012970795,
+      "execution_price": 378.67999267578125,
+      "shares": 1.59,
+      "notional": 603.4295569305453
+    },
+    {
+      "action": "BUY",
+      "ticker": "GEV",
+      "target_weight": 0.02615759793129114,
+      "execution_price": 1152.0400390625,
+      "shares": 0.24,
+      "notional": 271.329726807241
+    },
+    {
+      "action": "BUY",
+      "ticker": "GM",
+      "target_weight": 0.06763945600474888,
+      "execution_price": 77.8499984741211,
+      "shares": 9.01,
+      "notional": 701.6162251352806
+    },
+    {
+      "action": "BUY",
+      "ticker": "KLAC",
+      "target_weight": 0.05976720637772974,
+      "execution_price": 233.30999755859375,
+      "shares": 2.66,
+      "notional": 619.9582936131227
+    },
+    {
+      "action": "BUY",
+      "ticker": "MNST",
+      "target_weight": 0.09729222185917544,
+      "execution_price": 97.37000274658203,
+      "shares": 10.36,
+      "notional": 1009.2009230687237
+    },
+    {
+      "action": "BUY",
+      "ticker": "NXPI",
+      "target_weight": 0.05153257894875654,
+      "execution_price": 280.510009765625,
+      "shares": 1.91,
+      "notional": 534.5414592183283
+    },
+    {
+      "action": "BUY",
+      "ticker": "PANW",
+      "target_weight": 0.035759030461995606,
+      "execution_price": 357.5299987792969,
+      "shares": 1.04,
+      "notional": 370.92427185519335
+    },
+    {
+      "action": "BUY",
+      "ticker": "PNC",
+      "target_weight": 0.07635669199061548,
+      "execution_price": 253.17999267578125,
+      "shares": 3.13,
+      "notional": 792.0391020665755
+    },
+    {
+      "action": "BUY",
+      "ticker": "QCOM",
+      "target_weight": 0.04585084839919176,
+      "execution_price": 186.47999572753906,
+      "shares": 2.55,
+      "notional": 475.605527797745
+    },
+    {
+      "action": "BUY",
+      "ticker": "STX",
+      "target_weight": 0.03829066887869586,
+      "execution_price": 868.260009765625,
+      "shares": 0.46,
+      "notional": 397.184663263545
+    },
+    {
+      "action": "BUY",
+      "ticker": "VRTX",
+      "target_weight": 0.057160352028422345,
+      "execution_price": 529.5900268554688,
+      "shares": 1.12,
+      "notional": 592.917696067363
+    },
+    {
+      "action": "BUY",
+      "ticker": "WELL",
+      "target_weight": 0.053282435371397784,
+      "execution_price": 232.69000244140625,
+      "shares": 2.38,
+      "notional": 552.6925167563439
+    }
+  ],
+  "risk_levels": [
+    {
+      "ticker": "ABBV",
+      "entry_price": 254.75999450683594,
+      "atr": 7.492859976632254,
+      "stop_loss": 239.77427455357142,
+      "take_profit": 277.2385744367327
+    },
+    {
+      "ticker": "ALL",
+      "entry_price": 248.3699951171875,
+      "atr": 5.68714359828404,
+      "stop_loss": 236.99570792061942,
+      "take_profit": 265.43142591203963
+    },
+    {
+      "ticker": "AVGO",
+      "entry_price": 373.8999938964844,
+      "atr": 16.517144339425222,
+      "stop_loss": 340.86570521763394,
+      "take_profit": 423.45142691476
+    },
+    {
+      "ticker": "ELV",
+      "entry_price": 408.1700134277344,
+      "atr": 10.899998256138392,
+      "stop_loss": 386.3700169154576,
+      "take_profit": 440.87000819614957
+    },
+    {
+      "ticker": "F",
+      "entry_price": 13.829999923706055,
+      "atr": 0.5042855398995536,
+      "stop_loss": 12.821428843906947,
+      "take_profit": 15.342856543404716
+    },
+    {
+      "ticker": "FTNT",
+      "entry_price": 162.35000610351562,
+      "atr": 6.021432059151786,
+      "stop_loss": 150.30714198521204,
+      "take_profit": 180.414302280971
+    },
+    {
+      "ticker": "GE",
+      "entry_price": 378.67999267578125,
+      "atr": 9.648574829101562,
+      "stop_loss": 359.3828430175781,
+      "take_profit": 407.62571716308594
+    },
+    {
+      "ticker": "GEV",
+      "entry_price": 1152.0400390625,
+      "atr": 60.056344168526785,
+      "stop_loss": 1031.9273507254463,
+      "take_profit": 1332.2090715680804
+    },
+    {
+      "ticker": "GM",
+      "entry_price": 77.8499984741211,
+      "atr": 2.436427525111607,
+      "stop_loss": 72.97714342389789,
+      "take_profit": 85.15928104945591
+    },
+    {
+      "ticker": "KLAC",
+      "entry_price": 233.30999755859375,
+      "atr": 22.55643027169364,
+      "stop_loss": 188.19713701520647,
+      "take_profit": 300.97928837367465
+    },
+    {
+      "ticker": "MNST",
+      "entry_price": 97.37000274658203,
+      "atr": 1.929999760219029,
+      "stop_loss": 93.51000322614398,
+      "take_profit": 103.16000202723912
+    },
+    {
+      "ticker": "NXPI",
+      "entry_price": 280.510009765625,
+      "atr": 15.696432931082589,
+      "stop_loss": 249.11714390345983,
+      "take_profit": 327.59930855887274
+    },
+    {
+      "ticker": "PANW",
+      "entry_price": 357.5299987792969,
+      "atr": 14.037148611886161,
+      "stop_loss": 329.45570155552457,
+      "take_profit": 399.6414446149554
+    },
+    {
+      "ticker": "PNC",
+      "entry_price": 253.17999267578125,
+      "atr": 5.40142822265625,
+      "stop_loss": 242.37713623046875,
+      "take_profit": 269.38427734375
+    },
+    {
+      "ticker": "QCOM",
+      "entry_price": 186.47999572753906,
+      "atr": 15.209286281040736,
+      "stop_loss": 156.0614231654576,
+      "take_profit": 232.1078545706613
+    },
+    {
+      "ticker": "STX",
+      "entry_price": 868.260009765625,
+      "atr": 92.7264404296875,
+      "stop_loss": 682.80712890625,
+      "take_profit": 1146.4393310546875
+    },
+    {
+      "ticker": "VRTX",
+      "entry_price": 529.5900268554688,
+      "atr": 14.92356436593192,
+      "stop_loss": 499.7428981236049,
+      "take_profit": 574.3607199532645
+    },
+    {
+      "ticker": "WELL",
+      "entry_price": 232.69000244140625,
+      "atr": 5.6064300537109375,
+      "stop_loss": 221.47714233398438,
+      "take_profit": 249.50929260253906
+    }
+  ],
+  "holdings": [
+    {
+      "ticker": "ABBV",
+      "direction": "LONG",
+      "shares": 1.7933453900430265,
+      "entry_date": "07/07/2026",
+      "entry_price": 254.75999450683594,
+      "last_price": 254.75999450683594,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "ALL",
+      "direction": "LONG",
+      "shares": 2.1430218744504304,
+      "entry_date": "07/07/2026",
+      "entry_price": 248.3699951171875,
+      "last_price": 248.3699951171875,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "AVGO",
+      "direction": "LONG",
+      "shares": 1.5636993161029356,
+      "entry_date": "07/07/2026",
+      "entry_price": 373.8999938964844,
+      "last_price": 373.8999938964844,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "ELV",
+      "direction": "LONG",
+      "shares": 1.1037708381868996,
+      "entry_date": "07/07/2026",
+      "entry_price": 408.1700134277344,
+      "last_price": 408.1700134277344,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "F",
+      "direction": "LONG",
+      "shares": 28.187074856300946,
+      "entry_date": "07/07/2026",
+      "entry_price": 13.829999923706055,
+      "last_price": 13.829999923706055,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "FTNT",
+      "direction": "LONG",
+      "shares": 6.389210670720004,
+      "entry_date": "07/07/2026",
+      "entry_price": 162.35000610351562,
+      "last_price": 162.35000610351562,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "GE",
+      "direction": "LONG",
+      "shares": 1.5935078921562948,
+      "entry_date": "07/07/2026",
+      "entry_price": 378.67999267578125,
+      "last_price": 378.67999267578125,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "GEV",
+      "direction": "LONG",
+      "shares": 0.23552109094059093,
+      "entry_date": "07/07/2026",
+      "entry_price": 1152.0400390625,
+      "last_price": 1152.0400390625,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "GM",
+      "direction": "LONG",
+      "shares": 9.012411546398578,
+      "entry_date": "07/07/2026",
+      "entry_price": 77.8499984741211,
+      "last_price": 77.8499984741211,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "KLAC",
+      "direction": "LONG",
+      "shares": 2.657229866274486,
+      "entry_date": "07/07/2026",
+      "entry_price": 233.30999755859375,
+      "last_price": 233.30999755859375,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "MNST",
+      "direction": "LONG",
+      "shares": 10.364597869995947,
+      "entry_date": "07/07/2026",
+      "entry_price": 97.37000274658203,
+      "last_price": 97.37000274658203,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "NXPI",
+      "direction": "LONG",
+      "shares": 1.905605649028192,
+      "entry_date": "07/07/2026",
+      "entry_price": 280.510009765625,
+      "last_price": 280.510009765625,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "PANW",
+      "direction": "LONG",
+      "shares": 1.0374633544643195,
+      "entry_date": "07/07/2026",
+      "entry_price": 357.5299987792969,
+      "last_price": 357.5299987792969,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "PNC",
+      "direction": "LONG",
+      "shares": 3.1283637134820905,
+      "entry_date": "07/07/2026",
+      "entry_price": 253.17999267578125,
+      "last_price": 253.17999267578125,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "QCOM",
+      "direction": "LONG",
+      "shares": 2.5504372516859104,
+      "entry_date": "07/07/2026",
+      "entry_price": 186.47999572753906,
+      "last_price": 186.47999572753906,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "STX",
+      "direction": "LONG",
+      "shares": 0.45744898854752003,
+      "entry_date": "07/07/2026",
+      "entry_price": 868.260009765625,
+      "last_price": 868.260009765625,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "VRTX",
+      "direction": "LONG",
+      "shares": 1.1195786665166507,
+      "entry_date": "07/07/2026",
+      "entry_price": 529.5900268554688,
+      "last_price": 529.5900268554688,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    },
+    {
+      "ticker": "WELL",
+      "direction": "LONG",
+      "shares": 2.375231041116679,
+      "entry_date": "07/07/2026",
+      "entry_price": 232.69000244140625,
+      "last_price": 232.69000244140625,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "days_held": 0
+    }
+  ],
+  "watchlist": [],
+  "reconciliation": {
+    "model_start_equity": 10000.0,
+    "model_current_equity": 10372.883913880398,
+    "broker_equity": null,
+    "difference": null,
+    "note": "broker equity placeholder (set BROKER_EQUITY)"
+  },
+  "proposed_trades": [],
+  "performance_diagnostics": {
+    "current_equity": 10372.883913880398,
+    "day_return": -0.001292588213117105,
+    "cumulative_return": 0.03728839138803966
+  },
+  "skipped_trades": [
+    {
+      "ticker": "FTNT",
+      "action": "WEIGHT_CAPPED",
+      "original_weight": 0.1346413380216926,
+      "capped_weight": 0.1,
+      "excess": 0.034641338021692586,
+      "reason": "Max position 10.0% exceeded"
+    }
+  ],
+  "s2_no_picks": false,
+  "signals_snapshot_path": "/home/brettolson/quant-daily-report/signals/2026-07-07.json",
+  "charlie_munger": {},
+  "charlie_munger_benchmark": {
+    "sleeve_cumulative_return": null
+  },
+  "regime_summary": {
+    "composite_regime": "risk_on_trending",
+    "trend_state": "strong_up",
+    "volatility_state": "normal",
+    "breadth_state": "healthy",
+    "macro_state": "neutral",
+    "target_weights": {
+      "trend": 0.5123071728522115,
+      "value": 0.19578501611776147,
+      "quality": 0.16856368598041901,
+      "mean_reversion": 0.10165571791003782,
+      "cash": 0.02168840713957019
+    }
+  },
+  "alpha_attribution": {
+    "ok": false,
+    "reason": "No overlapping dates between portfolio and SPY returns.",
+    "overlap_start": null,
+    "overlap_end": null,
+    "overlap_days": 0,
+    "summary": {},
+    "rows": []
+  },
+  "allocation_diagnostics": {
+    "sleeve_1": {
+      "desired_allocation": 0.5495398416468996,
+      "achieved_invested": 1.0,
+      "forced_cash": 0.0,
+      "selected_names": 10,
+      "min_required_names": 6,
+      "limiting_constraint": "max_position_weight=10%, min_position_weight=5%",
+      "cash_routing": [],
+      "desired_allocation_pre_breaker": 0.5495398416468996
+    }
+  },
+  "inception_metrics": {
+    "inception_date": "2026-03-21",
+    "spy_return_since_inception": 0.0,
+    "spy_mdd_since_inception": 0.0
+  },
+  "research_context_path": "outputs/research_context/2026-07-07.json",
+  "strategy_identity": {
+    "live_strategy_id": "growth_engine_v4",
+    "execution_target_source": "outputs/precompute/2026-07-07/signals.json",
+    "execution_target_type": "precompute_signals",
+    "shadow_baseline_strategy": "caerus_polaris",
+    "shadow_baseline_source": "outputs/shadow_candidates/2026-07-07/caerus_polaris.json",
+    "live_tracks_shadow_baseline": false
+  }
+}
