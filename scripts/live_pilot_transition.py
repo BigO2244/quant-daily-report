@@ -86,6 +86,8 @@ _BLOCK_REASON_TO_GATE_CONSTANT = {
 }
 
 LIVE_PILOT_ALLOW_FRACTIONAL_ENV = "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"
+# Duplicated as a literal (see module note above) to avoid a circular import.
+LIVE_PILOT_SELLS_ENABLED_ENV = "CAERUS_LIVE_PILOT_SELLS_ENABLED"
 LIVE_PILOT_MIN_TRADE_USD = 100.0
 TRANSITION_PLAN_SCHEMA = "caerus.transition_plan.v1"
 
@@ -431,6 +433,14 @@ def compute_live_transition(
     env: Mapping[str, str],
     max_orders: int = 1,
 ) -> TransitionPlan:
+    """NOT on the live execution path. ``run_live_pilot`` gates live sells at the
+    submission boundary via the guardrail master flag (``CAERUS_LIVE_PILOT_SELLS_ENABLED``,
+    fail-closed) plus the per-symbol whitelist — see ``validate_live_pilot_plan``.
+    This helper is retained for the standalone transition engine; ``sells_supported``
+    here honors the same master flag so it can never silently over-report sell
+    capability. (Full removal of this now-unused cluster is a deferred cleanup.)
+    """
+    sells_enabled = str(env.get(LIVE_PILOT_SELLS_ENABLED_ENV) or "").strip().lower() in _TRUE_TOKENS
     account = account_from_snapshot(pre_snapshot)
     engine_plan = compute_transition(
         current_holdings=holdings_from_snapshot(pre_snapshot),
@@ -438,7 +448,7 @@ def compute_live_transition(
         account_snapshot=account,
         capital_policy=live_capital_policy(approved_cap_usd),
         order_policy=order_policy_from_env(env),
-        mode_constraints=ModeConstraints(sells_supported=False, max_orders=max_orders),
+        mode_constraints=ModeConstraints(sells_supported=sells_enabled, max_orders=max_orders),
     )
     # Live-pilot fail-closed guards, in priority order. Each is a no-op once the plan is
     # already blocked, so the first applicable reason wins.

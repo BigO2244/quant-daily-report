@@ -23,6 +23,11 @@ LIVE_PILOT_KILL_SWITCH_ENV = "CAERUS_LIVE_PILOT_KILL_SWITCH"
 LIVE_PILOT_DRY_RUN_ENV = "CAERUS_LIVE_PILOT_DRY_RUN"
 LIVE_PILOT_CRON_APPROVED_ENV = "CAERUS_LIVE_PILOT_CRON_APPROVED"
 LIVE_PILOT_SELL_WHITELIST_ENV = "CAERUS_LIVE_PILOT_SELL_WHITELIST"
+# Master enable for live sells, fail-closed: a sell is only planned/submitted when
+# this flag is explicitly on AND the symbol is whitelisted. Default (unset/garbage)
+# disables all sells, so the per-symbol whitelist can never be the sole thing
+# standing between an armed lane and selling real positions.
+LIVE_PILOT_SELLS_ENABLED_ENV = "CAERUS_LIVE_PILOT_SELLS_ENABLED"
 LIVE_PILOT_ALLOW_FRACTIONAL_ENV = "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"
 LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV = "CAERUS_LIVE_PILOT_MAX_SLIPPAGE_BPS"
 
@@ -465,6 +470,7 @@ def validate_live_pilot_plan(
     orders: list[LivePilotOrder] = []
     total = 0.0
     sell_whitelist = _sell_whitelist(environ)
+    sells_enabled = _truthy(environ.get(LIVE_PILOT_SELLS_ENABLED_ENV))
     fractional_allowed = _fractional_allowed(environ)
 
     for index, raw_trade in enumerate(trades or []):
@@ -489,6 +495,12 @@ def validate_live_pilot_plan(
             continue
         if side not in {"BUY", "SELL"}:
             errors.append(f"{symbol}:unsupported_side:{side or 'missing'}")
+            continue
+        if side == "SELL" and not sells_enabled:
+            # Master gate (fail-closed): live sells are globally disabled unless
+            # CAERUS_LIVE_PILOT_SELLS_ENABLED is explicitly on. This sits in front
+            # of the per-symbol whitelist so the whitelist alone can never arm sells.
+            errors.append(f"{symbol}:sells_disabled")
             continue
         if side == "SELL" and symbol not in sell_whitelist:
             errors.append(f"{symbol}:sell_not_whitelisted")

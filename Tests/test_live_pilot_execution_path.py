@@ -120,6 +120,10 @@ def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
         "CAERUS_LIVE_PILOT_DRY_RUN": dry_run,
         # Kill switch fails closed: unset/garbage blocks; arming requires explicit "off".
         "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
+        # Master sell gate fails closed: sells stay blocked unless explicitly enabled.
+        # Tests that exercise the sell/rotation path opt in here; the default-off
+        # behavior is covered by the dedicated tests below.
+        "CAERUS_LIVE_PILOT_SELLS_ENABLED": "1",
     }
 
 
@@ -1017,3 +1021,51 @@ def test_live_pilot_market_order_fails_closed_outside_market_hours(tmp_path: Pat
     assert broker.submit_calls == 0
     market_gate = json.loads((run_root / "live_pilot_market_hours_gate.json").read_text())
     assert market_gate["status"] == "BLOCKED"
+
+
+# --------------------------------------------------------------------------- #
+# Master sell gate (CAERUS_LIVE_PILOT_SELLS_ENABLED), fail-closed.
+# A sell may only proceed when the master flag is explicitly on AND the symbol
+# is whitelisted; the flag sits in front of the per-symbol whitelist so the
+# whitelist alone can never arm live selling.
+# --------------------------------------------------------------------------- #
+def _sell_trade(symbol: str = "ABBV", qty: float = 1.0, price: float = 150.0) -> dict[str, object]:
+    return {"symbol": symbol, "side": "SELL", "qty": qty, "limit_price": price, "order_type": "market"}
+
+
+def _validate_sell(**env_overrides):
+    from core.live_pilot_guardrails import validate_live_pilot_plan
+
+    env = _env(dry_run="1")
+    env.pop("CAERUS_LIVE_PILOT_SELLS_ENABLED", None)  # start from the true production default (off)
+    env.update(env_overrides)
+    return validate_live_pilot_plan(
+        [_sell_trade()], env=env, capital_cap_usd=500.0, max_orders=1, run_id="t-sellgate"
+    )
+
+
+def test_master_sell_gate_default_off_blocks_even_when_whitelisted() -> None:
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV")  # flag unset -> fail-closed
+    assert v.status == "BLOCKED"
+    assert any("sells_disabled" in r for r in v.reason_codes)
+    # Master gate precedes the whitelist check, so the whitelist reason does not fire.
+    assert not any("sell_not_whitelisted" in r for r in v.reason_codes)
+
+
+def test_master_sell_gate_explicit_off_blocks() -> None:
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="0", CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV")
+    assert v.status == "BLOCKED"
+    assert any("sells_disabled" in r for r in v.reason_codes)
+
+
+def test_master_sell_gate_on_but_not_whitelisted_still_blocks() -> None:
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1")  # enabled, but no whitelist
+    assert v.status == "BLOCKED"
+    assert any("sell_not_whitelisted" in r for r in v.reason_codes)
+    assert not any("sells_disabled" in r for r in v.reason_codes)
+
+
+def test_master_sell_gate_on_and_whitelisted_passes() -> None:
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1", CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV")
+    assert v.status == "PASS"
+    assert [o.side for o in v.orders] == ["SELL"]

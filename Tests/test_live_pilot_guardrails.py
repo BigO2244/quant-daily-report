@@ -42,6 +42,7 @@ def _clear(monkeypatch: pytest.MonkeyPatch) -> None:
         LIVE_PILOT_KILL_SWITCH_ENV,
         LIVE_PILOT_DRY_RUN_ENV,
         "CAERUS_LIVE_PILOT_SELL_WHITELIST",
+        "CAERUS_LIVE_PILOT_SELLS_ENABLED",
         "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -58,6 +59,9 @@ def _approve(monkeypatch: pytest.MonkeyPatch, *, dry_run: str = "1") -> None:
     # Kill switch fails closed: arming live now requires an explicit recognized
     # "off" value; an unset/garbage value blocks. Disarm it for the approve fixture.
     monkeypatch.setenv(LIVE_PILOT_KILL_SWITCH_ENV, "0")
+    # Master sell gate fails closed: enable it so sell-path fixtures reach the
+    # per-symbol whitelist check. Default-off behavior has dedicated coverage.
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELLS_ENABLED", "1")
 
 
 def test_live_pilot_mode_is_canonical() -> None:

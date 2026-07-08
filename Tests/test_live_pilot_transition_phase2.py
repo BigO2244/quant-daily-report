@@ -81,6 +81,9 @@ def _env(*, dry_run="1", fractional="1"):
         "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL": fractional,
         # Disarmed ONLY for the test harness; production kill switch stays engaged.
         "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
+        # Master sell gate fails closed: enabled here so rotation/whitelist fixtures
+        # exercise the whitelist behavior. Default-off behavior has dedicated coverage.
+        "CAERUS_LIVE_PILOT_SELLS_ENABLED": "1",
     }
 
 
