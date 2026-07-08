@@ -42,7 +42,6 @@ export WORKFLOW_KIND="live_pilot"
 export CAERUS_LIVE_PILOT_CRON_CONTEXT="1"
 export ALPACA_PAPER="0"
 export ALPACA_BASE_URL="https://api.alpaca.markets"
-export APPROVED_LIVE_PILOT_CAP_USD="${APPROVED_LIVE_PILOT_CAP_USD:-500}"
 GATE_RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
 GATE_RUN_ID="${REPORT_DATE}T${GATE_RUN_TS}_live_pilot_cron_gate"
 GATE_RUN_ROOT="outputs/live_pilot/runs/${GATE_RUN_ID}"
@@ -69,7 +68,7 @@ echo "trading_mode=${TRADING_MODE}"
 echo "alpaca_paper=${ALPACA_PAPER}"
 echo "alpaca_base_url=${ALPACA_BASE_URL}"
 echo "approved_sleeve=${CAERUS_LIVE_PILOT_SLEEVE_ID}"
-echo "capital_cap=${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
+echo "capital_cap_mode=dynamic_portfolio_value"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "schedule_enabled=${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"
 echo "cron_approved=${CAERUS_LIVE_PILOT_CRON_APPROVED}"
@@ -153,14 +152,6 @@ if ! truthy "${CAERUS_LIVE_PILOT_APPROVED}"; then
     exit 1
 fi
 
-if [[ -z "${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}" ]]; then
-    echo "FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP is required for scheduled LIVE_PILOT execution."
-    write_gate_state_blocked "missing_positive_live_pilot_capital_cap"
-    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "missing_positive_live_pilot_capital_cap"
-    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
-    exit 1
-fi
-
 if [[ "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets" && "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets/" ]]; then
     echo "FATAL: ALPACA_BASE_URL must be https://api.alpaca.markets for LIVE_PILOT" >&2
     write_gate_state_blocked "invalid_live_pilot_endpoint"
@@ -175,25 +166,34 @@ if [[ "${CAERUS_LIVE_PILOT_KILL_SWITCH:-0}" == "1" ]]; then
     exit 1
 fi
 
-if ! "${PYTHON_BIN}" - <<'PY'
-import os
-import sys
-
-approved_cap = float(os.environ["APPROVED_LIVE_PILOT_CAP_USD"])
+# Resolve the capital cap dynamically from the account's portfolio value (no fixed
+# program ceiling; an optional CAERUS_LIVE_PILOT_CAPITAL_CAP only tightens it). The
+# same resolver is used by the execution path, so plan sizing and execution agree.
+CAP_RESOLVE="$(
+    "${PYTHON_BIN}" - <<'PY'
+import os, sys
 try:
-    cap = float(os.environ.get("CAERUS_LIVE_PILOT_CAPITAL_CAP", ""))
-except ValueError:
-    print("FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be numeric", file=sys.stderr)
-    raise SystemExit(1)
-if cap <= 0 or cap > approved_cap:
-    print(f"FATAL: CAERUS_LIVE_PILOT_CAPITAL_CAP must be > 0 and <= {approved_cap:.0f}", file=sys.stderr)
-    raise SystemExit(1)
+    from brokers.alpaca_broker import AlpacaBroker
+    from core.live_pilot_guardrails import resolve_dynamic_cap
+    acct = AlpacaBroker.from_env().get_account() or {}
+    pv = acct.get("portfolio_value") or acct.get("equity")
+    cap, src = resolve_dynamic_cap(pv, os.environ)
+except Exception as exc:  # fail-closed: any error -> unresolved -> block
+    print("", f"error:{exc}", sep="\t")
+    sys.exit(0)
+print("" if cap is None else f"{cap:.2f}", src, sep="\t")
 PY
-then
-    write_gate_state_blocked "live_pilot_capital_cap_invalid"
-    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_capital_cap_invalid"
+)"
+PLAN_CAP="$(printf '%s' "${CAP_RESOLVE}" | cut -f1)"
+CAP_SOURCE="$(printf '%s' "${CAP_RESOLVE}" | cut -f2)"
+if [[ -z "${PLAN_CAP}" ]]; then
+    echo "FATAL: could not resolve live capital cap from portfolio value (source=${CAP_SOURCE})"
+    write_gate_state_blocked "live_pilot_capital_cap_unresolved"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_capital_cap_unresolved"
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
     exit 1
 fi
+echo "resolved_capital_cap=${PLAN_CAP} (source=${CAP_SOURCE})"
 
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
 BUNDLE_VALIDATION_PATH="${REPO_ROOT}/outputs/workflow/${REPORT_DATE}/live_pilot_bundle_validation.json"
@@ -214,7 +214,7 @@ BUILD_OUTPUT="$(
     "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py \
         --trade-date "${REPORT_DATE}" \
         --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}" \
-        --capital-cap "${CAERUS_LIVE_PILOT_CAPITAL_CAP}" \
+        --capital-cap "${PLAN_CAP}" \
         --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}" \
         --output-dir outputs/live_pilot/plans
 )"

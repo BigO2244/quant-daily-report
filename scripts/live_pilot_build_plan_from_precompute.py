@@ -424,8 +424,10 @@ def build_live_pilot_plan(
 ) -> dict[str, Any]:
     if not str(approved_sleeve or "").strip():
         raise ValueError("approved_sleeve is required")
-    if float(capital_cap) <= 0 or float(capital_cap) > LIVE_PILOT_APPROVED_MAX_CAP_USD:
-        raise ValueError(f"capital_cap must be > 0 and <= {LIVE_PILOT_APPROVED_MAX_CAP_USD:.0f}")
+    if float(capital_cap) <= 0:
+        # No fixed program ceiling: the cap tracks the account's portfolio value
+        # (resolved upstream in the cron lane / execution path). Must still be positive.
+        raise ValueError("capital_cap must be > 0")
     if int(max_orders) != 1:
         raise ValueError("FR-104 Phase 1 requires max_orders=1")
 

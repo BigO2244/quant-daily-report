@@ -83,7 +83,7 @@ def test_over_cap_buy_is_scaled_to_pilot_cap(tmp_path: Path) -> None:
     assert plan["trades"] == [selected]
 
 
-def test_builder_rejects_cap_above_approved_limit(tmp_path: Path) -> None:
+def test_builder_accepts_cap_above_old_limit_and_rejects_nonpositive(tmp_path: Path) -> None:
     payload_path = _payload_path(
         tmp_path,
         [
@@ -97,12 +97,23 @@ def test_builder_rejects_cap_above_approved_limit(tmp_path: Path) -> None:
         ],
     )
 
-    assert DEFAULT_CAPITAL_CAP == 500.0
-    with pytest.raises(ValueError, match="capital_cap must be > 0 and <= 500"):
+    # No fixed program ceiling anymore: the cap tracks the account's portfolio value,
+    # so a cap well above the old $500 limit is accepted.
+    plan = build_live_pilot_plan(
+        payload_path=payload_path,
+        approved_sleeve="polaris",
+        capital_cap=5000,
+        max_orders=1,
+        output_dir=tmp_path / "outputs" / "live_pilot" / "plans",
+    )
+    assert plan is not None
+
+    # A non-positive cap is still rejected (fail-closed).
+    with pytest.raises(ValueError, match="capital_cap must be > 0"):
         build_live_pilot_plan(
             payload_path=payload_path,
             approved_sleeve="polaris",
-            capital_cap=501,
+            capital_cap=0,
             max_orders=1,
             output_dir=tmp_path / "outputs" / "live_pilot" / "plans",
         )
