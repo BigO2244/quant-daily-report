@@ -467,6 +467,18 @@ def _sell_whitelist(env: Mapping[str, str]) -> set[str]:
     return {_clean_symbol(item) for item in raw.split(",") if _clean_symbol(item)}
 
 
+def _sell_all_symbols_allowed(env: Mapping[str, str]) -> bool:
+    """Wildcard sell allowlist for a full buy/sell/hold model.
+
+    ``CAERUS_LIVE_PILOT_SELL_WHITELIST="*"`` permits selling ANY symbol, so the
+    strategy — not a hand-maintained per-symbol list — decides what to sell.
+    Selling remains gated by the fail-closed master flag
+    (``CAERUS_LIVE_PILOT_SELLS_ENABLED``) and the account-id pin. Only the exact
+    literal ``*`` is treated as the wildcard (never a ticker like ``ALL``).
+    """
+    return str(env.get(LIVE_PILOT_SELL_WHITELIST_ENV) or "").strip() == "*"
+
+
 def _fractional_allowed(env: Mapping[str, str]) -> bool:
     return _truthy(env.get(LIVE_PILOT_ALLOW_FRACTIONAL_ENV))
 
@@ -489,6 +501,7 @@ def validate_live_pilot_plan(
     orders: list[LivePilotOrder] = []
     total = 0.0
     sell_whitelist = _sell_whitelist(environ)
+    sell_all_allowed = _sell_all_symbols_allowed(environ)
     sells_enabled = _truthy(environ.get(LIVE_PILOT_SELLS_ENABLED_ENV))
     fractional_allowed = _fractional_allowed(environ)
 
@@ -521,7 +534,7 @@ def validate_live_pilot_plan(
             # of the per-symbol whitelist so the whitelist alone can never arm sells.
             errors.append(f"{symbol}:sells_disabled")
             continue
-        if side == "SELL" and symbol not in sell_whitelist:
+        if side == "SELL" and not sell_all_allowed and symbol not in sell_whitelist:
             errors.append(f"{symbol}:sell_not_whitelisted")
             continue
         if qty is None or qty <= 0:

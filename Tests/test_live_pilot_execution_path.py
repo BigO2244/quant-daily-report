@@ -1093,3 +1093,20 @@ def test_master_sell_gate_on_and_whitelisted_passes() -> None:
     v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1", CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV")
     assert v.status == "PASS"
     assert [o.side for o in v.orders] == ["SELL"]
+
+
+def test_sell_wildcard_allows_any_symbol_when_master_enabled() -> None:
+    # Full model: "*" permits selling any symbol (here ABBV, which is not otherwise
+    # named), gated only by the master flag + account-id pin.
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1", CAERUS_LIVE_PILOT_SELL_WHITELIST="*")
+    assert v.status == "PASS"
+    assert [o.side for o in v.orders] == ["SELL"]
+
+
+def test_sell_wildcard_does_not_bypass_master_gate() -> None:
+    # The wildcard must not arm sells on its own: the fail-closed master flag
+    # (unset here) still blocks before the whitelist/wildcard is consulted.
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELL_WHITELIST="*")  # SELLS_ENABLED popped -> off
+    assert v.status == "BLOCKED"
+    assert any("sells_disabled" in r for r in v.reason_codes)
+    assert not any("sell_not_whitelisted" in r for r in v.reason_codes)
