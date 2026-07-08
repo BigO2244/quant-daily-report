@@ -227,14 +227,22 @@ def apply_capital_budget_and_execution_filter(
         if trades is not None and not trades.empty
         else 0.0
     )
-    capital_budget = _build_capital_budget(
-        broker_cash=planning_account.get("cash"),
-        broker_equity=planning_account.get("equity")
-        or planning_account.get("portfolio_value"),
-        broker_buying_power=planning_account.get("buying_power"),
-        expected_sell_proceeds=expected_sell_proceeds,
-        requested_buy_notional=requested_buy_notional,
-    )
+    if _uses_configured_capital_policy(config):
+        capital_budget = _build_configured_capital_budget(
+            planning_account=planning_account,
+            config=config,
+            expected_sell_proceeds=expected_sell_proceeds,
+            requested_buy_notional=requested_buy_notional,
+        )
+    else:
+        capital_budget = _build_capital_budget(
+            broker_cash=planning_account.get("cash"),
+            broker_equity=planning_account.get("equity")
+            or planning_account.get("portfolio_value"),
+            broker_buying_power=planning_account.get("buying_power"),
+            expected_sell_proceeds=expected_sell_proceeds,
+            requested_buy_notional=requested_buy_notional,
+        )
     if precomputed_trade_plan_used:
         capital_trades = trades.copy()
         capital_budget = dict(capital_budget)
@@ -324,6 +332,7 @@ def live_pilot_execution_config(
             reserve_max_pct=0.0,
             approved_cap_usd=approved_cap_usd,
             over_cap_behavior="block",
+            broker_budget_source="buying_power",
         ),
         orders=OrderPolicy(
             allow_fractional=bool(allow_fractional),
@@ -379,6 +388,163 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _reserve_cash_for_policy(equity_value: float | None, policy: CapitalPolicy) -> float:
+    equity = max(0.0, float(equity_value or 0.0))
+    reserve_floor = max(
+        float(policy.reserve_min_cash or 0.0),
+        equity * float(policy.reserve_equity_pct or 0.0),
+    )
+    reserve_cap = equity * float(policy.reserve_max_pct or 0.0)
+    if reserve_cap > 0.0:
+        return float(min(reserve_floor, reserve_cap))
+    return float(reserve_floor)
+
+
+def _uses_configured_capital_policy(config: ExecutionCoreConfig) -> bool:
+    policy = config.capital
+    return bool(
+        policy.approved_cap_usd is not None
+        or str(policy.broker_budget_source or "") != "buying_power_then_cash"
+        or abs(float(policy.reserve_min_cash or 0.0) - 100.0) > 1e-9
+        or abs(float(policy.reserve_equity_pct or 0.0) - 0.005) > 1e-12
+        or abs(float(policy.reserve_max_pct or 0.0) - 0.05) > 1e-12
+        or abs(float(policy.sell_proceeds_haircut or 0.0) - 0.95) > 1e-12
+    )
+
+
+def _build_configured_capital_budget(
+    *,
+    planning_account: Mapping[str, Any],
+    config: ExecutionCoreConfig,
+    expected_sell_proceeds: float,
+    requested_buy_notional: float,
+) -> Mapping[str, Any]:
+    policy = config.capital
+    cash_value = _safe_float(planning_account.get("cash"), 0.0)
+    equity_value = _safe_float(
+        planning_account.get("equity") or planning_account.get("portfolio_value"),
+        0.0,
+    )
+    buying_power_value_raw = planning_account.get("buying_power")
+    buying_power_value = (
+        None
+        if buying_power_value_raw is None
+        else _safe_float(buying_power_value_raw, 0.0)
+    )
+    reserve_cash = _reserve_cash_for_policy(equity_value, policy)
+    expected_sell_proceeds_value = max(0.0, float(expected_sell_proceeds or 0.0))
+    expected_sell_proceeds_conservative = expected_sell_proceeds_value * float(
+        policy.sell_proceeds_haircut or 0.0
+    )
+    requested_buy_notional_value = max(0.0, float(requested_buy_notional or 0.0))
+
+    cash_budget = max(
+        0.0,
+        float(cash_value or 0.0) + expected_sell_proceeds_conservative - reserve_cash,
+    )
+    budget_source = str(policy.broker_budget_source or "buying_power_then_cash").strip().lower()
+    if budget_source == "buying_power":
+        broker_budget = (
+            max(0.0, float(buying_power_value) + expected_sell_proceeds_conservative - reserve_cash)
+            if buying_power_value is not None and float(buying_power_value) > 0.0
+            else 0.0
+        )
+        available_for_buys = min(cash_budget, broker_budget)
+        budget_basis = "broker_buying_power"
+    else:
+        available_for_buys = cash_budget
+        budget_basis = "cash"
+
+    approved_cap = policy.approved_cap_usd
+    if approved_cap is not None:
+        available_for_buys = min(float(available_for_buys), max(0.0, float(approved_cap)))
+
+    allowed_buy_notional = min(requested_buy_notional_value, max(0.0, float(available_for_buys)))
+    return {
+        "broker_cash_at_planning": cash_value,
+        "broker_equity_at_planning": equity_value,
+        "broker_buying_power_at_planning": buying_power_value,
+        "reserve_cash_policy": {
+            "min_cash_dollars": float(policy.reserve_min_cash or 0.0),
+            "equity_reserve_pct": float(policy.reserve_equity_pct or 0.0),
+            "sell_proceeds_haircut": float(policy.sell_proceeds_haircut or 0.0),
+            "reserve_cash": float(reserve_cash),
+            "available_for_buys": float(available_for_buys),
+            "approved_cap_usd": approved_cap,
+            "budget_source": budget_basis,
+        },
+        "expected_sell_proceeds": float(expected_sell_proceeds_value),
+        "expected_sell_proceeds_conservative": float(expected_sell_proceeds_conservative),
+        "requested_buy_notional": float(requested_buy_notional_value),
+        "allowed_buy_notional": float(allowed_buy_notional),
+        "capital_constraint_triggered": bool(
+            requested_buy_notional_value > allowed_buy_notional + 1e-9
+        ),
+        "clipped_or_deferred_buys_count": 0,
+        "approved_cap_usd": approved_cap,
+        "over_cap_behavior": str(policy.over_cap_behavior or "clip"),
+        "broker_budget_source": budget_source,
+    }
+
+
+def _apply_configured_post_sell_budget(
+    *,
+    buy_budget: float,
+    post_sell_budget_meta: Mapping[str, Any],
+    account: Mapping[str, Any],
+    config: ExecutionCoreConfig,
+) -> tuple[float, Mapping[str, Any]]:
+    if not _uses_configured_capital_policy(config):
+        return float(buy_budget or 0.0), post_sell_budget_meta
+
+    policy = config.capital
+    meta = dict(post_sell_budget_meta)
+    cash_value = _safe_float(account.get("cash"), 0.0)
+    equity_value = _safe_float(
+        account.get("equity") or account.get("portfolio_value") or meta.get("post_sell_equity"),
+        0.0,
+    )
+    buying_power_raw = account.get("buying_power")
+    buying_power_value = (
+        None if buying_power_raw is None else _safe_float(buying_power_raw, 0.0)
+    )
+    reserve_cash = _reserve_cash_for_policy(equity_value, policy)
+    cash_budget = max(0.0, float(cash_value or 0.0) - reserve_cash)
+    source = str(policy.broker_budget_source or "buying_power_then_cash").strip().lower()
+    if source == "buying_power":
+        broker_budget = (
+            max(0.0, float(buying_power_value) - reserve_cash)
+            if buying_power_value is not None and float(buying_power_value) > 0.0
+            else 0.0
+        )
+        basis = "broker_buying_power"
+    else:
+        broker_budget = cash_budget
+        basis = str(meta.get("buy_budget_basis") or "cash")
+
+    risk_cash_target = _safe_float(meta.get("risk_cash_target"), 0.0)
+    risk_budget = max(0.0, float(cash_value or 0.0) - risk_cash_target)
+    budget = min(cash_budget, broker_budget, risk_budget)
+    if policy.approved_cap_usd is not None:
+        budget = min(budget, max(0.0, float(policy.approved_cap_usd)))
+
+    meta.update(
+        {
+            "post_sell_cash": float(cash_value),
+            "post_sell_equity": float(equity_value),
+            "post_sell_buying_power": buying_power_value,
+            "broker_safeguard_buy_budget": float(broker_budget),
+            "risk_cash_target_buy_budget": float(risk_budget),
+            "buy_budget_after_safeguards": float(max(0.0, budget)),
+            "buy_budget_basis": basis,
+            "approved_cap_usd": policy.approved_cap_usd,
+            "broker_budget_source": source,
+            "reserve_cash": float(reserve_cash),
+        }
+    )
+    return float(max(0.0, budget)), meta
+
+
 def _intent_from_row(row: Mapping[str, Any], *, order: int) -> OrderIntent:
     symbol = str(row.get("ticker") or row.get("symbol") or "").upper()
     side = str(row.get("side") or "").upper()
@@ -411,19 +577,20 @@ def _submit_with_ledger(
     request: ExecutionRequest,
 ) -> SubmitResult:
     result = adapter.submit(intent)
+    ledger_intent = result.intent or intent
     if config.ledger_enabled:
         record_live_order(
             event="submitted",
-            symbol=intent.symbol,
-            side=intent.side,
-            qty=intent.shares,
-            limit_price=intent.price,
-            notional=intent.notional,
-            client_order_id=intent.client_order_id,
+            symbol=ledger_intent.symbol,
+            side=ledger_intent.side,
+            qty=ledger_intent.shares,
+            limit_price=ledger_intent.price,
+            notional=ledger_intent.notional,
+            client_order_id=ledger_intent.client_order_id,
             broker_order_id=result.broker_order_id,
             run_root=request.run_id,
             status=result.status,
-            reason=intent.reason,
+            reason=ledger_intent.reason,
             output_root=config.ledger_output_root,
         )
     return result
@@ -438,6 +605,29 @@ def _split_trades(executable_trades: pd.DataFrame, capital_trades: pd.DataFrame)
     sells = executable_trades[sides.isin({"SELL", "CLOSE", "REDUCE"})].copy()
     buys = executable_trades[sides.isin({"BUY", "ADD"})].copy()
     return sells, buys
+
+
+def _apply_buy_order_limit(
+    buy_trades: pd.DataFrame,
+    *,
+    config: ExecutionCoreConfig,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    if buy_trades is None or buy_trades.empty:
+        return buy_trades, []
+    limit = config.constraints.max_buy_orders
+    if config.constraints.max_one_order:
+        limit = 1 if limit is None else min(int(limit), 1)
+    if limit is None:
+        return buy_trades, []
+    limit = max(0, int(limit))
+    if len(buy_trades) <= limit:
+        return buy_trades, []
+    kept = buy_trades.head(limit).copy()
+    skipped = [
+        {**row.to_dict(), "block_reason": "max_trades_per_day"}
+        for _, row in buy_trades.iloc[limit:].iterrows()
+    ]
+    return kept, skipped
 
 
 def execute_lifecycle(
@@ -497,6 +687,12 @@ def execute_lifecycle(
             fallback_equity=float(request.total_equity),
             capital_constraint_clear=capital_constraint_clear,
         )
+        buy_budget, post_sell_budget_meta = _apply_configured_post_sell_budget(
+            buy_budget=buy_budget,
+            post_sell_budget_meta=post_sell_budget_meta,
+            account=post_sell_account,
+            config=config,
+        )
         pending_sell_order_ids = list(post_sell_snapshot.raw.get("pending_sell_order_ids") or [])
         if pending_sell_order_ids:
             buy_budget = 0.0
@@ -536,6 +732,12 @@ def execute_lifecycle(
             target_cash_weight=float(request.target_cash_weight),
             fallback_equity=float(request.total_equity),
             capital_constraint_clear=capital_constraint_clear,
+        )
+        buy_budget, post_sell_budget_meta = _apply_configured_post_sell_budget(
+            buy_budget=buy_budget,
+            post_sell_budget_meta=post_sell_budget_meta,
+            account=post_sell_account,
+            config=config,
         )
         rebuilt_buy_trades = original_buy_trades.iloc[0:0].copy()
         block_reason = str(
@@ -579,15 +781,29 @@ def execute_lifecycle(
             "buy_budget_after_safeguards": float(buy_budget or 0.0),
             "buy_budget_basis": buy_budget_basis,
         }
+        buy_budget, post_sell_budget_meta = _apply_configured_post_sell_budget(
+            buy_budget=buy_budget,
+            post_sell_budget_meta=post_sell_budget_meta,
+            account=post_sell_account,
+            config=config,
+        )
         rebuilt_buy_trades = original_buy_trades.copy()
+        rebuilt_buy_trades, buy_limit_skipped = _apply_buy_order_limit(
+            rebuilt_buy_trades,
+            config=config,
+        )
         rebudget_meta = {
             "status": "SKIPPED",
             "reason_codes": ["no_sell_orders"],
             "candidate_count": int(len(rebuilt_buy_trades)),
             "recomputed_requested_buy_notional": requested_buy_notional,
-            "recomputed_buy_notional": requested_buy_notional,
+            "recomputed_buy_notional": float(
+                rebuilt_buy_trades["notional"].astype(float).sum()
+            )
+            if not rebuilt_buy_trades.empty and "notional" in rebuilt_buy_trades.columns
+            else 0.0,
         }
-        rebudget_skipped = []
+        rebudget_skipped = buy_limit_skipped
 
     final_execution_trades = pd.concat(
         [sell_trades.copy(), rebuilt_buy_trades],

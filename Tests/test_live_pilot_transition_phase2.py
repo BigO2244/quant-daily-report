@@ -105,7 +105,8 @@ def _run(broker, plan, *, dry_run="1", fractional="1", run_id="run-p2", tmp_path
 
 
 # --------------------------------------------------------------------------- #
-# 1. July 6 — rotation fires first under Option A
+# 1. July 6 — live path no longer blocks rotation in the engine, but sell whitelist
+# still blocks any unapproved SELL before submission.
 # --------------------------------------------------------------------------- #
 def _july6_positions():
     return [
@@ -115,31 +116,27 @@ def _july6_positions():
     ]
 
 
-def test_july6_live_path_blocks_on_rotation(tmp_path: Path) -> None:
+def test_july6_live_path_blocks_unwhitelisted_rotation_sell(tmp_path: Path) -> None:
     broker = FakeBroker(buying_power="0.88", cash="0.88", equity="506.82", positions=_july6_positions())
     plan = {"target_portfolio": [_target_row("ALL", 0.5, 180.0)]}
 
     result, run_root = _run(broker, plan, run_id="run-july6-rotation", tmp_path=tmp_path)
 
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
-    assert "EXISTING_POSITIONS_REQUIRE_ROTATION" in result["reason_code"]
+    assert "sell_not_whitelisted" in result["reason_code"]
     assert broker.submit_calls == 0
 
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
-    assert transition["schema_version"] == "caerus.transition_plan.v1"
-    assert transition["blocked"] is True
-    assert transition["block_reason"] == "EXISTING_POSITIONS_REQUIRE_ROTATION"
-    # ABBV and C are recognized as exits; ALL is held-and-targeted (kept), not sold.
-    assert set(transition["holdings_to_sell"]) == {"ABBV", "C"}
-    assert transition["buy_orders_intended"] == []
-    # Incremental ALL need was computed (never a blind full-target buy).
-    assert transition["diagnostics"]["incremental_need_shares"]["ALL"] > 0
+    assert transition["schema_version"] == "caerus.execution_core_transition_plan.v1"
+    assert transition["blocked"] is False
+    # The paper-native core applies the min-trade floor before validation; ABBV remains
+    # an actionable unwhitelisted exit, while sub-$100 C is dust.
+    assert set(transition["holdings_to_sell"]) == {"ABBV"}
 
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
-    assert capital_gate["decision"] == "BLOCKED"
-    assert capital_gate["required_sell_count"] == 2  # actual exits, not "any position"
-    assert capital_gate["tradable_capital_usd"] == 0.88
+    assert capital_gate["decision"] == "ALLOWED"
+    assert capital_gate["required_sell_count"] == 1  # paper-native min-trade floor drops C dust
+    assert capital_gate["tradable_capital_usd"] > 0.88  # includes 95% expected-sell-proceeds haircut
 
 
 def test_july6_variant_blocks_on_buying_power_when_no_rotation(tmp_path: Path) -> None:
@@ -158,7 +155,6 @@ def test_july6_variant_blocks_on_buying_power_when_no_rotation(tmp_path: Path) -
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["holdings_to_sell"] == []  # no rotation
-    assert transition["diagnostics"]["incremental_need_shares"]["ALL"] > 0
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     # Tradable capital tracks buying power, never the cap.
     assert capital_gate["tradable_capital_usd"] == 0.88
@@ -202,7 +198,7 @@ def test_clean_slate_min_trade_floor_blocks_dust(tmp_path: Path) -> None:
     plan = {"target_portfolio": [_target_row("AAA", 0.05, 100.0)]}  # $25 target < $100 floor
     result, run_root = _run(broker, plan, run_id="run-dust", tmp_path=tmp_path)
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "live_pilot_transition_no_actionable_buy"
+    assert result["reason_code"] == "live_pilot_transition_no_actionable_order"
     assert broker.submit_calls == 0
 
 
@@ -328,11 +324,11 @@ def test_bp_zero_with_planned_but_clipped_blocks(tmp_path: Path) -> None:
     plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}  # need $200 > $50 budget
     result, run_root = _run(broker, plan, dry_run="0", run_id="run-bp0clip", tmp_path=tmp_path)
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_BUYING_POWER_UNAVAILABLE
     assert broker.submit_calls == 0
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["buy_orders_intended"] == []  # sized buy was clipped away
-    assert transition["diagnostics"]["planned_buy_notional"] > 0  # but a need existed
+    assert transition["diagnostics"]["buying_power_nonpositive"] is True
 
 
 def test_cleanly_priced_and_counted_holding_proceeds(tmp_path: Path) -> None:

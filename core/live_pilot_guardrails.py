@@ -530,8 +530,10 @@ def validate_live_pilot_plan(
 
     if not orders:
         errors.append("no_live_pilot_orders_after_validation")
-    if len(orders) > int(max_orders):
+    buy_count = sum(1 for order in orders if order.side == "BUY")
+    if buy_count > int(max_orders):
         errors.append("live_pilot_order_count_exceeds_max_orders")
+        errors.append("live_pilot_buy_order_count_exceeds_max_orders")
     if total > float(capital_cap_usd):
         errors.append("live_pilot_total_notional_exceeds_cap")
 
