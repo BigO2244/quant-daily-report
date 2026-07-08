@@ -301,11 +301,29 @@ def test_main_pass_path_keeps_precompute_plan_and_submissions_aligned(tmp_path, 
 
 
 def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path, monkeypatch) -> None:
+    """A nonempty planned payload that submits zero trades must classify RELIABILITY_RED.
+
+    Date note (Track 2, Part B): the original fixture used 2026-06-19, which is
+    Juneteenth — a MARKET_CLOSED_DAY on the XNYS calendar. On a closed day the
+    market-closed exemption in core/operational_invariants.py (the
+    `expected_market_closed_day` branch, ~line 609) fires BEFORE the
+    planned-payload-drop check and correctly classifies GREEN, because zero
+    submissions on a closed day are expected. That made this test assert a RED
+    outcome on a day the classifier is right to call GREEN.
+
+    Part A verified the classifier is correct, so the fix is to the fixture, not
+    the classifier: the scenario is moved to 2026-07-08, a confirmed OPEN
+    trading day (proven via paper.trading_calendar.is_trading_day:
+    2026-06-19 -> False, 2026-07-08 -> True). The prev-close pricing anchor moves
+    to 2026-07-07, the prior open trading day. The assertion intent is unchanged:
+    non-empty planned payload, zero submitted, must classify RELIABILITY_RED with
+    reason planned_payload_trades_dropped_before_execution.
+    """
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("REPORT_DATE", "2026-06-19")
+    monkeypatch.setenv("REPORT_DATE", "2026-07-08")
     monkeypatch.delenv("PRECOMPUTE_EXECUTE_EXACT_PLAN", raising=False)
 
-    run_id = "2026-06-19T093506-0400_071a61a"
+    run_id = "2026-07-08T093506-0400_071a61a"
     run_root = tmp_path / "outputs" / "runs" / run_id
     planned_trades = [
         {"ticker": "AAPL", "side": "BUY", "shares": 1, "price": 100.0, "notional": 100.0},
@@ -313,11 +331,11 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
         {"ticker": "GOOG", "side": "SELL", "shares": 1, "price": 150.0, "notional": 150.0},
     ]
     planned_payload = {
-        "trade_date": "2026-06-19",
+        "trade_date": "2026-07-08",
         "mode": "PAPER",
         "execution_status": "PLANNED",
         "pricing_source": "PREV_CLOSE",
-        "pricing_asof": "2026-06-18",
+        "pricing_asof": "2026-07-07",
         "trades_count": len(planned_trades),
         "trades": planned_trades,
     }
@@ -351,17 +369,17 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
     monkeypatch.setattr(
         live_exec,
         "current_et",
-        lambda: dt.datetime(2026, 6, 19, 9, 35, 15, tzinfo=ZoneInfo("America/New_York")),
+        lambda: dt.datetime(2026, 7, 8, 9, 35, 15, tzinfo=ZoneInfo("America/New_York")),
     )
     monkeypatch.setattr(
         live_exec,
         "classify_timing",
         lambda **kwargs: {
             "timing_status": "on_time",
-            "preferred_target_et": "2026-06-19T09:35:00-04:00",
-            "degraded_auto_trade_deadline_et": "2026-06-19T09:45:00-04:00",
-            "actual_workflow_start_et": "2026-06-19T09:34:00-04:00",
-            "actual_execution_start_et": "2026-06-19T09:35:15-04:00",
+            "preferred_target_et": "2026-07-08T09:35:00-04:00",
+            "degraded_auto_trade_deadline_et": "2026-07-08T09:45:00-04:00",
+            "actual_workflow_start_et": "2026-07-08T09:34:00-04:00",
+            "actual_execution_start_et": "2026-07-08T09:35:15-04:00",
             "first_submit_et": "",
         },
     )
@@ -391,7 +409,7 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
         live_exec.dqr,
         "build_execution_email_payload",
         lambda **kwargs: {
-            "trade_date": "2026-06-19",
+            "trade_date": "2026-07-08",
             "mode": "PAPER",
             "execution_status": "NO_ACTION",
             "halt_reason": None,
@@ -423,11 +441,11 @@ def test_nonempty_planned_payload_zero_submitted_fails_with_drop_reason(tmp_path
     payload = json.loads((run_root / "execution_payload.json").read_text(encoding="utf-8"))
     results = json.loads((run_root / "execution_results.json").read_text(encoding="utf-8"))
     reliability = json.loads(
-        (run_root / "audit" / "execution_reliability_report_2026-06-19.json").read_text(
+        (run_root / "audit" / "execution_reliability_report_2026-07-08.json").read_text(
             encoding="utf-8"
         )
     )
-    email_payload = json.loads((tmp_path / "outputs" / "execution_email" / "2026-06-19.json").read_text(encoding="utf-8"))
+    email_payload = json.loads((tmp_path / "outputs" / "execution_email" / "2026-07-08.json").read_text(encoding="utf-8"))
 
     assert exit_code == 1
     assert observed_run_paper_day["precomputed_trade_plan"] == planned_trades
