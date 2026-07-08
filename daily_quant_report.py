@@ -4189,6 +4189,37 @@ def _build_market_analyzer_payload(
     if vix_level is not None:
         payload["vix"] = vix_level
     return payload
+
+
+# ============================================================
+# Concentrated-alpha construction (flag-gated, OFF by default)
+# ============================================================
+def _concentrated_alpha_enabled() -> bool:
+    """Whether to concentrate the combined book to the top-N conviction names.
+
+    OFF by default -- the broad book is unchanged unless CAERUS_CONCENTRATED_ALPHA is
+    an explicit truthy value. When on, the engine's regime/sleeve scoring is untouched;
+    only the final book is concentrated (see core.concentration). Enabling this should
+    be paired with a matching risk_controls position cap (core.risk_controls raises its
+    default cap when this flag is on) so the concentrated weights are not re-clipped.
+    """
+    return str(os.environ.get("CAERUS_CONCENTRATED_ALPHA", "")).strip().lower() in {
+        "1", "true", "yes", "y", "on",
+    }
+
+
+def _concentrated_alpha_params() -> tuple[int, float]:
+    try:
+        top_n = int(os.environ.get("CAERUS_CONCENTRATED_TOP_N", "5"))
+    except (TypeError, ValueError):
+        top_n = 5
+    try:
+        max_weight = float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
+    except (TypeError, ValueError):
+        max_weight = 0.50
+    return max(1, top_n), max_weight
+
+
 # ============================================================
 # Daily snapshot builder
 # ============================================================
@@ -4254,6 +4285,30 @@ def build_daily_snapshot(
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
     if "sleeve" not in weights_df.columns and "sleeve_name" in weights_df.columns:
         weights_df["sleeve"] = weights_df["sleeve_name"]
+    # Concentrated-alpha (flag-gated, OFF by default): replace the broad book with the
+    # top-N highest-conviction names, conviction-weighted, cap per name. Regime/sleeve
+    # scoring upstream is untouched; cash becomes the residual after concentration and
+    # honors the engine's cash weight (risk-off) as a floor.
+    if _concentrated_alpha_enabled() and not weights_df.empty:
+        from core.concentration import concentrate_targets
+
+        _top_n, _max_w = _concentrated_alpha_params()
+        _names_before = len(weights_df)
+        weights_df = concentrate_targets(
+            weights_df,
+            top_n=_top_n,
+            max_position_weight=_max_w,
+            target_cash_weight=max(target_cash_weight_today, 0.05),
+        )
+        target_cash_weight_today = float(
+            max(0.0, min(1.0, 1.0 - float(weights_df["target_weight"].sum())))
+        )
+        invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
+        logger.info(
+            "[CONCENTRATED_ALPHA] top_n=%d cap=%.2f: %d -> %d names, cash_target=%.3f, names=%s",
+            _top_n, _max_w, _names_before, len(weights_df),
+            target_cash_weight_today, list(weights_df["ticker"]),
+        )
     if weights_df.empty:
         fallback_rows: list[dict[str, object]] = []
         for sleeve_name, details in (("sleeve_2", s2_details), ("charlie_munger", cm_details or {})):

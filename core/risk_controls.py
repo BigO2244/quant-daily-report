@@ -15,7 +15,26 @@ from paper.state_paths import get_paper_state_dir
 
 logger = logging.getLogger(__name__)
 
-MAX_POSITION_PCT = float(os.environ.get("MAX_POSITION_PCT", "0.10"))
+def _truthy_env(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _default_max_position_pct() -> float:
+    """Per-name cap. Explicit MAX_POSITION_PCT always wins; otherwise, when the
+    concentrated-alpha flag is on, the cap rises to the concentration ceiling so the
+    concentrated top-N weights are not re-clipped back to the broad-book 10%."""
+    explicit = os.environ.get("MAX_POSITION_PCT")
+    if explicit not in (None, ""):
+        return float(explicit)
+    if _truthy_env("CAERUS_CONCENTRATED_ALPHA"):
+        try:
+            return float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
+        except (TypeError, ValueError):
+            return 0.50
+    return 0.10
+
+
+MAX_POSITION_PCT = _default_max_position_pct()
 MAX_SECTOR_PCT = float(os.environ.get("MAX_SECTOR_PCT", "0.30"))
 MAX_NET_LONG_PCT = float(os.environ.get("MAX_NET_LONG_PCT", "0.95"))
 MAX_GROSS_PCT = float(os.environ.get("MAX_GROSS_PCT", "1.00"))
