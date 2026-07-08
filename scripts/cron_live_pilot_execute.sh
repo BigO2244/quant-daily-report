@@ -50,6 +50,11 @@ export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}"
 # "unlimited"). Sells are unaffected here (governed by the fail-closed sells master
 # gate + whitelist/wildcard). The env file may override; default is a generous 50.
 export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-50}"
+# Minimum per-trade notional. The strategy target spans many names; on a small live
+# account each target position is well under the paper default ($100), so a $100 floor
+# would skip every buy and drain to cash. A low floor lets the weight-priority rebudget
+# fill the top targets it can afford (budget/cash is the real cutoff). Env file overrides.
+export CAERUS_LIVE_PILOT_MIN_TRADE_USD="${CAERUS_LIVE_PILOT_MIN_TRADE_USD:-10}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
 export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"

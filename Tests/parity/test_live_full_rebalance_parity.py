@@ -81,6 +81,64 @@ def test_independent_hand_derivation() -> None:
     assert paper == expected
 
 
+def _small_account_request(min_trade_usd: float):
+    """~$500 account, one off-target holding + a many-name target (each < $100)."""
+    import pandas as pd
+    from execution.core import (ExecutionRequest, live_pilot_execution_config,
+                                 execute_lifecycle, SynchronousTestAdapter)
+
+    prices = {"ABBV": 252.0}
+    weights = [0.08, 0.075, 0.07, 0.065, 0.06, 0.06, 0.055, 0.05, 0.05, 0.05,
+               0.045, 0.045, 0.04, 0.04, 0.04, 0.035, 0.03, 0.025]
+    targets = []
+    for i, w in enumerate(weights):
+        t = f"T{i:02d}"; prices[t] = 50.0
+        targets.append({"ticker": t, "sleeve": "live_pilot", "target_weight": w})
+    holdings = pd.DataFrame([{"ticker": "ABBV", "sleeve": "live_pilot", "shares": 1.1862}],
+                            columns=["ticker", "sleeve", "shares"])
+    equity, cash = 500.15, 0.88
+    acct = {"cash": str(cash), "equity": str(equity), "portfolio_value": str(equity),
+            "buying_power": str(cash), "status": "ACTIVE"}
+    cfg = live_pilot_execution_config(approved_cap_usd=equity, max_orders=50,
+                                      allow_fractional=True, min_trade_usd=min_trade_usd,
+                                      ledger_enabled=False)
+    req = ExecutionRequest(holdings=holdings,
+                           targets=pd.DataFrame(targets, columns=["ticker", "sleeve", "target_weight"]),
+                           prices=pd.Series(prices, dtype=float), total_equity=equity,
+                           starting_cash=cash, target_cash_weight=0.05,
+                           planning_account=acct, run_id="small", price_basis="t")
+    # post_sell_account WITHOUT buying_power => adapter fills it with post-sell cash,
+    # modeling the live adapter re-snapshotting the broker after sells settle.
+    adapter = SynchronousTestAdapter(holdings=holdings, starting_cash=cash,
+        post_sell_account={"equity": str(equity), "status": "ACTIVE"},
+        planning_account=acct, portfolio_id="live_pilot")
+    return execute_lifecycle(request=req, adapter=adapter, config=cfg)
+
+
+def test_small_account_min_trade_floor_blocks_all_buys() -> None:
+    # Documents the failure the $100 default causes on a small account: every target
+    # position is < $100, so the rebalance sells to cash and buys NOTHING.
+    r = _small_account_request(min_trade_usd=100.0)
+    assert len(r.final_buy_orders or []) == 0
+
+
+def test_small_account_low_floor_fills_top_targets_within_budget() -> None:
+    # With a low floor the weight-priority rebudget fills the TOP targets it can afford
+    # and skips the unaffordable tail (operator's "fill what it can afford" intent).
+    r = _small_account_request(min_trade_usd=10.0)
+    buys = r.final_buy_orders or []
+    assert len(buys) > 0
+    filled = [str(o.get("ticker")) for o in buys]
+    # Highest-weight names come first; the tail (lowest weight) is skipped.
+    assert filled[0] == "T00"
+    assert "T17" not in filled
+    buy_notional = sum(float(o.get("notional") or 0.0) for o in buys)
+    post_sell_cash = float(r.post_sell_budget_meta.get("post_sell_cash") or 0.0)
+    assert buy_notional <= post_sell_cash + 1e-6
+    # Deploys down toward the 5% cash target rather than leaving proceeds idle.
+    assert (post_sell_cash - buy_notional) < 0.5 * post_sell_cash
+
+
 def test_legacy_plan_without_cash_weight_defaults_to_zero() -> None:
     """A pre-v2 plan (no top-level cash_target_weight) must not crash and defaults 0.0."""
     scenario = scenario_by_name("full_rebalance_mixed")

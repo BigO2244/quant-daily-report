@@ -1734,11 +1734,19 @@ def _run_live_pilot_core_path(
             preflight=preflight,
             capital_gate=capital_gate,
         )
+    # Minimum per-trade notional floor. Defaults to 100.0 (unchanged legacy behavior).
+    # For a small live account, a full rebalance to a many-name target needs a lower
+    # floor so the weight-priority rebudget can fill the top names it can afford instead
+    # of skipping every sub-$100 buy and parking proceeds in cash. Operator-controlled.
+    min_trade_usd = _finite_float(env.get("CAERUS_LIVE_PILOT_MIN_TRADE_USD"))
+    if min_trade_usd is None or min_trade_usd <= 0.0:
+        min_trade_usd = 100.0
     config = live_pilot_execution_config(
         approved_cap_usd=gate.capital_cap_usd,
         allow_fractional=str(env.get("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL") or "").strip().lower()
         in {"1", "true", "yes", "y", "on"},
         max_orders=int(gate.max_orders or 1),
+        min_trade_usd=float(min_trade_usd),
         ledger_output_root=output_root,
         ledger_enabled=not bool(gate.dry_run),
     )
