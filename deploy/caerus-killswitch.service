@@ -1,0 +1,28 @@
+[Unit]
+Description=Caerus live-pilot kill-switch service (server-side halt authority)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brettolson
+Group=brettolson
+WorkingDirectory=/home/brettolson/quant-daily-report
+# Token is the second factor on top of nginx basic auth. Generate once:
+#   openssl rand -hex 24  > /home/brettolson/.caerus/killswitch.token  (chmod 600)
+# and reference it here (systemd reads the file into the env var):
+EnvironmentFile=/home/brettolson/.caerus/killswitch.env
+ExecStart=/home/brettolson/.venvs/quant-daily-report/bin/python3 scripts/killswitch_service.py \
+    --env-file /home/brettolson/.caerus/live_pilot.env \
+    --state-file /var/www/caerus-dashboard/kill_switch_state.json \
+    --host 127.0.0.1 --port 8787
+Restart=on-failure
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/brettolson/.caerus /var/www/caerus-dashboard
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

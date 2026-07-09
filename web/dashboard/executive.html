@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caerus — Executive</title>
+<style>
+/* ---- Caerus theme (matches quant_daily_executive.css) ---- */
+:root{
+  --bg:#07090c; --bg2:#0d1117; --panel:#111820; --panel-2:#151e28;
+  --line:#2b3643; --line-2:#3c4b5d; --text:#e7edf5; --muted:#93a0b1;
+  --accent:#f3a712; --cyan:#4fd1ff; --green:#2ad67d; --red:#ff6f61;
+  --amber:#ffbf47; --violet:#8b7dff;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,monospace;
+  --sans:"IBM Plex Sans","Avenir Next","Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;color:var(--text);font-family:var(--sans);
+  background:linear-gradient(180deg,#07090c 0%,#0b1016 46%,#080a0d 100%);}
+a{color:var(--cyan);text-decoration:none}
+.shell{max-width:1500px;margin:0 auto;padding:16px 18px 60px}
+
+/* ---- Sticky command bar ---- */
+.cmdbar{position:sticky;top:0;z-index:40;background:rgba(7,9,12,.92);
+  backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:12px 18px;margin:0 -18px 18px}
+.brand{display:flex;flex-direction:column;gap:2px;margin-right:auto}
+.brand .tag{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--accent);text-transform:uppercase}
+.brand h1{margin:0;font-size:20px;letter-spacing:.02em}
+.brand .sub{font-size:12px;color:var(--muted)}
+
+/* segmented account toggle */
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;font-family:var(--mono)}
+.seg button{background:transparent;color:var(--muted);border:0;padding:9px 16px;font-size:12px;
+  letter-spacing:.08em;cursor:pointer;text-transform:uppercase;font-family:var(--mono)}
+.seg button.active{background:var(--panel-2);color:var(--text)}
+.seg button.live.active{background:rgba(255,111,97,.16);color:#ffd0c9}
+
+.meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11px}
+.meta .m{display:flex;flex-direction:column}
+.meta .m .lbl{color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-size:10px}
+.meta .m .val{color:var(--text)}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-family:var(--mono);font-size:11px;letter-spacing:.05em;border:1px solid transparent}
+.pill.ok{background:rgba(42,214,125,.12);color:var(--green);border-color:rgba(42,214,125,.35)}
+.pill.warn{background:rgba(255,191,71,.12);color:var(--amber);border-color:rgba(255,191,71,.35)}
+.pill.bad{background:rgba(255,111,97,.14);color:var(--red);border-color:rgba(255,111,97,.4)}
+.pill.mut{background:rgba(147,160,177,.1);color:var(--muted);border-color:rgba(147,160,177,.3)}
+
+/* ---- Kill switch control ---- */
+.kill{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:8px;
+  border:1px solid var(--line-2);background:rgba(5,8,12,.6)}
+.kill .kstate{font-family:var(--mono);font-size:11px;line-height:1.15}
+.kill .kstate b{display:block;font-size:13px;letter-spacing:.06em}
+.kbtn{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--red);background:rgba(255,111,97,.14);color:#ffd7d1;
+  padding:9px 14px;border-radius:7px;cursor:pointer;font-weight:600}
+.kbtn:hover{background:rgba(255,111,97,.24)}
+.kbtn.reset{border-color:var(--line-2);background:transparent;color:var(--muted)}
+.kbtn:disabled{opacity:.45;cursor:not-allowed}
+.kbtn.armed{animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,111,97,.5)}50%{box-shadow:0 0 0 6px rgba(255,111,97,0)}}
+.live-engaged-banner{display:none;margin:0 0 16px;padding:12px 16px;border-radius:10px;
+  border:1px solid var(--red);background:rgba(255,111,97,.12);color:#ffd7d1;font-family:var(--mono);font-size:13px}
+
+/* ---- Grid / panels ---- */
+.row{display:grid;gap:14px;margin-bottom:16px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.two{grid-template-columns:1.4fr 1fr}
+.three{grid-template-columns:repeat(3,1fr)}
+@media(max-width:1000px){.two,.three{grid-template-columns:1fr}}
+.panel{background:linear-gradient(180deg,rgba(21,30,40,.6),rgba(13,17,23,.6));
+  border:1px solid var(--line);border-radius:12px;padding:16px}
+.panel h2{margin:0 0 12px;font-family:var(--mono);font-size:12px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.panel h2 .rt{color:var(--muted);font-size:11px;letter-spacing:.04em}
+
+/* KPI tile */
+.kpi{background:rgba(9,15,24,.55);border:1px solid var(--line);border-radius:12px;padding:14px 15px;min-height:104px;display:flex;flex-direction:column;gap:4px}
+.kpi .k-lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.kpi .k-val{font-family:var(--mono);font-size:28px;font-weight:600;line-height:1.05}
+.kpi .k-sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.pos{color:var(--green)} .neg{color:var(--red)} .neu{color:var(--text)} .amber{color:var(--amber)}
+
+/* limit bars */
+.limit{margin-bottom:13px}
+.limit:last-child{margin-bottom:0}
+.limit .top{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;margin-bottom:5px}
+.limit .top .name{color:var(--text)}
+.limit .top .val{color:var(--muted)}
+.bar{position:relative;height:9px;border-radius:6px;background:rgba(147,160,177,.14);overflow:hidden}
+.bar>i{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--cyan)}
+.bar>i.g{background:var(--green)} .bar>i.a{background:var(--amber)} .bar>i.r{background:var(--red)}
+.bar>.mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--line-2)}
+.limit .cap{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px}
+
+/* tables */
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+th{text-align:left;color:var(--muted);font-weight:500;letter-spacing:.06em;text-transform:uppercase;
+  font-size:10px;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:6px 8px;border-bottom:1px solid rgba(43,54,67,.5)}
+td.num,th.num{text-align:right}
+tr:last-child td{border-bottom:0}
+.chip{font-family:var(--mono);font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid var(--line-2);color:var(--muted)}
+
+/* checklist rows */
+.chk{display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:1px solid rgba(43,54,67,.5);font-size:12.5px}
+.chk:last-child{border-bottom:0}
+.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:0 0 auto;background:var(--muted)}
+.dot.ok{background:var(--green)} .dot.warn{background:var(--amber)} .dot.bad{background:var(--red)}
+.chk .cname{font-family:var(--mono);color:var(--text)}
+.chk .cdet{color:var(--muted);font-size:11.5px}
+
+svg{display:block;width:100%;height:auto}
+.legend{display:flex;gap:16px;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:16px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+.muted{color:var(--muted)}
+.empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:14px 4px}
+footer{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap;justify-content:space-between}
+
+/* modal */
+.modal-bg{position:fixed;inset:0;background:rgba(3,5,8,.72);display:none;align-items:center;justify-content:center;z-index:100}
+.modal{background:var(--panel);border:1px solid var(--red);border-radius:12px;max-width:460px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.modal h3{margin:0 0 8px;font-family:var(--mono);letter-spacing:.04em}
+.modal p{color:var(--muted);font-size:13px;line-height:1.5}
+.modal input{width:100%;background:var(--bg2);border:1px solid var(--line-2);color:var(--text);
+  font-family:var(--mono);padding:10px;border-radius:7px;margin:6px 0 14px}
+.modal .actions{display:flex;gap:10px;justify-content:flex-end}
+.modal button{font-family:var(--mono);font-size:12px;padding:9px 16px;border-radius:7px;cursor:pointer;border:1px solid var(--line-2);background:transparent;color:var(--muted)}
+.modal button.danger{border-color:var(--red);background:rgba(255,111,97,.16);color:#ffd7d1;font-weight:600}
+.hide{display:none!important}
+.only-live{display:none}
+body[data-account="live"] .only-live{display:block}
+body[data-account="live"] .only-paper{display:none}
+</style>
+</head>
+<body data-account="paper">
+<div class="shell">
+
+  <div class="cmdbar">
+    <div class="brand">
+      <span class="tag">Caerus · Executive Command</span>
+      <h1 id="brand-title">Portfolio Overview</h1>
+      <span class="sub" id="brand-sub">Decision view — risk, exposure, and execution health at a glance.</span>
+    </div>
+
+    <div class="seg" role="tablist" aria-label="Account">
+      <button id="tab-paper" class="active" onclick="setAccount('paper')">Paper Book</button>
+      <button id="tab-live" class="live" onclick="setAccount('live')">Live Pilot</button>
+    </div>
+
+    <div class="meta">
+      <div class="m"><span class="lbl">Report</span><span class="val" id="m-report">—</span></div>
+      <div class="m"><span class="lbl">Refreshed</span><span class="val" id="m-generated">—</span></div>
+      <div class="m"><span class="lbl">Data</span><span class="val"><span id="m-fresh" class="pill mut">—</span></span></div>
+      <div class="m"><span class="lbl">Status</span><span class="val"><span id="m-status" class="pill mut">—</span></span></div>
+    </div>
+
+    <div class="kill only-live" id="kill-wrap">
+      <div class="kstate">
+        <span class="lbl muted">Live kill switch</span>
+        <b id="kill-state">—</b>
+      </div>
+      <button class="kbtn" id="kill-btn" onclick="openKillModal('engage')">Engage</button>
+      <button class="kbtn reset hide" id="kill-reset" onclick="openKillModal('disengage')">Disengage</button>
+    </div>
+  </div>
+
+  <div class="live-engaged-banner" id="engaged-banner"></div>
+
+  <!-- Executive KPI strip -->
+  <div class="row kpis" id="kpi-strip"></div>
+
+  <!-- Risk & performance -->
+  <div class="row two">
+    <div class="panel">
+      <h2 id="perf-title">Performance <span class="rt" id="perf-rt"></span></h2>
+      <div id="perf-body"></div>
+    </div>
+    <div class="panel">
+      <h2>Risk &amp; Limits <span class="rt">how close to a guardrail</span></h2>
+      <div id="limits-body"></div>
+    </div>
+  </div>
+
+  <!-- Positions + execution/governance -->
+  <div class="row two">
+    <div class="panel">
+      <h2 id="pos-title">Positions <span class="rt" id="pos-rt"></span></h2>
+      <div id="pos-body"></div>
+    </div>
+    <div class="panel">
+      <h2 id="side-title">Execution &amp; Health</h2>
+      <div id="side-body"></div>
+    </div>
+  </div>
+
+  <!-- Governance / actions -->
+  <div class="row two">
+    <div class="panel">
+      <h2>Operator Actions <span class="rt">what needs a decision</span></h2>
+      <div id="actions-body"></div>
+    </div>
+    <div class="panel">
+      <h2>Governance &amp; Regime</h2>
+      <div id="gov-body"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span id="foot-sources">—</span>
+    <span>Full audit / evidence view: <a href="index.html">Portfolio Command (detail)</a></span>
+    <span id="foot-schema">—</span>
+  </footer>
+</div>
+
+<!-- Kill switch confirm modal -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h3 id="modal-title">Engage live kill switch?</h3>
+    <p id="modal-body"></p>
+    <input id="modal-input" autocomplete="off" spellcheck="false" placeholder="Type ENGAGE to confirm">
+    <div class="actions">
+      <button onclick="closeKillModal()">Cancel</button>
+      <button class="danger" id="modal-confirm" onclick="confirmKill()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   Caerus Executive Dashboard
+   Reads the same dashboard-data.json produced every ~5 min by
+   scripts/refresh_quant_dashboard.py (DashboardV1Builder). No external deps.
+   ===================================================================== */
+
+// --- Real, code-derived risk thresholds (see repo) -------------------
+const RISK = {
+  // core/risk_controls.py : CIRCUIT_BREAKER_PCT / _SCALE
+  circuitBreakerPct: 0.15,      // drawdown that scales exposure to 50%
+  circuitBreakerScale: 0.50,
+  // core/growth_engine_v4.py : CIRCUIT_BREAKER_DRAWDOWN (live sleeve floor)
+  growthEngineHalt: 0.25,
+  grossExposureCap: 1.00,       // long-only fully-invested reference
+  // Soft "watch" guides (NOT hard limits — tune to taste)
+  concentrationWatch: 0.75,     // top-10 concentration watch level
+  singleNameWatch: 0.15,        // largest single name watch level
+};
+
+// Kill switch endpoint (served by scripts/killswitch_service.py behind nginx).
+// If absent, the control degrades to read-only + shows the manual command.
+const KILLSWITCH_API = 'api/killswitch';
+
+let DATA = null;
+let account = 'paper';
+let killState = { engaged:null, source:'unknown', endpoint:false };
+let pendingKillAction = null;
+
+// --- helpers ---------------------------------------------------------
+const $ = id => document.getElementById(id);
+const S = () => (DATA && DATA.sections) || {};
+const T = () => (DATA && DATA.terminal) || {};
+const num = v => (typeof v==='number' && isFinite(v)) ? v : null;
+function money(v,dp=0){ v=num(v); if(v===null) return '—';
+  return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:dp,maximumFractionDigits:dp}); }
+function pct(v,dp=2){ v=num(v); return v===null?'—':(v*100).toFixed(dp)+'%'; }
+function signPct(v,dp=2){ v=num(v); if(v===null) return '—'; return (v>=0?'+':'')+(v*100).toFixed(dp)+'%'; }
+function cls(v){ v=num(v); return v===null?'neu':(v>0?'pos':(v<0?'neg':'neu')); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtTime(iso){ if(!iso) return '—'; try{ const d=new Date(iso);
+  return d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return iso; } }
+function statusPill(level){ const l=String(level||'').toLowerCase();
+  if(l==='ok'||l==='pass'||l==='clean'||l==='healthy') return 'ok';
+  if(l==='warning'||l==='warn'||l==='partial'||l==='action_required') return 'warn';
+  if(l==='error'||l==='fail'||l==='blocked'||l==='bad'||l==='critical') return 'bad';
+  return 'mut'; }
+
+// --- load ------------------------------------------------------------
+async function load(){
+  try{
+    const r = await fetch('dashboard-data.json?_='+Date.now(), {cache:'no-store'});
+    DATA = await r.json();
+  }catch(e){
+    document.querySelector('.shell').insertAdjacentHTML('afterbegin',
+      '<div class="panel" style="border-color:var(--red)"><b>Could not load dashboard-data.json</b><br>'+esc(e.message)+'</div>');
+    return;
+  }
+  // default to whatever environment the payload was built for
+  account = (DATA.environment === 'live') ? 'live' : 'paper';
+  syncTabs();
+  renderMeta();
+  await refreshKillState();
+  renderAll();
+}
+
+function setAccount(a){ account=a; syncTabs(); renderAll(); }
+function syncTabs(){
+  document.body.dataset.account=account;
+  $('tab-paper').classList.toggle('active',account==='paper');
+  $('tab-live').classList.toggle('active',account==='live');
+}
+
+function renderMeta(){
+  $('m-report').textContent = DATA.report_date || '—';
+  $('m-generated').textContent = fmtTime(DATA.generated_at);
+  const health=(T().health)||{};
+  const st=(DATA.status)||{};
+  const fresh = health.stale_sections && health.stale_sections.length
+      ? {t:'STALE ×'+health.stale_sections.length,c:'warn'} : {t:'FRESH',c:'ok'};
+  $('m-fresh').textContent=fresh.t; $('m-fresh').className='pill '+fresh.c;
+  $('m-status').textContent=(st.level||'—').toUpperCase();
+  $('m-status').className='pill '+statusPill(st.level);
+  const src=(DATA.sources||[]);
+  $('foot-sources').textContent = (health.sources_used||src.filter(s=>s.used).length||0)+'/'+(health.sources_total||src.length||0)+' sources · '
+     + (health.warnings||0)+' warnings · '+(health.blocking_failures||0)+' blocking';
+  $('foot-schema').textContent = 'schema '+(DATA.schema_version||'—');
+}
+
+// =====================================================================
+//  RENDER
+// =====================================================================
+function renderAll(){
+  if(account==='live'){
+    $('brand-title').textContent='Live Pilot — Real Money';
+    $('brand-sub').textContent='FR-104 capped live account. Real capital at risk.';
+  }else{
+    $('brand-title').textContent='Paper Book';
+    $('brand-sub').textContent='Shadow/paper track record — no capital at risk.';
+  }
+  renderKpis();
+  renderPerformance();
+  renderLimits();
+  renderPositions();
+  renderSide();
+  renderActions();
+  renderGovernance();
+  renderKillUI();
+}
+
+// ---- KPI strip ------------------------------------------------------
+function currentDrawdown(){
+  const rows=(S().performance_history||{})._nav_rows||[];
+  if(!rows.length) return null;
+  let peak=-Infinity, last=null;
+  rows.forEach(r=>{ const e=num(r.equity); if(e!==null){ peak=Math.max(peak,e); last=e; }});
+  if(last===null||peak<=0) return null;
+  return (peak-last)/peak * -1; // negative number
+}
+function kpiTile(lbl,val,valCls,sub){
+  return '<div class="kpi"><span class="k-lbl">'+esc(lbl)+'</span>'
+    +'<span class="k-val '+(valCls||'neu')+'">'+val+'</span>'
+    +'<span class="k-sub">'+(sub||'')+'</span></div>';
+}
+function renderKpis(){
+  const el=$('kpi-strip'); let h='';
+  if(account==='paper'){
+    const hd=T().headline||{}, bm=T().benchmark||{}, po=T().positioning||{}, nav=S().nav||{};
+    const ddNow=currentDrawdown();
+    const regime=S().regime_market_state||{};
+    h+=kpiTile('NAV', money(hd.nav??nav.equity,0), 'neu',
+        'Cash '+money(hd.cash??nav.cash,0)+' · '+(hd.positions_count??'—')+' positions');
+    h+=kpiTile('Day P&L', money(hd.day_pnl,2), cls(hd.day_pnl), signPct(hd.day_return));
+    h+=kpiTile('Since inception', signPct(bm.since_inception_return), cls(bm.since_inception_return),
+        'SPY '+signPct(bm.spy_since_inception_return)+' · edge '+signPct(bm.excess_since_inception_return));
+    h+=kpiTile('Net exposure', pct(nav.net_exposure??po.invested_ratio,1),
+        (num(nav.net_exposure??po.invested_ratio)>RISK.grossExposureCap?'amber':'neu'),
+        'Cash '+pct(po.cash_ratio,1)+' · cap '+pct(RISK.grossExposureCap,0));
+    h+=kpiTile('Drawdown', pct(ddNow,2), 'neg',
+        'Max '+pct(bm.max_drawdown,2)+' · CB at -'+pct(RISK.circuitBreakerPct,0));
+    h+=kpiTile('Positions', (hd.positions_count??'—')+' / '+(num(regime.max_positions)!==null?regime.max_positions:'—'),
+        (num(regime.max_positions)!==null && (hd.positions_count>regime.max_positions)?'amber':'neu'),
+        'vs regime max');
+  } else {
+    const lp=S().live_pilot||{}, acc=lp.account||{}, m=lp.metrics||{}, rec=lp.reconciliation||{};
+    const cap=num(m.capital_cap_usd);
+    h+=kpiTile('Live equity', money(acc.equity??acc.portfolio_value,2), 'neu',
+        'Cash '+money(acc.cash,2)+' · '+(acc.status||'').replace('AccountStatus.',''));
+    h+=kpiTile('Capital cap', cap!==null?money(cap,0):'—',
+        'neu', 'BUY notional bound');
+    h+=kpiTile('Positions', (lp.positions?lp.positions.length:0)+'', 'neu',
+        'Buying power '+money(acc.buying_power,2));
+    h+=kpiTile('Open orders', (num(m.open_order_count)??0)+'', (m.blocking_open_order_count?'amber':'neu'),
+        (num(m.blocking_open_order_count)||0)+' blocking');
+    h+=kpiTile('Fill rate', m.fill_rate!=null?pct(m.fill_rate,0):'—', 'neu',
+        (m.filled_count!=null?m.filled_count:'—')+' filled / '+(m.submitted_count!=null?m.submitted_count:'—')+' sub');
+    h+=kpiTile('Reconciliation', esc(rec.state||rec.status||'—'), statusPill(rec.state||rec.status)==='ok'?'pos':(statusPill(rec.state||rec.status)==='bad'?'neg':'amber'),
+        (num(rec.unresolved_count)||0)+' unresolved · '+(num(rec.rejected_count)||0)+' rejected');
+  }
+  el.innerHTML=h;
+}
+
+// ---- Performance panel ---------------------------------------------
+function renderPerformance(){
+  const body=$('perf-body'), rt=$('perf-rt');
+  if(account==='paper'){
+    $('perf-title').firstChild.textContent='Performance ';
+    const ph=S().performance_history||{};
+    const nav=ph._nav_rows||[], bench=ph._bench_rows||[];
+    rt.textContent=(nav.length? nav.length+' sessions':'');
+    if(nav.length<2){ body.innerHTML='<div class="empty">No performance history in payload.</div>'; return; }
+    body.innerHTML = dualLineSVG(nav,bench) + drawdownSVG(nav) +
+      '<div class="legend"><span><i style="background:var(--cyan)"></i>Caerus</span><span><i style="background:var(--muted)"></i>SPY</span><span><i style="background:var(--red)"></i>Drawdown</span></div>';
+  } else {
+    $('perf-title').firstChild.textContent='Live capital ';
+    const lp=S().live_pilot||{}, acc=lp.account||{}, m=lp.metrics||{};
+    const eq=num(acc.equity??acc.portfolio_value), cap=num(m.capital_cap_usd);
+    rt.textContent = lp.run_id? 'run '+String(lp.run_id).slice(0,19):'';
+    let h='<div class="muted" style="font-family:var(--mono);font-size:12px;line-height:1.7">';
+    h+='Live NAV history accrues as the pilot runs; this account is intentionally small.<br>';
+    h+='Equity <b class="neu">'+money(eq,2)+'</b>';
+    if(cap!==null){ h+=' · BUY cap <b class="neu">'+money(cap,0)+'</b>'; }
+    h+='<br>Plan status: <span class="chip">'+esc(lp.plan_status||'—')+'</span> · Pilot status: <span class="chip">'+esc(lp.status||'—')+'</span>';
+    h+='<br>Last order fill: <span class="chip">'+esc(String(lp.latest_fill_status||'—').replace('OrderStatus.',''))+'</span>';
+    h+='</div>';
+    // simple cap gauge
+    if(cap!==null && eq!==null && cap>0){
+      const frac=Math.min(1, eq/ (eq>cap?eq:cap));
+      h+='<div class="limit" style="margin-top:14px"><div class="top"><span class="name">Equity vs BUY cap</span><span class="val">'+money(eq,0)+' / '+money(cap,0)+'</span></div>'
+        + bar(Math.min(1,eq/Math.max(cap,eq)),'g')+'</div>';
+    }
+    body.innerHTML=h;
+  }
+}
+function dualLineSVG(nav,bench){
+  const W=560,H=180,pad=6;
+  const base=num(nav[0].equity)||1;
+  const navIdx=nav.map(r=>({d:r.date,v:(num(r.equity)/base)*100}));
+  const bmap={}; bench.forEach(b=>{ if(num(b.spy_close)!=null) bmap[b.date]=b.spy_close; });
+  const bbase=bench.length?num(bench[0].spy_close):null;
+  const bmIdx=nav.map(r=> (bbase && bmap[r.date]!=null)?{d:r.date,v:(bmap[r.date]/bbase)*100}:null).filter(Boolean);
+  const all=navIdx.map(p=>p.v).concat(bmIdx.map(p=>p.v));
+  const min=Math.min(...all), max=Math.max(...all), span=(max-min)||1;
+  const x=(i,n)=>pad+(i/(n-1))*(W-2*pad);
+  const y=v=>pad+(1-(v-min)/span)*(H-2*pad);
+  const path=arr=>arr.map((p,i)=>(i?'L':'M')+x(i,arr.length).toFixed(1)+' '+y(p.v).toFixed(1)).join(' ');
+  return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="height:180px">'
+    +'<line x1="'+pad+'" y1="'+y(100)+'" x2="'+(W-pad)+'" y2="'+y(100)+'" stroke="var(--line)" stroke-dasharray="3 4"/>'
+    +'<path d="'+path(bmIdx)+'" fill="none" stroke="var(--muted)" stroke-width="1.5"/>'
+    +'<path d="'+path(navIdx)+'" fill="none" stroke="var(--cyan)" stroke-width="2"/>'
+    +'</svg>';
+}
+function drawdownSVG(nav){
+  const W=560,H=70,pad=4; let peak=-Infinity;
+  const dd=nav.map(r=>{ const e=num(r.equity); if(e!=null) peak=Math.max(peak,e); return e!=null&&peak>0?((peak-e)/peak)*-1:0; });
+  const min=Math.min(...dd,-0.005), max=0;
+  const x=i=>pad+(i/(dd.length-1))*(W-2*pad);
+  const y=v=>pad+(1-(v-min)/((max-min)||1))*(H-2*pad);
+  const line=dd.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
+  const area=line+' L'+x(dd.length-1)+' '+y(0)+' L'+x(0)+' '+y(0)+' Z';
+  return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="height:70px;margin-top:8px">'
+    +'<path d="'+area+'" fill="rgba(255,111,97,.14)"/>'
+    +'<path d="'+line+'" fill="none" stroke="var(--red)" stroke-width="1.5"/></svg>';
+}
+
+// ---- Risk & limits --------------------------------------------------
+function bar(frac,color){ frac=Math.max(0,Math.min(1,frac||0));
+  return '<div class="bar"><i class="'+(color||'')+'" style="width:'+(frac*100).toFixed(1)+'%"></i></div>'; }
+function limitRow(name,valTxt,frac,color,cap){
+  return '<div class="limit"><div class="top"><span class="name">'+esc(name)+'</span><span class="val">'+valTxt+'</span></div>'
+    + bar(frac,color) + (cap?'<div class="cap">'+esc(cap)+'</div>':'') + '</div>';
+}
+function renderLimits(){
+  const el=$('limits-body');
+  if(account==='paper'){
+    const po=T().positioning||{}, nav=S().nav||{}, regime=S().regime_market_state||{}, hd=T().headline||{};
+    const ddNow=Math.abs(currentDrawdown()||0);
+    const exp=num(nav.net_exposure??po.invested_ratio)||0;
+    const conc=num(po.top10_concentration)||0;
+    const large=num(po.largest_position_weight)||0;
+    const posN=num(hd.positions_count)||0, maxN=num(regime.max_positions)||10;
+    let h='';
+    h+=limitRow('Net exposure', pct(exp,1), exp/RISK.grossExposureCap,
+        exp>1?'r':(exp>0.95?'a':'g'), 'cap '+pct(RISK.grossExposureCap,0)+' (long-only)');
+    h+=limitRow('Drawdown → circuit breaker', pct(ddNow*-1,2), ddNow/RISK.circuitBreakerPct,
+        ddNow>=RISK.circuitBreakerPct?'r':(ddNow>=RISK.circuitBreakerPct*0.66?'a':'g'),
+        'CB trips at -'+pct(RISK.circuitBreakerPct,0)+' → scale to '+pct(RISK.circuitBreakerScale,0));
+    h+=limitRow('Positions', posN+' / '+maxN, Math.min(1,posN/maxN), posN>maxN?'a':'g',
+        'regime construction target (paper book runs broader by design)');
+    h+=limitRow('Top-10 concentration', pct(conc,1), conc/RISK.concentrationWatch,
+        conc>=RISK.concentrationWatch?'a':'g','watch '+pct(RISK.concentrationWatch,0)+' (soft)');
+    h+=limitRow('Largest single name', pct(large,1), large/RISK.singleNameWatch,
+        large>=RISK.singleNameWatch?'a':'g','watch '+pct(RISK.singleNameWatch,0)+' (soft)');
+    h+=limitRow('Portfolio scale (regime)', pct(regime.portfolio_scale,0), num(regime.portfolio_scale)||0,
+        'g','regime '+(regime.current_regime||'—')+' · VIX '+(num(regime.vix)!=null?regime.vix.toFixed(1):'—'));
+    el.innerHTML=h;
+  } else {
+    const lp=S().live_pilot||{}, acc=lp.account||{}, m=lp.metrics||{};
+    const eq=num(acc.equity??acc.portfolio_value)||0, cap=num(m.capital_cap_usd)||0;
+    let h='';
+    if(cap>0) h+=limitRow('Deployed vs BUY cap', money(eq,0)+' / '+money(cap,0), Math.min(1,eq/Math.max(cap,eq)),'g','buy notional bound');
+    h+=limitRow('Open orders', (num(m.open_order_count)||0)+'', Math.min(1,(num(m.open_order_count)||0)/5),
+        (m.blocking_open_order_count?'a':'g'), (num(m.blocking_open_order_count)||0)+' blocking');
+    if(m.reconciliation_clean_rate!=null)
+      h+=limitRow('Recon clean rate', pct(m.reconciliation_clean_rate,0), num(m.reconciliation_clean_rate)||0,
+        (m.reconciliation_clean_rate>=0.99?'g':'a'),'target 100%');
+    h+=limitRow('Drawdown → sleeve halt', '—', 0,'g','growth_engine_v4 floor at -'+pct(RISK.growthEngineHalt,0));
+    h+='<div class="cap" style="margin-top:8px">Live pilot risk envelope is enforced server-side by RiskControls (same engine as paper). Values shown as the broker reports them; nulls = no live orders yet.</div>';
+    el.innerHTML=h;
+  }
+}
+
+// ---- Positions ------------------------------------------------------
+function renderPositions(){
+  const body=$('pos-body'), rt=$('pos-rt');
+  let rows = account==='paper' ? ((S().positions||{}).rows||[]) : ((S().live_pilot||{}).positions||[]);
+  rt.textContent = rows.length+' held';
+  if(!rows.length){ body.innerHTML='<div class="empty">'+(account==='live'?'No live positions.':'No positions.')+'</div>'; return; }
+  rows=rows.slice().sort((a,b)=>(num(b.weight)||num(b.market_value)||0)-(num(a.weight)||num(a.market_value)||0)).slice(0,12);
+  let h='<table><thead><tr><th>Ticker</th><th class="num">Weight</th><th class="num">Value</th><th class="num">Unreal P&L</th><th class="num">%</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    h+='<tr><td>'+esc(r.ticker)+'</td>'
+      +'<td class="num">'+pct(r.weight,2)+'</td>'
+      +'<td class="num">'+money(r.market_value,0)+'</td>'
+      +'<td class="num '+cls(r.unrealized_pnl)+'">'+money(r.unrealized_pnl,0)+'</td>'
+      +'<td class="num '+cls(r.unrealized_pnl_pct)+'">'+signPct(r.unrealized_pnl_pct)+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  body.innerHTML=h;
+}
+
+// ---- Side panel: execution & health --------------------------------
+function renderSide(){
+  const body=$('side-body');
+  if(account==='live'){
+    const lp=S().live_pilot||{};
+    const orders=(lp.submitted_orders||[]).concat(lp.open_orders||[]);
+    let h='';
+    const rec=lp.reconciliation||{};
+    h+='<div class="chk"><span class="dot '+statusPill(rec.state||rec.status)+'"></span><div><span class="cname">Reconciliation · '+esc(rec.state||rec.status||'—')+'</span><div class="cdet">'+esc(rec.operator_action||'')+'</div></div></div>';
+    const cmp=lp.paper_live_comparability||{};
+    if(cmp && Object.keys(cmp).length){
+      const ok = cmp.available!==false;
+      const msg = cmp.available===false ? (cmp.reason||'not available yet') : (cmp.status||'available');
+      h+='<div class="chk"><span class="dot '+(ok?'ok':'mut')+'"></span><div><span class="cname">Paper/live comparability</span><div class="cdet">'+esc(String(msg).replace(/_/g,' '))+'</div></div></div>';
+    }
+    if(orders.length){
+      h+='<div style="margin-top:10px"><table><thead><tr><th>Sym</th><th>Side</th><th class="num">Notional</th><th>Status</th></tr></thead><tbody>';
+      orders.slice(0,8).forEach(o=>{ h+='<tr><td>'+esc(o.symbol)+'</td><td>'+esc(o.side)+'</td><td class="num">'+money(o.notional,0)+'</td><td><span class="chip">'+esc(String(o.status||'').replace('OrderStatus.',''))+'</span></td></tr>'; });
+      h+='</tbody></table></div>';
+    } else { h+='<div class="empty">No submitted or open live orders.</div>'; }
+    body.innerHTML=h;
+  } else {
+    // paper: today's tape + winners/laggards + validation
+    const tape=T().tape||{}, ld=T().leaders||{};
+    let h='<div class="chk"><span class="dot mut"></span><div><span class="cname">Tape today</span><div class="cdet">'
+      +(num(tape.buy_notional)||0?money(tape.buy_notional,0)+' buys':'0 buys')+' · '
+      +(num(tape.sell_notional)||0?money(tape.sell_notional,0)+' sells':'0 sells')+' · net '+money(tape.net_notional,0)+'</div></div></div>';
+    const win=(ld.winners||[]).slice(0,3), lag=(ld.laggards||[]).slice(0,3);
+    if(win.length||lag.length){
+      h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">';
+      h+='<div><div class="cap" style="margin-bottom:4px">Leaders</div>'+win.map(w=>'<div style="font-family:var(--mono);font-size:12px" class="pos">'+esc(w.ticker)+' '+money(w.unrealized_pnl,0)+'</div>').join('')+'</div>';
+      h+='<div><div class="cap" style="margin-bottom:4px">Laggards</div>'+lag.map(w=>'<div style="font-family:var(--mono);font-size:12px" class="neg">'+esc(w.ticker)+' '+money(w.unrealized_pnl,0)+'</div>').join('')+'</div>';
+      h+='</div>';
+    }
+    // system health checks
+    const shc=S().system_health_console||{};
+    (shc.checks||[]).slice(0,5).forEach(c=>{ h+='<div class="chk"><span class="dot '+statusPill(c.status)+'"></span><div><span class="cname">'+esc(c.name)+'</span><div class="cdet">'+esc(c.detail||c.status||'')+'</div></div></div>'; });
+    body.innerHTML=h;
+  }
+}
+
+// ---- Operator actions ----------------------------------------------
+function renderActions(){
+  const oct=S().operator_control_tower||{};
+  const acts=(oct.operator_actions||[]);
+  let h='';
+  if(!acts.length){ h='<div class="empty">No operator actions outstanding.</div>'; }
+  acts.forEach(a=>{
+    const sev=statusPill(a.severity||a.status);
+    h+='<div class="chk"><span class="dot '+sev+'"></span><div><span class="cname">'+esc(a.title||a.operator_action||'Action')
+      +(a.blocks_pilot?' <span class="chip" style="border-color:var(--red);color:var(--red)">blocks pilot</span>':'')+'</span>'
+      +'<div class="cdet">'+esc(a.detail||a.operator_action||'')+'</div></div></div>';
+  });
+  $('actions-body').innerHTML=h;
+}
+
+// ---- Governance & regime -------------------------------------------
+function renderGovernance(){
+  const gov=S().governance_state||{}, regime=S().regime_market_state||{}, lr=S().live_readiness||{};
+  let h='';
+  (gov.rows||[]).forEach(r=>{
+    const blocking = r.pilot_blocking||r.promotion_blocking||r.production_scaling_blocking;
+    h+='<div class="chk"><span class="dot '+(r.pilot_blocking?'bad':(blocking?'warn':'ok'))+'"></span><div><span class="cname">'+esc(r.name)+' · '+esc(r.status)+'</span>'
+      +'<div class="cdet">'+esc((r.detail||'').slice(0,120))
+      +(r.pilot_blocking?' — blocks pilot':(r.promotion_blocking?' — blocks promotion':''))+'</div></div></div>';
+  });
+  h+='<div class="chk"><span class="dot mut"></span><div><span class="cname">Regime '+esc(regime.current_regime||'—')+' · VIX '+(num(regime.vix)!=null?regime.vix.toFixed(1):'—')+'</span>'
+    +'<div class="cdet">Portfolio scale '+pct(regime.portfolio_scale,0)+' · max positions '+(regime.max_positions??'—')+'</div></div></div>';
+  const lrs=(lr.summary&&lr.summary.status)||lr.status;
+  if(lrs){ h+='<div class="chk"><span class="dot '+statusPill(lrs)+'"></span><div><span class="cname">Live readiness · '+esc(lrs)+'</span></div></div>'; }
+  $('gov-body').innerHTML=h;
+}
+
+// =====================================================================
+//  KILL SWITCH
+// =====================================================================
+async function refreshKillState(){
+  try{
+    const r=await fetch(KILLSWITCH_API,{cache:'no-store'});
+    if(r.ok){ const j=await r.json();
+      killState={engaged:!!j.engaged, source:j.source||'endpoint', endpoint:true, updated:j.updated_at}; return; }
+  }catch(e){}
+  // fallback: try static state file the service writes; else infer from payload
+  try{
+    const r2=await fetch('kill_switch_state.json?_='+Date.now(),{cache:'no-store'});
+    if(r2.ok){ const j=await r2.json(); killState={engaged:!!j.engaged,source:'state_file',endpoint:false,updated:j.updated_at}; return; }
+  }catch(e){}
+  killState={engaged:null,source:'unknown',endpoint:false};
+}
+function renderKillUI(){
+  if(account!=='live') return;
+  const st=$('kill-state'), btn=$('kill-btn'), reset=$('kill-reset'), banner=$('engaged-banner');
+  if(killState.engaged===true){
+    st.textContent='ENGAGED'; st.style.color='var(--red)';
+    btn.classList.add('hide'); reset.classList.remove('hide');
+    banner.style.display='block';
+    banner.innerHTML='■ LIVE KILL SWITCH ENGAGED — the next scheduled live-pilot execution will abort and no live orders will be submitted. '
+      +'(This halts new orders; it does not liquidate existing positions.)';
+  }else if(killState.engaged===false){
+    st.textContent='ARMED — trading allowed'; st.style.color='var(--green)';
+    btn.classList.remove('hide'); btn.classList.add('armed'); reset.classList.add('hide');
+    banner.style.display='none';
+  }else{
+    st.textContent='unknown'; st.style.color='var(--muted)';
+    banner.style.display='none';
+  }
+  if(!killState.endpoint){
+    btn.disabled=true; reset.disabled=true;
+    btn.title='Kill-switch endpoint not deployed. Manual: set CAERUS_LIVE_PILOT_KILL_SWITCH=1 in ~/.caerus/live_pilot.env on the VM.';
+    reset.title=btn.title;
+  }else{ btn.disabled=false; reset.disabled=false; }
+}
+function openKillModal(action){
+  if(!killState.endpoint) return;
+  pendingKillAction=action;
+  const engage=action==='engage';
+  $('modal-title').textContent = engage?'Engage live kill switch?':'Disengage kill switch?';
+  $('modal-body').innerHTML = engage
+    ? 'This writes <code>CAERUS_LIVE_PILOT_KILL_SWITCH=1</code> on the VM. The next scheduled live-pilot run will <b>abort before submitting any order</b>. Existing positions are <b>not</b> liquidated. Type <b>ENGAGE</b> to confirm.'
+    : 'This re-arms live trading (sets the flag back to 0). The next scheduled run will be allowed to submit orders again. Type <b>DISENGAGE</b> to confirm.';
+  const inp=$('modal-input'); inp.value=''; inp.placeholder='Type '+(engage?'ENGAGE':'DISENGAGE')+' to confirm';
+  $('modal-confirm').className = 'danger';
+  $('modal-bg').style.display='flex'; inp.focus();
+}
+function closeKillModal(){ $('modal-bg').style.display='none'; pendingKillAction=null; }
+async function confirmKill(){
+  const engage=pendingKillAction==='engage';
+  const want=engage?'ENGAGE':'DISENGAGE';
+  if($('modal-input').value.trim().toUpperCase()!==want){ $('modal-input').style.borderColor='var(--red)'; return; }
+  const btn=$('modal-confirm'); btn.disabled=true; btn.textContent='Working…';
+  try{
+    const r=await fetch(KILLSWITCH_API+'/'+(engage?'engage':'disengage'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:want})});
+    if(!r.ok){ const t=await r.text().catch(()=>''); throw new Error('HTTP '+r.status+' '+t); }
+    await r.json().catch(()=>({}));
+    await refreshKillState();   // trust the server's authoritative env-file read, not the optimistic response
+  }catch(e){ alert('Kill switch request failed: '+e.message+'\nVerify the killswitch service is deployed and reachable.'); }
+  btn.disabled=false; btn.textContent='Confirm';
+  closeKillModal(); renderKillUI();
+}
+
+load();
+setInterval(async()=>{ await load(); }, 60000); // auto-refresh view each minute
+</script>
+</body>
+</html>
