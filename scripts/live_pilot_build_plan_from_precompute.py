@@ -124,19 +124,9 @@ def _resolve_signals_path(payload_path: Path, payload: Mapping[str, Any]) -> Pat
     """Locate the strategy target signals file for the LIVE lane.
 
     Preference (live-only; paper uses its own loader and always reads signals.json):
-      0. ``signals_broad.json`` — the full pre-concentration target universe, when the
-         bundle carries it AND CAERUS_LIVE_PILOT_USE_BROAD_TARGETS is truthy (default).
-         Live rebalances to the broad set by affordability instead of the top-N prorate.
       1. ``signals.json`` beside the payload in the precompute bundle dir.
       2. an explicit ``execution_target_source`` pointer in the payload.
     """
-    use_broad = str(
-        os.environ.get("CAERUS_LIVE_PILOT_USE_BROAD_TARGETS", "1") or ""
-    ).strip().lower() not in {"0", "false", "no", "off", ""}
-    if use_broad:
-        broad = payload_path.parent / "signals_broad.json"
-        if broad.exists():
-            return broad
     sibling = payload_path.parent / "signals.json"
     if sibling.exists():
         return sibling

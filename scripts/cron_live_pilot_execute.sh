@@ -54,9 +54,9 @@ GATE_RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
 GATE_RUN_ID="${REPORT_DATE}T${GATE_RUN_TS}_live_pilot_cron_gate"
 GATE_RUN_ROOT="outputs/live_pilot/runs/${GATE_RUN_ID}"
 export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}"
-# Shared behavior params (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT, CONCENTRATED_*,
-# USE_BROAD_TARGETS) default via scripts/lane_params.sh — sourced above, shared
-# by BOTH lanes, env-file overrides (tighter operator values) always win.
+# Shared behavior params (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT,
+# CONCENTRATED_MAX_WEIGHT) default via scripts/lane_params.sh — sourced above,
+# shared by BOTH lanes, env-file overrides (tighter operator values) always win.
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
 export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"

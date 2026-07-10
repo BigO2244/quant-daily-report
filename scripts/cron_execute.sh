@@ -37,7 +37,7 @@ fi
 # --- Shared lane behavior params (shared defaults; single source for both lanes) ---
 # Sourced AFTER .env. lane_params.sh provides SHARED DEFAULTS with env-wins
 # semantics for the strategy/engine knobs (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT,
-# CONCENTRATED_*, USE_BROAD_TARGETS): an operator-set env-file value is never
+# CONCENTRATED_MAX_WEIGHT): an operator-set env-file value is never
 # silently overridden. Divergence between lanes shows up as different
 # lane_params_fingerprint values in the two cron logs.
 # shellcheck disable=SC1091

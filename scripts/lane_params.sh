@@ -30,9 +30,6 @@ export CAERUS_LIVE_PILOT_CAP_PCT="${CAERUS_LIVE_PILOT_CAP_PCT:-0.95}"
 export CAERUS_CONCENTRATED_ALPHA="${CAERUS_CONCENTRATED_ALPHA:-1}"
 export CAERUS_CONCENTRATED_TOP_N="${CAERUS_CONCENTRATED_TOP_N:-5}"
 export CAERUS_CONCENTRATED_MAX_WEIGHT="${CAERUS_CONCENTRATED_MAX_WEIGHT:-0.50}"
-# Broad/affordability targeting stays OFF: both lanes execute the concentrated
-# signals.json target (broad targeting was wrong intent — see 1ac0fe4).
-export CAERUS_LIVE_PILOT_USE_BROAD_TARGETS="${CAERUS_LIVE_PILOT_USE_BROAD_TARGETS:-0}"
 
 # --- Params fingerprint (sha256 of sorted key=value list) ---------------------
 _caerus_lane_params_sorted="$(printf '%s\n' \
@@ -42,7 +39,6 @@ _caerus_lane_params_sorted="$(printf '%s\n' \
     "CAERUS_LIVE_PILOT_CAP_PCT=${CAERUS_LIVE_PILOT_CAP_PCT}" \
     "CAERUS_LIVE_PILOT_MAX_ORDERS=${CAERUS_LIVE_PILOT_MAX_ORDERS}" \
     "CAERUS_LIVE_PILOT_MIN_TRADE_USD=${CAERUS_LIVE_PILOT_MIN_TRADE_USD}" \
-    "CAERUS_LIVE_PILOT_USE_BROAD_TARGETS=${CAERUS_LIVE_PILOT_USE_BROAD_TARGETS}" \
     | LC_ALL=C sort)"
 if command -v shasum >/dev/null 2>&1; then
     CAERUS_LANE_PARAMS_FINGERPRINT="$(printf '%s\n' "${_caerus_lane_params_sorted}" | shasum -a 256 | awk '{print $1}')"

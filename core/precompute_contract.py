@@ -49,7 +49,6 @@ def build_precompute_contract(
     signals_filename: str = "signals.json",
     snapshot_filename: str = "daily_snapshot.json",
     payload_filename: str = "planned_execution_payload.json",
-    signals_broad_filename: str | None = None,
 ) -> dict[str, Any]:
     executable_count = int(
         (execution_payload or {}).get("execution_eligible_trades_count")
@@ -83,7 +82,6 @@ def build_precompute_contract(
             "daily_snapshot": snapshot_filename,
             "signals": signals_filename,
             "planned_execution_payload": payload_filename,
-            **({"signals_broad": signals_broad_filename} if signals_broad_filename else {}),
         },
         "summary": {
             "execution_status": str((execution_payload or {}).get("execution_status") or ""),
@@ -103,7 +101,6 @@ def write_precompute_bundle(
     daily_snapshot: dict[str, Any],
     signals_payload: dict[str, Any],
     execution_payload: dict[str, Any],
-    signals_broad_payload: dict[str, Any] | None = None,
     allow_overwrite: bool = True,
 ) -> Path:
     bundle_dir = precompute_bundle_dir(trade_date)
@@ -133,21 +130,6 @@ def write_precompute_bundle(
         json.dumps(signals_payload, indent=2, default=str) + "\n",
         allow_overwrite=allow_overwrite,
     )
-    # Optional broad (pre-concentration) target set. The LIVE lane consumes this to
-    # rebalance the whole account to the full precompute universe by affordability
-    # (no top-N prorate); the PAPER lane keeps reading the concentrated signals.json.
-    # Only written when the caller supplies it (concentrated runs); when absent the
-    # live builder falls back to signals.json.
-    signals_broad_filename: str | None = None
-    if signals_broad_payload:
-        signals_broad_payload = dict(signals_broad_payload)
-        signals_broad_payload.setdefault("strategy_identity", identity)
-        signals_broad_filename = "signals_broad.json"
-        safe_write_text(
-            bundle_dir / signals_broad_filename,
-            json.dumps(signals_broad_payload, indent=2, default=str) + "\n",
-            allow_overwrite=allow_overwrite,
-        )
     safe_write_text(
         payload_path,
         json.dumps(execution_payload, indent=2, default=str) + "\n",
@@ -160,7 +142,6 @@ def write_precompute_bundle(
         mode=mode,
         daily_snapshot=daily_snapshot,
         execution_payload=execution_payload,
-        signals_broad_filename=signals_broad_filename,
     )
     safe_write_text(
         contract_path,
