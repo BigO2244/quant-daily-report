@@ -570,7 +570,6 @@ def test_replay_falls_back_to_plan_date_when_planned_for_missing(tmp_path):
 EXECUTION_PATH_SENTINELS = [
     Path("scripts/cron_execute.sh"),
     Path("scripts/cron_precompute.sh"),
-    Path("scripts/cron_overnight.sh"),
     Path("scripts/cron_research.sh"),
     Path("scripts/crontab.txt"),
     Path("scripts/run_precomputed_alpaca_execution.py"),

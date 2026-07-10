@@ -449,7 +449,6 @@ def test_cli_refuses_non_trading_day(capsys, tmp_path):
 EXECUTION_PATH_SENTINELS = [
     Path("scripts/cron_execute.sh"),
     Path("scripts/cron_precompute.sh"),
-    Path("scripts/cron_overnight.sh"),
     Path("scripts/cron_research.sh"),
     Path("scripts/crontab.txt"),
     Path("scripts/run_precomputed_alpaca_execution.py"),

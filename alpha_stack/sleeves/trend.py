@@ -34,7 +34,6 @@ import pandas as pd
 
 from alpha_stack.sleeves.base import SleeveBase, SleeveOutput, HoldState
 from alpha_stack._config_loader import get_section
-from alpha_stack.research_signal.thematic_overlay import load_thematic_scores
 
 logger = logging.getLogger(__name__)
 
@@ -161,18 +160,6 @@ class TrendSleeve(SleeveBase):
             atr_pct = atr_pct.fillna(0.02)
         atr_adj = atr_pct.clip(lower=0.01)
         adj_score = raw_score / atr_adj
-
-        # Thematic overlay: additive boost from research agent Claude-scored digest
-        # Boost is applied before percentile ranking so flagged names rise naturally
-        thematic_weight = float(self._cfg.get("thematic_boost_weight", 0.15))
-        if thematic_weight > 0 and "ticker" in df.columns:
-            thematic_scores = load_thematic_scores()
-            if not thematic_scores.empty:
-                boost = df["ticker"].map(thematic_scores).fillna(0.0)
-                adj_score = adj_score + thematic_weight * boost
-                n_boosted = (boost > 0).sum()
-                logger.info("[TREND] Thematic boost applied to %d tickers.", n_boosted)
-                self._last_diagnostics["thematic_boosted"] = int(n_boosted)
 
         # Percentile rank → [0, 100]
         df["score"] = adj_score.rank(pct=True) * 100

@@ -50,7 +50,7 @@ DOMAIN_RULES = (
     ),
     DocumentationDomain(
         name="strategy_research",
-        match_prefixes=("alpha_stack/", "overnight_agents/", "quant_research_agent/", "config/"),
+        match_prefixes=("alpha_stack/", "quant_research_agent/", "config/"),
         match_exact=("data/universe.csv",),
         impacted_docs=("AGENTS.md", "README.md", "docs/architecture/architecture_lineage.md", "docs/OPERATIONS.md"),
         review_owner="research",
@@ -262,7 +262,7 @@ def _detect_architecture_drift(
     domain_names = {domain.name for domain in domains}
     architecture_changes = [
         path for path in changed_files
-        if path.startswith(("core/", "alpha_stack/", "overnight_agents/", "quant_research_agent/"))
+        if path.startswith(("core/", "alpha_stack/", "quant_research_agent/"))
     ]
     if architecture_changes and "docs/architecture/architecture_lineage.md" not in records:
         findings.append(
