@@ -2145,7 +2145,8 @@ def _run_live_pilot_core_path(
         "generated_at": _now_utc(),
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": LIVE_PILOT_MODE.upper(),
+        # Honest mode label (PAPER for the unified paper lane, LIVE_PILOT for live).
+        "mode": str(getattr(gate, "requested_mode", "") or LIVE_PILOT_MODE).upper(),
         "terminal_status": terminal_status,
         "reason_code": reconciliation.get("status"),
         "live_orders_allowed": bool(gate.live_orders_allowed),
@@ -2222,7 +2223,8 @@ def _write_blocked_artifacts(
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_id,
-        "mode": LIVE_PILOT_MODE.upper(),
+        # Honest mode label (PAPER for the unified paper lane, LIVE_PILOT for live).
+        "mode": str(preflight.get("requested_mode") or LIVE_PILOT_MODE).upper(),
         "terminal_status": "BLOCKED",
         "reason_code": reason_code,
         "live_orders_allowed": False,
@@ -2349,7 +2351,10 @@ def run_live_pilot(
         "generated_at": _now_utc(),
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": LIVE_PILOT_MODE,
+        # Honest mode label: the unified PAPER lane runs this same engine with
+        # MODE=paper; recording LIVE_PILOT for paper runs would be misleading.
+        # Schema is unchanged (same key, canonical mode value).
+        "mode": gate.requested_mode,
         "plan_path": plan_path,
         "dry_run": bool(gate.dry_run),
         "paper_paths_touched": False,
@@ -2391,28 +2396,35 @@ def run_live_pilot(
 
     account_public = pre_snapshot.get("account") or {}
     account_hash = str(account_public.get("account_id_hash") or "")
-    # Route the account-hash match through the orchestrated gate result so the
-    # pinned-account check is a single authoritative decision (fail closed on a
-    # missing broker id or a mismatch) rather than an ad-hoc executor-only check.
-    raw_account = broker.get_account() if hasattr(broker, "get_account") else {}
-    account_gate = build_live_pilot_gate_result(
-        broker_paper=broker_paper,
-        base_url=base_url,
-        env=environ,
-        account_id=(raw_account or {}).get("id"),
-        account_id_hash=account_hash,
-        enforce_account_match=True,
-    )
-    if not account_gate.account_id_match:
-        return _write_blocked_artifacts(
-            run_root=run_root,
-            run_id=run_id,
-            trade_date=trade_date,
+    # Account-pin gate applies to the LIVE lane only. A paper broker on the paper
+    # host already passed the gate above via the paper branch, which short-circuits
+    # BEFORE the account-match logic (account_id_match stays None) — enforcing it
+    # here would fail-closed every unified paper-lane run for the wrong reason.
+    # Paper accounts carry no pinned id/hash by design; the live path is unchanged
+    # and still blocks on a missing broker id or an id/hash mismatch.
+    if not broker_paper:
+        # Route the account-hash match through the orchestrated gate result so the
+        # pinned-account check is a single authoritative decision (fail closed on a
+        # missing broker id or a mismatch) rather than an ad-hoc executor-only check.
+        raw_account = broker.get_account() if hasattr(broker, "get_account") else {}
+        account_gate = build_live_pilot_gate_result(
+            broker_paper=broker_paper,
+            base_url=base_url,
             env=environ,
-            reason_code=account_gate.account_match_reason or "live_pilot_account_id_mismatch",
-            operator_action="Expected live pilot account id/hash does not match broker account.",
-            preflight=preflight,
+            account_id=(raw_account or {}).get("id"),
+            account_id_hash=account_hash,
+            enforce_account_match=True,
         )
+        if not account_gate.account_id_match:
+            return _write_blocked_artifacts(
+                run_root=run_root,
+                run_id=run_id,
+                trade_date=trade_date,
+                env=environ,
+                reason_code=account_gate.account_match_reason or "live_pilot_account_id_mismatch",
+                operator_action="Expected live pilot account id/hash does not match broker account.",
+                preflight=preflight,
+            )
 
     # Resolve the capital cap dynamically from the account's current portfolio value
     # (fully dynamic ceiling; an optional CAERUS_LIVE_PILOT_CAPITAL_CAP only tightens

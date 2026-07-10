@@ -634,6 +634,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-orders", type=int, default=DEFAULT_MAX_ORDERS)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument(
+        "--state-dir",
+        default=None,
+        help=(
+            "Peak-equity state dir for this lane. Default (unset) keeps the live-scoped "
+            f"{LIVE_PILOT_STATE_DIR} — live behavior unchanged. The unified PAPER lane "
+            "passes its own isolated dir (e.g. outputs/paper_lane/state) so paper and "
+            "live peak-equity/drawdown state can never cross-contaminate."
+        ),
+    )
+    parser.add_argument(
         "--allow-missing-sleeve",
         action="store_true",
         default=os.getenv("CAERUS_LIVE_PILOT_ALLOW_MISSING_SLEEVE", "").strip().lower() in {"1", "true", "yes", "y", "on"},
@@ -666,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=Path(args.output_dir),
         allow_missing_sleeve=bool(args.allow_missing_sleeve),
         allow_fractional=bool(args.allow_fractional),
+        state_dir=Path(args.state_dir) if args.state_dir else None,
     )
     print(
         json.dumps(
