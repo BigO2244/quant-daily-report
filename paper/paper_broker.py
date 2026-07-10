@@ -345,6 +345,25 @@ def load_targets(
 
 
 def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.DataFrame:
+    """Fetch open prices for run_date; columns [ticker, open, price_date].
+
+    Source selection (CAERUS_PRICE_SOURCE env):
+      unset / 'yfinance' -> the existing yfinance implementation, untouched.
+      'alpaca'           -> core.price_sources.alpaca_fetch_open_prices
+                            (same schema; '^' index symbols still yfinance).
+    """
+    from core.price_sources import resolve_price_source
+
+    source = resolve_price_source()
+    logger.info("[PRICE_SOURCE] fetch_open_prices source=%s", source)
+    if source == "alpaca":
+        from core.price_sources import alpaca_fetch_open_prices
+
+        return alpaca_fetch_open_prices(tickers, run_date)
+    return _fetch_open_prices_yfinance_impl(tickers, run_date)
+
+
+def _fetch_open_prices_yfinance_impl(tickers: List[str], run_date: str) -> pd.DataFrame:
     if not tickers:
         return pd.DataFrame(columns=["ticker", "open", "price_date"])
 

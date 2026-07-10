@@ -75,6 +75,29 @@ def download_prices(
     tickers: List[str], period: str = "1y", interval: str = "1d"
 ) -> pd.DataFrame:
     """
+    Download OHLCV data per ticker and return a long-form table:
+    columns: date, ticker, open, high, low, close, volume
+
+    Source selection (CAERUS_PRICE_SOURCE env):
+      unset / 'yfinance' -> the existing yfinance implementation, untouched.
+      'alpaca'           -> core.price_sources.alpaca_download_prices
+                            (same schema; '^' index symbols still yfinance).
+    """
+    from core.price_sources import resolve_price_source
+
+    source = resolve_price_source()
+    logger.info("[PRICE_SOURCE] download_prices source=%s", source)
+    if source == "alpaca":
+        from core.price_sources import alpaca_download_prices
+
+        return alpaca_download_prices(tickers, period=period, interval=interval)
+    return _download_prices_yfinance(tickers, period=period, interval=interval)
+
+
+def _download_prices_yfinance(
+    tickers: List[str], period: str = "1y", interval: str = "1d"
+) -> pd.DataFrame:
+    """
     Download OHLCV data per ticker from yfinance and return a long-form table:
     columns: date, ticker, open, high, low, close, volume
 
