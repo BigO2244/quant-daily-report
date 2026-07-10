@@ -11,10 +11,24 @@ paper/paper_broker.py):
 
 Adjustment semantics
 --------------------
-Historical daily bars are requested with ``adjustment='all'`` (splits AND
-dividends) so the resulting close series matches yfinance auto-adjust
-semantics. Same-day open bars carry no future corporate actions, so the
-adjustment mode is a no-op for the open-price fetcher.
+The production baseline (core.quant_report._download_prices_yfinance) calls
+``yf.download(..., auto_adjust=False)`` and maps the RAW ``Close`` column to
+``close`` (``Adj Close`` is dropped). Yahoo serves that raw daily ``Close``
+split-adjusted but dividend-UNadjusted. Historical daily bars here are
+therefore requested with ``adjustment='split'`` (splits only, NO dividend
+adjustment) to mirror the actual baseline series. ``adjustment='all'`` would
+match yfinance ``auto_adjust=True`` — which is NOT the baseline — and would
+silently change returns on any ticker with an ex-dividend date inside the
+lookback window.
+
+Cutover gate: this equivalence must be confirmed EMPIRICALLY before
+``CAERUS_PRICE_SOURCE=alpaca`` is ever enabled — run the shadow comparator
+(scripts/price_source_shadow_compare.py) and require per-symbol
+``close_max_abs_dev_pct`` to be near-zero, specifically including tickers
+with recent splits or dividends.
+
+Same-day open bars carry no future corporate actions, so the adjustment mode
+is a no-op for the open-price fetcher.
 
 Index symbols
 -------------
@@ -154,8 +168,13 @@ def _get_bars(client, symbols: List[str], *, start, end, feed: Optional[str]) ->
         timeframe=TimeFrame.Day,
         start=start,
         end=end,
-        # 'all' = splits + dividends, matching yfinance auto-adjust semantics.
-        adjustment="all",
+        # 'split' = split-adjusted, dividend-UNadjusted: matches the baseline
+        # yfinance auto_adjust=False raw 'Close' (Yahoo split-adjusts daily
+        # closes but does not dividend-adjust them; 'Adj Close' is dropped by
+        # the baseline). 'all' would add dividend adjustment and diverge from
+        # the baseline on ex-dividend names. See module docstring
+        # ("Adjustment semantics") for the empirical shadow-comparator gate.
+        adjustment="split",
     )
     if feed is not None:
         kwargs["feed"] = feed

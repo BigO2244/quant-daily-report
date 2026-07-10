@@ -169,7 +169,7 @@ def test_open_prices_schema_equivalence(monkeypatch):
     assert isinstance(alp_df["open"].iloc[0], float)
 
 
-def test_open_prices_uses_iex_feed_and_adjustment_all():
+def test_open_prices_uses_iex_feed_and_history_split_adjustment():
     client = FakeAlpacaClient({"AAPL": [_default_bars()["AAPL"][1]]})
     ps.alpaca_fetch_open_prices(["AAPL"], DAYS[1], client=client)
     req = client.requests[0]
@@ -178,7 +178,10 @@ def test_open_prices_uses_iex_feed_and_adjustment_all():
     hist_client = FakeAlpacaClient(_default_bars())
     ps.alpaca_download_prices(["AAPL"], period="1mo", client=hist_client)
     hist_req = hist_client.requests[0]
-    assert str(getattr(hist_req.adjustment, "value", hist_req.adjustment)) == "all"
+    # 'split' (NOT 'all'): baseline yfinance auto_adjust=False raw Close is
+    # split-adjusted, dividend-UNadjusted; 'all' would dividend-adjust and
+    # diverge from the baseline on ex-dividend tickers.
+    assert str(getattr(hist_req.adjustment, "value", hist_req.adjustment)) == "split"
     assert hist_req.feed is None  # multi-day history uses the default feed
 
 
