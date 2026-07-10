@@ -404,13 +404,15 @@ class ComputeSleeveDriftTests(unittest.TestCase):
             places=9,
         )
 
-    def test_partial_blend_interpolates_strength(self) -> None:
-        """blend=0.5: applied strength = 0.5 * prior + 0.5 * target."""
+    def test_partial_blend_still_anchors_to_regime_target(self) -> None:
+        """Blends are observability-only: meta.strength at call time is the
+        construction-time base, not a genuine prior-day strength, so any
+        blend value must still anchor the sleeve to the regime target."""
         outputs = [
             create_sleeve_output(
                 [{"ticker": "AAPL", "target_weight": 1.0}],
                 "sleeve_trend",
-                strength=0.4,  # prior
+                strength=0.4,  # stale construction-time base, not a real prior
             ),
         ]
         regime_strengths = {"sleeve_trend": 0.8}
@@ -418,8 +420,45 @@ class ComputeSleeveDriftTests(unittest.TestCase):
 
         dqr.apply_regime_strengths_to_sleeves(outputs, regime_strengths, drift_blends)
 
-        # expected: 0.4 * 0.5 + 0.8 * 0.5 = 0.6
-        self.assertAlmostEqual(outputs[0].meta.strength, 0.6, places=9)
+        self.assertAlmostEqual(outputs[0].meta.strength, 0.8, places=9)
+
+    def test_hold_blend_with_base_strengths_does_not_renormalize_to_50_50(self) -> None:
+        """Regression: two active sleeves at construction-time base strength 1.0
+        with blend=0.0 (HOLD) must end up at their regime-target strengths.
+        Blending against the stale 1.0/1.0 bases previously let the allocator
+        renormalize them into an unintended 50/50 split."""
+        outputs = [
+            create_sleeve_output(
+                [{"ticker": "AAPL", "target_weight": 1.0}],
+                "sleeve_trend",
+                strength=1.0,  # construction-time base
+            ),
+            create_sleeve_output(
+                [{"ticker": "IBM", "target_weight": 1.0}],
+                "sleeve_2",
+                strength=1.0,  # construction-time base
+            ),
+        ]
+        regime_strengths = {"sleeve_trend": 0.60, "sleeve_2": 0.40}
+        drift_blends = {"sleeve_trend": 0.0, "sleeve_2": 0.0}
+
+        dqr.apply_regime_strengths_to_sleeves(outputs, regime_strengths, drift_blends)
+
+        self.assertAlmostEqual(outputs[0].meta.strength, 0.60, places=9)
+        self.assertAlmostEqual(outputs[1].meta.strength, 0.40, places=9)
+
+        result = PortfolioAllocator(max_position_pct=1.0, min_gross_exposure=1.0).allocate(outputs)
+
+        self.assertAlmostEqual(
+            result.sleeve_allocations.get("sleeve_trend", 0.0),
+            0.60,
+            places=9,
+        )
+        self.assertAlmostEqual(
+            result.sleeve_allocations.get("sleeve_2", 0.0),
+            0.40,
+            places=9,
+        )
 
 
 if __name__ == "__main__":

@@ -3867,11 +3867,16 @@ def compute_sleeve_drift(
     """
     Compute per-sleeve rebalance blend factors from live broker positions.
 
+    OBSERVABILITY ONLY: the returned blends drive drift logging and the
+    HOLD/REBALANCE flags surfaced in live_regime_review; they do NOT gate
+    the applied sleeve strength (see apply_regime_strengths_to_sleeves,
+    which always anchors to the regime target).
+
     Compares current sleeve weights (derived from live Alpaca market values)
     against regime-target weights and returns a graded blend factor:
 
-    * drift < 1.5%  → 0.0  (HOLD: stay at prior/current strength)
-    * drift > 4.5%  → 1.0  (FULL: take full regime target)
+    * drift < 1.5%  → 0.0  (HOLD: within threshold of regime target)
+    * drift > 4.5%  → 1.0  (FULL: far from regime target)
     * 1.5% ≤ drift ≤ 4.5% → linear blend between 0.0 and 1.0
 
     Falls back to blend=1.0 (full rebalance) for all sleeves when broker
@@ -4001,29 +4006,25 @@ def apply_regime_strengths_to_sleeves(
     regime_strengths: "dict[str, float]",
     drift_blends: "dict[str, float] | None" = None,
 ) -> None:
-    """Apply regime target strengths blended by drift gate.
+    """Apply regime target strengths without letting HOLD sleeves use stale bases.
 
-    ``drift_blends`` maps sleeve_name → blend_factor in [0.0, 1.0]:
-      - 0.0 → HOLD: keep prior (current) strength unchanged.
-      - 1.0 → FULL: take full regime target strength.
-      - 0.0..1.0 → linear blend: prior * (1-blend) + target * blend.
-
-    When ``drift_blends`` is None or a sleeve has no entry, falls back to
-    applying the full regime target (blend=1.0). This preserves the prior
-    behaviour when broker data is unavailable and also ensures regime
-    strengths such as 1.0/1.0 are not silently renormalized into stale
-    50/50 allocations.
+    ``drift_blends`` remains part of the diagnostics path (drift logging and
+    the HOLD/REBALANCE flags in live_regime_review), but every sleeve must be
+    anchored UNCONDITIONALLY to the regime target strength here. At the call
+    site this runs before sleeves are resized/allocated, so ``meta.strength``
+    still holds the construction-time base (~1.0), not a genuine prior-day
+    regime strength. Blending against that stale base lets base strengths such
+    as 1.0/1.0 get renormalized into unintended 50/50 allocations downstream.
+    Re-introduce blending only if a persisted prior-day (or live current)
+    regime strength becomes available to blend from.
     """
+    _ = drift_blends
     for sleeve_output in sleeve_outputs:
         sname = sleeve_output.meta.sleeve_name
         target_strength = regime_strengths.get(sname)
         if target_strength is None:
             continue
-        blend = float((drift_blends or {}).get(sname, 1.0))
-        blend = max(0.0, min(1.0, blend))
-        prior = float(getattr(sleeve_output.meta, "strength", target_strength) or target_strength)
-        blended = prior * (1.0 - blend) + float(target_strength) * blend
-        sleeve_output.meta.strength = blended
+        sleeve_output.meta.strength = float(target_strength)
 
 
 # ============================================================
