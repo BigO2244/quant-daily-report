@@ -34,13 +34,12 @@ export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 
-# --- Concentrated-alpha construction (top-5 conviction-weighted, 50% cap) ---
-# Enabled by default for the pilot; overridable via .env. Applied here at signals.json
-# construction, and (via the same flag) raises the risk-controls position cap so the
-# concentrated weights are not re-clipped downstream. Set CAERUS_CONCENTRATED_ALPHA=0
-# in .env to revert paper to the broad book.
-export CAERUS_CONCENTRATED_ALPHA="${CAERUS_CONCENTRATED_ALPHA:-1}"
-export CAERUS_CONCENTRATED_TOP_N="${CAERUS_CONCENTRATED_TOP_N:-5}"
+# --- Concentrated-alpha construction (ALWAYS ON; regime-adaptive top-N) ---
+# Concentration is the model: no enable flag, and top-N derives from the VIX
+# regime inside the engine (clamped 3..7, fallback 5). CAERUS_CONCENTRATED_TOP_N
+# exists only as an emergency env override (set it in .env; never defaulted here).
+# The per-name ceiling below is also the risk-controls position-cap default so
+# the concentrated weights are not re-clipped downstream.
 export CAERUS_CONCENTRATED_MAX_WEIGHT="${CAERUS_CONCENTRATED_MAX_WEIGHT:-0.50}"
 
 # --- Log setup ---

@@ -25,17 +25,16 @@ export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-50}"
 # Deploy fraction of portfolio value for the dynamic cap: 0.95 keeps a ~5% cash
 # buffer so a full rebalance never drives buying power to ~0.
 export CAERUS_LIVE_PILOT_CAP_PCT="${CAERUS_LIVE_PILOT_CAP_PCT:-0.95}"
-# Concentrated-alpha (top-N conviction-weighted). Must match cron_precompute so the
-# execution-time RiskControls cap does not re-clip the concentrated book.
-export CAERUS_CONCENTRATED_ALPHA="${CAERUS_CONCENTRATED_ALPHA:-1}"
-export CAERUS_CONCENTRATED_TOP_N="${CAERUS_CONCENTRATED_TOP_N:-5}"
+# Concentrated-alpha per-name ceiling. Concentration is ALWAYS ON (no flag) and
+# top-N is regime-adaptive in the engine (CAERUS_CONCENTRATED_TOP_N exists only as
+# an emergency env override, deliberately NOT defaulted here). This ceiling must
+# match cron_precompute so the execution-time RiskControls cap does not re-clip
+# the concentrated book.
 export CAERUS_CONCENTRATED_MAX_WEIGHT="${CAERUS_CONCENTRATED_MAX_WEIGHT:-0.50}"
 
 # --- Params fingerprint (sha256 of sorted key=value list) ---------------------
 _caerus_lane_params_sorted="$(printf '%s\n' \
-    "CAERUS_CONCENTRATED_ALPHA=${CAERUS_CONCENTRATED_ALPHA}" \
     "CAERUS_CONCENTRATED_MAX_WEIGHT=${CAERUS_CONCENTRATED_MAX_WEIGHT}" \
-    "CAERUS_CONCENTRATED_TOP_N=${CAERUS_CONCENTRATED_TOP_N}" \
     "CAERUS_LIVE_PILOT_CAP_PCT=${CAERUS_LIVE_PILOT_CAP_PCT}" \
     "CAERUS_LIVE_PILOT_MAX_ORDERS=${CAERUS_LIVE_PILOT_MAX_ORDERS}" \
     "CAERUS_LIVE_PILOT_MIN_TRADE_USD=${CAERUS_LIVE_PILOT_MIN_TRADE_USD}" \

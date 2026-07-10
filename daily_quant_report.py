@@ -4192,32 +4192,47 @@ def _build_market_analyzer_payload(
 
 
 # ============================================================
-# Concentrated-alpha construction (flag-gated, OFF by default)
+# Concentrated-alpha construction (ALWAYS ON — concentration is the model)
 # ============================================================
-def _concentrated_alpha_enabled() -> bool:
-    """Whether to concentrate the combined book to the top-N conviction names.
+CONCENTRATED_TOP_N_MIN = 3
+CONCENTRATED_TOP_N_MAX = 7
+CONCENTRATED_TOP_N_FALLBACK = 5
 
-    OFF by default -- the broad book is unchanged unless CAERUS_CONCENTRATED_ALPHA is
-    an explicit truthy value. When on, the engine's regime/sleeve scoring is untouched;
-    only the final book is concentrated (see core.concentration). Enabling this should
-    be paired with a matching risk_controls position cap (core.risk_controls raises its
-    default cap when this flag is on) so the concentrated weights are not re-clipped.
+
+def _concentrated_top_n(vix_regime: dict | None) -> tuple[int, str]:
+    """Regime-adaptive top-N for the concentrated book.
+
+    N = clamp(int(vix_regime["max_positions"]), 3, 7); falls back to 5 when the
+    regime state is unavailable. An explicitly-set CAERUS_CONCENTRATED_TOP_N env
+    remains an emergency operator override (env wins ONLY when set non-empty).
+
+    Returns (top_n, source) where source is one of "env_override",
+    "vix_regime:<REGIME>", or "fallback_default".
     """
-    return str(os.environ.get("CAERUS_CONCENTRATED_ALPHA", "")).strip().lower() in {
-        "1", "true", "yes", "y", "on",
-    }
+    env_val = os.environ.get("CAERUS_CONCENTRATED_TOP_N")
+    if env_val not in (None, ""):
+        try:
+            return max(1, int(env_val)), "env_override"
+        except (TypeError, ValueError):
+            logger.warning(
+                "[CONCENTRATED_ALPHA] Invalid CAERUS_CONCENTRATED_TOP_N=%r; "
+                "using regime-adaptive N",
+                env_val,
+            )
+    try:
+        max_positions = int((vix_regime or {})["max_positions"])
+        regime_label = str((vix_regime or {}).get("regime", "UNKNOWN"))
+        clamped = max(CONCENTRATED_TOP_N_MIN, min(CONCENTRATED_TOP_N_MAX, max_positions))
+        return clamped, f"vix_regime:{regime_label}"
+    except (KeyError, TypeError, ValueError):
+        return CONCENTRATED_TOP_N_FALLBACK, "fallback_default"
 
 
-def _concentrated_alpha_params() -> tuple[int, float]:
+def _concentrated_max_weight() -> float:
     try:
-        top_n = int(os.environ.get("CAERUS_CONCENTRATED_TOP_N", "5"))
+        return float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
     except (TypeError, ValueError):
-        top_n = 5
-    try:
-        max_weight = float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
-    except (TypeError, ValueError):
-        max_weight = 0.50
-    return max(1, top_n), max_weight
+        return 0.50
 
 
 # ============================================================
@@ -4285,18 +4300,22 @@ def build_daily_snapshot(
     weights_df = weights_df[weights_df["target_weight"].abs() > WEIGHT_TOLERANCE]
     if "sleeve" not in weights_df.columns and "sleeve_name" in weights_df.columns:
         weights_df["sleeve"] = weights_df["sleeve_name"]
-    # Concentrated-alpha (flag-gated, OFF by default): replace the broad book with the
-    # top-N highest-conviction names, conviction-weighted, cap per name. Regime/sleeve
-    # scoring upstream is untouched; cash becomes the residual after concentration and
-    # honors the engine's cash weight (risk-off) as a floor.
-    _broad_book = None
-    if _concentrated_alpha_enabled() and not weights_df.empty:
-        _broad_book = weights_df.copy()
+    # Concentrated-alpha (ALWAYS ON — concentration is the model): replace the broad
+    # book with the top-N highest-conviction names, conviction-weighted, cap per name.
+    # N adapts to the VIX regime (clamped 3..7, fallback 5). Regime/sleeve scoring
+    # upstream is untouched; cash becomes the residual after concentration and honors
+    # the engine's cash weight (risk-off) as a floor.
+    #
+    # FAIL LOUD: if concentration cannot produce a book, the precompute must exit
+    # nonzero so no bundle is written and BOTH execution lanes fail closed (a HOLD
+    # day). A silent broad-book fallback is never traded.
+    if not weights_df.empty:
+        _top_n, _top_n_source = _concentrated_top_n(vix_regime)
+        _max_w = _concentrated_max_weight()
+        _names_before = len(weights_df)
         try:
             from core.concentration import concentrate_targets
 
-            _top_n, _max_w = _concentrated_alpha_params()
-            _names_before = len(weights_df)
             _concentrated = concentrate_targets(
                 weights_df,
                 top_n=_top_n,
@@ -4305,23 +4324,28 @@ def build_daily_snapshot(
             )
             if _concentrated is None or _concentrated.empty:
                 raise ValueError("concentration produced an empty book")
-            weights_df = _concentrated
-            target_cash_weight_today = float(
-                max(0.0, min(1.0, 1.0 - float(weights_df["target_weight"].sum())))
+        except Exception as _conc_err:
+            logger.critical(
+                "[CONCENTRATED_ALPHA] concentration failed (top_n=%d source=%s cap=%.2f, "
+                "%d candidate names); FAILING CLOSED — no bundle will be written and "
+                "both execution lanes HOLD: %s",
+                _top_n, _top_n_source, _max_w, _names_before, _conc_err,
+                exc_info=True,
             )
-            invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
-            logger.info(
-                "[CONCENTRATED_ALPHA] top_n=%d cap=%.2f: %d -> %d names, cash_target=%.3f, names=%s",
-                _top_n, _max_w, _names_before, len(weights_df),
-                target_cash_weight_today, list(weights_df["ticker"]),
-            )
-        except Exception:
-            # Fail SAFE for unattended runs: never let concentration crash the daily
-            # pipeline. Fall back to the broad book (loud in logs) so paper keeps trading.
-            weights_df = _broad_book
-            logger.exception(
-                "[CONCENTRATED_ALPHA] concentration failed; falling back to broad book this run"
-            )
+            raise RuntimeError(
+                "Concentrated-alpha construction failed; failing closed (HOLD day)"
+            ) from _conc_err
+        weights_df = _concentrated
+        target_cash_weight_today = float(
+            max(0.0, min(1.0, 1.0 - float(weights_df["target_weight"].sum())))
+        )
+        invested_after_overlay = max(0.0, min(1.0, 1.0 - target_cash_weight_today))
+        logger.info(
+            "[CONCENTRATED_ALPHA] top_n=%d (source=%s) cap=%.2f: %d -> %d names, "
+            "cash_target=%.3f, names=%s",
+            _top_n, _top_n_source, _max_w, _names_before, len(weights_df),
+            target_cash_weight_today, list(weights_df["ticker"]),
+        )
     if weights_df.empty:
         fallback_rows: list[dict[str, object]] = []
         for sleeve_name, details in (("sleeve_2", s2_details), ("charlie_munger", cm_details or {})):

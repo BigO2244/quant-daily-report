@@ -546,10 +546,25 @@ LANE_PARAM_DEFAULTS = {
     "CAERUS_LIVE_PILOT_MIN_TRADE_USD": "10",
     "CAERUS_LIVE_PILOT_MAX_ORDERS": "50",
     "CAERUS_LIVE_PILOT_CAP_PCT": "0.95",
-    "CAERUS_CONCENTRATED_ALPHA": "1",
-    "CAERUS_CONCENTRATED_TOP_N": "5",
     "CAERUS_CONCENTRATED_MAX_WEIGHT": "0.50",
 }
+
+
+def test_lane_params_do_not_carry_removed_concentration_knobs() -> None:
+    """Concentration is ALWAYS ON with regime-adaptive N: the enable flag and a
+    defaulted top-N must not exist in lane_params.sh or any cron lane script.
+    (CAERUS_CONCENTRATED_TOP_N stays available as an emergency env override, but
+    is never exported/defaulted by the lanes.)"""
+    for rel in (
+        "scripts/lane_params.sh",
+        "scripts/cron_execute.sh",
+        "scripts/cron_live_pilot_execute.sh",
+        "scripts/cron_precompute.sh",
+    ):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "export CAERUS_CONCENTRATED_ALPHA" not in text, rel
+        assert "export CAERUS_CONCENTRATED_TOP_N" not in text, rel
+        assert "CAERUS_LIVE_PILOT_USE_BROAD_TARGETS" not in text, rel
 
 
 def test_lane_params_defaults_use_env_wins_semantics() -> None:
