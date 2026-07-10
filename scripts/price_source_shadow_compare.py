@@ -26,6 +26,13 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Standard scripts/ entry-point boilerplate: when invoked by path
+# (python3 scripts/price_source_shadow_compare.py), sys.path[0] is scripts/,
+# not the repo root, so `import core...` fails. Match the other lane scripts.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_SYMBOLS = 120
