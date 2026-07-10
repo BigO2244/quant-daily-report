@@ -59,14 +59,14 @@ export CAERUS_LIVE_PILOT_MAX_ORDERS="${CAERUS_LIVE_PILOT_MAX_ORDERS:-50}"
 # would skip every buy and drain to cash. A low floor lets the weight-priority rebudget
 # fill the top targets it can afford (budget/cash is the real cutoff). Env file overrides.
 export CAERUS_LIVE_PILOT_MIN_TRADE_USD="${CAERUS_LIVE_PILOT_MIN_TRADE_USD:-10}"
-# LIVE lane rebalances to the BROAD precompute universe by affordability, NOT the
-# concentrated top-N prorate. It consumes signals_broad.json (the pre-concentration
-# book the precompute now emits alongside the concentrated signals.json that PAPER
-# keeps using). Concentrated-alpha OFF here so the live builder's re-applied
-# RiskControls use the broad-book 10% per-name cap (not the 50% concentration cap).
-# CAERUS_LIVE_PILOT_USE_BROAD_TARGETS=0 in the env file reverts live to signals.json.
-export CAERUS_CONCENTRATED_ALPHA="${CAERUS_CONCENTRATED_ALPHA:-0}"
-export CAERUS_LIVE_PILOT_USE_BROAD_TARGETS="${CAERUS_LIVE_PILOT_USE_BROAD_TARGETS:-1}"
+# Concentrated-alpha (top-5 conviction-weighted, 50% cap). The live builder re-applies
+# RiskControls to the (already concentrated) signals, so it needs the same flag to raise
+# its position cap to 0.50; otherwise a 10% cap would re-clip the concentrated book.
+export CAERUS_CONCENTRATED_ALPHA="${CAERUS_CONCENTRATED_ALPHA:-1}"
+export CAERUS_CONCENTRATED_TOP_N="${CAERUS_CONCENTRATED_TOP_N:-5}"
+export CAERUS_CONCENTRATED_MAX_WEIGHT="${CAERUS_CONCENTRATED_MAX_WEIGHT:-0.50}"
+# Broad/affordability targeting stays OFF: live uses the concentrated signals.json.
+export CAERUS_LIVE_PILOT_USE_BROAD_TARGETS="${CAERUS_LIVE_PILOT_USE_BROAD_TARGETS:-0}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
 export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"
