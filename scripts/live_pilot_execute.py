@@ -187,8 +187,26 @@ LIVE_PILOT_SELL_FIRST_SUPPORTED = True
 LIVE_PILOT_REBUDGET_AFTER_SELL_SUPPORTED = True
 LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS"
 LIVE_PILOT_SETTLEMENT_POLL_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_POLL_SECONDS"
+# Bounded exponential backoff for the sell-settlement wait (2026-07-09/10 incident
+# hardening). The wait refreshes broker order status + account cash between
+# attempts; delays double from the base up to the per-sleep ceiling. An explicit
+# CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS additionally caps total wall time
+# (setting it to 0 preserves the legacy single-pass fail-fast behavior).
+LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS"
+LIVE_PILOT_SETTLEMENT_BASE_DELAY_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS"
+LIVE_PILOT_SETTLEMENT_MAX_DELAY_ENV = "CAERUS_LIVE_PILOT_SETTLEMENT_MAX_DELAY_SECONDS"
+LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_ATTEMPTS = 5
+LIVE_PILOT_SETTLEMENT_DEFAULT_BASE_DELAY_SECONDS = 2.0
+LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_DELAY_SECONDS = 30.0
 LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR = 0.95
 LIVE_PILOT_SETTLEMENT_DOLLAR_TOLERANCE = 0.01
+
+# Machine-readable halt-state convergence contract. Every halted run records
+# whether the NEXT scheduled run is expected to self-heal (the next plan is
+# computed from CURRENT broker positions and every gate re-evaluates fresh; no
+# halt latch is persisted anywhere) or whether an operator must act first.
+NEXT_RUN_CONVERGES = "converges_next_run"
+NEXT_RUN_REQUIRES_MANUAL_ACTION = "requires_manual_action"
 
 CAPITAL_GATE_REPORT_KEYS = (
     "live_positions_before",
@@ -1133,6 +1151,93 @@ def _reconcile(
     }
 
 
+# Blocked-run reasons that clear WITHOUT operator action: nothing was submitted,
+# no broker state was mutated, and the condition is transient by construction.
+_CONVERGENT_BLOCK_REASON_MARKERS = (
+    "live_pilot_market_closed",
+    "live_pilot_pre_snapshot_failed",
+    LIVE_PILOT_EQUITY_UNAVAILABLE,
+    LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
+    LIVE_PILOT_SELL_SETTLEMENT_TIMEOUT,
+    LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED,
+    "live_pilot_transition_no_actionable_order",
+)
+
+
+def _next_run_expectation(
+    *,
+    terminal_status: str,
+    reason_code: object,
+    reconciliation_state: object = None,
+) -> dict[str, str]:
+    """Classify whether a run's end state converges on the next scheduled cycle.
+
+    Design invariant (verified by the post-halt regression tests): the executor
+    persists NO halt latch — the next run replans from CURRENT broker positions
+    and re-evaluates every gate fresh. A halt therefore self-heals unless it
+    left non-terminal broker state (partial/unresolved orders) or reflects a
+    configuration/approval condition that cannot clear on its own.
+    """
+    status = str(terminal_status or "").strip().upper()
+    reason = str(reason_code or "").strip()
+    state = str(reconciliation_state or "").strip().upper()
+    if status in {"SUBMITTED", "DRY_RUN"}:
+        return {
+            "next_run_expectation": NEXT_RUN_CONVERGES,
+            "next_run_expectation_reason": (
+                "run reached a terminal non-halt state; the next run replans from current broker positions"
+            ),
+        }
+    if status == "FAILED_RECONCILIATION":
+        if state == "REJECTED":
+            return {
+                "next_run_expectation": NEXT_RUN_CONVERGES,
+                "next_run_expectation_reason": (
+                    "rejected orders are terminal at the broker and leave no open orders; "
+                    "the next run replans from current broker positions and re-evaluates all gates fresh"
+                ),
+            }
+        if state == "PARTIAL":
+            return {
+                "next_run_expectation": NEXT_RUN_REQUIRES_MANUAL_ACTION,
+                "next_run_expectation_reason": (
+                    "a partially filled order may remain open at the broker; an open pilot order "
+                    "blocks the next submission until it reaches a terminal state — confirm or cancel first"
+                ),
+            }
+        return {
+            "next_run_expectation": NEXT_RUN_REQUIRES_MANUAL_ACTION,
+            "next_run_expectation_reason": (
+                "broker order state is not known-terminal; refresh reconciliation (--refresh-run) "
+                "or inspect the broker before the next run"
+            ),
+        }
+    # BLOCKED (pre-submission) paths.
+    if "BLOCKED_OPEN_PILOT_ORDER" in reason:
+        return {
+            "next_run_expectation": NEXT_RUN_CONVERGES,
+            "next_run_expectation_reason": (
+                "blocked by an open pilot DAY order; it reaches a terminal state by session close "
+                "and the next run replans from current broker positions"
+            ),
+        }
+    if any(marker in reason for marker in _CONVERGENT_BLOCK_REASON_MARKERS):
+        return {
+            "next_run_expectation": NEXT_RUN_CONVERGES,
+            "next_run_expectation_reason": (
+                "no orders were submitted and no broker state was mutated; the block condition is "
+                "transient and the next run replans from current broker positions"
+            ),
+        }
+    return {
+        "next_run_expectation": NEXT_RUN_REQUIRES_MANUAL_ACTION,
+        "next_run_expectation_reason": (
+            f"halt reason {reason or 'unknown'!r} is a configuration/approval or unknown-broker-truth "
+            "condition that will not clear on its own; operator action required before the next run"
+        ),
+    }
+
+
 def _normal_market_hours_gate(*, now_et: dt.datetime | None = None) -> dict[str, Any]:
     current = now_et or dt.datetime.now(ET_TZ)
     if current.tzinfo is None:
@@ -1496,10 +1601,44 @@ class LivePilotCoreAdapter:
             "settlement_reflected": bool(bp_reflected and cash_reflected and expected_freed > 0.0),
         }
 
+    def _settlement_wait_params(self) -> dict[str, Any]:
+        """Env-tunable bounded exponential backoff for the sell-settlement wait.
+
+        Safe defaults apply when the CAERUS_LIVE_PILOT_SETTLEMENT_* envs are
+        unset. An explicitly set TIMEOUT additionally caps total wall time;
+        TIMEOUT=0 preserves the legacy single-pass fail-fast behavior. The
+        legacy POLL env doubles as the backoff base when the new BASE_DELAY
+        env is unset.
+        """
+        raw_attempts = _safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS_ENV))
+        max_attempts = (
+            int(raw_attempts)
+            if raw_attempts is not None and raw_attempts >= 1.0
+            else LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_ATTEMPTS
+        )
+        base_delay = _safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_BASE_DELAY_ENV))
+        if base_delay is None or base_delay < 0.0:
+            base_delay = _safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_POLL_ENV))
+        if base_delay is None or base_delay < 0.0:
+            base_delay = LIVE_PILOT_SETTLEMENT_DEFAULT_BASE_DELAY_SECONDS
+        max_delay = _safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_MAX_DELAY_ENV))
+        if max_delay is None or max_delay < 0.0:
+            max_delay = LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_DELAY_SECONDS
+        raw_timeout = str(self.env.get(LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV) or "").strip()
+        timeout = _safe_float(raw_timeout) if raw_timeout else None
+        if timeout is not None:
+            timeout = max(0.0, float(timeout))
+        return {
+            "max_attempts": int(max_attempts),
+            "base_delay_seconds": float(base_delay),
+            "max_delay_seconds": float(max_delay),
+            "timeout_seconds": timeout,
+        }
+
     def wait_or_refresh(self, submitted_sells: list[SubmitResult] | tuple[SubmitResult, ...]) -> CoreAccountSnapshot:
-        timeout = max(0.0, float(_safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_TIMEOUT_ENV)) or 0.0))
-        poll = max(0.0, float(_safe_float(self.env.get(LIVE_PILOT_SETTLEMENT_POLL_ENV)) or 0.0))
-        deadline = time.monotonic() + timeout
+        params = self._settlement_wait_params()
+        timeout = params["timeout_seconds"]
+        deadline = (time.monotonic() + float(timeout)) if timeout is not None else None
         expected_freed = float(
             sum(
                 max(0.0, float(getattr(result.intent, "notional", 0.0) or 0.0))
@@ -1508,14 +1647,15 @@ class LivePilotCoreAdapter:
         )
         sell_records: list[dict[str, Any]] = []
         pending: list[str] = []
-        snapshot = self.snapshot()
-        settlement_reflection = self._settlement_reflection(
-            account=snapshot.account,
-            expected_freed=expected_freed,
-        )
+        terminal_failed: list[str] = []
+        attempts_used = 0
+        delays_slept: list[float] = []
+        exhausted_reason: str | None = None
         while True:
+            attempts_used += 1
             sell_records = []
             pending = []
+            terminal_failed = []
             for result in submitted_sells or []:
                 order_id = str(result.broker_order_id or "").strip()
                 broker_order: Mapping[str, Any] = result.raw if isinstance(result.raw, Mapping) else {}
@@ -1527,6 +1667,8 @@ class LivePilotCoreAdapter:
                 bucket = _status_bucket(status)
                 if bucket != "filled":
                     pending.append(order_id or result.intent.client_order_id or result.intent.symbol)
+                if bucket == "rejected":
+                    terminal_failed.append(order_id or result.intent.client_order_id or result.intent.symbol)
                 filled_qty = _safe_float(
                     broker_order.get("filled_qty")
                     or broker_order.get("filled_quantity")
@@ -1556,11 +1698,28 @@ class LivePilotCoreAdapter:
                 account=snapshot.account,
                 expected_freed=expected_freed,
             )
-            if (
-                not pending and settlement_reflection["settlement_reflected"]
-            ) or time.monotonic() >= deadline:
+            if not pending and settlement_reflection["settlement_reflected"]:
                 break
-            time.sleep(poll)
+            if terminal_failed:
+                # A rejected/canceled/expired sell can never settle; retrying only
+                # delays the (unchanged) fail-closed outcome.
+                exhausted_reason = "terminal_failed_sell_orders"
+                break
+            if attempts_used >= int(params["max_attempts"]):
+                exhausted_reason = "max_attempts_exhausted"
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                exhausted_reason = "timeout_exhausted"
+                break
+            delay = min(
+                float(params["base_delay_seconds"]) * (2.0 ** (attempts_used - 1)),
+                float(params["max_delay_seconds"]),
+            )
+            if deadline is not None:
+                delay = min(delay, max(0.0, deadline - time.monotonic()))
+            delays_slept.append(float(delay))
+            if delay > 0.0:
+                time.sleep(delay)
         confirmed_proceeds = float(sum(float(row.get("filled_notional") or 0.0) for row in sell_records))
         raw = dict(snapshot.raw or {})
         raw["sell_fill_meta"] = {
@@ -1570,6 +1729,17 @@ class LivePilotCoreAdapter:
             "settlement_reflection": dict(settlement_reflection),
             "pending_sell_order_ids": list(pending),
             "fill_model": "broker_refresh_until_settled",
+            "settlement_wait": {
+                "backoff": "bounded_exponential",
+                "attempts_used": attempts_used,
+                "max_attempts": int(params["max_attempts"]),
+                "base_delay_seconds": float(params["base_delay_seconds"]),
+                "max_delay_seconds": float(params["max_delay_seconds"]),
+                "timeout_seconds": params["timeout_seconds"],
+                "delays_slept_seconds": list(delays_slept),
+                "exhausted_reason": exhausted_reason,
+                "terminal_failed_sell_order_ids": list(terminal_failed),
+            },
         }
         raw["pending_sell_order_ids"] = list(pending)
         raw["sell_phase_allows_buy"] = bool(
@@ -2181,6 +2351,11 @@ def _run_live_pilot_core_path(
         "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
+        **_next_run_expectation(
+            terminal_status=terminal_status,
+            reason_code=reconciliation.get("status"),
+            reconciliation_state=reconciliation.get("state"),
+        ),
         **entry_summary,
         **_capital_gate_report_fields(capital_gate),
     }
@@ -2252,6 +2427,11 @@ def _write_blocked_artifacts(
         "live_orders_allowed": False,
         "submitted_count": 0,
         "operator_action": operator_action,
+        **_next_run_expectation(
+            terminal_status="BLOCKED",
+            reason_code=reason_code,
+            reconciliation_state=reconciliation.get("state"),
+        ),
         **entry_summary,
         **capital_gate_fields,
     }
@@ -2591,6 +2771,11 @@ def refresh_live_pilot_reconciliation(
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
         "refreshed_existing_run": True,
+        **_next_run_expectation(
+            terminal_status="SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION",
+            reason_code=reconciliation.get("status"),
+            reconciliation_state=reconciliation.get("state"),
+        ),
     }
     summary.update(
         _entry_policy_summary(
