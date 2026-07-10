@@ -1110,3 +1110,369 @@ def test_sell_wildcard_does_not_bypass_master_gate() -> None:
     assert v.status == "BLOCKED"
     assert any("sells_disabled" in r for r in v.reason_codes)
     assert not any("sell_not_whitelisted" in r for r in v.reason_codes)
+
+
+# --------------------------------------------------------------------------- #
+# Sell-settlement wait: bounded exponential backoff (2026-07-09/10 hardening)
+# and halt-state convergence regressions. The two real incidents both halted
+# mid-rebalance in the sell-first coupling; these tests pin down (1) the
+# retry/backoff contract of the settlement wait and (2) that BOTH real post-halt
+# broker states produce a valid plan and pass every gate on the NEXT run.
+# --------------------------------------------------------------------------- #
+
+
+class SellScriptedBroker(FakeBroker):
+    """Multi-position broker whose sell outcomes are scripted per symbol.
+
+    ``sell_behavior[symbol]`` is one of:
+      - "filled": fills immediately and settles cash/positions.
+      - "rejected": broker returns a terminal rejected order (pre-book reject).
+      - int N >= 1: order stays "accepted" for N get_order refreshes, then
+        fills and settles (exercises the settlement retry/backoff).
+    Buys always fill.
+    """
+
+    def __init__(
+        self,
+        *,
+        positions: list[dict[str, object]],
+        cash: str = "150",
+        equity: str = "500",
+        sell_behavior: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(
+            order_status="filled",
+            buying_power=cash,
+            cash=cash,
+            equity=equity,
+            positions=positions,
+        )
+        self.sell_behavior: dict[str, object] = dict(sell_behavior or {})
+        self.orders_by_id: dict[str, dict[str, object]] = {}
+        self.refresh_counts: dict[str, int] = {}
+        self._pending_settlement: dict[str, dict[str, float]] = {}
+
+    def _settle_sell(self, symbol: str, qty: float, notional: float) -> None:
+        self.cash = str(float(self.cash) + notional)
+        self.buying_power = str(float(self.buying_power) + notional)
+        self.positions = [row for row in self.positions if row.get("symbol") != symbol]
+
+    def submit_market_order(self, **kwargs):
+        self.submit_calls += 1
+        self.market_calls += 1
+        side = str(kwargs.get("side") or "").upper()
+        symbol = str(kwargs.get("symbol") or "").upper()
+        qty = float(kwargs.get("qty") or 0.0)
+        estimated = float(kwargs.get("estimated_notional") or 0.0)
+        self.submitted_methods.append("market")
+        self.submitted_sides.append(side)
+        order_id = f"order-{self.submit_calls}"
+        behavior = self.sell_behavior.get(symbol, "filled") if side == "SELL" else "filled"
+        if behavior == "rejected":
+            status = "rejected"
+        elif isinstance(behavior, int):
+            status = "accepted"
+        else:
+            status = "filled"
+        filled = status == "filled"
+        fill_price = (estimated / qty) if qty > 0 else None
+        order = {
+            "id": order_id,
+            "status": status,
+            "symbol": symbol,
+            "side": side,
+            "client_order_id": kwargs.get("client_order_id"),
+            "filled_qty": str(qty) if filled else None,
+            "filled_quantity": str(qty) if filled else None,
+            "filled_avg_price": str(fill_price) if filled and fill_price else None,
+            "submitted_at": "2026-03-17T13:35:00+00:00",
+            "filled_at": "2026-03-17T13:35:02+00:00" if filled else None,
+        }
+        self.orders_by_id[order_id] = order
+        if side == "SELL":
+            if filled:
+                self._settle_sell(symbol, qty, estimated)
+            elif isinstance(behavior, int):
+                self._pending_settlement[order_id] = {"qty": qty, "notional": estimated}
+        elif side == "BUY" and filled:
+            self.cash = str(float(self.cash) - estimated)
+            self.buying_power = str(float(self.buying_power) - estimated)
+            self.positions.append({"symbol": symbol, "qty": str(qty), "market_value": str(estimated)})
+        return order
+
+    def get_order(self, order_id):
+        order = dict(self.orders_by_id.get(order_id, {}))
+        if not order:
+            return order
+        symbol = str(order.get("symbol") or "")
+        behavior = self.sell_behavior.get(symbol)
+        if order.get("status") == "accepted" and isinstance(behavior, int):
+            count = self.refresh_counts.get(order_id, 0) + 1
+            self.refresh_counts[order_id] = count
+            if count >= behavior:
+                pending = self._pending_settlement.pop(order_id, None)
+                qty = float((pending or {}).get("qty") or 0.0)
+                notional = float((pending or {}).get("notional") or 0.0)
+                fill_price = (notional / qty) if qty > 0 else None
+                order.update(
+                    {
+                        "status": "filled",
+                        "filled_qty": str(qty),
+                        "filled_quantity": str(qty),
+                        "filled_avg_price": str(fill_price) if fill_price else None,
+                        "filled_at": "2026-03-17T13:35:05+00:00",
+                    }
+                )
+                self.orders_by_id[order_id] = dict(order)
+                self._settle_sell(symbol, qty, notional)
+        return order
+
+
+def _rotation_env(**overrides: str) -> dict[str, str]:
+    env = _env(dry_run="0", max_orders="1")
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "*"
+    # Hermetic backoff: retries allowed, zero sleep.
+    env["CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS"] = "0"
+    env.update(overrides)
+    return env
+
+
+def test_settlement_wait_retries_with_backoff_until_settled(tmp_path: Path) -> None:
+    """A sell that settles on the 3rd broker refresh is retried (bounded backoff)
+    and the run completes the full sell->settle->rebudget->buy lifecycle."""
+    broker = SellScriptedBroker(
+        positions=[{"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}],
+        sell_behavior={"OLD": 3},
+    )
+    env = _rotation_env(CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS="5")
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-settlement-retry",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-settlement-retry"
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_sides == ["SELL", "BUY"]
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    wait_meta = transition["diagnostics"]["sell_fill_meta"]["settlement_wait"]
+    assert wait_meta["backoff"] == "bounded_exponential"
+    assert wait_meta["attempts_used"] == 3
+    assert wait_meta["max_attempts"] == 5
+    assert wait_meta["exhausted_reason"] is None
+    settlement = transition["diagnostics"]["sell_fill_meta"]["settlement_reflection"]
+    assert settlement["settlement_reflected"] is True
+
+
+def test_settlement_wait_exhausts_attempts_and_fails_closed(tmp_path: Path) -> None:
+    """A sell that never settles exhausts the bounded attempts and the buy phase
+    stays fail-closed (no buys sized from unconfirmed proceeds)."""
+    broker = SellScriptedBroker(
+        positions=[{"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}],
+        sell_behavior={"OLD": 99},  # never settles within the attempt budget
+    )
+    env = _rotation_env(CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS="3")
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-settlement-exhausted",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-settlement-exhausted"
+    assert broker.submitted_sides == ["SELL"]  # no buy submitted
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["buy_orders_intended"] == []
+    assert transition["diagnostics"]["rebudget"]["reason_codes"] == ["live_pilot_sell_settlement_timeout"]
+    wait_meta = transition["diagnostics"]["sell_fill_meta"]["settlement_wait"]
+    assert wait_meta["attempts_used"] == 3
+    assert wait_meta["exhausted_reason"] == "max_attempts_exhausted"
+    assert result["terminal_status"] == "SUBMITTED"  # sell accepted-open reconciles clean
+
+
+def test_settlement_timeout_zero_preserves_single_pass_fail_fast(tmp_path: Path) -> None:
+    """Legacy contract: TIMEOUT=0 means one refresh pass, no retries, fail closed."""
+    broker = SellScriptedBroker(
+        positions=[{"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}],
+        sell_behavior={"OLD": 2},
+    )
+    env = _rotation_env(CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS="0")
+
+    run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-settlement-timeout-zero",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-settlement-timeout-zero"
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    wait_meta = transition["diagnostics"]["sell_fill_meta"]["settlement_wait"]
+    assert wait_meta["attempts_used"] == 1
+    assert wait_meta["exhausted_reason"] == "timeout_exhausted"
+    assert wait_meta["delays_slept_seconds"] == []
+    assert transition["buy_orders_intended"] == []
+
+
+def test_halt_state_a_rejected_sells_converge_on_next_run(tmp_path: Path) -> None:
+    """2026-07-09 incident shape: every sell rejected before reaching the broker
+    book. The halted run must (1) fail closed with next_run_expectation =
+    converges_next_run, and (2) the NEXT run over the unchanged broker state must
+    produce a valid plan, pass all gates, and complete the rebalance."""
+    output_root = tmp_path / "outputs" / "live_pilot"
+    broker = SellScriptedBroker(
+        positions=[{"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}],
+        sell_behavior={"OLD": "rejected"},
+    )
+
+    halted = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=_rotation_env(),
+        run_id="run-halt-a",
+        output_root=output_root,
+        now_et=_market_open_now(),
+    )
+
+    assert halted["terminal_status"] == "FAILED_RECONCILIATION"
+    assert halted["next_run_expectation"] == "converges_next_run"
+    assert halted["next_run_expectation_reason"]
+    assert broker.submitted_sides == ["SELL"]  # buy phase stayed closed
+    # Post-halt broker state: positions and cash unchanged, no open orders.
+    assert [row["symbol"] for row in broker.get_positions()] == ["OLD"]
+    assert float(broker.cash) == 150.0
+    summary = json.loads((output_root / "runs" / "run-halt-a" / "live_pilot_operator_summary.json").read_text())
+    assert summary["next_run_expectation"] == "converges_next_run"
+
+    # Next cycle: same broker (sell no longer rejected), same artifact root.
+    broker.sell_behavior["OLD"] = "filled"
+    recovered = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=_rotation_env(),
+        run_id="run-halt-a-next",
+        output_root=output_root,
+        now_et=_market_open_now(),
+    )
+
+    next_root = output_root / "runs" / "run-halt-a-next"
+    assert recovered["terminal_status"] == "SUBMITTED"
+    open_check = json.loads((next_root / "live_pilot_open_order_check.json").read_text())
+    assert open_check["status"] == "PASS"
+    gate_state = json.loads((next_root / "live_pilot_gate_state.json").read_text())
+    assert gate_state["decision"] == "ALLOWED"
+    transition = json.loads((next_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["blocked"] is False
+    assert transition["sell_orders_intended"][0]["symbol"] == "OLD"
+    assert transition["buy_orders_intended"][0]["symbol"] == "NEW"
+    assert broker.submitted_sides[-2:] == ["SELL", "BUY"]
+    reconciliation = json.loads((next_root / "live_pilot_reconciliation.json").read_text())
+    assert reconciliation["status"] == "CLEAN"
+
+
+def test_halt_state_b_one_sell_filled_then_halt_converges_on_next_run(tmp_path: Path) -> None:
+    """2026-07-10 incident shape: one sell filled, then the run halted, leaving
+    idle cash plus remaining positions. The NEXT run must replan from the
+    mutated broker state, pass all gates, and finish the rotation."""
+    output_root = tmp_path / "outputs" / "live_pilot"
+    broker = SellScriptedBroker(
+        positions=[
+            {"symbol": "OLDA", "qty": "1", "market_value": "100", "cost_basis": "100"},
+            {"symbol": "OLDB", "qty": "1", "market_value": "100", "cost_basis": "100"},
+        ],
+        sell_behavior={"OLDA": "filled", "OLDB": "rejected"},
+    )
+
+    halted = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=_rotation_env(),
+        run_id="run-halt-b",
+        output_root=output_root,
+        now_et=_market_open_now(),
+    )
+
+    assert halted["terminal_status"] == "FAILED_RECONCILIATION"
+    assert halted["next_run_expectation"] == "converges_next_run"
+    # Post-halt broker state matches the incident: one sell's proceeds idle in
+    # cash, remaining position still held, no open orders, no buys submitted.
+    assert [row["symbol"] for row in broker.get_positions()] == ["OLDB"]
+    assert float(broker.cash) == 250.0
+    assert "BUY" not in broker.submitted_sides
+
+    # Next cycle: remaining sell now succeeds; plan recomputed from broker truth.
+    broker.sell_behavior["OLDB"] = "filled"
+    recovered = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=_rotation_env(),
+        run_id="run-halt-b-next",
+        output_root=output_root,
+        now_et=_market_open_now(),
+    )
+
+    next_root = output_root / "runs" / "run-halt-b-next"
+    assert recovered["terminal_status"] == "SUBMITTED"
+    open_check = json.loads((next_root / "live_pilot_open_order_check.json").read_text())
+    assert open_check["status"] == "PASS"
+    gate_state = json.loads((next_root / "live_pilot_gate_state.json").read_text())
+    assert gate_state["decision"] == "ALLOWED"
+    transition = json.loads((next_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["blocked"] is False
+    assert transition["sell_orders_intended"][0]["symbol"] == "OLDB"
+    assert transition["buy_orders_intended"][0]["symbol"] == "NEW"
+    reconciliation = json.loads((next_root / "live_pilot_reconciliation.json").read_text())
+    assert reconciliation["status"] == "CLEAN"
+    assert recovered["next_run_expectation"] == "converges_next_run"
+
+
+def test_blocked_halt_paths_write_next_run_expectation(tmp_path: Path) -> None:
+    """Every halt path writes the machine-readable convergence contract:
+    operator-latched blocks require manual action; transient blocks converge."""
+    # Kill switch: stays blocked until an operator disarms it.
+    env = _env(dry_run="0")
+    env["CAERUS_LIVE_PILOT_KILL_SWITCH"] = "1"
+    blocked = run_live_pilot(
+        plan=_plan(),
+        broker=FakeBroker(),
+        env=env,
+        run_id="run-nre-kill-switch",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+    assert blocked["terminal_status"] == "BLOCKED"
+    assert blocked["next_run_expectation"] == "requires_manual_action"
+    assert blocked["next_run_expectation_reason"]
+
+    # Market closed: converges on the next in-hours scheduled run.
+    closed = run_live_pilot(
+        plan=_plan(),
+        broker=FakeBroker(),
+        env=_env(dry_run="0"),
+        run_id="run-nre-market-closed",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=dt.datetime(2026, 3, 17, 8, 0, tzinfo=ET),
+    )
+    assert closed["terminal_status"] == "BLOCKED"
+    assert closed["next_run_expectation"] == "converges_next_run"
+
+    # Partial fill: broker truth not terminal -> manual confirmation required.
+    partial = run_live_pilot(
+        plan=_plan(),
+        broker=FakeBroker(order_status="partially_filled"),
+        env=_env(dry_run="0"),
+        run_id="run-nre-partial",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+    assert partial["terminal_status"] == "FAILED_RECONCILIATION"
+    assert partial["next_run_expectation"] == "requires_manual_action"
