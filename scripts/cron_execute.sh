@@ -34,10 +34,11 @@ else
     exit 1
 fi
 
-# --- Shared lane behavior params (FINAL WORD; single source for both lanes) ---
-# Sourced AFTER .env so lane_params.sh overrides any env-file drift on shared
-# strategy/engine knobs (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT, CONCENTRATED_*,
-# USE_BROAD_TARGETS). Divergence between lanes shows up as different
+# --- Shared lane behavior params (shared defaults; single source for both lanes) ---
+# Sourced AFTER .env. lane_params.sh provides SHARED DEFAULTS with env-wins
+# semantics for the strategy/engine knobs (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT,
+# CONCENTRATED_*, USE_BROAD_TARGETS): an operator-set env-file value is never
+# silently overridden. Divergence between lanes shows up as different
 # lane_params_fingerprint values in the two cron logs.
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/lane_params.sh"
@@ -72,6 +73,14 @@ fi
 # engine at a fixed, comparable scale regardless of the paper account's drifting
 # portfolio value (resolve_dynamic_cap only ever TIGHTENS to this value).
 export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"
+# The cap alone is NOT enough: the executor sizes target shares against the
+# broker account's REAL equity (weight * total_equity / price), so a paper
+# account far above $10k would compute needs that exceed the approved cap and
+# hard-block with live_pilot_total_notional_exceeds_cap before the dry pass.
+# PLANNING_EQUITY_CAP clamps the executor's planning equity to the same $10k
+# staging scale (it only ever TIGHTENS; unset on the live lane -> live sizes
+# against real equity, unchanged).
+export CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 # Sells run through the SAME fail-closed gates as live (master flag + whitelist);
 # paper arms them with the wildcard so the full buy/sell/hold model is exercised.
@@ -88,7 +97,12 @@ export CAERUS_LIVE_PILOT_APPROVED="1"
 export CAERUS_LIVE_PILOT_CRON_APPROVED="1"
 export CAERUS_LIVE_PILOT_SCHEDULE_ENABLED="1"
 export CAERUS_LIVE_PILOT_SUBMIT_APPROVED="1"
-export CAERUS_LIVE_PILOT_KILL_SWITCH="0"
+# Deliberately NOT exported here: CAERUS_LIVE_PILOT_KILL_SWITCH. The kill switch
+# is a LIVE-lane safety gate; the paper gate stack short-circuits on the paper
+# broker before ever consulting it, so exporting =0 here would be inert for
+# paper while creating a latent hazard — any child process inheriting this env
+# against a non-paper broker would find the switch pre-disarmed. Never suppress
+# a safety gate via environment inheritance.
 
 # --- Lane-scoped directories (isolated from outputs/live_pilot) ---
 PAPER_LANE_ROOT="outputs/paper_lane"
@@ -153,13 +167,35 @@ fail_lane() {
 }
 
 summary_field() {
+    # summary_field <captured_output> <field>
+    # The captured output is stdout+stderr merged (2>&1), so it may contain
+    # non-JSON noise (deprecation warnings, tracebacks) around the executor's
+    # final json.dumps summary. Extract the LAST valid JSON object in the
+    # stream instead of json.loads()-ing the whole blob, so a stray stderr
+    # line can never blank out run_root/terminal_status/reason_code and turn
+    # a real outcome into terminal_status=failed_unknown.
     local summary_json="$1"
     local field="$2"
     SUMMARY_JSON="${summary_json}" SUMMARY_FIELD="${field}" "${PYTHON_BIN}" - <<'PY'
 import json
 import os
 
-payload = json.loads(os.environ["SUMMARY_JSON"])
+raw = os.environ["SUMMARY_JSON"]
+decoder = json.JSONDecoder()
+payload = {}
+idx = 0
+while True:
+    start = raw.find("{", idx)
+    if start == -1:
+        break
+    try:
+        candidate, end = decoder.raw_decode(raw, start)
+    except json.JSONDecodeError:
+        idx = start + 1
+        continue
+    if isinstance(candidate, dict):
+        payload = candidate
+    idx = end
 print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
 }

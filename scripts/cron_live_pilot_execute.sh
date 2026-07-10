@@ -28,9 +28,11 @@ set -a
 source "${ENV_FILE}"
 set +a
 
-# Shared lane behavior params — sourced AFTER the env file so lane_params.sh is
-# the FINAL WORD on shared strategy/engine knobs (single source for BOTH the
-# paper 9:35 lane and this live lane). Approval/arming gates stay env-file-owned.
+# Shared lane behavior params — sourced AFTER the env file. lane_params.sh
+# provides SHARED DEFAULTS with env-wins semantics (single source for BOTH the
+# paper 9:35 lane and this live lane): a tighter operator-set value in
+# ~/.caerus/live_pilot.env (e.g. CAP_PCT/MAX_ORDERS/CONCENTRATED_MAX_WEIGHT)
+# always wins. Approval/arming gates stay env-file-owned.
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/lane_params.sh"
 
@@ -53,8 +55,8 @@ GATE_RUN_ID="${REPORT_DATE}T${GATE_RUN_TS}_live_pilot_cron_gate"
 GATE_RUN_ROOT="outputs/live_pilot/runs/${GATE_RUN_ID}"
 export CAERUS_LIVE_PILOT_CAPITAL_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP:-}"
 # Shared behavior params (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT, CONCENTRATED_*,
-# USE_BROAD_TARGETS) come from scripts/lane_params.sh — sourced above as the
-# single source of truth for BOTH lanes.
+# USE_BROAD_TARGETS) default via scripts/lane_params.sh — sourced above, shared
+# by BOTH lanes, env-file overrides (tighter operator values) always win.
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 export CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH="${CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH:-cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85}"
 export CAERUS_LIVE_PILOT_APPROVED="${CAERUS_LIVE_PILOT_APPROVED:-0}"

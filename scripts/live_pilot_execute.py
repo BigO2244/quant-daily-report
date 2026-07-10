@@ -23,6 +23,7 @@ from core.live_trade_ledger import record_live_order
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
     LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV,
+    _is_live_host,
     account_id_hash,
     build_live_pilot_gate_result,
     expected_account_matches,
@@ -474,17 +475,32 @@ def _build_core_request(
     pre_snapshot: Mapping[str, Any],
     plan: Mapping[str, Any],
     run_id: str,
+    planning_equity_cap: float | None = None,
 ) -> tuple[ExecutionRequest | None, list[dict[str, Any]]]:
     account = pre_snapshot.get("account") if isinstance(pre_snapshot.get("account"), Mapping) else {}
     equity = _finite_float((account or {}).get("equity") or (account or {}).get("portfolio_value"))
     if equity is None or equity <= 0.0:
         return None, [{"reason": LIVE_PILOT_EQUITY_UNAVAILABLE, "symbol": None}]
+    cash = float(_finite_float((account or {}).get("cash")) or 0.0)
+    # Staging-scale pin (CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP; paper lane only).
+    # Target sizing is weight * total_equity / price, so without this pin a paper
+    # account far above the pinned capital cap computes single-name needs that
+    # exceed the approved cap and hard-blocks with
+    # live_pilot_total_notional_exceeds_cap. Clamping the planning equity to the
+    # same scale as the cap makes plan sizing and execution agree at the pinned
+    # scale. The clamp only ever TIGHTENS (min); the live lane leaves the env
+    # unset and continues to size against real account equity.
+    if planning_equity_cap is not None and planning_equity_cap > 0.0 and equity > planning_equity_cap:
+        equity = float(planning_equity_cap)
+        # Keep the planning account internally coherent at the pinned scale
+        # (cash can never exceed equity); the buy budget is already bounded by
+        # approved_cap_usd, so this only tightens.
+        cash = min(cash, equity)
     holdings, holding_prices, malformed = _holding_frames_from_snapshot(pre_snapshot)
     targets, target_prices = _target_rows_from_plan(plan, equity=equity)
     prices = holding_prices.copy()
     for symbol, price in target_prices.items():
         prices.loc[symbol] = float(price)
-    cash = float(_finite_float((account or {}).get("cash")) or 0.0)
     # Carry the risk-adjusted cash target through execution so live matches paper.
     # Paper holds this cash back (circuit breaker, sector trim); a legacy plan without
     # the field defaults to 0.0 (prior behavior).
@@ -1716,7 +1732,13 @@ def _run_live_pilot_core_path(
     output_root: Path | str,
     now_et: dt.datetime | None,
 ) -> dict[str, Any]:
-    request, malformed = _build_core_request(pre_snapshot=pre_snapshot, plan=plan, run_id=run_id)
+    planning_equity_cap = _finite_float(env.get("CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP"))
+    request, malformed = _build_core_request(
+        pre_snapshot=pre_snapshot,
+        plan=plan,
+        run_id=run_id,
+        planning_equity_cap=planning_equity_cap,
+    )
     if request is None:
         _write_blocked_transition_artifact(
             run_root=run_root,
@@ -2400,9 +2422,34 @@ def run_live_pilot(
     # host already passed the gate above via the paper branch, which short-circuits
     # BEFORE the account-match logic (account_id_match stays None) — enforcing it
     # here would fail-closed every unified paper-lane run for the wrong reason.
-    # Paper accounts carry no pinned id/hash by design; the live path is unchanged
-    # and still blocks on a missing broker id or an id/hash mismatch.
+    # Do NOT revert this to an unconditional check "because the old code did it":
+    # the old unconditional `if not account_gate.account_id_match:` was latently
+    # broken for paper (account_id_match=None -> `not None` == True -> every paper
+    # run BLOCKED). Paper accounts carry no pinned id/hash by design; the live
+    # path is unchanged and still blocks on a missing broker id or an id/hash
+    # mismatch.
     if not broker_paper:
+        # Defense-in-depth: a non-paper broker MUST be pointed at the canonical
+        # LIVE Alpaca host before the account pin is consulted. A misconfigured
+        # broker adapter (wrong host while reporting paper=False) fails closed
+        # here instead of falling through to the pin check.
+        if not _is_live_host(base_url):
+            return _write_blocked_artifacts(
+                run_root=run_root,
+                run_id=run_id,
+                trade_date=trade_date,
+                env=environ,
+                reason_code="live_pilot_requires_live_alpaca_endpoint",
+                operator_action=(
+                    "Non-paper broker is not pointed at the live Alpaca host "
+                    f"(base_url={base_url!r}); refusing to run the account-pin check."
+                ),
+                preflight=preflight,
+            )
+        print(
+            f"live_pilot_account_pin_check: enforcing pinned account on live endpoint base_url={base_url}",
+            file=sys.stderr,
+        )
         # Route the account-hash match through the orchestrated gate result so the
         # pinned-account check is a single authoritative decision (fail closed on a
         # missing broker id or a mismatch) rather than an ad-hoc executor-only check.
