@@ -108,6 +108,15 @@ else
     echo "ERROR: precompute failed with exit code ${EXIT_CODE}" | tee -a "${LOG_FILE}"
 fi
 
+# --- Price-source shadow comparison (best-effort; can NEVER fail or delay precompute) ---
+# Gated on CAERUS_PRICE_SHADOW (default 1). Compares Alpaca vs yfinance prices
+# and writes outputs/workflow/${REPORT_DATE}/price_source_shadow.json.
+CAERUS_PRICE_SHADOW="${CAERUS_PRICE_SHADOW:-1}"
+if [[ "${CAERUS_PRICE_SHADOW}" =~ ^(1|true|TRUE|yes|YES|y|Y|on|ON)$ ]]; then
+    SHADOW_SUMMARY="$(python3 -m scripts.price_source_shadow_compare 2>>"${LOG_FILE}" || true)"
+    echo "price_source_shadow: ${SHADOW_SUMMARY:-unavailable}" | tee -a "${LOG_FILE}" || true
+fi
+
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${EXIT_CODE}" | tee -a "${LOG_FILE}"
 
 if [[ "${SELF_HEAL_PRECOMPUTE_ONLY}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
