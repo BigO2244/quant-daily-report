@@ -89,14 +89,25 @@ export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 # Suppress any real-money arming
 unset CAERUS_LIVE_PILOT_KILL_SWITCH 2>/dev/null || true
 
-# --- Resolve Python ---
-PYTHON_BIN="${PYTHON_BIN:-${REPO_ROOT}/.venv/bin/python3}"
-if [[ ! -x "${PYTHON_BIN}" ]]; then
-    # Fallback to whatever python3 is available
-    PYTHON_BIN="$(command -v python3 2>/dev/null || echo '')"
+# --- Resolve Python (same activation path as the cron lanes) ---
+# runtime_env.sh knows where the runtime venv lives on each machine (Mac: .venv/,
+# VM: ~/.venvs/...). Falling back to bare system python3 silently loses all deps,
+# which made the harness FAIL on the VM while every manual run passed.
+if [[ -f "${REPO_ROOT}/scripts/runtime_env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/scripts/runtime_env.sh"
+    activate_runtime_venv "${REPO_ROOT}" >/dev/null 2>&1 || true
+fi
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 2>/dev/null || echo '')}"
+if [[ ! -x "${PYTHON_BIN:-}" && -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
+    PYTHON_BIN="${REPO_ROOT}/.venv/bin/python3"
 fi
 if [[ -z "${PYTHON_BIN}" || ! -x "${PYTHON_BIN}" ]]; then
     echo "FATAL: no usable python3 found" >&2
+    exit 1
+fi
+if ! "${PYTHON_BIN}" -c "import pandas" >/dev/null 2>&1; then
+    echo "FATAL: resolved python (${PYTHON_BIN}) lacks runtime deps (pandas) — venv not activated?" >&2
     exit 1
 fi
 
