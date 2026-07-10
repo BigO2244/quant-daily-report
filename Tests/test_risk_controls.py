@@ -33,8 +33,8 @@ def test_circuit_breaker_scales_targets_and_adds_cash() -> None:
     assert result.weights["target_weight"].sum() == pytest.approx(0.20)
 
 
-def test_position_cap_trims_single_name_to_ten_percent() -> None:
-    controls = RiskControls()
+def test_position_cap_trims_single_name_to_explicit_cap() -> None:
+    controls = RiskControls(max_position_pct=0.10)
     result = controls.apply_to_targets(
         _targets([("AAA", "trend", 0.20), ("BBB", "value", 0.05)]),
         cash_target_weight=0.75,
@@ -43,6 +43,21 @@ def test_position_cap_trims_single_name_to_ten_percent() -> None:
     aaa = result.weights.loc[result.weights["ticker"] == "AAA", "target_weight"].iloc[0]
     assert aaa == pytest.approx(0.10)
     assert result.cash_target_weight == pytest.approx(0.85)
+
+
+def test_default_position_cap_is_concentration_ceiling() -> None:
+    """Concentration is the model: the default per-name cap follows the
+    concentration ceiling (0.50), so a concentrated 45% name is NOT re-clipped
+    to the old broad-book 10%; anything above the ceiling still trims."""
+    controls = RiskControls()
+    result = controls.apply_to_targets(
+        _targets([("AAA", "trend", 0.45), ("BBB", "value", 0.55)]),
+        cash_target_weight=0.0,
+    )
+
+    by = dict(zip(result.weights["ticker"], result.weights["target_weight"]))
+    assert by["AAA"] == pytest.approx(0.45)
+    assert by["BBB"] == pytest.approx(0.50)
 
 
 def test_sector_cap_scales_sector_to_thirty_percent() -> None:

@@ -89,8 +89,14 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     tp = plan["target_portfolio"]
     assert {r["symbol"] for r in tp} == {"AAPL", "MSFT", "JNJ"}
     assert all(r["price"] > 0 for r in tp)
-    # Highest weight first.
-    assert tp[0]["symbol"] == "AAPL"
+    # Highest RISK-ADJUSTED weight first. The per-name cap default is now the
+    # concentration ceiling (0.50) so AAPL is not clipped to 10%, but the 0.30
+    # sector cap scales the two Information Technology names (0.5 + 0.3 -> 0.30
+    # total), leaving JNJ (Health Care, 0.2) as the top weight.
+    assert tp[0]["symbol"] == "JNJ"
+    weights = {r["symbol"]: float(r["target_weight"]) for r in tp}
+    assert weights["AAPL"] + weights["MSFT"] == pytest.approx(0.30)
+    assert weights["AAPL"] > weights["MSFT"]
     # Price provenance: AAPL from payload, others from yfinance.
     by_symbol = {r["symbol"]: r for r in tp}
     assert by_symbol["AAPL"]["price_source"] == "payload_entry_price"

@@ -15,23 +15,20 @@ from paper.state_paths import get_paper_state_dir
 
 logger = logging.getLogger(__name__)
 
-def _truthy_env(name: str) -> bool:
-    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def _default_max_position_pct() -> float:
-    """Per-name cap. Explicit MAX_POSITION_PCT always wins; otherwise, when the
-    concentrated-alpha flag is on, the cap rises to the concentration ceiling so the
-    concentrated top-N weights are not re-clipped back to the broad-book 10%."""
+    """Per-name cap — the SINGLE source of truth for the position-cap default.
+
+    Explicit MAX_POSITION_PCT env always wins; otherwise the concentration
+    ceiling (CAERUS_CONCENTRATED_MAX_WEIGHT, default 0.50). Concentration is
+    ALWAYS ON (no flag), so the cap must match the concentrated book's per-name
+    ceiling or the concentrated weights would be re-clipped downstream."""
     explicit = os.environ.get("MAX_POSITION_PCT")
     if explicit not in (None, ""):
         return float(explicit)
-    if _truthy_env("CAERUS_CONCENTRATED_ALPHA"):
-        try:
-            return float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
-        except (TypeError, ValueError):
-            return 0.50
-    return 0.10
+    try:
+        return float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
+    except (TypeError, ValueError):
+        return 0.50
 
 
 MAX_POSITION_PCT = _default_max_position_pct()

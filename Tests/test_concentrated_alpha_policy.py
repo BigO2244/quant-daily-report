@@ -209,3 +209,50 @@ def test_empty_concentrated_book_also_fails_loud(monkeypatch):
             cm_details={},
         )
     assert "df_targets" not in captured
+
+
+# ---------------------------------------------------------------------------
+# Unified position-cap source of truth (core.risk_controls._default_max_position_pct)
+# ---------------------------------------------------------------------------
+
+
+def test_default_max_position_pct_is_concentration_ceiling_no_flag(monkeypatch):
+    """No flag check: the cap default is the concentration ceiling even with
+    CAERUS_CONCENTRATED_ALPHA unset (concentration is always on)."""
+    from core.risk_controls import _default_max_position_pct
+
+    monkeypatch.delenv("MAX_POSITION_PCT", raising=False)
+    monkeypatch.delenv("CAERUS_CONCENTRATED_ALPHA", raising=False)
+    monkeypatch.delenv("CAERUS_CONCENTRATED_MAX_WEIGHT", raising=False)
+    assert _default_max_position_pct() == pytest.approx(0.50)
+
+    monkeypatch.setenv("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.42")
+    assert _default_max_position_pct() == pytest.approx(0.42)
+
+    # Explicit MAX_POSITION_PCT always wins.
+    monkeypatch.setenv("MAX_POSITION_PCT", "0.15")
+    assert _default_max_position_pct() == pytest.approx(0.15)
+
+    # Garbage ceiling falls back to 0.50.
+    monkeypatch.delenv("MAX_POSITION_PCT", raising=False)
+    monkeypatch.setenv("CAERUS_CONCENTRATED_MAX_WEIGHT", "banana")
+    assert _default_max_position_pct() == pytest.approx(0.50)
+
+
+def test_live_construction_policy_uses_shared_cap_default(monkeypatch):
+    """_resolve_live_construction_policy must derive its max_position_weight
+    default from core.risk_controls._default_max_position_pct (no more
+    hardcoded 0.10/0.20 dual-cap confusion)."""
+    monkeypatch.delenv("MAX_POSITION_PCT", raising=False)
+    monkeypatch.setenv("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.42")
+    # Neutralize the env/config override layer so the DEFAULT is observable.
+    monkeypatch.setattr(dqr, "_snapshot_risk_value", lambda name, default: default)
+
+    for equity in (10000.0, 250000.0):  # small and large account paths
+        policy = dqr._resolve_live_construction_policy(equity)
+        assert policy["max_position_weight"] == pytest.approx(0.42), equity
+
+    # Explicit MAX_POSITION_PCT env wins through the shared function too.
+    monkeypatch.setenv("MAX_POSITION_PCT", "0.15")
+    policy = dqr._resolve_live_construction_policy(10000.0)
+    assert policy["max_position_weight"] == pytest.approx(0.15)

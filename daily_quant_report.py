@@ -725,14 +725,15 @@ def _resolve_live_construction_policy(model_equity: float | None) -> dict[str, f
     )
     small_account = equity <= small_account_threshold
 
-    default_max_position_weight = 0.10
-    if small_account:
-        try:
-            from core.growth_engine_v4 import MAX_POSITION_WEIGHT as strategy_max_position_weight
+    # Position-cap default comes from the SINGLE source of truth in
+    # core.risk_controls (explicit MAX_POSITION_PCT env wins there, else the
+    # concentration ceiling CAERUS_CONCENTRATED_MAX_WEIGHT, default 0.50) so
+    # construction and execution-time risk controls can never disagree.
+    # Known-safe: concentrate_targets re-derives weights from convictions under
+    # its own cap, so this cannot loosen the final book.
+    from core.risk_controls import _default_max_position_pct
 
-            default_max_position_weight = float(strategy_max_position_weight)
-        except Exception:
-            default_max_position_weight = 0.20
+    default_max_position_weight = float(_default_max_position_pct())
 
     max_position_weight = max(
         WEIGHT_TOLERANCE,
