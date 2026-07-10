@@ -84,6 +84,8 @@ echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "schedule_enabled=${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"
 echo "cron_approved=${CAERUS_LIVE_PILOT_CRON_APPROVED}"
 echo "submit_approved=${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}"
+_DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
+echo "deployed_sha=${_DEPLOY_SHA}"
 
 write_live_pilot_pointer() {
     local status="$1"

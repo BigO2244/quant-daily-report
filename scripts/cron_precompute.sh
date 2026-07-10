@@ -67,6 +67,8 @@ echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "${LOG_FILE}"
 echo "report_date=${REPORT_DATE}" | tee -a "${LOG_FILE}"
 echo "repo_root=${REPO_ROOT}" | tee -a "${LOG_FILE}"
 echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}" | tee -a "${LOG_FILE}"
+_DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
+echo "deployed_sha=${_DEPLOY_SHA}" | tee -a "${LOG_FILE}"
 if [[ "${SELF_HEAL_PRECOMPUTE_ONLY}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
     echo "self_heal_precompute_only=1" | tee -a "${LOG_FILE}"
 fi

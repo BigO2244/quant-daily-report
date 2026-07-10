@@ -3709,21 +3709,174 @@ def resolve_regime_strengths(
         return {s: eq for s in available_sleeves}
 
 
+def write_regime_state_artifact(
+    *,
+    report_date: str,
+    regime_summary: "dict",
+    vix_regime: "dict | None",
+    regime_strengths: "dict[str, float]",
+    drift_blends: "dict[str, float]",
+    sleeve_cash_routes: "list[dict]",
+    final_target_count: int,
+    repo_root: "Path | None" = None,
+) -> "Path | None":
+    """Write outputs/workflow/<REPORT_DATE>/regime_state.json.
+
+    Also logs a single concise human-readable REGIME summary block and, when a
+    previous-trading-day artifact exists, appends a 'changes' list of fields that
+    differ from the prior run.
+
+    All exceptions are caught and logged — never raises.
+    """
+    try:
+        if repo_root is None:
+            repo_root = Path(__file__).resolve().parent
+        out_dir = repo_root / "outputs" / "workflow" / report_date
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "regime_state.json"
+
+        # Concentration N + source from current env / vix_regime
+        conc_n, conc_source = _concentrated_top_n(vix_regime)
+
+        # Deployed SHA from deploy_state.json
+        deploy_state_path = repo_root / "outputs" / "deploy_state.json"
+        deployed_sha: "str | None" = None
+        try:
+            if deploy_state_path.exists():
+                _ds = json.loads(deploy_state_path.read_text(encoding="utf-8"))
+                deployed_sha = str(_ds.get("deployed_sha") or "").strip() or None
+        except Exception:
+            pass
+
+        vix_val = float((vix_regime or {}).get("vix", 0.0) or 0.0)
+        vix_label = str((vix_regime or {}).get("regime", "unknown")).lower()
+        composite_regime = str(regime_summary.get("composite_regime") or "unknown").lower()
+
+        state: dict = {
+            "report_date": report_date,
+            "generated_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "deployed_sha": deployed_sha,
+            "regime": {
+                "composite_regime": composite_regime,
+                "vix_regime_label": vix_label,
+                "vix_value": round(vix_val, 4),
+                "trend_state": str(regime_summary.get("trend_state") or ""),
+                "volatility_state": str(regime_summary.get("volatility_state") or ""),
+                "breadth_state": str(regime_summary.get("breadth_state") or ""),
+                "macro_state": str(regime_summary.get("macro_state") or ""),
+            },
+            "concentration": {
+                "n": conc_n,
+                "source": conc_source,
+            },
+            "sleeve_strengths": {k: round(v, 6) for k, v in (regime_strengths or {}).items()},
+            "drift_blends": {k: round(v, 6) for k, v in (drift_blends or {}).items()},
+            "cash_routes": [
+                {
+                    "sleeve": str(r.get("sleeve_id") or ""),
+                    "routed_weight": float(r.get("routed_weight") or 0.0),
+                    "reason": str(r.get("invalid_reason") or r.get("reason_code") or ""),
+                }
+                for r in (sleeve_cash_routes or [])
+            ],
+            "final_target_count": int(final_target_count),
+        }
+
+        # Load previous trading-day artifact for diff
+        try:
+            prev_date_str = prev_trading_day(report_date)
+            prev_path = repo_root / "outputs" / "workflow" / prev_date_str / "regime_state.json"
+            if prev_path.exists():
+                prev_state = json.loads(prev_path.read_text(encoding="utf-8"))
+                changes: list[str] = []
+                # Compare flat scalars at regime level
+                for field in ("composite_regime", "vix_regime_label", "trend_state", "volatility_state", "breadth_state", "macro_state"):
+                    old_val = (prev_state.get("regime") or {}).get(field)
+                    new_val = state["regime"].get(field)
+                    if old_val != new_val:
+                        changes.append(f"regime.{field}: {old_val!r} → {new_val!r}")
+                # Concentration N change
+                old_n = (prev_state.get("concentration") or {}).get("n")
+                if old_n != conc_n:
+                    changes.append(f"concentration.n: {old_n!r} → {conc_n!r}")
+                # Sleeve strength changes (rounded to 3 decimal places for stability)
+                for sname in sorted(set(list((prev_state.get("sleeve_strengths") or {}).keys()) + list(regime_strengths.keys()))):
+                    old_s = round(float((prev_state.get("sleeve_strengths") or {}).get(sname, 0.0) or 0.0), 3)
+                    new_s = round(float((regime_strengths or {}).get(sname, 0.0) or 0.0), 3)
+                    if old_s != new_s:
+                        changes.append(f"sleeve_strengths.{sname}: {old_s:.3f} → {new_s:.3f}")
+                state["changes"] = changes
+        except Exception as _diff_err:
+            logger.debug("[REGIME_STATE] Could not load prior artifact for diff: %s", _diff_err)
+
+        out_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Concise human-readable log block
+        blend_log = ", ".join(
+            f"{k}={v:.2f}" for k, v in sorted((drift_blends or {}).items())
+        )
+        strength_log = " ".join(
+            f"{k}={v:.2f}" for k, v in sorted((regime_strengths or {}).items())
+        )
+        cash_log = (
+            " | cash_routes=" + ",".join(r.get("sleeve") or "" for r in state["cash_routes"])
+            if state["cash_routes"] else ""
+        )
+        logger.info(
+            "REGIME | vix=%.1f %s | composite=%s | N=%d (src=%s) | %s"
+            " | drift_blends: %s%s | targets=%d",
+            vix_val, vix_label, composite_regime, conc_n, conc_source,
+            strength_log, blend_log, cash_log, int(final_target_count),
+        )
+        if state.get("changes"):
+            logger.info("[REGIME_STATE] changes vs prev day: %s", "; ".join(state["changes"]))
+
+        return out_path
+
+    except Exception as _exc:
+        logger.warning("[REGIME_STATE] Failed to write regime_state.json: %s", _exc)
+        return None
+
+
+_DRIFT_HOLD_THRESHOLD = 0.015   # below → hold prior strength (blend=0.0)
+_DRIFT_FULL_THRESHOLD = 0.045   # above → full regime target (blend=1.0)
+# Between the two thresholds, blend factor = linear interpolation 0..1.
+
+
+def _drift_blend(drift: float) -> float:
+    """Map absolute drift to a blend factor in [0.0, 1.0].
+
+    Below ``_DRIFT_HOLD_THRESHOLD`` (1.5%) → 0.0 (full HOLD, keep prior strength).
+    Above ``_DRIFT_FULL_THRESHOLD`` (4.5%) → 1.0 (full REBALANCE, regime target).
+    Between the two thresholds → linear interpolation.
+    """
+    if drift <= _DRIFT_HOLD_THRESHOLD:
+        return 0.0
+    if drift >= _DRIFT_FULL_THRESHOLD:
+        return 1.0
+    span = _DRIFT_FULL_THRESHOLD - _DRIFT_HOLD_THRESHOLD
+    return (drift - _DRIFT_HOLD_THRESHOLD) / span
+
+
 def compute_sleeve_drift(
     broker_positions: "list | None",
     broker_equity: "float | None",
     sleeve_outputs: "list[SleeveOutput]",
     regime_strengths: "dict[str, float]",
-) -> "dict[str, bool]":
+) -> "dict[str, float]":
     """
-    Determine per-sleeve rebalance necessity from live broker positions.
+    Compute per-sleeve rebalance blend factors from live broker positions.
 
     Compares current sleeve weights (derived from live Alpaca market values)
-    against regime-target weights.  Uses TRANSITION["min_rebalance_threshold"]
-    (3%) from regime_config as the minimum drift before rebalancing.
+    against regime-target weights and returns a graded blend factor:
 
-    Falls back to rebalancing all sleeves when broker data is unavailable —
-    safe for plan-only paper mode, offline fixture, and FRED-missing runs.
+    * drift < 1.5%  → 0.0  (HOLD: stay at prior/current strength)
+    * drift > 4.5%  → 1.0  (FULL: take full regime target)
+    * 1.5% ≤ drift ≤ 4.5% → linear blend between 0.0 and 1.0
+
+    Falls back to blend=1.0 (full rebalance) for all sleeves when broker
+    data is unavailable — safe for plan-only paper mode, offline fixture,
+    and FRED-missing runs.
 
     Parameters
     ----------
@@ -3735,15 +3888,14 @@ def compute_sleeve_drift(
 
     Returns
     -------
-    dict[str, bool]  {sleeve_name: should_rebalance}
-        True  = drift ≥ threshold → REBALANCE
-        False = drift < threshold → HOLD (already near target)
+    dict[str, float]  {sleeve_name: blend_factor}
+        0.0 = HOLD (drift below 1.5% threshold)
+        1.0 = FULL REBALANCE (drift above 4.5% threshold)
+        0.0..1.0 = graded blend (linear between thresholds)
     """
-    from regime.regime_config import TRANSITION
-    _THRESHOLD = float(TRANSITION.get("min_rebalance_threshold", 0.03))
     sleeve_names = list(regime_strengths.keys())
 
-    # Fallback: no usable broker data → always rebalance all sleeves
+    # Fallback: no usable broker data → always full rebalance all sleeves
     if (
         not sleeve_names
         or broker_positions is None
@@ -3752,10 +3904,10 @@ def compute_sleeve_drift(
     ):
         for name in sleeve_names:
             logger.info(
-                "[DRIFT] %s: current=n/a target=%.2f drift=n/a \u2192 REBALANCE (no broker data)",
+                "[DRIFT] %s: current=n/a target=%.2f drift=n/a → REBALANCE blend=1.00 (no broker data)",
                 name, regime_strengths.get(name, 0.0),
             )
-        return {name: True for name in sleeve_names}
+        return {name: 1.0 for name in sleeve_names}
 
     # Build ticker → {sleeve_name: share} from sleeve_outputs.
     # When the same ticker appears in multiple sleeves, split the live broker
@@ -3819,22 +3971,27 @@ def compute_sleeve_drift(
             if sname in sleeve_mv and share > WEIGHT_TOLERANCE:
                 sleeve_mv[sname] += mv * share
 
-    # Compute drift and emit one log line per sleeve
-    result: "dict[str, bool]" = {}
+    # Compute drift and emit one log line per sleeve (graded blend)
+    result: "dict[str, float]" = {}
     for sname, target in regime_strengths.items():
         current = sleeve_mv.get(sname, 0.0) / broker_equity
         drift = abs(current - target)
-        rebalance = drift >= _THRESHOLD
-        result[sname] = rebalance
-        if rebalance:
+        blend = _drift_blend(drift)
+        result[sname] = blend
+        if blend >= 1.0:
             logger.info(
-                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f \u2192 REBALANCE",
+                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f → REBALANCE blend=1.00",
                 sname, current, target, drift,
+            )
+        elif blend <= 0.0:
+            logger.info(
+                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f → HOLD blend=0.00 (below %.0f%% threshold)",
+                sname, current, target, drift, _DRIFT_HOLD_THRESHOLD * 100,
             )
         else:
             logger.info(
-                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f \u2192 HOLD (below %.0f%% threshold)",
-                sname, current, target, drift, _THRESHOLD * 100,
+                "[DRIFT] %s: current=%.2f target=%.2f drift=%.2f → BLEND=%.2f (partial rebalance)",
+                sname, current, target, drift, blend,
             )
     return result
 
@@ -3842,21 +3999,31 @@ def compute_sleeve_drift(
 def apply_regime_strengths_to_sleeves(
     sleeve_outputs: "list[SleeveOutput]",
     regime_strengths: "dict[str, float]",
-    drift_flags: "dict[str, bool] | None" = None,
+    drift_blends: "dict[str, float] | None" = None,
 ) -> None:
-    """Apply regime target strengths without letting HOLD sleeves use stale bases.
+    """Apply regime target strengths blended by drift gate.
 
-    ``drift_flags`` remains part of the diagnostics path, but a below-threshold
-    sleeve must still be anchored to the regime target. Otherwise base strengths
-    such as 1.0/1.0 get renormalized into unintended 50/50 allocations.
+    ``drift_blends`` maps sleeve_name → blend_factor in [0.0, 1.0]:
+      - 0.0 → HOLD: keep prior (current) strength unchanged.
+      - 1.0 → FULL: take full regime target strength.
+      - 0.0..1.0 → linear blend: prior * (1-blend) + target * blend.
+
+    When ``drift_blends`` is None or a sleeve has no entry, falls back to
+    applying the full regime target (blend=1.0). This preserves the prior
+    behaviour when broker data is unavailable and also ensures regime
+    strengths such as 1.0/1.0 are not silently renormalized into stale
+    50/50 allocations.
     """
-    _ = drift_flags
     for sleeve_output in sleeve_outputs:
         sname = sleeve_output.meta.sleeve_name
         target_strength = regime_strengths.get(sname)
         if target_strength is None:
             continue
-        sleeve_output.meta.strength = float(target_strength)
+        blend = float((drift_blends or {}).get(sname, 1.0))
+        blend = max(0.0, min(1.0, blend))
+        prior = float(getattr(sleeve_output.meta, "strength", target_strength) or target_strength)
+        blended = prior * (1.0 - blend) + float(target_strength) * blend
+        sleeve_output.meta.strength = blended
 
 
 # ============================================================
@@ -6359,16 +6526,20 @@ def main(argv: list[str] | None = None):
         if _safe_df(getattr(so, "positions_df", pd.DataFrame())).get("target_weight", pd.Series(dtype=float)).abs().sum() > WEIGHT_TOLERANCE
     ]
     _regime_strengths = resolve_regime_strengths(_regime_today, _active_sleeve_names)
-    _drift_flags = compute_sleeve_drift(
+    _drift_blends = compute_sleeve_drift(
         broker_positions=_broker_positions_for_drift,
         broker_equity=_broker_equity_for_drift,
         sleeve_outputs=_active_sleeve_outputs,
         regime_strengths=_regime_strengths,
     )
+    # Convert blend factors to boolean flags for downstream consumers that
+    # expect dict[str, bool] (live_regime_review, serialization).
+    # A blend of 0.0 = HOLD (False); any positive blend = some rebalance (True).
+    _drift_flags = {k: (v > 0.0) for k, v in _drift_blends.items()}
     apply_regime_strengths_to_sleeves(
         _active_sleeve_outputs,
         _regime_strengths,
-        _drift_flags,
+        _drift_blends,
     )
     _preview_allocations = _preview_sleeve_allocations(_active_sleeve_outputs)
     _resized_outputs_by_name: dict[str, SleeveOutput] = {}
@@ -6424,6 +6595,10 @@ def main(argv: list[str] | None = None):
         routed_weight = float(alloc_result.sleeve_allocations["sleeve_trend"])
         freed_weight += routed_weight
         alloc_result.sleeve_allocations["sleeve_trend"] = 0.0
+        logger.error(
+            "[CASH_ROUTE] sleeve=sleeve_trend routed_weight=%.4f (%.1f%%) reason=%s",
+            routed_weight, routed_weight * 100, trend_reason or "sleeve_invalid",
+        )
         sleeve_cash_routes.append(
             {
                 "sleeve_id": "sleeve_trend",
@@ -6442,22 +6617,38 @@ def main(argv: list[str] | None = None):
         not s2_valid
         and alloc_result.sleeve_allocations.get("sleeve_2", 0.0) > WEIGHT_TOLERANCE
     ):
-        freed_weight += alloc_result.sleeve_allocations["sleeve_2"]
+        _s2_routed = float(alloc_result.sleeve_allocations["sleeve_2"])
+        freed_weight += _s2_routed
         alloc_result.sleeve_allocations["sleeve_2"] = 0.0
+        logger.error(
+            "[CASH_ROUTE] sleeve=sleeve_2 routed_weight=%.4f (%.1f%%) reason=%s",
+            _s2_routed, _s2_routed * 100, s2_reason or "sleeve_invalid",
+        )
         patched = True
     if (
         not cm_valid
         and alloc_result.sleeve_allocations.get("charlie_munger", 0.0) > WEIGHT_TOLERANCE
     ):
-        freed_weight += alloc_result.sleeve_allocations["charlie_munger"]
+        _cm_routed = float(alloc_result.sleeve_allocations["charlie_munger"])
+        freed_weight += _cm_routed
         alloc_result.sleeve_allocations["charlie_munger"] = 0.0
+        logger.error(
+            "[CASH_ROUTE] sleeve=charlie_munger routed_weight=%.4f (%.1f%%) reason=%s",
+            _cm_routed, _cm_routed * 100, cm_reason or "sleeve_invalid",
+        )
         patched = True
     if (
         not defensive_valid
         and alloc_result.sleeve_allocations.get(DEFENSIVE_SLEEVE_NAME, 0.0) > WEIGHT_TOLERANCE
     ):
-        freed_weight += alloc_result.sleeve_allocations[DEFENSIVE_SLEEVE_NAME]
+        _def_routed = float(alloc_result.sleeve_allocations[DEFENSIVE_SLEEVE_NAME])
+        freed_weight += _def_routed
         alloc_result.sleeve_allocations[DEFENSIVE_SLEEVE_NAME] = 0.0
+        logger.error(
+            "[CASH_ROUTE] sleeve=%s routed_weight=%.4f (%.1f%%) reason=%s",
+            DEFENSIVE_SLEEVE_NAME, _def_routed, _def_routed * 100,
+            defensive_reason or "sleeve_invalid",
+        )
         patched = True
     if patched:
         _old_allocs = dict(alloc_result.sleeve_allocations)
@@ -6544,6 +6735,28 @@ def main(argv: list[str] | None = None):
     trade_date_str = report_date.strftime("%Y-%m-%d")
     if _RUN_CONTEXT is not None and not _RUN_CONTEXT.report_date:
         _RUN_CONTEXT.report_date = trade_date_str
+    # ── Regime state artifact ──────────────────────────────────────
+    _final_target_count = int(
+        len(
+            {
+                str(t).strip().upper()
+                for t in (_safe_df(getattr(alloc_result, "combined_weights", pd.DataFrame()))
+                          .get("ticker", pd.Series(dtype=str))
+                          .tolist())
+                if str(t).strip().upper() not in ("", CASH_TICKER)
+            }
+        )
+    )
+    write_regime_state_artifact(
+        report_date=trade_date_str,
+        regime_summary=regime_summary,
+        vix_regime=_vix_regime,
+        regime_strengths=_regime_strengths,
+        drift_blends=_drift_blends,
+        sleeve_cash_routes=sleeve_cash_routes,
+        final_target_count=_final_target_count,
+        repo_root=Path(__file__).resolve().parent,
+    )
     pretrade_broker_capture = _capture_pretrade_broker_snapshot(
         trade_date=trade_date_str,
         paper_requested=paper_requested,

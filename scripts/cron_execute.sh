@@ -143,6 +143,8 @@ echo "lane_params_fingerprint=${CAERUS_LANE_PARAMS_FINGERPRINT}"
 echo "capital_cap_pin=${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "min_trade_usd=${CAERUS_LIVE_PILOT_MIN_TRADE_USD}"
+_DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
+echo "deployed_sha=${_DEPLOY_SHA}"
 
 RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
 DRY_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_cron_dry"
