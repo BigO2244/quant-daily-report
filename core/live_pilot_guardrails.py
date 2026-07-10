@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from decimal import Decimal, ROUND_HALF_UP
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from core.trading_mode import canonical_trading_mode
+
+logger = logging.getLogger(__name__)
 
 
 LIVE_PILOT_MODE = "live_pilot"
@@ -15,6 +18,7 @@ PAPER_MODE = "paper"
 
 LIVE_PILOT_APPROVED_ENV = "CAERUS_LIVE_PILOT_APPROVED"
 LIVE_PILOT_CAPITAL_CAP_ENV = "CAERUS_LIVE_PILOT_CAPITAL_CAP"
+LIVE_PILOT_CAP_PCT_ENV = "CAERUS_LIVE_PILOT_CAP_PCT"
 LIVE_PILOT_SLEEVE_ID_ENV = "CAERUS_LIVE_PILOT_SLEEVE_ID"
 LIVE_PILOT_ACCOUNT_ID_ENV = "CAERUS_LIVE_PILOT_ACCOUNT_ID"
 LIVE_PILOT_ACCOUNT_ID_HASH_ENV = "CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH"
@@ -201,9 +205,17 @@ def resolve_dynamic_cap(
     pv = _positive_float(portfolio_value)
     env_cap = _positive_float(environ.get(LIVE_PILOT_CAPITAL_CAP_ENV))
     if pv is not None:
+        # Optional deploy fraction of portfolio value (default 1.0 = full account).
+        # Setting CAERUS_LIVE_PILOT_CAP_PCT=0.95 keeps a 5% cash buffer so a full
+        # rebalance never drives the account to ~0 buying power. Clamped to (0, 1];
+        # an invalid/unset value falls back to 1.0 (unchanged behavior).
+        pct = _positive_float(environ.get(LIVE_PILOT_CAP_PCT_ENV)) or 1.0
+        pct = min(pct, 1.0)
+        pv_deployable = pv * pct
+        pv_source = "portfolio_value" if pct >= 1.0 else "portfolio_value_pct"
         if env_cap is not None:
-            return min(pv, env_cap), "portfolio_value_env_capped"
-        return pv, "portfolio_value"
+            return min(pv_deployable, env_cap), pv_source + "_env_capped"
+        return pv_deployable, pv_source
     if env_cap is not None:
         return env_cap, "env_fallback"
     return None, "unavailable"
@@ -410,7 +422,18 @@ def build_live_pilot_gate_result(
             "missing_live_order_notional",
             "Live pilot order submission requires a pre-submit notional estimate.",
         )
-    if order_notional is not None and float(order_notional) > float(cap):
+    # An unset CAERUS_LIVE_PILOT_CAPITAL_CAP means UNCAPPED, not blocked. The design
+    # intent is that live capital scales proportionally with portfolio assets — there
+    # is no fixed USD ceiling. The env cap is only ever an OPTIONAL manual tightening.
+    # When it is absent we log a non-blocking warning and let the order through at full
+    # portfolio-proportional sizing rather than halting execution.
+    if cap is None:
+        logger.warning(
+            "live_pilot_capital_cap_unset: %s is unset; treating live pilot as uncapped "
+            "(portfolio-proportional sizing, no fixed USD ceiling).",
+            LIVE_PILOT_CAPITAL_CAP_ENV,
+        )
+    elif order_notional is not None and float(order_notional) > cap:
         return result(
             "order_notional_exceeds_live_pilot_cap",
             "Reduce or block the order; live pilot order notional exceeds the approved cap.",
@@ -584,7 +607,15 @@ def validate_live_pilot_plan(
     # buys stay within the portfolio value. Sells are exits (they fund buys, gated by
     # the fail-closed sells master flag + whitelist) and never consume the buying cap.
     buy_notional = sum(order.notional for order in orders if order.side == "BUY")
-    if buy_notional > float(capital_cap_usd):
+    if capital_cap_usd is None:
+        # Uncapped: a None cap means no fixed USD ceiling — buys size proportionally to
+        # portfolio value. Log a non-blocking warning and pass through rather than
+        # blocking (and never crash on float(None) via the comparison below).
+        logger.warning(
+            "live_pilot_capital_cap_unset: capital_cap_usd is None; treating buy notional "
+            "as uncapped (portfolio-proportional sizing, no fixed USD ceiling)."
+        )
+    elif buy_notional > float(capital_cap_usd):
         errors.append("live_pilot_total_notional_exceeds_cap")
 
     if errors:

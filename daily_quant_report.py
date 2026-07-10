@@ -4289,6 +4289,7 @@ def build_daily_snapshot(
     # top-N highest-conviction names, conviction-weighted, cap per name. Regime/sleeve
     # scoring upstream is untouched; cash becomes the residual after concentration and
     # honors the engine's cash weight (risk-off) as a floor.
+    _broad_book = None
     if _concentrated_alpha_enabled() and not weights_df.empty:
         _broad_book = weights_df.copy()
         try:
@@ -4432,6 +4433,51 @@ def build_daily_snapshot(
         signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
         signal_store_df["ticker"] = signal_store_df["ticker"].astype(str)
         persist_signal_snapshot(signal_store_df, report_date.strftime("%Y-%m-%d"))
+    # LIVE broad-target artifact: emit the pre-concentration book through the SAME
+    # exposure overlay so the live lane can rebalance to the full precompute universe
+    # by affordability instead of the concentrated top-N prorate. Paper keeps reading
+    # signals.json. Skipped when concentration is off (signals.json is already broad)
+    # or when the strategy chose all-cash. Non-fatal: on failure live falls back.
+    broad_signals_path = None
+    if _broad_book is not None and not _broad_book.empty and float(target_cash_weight_today) < 1.0:
+        try:
+            _broad_overlay = apply_portfolio_exposure_overlay(
+                _broad_book, exposure_today, cash_ticker="CASH"
+            )
+            if isinstance(_broad_overlay, pd.DataFrame) and not _broad_overlay.empty:
+                _broad_non_cash = _broad_overlay[
+                    _broad_overlay["ticker"].astype(str) != CASH_TICKER
+                ].copy()
+                _broad_non_cash = _broad_non_cash[
+                    _broad_non_cash["target_weight"].abs() > WEIGHT_TOLERANCE
+                ].copy()
+            else:
+                _broad_non_cash = pd.DataFrame()
+            _broad_invested = (
+                float(_broad_non_cash["target_weight"].sum())
+                if not _broad_non_cash.empty
+                else 0.0
+            )
+            _broad_cash_target = max(0.0, min(1.0, 1.0 - _broad_invested))
+            if not _broad_non_cash.empty:
+                broad_signals_path = write_signals_snapshot(
+                    df_targets=_broad_non_cash,
+                    run_date=run_date_str,
+                    asof_date=str(cutoff_date) if cutoff_date else None,
+                    out_dir="signals_broad",
+                    cash_target_weight=float(_broad_cash_target),
+                    sleeve_col="sleeve",
+                    extra=breaker_block,
+                )
+                logger.info(
+                    "[LIVE_BROAD] wrote broad signals snapshot (%d names, cash=%.3f): %s",
+                    len(_broad_non_cash), _broad_cash_target, broad_signals_path,
+                )
+        except Exception:
+            logger.exception(
+                "[LIVE_BROAD] failed writing broad signals snapshot; live falls back to signals.json"
+            )
+            broad_signals_path = None
     tickers = (
         sorted(
             weights_df.loc[weights_df["ticker"].astype(str) != CASH_TICKER, "ticker"].unique().tolist()
@@ -4849,6 +4895,7 @@ def build_daily_snapshot(
         "skipped_trades": alloc_result.skipped_trades if alloc_result else [],
         "s2_no_picks": s2_no_picks,
         "signals_snapshot_path": signals_path,
+        "signals_broad_snapshot_path": broad_signals_path,
         "charlie_munger": (cm_details or {}).get("signals", {}),
         "charlie_munger_benchmark": {**((cm_details or {}).get("benchmark", {}) or {}), "sleeve_cumulative_return": ((cm_details or {}).get("sleeve_stats", {}) or {}).get("cumulative_return")},
         "regime_summary": regime_summary or {},
@@ -7308,12 +7355,18 @@ def main(argv: list[str] | None = None):
             if signals_path_exec and os.path.exists(signals_path_exec):
                 with open(signals_path_exec, "r", encoding="utf-8") as _signals_f:
                     signals_payload = json.load(_signals_f)
+            signals_broad_payload = None
+            _broad_snapshot_path = (daily_snapshot or {}).get("signals_broad_snapshot_path")
+            if _broad_snapshot_path and os.path.exists(str(_broad_snapshot_path)):
+                with open(str(_broad_snapshot_path), "r", encoding="utf-8") as _broad_f:
+                    signals_broad_payload = json.load(_broad_f)
             precompute_contract_path = write_precompute_bundle(
                 trade_date=trade_date_str,
                 run_id=str((paper_summary or {}).get("run_id") or (_RUN_CONTEXT.run_id if _RUN_CONTEXT is not None else "")),
                 mode=canonical_trading_mode_label(trading_mode_norm),
                 daily_snapshot=daily_snapshot,
                 signals_payload=signals_payload,
+                signals_broad_payload=signals_broad_payload,
                 execution_payload=execution_payload,
                 allow_overwrite=True,
             )
