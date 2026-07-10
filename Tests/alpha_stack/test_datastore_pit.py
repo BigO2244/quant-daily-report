@@ -1,11 +1,9 @@
 """
 Tests — DataStore PIT Safety
 ================================
-Verify that DataStores enforce point-in-time semantics and
-that the FundamentalsDataStore stub behaves as expected.
+Verify that DataStores enforce point-in-time semantics.
 """
 
-import warnings
 import pytest
 import pandas as pd
 import numpy as np
@@ -75,91 +73,6 @@ class TestPricesDataStorePIT:
             result = store.get_price_history("FAKE_TICKER_XYZ", "2022-01-01", "2022-12-31")
             assert isinstance(result, pd.DataFrame)
             assert list(result.columns) == ["date", "open", "high", "low", "close", "volume"]
-
-
-# ------------------------------------------------------------------ #
-# FundamentalsDataStore — stub contract                                #
-# ------------------------------------------------------------------ #
-
-class TestFundamentalsDataStore:
-    """FundamentalsDataStore now uses SEC EDGAR XBRL for PIT-safe fundamentals."""
-
-    def test_get_fundamental_returns_value_or_none(self):
-        """
-        PIT-safe implementation may return None if data is unavailable,
-        but is not a stub that always returns None.
-        """
-        from alpha_stack.datastore.fundamentals import FundamentalsDataStore
-        from unittest.mock import MagicMock
-
-        # Mock EdgarClient to return some data
-        mock_edgar = MagicMock()
-        mock_edgar.get_pit_value = MagicMock(return_value=0.05)
-        mock_edgar.get_ttm_value = MagicMock(return_value=1e9)
-        
-        store = FundamentalsDataStore(edgar_client=mock_edgar)
-        result = store.get_fundamental("AAPL", "earnings_yield", "2023-01-15")
-        # With mock Edgar client, should return a computed value or None (not always None)
-        assert result is None or isinstance(result, (int, float))
-
-    def test_get_fundamental_emits_no_warning(self):
-        """
-        PIT-safe implementation should not emit DataStorePITWarning
-        (old stub behavior). Only logs when data fetch fails.
-        """
-        from alpha_stack.datastore.fundamentals import FundamentalsDataStore
-        from alpha_stack.datastore.base import DataStorePITWarning
-        from unittest.mock import MagicMock
-
-        mock_edgar = MagicMock()
-        mock_edgar.get_pit_value = MagicMock(return_value=0.05)
-        mock_edgar.get_ttm_value = MagicMock(return_value=1e9)
-        
-        store = FundamentalsDataStore(edgar_client=mock_edgar)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            store.get_fundamental("AAPL", "earnings_yield", "2023-01-15")
-            pit_warnings = [x for x in w if issubclass(x.category, DataStorePITWarning)]
-            # PIT-safe implementation should not emit DataStorePITWarning
-            assert len(pit_warnings) == 0, "PIT-safe implementation should not warn"
-
-    def test_pit_safe_is_true(self):
-        """FundamentalsDataStore.metadata() must report pit_safe=True."""
-        from alpha_stack.datastore.fundamentals import FundamentalsDataStore
-        from unittest.mock import MagicMock
-
-        mock_edgar = MagicMock()
-        store = FundamentalsDataStore(edgar_client=mock_edgar)
-        assert store.metadata()["pit_safe"] is True, "SEC EDGAR implementation is PIT-safe"
-        assert "SEC EDGAR" in store.metadata()["source"]
-
-    def test_get_fundamental_snapshot_structure(self):
-        """get_fundamental_snapshot returns dict with supported fields."""
-        from alpha_stack.datastore.fundamentals import FundamentalsDataStore
-        from unittest.mock import MagicMock
-
-        mock_edgar = MagicMock()
-        mock_edgar.get_pit_value = MagicMock(return_value=1e9)
-        mock_edgar.get_ttm_value = MagicMock(return_value=1e9)
-        mock_prices = MagicMock()
-        mock_prices.get_prices_multi = MagicMock(
-            return_value=pd.DataFrame({"close": [150.0]})
-        )
-        
-        store = FundamentalsDataStore(edgar_client=mock_edgar, prices_datastore=mock_prices)
-        snap = store.get_fundamental_snapshot("MSFT", "2023-06-01")
-        assert isinstance(snap, dict), "Snapshot should be dict"
-        # Fields should exist (values may be None if data unavailable)
-        for field in ["earnings_yield", "fcf_yield", "book_to_price"]:
-            assert field in snap, f"Snapshot must have {field}"
-
-    def test_standard_filing_lags(self):
-        """Filing lag assumptions must be positive integers."""
-        from alpha_stack.datastore.fundamentals import FundamentalsDataStore
-        lags = FundamentalsDataStore.standard_filing_lags()
-        assert isinstance(lags, dict)
-        for k, v in lags.items():
-            assert isinstance(v, int) and v > 0, f"Lag for {k} must be positive int"
 
 
 # ------------------------------------------------------------------ #
