@@ -70,9 +70,8 @@ def make_fred_data(n=500, regime="normal") -> pd.DataFrame:
     else:
         curve = np.random.uniform(0.2, 0.8, n)
         hy    = np.random.uniform(350, 500, n)
-    fed   = np.random.uniform(4.0, 5.5, n)
     return pd.DataFrame(
-        {"yield_curve_2s10s": curve, "hy_oas": hy, "fed_funds": fed},
+        {"yield_curve_2s10s": curve, "hy_oas": hy},
         index=pd.DatetimeIndex(dates),
     )
 
@@ -94,7 +93,7 @@ class TestBuildIndicators:
             "spy_vs_50d", "spy_vs_200d", "ma50_vs_ma200", "spy_ret_63d",
             "vix", "vix_vs_ma63", "vix_spike_10d",
             "pct_above_200d", "pct_above_50d",
-            "yield_curve_2s10s", "hy_oas", "fed_funds",
+            "yield_curve_2s10s", "hy_oas",
         ]
         expected_ewm = [f"{c}_ewm" for c in expected_raw if c != "vix_spike_10d"]
 

@@ -116,7 +116,6 @@ TRANSITION = {
 FRED_SERIES = {
     "yield_curve_2s10s":  "T10Y2Y",         # 10Y minus 2Y Treasury spread
     "hy_oas":             "BAMLH0A0HYM2",   # HY OAS (bps)
-    "fed_funds":          "DFF",            # Daily effective fed funds rate
 }
 
 # ---------------------------------------------------------------------------

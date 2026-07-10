@@ -21,13 +21,13 @@ Usage:
     series = ms.get_series('BAMLH0A0HYM2', '2020-01-01', '2022-12-31')
 
     # Latest available observation (no PIT gate)
-    vix = ms.get_latest('VIXCLS')
+    hy = ms.get_latest('BAMLH0A0HYM2')
 
     # Multiple series as a wide DataFrame as of one date
-    snap = ms.get_many(['T10Y2Y', 'BAMLH0A0HYM2', 'DFF'], '2022-06-30')
+    snap = ms.get_many(['T10Y2Y', 'BAMLH0A0HYM2'], '2022-06-30')
 
     # Wide DataFrame over a date range (for regime engine)
-    macro_df = ms.get_frame(['T10Y2Y', 'BAMLH0A0HYM2', 'DFF'],
+    macro_df = ms.get_frame(['T10Y2Y', 'BAMLH0A0HYM2'],
                             '2005-01-01', '2022-12-31')
 """
 
@@ -134,8 +134,8 @@ class MacroStore:
         s_pit = s[s.index <= end_ts]
 
         # Reindex to business daily grid, then forward-fill from source
-        # This correctly handles monthly series (CPIAUCSL, UNRATE) and
-        # daily series (DFF, T10Y2Y) alike
+        # This correctly handles monthly and daily series (T10Y2Y,
+        # BAMLH0A0HYM2) alike
         aligned = s_pit.reindex(
             s_pit.index.union(dates)
         ).sort_index()

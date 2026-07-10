@@ -51,8 +51,6 @@ INDICATOR_COLS = [
     "yield_curve_2s10s_ewm",
     "hy_oas",
     "hy_oas_ewm",
-    "fed_funds",
-    "fed_funds_ewm",
 ]
 
 
@@ -72,7 +70,7 @@ def _print_header(title: str) -> None:
 def _print_macro_freshness() -> None:
     store = MacroStore(REPO_ROOT / "data" / "macro")
     _print_header("Macro Coverage")
-    for series_id in ["T10Y2Y", "BAMLH0A0HYM2", "DFF"]:
+    for series_id in ["T10Y2Y", "BAMLH0A0HYM2"]:
         coverage = store.coverage(series_id)
         latest = store.get_latest(series_id)
         print(

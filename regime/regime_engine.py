@@ -47,7 +47,7 @@ from regime.regime_config import FRED_SERIES
 logger = logging.getLogger(__name__)
 
 # ── Required FRED series for the regime engine ──────────────────────────────
-_REQUIRED_MACRO_SERIES = {"T10Y2Y", "BAMLH0A0HYM2", "DFF"}
+_REQUIRED_MACRO_SERIES = {"T10Y2Y", "BAMLH0A0HYM2"}
 
 
 class MacroStoreFredAdapter:

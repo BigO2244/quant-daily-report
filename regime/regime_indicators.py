@@ -11,7 +11,7 @@ Inputs:
     universe_prices: DataFrame with columns [date, ticker, close] —
                      your existing 200-ticker universe
     fred_data   : Wide DataFrame indexed by date with columns:
-                  [yield_curve_2s10s, hy_oas, fed_funds]
+                  [yield_curve_2s10s, hy_oas]
                   (produced by FredClient.fetch_many)
 
 Output (from build_indicators):
@@ -62,7 +62,6 @@ def build_indicators(
     MACRO dimension
         yield_curve_2s10s   : 10Y-2Y spread in pct pts (from FRED)
         hy_oas              : HY OAS in bps (from FRED)
-        fed_funds           : Fed funds rate (from FRED)
 
     Each column also has an _ewm companion smoothed per EWM_SPANS config.
     """
@@ -185,7 +184,7 @@ def _compute_macro(fred: pd.DataFrame) -> pd.DataFrame:
     fred: wide DataFrame indexed by date with columns matching FRED_SERIES keys.
     Passes through as-is; smoothing happens in the EWM layer.
     """
-    expected = ["yield_curve_2s10s", "hy_oas", "fed_funds"]
+    expected = ["yield_curve_2s10s", "hy_oas"]
     missing = [c for c in expected if c not in fred.columns]
     if missing:
         logger.warning("FRED data missing columns: %s — will be NaN", missing)
@@ -221,7 +220,6 @@ def _add_ewm_columns(df: pd.DataFrame) -> pd.DataFrame:
         # macro indicators → macro span
         "yield_curve_2s10s": "macro",
         "hy_oas":            "macro",
-        "fed_funds":         "macro",
     }
 
     new_cols = {}
