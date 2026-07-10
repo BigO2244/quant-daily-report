@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from brokers.alpaca_broker import AlpacaBroker
+from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
 from core.live_trade_ledger import record_live_order
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
@@ -1303,7 +1303,13 @@ class LivePilotCoreAdapter:
 
     def _client_order_id(self, intent: OrderIntent) -> str:
         self._sequence += 1
-        return f"caerus-live-pilot-{self.run_id}-{self._sequence}-{intent.symbol}".lower()[:48]
+        # Hash-collapse to a UNIQUE <=48-char id. Naive [:48] truncation dropped the
+        # -{seq}-{symbol} suffix (run_id alone fills the 48 chars), so every order in a
+        # run shared one client_order_id and the broker rejected all but the first as
+        # "client_order_id must be unique" (2026-07-10 live incident).
+        return alpaca_client_order_id(
+            f"caerus-live-pilot-{self.run_id}-{self._sequence}-{intent.symbol}".lower()
+        )
 
     def _policy(self, intent: OrderIntent) -> dict[str, Any]:
         source = self.source_by_symbol.get(intent.symbol, {})

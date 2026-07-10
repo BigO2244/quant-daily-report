@@ -473,6 +473,21 @@ def validate_live_pilot_submission_guardrails(
     )
 
 
+def _bounded_client_order_id(raw: str) -> str:
+    """Return a UNIQUE, broker-safe client_order_id <=48 ASCII chars.
+
+    Mirrors brokers.alpaca_broker.alpaca_client_order_id (kept local to avoid a
+    core->brokers import cycle). Plain [:48] truncation is NOT safe: the
+    "caerus-live-pilot-{run_id}" prefix alone fills 48 chars, so the unique
+    -{index}-{symbol} suffix is chopped and every order in a run collides ->
+    broker rejects all but the first as "client_order_id must be unique".
+    """
+    text = str(raw or "").strip()
+    if text and len(text) <= 48 and all(32 <= ord(ch) <= 126 for ch in text):
+        return text
+    return "qd:" + hashlib.sha1(text.encode("utf-8")).hexdigest()[:45]
+
+
 def _clean_symbol(value: object) -> str:
     return str(value or "").strip().upper()
 
@@ -587,7 +602,9 @@ def validate_live_pilot_plan(
                 qty=float(qty),
                 limit_price=float(normalized_limit_price),
                 notional=notional,
-                client_order_id=f"caerus-live-pilot-{run_id}-{index}-{symbol}".lower()[:48],
+                client_order_id=_bounded_client_order_id(
+                    f"caerus-live-pilot-{run_id}-{index}-{symbol}".lower()
+                ),
                 order_type=order_type,
                 expected_price=float(normalized_limit_price),
                 original_limit_price=original_limit_price,
