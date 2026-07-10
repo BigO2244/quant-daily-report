@@ -3717,7 +3717,7 @@ def write_regime_state_artifact(
     regime_strengths: "dict[str, float]",
     drift_blends: "dict[str, float]",
     sleeve_cash_routes: "list[dict]",
-    final_target_count: int,
+    pre_concentration_target_count: int,
     repo_root: "Path | None" = None,
 ) -> "Path | None":
     """Write outputs/workflow/<REPORT_DATE>/regime_state.json.
@@ -3725,6 +3725,12 @@ def write_regime_state_artifact(
     Also logs a single concise human-readable REGIME summary block and, when a
     previous-trading-day artifact exists, appends a 'changes' list of fields that
     differ from the prior run.
+
+    ``pre_concentration_target_count`` is the ticker count from the broad-book
+    ``alloc_result.combined_weights`` BEFORE the concentrated-alpha step reduces
+    it to top-N names.  Concentration is always ON so this value overstates the
+    number of names actually traded — it is preserved as provenance for diagnosis
+    (how many candidates existed before narrowing).
 
     All exceptions are caught and logged — never raises.
     """
@@ -3779,7 +3785,7 @@ def write_regime_state_artifact(
                 }
                 for r in (sleeve_cash_routes or [])
             ],
-            "final_target_count": int(final_target_count),
+            "pre_concentration_target_count": int(pre_concentration_target_count),
         }
 
         # Load previous trading-day artifact for diff
@@ -3826,7 +3832,7 @@ def write_regime_state_artifact(
             "REGIME | vix=%.1f %s | composite=%s | N=%d (src=%s) | %s"
             " | drift_blends: %s%s | targets=%d",
             vix_val, vix_label, composite_regime, conc_n, conc_source,
-            strength_log, blend_log, cash_log, int(final_target_count),
+            strength_log, blend_log, cash_log, int(pre_concentration_target_count),
         )
         if state.get("changes"):
             logger.info("[REGIME_STATE] changes vs prev day: %s", "; ".join(state["changes"]))
@@ -6755,7 +6761,7 @@ def main(argv: list[str] | None = None):
         regime_strengths=_regime_strengths,
         drift_blends=_drift_blends,
         sleeve_cash_routes=sleeve_cash_routes,
-        final_target_count=_final_target_count,
+        pre_concentration_target_count=_final_target_count,
         repo_root=Path(__file__).resolve().parent,
     )
     pretrade_broker_capture = _capture_pretrade_broker_snapshot(

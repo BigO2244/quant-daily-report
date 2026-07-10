@@ -27,7 +27,7 @@ class WriteRegimeStateArtifactTests(unittest.TestCase):
             regime_strengths={"sleeve_trend": 0.60, "sleeve_2": 0.25, "sleeve_quality": 0.15},
             drift_blends={"sleeve_trend": 1.0, "sleeve_2": 0.5, "sleeve_quality": 0.0},
             sleeve_cash_routes=[],
-            final_target_count=6,
+            pre_concentration_target_count=6,
             repo_root=tmp_root,
         )
         kwargs.update(overrides)
@@ -69,12 +69,15 @@ class WriteRegimeStateArtifactTests(unittest.TestCase):
             self.assertAlmostEqual(data["drift_blends"]["sleeve_2"], 0.5, places=5)
             self.assertAlmostEqual(data["drift_blends"]["sleeve_quality"], 0.0, places=5)
 
-    def test_final_target_count_present(self) -> None:
+    def test_pre_concentration_target_count_present(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             path = self._call(tmp)
             data = json.loads(path.read_text())
-            self.assertEqual(data["final_target_count"], 6)
+            self.assertEqual(data["pre_concentration_target_count"], 6)
+            # The old "final_target_count" field was misleading — concentration is
+            # always ON so the alloc_result count is pre-concentration.
+            self.assertNotIn("final_target_count", data)
 
     def test_cash_routes_serialized(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -135,7 +138,7 @@ class WriteRegimeStateArtifactTests(unittest.TestCase):
                 "sleeve_strengths": {"sleeve_trend": 0.20, "sleeve_2": 0.40, "sleeve_quality": 0.40},
                 "drift_blends": {"sleeve_trend": 1.0, "sleeve_2": 1.0, "sleeve_quality": 1.0},
                 "cash_routes": [],
-                "final_target_count": 3,
+                "pre_concentration_target_count": 3,
             }
             (prev_dir / "regime_state.json").write_text(json.dumps(prev_state))
 
@@ -175,7 +178,7 @@ class WriteRegimeStateArtifactTests(unittest.TestCase):
                 "sleeve_strengths": {"sleeve_trend": 0.60, "sleeve_2": 0.25, "sleeve_quality": 0.15},
                 "drift_blends": {"sleeve_trend": 1.0, "sleeve_2": 0.5, "sleeve_quality": 0.0},
                 "cash_routes": [],
-                "final_target_count": 6,
+                "pre_concentration_target_count": 6,
             }
             (prev_dir / "regime_state.json").write_text(json.dumps(prev_state))
 
