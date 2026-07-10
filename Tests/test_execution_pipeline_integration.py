@@ -36,9 +36,18 @@ def test_cron_execute_self_heal_invokes_precompute_recovery_mode() -> None:
     assert '"${REPO_ROOT}/scripts/cron_precompute.sh"' in text
     assert "execution_self_heal.json" in text
     assert "execution halted to avoid degraded bundle execution" in text
-    assert "run_precomputed_alpaca_execution" in text.split("precompute bundle validation failed after self-heal", 1)[-1]
-    assert "export PRECOMPUTE_EXECUTE_EXACT_PLAN=1" in text
-    assert "EXECUTION_SOURCE=planned_payload_exact" in text
+    # Unified paper lane: the shared engine (plan builder + executor) is only
+    # invoked AFTER the self-heal gate; a failed self-heal halts before it.
+    assert (
+        "live_pilot_build_plan_from_precompute.py"
+        in text.split("precompute bundle validation failed after self-heal", 1)[-1]
+    )
+    assert "scripts/live_pilot_execute.py" in text
+    # The dormant legacy engine must not be invoked (comments may mention it).
+    code_lines = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "run_precomputed_alpaca_execution" not in code_lines
 
 
 def test_cron_precompute_self_heal_suppresses_noncritical_side_effects() -> None:

@@ -51,8 +51,11 @@ def test_cron_execute_requires_validated_precompute_bundle_and_exact_plan() -> N
 
     assert "core.precompute_bundle_validation" in cron_execute
     assert "execution_bundle_validation.json" in cron_execute
-    assert "export PRECOMPUTE_EXECUTE_EXACT_PLAN=1" in cron_execute
-    assert "python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0" in cron_execute
+    # Unified paper lane: the shared live-pilot engine executes the plan built
+    # from the validated precompute bundle; the legacy exact-payload module
+    # (run_precomputed_alpaca_execution) is dormant and no longer invoked.
+    assert "scripts/live_pilot_build_plan_from_precompute.py" in cron_execute
+    assert "scripts/live_pilot_execute.py" in cron_execute
 
 
 def test_cron_confirm_remains_execution_result_email_authority() -> None:

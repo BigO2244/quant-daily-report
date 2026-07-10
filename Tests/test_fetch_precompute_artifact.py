@@ -458,13 +458,30 @@ class TestWorkflowYAMLContracts:
         cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
         assert "execution_bundle_validation.json" in cron_execute
         assert "core.precompute_bundle_validation" in cron_execute
-        assert "BUNDLE_STATUS=bundle_ready" in cron_execute
+        # Failed validation (after self-heal) must halt before any engine call,
+        # and the engine only runs after validation (compare code, not comments).
+        assert "execution halted to avoid degraded bundle execution" in cron_execute
+        code_lines = "\n".join(
+            line for line in cron_execute.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert code_lines.index("core.precompute_bundle_validation") < code_lines.index(
+            "live_pilot_build_plan_from_precompute.py"
+        )
 
-    def test_cron_execute_uses_exact_planned_payload_mode(self) -> None:
+    def test_cron_execute_uses_unified_engine_from_precompute(self) -> None:
+        # Unified paper lane ("one engine, two endpoints"): the SAME engine as
+        # the live pilot builds the plan from the validated precompute bundle
+        # and executes it against the paper endpoint. The legacy exact-payload
+        # path (run_precomputed_alpaca_execution) is dormant — files stay in
+        # tree but the cron must not invoke it.
         cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
-        assert "export PRECOMPUTE_EXECUTE_EXACT_PLAN=1" in cron_execute
-        assert "EXECUTION_SOURCE=planned_payload_exact" in cron_execute
-        assert "python3 -m scripts.run_precomputed_alpaca_execution --retry-attempt 0" in cron_execute
+        assert "scripts/live_pilot_build_plan_from_precompute.py" in cron_execute
+        assert "scripts/live_pilot_execute.py" in cron_execute
+        assert '--output-root "${PAPER_LANE_ROOT}"' in cron_execute
+        code_lines = "\n".join(
+            line for line in cron_execute.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert "run_precomputed_alpaca_execution" not in code_lines
 
     def test_cron_precompute_self_heal_suppresses_noncritical_side_effects(self) -> None:
         cron_precompute = Path("scripts/cron_precompute.sh").read_text(encoding="utf-8")
@@ -482,5 +499,8 @@ class TestWorkflowYAMLContracts:
         cron_execute = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
         cron_precompute = Path("scripts/cron_precompute.sh").read_text(encoding="utf-8")
         assert "python3 -m core.precompute_bundle_validation" in cron_execute
-        assert "python3 -m scripts.run_precomputed_alpaca_execution" in cron_execute
+        # Unified paper lane: the shared executor scripts are invoked by path
+        # (same invocation style as the live lane); the dormant module
+        # invocation of run_precomputed_alpaca_execution is gone.
+        assert "scripts/live_pilot_execute.py" in cron_execute
         assert "python3 -m core.precompute_bundle_validation" in cron_precompute

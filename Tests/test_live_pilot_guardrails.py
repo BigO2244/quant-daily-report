@@ -179,12 +179,25 @@ def test_live_pilot_refuses_cron_without_explicit_approval(monkeypatch: pytest.M
 
 
 def test_cron_execute_remains_paper_forced() -> None:
+    # The unified paper lane intentionally runs the SAME engine as the live
+    # pilot (live_pilot_* scripts/env), so "live_pilot" strings are expected.
+    # The invariant that matters: the lane is hard-pinned to paper mode and the
+    # paper endpoint, and never arms live mode or the live host.
     text = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
 
     assert 'export MODE="paper"' in text
     assert 'export TRADING_MODE="paper"' in text
     assert 'export ALPACA_PAPER="1"' in text
-    assert "live_pilot" not in text
+    assert 'export ALPACA_BASE_URL="https://paper-api.alpaca.markets"' in text
+    assert 'TRADING_MODE="live_pilot"' not in text
+    assert 'ALPACA_PAPER="0"' not in text
+    assert '"https://api.alpaca.markets"' not in text
+    # The paper lane must never read the live arming env file (ignore comments;
+    # the header documents the rule in prose).
+    code_lines = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "live_pilot.env" not in code_lines
 
 
 def test_live_pilot_dry_run_passes_but_does_not_allow_orders(monkeypatch: pytest.MonkeyPatch) -> None:
