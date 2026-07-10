@@ -173,18 +173,6 @@ except ImportError as exc:  # pragma: no cover - defensive compatibility fallbac
 from paper.reporting_consistency import compute_exposure, determine_sleeve_state
 from core.benchmark_v4 import update_inception_nav_series, INCEPTION_DATE
 from reporting.attribution import compute_daily_attribution, write_attribution_outputs
-def persist_signal_snapshot(df, date_str: str) -> None:
-    """Write signal snapshot to outputs/signal_store/ (replaces deleted research.signal_store)."""
-    import json as _json
-    _out = Path("outputs") / "signal_store"
-    _out.mkdir(parents=True, exist_ok=True)
-    _out_path = _out / f"signals_{date_str}.json"
-    try:
-        _out_path.write_text(
-            _json.dumps(df.to_dict(orient="records"), default=str), encoding="utf-8"
-        )
-    except Exception as _e:
-        logger.warning("[SIGNAL_STORE] Failed to persist snapshot: %s", _e)
 from engine.breaker import get_breaker_config, apply_portfolio_exposure_overlay
 from reconciliation import (
     bootstrap_model_ledger_from_broker,
@@ -4409,9 +4397,6 @@ def build_daily_snapshot(
         signals_path = _flush_signal_snapshot_cache()
         if signals_path is not None:
             logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
-        signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
-        signal_store_df["ticker"] = signal_store_df["ticker"].astype(str)
-        persist_signal_snapshot(signal_store_df, report_date.strftime("%Y-%m-%d"))
     else:
         invested_before_overlay = float(weights_df["target_weight"].sum()) if not weights_df.empty else 0.0
         weights_df_overlay = apply_portfolio_exposure_overlay(weights_df, exposure_today, cash_ticker="CASH")
@@ -4455,9 +4440,6 @@ def build_daily_snapshot(
         signals_path = _flush_signal_snapshot_cache()
         if signals_path is not None:
             logger.info("[PAPER] Wrote signals snapshot: %s", signals_path)
-        signal_store_df = weights_df.rename(columns={"target_weight": "final_target_weight", "sleeve": "sleeve_source"}).copy()
-        signal_store_df["ticker"] = signal_store_df["ticker"].astype(str)
-        persist_signal_snapshot(signal_store_df, report_date.strftime("%Y-%m-%d"))
     tickers = (
         sorted(
             weights_df.loc[weights_df["ticker"].astype(str) != CASH_TICKER, "ticker"].unique().tolist()

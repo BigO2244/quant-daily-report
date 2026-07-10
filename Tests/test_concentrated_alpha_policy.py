@@ -106,7 +106,6 @@ def _patch_snapshot_io(monkeypatch, captured: dict):
         return "signals/2026-07-10.json"
 
     monkeypatch.setattr(dqr, "write_signals_snapshot", _capture_signals)
-    monkeypatch.setattr(dqr, "persist_signal_snapshot", lambda *a, **k: None)
 
     def fake_prices(tickers, period="6mo", interval="1d"):
         return pd.DataFrame(

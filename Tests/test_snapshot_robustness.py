@@ -17,7 +17,6 @@ def test_build_daily_snapshot_survives_stop_calc_error(monkeypatch):
     )
 
     monkeypatch.setattr(dqr, "write_signals_snapshot", lambda **kwargs: "signals/2026-02-19.json")
-    monkeypatch.setattr(dqr, "persist_signal_snapshot", lambda *args, **kwargs: None)
 
     def fake_prices(tickers, period="6mo", interval="1d"):
         return pd.DataFrame(
