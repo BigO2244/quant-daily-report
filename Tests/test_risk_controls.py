@@ -74,6 +74,9 @@ def test_sector_cap_scales_sector_to_thirty_percent() -> None:
         ),
         cash_target_weight=0.55,
         sector_map={"AAA": "Tech", "BBB": "Tech", "CCC": "Tech", "DDD": "Tech", "EEE": "Health"},
+        # layer=None and layer="alpha" are exempt from the sector cap (§3.1);
+        # use a non-exempt book to exercise the scaling path.
+        layer="diversifier",
     )
 
     tech_weight = (

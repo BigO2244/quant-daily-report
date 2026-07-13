@@ -33,6 +33,15 @@ def _default_max_position_pct() -> float:
 
 MAX_POSITION_PCT = _default_max_position_pct()
 MAX_SECTOR_PCT = float(os.environ.get("MAX_SECTOR_PCT", "0.30"))
+
+# Book layers exempt from the portfolio sector cap (Stage 1 §3.1, ratified
+# 2026-07-11). The concentrated alpha book can legitimately exceed
+# MAX_SECTOR_PCT (e.g. three mega-cap Tech names); for it, sector
+# concentration is reviewed as a documented risk, not enforced as a hard cap.
+# layer="alpha" and layer=None (unlabelled — defaults to the alpha book for
+# backward compatibility, per §2) are both exempt; the diversifier and
+# protection books remain subject to the cap.
+SECTOR_CAP_EXEMPT_LAYERS = frozenset({"alpha", None})
 MAX_NET_LONG_PCT = float(os.environ.get("MAX_NET_LONG_PCT", "0.95"))
 MAX_GROSS_PCT = float(os.environ.get("MAX_GROSS_PCT", "1.00"))
 CIRCUIT_BREAKER_PCT = float(os.environ.get("CIRCUIT_BREAKER_PCT", "0.15"))
@@ -156,7 +165,12 @@ class RiskControls:
         cash_target_weight: float = 0.0,
         current_equity: float | None = None,
         peak_equity: float | None = None,
+        layer: str | None = None,
     ) -> RiskResult:
+        # ``layer`` names the book being processed (SleeveOutput.layer). When it
+        # is in SECTOR_CAP_EXEMPT_LAYERS ("alpha" or the default None, which maps
+        # to the alpha book) the sector cap is skipped; diversifier/protection
+        # and any other explicit layer leave the cap enforced.
         if targets is None or targets.empty:
             return RiskResult(
                 weights=pd.DataFrame(columns=["ticker", "sleeve", "target_weight"]),
@@ -188,7 +202,8 @@ class RiskControls:
         weights, cash_weight, position_actions = self._apply_position_caps(weights, cash_weight)
         actions.extend(position_actions)
 
-        if sector_map:
+        sector_cap_exempt = layer in SECTOR_CAP_EXEMPT_LAYERS
+        if sector_map and not sector_cap_exempt:
             weights, cash_weight, sector_actions = self._apply_sector_caps(weights, sector_map, cash_weight)
             actions.extend(sector_actions)
 
@@ -235,6 +250,7 @@ class RiskControls:
         sectors: dict[str, str] | None = None,
         portfolio_value: float | None = None,
         peak_value: float | None = None,
+        layer: str | None = None,
     ) -> RiskResult:
         return self.apply_to_targets(
             weights,
@@ -242,6 +258,7 @@ class RiskControls:
             cash_target_weight=max(0.0, 1.0 - float(weights.get("target_weight", pd.Series(dtype=float)).sum() or 0.0)),
             current_equity=portfolio_value,
             peak_equity=peak_value,
+            layer=layer,
         )
 
     def exposure_report(

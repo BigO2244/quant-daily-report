@@ -87,6 +87,12 @@ class SleeveOutput:
 
     positions_df: pd.DataFrame
     meta: SleeveMetadata
+    # Stage 1 three-layer sleeve-interface contract (ratified 2026-07-11).
+    # All three are optional with default None so every existing sleeve keeps
+    # working unchanged; new sleeves populate them at build time.
+    layer: str | None = None          # "alpha" | "diversifier" | "protection"
+    pit_grade: str | None = None      # "pit_safe" | "pit_approximate" | "non_pit"
+    kill_criteria: dict | None = None  # machine-checkable thresholds dict
 
     def __post_init__(self):
         if self.positions_df is None:
