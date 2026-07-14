@@ -475,7 +475,15 @@ def test_core_routed_live_rotation_sells_settles_rebudgets_and_buys(tmp_path: Pa
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     assert capital_gate["required_sell_count"] == 1
     assert capital_gate["post_sell_buy_budget"]["post_sell_cash"] == 250.0
-    assert capital_gate["post_sell_buy_budget"]["buy_budget_after_safeguards"] == 250.0
+    # Settled-cash guard (Blocker #2) + freshness cross-check: this run's confirmed
+    # $100 sell fill is MISSING from the broker's bulk order history (FakeBroker's
+    # list_orders returns only open orders), so its proceeds are injected as
+    # unsettled. Budget = (250 cash - 100 unsettled proceeds) * 0.98 buffer = 147.
+    # This is also economically correct: same-day sale proceeds ARE unsettled T+1
+    # funds and must not fund buys.
+    assert capital_gate["post_sell_buy_budget"]["buy_budget_after_safeguards"] == (250.0 - 100.0) * 0.98
+    assert capital_gate["post_sell_buy_budget"]["settled_cash_guard"]["buy_buffer_pct"] == 0.98
+    assert capital_gate["post_sell_buy_budget"]["settled_cash_guard"]["settled_cash"] == 150.0
 
 
 def test_core_routed_live_filled_sell_with_reflected_cash_allows_buy(tmp_path: Path) -> None:
@@ -589,7 +597,9 @@ def test_insufficient_live_buying_power_blocks_even_when_approved_cap_allows_pla
     assert capital_gate["live_buying_power_before"] == 0.88
     assert capital_gate["approved_cap_usd"] == 500.0
     assert capital_gate["planned_buy_notional_usd"] == 150.0
-    assert capital_gate["tradable_capital_usd"] == 0.88
+    # Settled-cash guard (Blocker #2): available-for-buys is trimmed by the 0.98
+    # slippage buffer ($0.88 * 0.98). The buy ($150) is still blocked as insufficient.
+    assert capital_gate["tradable_capital_usd"] == 0.88 * 0.98
     assert capital_gate["buy_block_reason"] == LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"] == []

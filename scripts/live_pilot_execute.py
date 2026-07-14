@@ -32,6 +32,12 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_plan,
 )
 from core.live_pilot_gate_state import write_live_pilot_gate_state
+from core.settled_cash import (
+    _fill_date as _settled_cash_fill_date,
+    compute_settled_cash,
+    detect_gfv_risky_sells,
+    settlement_date,
+)
 from execution.core import (
     AccountSnapshot as CoreAccountSnapshot,
     ExecutionRequest,
@@ -42,7 +48,7 @@ from execution.core import (
     execute_lifecycle,
     live_pilot_execution_config,
 )
-from paper.trading_calendar import ET_TZ, market_session_status
+from paper.trading_calendar import ET_TZ, market_session_status, prev_trading_day
 from paper.run_manager import generate_run_id, safe_write_text
 
 
@@ -201,6 +207,17 @@ LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_DELAY_SECONDS = 30.0
 LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR = 0.95
 LIVE_PILOT_SETTLEMENT_DOLLAR_TOLERANCE = 0.01
 
+# Settled-cash / GFV guard (PRE_ARM_SWEEP Blocker #2). US equities settle T+1; Alpaca
+# credits sale proceeds to cash immediately though unsettled. The buy budget is clamped
+# to settled cash (broker cash - unsettled sale proceeds from filled sell history) times
+# a slippage buffer so no buy ever spends unsettled funds (=> no lot is GFV-vulnerable).
+LIVE_PILOT_BUY_BUFFER_PCT_ENV = "CAERUS_LIVE_PILOT_BUY_BUFFER_PCT"
+LIVE_PILOT_BUY_BUFFER_PCT_DEFAULT = 0.98
+LIVE_PILOT_SETTLED_CASH_LOOKBACK_ENV = "CAERUS_LIVE_PILOT_SETTLED_CASH_ORDER_LOOKBACK"
+LIVE_PILOT_SETTLED_CASH_LOOKBACK_DEFAULT = 100
+LIVE_PILOT_GFV_SETTLED_CASH_UNAVAILABLE = "live_pilot_gfv_settled_cash_unavailable"
+LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION = "live_pilot_gfv_sell_of_unsettled_acquisition"
+
 # Machine-readable halt-state convergence contract. Every halted run records
 # whether the NEXT scheduled run is expected to self-heal (the next plan is
 # computed from CURRENT broker positions and every gate re-evaluates fresh; no
@@ -220,6 +237,10 @@ CAPITAL_GATE_REPORT_KEYS = (
     "planned_buy_notional_usd",
     "tradable_capital_usd",
     "buy_block_reason",
+    "settled_cash_usd",
+    "unsettled_proceeds_usd",
+    "buy_buffer_pct",
+    "settled_cash_fail_closed",
 )
 
 
@@ -254,6 +275,123 @@ def _list_open_orders(broker: Any) -> list[dict[str, Any]]:
     if not isinstance(orders, list):
         return []
     return [dict(order) for order in orders if isinstance(order, Mapping)]
+
+
+def _buy_buffer_pct(env: Mapping[str, str]) -> float:
+    """Slippage/settled-cash buffer for live buys. Safe default 0.98; clamped to (0,1]."""
+    raw = _finite_float(env.get(LIVE_PILOT_BUY_BUFFER_PCT_ENV))
+    if raw is None or raw <= 0.0 or raw > 1.0:
+        return LIVE_PILOT_BUY_BUFFER_PCT_DEFAULT
+    return float(raw)
+
+
+def _settled_cash_lookback(env: Mapping[str, str]) -> int:
+    raw = _finite_float(env.get(LIVE_PILOT_SETTLED_CASH_LOOKBACK_ENV))
+    if raw is None or raw < 1.0:
+        return LIVE_PILOT_SETTLED_CASH_LOOKBACK_DEFAULT
+    return int(raw)
+
+
+def _unsettled_window_after_date(as_of_date: str) -> str | None:
+    """Start of the date-bounded order query for the settled-cash recompute.
+
+    A fill on ``prev_trading_day(as_of)`` settles ON ``as_of`` (already settled), so
+    every possibly-unsettled fill has fill_date > prev_trading_day(as_of). Querying
+    ``after=prev_trading_day`` covers the whole unsettled window with one trading day
+    of margin.
+    """
+    try:
+        return prev_trading_day(str(as_of_date))
+    except Exception:  # noqa: BLE001 - unparseable date -> unbounded query, page check still guards
+        return None
+
+
+def _fetch_order_history(
+    broker: Any, *, limit: int, after: str | None = None
+) -> tuple[list[dict[str, Any]] | None, str]:
+    """Fetch recent FILLED-inclusive order history for the settled-cash recompute.
+
+    Returns ``(orders, availability)`` where ``orders is None`` fails the guard CLOSED
+    (broker cannot report history -> assume cash is fully unsettled). ``availability``
+    is a short status string for observability. ``after`` date-bounds the query to the
+    unsettled window on brokers that support it (injected test brokers may not; the
+    page-full check in ``_settled_cash_context`` still guards truncation either way).
+    """
+    if not hasattr(broker, "list_orders"):
+        return None, "no_broker_support"
+    try:
+        try:
+            if after:
+                orders = broker.list_orders(status="all", limit=int(limit), after=after)
+                availability = "ok_date_bounded"
+            else:
+                orders = broker.list_orders(status="all", limit=int(limit))
+                availability = "ok"
+        except TypeError:
+            # Broker without `after` support (stub/test brokers): count-bounded query.
+            orders = broker.list_orders(status="all", limit=int(limit))
+            availability = "ok_no_after_support"
+    except Exception as exc:  # noqa: BLE001 - fail closed on any lookup error
+        return None, f"lookup_failed:{exc}"
+    if not isinstance(orders, list):
+        return None, "non_list_response"
+    return [dict(order) for order in orders if isinstance(order, Mapping)], availability
+
+
+def _order_history_page_truncation_risk(
+    orders: list[dict[str, Any]], *, limit: int, as_of_date: str
+) -> bool:
+    """True when the returned page may have truncated unsettled sells (fail closed).
+
+    A full page (len >= limit) whose OLDEST parseable fill date is still inside the
+    unsettled window means older, unreturned orders could also be unsettled — the
+    recompute would silently undercount unsettled proceeds. A full page whose oldest
+    row is already settled proves the window is fully covered.
+    """
+    if len(orders) < int(limit):
+        return False
+    fill_dates = [d for d in (_settled_cash_fill_date(o) for o in orders) if d]
+    if not fill_dates:
+        return True  # cannot prove coverage -> fail closed
+    oldest = min(fill_dates)
+    return settlement_date(oldest) > str(as_of_date)
+
+
+def _settled_cash_context(
+    broker: Any,
+    *,
+    broker_cash: Any,
+    as_of_date: str,
+    env: Mapping[str, str],
+    confirmed_sells: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+) -> Any:
+    """Stateless settled-cash recompute from broker truth (fails closed).
+
+    ``confirmed_sells`` are this run's per-order-polled filled sells; they cross-check
+    the bulk history for freshness (a lagging bulk read cannot hide their proceeds).
+    """
+    limit = _settled_cash_lookback(env)
+    orders, availability = _fetch_order_history(
+        broker,
+        limit=limit,
+        after=_unsettled_window_after_date(as_of_date),
+    )
+    if orders is not None and _order_history_page_truncation_risk(
+        orders, limit=limit, as_of_date=str(as_of_date)
+    ):
+        # FAIL CLOSED: the page is full and its oldest row is still unsettled, so
+        # unsettled sells may have been truncated off the page.
+        orders = None
+        availability = "page_full_unsettled_window"
+    result = compute_settled_cash(
+        broker_cash=broker_cash,
+        orders=orders,
+        as_of_date=str(as_of_date),
+        buy_buffer_pct=_buy_buffer_pct(env),
+        orders_available=orders is not None,
+        confirmed_sells=confirmed_sells,
+    )
+    return result, orders, availability
 
 
 def _order_status(order: Mapping[str, Any]) -> str:
@@ -625,6 +763,25 @@ def _frame_len(frame: Any) -> int:
     return 0 if frame is None else int(len(frame))
 
 
+def _settled_cash_gate_fields(capital_budget: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Surface the settled-cash guard into the capital gate for the dry-run proof."""
+    guard = dict((capital_budget or {}).get("settled_cash_guard") or {})
+    if not guard:
+        return {}
+    settled = guard.get("settled_cash")
+    broker_cash = _safe_float((capital_budget or {}).get("broker_cash_at_planning"))
+    unsettled = None
+    if settled is not None and broker_cash is not None:
+        unsettled = max(0.0, float(broker_cash) - float(settled))
+    return {
+        "settled_cash_usd": settled,
+        "unsettled_proceeds_usd": unsettled,
+        "buy_buffer_pct": guard.get("buy_buffer_pct"),
+        "settled_cash_fail_closed": bool(guard.get("settled_cash_fail_closed")),
+        "settled_cash_guard": guard,
+    }
+
+
 def _build_live_pilot_capital_gate(
     *,
     result: Any,
@@ -665,6 +822,15 @@ def _build_live_pilot_capital_gate(
             + len(getattr(result, "submitted_buys", ()) or ())
         ),
         "post_sell_buy_budget": post_budget,
+        # Post-sell guard reflects the account AFTER today's sells credited unsettled
+        # proceeds; fall back to the planning guard when there was no rebudget.
+        **_settled_cash_gate_fields(
+            budget if not post_budget.get("settled_cash_guard") else {
+                **budget,
+                "settled_cash_guard": post_budget.get("settled_cash_guard"),
+                "broker_cash_at_planning": post_budget.get("post_sell_cash", budget.get("broker_cash_at_planning")),
+            }
+        ),
     }
 
 
@@ -1410,6 +1576,7 @@ class LivePilotCoreAdapter:
         run_id: str,
         pre_sell_account: Mapping[str, Any] | None = None,
         source_plan: Mapping[str, Any] | None = None,
+        trade_date: str | None = None,
     ) -> None:
         self.broker = broker
         self.env = env
@@ -1418,9 +1585,16 @@ class LivePilotCoreAdapter:
         self.run_id = run_id
         self.pre_sell_account = dict(pre_sell_account or {})
         self.source_by_symbol = _plan_rows_by_symbol(source_plan or {})
+        self.trade_date = str(trade_date or "")
         self.submitted_rows: list[dict[str, Any]] = []
         self.submit_errors: list[str] = []
         self._sequence = 0
+        # Last settled-cash recompute (post-sell), surfaced for observability.
+        self.settled_cash_post_sell: dict[str, Any] | None = None
+        # Sells THIS RUN confirmed filled via per-order polling (get_order). Feeds the
+        # bulk-history freshness cross-check in the settled-cash recompute: a lagging
+        # list_orders payload cannot hide these proceeds from the clamp.
+        self._confirmed_sell_fills: list[dict[str, Any]] = []
 
     def _client_order_id(self, intent: OrderIntent) -> str:
         self._sequence += 1
@@ -1555,12 +1729,29 @@ class LivePilotCoreAdapter:
             )
 
     def snapshot(self) -> CoreAccountSnapshot:
-        account = self.broker.get_account() if hasattr(self.broker, "get_account") else {}
+        account = dict(self.broker.get_account() if hasattr(self.broker, "get_account") else {})
         positions = self.broker.get_positions() if hasattr(self.broker, "get_positions") else []
+        # PRIMARY GFV DEFENSE: recompute settled cash from CURRENT broker truth. After
+        # sells fill, broker cash includes today's freshly credited (but unsettled)
+        # proceeds; the post-sell rebudget must clamp to settled cash so no buy spends
+        # them. Stamp settled_cash onto the account the core budget functions read.
+        settled_result, _orders, availability = _settled_cash_context(
+            self.broker,
+            broker_cash=account.get("cash"),
+            as_of_date=self.trade_date,
+            env=self.env,
+            confirmed_sells=list(self._confirmed_sell_fills),
+        )
+        account["settled_cash"] = float(settled_result.settled_cash)
+        account["settled_cash_fail_closed"] = bool(settled_result.fail_closed)
+        settled_report = settled_result.to_report()
+        settled_report["order_history_availability"] = availability
+        settled_report["phase"] = "post_sell"
+        self.settled_cash_post_sell = settled_report
         return CoreAccountSnapshot(
-            account=dict(account or {}),
+            account=account,
             holdings=_holdings_frame_from_broker_positions(positions),
-            raw={"snapshot_source": "live_pilot_adapter"},
+            raw={"snapshot_source": "live_pilot_adapter", "settled_cash_guard": settled_report},
         )
 
     def _settlement_reflection(
@@ -1693,6 +1884,21 @@ class LivePilotCoreAdapter:
                         "filled_notional": filled_notional,
                     }
                 )
+            # Freshness cross-check input (GFV guard): sells confirmed filled (fully
+            # or partially) by the per-order polling above. snapshot()'s settled-cash
+            # recompute verifies their proceeds are represented in the BULK order
+            # history it uses; a lagging bulk read gets the shortfall injected as
+            # unsettled instead of silently counting it as settled.
+            self._confirmed_sell_fills = [
+                {
+                    "order_id": row.get("broker_order_id") or "",
+                    "proceeds": float(row.get("filled_notional") or 0.0),
+                    "symbol": row.get("symbol"),
+                }
+                for row in sell_records
+                if _status_bucket(row.get("status")) in {"filled", "partial"}
+                and float(row.get("filled_notional") or 0.0) > 0.0
+            ]
             snapshot = self.snapshot()
             settlement_reflection = self._settlement_reflection(
                 account=snapshot.account,
@@ -1862,6 +2068,7 @@ def _capital_gate_from_planning(
         "tradable_capital_usd": (capital_budget.get("reserve_cash_policy") or {}).get("available_for_buys"),
         "buy_block_reason": block_reason,
         "broker_orders_submitted": 0,
+        **_settled_cash_gate_fields(capital_budget),
     }
 
 
@@ -1939,12 +2146,31 @@ def _run_live_pilot_core_path(
     min_trade_usd = _finite_float(env.get("CAERUS_LIVE_PILOT_MIN_TRADE_USD"))
     if min_trade_usd is None or min_trade_usd <= 0.0:
         min_trade_usd = 100.0
+    # PRIMARY GFV DEFENSE (Blocker #2): recompute settled cash from broker truth and
+    # clamp planning buys to it. Alpaca credits sale proceeds instantly though
+    # unsettled (T+1); buying with them then selling next morning is a GFV. Injecting
+    # settled_cash into the planning account makes the capital budget size against
+    # settled funds only. Fails closed if order history is unavailable.
+    buy_buffer_pct = _buy_buffer_pct(env)
+    settled_result, _settled_orders, settled_availability = _settled_cash_context(
+        broker,
+        broker_cash=request.planning_account.get("cash"),
+        as_of_date=trade_date,
+        env=env,
+    )
+    request.planning_account["settled_cash"] = float(settled_result.settled_cash)
+    request.planning_account["settled_cash_fail_closed"] = bool(settled_result.fail_closed)
+    settled_report = settled_result.to_report()
+    settled_report["order_history_availability"] = settled_availability
+    settled_report["phase"] = "planning"
+    _write_json(run_root / "live_pilot_settled_cash.json", settled_report)
     config = live_pilot_execution_config(
         approved_cap_usd=gate.capital_cap_usd,
         allow_fractional=str(env.get("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL") or "").strip().lower()
         in {"1", "true", "yes", "y", "on"},
         max_orders=int(gate.max_orders or 1),
         min_trade_usd=float(min_trade_usd),
+        buy_buffer_pct=float(buy_buffer_pct),
         ledger_output_root=output_root,
         ledger_enabled=not bool(gate.dry_run),
     )
@@ -2099,12 +2325,17 @@ def _run_live_pilot_core_path(
     )
     source_trades = _core_rows_from_frame(executable_trades, plan=plan)
     if not source_trades:
-        reason_code = (
-            LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
-            if float(capital_budget.get("requested_buy_notional") or 0.0) > 0.0
+        had_buy_demand = (
+            float(capital_budget.get("requested_buy_notional") or 0.0) > 0.0
             or full_need + 1e-9 >= float(config.orders.min_trade_usd)
-            else "live_pilot_transition_no_actionable_order"
         )
+        if settled_result.fail_closed and had_buy_demand:
+            # Order history was unavailable -> settled cash treated as $0 -> buys blocked.
+            reason_code = LIVE_PILOT_GFV_SETTLED_CASH_UNAVAILABLE
+        elif had_buy_demand:
+            reason_code = LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+        else:
+            reason_code = "live_pilot_transition_no_actionable_order"
         capital_gate["planned_buy_notional_usd"] = max(
             float(capital_gate.get("planned_buy_notional_usd") or 0.0),
             float(full_need or 0.0),
@@ -2162,6 +2393,53 @@ def _run_live_pilot_core_path(
             capital_gate=capital_gate,
         )
     _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
+
+    # Belt-and-suspenders (defense #3): block any planned SELL of a position whose
+    # acquiring buy has not passed its own T+1 settlement (canonical GFV shape). With
+    # the buy clamp (defense #2) in place this NEVER fires under daily rotation; a hit
+    # means the buy clamp regressed, so it is a loud, blocking alert.
+    planned_sell_symbols = [
+        str(order.symbol)
+        for order in plan_validation.orders
+        if str(getattr(order, "side", "")).strip().upper() in {"SELL", "CLOSE", "REDUCE"}
+    ]
+    gfv_sell_alerts = detect_gfv_risky_sells(
+        planned_sell_symbols=planned_sell_symbols,
+        orders=_settled_orders,
+        as_of_date=trade_date,
+    )
+    if gfv_sell_alerts:
+        gfv_alert_payload = {
+            "schema_version": "live_pilot_gfv_alert.v1",
+            "generated_at": _now_utc(),
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "reason_code": LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION,
+            "alerts": gfv_sell_alerts,
+            "note": (
+                "Sell-side GFV guard fired: selling a position acquired with funds that "
+                "may not have settled. This should be impossible while the settled-cash "
+                "buy clamp is active; investigate a buy-clamp regression before arming."
+            ),
+        }
+        _write_json(run_root / "live_pilot_gfv_alert.json", gfv_alert_payload)
+        capital_gate["decision"] = "BLOCKED"
+        capital_gate["block_reason"] = LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION
+        _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION,
+            operator_action=(
+                "Sell-side GFV guard blocked the run: a planned sell targets a position "
+                "acquired with possibly-unsettled funds. Investigate the buy clamp."
+            ),
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+        )
 
     asset_errors: list[str] = []
     for order in plan_validation.orders:
@@ -2242,10 +2520,16 @@ def _run_live_pilot_core_path(
             run_id=run_id,
             pre_sell_account=request.planning_account,
             source_plan=plan,
+            trade_date=trade_date,
         )
         result = execute_lifecycle(request=request, adapter=adapter, config=config)
         submitted = list(adapter.submitted_rows)
         submit_errors = list(adapter.submit_errors)
+        if adapter.settled_cash_post_sell is not None:
+            _write_json(
+                run_root / "live_pilot_settled_cash.json",
+                adapter.settled_cash_post_sell,
+            )
         intended = _intended_from_submitted(submitted)
         _write_json(
             run_root / "live_pilot_orders_intended.json",

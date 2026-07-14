@@ -139,7 +139,10 @@ def test_july6_live_path_blocks_unwhitelisted_rotation_sell(tmp_path: Path) -> N
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     assert capital_gate["decision"] == "ALLOWED"
     assert capital_gate["required_sell_count"] == 1  # paper-native min-trade floor drops C dust
-    assert capital_gate["tradable_capital_usd"] > 0.88  # includes 95% expected-sell-proceeds haircut
+    # Settled-cash guard (Blocker #2): the planning budget no longer credits the 95%
+    # expected-sell-proceeds haircut (those proceeds are unsettled) — it is clamped to
+    # settled cash ($0.88) and trimmed by the 0.98 slippage buffer.
+    assert capital_gate["tradable_capital_usd"] == 0.88 * 0.98
 
 
 def test_july6_variant_blocks_on_buying_power_when_no_rotation(tmp_path: Path) -> None:
@@ -159,8 +162,9 @@ def test_july6_variant_blocks_on_buying_power_when_no_rotation(tmp_path: Path) -
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["holdings_to_sell"] == []  # no rotation
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
-    # Tradable capital tracks buying power, never the cap.
-    assert capital_gate["tradable_capital_usd"] == 0.88
+    # Tradable capital tracks buying power, never the cap; settled-cash guard
+    # (Blocker #2) trims it by the 0.98 slippage buffer ($0.88 * 0.98).
+    assert capital_gate["tradable_capital_usd"] == 0.88 * 0.98
     assert capital_gate["approved_cap_usd"] == 500.0
     assert capital_gate["planned_buy_notional_usd"] > 0.88  # need exceeds buying power
 

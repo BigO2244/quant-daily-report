@@ -38,6 +38,10 @@ class CapitalPolicy:
     approved_cap_usd: float | None = None
     over_cap_behavior: str = "clip"
     broker_budget_source: str = "buying_power_then_cash"
+    # Slippage/settled-cash buffer applied to the buy budget on the live cash-account
+    # path (PRE_ARM_SWEEP Blocker #2 / #8). 1.0 = inert (paper). Live sets ~0.98 so
+    # market-order buys sized at snapshot prices keep headroom against adverse fills.
+    buy_buffer_pct: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -295,6 +299,7 @@ def live_pilot_execution_config(
     max_orders: int = 1,
     min_trade_usd: float = 100.0,
     equity_collar_max_usd: float | None = None,
+    buy_buffer_pct: float = 0.98,
     ledger_output_root: str | Path | None = None,
     ledger_enabled: bool = True,
 ) -> ExecutionCoreConfig:
@@ -337,6 +342,7 @@ def live_pilot_execution_config(
             approved_cap_usd=approved_cap_usd,
             over_cap_behavior="block",
             broker_budget_source="buying_power",
+            buy_buffer_pct=float(buy_buffer_pct),
         ),
         orders=OrderPolicy(
             allow_fractional=bool(allow_fractional),
@@ -413,7 +419,57 @@ def _uses_configured_capital_policy(config: ExecutionCoreConfig) -> bool:
         or abs(float(policy.reserve_equity_pct or 0.0) - 0.005) > 1e-12
         or abs(float(policy.reserve_max_pct or 0.0) - 0.05) > 1e-12
         or abs(float(policy.sell_proceeds_haircut or 0.0) - 0.95) > 1e-12
+        or abs(float(policy.buy_buffer_pct or 1.0) - 1.0) > 1e-12
     )
+
+
+def _apply_settled_cash_and_buffer(
+    budget: float,
+    account: Mapping[str, Any],
+    policy: CapitalPolicy,
+) -> tuple[float, dict[str, Any]]:
+    """Clamp a buy budget to *settled* cash and apply the slippage buffer.
+
+    PRIMARY GFV DEFENSE (PRE_ARM_SWEEP Blocker #2). On the live cash account, Alpaca
+    credits sale proceeds to ``cash`` immediately though they are unsettled (T+1). The
+    executor injects ``settled_cash`` (= broker cash - unsettled sale proceeds) and, on
+    a fail-closed history lookup, ``settled_cash_fail_closed=True``. Clamping the buy
+    budget to settled cash guarantees the invariant::
+
+        sum(buy_notional) <= settled_cash * buy_buffer_pct
+
+    so no buy ever spends unsettled funds and no held lot can become GFV-vulnerable.
+    The buffer then trims the whole budget (default 0.98 live) so market-order buys
+    sized at snapshot prices keep headroom against adverse fills.
+    """
+    buffer = float(policy.buy_buffer_pct if policy.buy_buffer_pct is not None else 1.0)
+    if buffer < 0.0:
+        buffer = 0.0
+    settled_raw = account.get("settled_cash")
+    fail_closed = bool(account.get("settled_cash_fail_closed"))
+    settled_ceiling: float | None = None
+    if fail_closed:
+        settled_ceiling = 0.0
+    elif settled_raw is not None:
+        settled_ceiling = max(0.0, _safe_float(settled_raw, 0.0))
+
+    budget_in = max(0.0, float(budget or 0.0))
+    clamped = budget_in
+    settled_clamp_applied = False
+    if settled_ceiling is not None and settled_ceiling < clamped:
+        clamped = settled_ceiling
+        settled_clamp_applied = True
+    buffered = clamped * buffer
+    diag = {
+        "settled_cash": settled_ceiling,
+        "settled_cash_fail_closed": fail_closed,
+        "buy_buffer_pct": buffer,
+        "budget_before_settled_clamp": budget_in,
+        "budget_after_settled_clamp": clamped,
+        "settled_cash_clamp_applied": settled_clamp_applied,
+        "budget_after_buffer": buffered,
+    }
+    return buffered, diag
 
 
 def _build_configured_capital_budget(
@@ -463,6 +519,11 @@ def _build_configured_capital_budget(
     if approved_cap is not None:
         available_for_buys = min(float(available_for_buys), max(0.0, float(approved_cap)))
 
+    # PRIMARY GFV DEFENSE: clamp to settled cash and apply the slippage buffer.
+    available_for_buys, settled_cash_diag = _apply_settled_cash_and_buffer(
+        float(available_for_buys), planning_account, policy
+    )
+
     allowed_buy_notional = min(requested_buy_notional_value, max(0.0, float(available_for_buys)))
     return {
         "broker_cash_at_planning": cash_value,
@@ -477,6 +538,7 @@ def _build_configured_capital_budget(
             "approved_cap_usd": approved_cap,
             "budget_source": budget_basis,
         },
+        "settled_cash_guard": settled_cash_diag,
         "expected_sell_proceeds": float(expected_sell_proceeds_value),
         "expected_sell_proceeds_conservative": float(expected_sell_proceeds_conservative),
         "requested_buy_notional": float(requested_buy_notional_value),
@@ -532,6 +594,11 @@ def _apply_configured_post_sell_budget(
     if policy.approved_cap_usd is not None:
         budget = min(budget, max(0.0, float(policy.approved_cap_usd)))
 
+    # PRIMARY GFV DEFENSE: the post-sell account's cash now INCLUDES today's freshly
+    # credited (but unsettled) sale proceeds. Clamping to settled cash here is what
+    # actually sizes the submitted buys, so no buy can spend today's unsettled money.
+    budget, settled_cash_diag = _apply_settled_cash_and_buffer(float(budget), account, policy)
+
     meta.update(
         {
             "post_sell_cash": float(cash_value),
@@ -544,6 +611,7 @@ def _apply_configured_post_sell_budget(
             "approved_cap_usd": policy.approved_cap_usd,
             "broker_budget_source": source,
             "reserve_cash": float(reserve_cash),
+            "settled_cash_guard": settled_cash_diag,
         }
     )
     return float(max(0.0, budget)), meta
