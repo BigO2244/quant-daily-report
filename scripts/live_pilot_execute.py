@@ -1047,12 +1047,16 @@ def _build_live_pilot_execution_results(
         "mode": LIVE_PILOT_MODE.upper(),
         "status": terminal_status,
         "reason": reason_code,
-        "halt_reason": None if terminal_status in {"DRY_RUN", "SUBMITTED"} else reason_code,
+        "halt_reason": (
+            None if terminal_status in {"DRY_RUN", "SUBMITTED", "SUBMITTED_UNFILLED"} else reason_code
+        ),
         "operator_execution_status": (
             "dry_run"
             if dry_run
             else "executed"
             if terminal_status == "SUBMITTED"
+            else "submitted_unfilled"
+            if terminal_status == "SUBMITTED_UNFILLED"
             else "halted"
         ),
         "submitted_count": submitted_count,
@@ -1107,6 +1111,20 @@ def _reconcile(
         elif bucket == "unresolved":
             unresolved += 1
 
+    # WARNING §f fix (PRE_ARM_SWEEP_2026-07-13): two prior gaps in this state
+    # machine:
+    #   1. CLEAN did not require fills — a fully-submitted batch sitting
+    #      accepted/new/pending_new/done_for_day at the broker (zero fills)
+    #      reported CLEAN.
+    #   2. A `partially_filled` snapshot (still OPEN at the broker — it may
+    #      fill further) was treated the same as a rejected/failed order and
+    #      reported FAILED_RECONCILIATION.
+    # Both are non-terminal, in-flight broker states, not failures. They now
+    # get their own status: state=OPEN / status=SUBMITTED_UNFILLED — "orders are
+    # live at the broker, not yet (fully) filled". A genuinely TERMINAL partial
+    # (order done/canceled after only partially filling) is unaffected: its raw
+    # broker status is canceled/expired/rejected, which buckets as "rejected"
+    # above and correctly stays FAILED_RECONCILIATION.
     if dry_run:
         state = "DRY_RUN"
         status = "DRY_RUN_NO_SUBMISSION"
@@ -1115,14 +1133,18 @@ def _reconcile(
         state = "REJECTED"
         status = "FAILED_RECONCILIATION"
         action = "Do not continue live pilot; inspect broker state and resolve rejected/unresolved orders manually."
-    elif partial:
-        state = "PARTIAL"
-        status = "FAILED_RECONCILIATION"
-        action = "Do not continue live pilot; wait for broker terminal truth or manually review partial fill state."
     elif unresolved or len(submitted) != len(intended):
         state = "UNRESOLVED"
         status = "FAILED_RECONCILIATION"
         action = "Do not continue live pilot; inspect broker state and resolve rejected/unresolved orders manually."
+    elif open_count or partial:
+        state = "OPEN"
+        status = "SUBMITTED_UNFILLED"
+        action = (
+            "Orders are live at the broker and not yet fully filled. This is not a "
+            "failure — monitor broker terminal states and re-run reconciliation "
+            "(--refresh-run) until every order reaches a terminal state."
+        )
     else:
         state = "CLEAN"
         status = "CLEAN"
@@ -1144,9 +1166,12 @@ def _reconcile(
         "errors": list(errors),
         "operator_action": action,
         "rollback_recommendation": (
-            "No auto-liquidation. Cancel/flatten only under a separately approved live incident runbook."
-            if status != "CLEAN"
-            else "No rollback action required unless broker state later diverges."
+            "No rollback action required unless broker state later diverges."
+            if status == "CLEAN"
+            else "No auto-liquidation. Orders remain open at the broker; wait for a "
+            "terminal state or cancel manually if needed."
+            if status == "SUBMITTED_UNFILLED"
+            else "No auto-liquidation. Cancel/flatten only under a separately approved live incident runbook."
         ),
     }
 
@@ -1186,6 +1211,16 @@ def _next_run_expectation(
             "next_run_expectation": NEXT_RUN_CONVERGES,
             "next_run_expectation_reason": (
                 "run reached a terminal non-halt state; the next run replans from current broker positions"
+            ),
+        }
+    if status == "SUBMITTED_UNFILLED":
+        return {
+            "next_run_expectation": NEXT_RUN_REQUIRES_MANUAL_ACTION,
+            "next_run_expectation_reason": (
+                "orders were submitted and accepted by the broker but are not yet fully "
+                "filled; this is not a failure, but the open-pilot-order check blocks a "
+                "new submission until they reach a terminal state (filled/rejected/expired) "
+                "— monitor the broker directly and re-run reconciliation"
             ),
         }
     if status == "FAILED_RECONCILIATION":
@@ -1865,6 +1900,88 @@ def _capital_gate_from_planning(
     }
 
 
+def _request_excluding_dropped_orders(
+    request: ExecutionRequest,
+    dropped_orders: list[Mapping[str, Any]],
+) -> ExecutionRequest:
+    """Neutralize orders dropped at validation so the submission engine agrees.
+
+    BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): per-order partitioning in
+    ``validate_live_pilot_plan``/the asset-check loop only decides what the
+    *validation gate* allows. For a real (non-dry) run, ``execute_lifecycle``
+    independently recomputes trades from this ``ExecutionRequest`` — without
+    this filter, a symbol dropped at validation (bad symbol, non-tradable
+    asset, sell not whitelisted, sells disabled, ...) would still be
+    recomputed and submitted by the engine, silently defeating the partition
+    (and, for a dropped SELL, submitting an order guardrails explicitly
+    rejected). A dropped BUY target is simply removed from the target book
+    (nothing is currently held, so no target row = no trade proposed). A
+    dropped SELL is neutralized by pinning its target weight to its CURRENT
+    weight so the rebalance engine computes a zero delta for that symbol —
+    the held position is left exactly as-is rather than exited.
+    """
+    if not dropped_orders:
+        return request
+    dropped_buy_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in dropped_orders
+        if str(row.get("side") or "").strip().upper() == "BUY"
+    }
+    dropped_sell_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in dropped_orders
+        if str(row.get("side") or "").strip().upper() == "SELL"
+    }
+    dropped_buy_symbols.discard("")
+    dropped_sell_symbols.discard("")
+    if not dropped_buy_symbols and not dropped_sell_symbols:
+        return request
+    targets = (
+        request.targets.copy()
+        if request.targets is not None and not request.targets.empty
+        else pd.DataFrame(columns=["ticker", "sleeve", "target_weight"])
+    )
+    if dropped_buy_symbols and not targets.empty:
+        targets = targets[
+            ~targets["ticker"].astype(str).str.upper().isin(dropped_buy_symbols)
+        ].copy()
+    if dropped_sell_symbols:
+        held_shares: dict[str, float] = {}
+        if request.holdings is not None and not request.holdings.empty:
+            held_shares = (
+                request.holdings.set_index("ticker")["shares"].astype(float).to_dict()
+            )
+        equity = float(request.total_equity or 0.0)
+        if not targets.empty:
+            targets = targets[
+                ~targets["ticker"].astype(str).str.upper().isin(dropped_sell_symbols)
+            ].copy()
+        pin_rows: list[dict[str, Any]] = []
+        for symbol in dropped_sell_symbols:
+            shares = float(held_shares.get(symbol, 0.0) or 0.0)
+            price = (
+                float(request.prices.get(symbol, 0.0) or 0.0)
+                if request.prices is not None
+                else 0.0
+            )
+            current_weight = (
+                (shares * price / equity) if equity > 0.0 and price > 0.0 else 0.0
+            )
+            pin_rows.append(
+                {
+                    "ticker": symbol,
+                    "sleeve": "live_pilot_validation_dropped_sell_hold",
+                    "target_weight": current_weight,
+                }
+            )
+        if pin_rows:
+            targets = pd.concat(
+                [targets, pd.DataFrame(pin_rows, columns=["ticker", "sleeve", "target_weight"])],
+                ignore_index=True,
+            )
+    return dataclasses.replace(request, targets=targets)
+
+
 def _intended_from_validation(
     *,
     orders: list[Any],
@@ -2129,6 +2246,14 @@ def _run_live_pilot_core_path(
         max_orders=int(gate.max_orders or 0),
         run_id=run_id,
     )
+    # BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): validate_live_pilot_plan now
+    # partitions PER ORDER — a bad symbol/whitelist/sells-disabled problem drops
+    # only that order (recorded below) rather than blocking the whole batch.
+    # plan_validation.status is only "BLOCKED" when NOT ONE order survived, or a
+    # genuine batch-level constraint (order-count/cap) was tripped.
+    dropped_orders: list[dict[str, Any]] = [
+        dropped.to_dict() for dropped in plan_validation.dropped_orders
+    ]
     intended = _intended_from_validation(
         orders=plan_validation.orders,
         source_trades=source_trades,
@@ -2163,28 +2288,71 @@ def _run_live_pilot_core_path(
         )
     _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
 
-    asset_errors: list[str] = []
+    # Asset validation (halted/delisted/inactive/unsupported asset class) is also
+    # PER ORDER: a bad asset drops only that order — critically, a bad BUY
+    # candidate must never block the SELLs that free capital. Only a totally
+    # empty surviving set blocks the run.
+    valid_orders: list[Any] = []
     for order in plan_validation.orders:
         asset = broker.get_asset(order.symbol) if hasattr(broker, "get_asset") else None
         error = validate_live_pilot_asset(asset, order.symbol)
         if error:
-            asset_errors.append(error)
-    if asset_errors:
+            severity = "critical" if order.side == "SELL" else "warning"
+            dropped_orders.append(
+                {
+                    "symbol": order.symbol,
+                    "side": order.side,
+                    "reason_code": error,
+                    "severity": severity,
+                    "stage": "asset_validation",
+                }
+            )
+            if severity == "critical":
+                print(
+                    f"live_pilot_sell_dropped_at_asset_check: symbol={order.symbol} "
+                    f"reason={error} — an intended SELL of a held position was dropped; "
+                    "it will NOT be submitted this run. Other orders proceed.",
+                    file=sys.stderr,
+                )
+            continue
+        valid_orders.append(order)
+
+    if not valid_orders:
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
             trade_date=trade_date,
             env=env,
-            reason_code=";".join(asset_errors),
+            reason_code=";".join(row["reason_code"] for row in dropped_orders if row.get("stage") == "asset_validation")
+            or "live_pilot_all_orders_failed_asset_validation",
             operator_action="Unsupported or non-tradable assets blocked before submission.",
             preflight=preflight,
             intended=intended,
             capital_gate=capital_gate,
         )
 
+    # Recompute the intended/artifact set against the FINAL (post-asset-check)
+    # surviving orders, and re-write orders_intended so the artifact reflects
+    # exactly what will be submitted plus a full audit trail of every drop.
+    intended = _intended_from_validation(
+        orders=valid_orders,
+        source_trades=source_trades,
+        output_root=output_root,
+        run_id=run_id,
+    )
+    intended_payload = plan_validation.to_dict()
+    intended_payload["orders"] = intended
+    intended_payload["dropped_orders"] = dropped_orders
+    intended_payload["dropped_orders_count"] = len(dropped_orders)
+    intended_payload["dropped_sell_orders_count"] = sum(
+        1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
+    )
+    intended_payload.update(_entry_policy_summary(intended=intended, submitted=[], dry_run=bool(gate.dry_run)))
+    _write_json(run_root / "live_pilot_orders_intended.json", intended_payload)
+
     open_order_check = _open_pilot_order_check(
         broker,
-        intended_symbols={order.symbol for order in plan_validation.orders},
+        intended_symbols={order.symbol for order in valid_orders},
     )
     _write_json(run_root / "live_pilot_open_order_check.json", open_order_check)
     if bool(open_order_check.get("block_submission")):
@@ -2234,6 +2402,11 @@ def _run_live_pilot_core_path(
             rebudget_meta={},
         )
     else:
+        # BLOCKER 3 fix: execute_lifecycle independently recomputes trades from
+        # `request` (holdings/targets), so orders dropped at validation must be
+        # neutralized in the request too — otherwise the submission engine would
+        # silently recompute and submit them anyway, defeating the partition.
+        submission_request = _request_excluding_dropped_orders(request, dropped_orders)
         adapter = LivePilotCoreAdapter(
             broker=broker,
             env=env,
@@ -2243,7 +2416,7 @@ def _run_live_pilot_core_path(
             pre_sell_account=request.planning_account,
             source_plan=plan,
         )
-        result = execute_lifecycle(request=request, adapter=adapter, config=config)
+        result = execute_lifecycle(request=submission_request, adapter=adapter, config=config)
         submitted = list(adapter.submitted_rows)
         submit_errors = list(adapter.submit_errors)
         intended = _intended_from_submitted(submitted)
@@ -2252,6 +2425,11 @@ def _run_live_pilot_core_path(
             {
                 **plan_validation.to_dict(),
                 "orders": intended,
+                "dropped_orders": dropped_orders,
+                "dropped_orders_count": len(dropped_orders),
+                "dropped_sell_orders_count": sum(
+                    1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
+                ),
                 **_entry_policy_summary(intended=intended, submitted=[], dry_run=False),
             },
         )
@@ -2327,11 +2505,19 @@ def _run_live_pilot_core_path(
         cap_source_override=_cap_source,
         portfolio_value_usd=_cap_pv,
     )
-    terminal_status = (
-        "DRY_RUN"
-        if gate.dry_run
-        else ("SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION")
-    )
+    # Reconciliation status semantics (WARNING §f fix): CLEAN now requires actual
+    # fills; a fully-submitted-but-unfilled/open batch is its own non-failure
+    # status (SUBMITTED_UNFILLED) rather than CLEAN-with-zero-fills or a false
+    # FAILED_RECONCILIATION. See _reconcile() for the full state machine.
+    _recon_status = str(reconciliation.get("status") or "")
+    if gate.dry_run:
+        terminal_status = "DRY_RUN"
+    elif _recon_status == "CLEAN":
+        terminal_status = "SUBMITTED"
+    elif _recon_status == "SUBMITTED_UNFILLED":
+        terminal_status = "SUBMITTED_UNFILLED"
+    else:
+        terminal_status = "FAILED_RECONCILIATION"
     summary = {
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
@@ -2351,6 +2537,14 @@ def _run_live_pilot_core_path(
         "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
+        # BLOCKER 3 audit trail: every order dropped at validation (plan-level or
+        # asset-level), with its own reason_code — never silently absorbed into
+        # the intended/submitted counts.
+        "dropped_orders_count": len(dropped_orders),
+        "dropped_sell_orders_count": sum(
+            1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
+        ),
+        "dropped_orders": dropped_orders,
         **_next_run_expectation(
             terminal_status=terminal_status,
             reason_code=reconciliation.get("status"),
@@ -2757,12 +2951,19 @@ def refresh_live_pilot_reconciliation(
     reconciliation["broker_status_refresh_claims_broker_truth"] = not bool(refresh_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
 
+    _refreshed_recon_status = str(reconciliation.get("status") or "")
+    if _refreshed_recon_status == "CLEAN":
+        _refreshed_terminal_status = "SUBMITTED"
+    elif _refreshed_recon_status == "SUBMITTED_UNFILLED":
+        _refreshed_terminal_status = "SUBMITTED_UNFILLED"
+    else:
+        _refreshed_terminal_status = "FAILED_RECONCILIATION"
     summary = {
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_root.name,
         "mode": LIVE_PILOT_MODE.upper(),
-        "terminal_status": "SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION",
+        "terminal_status": _refreshed_terminal_status,
         "reason_code": reconciliation.get("status"),
         "live_orders_allowed": True,
         "dry_run": False,
@@ -2772,7 +2973,7 @@ def refresh_live_pilot_reconciliation(
         "run_root": str(run_root),
         "refreshed_existing_run": True,
         **_next_run_expectation(
-            terminal_status="SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION",
+            terminal_status=_refreshed_terminal_status,
             reason_code=reconciliation.get("status"),
             reconciliation_state=reconciliation.get("state"),
         ),
