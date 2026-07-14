@@ -555,7 +555,10 @@ def test_core_routed_live_settlement_timeout_uses_actual_cash_and_does_not_overb
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-settlement-timeout"
-    assert result["terminal_status"] == "SUBMITTED"
+    # WARNING §f fix: the sell stays "accepted" (zero fill) at snapshot time — that
+    # is a live/open broker order, not a completed submission. CLEAN now requires
+    # actual fills, so this is SUBMITTED_UNFILLED (not a failure, not CLEAN).
+    assert result["terminal_status"] == "SUBMITTED_UNFILLED"
     assert broker.submitted_sides == ["SELL"]
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert [row["side"] for row in submitted["orders"]] == ["SELL"]
@@ -803,7 +806,12 @@ def test_rejected_order_produces_failed_reconciliation(tmp_path: Path) -> None:
     assert reconciliation["operator_action"]
 
 
-def test_accepted_open_order_produces_clean_reconciliation(tmp_path: Path) -> None:
+def test_accepted_open_order_produces_submitted_unfilled_reconciliation(tmp_path: Path) -> None:
+    # WARNING §f fix (PRE_ARM_SWEEP_2026-07-13): this used to report CLEAN with
+    # ZERO fills (the order merely sits accepted/new at the broker). CLEAN now
+    # requires filled_count == submitted_count; a fully-submitted-but-unfilled
+    # batch gets its own non-failure status instead: state=OPEN /
+    # status=SUBMITTED_UNFILLED ("orders live at broker, not yet filled").
     broker = FakeBroker(order_status="OrderStatus.NEW")
 
     result = run_live_pilot(
@@ -816,12 +824,13 @@ def test_accepted_open_order_produces_clean_reconciliation(tmp_path: Path) -> No
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-open"
-    assert result["terminal_status"] == "SUBMITTED"
+    assert result["terminal_status"] == "SUBMITTED_UNFILLED"
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
-    assert reconciliation["status"] == "CLEAN"
-    assert reconciliation["state"] == "CLEAN"
+    assert reconciliation["status"] == "SUBMITTED_UNFILLED"
+    assert reconciliation["state"] == "OPEN"
     assert reconciliation["accepted_count"] == 1
     assert reconciliation["open_count"] == 1
+    assert reconciliation["filled_count"] == 0
     assert reconciliation["unresolved_count"] == 0
 
 
@@ -845,7 +854,9 @@ def test_unknown_order_status_produces_failed_reconciliation(tmp_path: Path) -> 
 
 
 
-def test_refresh_existing_run_reconciles_open_broker_order(tmp_path: Path) -> None:
+def test_refresh_existing_run_reconciles_open_broker_order_as_submitted_unfilled(tmp_path: Path) -> None:
+    # WARNING §f fix: a refreshed order still open at the broker (zero fill) is
+    # SUBMITTED_UNFILLED, not CLEAN — CLEAN now requires actual fills.
     broker = FakeBroker(order_status="OrderStatus.NEW")
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-refresh"
     run_root.mkdir(parents=True)
@@ -873,11 +884,12 @@ def test_refresh_existing_run_reconciles_open_broker_order(tmp_path: Path) -> No
 
     result = refresh_live_pilot_reconciliation(run_root=run_root, broker=broker)
 
-    assert result["terminal_status"] == "SUBMITTED"
+    assert result["terminal_status"] == "SUBMITTED_UNFILLED"
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"][0]["status"] == "OrderStatus.NEW"
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
-    assert reconciliation["status"] == "CLEAN"
+    assert reconciliation["status"] == "SUBMITTED_UNFILLED"
+    assert reconciliation["state"] == "OPEN"
     assert reconciliation["open_count"] == 1
     assert reconciliation["refreshed_existing_run"] is True
 
@@ -933,7 +945,14 @@ def test_refresh_existing_market_order_updates_stale_pending_to_filled(tmp_path:
     assert results["idle_cash_reason"] != "submitted_not_filled"
 
 
-def test_partial_order_produces_partial_failed_reconciliation(tmp_path: Path) -> None:
+def test_snapshot_time_partial_fill_produces_submitted_unfilled_not_failed(tmp_path: Path) -> None:
+    # WARNING §f fix: a `partially_filled` order observed at snapshot time is
+    # NON-TERMINAL — the order is still open at the broker and may fill
+    # further. It must not be a false FAILED_RECONCILIATION; it belongs to the
+    # same OPEN/SUBMITTED_UNFILLED family as an unfilled accepted/new order.
+    # Only a TERMINAL partial (order done/canceled after partially filling,
+    # which buckets as "rejected" via its canceled/expired broker status) stays
+    # FAILED_RECONCILIATION.
     broker = FakeBroker(order_status="partially_filled")
 
     result = run_live_pilot(
@@ -946,9 +965,10 @@ def test_partial_order_produces_partial_failed_reconciliation(tmp_path: Path) ->
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-partial"
-    assert result["terminal_status"] == "FAILED_RECONCILIATION"
+    assert result["terminal_status"] == "SUBMITTED_UNFILLED"
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
-    assert reconciliation["state"] == "PARTIAL"
+    assert reconciliation["status"] == "SUBMITTED_UNFILLED"
+    assert reconciliation["state"] == "OPEN"
     assert reconciliation["partial_count"] == 1
 
 
@@ -975,6 +995,185 @@ def test_unsupported_asset_class_does_not_submit(tmp_path: Path) -> None:
 
     assert result["terminal_status"] == "BLOCKED"
     assert "unsupported_asset_class" in result["reason_code"]
+    assert broker.submit_calls == 0
+
+
+# --------------------------------------------------------------------------- #
+# BLOCKER 3 (PRE_ARM_SWEEP_2026-07-13 §d) — per-order validation partitioning.
+# A single bad/unresolvable order must never block the rest of the batch, and
+# a buy-side problem must never block the sells that free capital.
+# --------------------------------------------------------------------------- #
+
+
+def _nine_order_rotation_plan() -> dict[str, object]:
+    # 7 BUY targets; the 2 currently-held positions below (OLD1/OLD2) are absent
+    # from this target book, so the transition engine proposes SELLing both.
+    return {
+        "target_portfolio": [
+            {
+                "symbol": symbol,
+                "ticker": symbol,
+                "side": "BUY",
+                "target_weight": 0.05,
+                "price": 50.0,
+                "sleeve": "polaris",
+            }
+            for symbol in ("XOM", "MNST", "FTNT", "GM", "UNP", "PNC", "CVS")
+        ]
+    }
+
+
+class AssetAwareBroker(FakeBroker):
+    """FakeBroker whose get_asset() flags a single configured symbol as bad."""
+
+    def __init__(self, *, bad_asset_symbol: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.bad_asset_symbol = bad_asset_symbol
+
+    def get_asset(self, symbol):
+        if symbol == self.bad_asset_symbol:
+            return {
+                "symbol": symbol,
+                "status": "inactive",
+                "asset_class": "us_equity",
+                "tradable": False,
+            }
+        return super().get_asset(symbol)
+
+
+def test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed(tmp_path: Path) -> None:
+    """2 sells + 7 buys, one buy symbol fails asset validation.
+
+    The bad buy is dropped (own reason_code); the 2 sells and 6 good buys still
+    plan/submit-intend, and reconcile treats intended as 8 (not 9) — the
+    dropped order never counts toward `intended`.
+    """
+    broker = AssetAwareBroker(
+        bad_asset_symbol="FTNT",
+        buying_power="10000",
+        cash="10000",
+        equity="10000",
+        positions=[
+            {"symbol": "ALLX", "qty": "1", "market_value": "100", "cost_basis": "100"},
+            {"symbol": "COTY", "qty": "1", "market_value": "100", "cost_basis": "100"},
+        ],
+    )
+    env = _env(dry_run="1", max_orders="10")
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "*"
+    # Large enough cap that all 7 buy targets ($500 notional each) fit — the
+    # base fixture's $500 cap would otherwise clip the buy book down to a
+    # single name on capital grounds, unrelated to what this test exercises.
+    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "100000"
+
+    result = run_live_pilot(
+        plan=_nine_order_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-partition-bad-buy",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-partition-bad-buy"
+    # The batch was NOT blocked: it reached the DRY_RUN terminal state with the
+    # 8 surviving orders (this fixture never reaches real broker submission,
+    # so DRY_RUN is the correct proceed-state to assert against).
+    assert result["terminal_status"] == "DRY_RUN"
+    assert result["dropped_orders_count"] == 1
+    assert result["dropped_sell_orders_count"] == 0
+
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    dropped = intended["dropped_orders"]
+    assert len(dropped) == 1
+    assert dropped[0]["symbol"] == "FTNT"
+    assert dropped[0]["side"] == "BUY"
+    assert dropped[0]["severity"] == "warning"
+    assert dropped[0]["stage"] == "asset_validation"
+    assert "asset_not_tradable" in dropped[0]["reason_code"]
+
+    surviving_symbols = {row["symbol"] for row in intended["orders"]}
+    assert surviving_symbols == {"ALLX", "COTY", "XOM", "MNST", "GM", "UNP", "PNC", "CVS"}
+    surviving_sides = [row["side"] for row in intended["orders"]]
+    assert surviving_sides.count("SELL") == 2
+    assert surviving_sides.count("BUY") == 6
+
+    reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
+    assert reconciliation["status"] == "DRY_RUN_NO_SUBMISSION"
+    # The dropped order never counts toward `intended` — reconcile sees 8, not 9.
+    assert reconciliation["intended_count"] == 8
+    assert reconciliation["submitted_count"] == 8
+
+
+def test_invalid_sell_of_held_position_dropped_loudly_others_proceed(tmp_path: Path) -> None:
+    """An invalid SELL of a held position is dropped (critical severity, loud
+    log) but does not block the other sell or the buys."""
+    broker = FakeBroker(
+        buying_power="10000",
+        cash="10000",
+        equity="10000",
+        positions=[
+            {"symbol": "ALLX", "qty": "1", "market_value": "100", "cost_basis": "100"},
+            {"symbol": "COTY", "qty": "1", "market_value": "100", "cost_basis": "100"},
+        ],
+    )
+    env = _env(dry_run="1", max_orders="10")
+    # Only COTY is whitelisted for sale; ALLX's sell is invalid (not whitelisted).
+    env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "COTY"
+    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "100000"
+
+    result = run_live_pilot(
+        plan=_nine_order_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-partition-bad-sell",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-partition-bad-sell"
+    assert result["terminal_status"] == "DRY_RUN"
+    assert result["dropped_orders_count"] == 1
+    assert result["dropped_sell_orders_count"] == 1
+
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    dropped = intended["dropped_orders"]
+    assert len(dropped) == 1
+    assert dropped[0]["symbol"] == "ALLX"
+    assert dropped[0]["side"] == "SELL"
+    assert dropped[0]["severity"] == "critical"
+    assert "sell_not_whitelisted" in dropped[0]["reason_code"]
+
+    surviving = {(row["symbol"], row["side"]) for row in intended["orders"]}
+    assert ("ALLX", "SELL") not in surviving
+    assert ("COTY", "SELL") in surviving
+    assert sum(1 for row in intended["orders"] if row["side"] == "BUY") == 7
+
+
+def test_all_orders_invalid_blocks_the_run(tmp_path: Path) -> None:
+    """If every candidate order is invalid, the run is BLOCKED (fail closed on
+    total failure), same as before the partitioning fix."""
+    broker = FakeBroker(
+        buying_power="10000",
+        cash="10000",
+        equity="10000",
+        positions=[
+            {"symbol": "ALLX", "qty": "1", "market_value": "100", "cost_basis": "100"},
+        ],
+    )
+    env = _env(dry_run="1", max_orders="10")
+    # Sells master-disabled and no buy targets at all -> nothing survives.
+    env["CAERUS_LIVE_PILOT_SELLS_ENABLED"] = "0"
+
+    result = run_live_pilot(
+        plan={"target_portfolio": []},
+        broker=broker,
+        env=env,
+        run_id="run-partition-all-invalid",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
     assert broker.submit_calls == 0
 
 
@@ -1256,7 +1455,14 @@ def test_settlement_wait_retries_with_backoff_until_settled(tmp_path: Path) -> N
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-settlement-retry"
-    assert result["terminal_status"] == "SUBMITTED"
+    # WARNING §f fix: reconciliation is built from the ORIGINAL submit-time
+    # order rows, whose SELL leg was captured "accepted" before the settlement
+    # retry loop confirmed the fill (the confirmed fill is only recorded in
+    # sell_fill_meta below, a separate diagnostic — a pre-existing gap this fix
+    # does not paper over). Previously that stale "accepted" status still
+    # reported CLEAN (the exact zero-fill-CLEAN bug this fix closes); it now
+    # correctly reads SUBMITTED_UNFILLED instead of falsely claiming CLEAN.
+    assert result["terminal_status"] == "SUBMITTED_UNFILLED"
     assert broker.submitted_sides == ["SELL", "BUY"]
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     wait_meta = transition["diagnostics"]["sell_fill_meta"]["settlement_wait"]
@@ -1294,7 +1500,12 @@ def test_settlement_wait_exhausts_attempts_and_fails_closed(tmp_path: Path) -> N
     wait_meta = transition["diagnostics"]["sell_fill_meta"]["settlement_wait"]
     assert wait_meta["attempts_used"] == 3
     assert wait_meta["exhausted_reason"] == "max_attempts_exhausted"
-    assert result["terminal_status"] == "SUBMITTED"  # sell accepted-open reconciles clean
+    # WARNING §f fix: the sell stayed "accepted" (zero fill) at submission time —
+    # that is a live/open broker order, not a completed submission. CLEAN now
+    # requires actual fills, so this is SUBMITTED_UNFILLED (previously this
+    # falsely reported CLEAN/SUBMITTED with zero fills — the exact bug closed
+    # by this fix).
+    assert result["terminal_status"] == "SUBMITTED_UNFILLED"
 
 
 def test_settlement_timeout_zero_preserves_single_pass_fail_fast(tmp_path: Path) -> None:
@@ -1465,7 +1676,9 @@ def test_blocked_halt_paths_write_next_run_expectation(tmp_path: Path) -> None:
     assert closed["terminal_status"] == "BLOCKED"
     assert closed["next_run_expectation"] == "converges_next_run"
 
-    # Partial fill: broker truth not terminal -> manual confirmation required.
+    # Snapshot-time partial fill: broker truth not terminal -> not a failure
+    # (WARNING §f fix), but still requires manual confirmation since the order
+    # remains open at the broker and blocks a duplicate next submission.
     partial = run_live_pilot(
         plan=_plan(),
         broker=FakeBroker(order_status="partially_filled"),
@@ -1474,5 +1687,5 @@ def test_blocked_halt_paths_write_next_run_expectation(tmp_path: Path) -> None:
         output_root=tmp_path / "outputs" / "live_pilot",
         now_et=_market_open_now(),
     )
-    assert partial["terminal_status"] == "FAILED_RECONCILIATION"
+    assert partial["terminal_status"] == "SUBMITTED_UNFILLED"
     assert partial["next_run_expectation"] == "requires_manual_action"
