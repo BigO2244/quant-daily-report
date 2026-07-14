@@ -301,7 +301,7 @@ write_live_pilot_pointer "dry_run" "${DRY_RUN_ID}" "${DRY_RUN_ROOT}" "dry_run_co
 
 if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}" != "1" ]]; then
     echo "LIVE_PILOT scheduled submission paused: CAERUS_LIVE_PILOT_SUBMIT_APPROVED is not 1."
-    confirm_completed_runs
+    confirm_completed_runs || true
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
     exit 0
 fi
@@ -322,7 +322,7 @@ fi
 # Execute-completion hook: confirm the just-completed submit run (and the dry
 # run) now, so an armed submission is reported even if it finished after the
 # scheduled confirm sweep. Dedupe keeps it idempotent with the 09:45 cron.
-confirm_completed_runs
+confirm_completed_runs || true
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${LIVE_STATUS}"
 exit "${LIVE_STATUS}"
