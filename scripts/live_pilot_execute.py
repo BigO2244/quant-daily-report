@@ -22,6 +22,7 @@ from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
 from core.live_trade_ledger import record_live_order
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
+    PAPER_MODE,
     LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV,
     _is_live_host,
     account_id_hash,
@@ -1156,6 +1157,26 @@ def _entry_policy_summary(
     }
 
 
+def _derive_execution_mode(run_root: Path | str) -> str:
+    """Derive the reporting mode/lane from the run's output-root ancestry.
+
+    The SAME executor services both the paper lane (``--output-root
+    outputs/paper_lane``) and the live pilot lane (default
+    ``outputs/live_pilot``). The run_root is always ``<output_root>/runs/<id>``,
+    so the lane is unambiguous from the path — no reliance on process env that a
+    shared subprocess might inherit incorrectly. Falls back to the run_id token
+    and finally to LIVE_PILOT (fail-safe: an unknown lane is labelled as the
+    higher-consequence live lane so it can never silently masquerade as paper).
+    """
+    parts = {p.lower() for p in Path(run_root).parts}
+    name = Path(run_root).name.lower()
+    if "paper_lane" in parts or "_paper_" in f"_{name}_" or name.endswith("_paper"):
+        return PAPER_MODE.upper()
+    if "live_pilot" in parts or "live_pilot" in name:
+        return LIVE_PILOT_MODE.upper()
+    return LIVE_PILOT_MODE.upper()
+
+
 def _build_live_pilot_execution_results(
     *,
     run_id: str,
@@ -1210,7 +1231,7 @@ def _build_live_pilot_execution_results(
         "schema_version": "live_pilot_execution_results.v1",
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": LIVE_PILOT_MODE.upper(),
+        "mode": _derive_execution_mode(run_root),
         "status": terminal_status,
         "reason": reason_code,
         "halt_reason": (
@@ -3246,7 +3267,7 @@ def refresh_live_pilot_reconciliation(
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_root.name,
-        "mode": LIVE_PILOT_MODE.upper(),
+        "mode": _derive_execution_mode(run_root),
         "terminal_status": _refreshed_terminal_status,
         "reason_code": reconciliation.get("status"),
         "live_orders_allowed": True,
