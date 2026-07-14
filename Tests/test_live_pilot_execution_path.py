@@ -5,6 +5,8 @@ import datetime as dt
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import core.live_trade_ledger as live_trade_ledger
 from scripts.live_pilot_execute import (
     LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
@@ -107,6 +109,21 @@ class FakeBroker:
         }
 
 
+class GateFlipBroker(FakeBroker):
+    """Flip one mutable runtime gate after planning but before adapter submit."""
+
+    def __init__(self, env: dict[str, str], key: str, value: str) -> None:
+        super().__init__()
+        self.env = env
+        self.key = key
+        self.value = value
+
+    def get_asset(self, symbol):
+        asset = super().get_asset(symbol)
+        self.env[self.key] = self.value
+        return asset
+
+
 def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
     return {
         "TRADING_MODE": "live_pilot",
@@ -120,6 +137,7 @@ def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
         "CAERUS_LIVE_PILOT_DRY_RUN": dry_run,
         # Kill switch fails closed: unset/garbage blocks; arming requires explicit "off".
         "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
+        "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "1",
         # Master sell gate fails closed: sells stay blocked unless explicitly enabled.
         # Tests that exercise the sell/rotation path opt in here; the default-off
         # behavior is covered by the dedicated tests below.
@@ -679,6 +697,37 @@ def test_kill_switch_blocks_before_broker_submission_and_writes_gate_state(tmp_p
     assert gate_state["block_reason"] == "live_pilot_kill_switch_enabled"
     assert gate_state["kill_switch_set"] is True
     assert gate_state["broker_orders_submitted"] == 0
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "reason"),
+    [
+        ("CAERUS_LIVE_PILOT_KILL_SWITCH", "1", "live_pilot_kill_switch_enabled"),
+        ("CAERUS_LIVE_PILOT_SUBMIT_APPROVED", "0", "live_pilot_submit_not_approved"),
+    ],
+)
+def test_runtime_gates_are_rechecked_immediately_before_submission(
+    tmp_path: Path, key: str, value: str, reason: str
+) -> None:
+    env = _env(dry_run="0")
+    broker = GateFlipBroker(env, key, value)
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=env,
+        run_id=f"run-last-mile-{key.lower()}",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+    assert broker.submit_calls == 0
+    assert result["terminal_status"] == "FAILED_RECONCILIATION"
+    run_root = Path(str(result["run_root"]))
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert submitted["orders"]
+    assert all(row["status"] == "REJECTED" for row in submitted["orders"])
+    assert reason in json.dumps(submitted)
+    reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
+    assert reason in json.dumps(reconciliation)
 
 
 def test_live_buy_limit_plan_is_submitted_as_market_with_policy_metadata(tmp_path: Path) -> None:

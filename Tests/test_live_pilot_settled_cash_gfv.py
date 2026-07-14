@@ -236,6 +236,7 @@ def _env(max_orders: str = "5") -> dict:
         "CAERUS_LIVE_PILOT_MAX_ORDERS": max_orders,
         "CAERUS_LIVE_PILOT_DRY_RUN": "0",
         "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
+        "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "1",
         "CAERUS_LIVE_PILOT_SELLS_ENABLED": "1",
         "CAERUS_LIVE_PILOT_SELL_WHITELIST": "*",
         "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL": "1",

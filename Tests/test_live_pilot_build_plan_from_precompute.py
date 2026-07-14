@@ -89,14 +89,13 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     tp = plan["target_portfolio"]
     assert {r["symbol"] for r in tp} == {"AAPL", "MSFT", "JNJ"}
     assert all(r["price"] > 0 for r in tp)
-    # Highest RISK-ADJUSTED weight first. The per-name cap default is now the
-    # concentration ceiling (0.50) so AAPL is not clipped to 10%, but the 0.30
-    # sector cap scales the two Information Technology names (0.5 + 0.3 -> 0.30
-    # total), leaving JNJ (Health Care, 0.2) as the top weight.
-    assert tp[0]["symbol"] == "JNJ"
+    # The shared temporary pilot cap clips AAPL to 30%; unclassified sector-cap
+    # behavior is unchanged and remains outside this guardrail change.
+    assert tp[0]["symbol"] == "AAPL"
     weights = {r["symbol"]: float(r["target_weight"]) for r in tp}
-    assert weights["AAPL"] + weights["MSFT"] == pytest.approx(0.30)
-    assert weights["AAPL"] > weights["MSFT"]
+    assert weights["AAPL"] == pytest.approx(0.30)
+    assert weights["MSFT"] == pytest.approx(0.30)
+    assert max(weights.values()) <= 0.30
     # Price provenance: AAPL from payload, others from yfinance.
     by_symbol = {r["symbol"]: r for r in tp}
     assert by_symbol["AAPL"]["price_source"] == "payload_entry_price"
@@ -144,6 +143,53 @@ def test_unpriced_target_blocks_fail_closed(tmp_path: Path) -> None:
     assert plan["reason_code"] == "live_pilot_target_unpriced"
     assert "MSFT" in plan["block_diagnostics"]["unpriced_targets"]
     assert plan["target_portfolio"] == []
+
+
+def test_unknown_layer_metadata_blocks_live(tmp_path: Path) -> None:
+    payload_path = _bundle(
+        tmp_path,
+        signals=[{"ticker": "AAPL", "target_weight": 0.95, "sleeve": "mystery_sleeve"}],
+        cash_target_weight=0.05,
+    )
+    plan = _build(tmp_path, payload_path, prices={"AAPL": 100.0})
+    assert plan["status"] == "BLOCKED"
+    assert plan["reason_code"] == "live_pilot_layer_unresolved"
+    assert plan["block_diagnostics"]["unresolved_layer_labels"] == {
+        "AAPL": ["mystery_sleeve"]
+    }
+
+
+def test_paper_and_live_share_identical_targets_and_explicit_cash(tmp_path: Path) -> None:
+    signals = [
+        {"ticker": "AAPL", "target_weight": 0.25, "sleeve": "sleeve_quality"},
+        {"ticker": "MSFT", "target_weight": 0.20, "sleeve": "sleeve_trend"},
+        {"ticker": "JNJ", "target_weight": 0.20, "sleeve": "sleeve_quality"},
+        {"ticker": "PNC", "target_weight": 0.15, "sleeve": "sleeve_trend"},
+        {"ticker": "SPG", "target_weight": 0.15, "sleeve": "sleeve_quality"},
+        {"ticker": "CASH", "target_weight": 0.05, "sleeve": "core"},
+    ]
+    payload_path = _bundle(tmp_path, signals=signals, cash_target_weight=0.05)
+    prices = {symbol: 100.0 for symbol in ("AAPL", "MSFT", "JNJ", "PNC", "SPG")}
+    plan = _build(tmp_path, payload_path, prices=prices)
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+
+    from paper.paper_broker import load_targets
+
+    paper_targets, paper_cash, _, _ = load_targets(
+        str(payload_path.parent / "signals.json"), cash_target_weight_default=0.05
+    )
+    paper_weights = {
+        str(row["ticker"]): float(row["target_weight"])
+        for _, row in paper_targets.iterrows()
+    }
+    live_weights = {
+        str(row["symbol"]): float(row["target_weight"])
+        for row in plan["target_portfolio"]
+    }
+    assert live_weights == pytest.approx(paper_weights)
+    assert max(live_weights.values()) <= 0.30
+    assert float(plan["cash_target_weight"]) == pytest.approx(float(paper_cash))
+    assert sum(live_weights.values()) + float(plan["cash_target_weight"]) == pytest.approx(1.0)
 
 
 def test_missing_signals_source_blocks(tmp_path: Path) -> None:

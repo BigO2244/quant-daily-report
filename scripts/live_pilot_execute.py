@@ -31,6 +31,7 @@ from core.live_pilot_guardrails import (
     resolve_dynamic_cap,
     validate_live_pilot_asset,
     validate_live_pilot_plan,
+    validate_live_pilot_submission_guardrails,
 )
 from core.live_pilot_gate_state import write_live_pilot_gate_state
 from core.settled_cash import (
@@ -1694,6 +1695,14 @@ class LivePilotCoreAdapter:
         policy = self._policy(submitted_intent)
         submitted_order_type = str(policy.get("submitted_order_type") or "market").strip().lower()
         try:
+            # Re-read the mutable runtime gates at the last possible point before
+            # each broker submission. A gate flip after planning must fail closed.
+            validate_live_pilot_submission_guardrails(
+                broker_paper=bool(getattr(self.broker, "paper", True)),
+                base_url=str(getattr(self.broker, "base_url", "") or ""),
+                env=self.env,
+                order_notional=float(submitted_intent.notional),
+            )
             if submitted_order_type == "limit":
                 broker_result = self.broker.submit_limit_order(
                     symbol=submitted_intent.symbol,

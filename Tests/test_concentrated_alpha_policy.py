@@ -1,7 +1,7 @@
-"""Phase 2 refactor: CONCENTRATION IS THE MODEL.
+"""Temporary pilot guardrails: CONCENTRATION IS THE MODEL.
 
 Covers:
-- Regime-adaptive top-N: N = clamp(int(vix_regime.max_positions), 3, 7),
+- Regime-adaptive top-N: N = clamp(int(vix_regime.max_positions), 5, 7),
   fallback 5 when regime is unavailable; explicitly-set CAERUS_CONCENTRATED_TOP_N
   env remains an emergency override (wins ONLY when set).
 - Hardwired concentration: no enable flag; concentration always applies.
@@ -29,8 +29,8 @@ import daily_quant_report as dqr
     [
         ("LOW", 10, 7),       # clamped down to 7
         ("ELEVATED", 7, 7),
-        ("HIGH", 4, 4),
-        ("CRISIS", 2, 3),     # clamped up to 3
+        ("HIGH", 4, 5),
+        ("CRISIS", 2, 5),     # temporary pilot floor
     ],
 )
 def test_top_n_derives_from_vix_regime(monkeypatch, regime, max_positions, expected_n):
@@ -47,7 +47,7 @@ def test_top_n_from_real_regime_classifier(monkeypatch):
     from research.vix_regime import classify_vix_regime
 
     monkeypatch.delenv("CAERUS_CONCENTRATED_TOP_N", raising=False)
-    expected = {15.0: 7, 25.0: 7, 35.0: 4, 55.0: 3}  # LOW/ELEVATED/HIGH/CRISIS
+    expected = {15.0: 7, 25.0: 7, 35.0: 5, 55.0: 5}  # LOW/ELEVATED/HIGH/CRISIS
     for vix, expected_n in expected.items():
         top_n, source = dqr._concentrated_top_n(classify_vix_regime(vix))
         assert top_n == expected_n, f"vix={vix}"
@@ -68,13 +68,19 @@ def test_top_n_env_override_wins_only_when_set(monkeypatch):
     assert dqr._concentrated_top_n(regime) == (6, "env_override")
     # Unset -> regime wins again.
     monkeypatch.delenv("CAERUS_CONCENTRATED_TOP_N", raising=False)
-    assert dqr._concentrated_top_n(regime) == (4, "vix_regime:HIGH")
+    assert dqr._concentrated_top_n(regime) == (5, "vix_regime:HIGH")
     # Empty string is NOT an explicit override.
     monkeypatch.setenv("CAERUS_CONCENTRATED_TOP_N", "")
-    assert dqr._concentrated_top_n(regime) == (4, "vix_regime:HIGH")
+    assert dqr._concentrated_top_n(regime) == (5, "vix_regime:HIGH")
     # Invalid value is ignored (regime-adaptive N with a warning).
     monkeypatch.setenv("CAERUS_CONCENTRATED_TOP_N", "banana")
-    assert dqr._concentrated_top_n(regime) == (4, "vix_regime:HIGH")
+    assert dqr._concentrated_top_n(regime) == (5, "vix_regime:HIGH")
+
+    # Overrides cannot weaken the temporary pilot range.
+    monkeypatch.setenv("CAERUS_CONCENTRATED_TOP_N", "1")
+    assert dqr._concentrated_top_n(regime) == (5, "env_override")
+    monkeypatch.setenv("CAERUS_CONCENTRATED_TOP_N", "99")
+    assert dqr._concentrated_top_n(regime) == (7, "env_override")
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +109,7 @@ def _alloc_result(n_names: int = 8):
 def _patch_snapshot_io(monkeypatch, captured: dict):
     def _capture_signals(**kwargs):
         captured["df_targets"] = kwargs.get("df_targets")
+        captured["cash_target_weight"] = kwargs.get("cash_target_weight")
         return "signals/2026-07-10.json"
 
     monkeypatch.setattr(dqr, "write_signals_snapshot", _capture_signals)
@@ -130,7 +137,7 @@ def _patch_snapshot_io(monkeypatch, captured: dict):
 
 def test_concentration_always_applies_without_any_flag(monkeypatch):
     """No CAERUS_CONCENTRATED_ALPHA gate: the emitted book is the concentrated
-    top-N for the regime (HIGH -> 4 names), not the broad book."""
+    top-N for the regime (HIGH -> 5 names), not the broad book."""
     monkeypatch.delenv("CAERUS_CONCENTRATED_ALPHA", raising=False)
     monkeypatch.delenv("CAERUS_CONCENTRATED_TOP_N", raising=False)
     captured: dict = {}
@@ -149,7 +156,12 @@ def test_concentration_always_applies_without_any_flag(monkeypatch):
     )
 
     emitted = captured["df_targets"]
-    assert emitted is not None and len(emitted) == 4
+    assert emitted is not None and len(emitted) == 5
+    assert float(emitted["target_weight"].max()) <= 0.30
+    assert float(captured["cash_target_weight"]) >= 0.05
+    assert float(emitted["target_weight"].sum()) + float(
+        captured["cash_target_weight"]
+    ) == pytest.approx(1.0)
     # Top-conviction names survive, ordered by conviction.
     assert list(emitted["ticker"])[:2] == ["TK00", "TK01"]
     assert snapshot["signals_snapshot_path"] == "signals/2026-07-10.json"
@@ -223,19 +235,19 @@ def test_default_max_position_pct_is_concentration_ceiling_no_flag(monkeypatch):
     monkeypatch.delenv("MAX_POSITION_PCT", raising=False)
     monkeypatch.delenv("CAERUS_CONCENTRATED_ALPHA", raising=False)
     monkeypatch.delenv("CAERUS_CONCENTRATED_MAX_WEIGHT", raising=False)
-    assert _default_max_position_pct() == pytest.approx(0.50)
+    assert _default_max_position_pct() == pytest.approx(0.30)
 
     monkeypatch.setenv("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.42")
-    assert _default_max_position_pct() == pytest.approx(0.42)
+    assert _default_max_position_pct() == pytest.approx(0.30)
 
     # Explicit MAX_POSITION_PCT always wins.
     monkeypatch.setenv("MAX_POSITION_PCT", "0.15")
     assert _default_max_position_pct() == pytest.approx(0.15)
 
-    # Garbage ceiling falls back to 0.50.
+    # Garbage ceiling falls back to the temporary pilot cap.
     monkeypatch.delenv("MAX_POSITION_PCT", raising=False)
     monkeypatch.setenv("CAERUS_CONCENTRATED_MAX_WEIGHT", "banana")
-    assert _default_max_position_pct() == pytest.approx(0.50)
+    assert _default_max_position_pct() == pytest.approx(0.30)
 
 
 def test_live_construction_policy_uses_shared_cap_default(monkeypatch):
@@ -249,7 +261,7 @@ def test_live_construction_policy_uses_shared_cap_default(monkeypatch):
 
     for equity in (10000.0, 250000.0):  # small and large account paths
         policy = dqr._resolve_live_construction_policy(equity)
-        assert policy["max_position_weight"] == pytest.approx(0.42), equity
+        assert policy["max_position_weight"] == pytest.approx(0.30), equity
 
     # Explicit MAX_POSITION_PCT env wins through the shared function too.
     monkeypatch.setenv("MAX_POSITION_PCT", "0.15")

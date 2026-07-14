@@ -24,6 +24,7 @@ LIVE_PILOT_ACCOUNT_ID_ENV = "CAERUS_LIVE_PILOT_ACCOUNT_ID"
 LIVE_PILOT_ACCOUNT_ID_HASH_ENV = "CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH"
 LIVE_PILOT_MAX_ORDERS_ENV = "CAERUS_LIVE_PILOT_MAX_ORDERS"
 LIVE_PILOT_KILL_SWITCH_ENV = "CAERUS_LIVE_PILOT_KILL_SWITCH"
+LIVE_PILOT_SUBMIT_APPROVED_ENV = "CAERUS_LIVE_PILOT_SUBMIT_APPROVED"
 LIVE_PILOT_DRY_RUN_ENV = "CAERUS_LIVE_PILOT_DRY_RUN"
 LIVE_PILOT_CRON_APPROVED_ENV = "CAERUS_LIVE_PILOT_CRON_APPROVED"
 LIVE_PILOT_SELL_WHITELIST_ENV = "CAERUS_LIVE_PILOT_SELL_WHITELIST"
@@ -446,6 +447,11 @@ def build_live_pilot_gate_result(
             "Dry run may write isolated artifacts, but must not submit live orders.",
             status="PASS",
             allowed=False,
+        )
+    if submission_intent and not _truthy(environ.get(LIVE_PILOT_SUBMIT_APPROVED_ENV)):
+        return result(
+            "live_pilot_submit_not_approved",
+            f"Set {LIVE_PILOT_SUBMIT_APPROVED_ENV}=1 only for an owner-approved submission.",
         )
     if submission_intent and order_notional is None:
         return result(

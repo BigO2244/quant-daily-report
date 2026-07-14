@@ -19,16 +19,23 @@ def _default_max_position_pct() -> float:
     """Per-name cap — the SINGLE source of truth for the position-cap default.
 
     Explicit MAX_POSITION_PCT env always wins; otherwise the concentration
-    ceiling (CAERUS_CONCENTRATED_MAX_WEIGHT, default 0.50). Concentration is
+    ceiling (CAERUS_CONCENTRATED_MAX_WEIGHT, temporary pilot default 0.30). Concentration is
     ALWAYS ON (no flag), so the cap must match the concentrated book's per-name
     ceiling or the concentrated weights would be re-clipped downstream."""
+    pilot_ceiling = 0.30
     explicit = os.environ.get("MAX_POSITION_PCT")
     if explicit not in (None, ""):
-        return float(explicit)
+        try:
+            return min(pilot_ceiling, float(explicit))
+        except (TypeError, ValueError):
+            return pilot_ceiling
     try:
-        return float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
+        return min(
+            pilot_ceiling,
+            float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", str(pilot_ceiling))),
+        )
     except (TypeError, ValueError):
-        return 0.50
+        return pilot_ceiling
 
 
 MAX_POSITION_PCT = _default_max_position_pct()
