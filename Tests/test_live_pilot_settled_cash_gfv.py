@@ -340,3 +340,191 @@ def test_fail_closed_blocks_buys_when_order_history_unavailable(tmp_path: Path) 
     settled = json.loads((run_root / "live_pilot_settled_cash.json").read_text())
     assert settled["fail_closed"] is True
     assert settled["settled_cash"] == 0.0
+
+# --------------------------------------------------------------------------- #
+# Verifier round 2: bulk-history freshness, date bounds, date-only fills
+# --------------------------------------------------------------------------- #
+def test_date_only_filled_at_is_not_shifted_to_prior_day() -> None:
+    """A date-only filled_at ("2026-07-13") must be used AS-IS as the ET trade date.
+
+    The old datetime path parsed it as naive midnight -> UTC -> ET = the PRIOR day,
+    which moved settlement one day EARLIER (unsafe: a today-filled sell would count
+    as already settled today).
+    """
+    orders = [
+        {"side": "sell", "status": "filled", "symbol": "X", "filled_qty": "1",
+         "filled_avg_price": "100", "filled_at": "2026-07-13", "id": "d1"},
+    ]
+    total, breakdown = unsettled_proceeds(orders, "2026-07-13")
+    assert total == pytest.approx(100.0)  # still unsettled TODAY (settles 07-14)
+    assert breakdown[0]["fill_date"] == "2026-07-13"
+    assert breakdown[0]["settlement_date"] == "2026-07-14"
+
+
+def test_confirmed_fill_missing_from_bulk_history_is_injected_as_unsettled() -> None:
+    """Cross-check (finding #1, unit level): a same-run confirmed sell fill absent
+    from the lagging bulk listing has its proceeds injected as unsettled."""
+    r = compute_settled_cash(
+        broker_cash=404.0,
+        orders=[],  # lagging bulk read: shows nothing
+        as_of_date="2026-07-13",
+        buy_buffer_pct=0.98,
+        confirmed_sells=[{"order_id": "sim-1", "proceeds": 111.0, "symbol": "ALL"}],
+    )
+    assert r.unsettled_proceeds == pytest.approx(111.0)
+    assert r.settled_cash == pytest.approx(293.0)
+    assert any(
+        row.get("source") == "confirmed_fill_missing_from_bulk_history"
+        for row in r.unsettled_orders
+    )
+
+
+def test_confirmed_fill_partially_visible_in_bulk_injects_only_shortfall() -> None:
+    """Bulk shows a stale partial fill ($40 of a $111 confirmed sell): only the $71
+    shortfall is injected, never double-counted."""
+    bulk = [
+        {"id": "sim-1", "side": "sell", "status": "partially_filled", "symbol": "ALL",
+         "filled_qty": "0.4", "filled_avg_price": "100",
+         "filled_at": "2026-07-13T14:00:00Z"},
+    ]
+    r = compute_settled_cash(
+        broker_cash=404.0,
+        orders=bulk,
+        as_of_date="2026-07-13",
+        confirmed_sells=[{"order_id": "sim-1", "proceeds": 111.0, "symbol": "ALL"}],
+    )
+    assert r.unsettled_proceeds == pytest.approx(111.0)  # 40 bulk + 71 shortfall
+    assert r.settled_cash == pytest.approx(293.0)
+
+
+class LaggingBulkHistoryBroker(SettlementSimBroker):
+    """Bulk list_orders lags per-order reads: orders filled TODAY are missing from
+    the status=all listing, while get_order (per-order poll) sees them filled and
+    account cash already includes their proceeds. This is the freshness gap from
+    verifier finding #1."""
+
+    def list_orders(self, status: str = "open", limit: int = 100) -> list[dict]:
+        if str(status).lower() == "open":
+            return []
+        stale = [o for o in self.history if str(o.get("filled_at") or "")[:10] != self.today]
+        return [dict(o) for o in stale][-int(limit):]
+
+
+def test_lagging_bulk_history_cannot_defeat_the_clamp(tmp_path: Path) -> None:
+    """Finding #1 (integration): sells fill and credit cash, but the bulk order
+    listing feeding the settled-cash recompute hasn't caught up. The confirmed-fill
+    cross-check must inject the known proceeds as unsettled so buys stay clamped to
+    the PRE-SELL settled cash. Without the cross-check this run buys ~$395 against
+    $293 settled (a GFV); the double-entry ledger would go negative."""
+    broker = LaggingBulkHistoryBroker(
+        settled_cash=293.0,
+        positions={"ALL": 0.42, "C": 0.69},  # $111 of long-settled holdings
+        price=100.0,
+    )
+    broker.advance_to("2026-07-13")
+    output_root = tmp_path / "outputs" / "live_pilot"
+    run_id = "lagging-bulk"
+    result = run_live_pilot(
+        plan=_rotation_plan("NEWA"),
+        broker=broker,
+        env=_env(),
+        run_id=run_id,
+        output_root=output_root,
+        now_et=_open(dt.date(2026, 7, 13)),
+    )
+    run_root = output_root / "runs" / run_id
+    assert result["terminal_status"] == "SUBMITTED", result
+    # Sells happened and buys happened...
+    assert broker.buy_events, "rotation should still deploy buys"
+    # ...but INVARIANT HOLDS: no buy drew on unsettled proceeds despite the lagging
+    # bulk read (the ledger never went negative).
+    assert broker.min_settled_funds_seen >= -1e-6, broker.buy_events
+    total_buys = sum(e["notional"] for e in broker.buy_events)
+    assert total_buys <= 293.0 * 0.98 + 1e-6, total_buys
+    # The post-sell settled-cash artifact records the injected cross-check rows.
+    settled = json.loads((run_root / "live_pilot_settled_cash.json").read_text())
+    assert settled["phase"] == "post_sell"
+    assert any(
+        row.get("source") == "confirmed_fill_missing_from_bulk_history"
+        for row in settled["unsettled_orders"]
+    ), settled["unsettled_orders"]
+    assert settled["settled_cash"] == pytest.approx(293.0)
+
+
+def test_page_full_inside_unsettled_window_fails_closed() -> None:
+    """Finding #3: a full history page whose oldest row is still unsettled may have
+    truncated older unsettled sells -> treat history as unavailable (fail closed)."""
+    from scripts.live_pilot_execute import _settled_cash_context
+
+    class PageFullBroker:
+        def list_orders(self, status: str = "open", limit: int = 100) -> list[dict]:
+            # Exactly `limit` rows, all filled today (unsettled as of today).
+            return [
+                {"id": f"o{i}", "side": "sell", "status": "filled", "symbol": "X",
+                 "filled_qty": "1", "filled_avg_price": "10",
+                 "filled_at": "2026-07-13T14:00:00Z"}
+                for i in range(int(limit))
+            ]
+
+    env = {"CAERUS_LIVE_PILOT_SETTLED_CASH_ORDER_LOOKBACK": "3"}
+    result, orders, availability = _settled_cash_context(
+        PageFullBroker(), broker_cash=500.0, as_of_date="2026-07-13", env=env
+    )
+    assert availability == "page_full_unsettled_window"
+    assert orders is None
+    assert result.fail_closed is True
+    assert result.settled_cash == 0.0
+
+
+def test_page_full_with_oldest_row_settled_does_not_fail_closed() -> None:
+    """Control: a full page whose oldest row is ALREADY settled proves the unsettled
+    window is fully covered -> normal computation."""
+    from scripts.live_pilot_execute import _settled_cash_context
+
+    class PageFullSettledOldestBroker:
+        def list_orders(self, status: str = "open", limit: int = 100) -> list[dict]:
+            rows = [
+                {"id": f"o{i}", "side": "sell", "status": "filled", "symbol": "X",
+                 "filled_qty": "1", "filled_avg_price": "10",
+                 "filled_at": "2026-07-13T14:00:00Z"}
+                for i in range(int(limit) - 1)
+            ]
+            # Oldest row: filled a week ago -> long settled -> window fully covered.
+            rows.append(
+                {"id": "old", "side": "sell", "status": "filled", "symbol": "Y",
+                 "filled_qty": "1", "filled_avg_price": "10",
+                 "filled_at": "2026-07-06T14:00:00Z"}
+            )
+            return rows
+
+    env = {"CAERUS_LIVE_PILOT_SETTLED_CASH_ORDER_LOOKBACK": "3"}
+    result, orders, availability = _settled_cash_context(
+        PageFullSettledOldestBroker(), broker_cash=500.0, as_of_date="2026-07-13", env=env
+    )
+    assert result.fail_closed is False
+    assert result.unsettled_proceeds == pytest.approx(20.0)  # 2 unsettled today-fills
+    assert result.settled_cash == pytest.approx(480.0)
+
+
+def test_order_history_query_is_date_bounded_when_broker_supports_after() -> None:
+    """Finding #3: brokers supporting `after` get a date-bounded query covering the
+    unsettled window (after = prev trading day of as_of); others fall back cleanly."""
+    from scripts.live_pilot_execute import _settled_cash_context
+
+    class AfterCapableBroker:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def list_orders(self, status: str = "open", limit: int = 100, after: str | None = None) -> list[dict]:
+            self.calls.append({"status": status, "limit": limit, "after": after})
+            return []
+
+    broker = AfterCapableBroker()
+    result, _orders, availability = _settled_cash_context(
+        broker, broker_cash=100.0, as_of_date="2026-07-13", env={}
+    )
+    assert availability == "ok_date_bounded"
+    # Monday 2026-07-13 -> prev trading day Friday 2026-07-10.
+    assert broker.calls[0]["after"] == "2026-07-10"
+    assert result.fail_closed is False
+    assert result.settled_cash == pytest.approx(100.0)

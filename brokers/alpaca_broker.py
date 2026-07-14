@@ -6,7 +6,9 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from core.live_pilot_preflight import validate_alpaca_submission_guardrails
 
@@ -776,7 +778,9 @@ class AlpacaBroker:
             tif=tif,
         )
 
-    def list_orders(self, status: str = "open", limit: int = 100) -> List[Dict[str, Any]]:
+    def list_orders(
+        self, status: str = "open", limit: int = 100, after: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
@@ -787,7 +791,26 @@ class AlpacaBroker:
             query_status = QueryOrderStatus.CLOSED
         else:
             query_status = QueryOrderStatus.ALL
-        req = GetOrdersRequest(status=query_status, limit=int(limit))
+        req_kwargs: Dict[str, Any] = {"status": query_status, "limit": int(limit)}
+        # Optional date bound (ISO date or datetime string). Used by the settled-cash
+        # guard to query only the unsettled window instead of a count-bounded page.
+        if after:
+            after_text = str(after).strip()
+            after_dt: Optional[datetime] = None
+            try:
+                after_dt = datetime.fromisoformat(after_text.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    after_date = datetime.strptime(after_text[:10], "%Y-%m-%d")
+                    after_dt = after_date
+                except ValueError:
+                    after_dt = None
+            if after_dt is not None:
+                if after_dt.tzinfo is None:
+                    # Treat a bare date as start-of-day ET (exchange calendar time).
+                    after_dt = after_dt.replace(tzinfo=ZoneInfo("America/New_York"))
+                req_kwargs["after"] = after_dt
+        req = GetOrdersRequest(**req_kwargs)
         orders = self.trading_client.get_orders(filter=req)
         return [_normalize_order_obj(o) for o in orders]
 

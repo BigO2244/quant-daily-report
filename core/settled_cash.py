@@ -81,6 +81,15 @@ def _fill_date(order: Mapping[str, Any]) -> str | None:
     text = str(raw or "").strip()
     if not text:
         return None
+    # A date-only string ("2026-07-13") IS the calendar trade date: use it as-is.
+    # Routing it through the datetime path would parse it as naive midnight, stamp
+    # UTC, and shift it to the PRIOR day in ET — moving settlement one day EARLIER,
+    # which is the unsafe direction for the GFV guard.
+    try:
+        dt.date.fromisoformat(text)
+        return text
+    except ValueError:
+        pass
     try:
         parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
@@ -202,12 +211,21 @@ def compute_settled_cash(
     as_of_date: str,
     buy_buffer_pct: float = 1.0,
     orders_available: bool = True,
+    confirmed_sells: Sequence[Mapping[str, Any]] = (),
 ) -> SettledCashResult:
     """Stateless settled-cash recompute from broker truth.
 
     ``orders`` is the recent order history (status=all/closed). Pass ``None`` (or
     ``orders_available=False``) when the history could not be retrieved: the result
     fails closed (settled_cash = 0, buys blocked).
+
+    ``confirmed_sells`` is the freshness cross-check: sells that THIS RUN's per-order
+    polling (``get_order``) already confirmed as filled, as rows of
+    ``{"order_id", "proceeds", "symbol"}``. The bulk ``orders`` listing can lag those
+    per-order reads; a just-filled sell missing (or under-filled) in the bulk payload
+    would otherwise count as $0 unsettled while broker cash ALREADY includes its
+    proceeds — silently defeating the clamp. Any confirmed proceeds not accounted for
+    in the bulk-derived unsettled total are injected as unsettled here.
     """
     cash = max(0.0, _to_float(broker_cash, 0.0))
     buffer = float(buy_buffer_pct) if buy_buffer_pct is not None else 1.0
@@ -230,6 +248,39 @@ def compute_settled_cash(
         )
 
     unsettled, breakdown = unsettled_proceeds(orders, as_of_date)
+
+    # Freshness cross-check (same-run confirmed fills vs the bulk listing). A sell
+    # this run confirmed FILLED settles strictly after today, so its proceeds must
+    # appear in ``unsettled``. Credit whatever the bulk listing already counted for
+    # that order id and inject only the shortfall (covers both a missing order and a
+    # stale partial-fill snapshot).
+    counted_by_id: dict[str, float] = {}
+    for row in breakdown:
+        oid = str(row.get("order_id") or "")
+        if oid:
+            counted_by_id[oid] = counted_by_id.get(oid, 0.0) + float(row.get("proceeds") or 0.0)
+    for sell in confirmed_sells or ():
+        if not isinstance(sell, Mapping):
+            continue
+        proceeds = _to_float(sell.get("proceeds"), 0.0)
+        if proceeds <= 0.0:
+            continue
+        oid = str(sell.get("order_id") or "")
+        shortfall = proceeds - counted_by_id.get(oid, 0.0)
+        if shortfall <= 1e-9:
+            continue
+        unsettled += shortfall
+        breakdown.append(
+            {
+                "symbol": str(sell.get("symbol") or "").upper(),
+                "order_id": oid,
+                "fill_date": str(as_of_date),
+                "settlement_date": settlement_date(str(as_of_date)),
+                "proceeds": round(shortfall, 6),
+                "source": "confirmed_fill_missing_from_bulk_history",
+            }
+        )
+
     settled = max(0.0, cash - unsettled)
     return SettledCashResult(
         settled_cash=settled,

@@ -33,8 +33,10 @@ from core.live_pilot_guardrails import (
 )
 from core.live_pilot_gate_state import write_live_pilot_gate_state
 from core.settled_cash import (
+    _fill_date as _settled_cash_fill_date,
     compute_settled_cash,
     detect_gfv_risky_sells,
+    settlement_date,
 )
 from execution.core import (
     AccountSnapshot as CoreAccountSnapshot,
@@ -46,7 +48,7 @@ from execution.core import (
     execute_lifecycle,
     live_pilot_execution_config,
 )
-from paper.trading_calendar import ET_TZ, market_session_status
+from paper.trading_calendar import ET_TZ, market_session_status, prev_trading_day
 from paper.run_manager import generate_run_id, safe_write_text
 
 
@@ -290,22 +292,69 @@ def _settled_cash_lookback(env: Mapping[str, str]) -> int:
     return int(raw)
 
 
-def _fetch_order_history(broker: Any, *, limit: int) -> tuple[list[dict[str, Any]] | None, str]:
+def _unsettled_window_after_date(as_of_date: str) -> str | None:
+    """Start of the date-bounded order query for the settled-cash recompute.
+
+    A fill on ``prev_trading_day(as_of)`` settles ON ``as_of`` (already settled), so
+    every possibly-unsettled fill has fill_date > prev_trading_day(as_of). Querying
+    ``after=prev_trading_day`` covers the whole unsettled window with one trading day
+    of margin.
+    """
+    try:
+        return prev_trading_day(str(as_of_date))
+    except Exception:  # noqa: BLE001 - unparseable date -> unbounded query, page check still guards
+        return None
+
+
+def _fetch_order_history(
+    broker: Any, *, limit: int, after: str | None = None
+) -> tuple[list[dict[str, Any]] | None, str]:
     """Fetch recent FILLED-inclusive order history for the settled-cash recompute.
 
     Returns ``(orders, availability)`` where ``orders is None`` fails the guard CLOSED
     (broker cannot report history -> assume cash is fully unsettled). ``availability``
-    is a short status string for observability.
+    is a short status string for observability. ``after`` date-bounds the query to the
+    unsettled window on brokers that support it (injected test brokers may not; the
+    page-full check in ``_settled_cash_context`` still guards truncation either way).
     """
     if not hasattr(broker, "list_orders"):
         return None, "no_broker_support"
     try:
-        orders = broker.list_orders(status="all", limit=int(limit))
+        try:
+            if after:
+                orders = broker.list_orders(status="all", limit=int(limit), after=after)
+                availability = "ok_date_bounded"
+            else:
+                orders = broker.list_orders(status="all", limit=int(limit))
+                availability = "ok"
+        except TypeError:
+            # Broker without `after` support (stub/test brokers): count-bounded query.
+            orders = broker.list_orders(status="all", limit=int(limit))
+            availability = "ok_no_after_support"
     except Exception as exc:  # noqa: BLE001 - fail closed on any lookup error
         return None, f"lookup_failed:{exc}"
     if not isinstance(orders, list):
         return None, "non_list_response"
-    return [dict(order) for order in orders if isinstance(order, Mapping)], "ok"
+    return [dict(order) for order in orders if isinstance(order, Mapping)], availability
+
+
+def _order_history_page_truncation_risk(
+    orders: list[dict[str, Any]], *, limit: int, as_of_date: str
+) -> bool:
+    """True when the returned page may have truncated unsettled sells (fail closed).
+
+    A full page (len >= limit) whose OLDEST parseable fill date is still inside the
+    unsettled window means older, unreturned orders could also be unsettled — the
+    recompute would silently undercount unsettled proceeds. A full page whose oldest
+    row is already settled proves the window is fully covered.
+    """
+    if len(orders) < int(limit):
+        return False
+    fill_dates = [d for d in (_settled_cash_fill_date(o) for o in orders) if d]
+    if not fill_dates:
+        return True  # cannot prove coverage -> fail closed
+    oldest = min(fill_dates)
+    return settlement_date(oldest) > str(as_of_date)
 
 
 def _settled_cash_context(
@@ -314,15 +363,33 @@ def _settled_cash_context(
     broker_cash: Any,
     as_of_date: str,
     env: Mapping[str, str],
+    confirmed_sells: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
 ) -> Any:
-    """Stateless settled-cash recompute from broker truth (fails closed)."""
-    orders, availability = _fetch_order_history(broker, limit=_settled_cash_lookback(env))
+    """Stateless settled-cash recompute from broker truth (fails closed).
+
+    ``confirmed_sells`` are this run's per-order-polled filled sells; they cross-check
+    the bulk history for freshness (a lagging bulk read cannot hide their proceeds).
+    """
+    limit = _settled_cash_lookback(env)
+    orders, availability = _fetch_order_history(
+        broker,
+        limit=limit,
+        after=_unsettled_window_after_date(as_of_date),
+    )
+    if orders is not None and _order_history_page_truncation_risk(
+        orders, limit=limit, as_of_date=str(as_of_date)
+    ):
+        # FAIL CLOSED: the page is full and its oldest row is still unsettled, so
+        # unsettled sells may have been truncated off the page.
+        orders = None
+        availability = "page_full_unsettled_window"
     result = compute_settled_cash(
         broker_cash=broker_cash,
         orders=orders,
         as_of_date=str(as_of_date),
         buy_buffer_pct=_buy_buffer_pct(env),
         orders_available=orders is not None,
+        confirmed_sells=confirmed_sells,
     )
     return result, orders, availability
 
@@ -1524,6 +1591,10 @@ class LivePilotCoreAdapter:
         self._sequence = 0
         # Last settled-cash recompute (post-sell), surfaced for observability.
         self.settled_cash_post_sell: dict[str, Any] | None = None
+        # Sells THIS RUN confirmed filled via per-order polling (get_order). Feeds the
+        # bulk-history freshness cross-check in the settled-cash recompute: a lagging
+        # list_orders payload cannot hide these proceeds from the clamp.
+        self._confirmed_sell_fills: list[dict[str, Any]] = []
 
     def _client_order_id(self, intent: OrderIntent) -> str:
         self._sequence += 1
@@ -1669,6 +1740,7 @@ class LivePilotCoreAdapter:
             broker_cash=account.get("cash"),
             as_of_date=self.trade_date,
             env=self.env,
+            confirmed_sells=list(self._confirmed_sell_fills),
         )
         account["settled_cash"] = float(settled_result.settled_cash)
         account["settled_cash_fail_closed"] = bool(settled_result.fail_closed)
@@ -1812,6 +1884,21 @@ class LivePilotCoreAdapter:
                         "filled_notional": filled_notional,
                     }
                 )
+            # Freshness cross-check input (GFV guard): sells confirmed filled (fully
+            # or partially) by the per-order polling above. snapshot()'s settled-cash
+            # recompute verifies their proceeds are represented in the BULK order
+            # history it uses; a lagging bulk read gets the shortfall injected as
+            # unsettled instead of silently counting it as settled.
+            self._confirmed_sell_fills = [
+                {
+                    "order_id": row.get("broker_order_id") or "",
+                    "proceeds": float(row.get("filled_notional") or 0.0),
+                    "symbol": row.get("symbol"),
+                }
+                for row in sell_records
+                if _status_bucket(row.get("status")) in {"filled", "partial"}
+                and float(row.get("filled_notional") or 0.0) > 0.0
+            ]
             snapshot = self.snapshot()
             settlement_reflection = self._settlement_reflection(
                 account=snapshot.account,
