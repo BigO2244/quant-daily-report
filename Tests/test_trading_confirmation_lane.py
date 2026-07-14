@@ -82,6 +82,18 @@ def test_failed_reconciliation_preserves_halted_subject() -> None:
     assert "🛑" in body_html
 
 
+def test_live_dry_run_is_classified_truthfully() -> None:
+    results = {
+        "run_id": "r_dry", "trade_date": "2026-07-14", "mode": "LIVE_PILOT",
+        "status": "DRY_RUN", "operator_execution_status": "dry_run",
+        "submitted_count": 0, "accepted_count": 0, "rejected_count": 0,
+    }
+    subject, body_text, body_html = _build_confirmation_email(results, RESULTS_PATH)
+    assert subject == "[LIVE_PILOT] Trading Confirmation 2026-07-14 [DRY_RUN]"
+    assert "STATUS: DRY_RUN" in body_text
+    assert "DRY_RUN" in body_html
+
+
 # --- broker-snapshot fallback truthfulness --------------------------------- #
 
 def test_fallback_open_orders_zero_fills_never_executed() -> None:

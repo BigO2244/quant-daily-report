@@ -839,6 +839,9 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         # never mistaken for either a clean success or a halt.
         status_display = "SUBMITTED_UNFILLED"
         status_emoji = "🕒"
+    elif status == "DRY_RUN" or operator_execution_status == "dry_run":
+        status_display = "DRY_RUN"
+        status_emoji = "🧪"
     elif operator_execution_status == "open":
         # Orders submitted and merely open/new at snapshot time with zero fills.
         # This is explicitly NOT "EXECUTED": nothing has filled yet.
@@ -1095,6 +1098,25 @@ def main() -> None:
     explicit_run_root = _explicit_run_root()
     latest = None if explicit_run_root is not None else _resolve_execution_pointer_optional(trade_date)
     run_root = explicit_run_root or (Path(str(latest.get("run_root") or "").strip()) if latest else None)
+    operator_summary_fields = {
+        "run_id": str(results.get("run_id") or ""),
+        "trade_date": str(results.get("trade_date") or ""),
+        "mode": str(results.get("mode") or ""),
+        "terminal_status": str(results.get("status") or "UNKNOWN"),
+        "submitted_count": _to_int(results.get("submitted_count")),
+        "accepted_count": _to_int(results.get("accepted_count")),
+        "rejected_count": _to_int(results.get("rejected_count")),
+        "post_execution_recon_status": (
+            "DRY_RUN_NO_SUBMISSION"
+            if str(results.get("status") or "").upper() == "DRY_RUN"
+            else results.get("post_execution_recon_status")
+        ),
+        "broker_authoritative_state": bool(
+            results_path.name == "execution_results.json"
+            and not results.get("execution_payload_fallback")
+            and not results.get("broker_snapshot_fallback")
+        ),
+    }
 
     event = EmailEvent(
         event_type="trading_confirmation",
@@ -1107,9 +1129,7 @@ def main() -> None:
         if run_root:
             write_operator_summary(
                 run_root,
-                run_id=str(results.get("run_id") or ""),
-                trade_date=str(results.get("trade_date") or ""),
-                mode=str(results.get("mode") or ""),
+                **operator_summary_fields,
                 confirmation_email_sent=False,
             )
         return
@@ -1119,9 +1139,7 @@ def main() -> None:
         if run_root:
             write_operator_summary(
                 run_root,
-                run_id=str(results.get("run_id") or ""),
-                trade_date=str(results.get("trade_date") or ""),
-                mode=str(results.get("mode") or ""),
+                **operator_summary_fields,
                 confirmation_email_sent=False,
             )
         return
@@ -1134,9 +1152,7 @@ def main() -> None:
     if run_root:
         write_operator_summary(
             run_root,
-            run_id=str(results.get("run_id") or ""),
-            trade_date=str(results.get("trade_date") or ""),
-            mode=str(results.get("mode") or ""),
+            **operator_summary_fields,
             confirmation_email_sent=True,
         )
 
