@@ -1,0 +1,11 @@
+level,regime,n,sharpe,cagr
+top1,VIX<20 calm,1993,0.33,-0.089
+top1,VIX>=20 stress,774,1.546,2.548
+top3,VIX<20 calm,1993,0.438,0.094
+top3,VIX>=20 stress,774,1.599,1.445
+top5,VIX<20 calm,1993,0.624,0.201
+top5,VIX>=20 stress,774,1.638,1.252
+top10,VIX<20 calm,1993,0.658,0.189
+top10,VIX>=20 stress,774,1.379,0.81
+full,VIX<20 calm,1993,0.515,0.062
+full,VIX>=20 stress,774,1.237,0.39

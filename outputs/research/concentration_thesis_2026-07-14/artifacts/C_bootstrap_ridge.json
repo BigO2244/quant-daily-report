@@ -1,0 +1,9 @@
+{
+  "p_top5_gt_top10": 0.5928,
+  "p_top5_gt_top3": 0.8666,
+  "p_top5_gt_top1": 0.7528,
+  "p_top5_gt_full": 0.6724,
+  "p_top5_is_max": 0.3322,
+  "p_top10_is_max": 0.2402,
+  "p_top3_is_max": 0.0432
+}

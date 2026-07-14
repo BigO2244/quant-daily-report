@@ -1,0 +1,52 @@
+{
+  "claim_repro": {
+    "top5_2026Q2": {
+      "label": "top5",
+      "n_days": 3088,
+      "n_years": 12.25,
+      "cagr": 0.4602,
+      "sharpe": 1.27,
+      "sortino": 1.668,
+      "max_drawdown": -0.4118,
+      "calmar": 1.117,
+      "hit_rate": 0.507,
+      "annualised_vol": 0.3454,
+      "cost_bps_assumption": 25.0,
+      "beta": 1.339,
+      "alpha_annualised": 0.2492,
+      "name": "top5",
+      "top_n": 5,
+      "sizing": "ew",
+      "avg_n_names": 4.59,
+      "avg_cash_weight": 0.0816,
+      "ann_turnover": 36.804,
+      "cost_drag_bps_yr": 368.0,
+      "avg_holding_days": 17.8,
+      "hit_rate_daily": 0.5074
+    },
+    "top10_2026Q2": {
+      "label": "top10",
+      "n_days": 3088,
+      "n_years": 12.25,
+      "cagr": 0.3141,
+      "sharpe": 1.101,
+      "sortino": 1.361,
+      "max_drawdown": -0.4307,
+      "calmar": 0.729,
+      "hit_rate": 0.518,
+      "annualised_vol": 0.2855,
+      "cost_bps_assumption": 25.0,
+      "beta": 1.225,
+      "alpha_annualised": 0.1409,
+      "name": "top10",
+      "top_n": 10,
+      "sizing": "ew",
+      "avg_n_names": 9.18,
+      "avg_cash_weight": 0.0816,
+      "ann_turnover": 35.809,
+      "cost_drag_bps_yr": 358.1,
+      "avg_holding_days": 18.3,
+      "hit_rate_daily": 0.5178
+    }
+  }
+}
