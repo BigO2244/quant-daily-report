@@ -431,11 +431,6 @@ def build_live_pilot_gate_result(
             "missing_positive_live_pilot_max_orders",
             f"Set a positive {LIVE_PILOT_MAX_ORDERS_ENV}.",
         )
-    if kill_switch:
-        return result(
-            "live_pilot_kill_switch_enabled",
-            f"Unset {LIVE_PILOT_KILL_SWITCH_ENV} before any pilot action.",
-        )
     if cron_context and not cron_approved:
         return result(
             "live_pilot_cron_context_requires_explicit_approval",
@@ -444,9 +439,15 @@ def build_live_pilot_gate_result(
     if dry_run:
         return result(
             "live_pilot_dry_run_enabled",
-            "Dry run may write isolated artifacts, but must not submit live orders.",
+            "Dry run may write isolated artifacts while the kill switch remains engaged, "
+            "but must not submit live orders.",
             status="PASS",
             allowed=False,
+        )
+    if kill_switch:
+        return result(
+            "live_pilot_kill_switch_enabled",
+            f"Unset {LIVE_PILOT_KILL_SWITCH_ENV} before any live submission.",
         )
     if submission_intent and not _truthy(environ.get(LIVE_PILOT_SUBMIT_APPROVED_ENV)):
         return result(

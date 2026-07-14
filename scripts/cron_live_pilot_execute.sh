@@ -226,13 +226,6 @@ if [[ "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets" && "${ALPACA_BASE_U
     exit 1
 fi
 
-if [[ "${CAERUS_LIVE_PILOT_KILL_SWITCH:-0}" == "1" ]]; then
-    echo "FATAL: CAERUS_LIVE_PILOT_KILL_SWITCH=1" >&2
-    write_gate_state_blocked "live_pilot_kill_switch_enabled"
-    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_kill_switch_enabled"
-    exit 1
-fi
-
 # Resolve the capital cap dynamically from the account's portfolio value (no fixed
 # program ceiling; an optional CAERUS_LIVE_PILOT_CAPITAL_CAP only tightens it). The
 # same resolver is used by the execution path, so plan sizing and execution agree.
@@ -336,6 +329,16 @@ if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}" != "1" ]]; then
     confirm_completed_runs || true
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
     exit 0
+fi
+
+# Dry-run validation is intentionally safe with the kill switch engaged. A live
+# submission still rechecks it here, after the dry run and immediately before
+# the submission-only guards/path.
+if [[ "${CAERUS_LIVE_PILOT_KILL_SWITCH:-1}" != "0" ]]; then
+    echo "FATAL: CAERUS_LIVE_PILOT_KILL_SWITCH is engaged; submission remains blocked." >&2
+    write_gate_state_blocked "live_pilot_kill_switch_enabled"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_kill_switch_enabled"
+    exit 1
 fi
 
 # BLOCKER 4 (§f) drift guard — SUBMIT fails closed if the running HEAD is not the
