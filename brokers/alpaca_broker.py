@@ -312,6 +312,11 @@ def _normalize_order_obj(order: Any) -> Dict[str, Any]:
             or getattr(order, "filled_quantity", "")
         ),
         "filled_at": _safe_str(d.get("filled_at") or getattr(order, "filled_at", "")),
+        "filled_avg_price": _safe_str(
+            d.get("filled_avg_price")
+            or d.get("avg_fill_price")
+            or getattr(order, "filled_avg_price", "")
+        ),
         "qty": _safe_str(d.get("qty") or getattr(order, "qty", "")),
         "raw": d,
     }
