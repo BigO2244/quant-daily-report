@@ -49,5 +49,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # captured in logs/portfolio_history.cron.log.
 15 19 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && ( python3 scripts/build_portfolio_history.py --trade-date $(TZ=America/New_York date +\%F) ; python3 -m core.portfolio_history_escalation --trade-date $(TZ=America/New_York date +\%F) --send ) >> logs/portfolio_history.cron.log 2>&1
 
+# Broker-truth ledger + realized performance + TCA (GET-only broker reads).
+45 19 * * 1-5 $HOME/quant-daily-report/scripts/cron_broker_ledger.sh >> $HOME/quant-daily-report/logs/cron_broker_ledger.log 2>&1
+
 # Weekly Model Review (Monday 8:00 AM ET)
 0 8 * * 1 $HOME/quant-daily-report/scripts/cron_weekly_review.sh >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1

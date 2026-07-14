@@ -37,6 +37,7 @@ def _approve_without_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(LIVE_PILOT_MAX_ORDERS_ENV, "1")
     monkeypatch.setenv(LIVE_PILOT_DRY_RUN_ENV, "0")
     monkeypatch.setenv(LIVE_PILOT_KILL_SWITCH_ENV, "0")
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SUBMIT_APPROVED", "1")
 
 
 def test_gate_treats_unset_cap_as_uncapped_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:

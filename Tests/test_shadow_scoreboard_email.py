@@ -289,7 +289,9 @@ def test_trading_confirmation_renders_reconciliation_ok_with_no_operator_action(
         tmp_path / "execution_results.json",
     )
 
-    assert "--- Execution Status ---" in body_text
+    # Reporting-reliability fix: the execution-status header now carries the lane
+    # label so PAPER/LIVE_PILOT confirmations are never mistaken for each other.
+    assert "--- Execution Status [PAPER] ---" in body_text
     assert "Filled: 1" in body_text
     assert "--- Reconciliation Status ---" in body_text
     assert "Status: OK_RECONCILED" in body_text
@@ -356,7 +358,8 @@ def test_trading_confirmation_renders_stale_price_halt_separately(tmp_path: Path
         tmp_path / "execution_payload.json",
     )
 
-    assert "--- Execution Status ---" in body_text
+    # Reporting-reliability fix: lane-labeled execution-status header.
+    assert "--- Execution Status [PAPER] ---" in body_text
     assert "Status: HALTED" in body_text
     assert "stale_prices" in body_text
     assert "--- Reconciliation Status ---" in body_text

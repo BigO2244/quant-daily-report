@@ -334,6 +334,28 @@ def build_live_pilot_plan(
         for _, row in targets.iterrows()
     }
 
+    # Live remains fail-closed when any target's layer cannot be resolved. This
+    # is classification-only; paper/live continue to share the same target and
+    # risk-control path, and no per-layer sector-cap behavior is introduced.
+    from core.sleeve_layers import unresolved_sleeve_labels
+
+    unresolved_layers: dict[str, list[str]] = {}
+    for symbol, label in signal_sleeve_by_symbol.items():
+        unresolved = unresolved_sleeve_labels(label)
+        if unresolved:
+            unresolved_layers[symbol] = unresolved
+    if unresolved_layers:
+        return _emit_blocked_plan(
+            output_dir=output_dir,
+            trade_date=trade_date,
+            approved_sleeve=approved_sleeve,
+            capital_cap=float(capital_cap),
+            max_orders=int(max_orders),
+            allow_fractional=bool(allow_fractional),
+            reason_code="live_pilot_layer_unresolved",
+            diagnostics={"unresolved_layer_labels": unresolved_layers},
+        )
+
     # 2) Risk controls at the LIVE portfolio size. current_equity is the resolved
     #    dynamic cap (== the live portfolio value; an optional operator CAPITAL_CAP
     #    only tightens it -- that IS "the portfolio size for Live"). Peak-equity is

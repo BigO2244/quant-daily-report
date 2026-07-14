@@ -84,8 +84,40 @@ echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "schedule_enabled=${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"
 echo "cron_approved=${CAERUS_LIVE_PILOT_CRON_APPROVED}"
 echo "submit_approved=${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}"
-_DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
-echo "deployed_sha=${_DEPLOY_SHA}"
+# BLOCKER 4 (§f): the ONE running-truth SHA is `git rev-parse HEAD` — the code
+# this process actually runs — NOT the deploy marker. The deploy-drift guard
+# (scripts/live_pilot_sha_guard.py) compares HEAD against deploy_state.json's
+# deployed_sha and reports a dirty working tree. Drift/dirty fails the SUBMIT
+# path closed (enforced below, immediately before submission); the DRY path
+# proceeds but flags the drift loudly here.
+RUNNING_SHA="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
+echo "running_sha=${RUNNING_SHA}"
+# The guard exits non-zero when SUBMIT must be blocked (that IS a valid verdict,
+# not a failure), so capture stdout unconditionally and let the parse below read
+# the JSON verdict. `|| true` keeps `set -e` from aborting on the block exit code.
+SHA_GUARD_JSON="$("${PYTHON_BIN}" scripts/live_pilot_sha_guard.py --repo-root "${REPO_ROOT}" 2>/dev/null)" || true
+# Extract guard fields via a single python read (summary_field is defined later
+# in this file, so it is not usable at this point in execution order).
+eval "$(
+    SHA_GUARD_JSON="${SHA_GUARD_JSON}" "${PYTHON_BIN}" - <<'PY'
+import json, os, shlex
+d = json.loads(os.environ.get("SHA_GUARD_JSON") or "{}")
+def emit(k, v):
+    print(f"{k}={shlex.quote('' if v is None else str(v))}")
+emit("_DEPLOY_SHA", d.get("deployed_sha") or "unknown")
+emit("SHA_DRIFT", d.get("sha_drift"))
+emit("SHA_TREE_DIRTY", d.get("tree_dirty"))
+emit("SHA_BLOCK_SUBMIT", d.get("block_submit"))
+emit("SHA_DRIFT_REASON", d.get("reason_code") or "")
+emit("SHA_DRIFT_MESSAGE", d.get("message") or "")
+PY
+)"
+echo "deployed_sha=${_DEPLOY_SHA:-unknown}"
+echo "deploy_sha_drift=${SHA_DRIFT:-unknown} working_tree_dirty=${SHA_TREE_DIRTY:-unknown}"
+if [[ "${SHA_BLOCK_SUBMIT}" == "True" ]]; then
+    echo "!!! DEPLOY DRIFT DETECTED: ${SHA_DRIFT_MESSAGE}"
+    echo "!!! reason=${SHA_DRIFT_REASON} — SUBMIT will fail closed; DRY continues with drift flagged."
+fi
 
 write_live_pilot_pointer() {
     local status="$1"
@@ -130,6 +162,28 @@ import os
 payload = json.loads(os.environ["SUMMARY_JSON"])
 print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
+}
+
+confirm_completed_runs() {
+    # Execute-completion hook: immediately confirm every terminal run for today
+    # that is not yet confirmed. This closes the race that let the 2026-07-10
+    # 10:09 armed submit go unreported: the scheduled confirm sweep runs at a
+    # fixed time and cannot see a run that finishes later, so the lane that just
+    # produced the run triggers the same sweep here. Dedupe (the JSONL sent
+    # ledger) makes this idempotent with the scheduled cron. Best-effort: never
+    # changes the execute lane's exit code.
+    if [[ -f "${REPO_ROOT}/.env" ]]; then
+        set -a
+        # shellcheck disable=SC1091
+        source "${REPO_ROOT}/.env"
+        set +a
+    fi
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/scripts/live_pilot_confirm_lib.sh"
+    live_pilot_confirm_sweep \
+        "outputs/live_pilot/runs" \
+        "outputs/live_pilot/state/confirm_sent_ledger.jsonl" \
+        || echo "WARN: execute-completion confirm hook reported problems (non-blocking)"
 }
 
 write_gate_state_blocked() {
@@ -279,8 +333,21 @@ write_live_pilot_pointer "dry_run" "${DRY_RUN_ID}" "${DRY_RUN_ROOT}" "dry_run_co
 
 if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}" != "1" ]]; then
     echo "LIVE_PILOT scheduled submission paused: CAERUS_LIVE_PILOT_SUBMIT_APPROVED is not 1."
+    confirm_completed_runs || true
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
     exit 0
+fi
+
+# BLOCKER 4 (§f) drift guard — SUBMIT fails closed if the running HEAD is not the
+# deployed/audited SHA, if the working tree is dirty, or if HEAD is unresolvable.
+# This makes "audited SHA == deployed SHA" mechanically enforced, not aspirational.
+# (The DRY run above already ran and flagged any drift; only submission is gated.)
+if [[ "${SHA_BLOCK_SUBMIT}" == "True" ]]; then
+    echo "FATAL: LIVE_PILOT submission blocked by deploy-drift guard: ${SHA_DRIFT_MESSAGE}"
+    write_gate_state_blocked "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}"
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
+    exit 1
 fi
 
 echo "=== LIVE_PILOT SCHEDULED SUBMISSION ==="
@@ -295,6 +362,11 @@ LIVE_TERMINAL_STATUS="$(summary_field "${LIVE_OUTPUT}" terminal_status || true)"
 if [[ -n "${LIVE_RUN_ROOT}" ]]; then
     write_live_pilot_pointer "${LIVE_TERMINAL_STATUS:-unknown}" "${LIVE_RUN_ID}" "${LIVE_RUN_ROOT}" "scheduled_submission_completed"
 fi
+
+# Execute-completion hook: confirm the just-completed submit run (and the dry
+# run) now, so an armed submission is reported even if it finished after the
+# scheduled confirm sweep. Dedupe keeps it idempotent with the 09:45 cron.
+confirm_completed_runs || true
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${LIVE_STATUS}"
 exit "${LIVE_STATUS}"

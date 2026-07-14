@@ -216,23 +216,53 @@ def _build_results_from_broker_snapshot(trade_date: str, snapshot: dict, pointer
     statuses = [str((order or {}).get("status") or "").strip().lower() for order in orders if isinstance(order, dict)]
     submitted_count = int(counts.get("orders_report_date") or len(orders) or 0)
     rejected_count = sum(status in {"rejected"} for status in statuses)
-    accepted_count = max(submitted_count - rejected_count, 0)
+    filled_count = int(counts.get("fills_report_date") or len(fills) or 0)
+    # Count orders the broker reports as terminally filled. "accepted"/"new"/
+    # "open"/"pending_new" are NOT fills — they are open orders that may still
+    # reject. Only genuinely-filled orders count as accepted-and-done here.
+    order_filled_statuses = sum(status in {"filled"} for status in statuses)
+    open_count = sum(
+        status in {
+            "accepted", "accepted_for_bidding", "new", "open", "held",
+            "pending_new", "pending_replace", "pending_cancel", "done_for_day",
+            "partially_filled",
+        }
+        for status in statuses
+    )
+    accepted_count = max(order_filled_statuses, filled_count)
 
     if submitted_count <= 0 and len(fills) <= 0:
         raise RuntimeError(f"Broker snapshot for {trade_date} contains no report-date orders or fills")
 
-    operator_execution_status = "executed"
-    halt_reason = None
-    status = STATUS_EXECUTED
-
+    # Classify with the SAME open/new != accepted-filled discipline as the
+    # primary execution-results path: an order merely sitting open is NOT
+    # "EXECUTED". Only real fills earn EXECUTED; open-with-no-fills surfaces as
+    # OPEN (not a silent green EXECUTED).
     terminal_statuses = {status for status in statuses if status}
+    has_reject_like = any(status in {"rejected", "canceled", "expired"} for status in terminal_statuses)
+    has_fill = filled_count > 0 or order_filled_statuses > 0
+
     if terminal_statuses and terminal_statuses.issubset({"rejected", "canceled", "expired"}):
         operator_execution_status = "halted"
         halt_reason = "broker_snapshot_no_executed_orders"
         status = STATUS_HALTED
-    elif any(status in {"rejected", "canceled", "expired"} for status in terminal_statuses):
+    elif has_fill and has_reject_like:
         operator_execution_status = "partial"
         halt_reason = "broker_snapshot_partial_execution"
+        status = STATUS_EXECUTED
+    elif has_fill:
+        operator_execution_status = "executed"
+        halt_reason = None
+        status = STATUS_EXECUTED
+    elif open_count > 0:
+        # Orders submitted and merely open/new with ZERO fills. Never EXECUTED.
+        operator_execution_status = "open"
+        halt_reason = "broker_snapshot_orders_open_not_filled"
+        status = STATUS_HALTED
+    else:
+        operator_execution_status = "halted"
+        halt_reason = "broker_snapshot_no_executed_orders"
+        status = STATUS_HALTED
 
     return {
         "trade_date": trade_date,
@@ -242,10 +272,11 @@ def _build_results_from_broker_snapshot(trade_date: str, snapshot: dict, pointer
         "submitted_count": submitted_count,
         "accepted_count": accepted_count,
         "rejected_count": int(rejected_count),
+        "open_orders_count": int(open_count),
         "halt_reason": halt_reason,
         "operator_execution_status": operator_execution_status,
         "broker_snapshot_fallback": True,
-        "broker_fill_count": int(counts.get("fills_report_date") or len(fills) or 0),
+        "broker_fill_count": filled_count,
     }
 
 
@@ -545,7 +576,10 @@ def _format_reconciliation_section(recon: dict) -> tuple[str, str, bool]:
     payload = recon.get("payload") if isinstance(recon.get("payload"), dict) else {}
     path = recon.get("path")
     path_text = str(path) if path else "unavailable"
-    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION"}
+    # SUBMITTED_UNFILLED (WARNING §f fix) is a non-terminal in-flight broker
+    # state, not a drift/failure signal — treat it as healthy here too so this
+    # section doesn't render an open-but-not-yet-filled batch as unhealthy.
+    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION", "SUBMITTED_UNFILLED"}
     if healthy:
         explanation = "Broker positions match expected post-execution state."
     elif status == "DRIFT_DETECTED":
@@ -647,7 +681,7 @@ def _format_live_pilot_buy_lifecycle(results: dict) -> tuple[str, str]:
         ("Marketable orders", results.get("marketable_order_count", "unavailable")),
         ("Passive orders", results.get("passive_order_count", "unavailable")),
         ("broker_status_refresh", results.get("broker_status_refresh", "not_attempted")),
-        ("broker_status_refresh_error", results.get("broker_status_refresh_error") or "; ".join(results.get("broker_status_refresh_errors") or []) or "none"),
+        ("broker_status_refresh_error", _classify_reason(results.get("broker_status_refresh_error") or "; ".join(results.get("broker_status_refresh_errors") or [])) or "none"),
         ("Filled qty", results.get("filled_qty") or results.get("fill_qty") or "unavailable"),
         ("Avg fill price", results.get("avg_fill_price") or "unavailable"),
         ("Open orders count", results.get("open_orders_count", "unavailable")),
@@ -655,7 +689,7 @@ def _format_live_pilot_buy_lifecycle(results: dict) -> tuple[str, str]:
         ("Prior unfilled attempts", results.get("prior_unfilled_attempts", "unavailable")),
         ("Escalation reason", results.get("escalation_reason", "none")),
         ("Remaining blocked/suppressed buys", blocked_count),
-        ("Blocked/suppressed reason", results.get("blocked_or_suppressed_buy_reason") or results.get("halt_reason") or "none"),
+        ("Blocked/suppressed reason", _classify_reason(results.get("blocked_or_suppressed_buy_reason") or results.get("halt_reason")) or "none"),
     ]
     text = (
         "--- Live Pilot Buy Lifecycle ---\n"
@@ -710,6 +744,50 @@ def _format_reporting_artifact_sections(results: dict, results_path: Path) -> tu
     return text, html
 
 
+def _lane_label(mode: str) -> str:
+    """Human-facing lane tag for the subject/body. LIVE_PILOT and PAPER are the
+    two real lanes; anything else is surfaced verbatim (upper-cased) so a novel
+    lane can never be silently rendered as another."""
+    normalized = str(mode or "").strip().upper()
+    if normalized in {"LIVE_PILOT", "PAPER"}:
+        return normalized
+    return normalized or "UNKNOWN"
+
+
+# Substrings that betray a Python exception string masquerading as a broker
+# "reason" (e.g. a float() ValueError from our own adapter, not a venue decline).
+_INTERNAL_ADAPTER_REASON_MARKERS = (
+    "traceback",
+    "exception",
+    "error(",
+    "valueerror",
+    "typeerror",
+    "keyerror",
+    "attributeerror",
+    "could not convert",
+    "invalid literal",
+    "float()",
+    "int()",
+    "nonetype",
+    "unhashable",
+    "unsupported operand",
+)
+
+
+def _classify_reason(reason: object) -> str:
+    """Label a rejection/blocked reason as an internal adapter error vs a broker
+    decline. A Python exception string surfaced as a broker 'reason' is one of
+    OUR bugs, not the venue rejecting the order; conflating them hides adapter
+    failures behind an apparent broker decline."""
+    text = str(reason or "").strip()
+    if not text or text.lower() in {"none", "null"}:
+        return text
+    lowered = text.lower()
+    if any(marker in lowered for marker in _INTERNAL_ADAPTER_REASON_MARKERS):
+        return f"internal adapter error (not a broker decline): {text}"
+    return f"broker decline: {text}"
+
+
 def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, str, str]:
     """
     Build confirmation email from execution results.
@@ -754,6 +832,18 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     elif operator_execution_status == "partial":
         status_display = "PARTIAL"
         status_emoji = "⚠️"
+    elif status == "SUBMITTED_UNFILLED" or operator_execution_status == "submitted_unfilled":
+        # WARNING §f fix: orders are live at the broker and not yet (fully)
+        # filled. This is NOT a failure (no HALTED) and NOT a completed
+        # execution (no EXECUTED) — it needs its own display so the email is
+        # never mistaken for either a clean success or a halt.
+        status_display = "SUBMITTED_UNFILLED"
+        status_emoji = "🕒"
+    elif operator_execution_status == "open":
+        # Orders submitted and merely open/new at snapshot time with zero fills.
+        # This is explicitly NOT "EXECUTED": nothing has filled yet.
+        status_display = "OPEN"
+        status_emoji = "⏳"
     elif status == STATUS_HALTED or halt_reason:
         status_display = "HALTED"
         status_emoji = "🛑"
@@ -764,19 +854,53 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         status_display = "NO_ACTION"
         status_emoji = "—"
 
-    subject = f"Trading Confirmation {trade_date} [{status_display}]"
+    lane = _lane_label(mode)
+    subject = f"[{lane}] Trading Confirmation {trade_date} [{status_display}]"
 
-    # Build reason line
+    # Data-provenance markers. When the primary execution_results.json is missing
+    # and the report was rebuilt from a secondary source, say so LOUDLY so an
+    # operator never mistakes a reconstructed status for a first-class one.
+    if results.get("broker_snapshot_fallback"):
+        fallback_note = (
+            "derived from broker snapshot — execution results missing "
+            "(counts reflect broker order/fill state, not the executor's reconciliation)"
+        )
+    elif results.get("execution_payload_fallback"):
+        fallback_note = (
+            "derived from execution payload — execution results missing "
+            "(reconciliation-grade fill data may be incomplete)"
+        )
+    else:
+        fallback_note = ""
+
+    # Broker-authoritative flag: whether the broker's own terminal state was
+    # successfully read back (vs. relying on our model/ledger view).
+    authoritative_raw = results.get("broker_status_refresh_claims_broker_truth")
+    if authoritative_raw is None:
+        authoritative_raw = results.get("broker_authoritative_state")
+    if authoritative_raw is None:
+        authoritative_display = "unknown"
+    else:
+        authoritative_display = "yes" if bool(authoritative_raw) else "no (model/ledger view)"
+
+    # Build reason line (rejection/halt reasons are classified as internal
+    # adapter errors vs. broker declines so our own bugs are not read as venue
+    # rejections).
     if status_display == "SKIPPED_DUPLICATE":
         reason_line = f"Skip reason: Duplicate execution detected for run_id {run_id}"
     elif status_display == "RECONCILED_SUCCESS":
         reason_line = f"Final reason: {final_execution_reason or 'raw_partial_reconciled_to_target_state'}"
+    elif status_display == "SUBMITTED_UNFILLED":
+        reason_line = "Status reason: orders submitted and accepted by the broker, not yet fully filled"
     elif halt_reason:
-        reason_line = f"Halt reason: {halt_reason}"
+        reason_line = f"Halt reason: {_classify_reason(halt_reason)}"
     else:
         reason_line = "Status reason: none"
     html_reason_label = "Halt/skip reason" if halt_reason or status_display == "SKIPPED_DUPLICATE" else "Status reason"
-    html_reason_value = halt_reason or ("Duplicate execution detected" if status_display == "SKIPPED_DUPLICATE" else "none")
+    html_reason_value = (
+        _classify_reason(halt_reason) if halt_reason
+        else ("Duplicate execution detected" if status_display == "SKIPPED_DUPLICATE" else "none")
+    )
 
     # When the final status was upgraded by post-trade reconciliation, preserve a
     # plainly-labelled diagnostic record of the raw (pre-reconciliation) status.
@@ -800,27 +924,38 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         )
 
     artifact_ref = f"Results artifact: {results_path}"
+    fallback_text_line = f"Data source: {fallback_note}\n" if fallback_note else ""
+    fallback_html_line = (
+        f"<p style='color:#B22222;'><b>Data source:</b> {html_escape(fallback_note)}</p>"
+        if fallback_note else ""
+    )
     execution_text = (
-        "--- Execution Status ---\n"
+        f"--- Execution Status [{lane}] ---\n"
+        f"Lane: {lane}\n"
         f"Run ID: {run_id}\n"
         f"Trade date: {trade_date}\n"
         f"Mode: {mode}\n"
         f"Status: {status_display}\n"
+        f"{fallback_text_line}"
         f"Submitted: {submitted}\n"
         f"Accepted: {accepted}\n"
         f"Rejected: {rejected}\n"
         f"Filled: {filled}\n"
+        f"Broker authoritative: {authoritative_display}\n"
         f"{reason_line}\n"
         f"{artifact_ref}\n"
     )
     execution_html = (
-        f"<h3>{status_emoji} Execution Status</h3>"
+        f"<h3>{status_emoji} Execution Status [{html_escape(lane)}]</h3>"
+        f"<p><b>Lane:</b> {html_escape(lane)}</p>"
         f"<p><b>Run ID:</b> {html_escape(run_id)}</p>"
         f"<p><b>Trade Date:</b> {html_escape(trade_date)}</p>"
         f"<p><b>Mode:</b> {html_escape(mode)}</p>"
         f"<p><b>Status:</b> {html_escape(status_display)}</p>"
+        f"{fallback_html_line}"
         f"<p><b>Submitted:</b> {submitted} | <b>Accepted:</b> {accepted} | "
         f"<b>Rejected:</b> {rejected} | <b>Filled:</b> {filled}</p>"
+        f"<p><b>Broker authoritative:</b> {html_escape(authoritative_display)}</p>"
         f"<p><b>{html_escape(html_reason_label)}:</b> {html_escape(html_reason_value)}</p>"
         f"<p style='font-size: 0.9em; color: #666;'>{html_escape(artifact_ref)}</p>"
     )
@@ -898,6 +1033,11 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     action_items: list[str] = []
     if status_display in {"HALTED", "PARTIAL"}:
         action_items.append("Review execution halt before next run.")
+    elif status_display == "SUBMITTED_UNFILLED":
+        action_items.append(
+            "Orders are live at the broker and not yet fully filled; monitor for "
+            "fill/expiration before the next scheduled run (not a failure)."
+        )
     if not recon_healthy:
         action_items.append("Review reconciliation drift before next run.")
     if not shadow_healthy:
@@ -912,6 +1052,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     )
 
     body_text = (
+        f"LANE: {lane} | STATUS: {status_display} | {trade_date}\n\n"
         f"{execution_text}\n"
         f"{raw_diag_text}{chr(10) if raw_diag_text else ''}"
         f"{live_pilot_lifecycle_text}{chr(10) if live_pilot_lifecycle_text else ''}"
@@ -924,7 +1065,7 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     )
     body_html = (
         "<html><body>"
-        f"<h2>Trading Confirmation {html_escape(trade_date)} [{html_escape(status_display)}]</h2>"
+        f"<h2>[{html_escape(lane)}] Trading Confirmation {html_escape(trade_date)} [{html_escape(status_display)}]</h2>"
         f"{execution_html}"
         f"{('<hr>' + raw_diag_html) if raw_diag_html else ''}"
         f"{('<hr>' + live_pilot_lifecycle_html) if live_pilot_lifecycle_html else ''}"

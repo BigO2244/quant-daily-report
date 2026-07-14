@@ -22,6 +22,7 @@ from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
 from core.live_trade_ledger import record_live_order
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
+    PAPER_MODE,
     LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV,
     _is_live_host,
     account_id_hash,
@@ -30,8 +31,15 @@ from core.live_pilot_guardrails import (
     resolve_dynamic_cap,
     validate_live_pilot_asset,
     validate_live_pilot_plan,
+    validate_live_pilot_submission_guardrails,
 )
 from core.live_pilot_gate_state import write_live_pilot_gate_state
+from core.settled_cash import (
+    _fill_date as _settled_cash_fill_date,
+    compute_settled_cash,
+    detect_gfv_risky_sells,
+    settlement_date,
+)
 from execution.core import (
     AccountSnapshot as CoreAccountSnapshot,
     ExecutionRequest,
@@ -42,7 +50,7 @@ from execution.core import (
     execute_lifecycle,
     live_pilot_execution_config,
 )
-from paper.trading_calendar import ET_TZ, market_session_status
+from paper.trading_calendar import ET_TZ, market_session_status, prev_trading_day
 from paper.run_manager import generate_run_id, safe_write_text
 
 
@@ -201,6 +209,17 @@ LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_DELAY_SECONDS = 30.0
 LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR = 0.95
 LIVE_PILOT_SETTLEMENT_DOLLAR_TOLERANCE = 0.01
 
+# Settled-cash / GFV guard (PRE_ARM_SWEEP Blocker #2). US equities settle T+1; Alpaca
+# credits sale proceeds to cash immediately though unsettled. The buy budget is clamped
+# to settled cash (broker cash - unsettled sale proceeds from filled sell history) times
+# a slippage buffer so no buy ever spends unsettled funds (=> no lot is GFV-vulnerable).
+LIVE_PILOT_BUY_BUFFER_PCT_ENV = "CAERUS_LIVE_PILOT_BUY_BUFFER_PCT"
+LIVE_PILOT_BUY_BUFFER_PCT_DEFAULT = 0.98
+LIVE_PILOT_SETTLED_CASH_LOOKBACK_ENV = "CAERUS_LIVE_PILOT_SETTLED_CASH_ORDER_LOOKBACK"
+LIVE_PILOT_SETTLED_CASH_LOOKBACK_DEFAULT = 100
+LIVE_PILOT_GFV_SETTLED_CASH_UNAVAILABLE = "live_pilot_gfv_settled_cash_unavailable"
+LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION = "live_pilot_gfv_sell_of_unsettled_acquisition"
+
 # Machine-readable halt-state convergence contract. Every halted run records
 # whether the NEXT scheduled run is expected to self-heal (the next plan is
 # computed from CURRENT broker positions and every gate re-evaluates fresh; no
@@ -220,6 +239,10 @@ CAPITAL_GATE_REPORT_KEYS = (
     "planned_buy_notional_usd",
     "tradable_capital_usd",
     "buy_block_reason",
+    "settled_cash_usd",
+    "unsettled_proceeds_usd",
+    "buy_buffer_pct",
+    "settled_cash_fail_closed",
 )
 
 
@@ -254,6 +277,123 @@ def _list_open_orders(broker: Any) -> list[dict[str, Any]]:
     if not isinstance(orders, list):
         return []
     return [dict(order) for order in orders if isinstance(order, Mapping)]
+
+
+def _buy_buffer_pct(env: Mapping[str, str]) -> float:
+    """Slippage/settled-cash buffer for live buys. Safe default 0.98; clamped to (0,1]."""
+    raw = _finite_float(env.get(LIVE_PILOT_BUY_BUFFER_PCT_ENV))
+    if raw is None or raw <= 0.0 or raw > 1.0:
+        return LIVE_PILOT_BUY_BUFFER_PCT_DEFAULT
+    return float(raw)
+
+
+def _settled_cash_lookback(env: Mapping[str, str]) -> int:
+    raw = _finite_float(env.get(LIVE_PILOT_SETTLED_CASH_LOOKBACK_ENV))
+    if raw is None or raw < 1.0:
+        return LIVE_PILOT_SETTLED_CASH_LOOKBACK_DEFAULT
+    return int(raw)
+
+
+def _unsettled_window_after_date(as_of_date: str) -> str | None:
+    """Start of the date-bounded order query for the settled-cash recompute.
+
+    A fill on ``prev_trading_day(as_of)`` settles ON ``as_of`` (already settled), so
+    every possibly-unsettled fill has fill_date > prev_trading_day(as_of). Querying
+    ``after=prev_trading_day`` covers the whole unsettled window with one trading day
+    of margin.
+    """
+    try:
+        return prev_trading_day(str(as_of_date))
+    except Exception:  # noqa: BLE001 - unparseable date -> unbounded query, page check still guards
+        return None
+
+
+def _fetch_order_history(
+    broker: Any, *, limit: int, after: str | None = None
+) -> tuple[list[dict[str, Any]] | None, str]:
+    """Fetch recent FILLED-inclusive order history for the settled-cash recompute.
+
+    Returns ``(orders, availability)`` where ``orders is None`` fails the guard CLOSED
+    (broker cannot report history -> assume cash is fully unsettled). ``availability``
+    is a short status string for observability. ``after`` date-bounds the query to the
+    unsettled window on brokers that support it (injected test brokers may not; the
+    page-full check in ``_settled_cash_context`` still guards truncation either way).
+    """
+    if not hasattr(broker, "list_orders"):
+        return None, "no_broker_support"
+    try:
+        try:
+            if after:
+                orders = broker.list_orders(status="all", limit=int(limit), after=after)
+                availability = "ok_date_bounded"
+            else:
+                orders = broker.list_orders(status="all", limit=int(limit))
+                availability = "ok"
+        except TypeError:
+            # Broker without `after` support (stub/test brokers): count-bounded query.
+            orders = broker.list_orders(status="all", limit=int(limit))
+            availability = "ok_no_after_support"
+    except Exception as exc:  # noqa: BLE001 - fail closed on any lookup error
+        return None, f"lookup_failed:{exc}"
+    if not isinstance(orders, list):
+        return None, "non_list_response"
+    return [dict(order) for order in orders if isinstance(order, Mapping)], availability
+
+
+def _order_history_page_truncation_risk(
+    orders: list[dict[str, Any]], *, limit: int, as_of_date: str
+) -> bool:
+    """True when the returned page may have truncated unsettled sells (fail closed).
+
+    A full page (len >= limit) whose OLDEST parseable fill date is still inside the
+    unsettled window means older, unreturned orders could also be unsettled — the
+    recompute would silently undercount unsettled proceeds. A full page whose oldest
+    row is already settled proves the window is fully covered.
+    """
+    if len(orders) < int(limit):
+        return False
+    fill_dates = [d for d in (_settled_cash_fill_date(o) for o in orders) if d]
+    if not fill_dates:
+        return True  # cannot prove coverage -> fail closed
+    oldest = min(fill_dates)
+    return settlement_date(oldest) > str(as_of_date)
+
+
+def _settled_cash_context(
+    broker: Any,
+    *,
+    broker_cash: Any,
+    as_of_date: str,
+    env: Mapping[str, str],
+    confirmed_sells: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+) -> Any:
+    """Stateless settled-cash recompute from broker truth (fails closed).
+
+    ``confirmed_sells`` are this run's per-order-polled filled sells; they cross-check
+    the bulk history for freshness (a lagging bulk read cannot hide their proceeds).
+    """
+    limit = _settled_cash_lookback(env)
+    orders, availability = _fetch_order_history(
+        broker,
+        limit=limit,
+        after=_unsettled_window_after_date(as_of_date),
+    )
+    if orders is not None and _order_history_page_truncation_risk(
+        orders, limit=limit, as_of_date=str(as_of_date)
+    ):
+        # FAIL CLOSED: the page is full and its oldest row is still unsettled, so
+        # unsettled sells may have been truncated off the page.
+        orders = None
+        availability = "page_full_unsettled_window"
+    result = compute_settled_cash(
+        broker_cash=broker_cash,
+        orders=orders,
+        as_of_date=str(as_of_date),
+        buy_buffer_pct=_buy_buffer_pct(env),
+        orders_available=orders is not None,
+        confirmed_sells=confirmed_sells,
+    )
+    return result, orders, availability
 
 
 def _order_status(order: Mapping[str, Any]) -> str:
@@ -625,6 +765,25 @@ def _frame_len(frame: Any) -> int:
     return 0 if frame is None else int(len(frame))
 
 
+def _settled_cash_gate_fields(capital_budget: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Surface the settled-cash guard into the capital gate for the dry-run proof."""
+    guard = dict((capital_budget or {}).get("settled_cash_guard") or {})
+    if not guard:
+        return {}
+    settled = guard.get("settled_cash")
+    broker_cash = _safe_float((capital_budget or {}).get("broker_cash_at_planning"))
+    unsettled = None
+    if settled is not None and broker_cash is not None:
+        unsettled = max(0.0, float(broker_cash) - float(settled))
+    return {
+        "settled_cash_usd": settled,
+        "unsettled_proceeds_usd": unsettled,
+        "buy_buffer_pct": guard.get("buy_buffer_pct"),
+        "settled_cash_fail_closed": bool(guard.get("settled_cash_fail_closed")),
+        "settled_cash_guard": guard,
+    }
+
+
 def _build_live_pilot_capital_gate(
     *,
     result: Any,
@@ -665,6 +824,15 @@ def _build_live_pilot_capital_gate(
             + len(getattr(result, "submitted_buys", ()) or ())
         ),
         "post_sell_buy_budget": post_budget,
+        # Post-sell guard reflects the account AFTER today's sells credited unsettled
+        # proceeds; fall back to the planning guard when there was no rebudget.
+        **_settled_cash_gate_fields(
+            budget if not post_budget.get("settled_cash_guard") else {
+                **budget,
+                "settled_cash_guard": post_budget.get("settled_cash_guard"),
+                "broker_cash_at_planning": post_budget.get("post_sell_cash", budget.get("broker_cash_at_planning")),
+            }
+        ),
     }
 
 
@@ -990,6 +1158,26 @@ def _entry_policy_summary(
     }
 
 
+def _derive_execution_mode(run_root: Path | str) -> str:
+    """Derive the reporting mode/lane from the run's output-root ancestry.
+
+    The SAME executor services both the paper lane (``--output-root
+    outputs/paper_lane``) and the live pilot lane (default
+    ``outputs/live_pilot``). The run_root is always ``<output_root>/runs/<id>``,
+    so the lane is unambiguous from the path — no reliance on process env that a
+    shared subprocess might inherit incorrectly. Falls back to the run_id token
+    and finally to LIVE_PILOT (fail-safe: an unknown lane is labelled as the
+    higher-consequence live lane so it can never silently masquerade as paper).
+    """
+    parts = {p.lower() for p in Path(run_root).parts}
+    name = Path(run_root).name.lower()
+    if "paper_lane" in parts or "_paper_" in f"_{name}_" or name.endswith("_paper"):
+        return PAPER_MODE.upper()
+    if "live_pilot" in parts or "live_pilot" in name:
+        return LIVE_PILOT_MODE.upper()
+    return LIVE_PILOT_MODE.upper()
+
+
 def _build_live_pilot_execution_results(
     *,
     run_id: str,
@@ -1044,15 +1232,19 @@ def _build_live_pilot_execution_results(
         "schema_version": "live_pilot_execution_results.v1",
         "run_id": run_id,
         "trade_date": trade_date,
-        "mode": LIVE_PILOT_MODE.upper(),
+        "mode": _derive_execution_mode(run_root),
         "status": terminal_status,
         "reason": reason_code,
-        "halt_reason": None if terminal_status in {"DRY_RUN", "SUBMITTED"} else reason_code,
+        "halt_reason": (
+            None if terminal_status in {"DRY_RUN", "SUBMITTED", "SUBMITTED_UNFILLED"} else reason_code
+        ),
         "operator_execution_status": (
             "dry_run"
             if dry_run
             else "executed"
             if terminal_status == "SUBMITTED"
+            else "submitted_unfilled"
+            if terminal_status == "SUBMITTED_UNFILLED"
             else "halted"
         ),
         "submitted_count": submitted_count,
@@ -1107,6 +1299,20 @@ def _reconcile(
         elif bucket == "unresolved":
             unresolved += 1
 
+    # WARNING §f fix (PRE_ARM_SWEEP_2026-07-13): two prior gaps in this state
+    # machine:
+    #   1. CLEAN did not require fills — a fully-submitted batch sitting
+    #      accepted/new/pending_new/done_for_day at the broker (zero fills)
+    #      reported CLEAN.
+    #   2. A `partially_filled` snapshot (still OPEN at the broker — it may
+    #      fill further) was treated the same as a rejected/failed order and
+    #      reported FAILED_RECONCILIATION.
+    # Both are non-terminal, in-flight broker states, not failures. They now
+    # get their own status: state=OPEN / status=SUBMITTED_UNFILLED — "orders are
+    # live at the broker, not yet (fully) filled". A genuinely TERMINAL partial
+    # (order done/canceled after only partially filling) is unaffected: its raw
+    # broker status is canceled/expired/rejected, which buckets as "rejected"
+    # above and correctly stays FAILED_RECONCILIATION.
     if dry_run:
         state = "DRY_RUN"
         status = "DRY_RUN_NO_SUBMISSION"
@@ -1115,14 +1321,18 @@ def _reconcile(
         state = "REJECTED"
         status = "FAILED_RECONCILIATION"
         action = "Do not continue live pilot; inspect broker state and resolve rejected/unresolved orders manually."
-    elif partial:
-        state = "PARTIAL"
-        status = "FAILED_RECONCILIATION"
-        action = "Do not continue live pilot; wait for broker terminal truth or manually review partial fill state."
     elif unresolved or len(submitted) != len(intended):
         state = "UNRESOLVED"
         status = "FAILED_RECONCILIATION"
         action = "Do not continue live pilot; inspect broker state and resolve rejected/unresolved orders manually."
+    elif open_count or partial:
+        state = "OPEN"
+        status = "SUBMITTED_UNFILLED"
+        action = (
+            "Orders are live at the broker and not yet fully filled. This is not a "
+            "failure — monitor broker terminal states and re-run reconciliation "
+            "(--refresh-run) until every order reaches a terminal state."
+        )
     else:
         state = "CLEAN"
         status = "CLEAN"
@@ -1144,9 +1354,12 @@ def _reconcile(
         "errors": list(errors),
         "operator_action": action,
         "rollback_recommendation": (
-            "No auto-liquidation. Cancel/flatten only under a separately approved live incident runbook."
-            if status != "CLEAN"
-            else "No rollback action required unless broker state later diverges."
+            "No rollback action required unless broker state later diverges."
+            if status == "CLEAN"
+            else "No auto-liquidation. Orders remain open at the broker; wait for a "
+            "terminal state or cancel manually if needed."
+            if status == "SUBMITTED_UNFILLED"
+            else "No auto-liquidation. Cancel/flatten only under a separately approved live incident runbook."
         ),
     }
 
@@ -1186,6 +1399,16 @@ def _next_run_expectation(
             "next_run_expectation": NEXT_RUN_CONVERGES,
             "next_run_expectation_reason": (
                 "run reached a terminal non-halt state; the next run replans from current broker positions"
+            ),
+        }
+    if status == "SUBMITTED_UNFILLED":
+        return {
+            "next_run_expectation": NEXT_RUN_REQUIRES_MANUAL_ACTION,
+            "next_run_expectation_reason": (
+                "orders were submitted and accepted by the broker but are not yet fully "
+                "filled; this is not a failure, but the open-pilot-order check blocks a "
+                "new submission until they reach a terminal state (filled/rejected/expired) "
+                "— monitor the broker directly and re-run reconciliation"
             ),
         }
     if status == "FAILED_RECONCILIATION":
@@ -1410,6 +1633,7 @@ class LivePilotCoreAdapter:
         run_id: str,
         pre_sell_account: Mapping[str, Any] | None = None,
         source_plan: Mapping[str, Any] | None = None,
+        trade_date: str | None = None,
     ) -> None:
         self.broker = broker
         self.env = env
@@ -1418,9 +1642,16 @@ class LivePilotCoreAdapter:
         self.run_id = run_id
         self.pre_sell_account = dict(pre_sell_account or {})
         self.source_by_symbol = _plan_rows_by_symbol(source_plan or {})
+        self.trade_date = str(trade_date or "")
         self.submitted_rows: list[dict[str, Any]] = []
         self.submit_errors: list[str] = []
         self._sequence = 0
+        # Last settled-cash recompute (post-sell), surfaced for observability.
+        self.settled_cash_post_sell: dict[str, Any] | None = None
+        # Sells THIS RUN confirmed filled via per-order polling (get_order). Feeds the
+        # bulk-history freshness cross-check in the settled-cash recompute: a lagging
+        # list_orders payload cannot hide these proceeds from the clamp.
+        self._confirmed_sell_fills: list[dict[str, Any]] = []
 
     def _client_order_id(self, intent: OrderIntent) -> str:
         self._sequence += 1
@@ -1464,6 +1695,14 @@ class LivePilotCoreAdapter:
         policy = self._policy(submitted_intent)
         submitted_order_type = str(policy.get("submitted_order_type") or "market").strip().lower()
         try:
+            # Re-read the mutable runtime gates at the last possible point before
+            # each broker submission. A gate flip after planning must fail closed.
+            validate_live_pilot_submission_guardrails(
+                broker_paper=bool(getattr(self.broker, "paper", True)),
+                base_url=str(getattr(self.broker, "base_url", "") or ""),
+                env=self.env,
+                order_notional=float(submitted_intent.notional),
+            )
             if submitted_order_type == "limit":
                 broker_result = self.broker.submit_limit_order(
                     symbol=submitted_intent.symbol,
@@ -1555,12 +1794,29 @@ class LivePilotCoreAdapter:
             )
 
     def snapshot(self) -> CoreAccountSnapshot:
-        account = self.broker.get_account() if hasattr(self.broker, "get_account") else {}
+        account = dict(self.broker.get_account() if hasattr(self.broker, "get_account") else {})
         positions = self.broker.get_positions() if hasattr(self.broker, "get_positions") else []
+        # PRIMARY GFV DEFENSE: recompute settled cash from CURRENT broker truth. After
+        # sells fill, broker cash includes today's freshly credited (but unsettled)
+        # proceeds; the post-sell rebudget must clamp to settled cash so no buy spends
+        # them. Stamp settled_cash onto the account the core budget functions read.
+        settled_result, _orders, availability = _settled_cash_context(
+            self.broker,
+            broker_cash=account.get("cash"),
+            as_of_date=self.trade_date,
+            env=self.env,
+            confirmed_sells=list(self._confirmed_sell_fills),
+        )
+        account["settled_cash"] = float(settled_result.settled_cash)
+        account["settled_cash_fail_closed"] = bool(settled_result.fail_closed)
+        settled_report = settled_result.to_report()
+        settled_report["order_history_availability"] = availability
+        settled_report["phase"] = "post_sell"
+        self.settled_cash_post_sell = settled_report
         return CoreAccountSnapshot(
-            account=dict(account or {}),
+            account=account,
             holdings=_holdings_frame_from_broker_positions(positions),
-            raw={"snapshot_source": "live_pilot_adapter"},
+            raw={"snapshot_source": "live_pilot_adapter", "settled_cash_guard": settled_report},
         )
 
     def _settlement_reflection(
@@ -1693,6 +1949,21 @@ class LivePilotCoreAdapter:
                         "filled_notional": filled_notional,
                     }
                 )
+            # Freshness cross-check input (GFV guard): sells confirmed filled (fully
+            # or partially) by the per-order polling above. snapshot()'s settled-cash
+            # recompute verifies their proceeds are represented in the BULK order
+            # history it uses; a lagging bulk read gets the shortfall injected as
+            # unsettled instead of silently counting it as settled.
+            self._confirmed_sell_fills = [
+                {
+                    "order_id": row.get("broker_order_id") or "",
+                    "proceeds": float(row.get("filled_notional") or 0.0),
+                    "symbol": row.get("symbol"),
+                }
+                for row in sell_records
+                if _status_bucket(row.get("status")) in {"filled", "partial"}
+                and float(row.get("filled_notional") or 0.0) > 0.0
+            ]
             snapshot = self.snapshot()
             settlement_reflection = self._settlement_reflection(
                 account=snapshot.account,
@@ -1862,7 +2133,90 @@ def _capital_gate_from_planning(
         "tradable_capital_usd": (capital_budget.get("reserve_cash_policy") or {}).get("available_for_buys"),
         "buy_block_reason": block_reason,
         "broker_orders_submitted": 0,
+        **_settled_cash_gate_fields(capital_budget),
     }
+
+
+def _request_excluding_dropped_orders(
+    request: ExecutionRequest,
+    dropped_orders: list[Mapping[str, Any]],
+) -> ExecutionRequest:
+    """Neutralize orders dropped at validation so the submission engine agrees.
+
+    BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): per-order partitioning in
+    ``validate_live_pilot_plan``/the asset-check loop only decides what the
+    *validation gate* allows. For a real (non-dry) run, ``execute_lifecycle``
+    independently recomputes trades from this ``ExecutionRequest`` — without
+    this filter, a symbol dropped at validation (bad symbol, non-tradable
+    asset, sell not whitelisted, sells disabled, ...) would still be
+    recomputed and submitted by the engine, silently defeating the partition
+    (and, for a dropped SELL, submitting an order guardrails explicitly
+    rejected). A dropped BUY target is simply removed from the target book
+    (nothing is currently held, so no target row = no trade proposed). A
+    dropped SELL is neutralized by pinning its target weight to its CURRENT
+    weight so the rebalance engine computes a zero delta for that symbol —
+    the held position is left exactly as-is rather than exited.
+    """
+    if not dropped_orders:
+        return request
+    dropped_buy_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in dropped_orders
+        if str(row.get("side") or "").strip().upper() == "BUY"
+    }
+    dropped_sell_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in dropped_orders
+        if str(row.get("side") or "").strip().upper() == "SELL"
+    }
+    dropped_buy_symbols.discard("")
+    dropped_sell_symbols.discard("")
+    if not dropped_buy_symbols and not dropped_sell_symbols:
+        return request
+    targets = (
+        request.targets.copy()
+        if request.targets is not None and not request.targets.empty
+        else pd.DataFrame(columns=["ticker", "sleeve", "target_weight"])
+    )
+    if dropped_buy_symbols and not targets.empty:
+        targets = targets[
+            ~targets["ticker"].astype(str).str.upper().isin(dropped_buy_symbols)
+        ].copy()
+    if dropped_sell_symbols:
+        held_shares: dict[str, float] = {}
+        if request.holdings is not None and not request.holdings.empty:
+            held_shares = (
+                request.holdings.set_index("ticker")["shares"].astype(float).to_dict()
+            )
+        equity = float(request.total_equity or 0.0)
+        if not targets.empty:
+            targets = targets[
+                ~targets["ticker"].astype(str).str.upper().isin(dropped_sell_symbols)
+            ].copy()
+        pin_rows: list[dict[str, Any]] = []
+        for symbol in dropped_sell_symbols:
+            shares = float(held_shares.get(symbol, 0.0) or 0.0)
+            price = (
+                float(request.prices.get(symbol, 0.0) or 0.0)
+                if request.prices is not None
+                else 0.0
+            )
+            current_weight = (
+                (shares * price / equity) if equity > 0.0 and price > 0.0 else 0.0
+            )
+            pin_rows.append(
+                {
+                    "ticker": symbol,
+                    "sleeve": "live_pilot_validation_dropped_sell_hold",
+                    "target_weight": current_weight,
+                }
+            )
+        if pin_rows:
+            targets = pd.concat(
+                [targets, pd.DataFrame(pin_rows, columns=["ticker", "sleeve", "target_weight"])],
+                ignore_index=True,
+            )
+    return dataclasses.replace(request, targets=targets)
 
 
 def _intended_from_validation(
@@ -1939,12 +2293,31 @@ def _run_live_pilot_core_path(
     min_trade_usd = _finite_float(env.get("CAERUS_LIVE_PILOT_MIN_TRADE_USD"))
     if min_trade_usd is None or min_trade_usd <= 0.0:
         min_trade_usd = 100.0
+    # PRIMARY GFV DEFENSE (Blocker #2): recompute settled cash from broker truth and
+    # clamp planning buys to it. Alpaca credits sale proceeds instantly though
+    # unsettled (T+1); buying with them then selling next morning is a GFV. Injecting
+    # settled_cash into the planning account makes the capital budget size against
+    # settled funds only. Fails closed if order history is unavailable.
+    buy_buffer_pct = _buy_buffer_pct(env)
+    settled_result, _settled_orders, settled_availability = _settled_cash_context(
+        broker,
+        broker_cash=request.planning_account.get("cash"),
+        as_of_date=trade_date,
+        env=env,
+    )
+    request.planning_account["settled_cash"] = float(settled_result.settled_cash)
+    request.planning_account["settled_cash_fail_closed"] = bool(settled_result.fail_closed)
+    settled_report = settled_result.to_report()
+    settled_report["order_history_availability"] = settled_availability
+    settled_report["phase"] = "planning"
+    _write_json(run_root / "live_pilot_settled_cash.json", settled_report)
     config = live_pilot_execution_config(
         approved_cap_usd=gate.capital_cap_usd,
         allow_fractional=str(env.get("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL") or "").strip().lower()
         in {"1", "true", "yes", "y", "on"},
         max_orders=int(gate.max_orders or 1),
         min_trade_usd=float(min_trade_usd),
+        buy_buffer_pct=float(buy_buffer_pct),
         ledger_output_root=output_root,
         ledger_enabled=not bool(gate.dry_run),
     )
@@ -2099,12 +2472,17 @@ def _run_live_pilot_core_path(
     )
     source_trades = _core_rows_from_frame(executable_trades, plan=plan)
     if not source_trades:
-        reason_code = (
-            LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
-            if float(capital_budget.get("requested_buy_notional") or 0.0) > 0.0
+        had_buy_demand = (
+            float(capital_budget.get("requested_buy_notional") or 0.0) > 0.0
             or full_need + 1e-9 >= float(config.orders.min_trade_usd)
-            else "live_pilot_transition_no_actionable_order"
         )
+        if settled_result.fail_closed and had_buy_demand:
+            # Order history was unavailable -> settled cash treated as $0 -> buys blocked.
+            reason_code = LIVE_PILOT_GFV_SETTLED_CASH_UNAVAILABLE
+        elif had_buy_demand:
+            reason_code = LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER
+        else:
+            reason_code = "live_pilot_transition_no_actionable_order"
         capital_gate["planned_buy_notional_usd"] = max(
             float(capital_gate.get("planned_buy_notional_usd") or 0.0),
             float(full_need or 0.0),
@@ -2129,6 +2507,14 @@ def _run_live_pilot_core_path(
         max_orders=int(gate.max_orders or 0),
         run_id=run_id,
     )
+    # BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): validate_live_pilot_plan now
+    # partitions PER ORDER — a bad symbol/whitelist/sells-disabled problem drops
+    # only that order (recorded below) rather than blocking the whole batch.
+    # plan_validation.status is only "BLOCKED" when NOT ONE order survived, or a
+    # genuine batch-level constraint (order-count/cap) was tripped.
+    dropped_orders: list[dict[str, Any]] = [
+        dropped.to_dict() for dropped in plan_validation.dropped_orders
+    ]
     intended = _intended_from_validation(
         orders=plan_validation.orders,
         source_trades=source_trades,
@@ -2163,28 +2549,118 @@ def _run_live_pilot_core_path(
         )
     _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
 
-    asset_errors: list[str] = []
-    for order in plan_validation.orders:
-        asset = broker.get_asset(order.symbol) if hasattr(broker, "get_asset") else None
-        error = validate_live_pilot_asset(asset, order.symbol)
-        if error:
-            asset_errors.append(error)
-    if asset_errors:
+    # Belt-and-suspenders (defense #3): block any planned SELL of a position whose
+    # acquiring buy has not passed its own T+1 settlement (canonical GFV shape). With
+    # the buy clamp (defense #2) in place this NEVER fires under daily rotation; a hit
+    # means the buy clamp regressed, so it is a loud, blocking alert.
+    planned_sell_symbols = [
+        str(order.symbol)
+        for order in plan_validation.orders
+        if str(getattr(order, "side", "")).strip().upper() in {"SELL", "CLOSE", "REDUCE"}
+    ]
+    gfv_sell_alerts = detect_gfv_risky_sells(
+        planned_sell_symbols=planned_sell_symbols,
+        orders=_settled_orders,
+        as_of_date=trade_date,
+    )
+    if gfv_sell_alerts:
+        gfv_alert_payload = {
+            "schema_version": "live_pilot_gfv_alert.v1",
+            "generated_at": _now_utc(),
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "reason_code": LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION,
+            "alerts": gfv_sell_alerts,
+            "note": (
+                "Sell-side GFV guard fired: selling a position acquired with funds that "
+                "may not have settled. This should be impossible while the settled-cash "
+                "buy clamp is active; investigate a buy-clamp regression before arming."
+            ),
+        }
+        _write_json(run_root / "live_pilot_gfv_alert.json", gfv_alert_payload)
+        capital_gate["decision"] = "BLOCKED"
+        capital_gate["block_reason"] = LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION
+        _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
             trade_date=trade_date,
             env=env,
-            reason_code=";".join(asset_errors),
+            reason_code=LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION,
+            operator_action=(
+                "Sell-side GFV guard blocked the run: a planned sell targets a position "
+                "acquired with possibly-unsettled funds. Investigate the buy clamp."
+            ),
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+        )
+
+    # Asset validation (halted/delisted/inactive/unsupported asset class) is also
+    # PER ORDER: a bad asset drops only that order — critically, a bad BUY
+    # candidate must never block the SELLs that free capital. Only a totally
+    # empty surviving set blocks the run.
+    valid_orders: list[Any] = []
+    for order in plan_validation.orders:
+        asset = broker.get_asset(order.symbol) if hasattr(broker, "get_asset") else None
+        error = validate_live_pilot_asset(asset, order.symbol)
+        if error:
+            severity = "critical" if order.side == "SELL" else "warning"
+            dropped_orders.append(
+                {
+                    "symbol": order.symbol,
+                    "side": order.side,
+                    "reason_code": error,
+                    "severity": severity,
+                    "stage": "asset_validation",
+                }
+            )
+            if severity == "critical":
+                print(
+                    f"live_pilot_sell_dropped_at_asset_check: symbol={order.symbol} "
+                    f"reason={error} — an intended SELL of a held position was dropped; "
+                    "it will NOT be submitted this run. Other orders proceed.",
+                    file=sys.stderr,
+                )
+            continue
+        valid_orders.append(order)
+
+    if not valid_orders:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=";".join(row["reason_code"] for row in dropped_orders if row.get("stage") == "asset_validation")
+            or "live_pilot_all_orders_failed_asset_validation",
             operator_action="Unsupported or non-tradable assets blocked before submission.",
             preflight=preflight,
             intended=intended,
             capital_gate=capital_gate,
         )
 
+    # Recompute the intended/artifact set against the FINAL (post-asset-check)
+    # surviving orders, and re-write orders_intended so the artifact reflects
+    # exactly what will be submitted plus a full audit trail of every drop.
+    intended = _intended_from_validation(
+        orders=valid_orders,
+        source_trades=source_trades,
+        output_root=output_root,
+        run_id=run_id,
+    )
+    intended_payload = plan_validation.to_dict()
+    intended_payload["orders"] = intended
+    intended_payload["dropped_orders"] = dropped_orders
+    intended_payload["dropped_orders_count"] = len(dropped_orders)
+    intended_payload["dropped_sell_orders_count"] = sum(
+        1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
+    )
+    intended_payload.update(_entry_policy_summary(intended=intended, submitted=[], dry_run=bool(gate.dry_run)))
+    _write_json(run_root / "live_pilot_orders_intended.json", intended_payload)
+
     open_order_check = _open_pilot_order_check(
         broker,
-        intended_symbols={order.symbol for order in plan_validation.orders},
+        intended_symbols={order.symbol for order in valid_orders},
     )
     _write_json(run_root / "live_pilot_open_order_check.json", open_order_check)
     if bool(open_order_check.get("block_submission")):
@@ -2234,6 +2710,11 @@ def _run_live_pilot_core_path(
             rebudget_meta={},
         )
     else:
+        # BLOCKER 3 fix: execute_lifecycle independently recomputes trades from
+        # `request` (holdings/targets), so orders dropped at validation must be
+        # neutralized in the request too — otherwise the submission engine would
+        # silently recompute and submit them anyway, defeating the partition.
+        submission_request = _request_excluding_dropped_orders(request, dropped_orders)
         adapter = LivePilotCoreAdapter(
             broker=broker,
             env=env,
@@ -2242,16 +2723,27 @@ def _run_live_pilot_core_path(
             run_id=run_id,
             pre_sell_account=request.planning_account,
             source_plan=plan,
+            trade_date=trade_date,
         )
-        result = execute_lifecycle(request=request, adapter=adapter, config=config)
+        result = execute_lifecycle(request=submission_request, adapter=adapter, config=config)
         submitted = list(adapter.submitted_rows)
         submit_errors = list(adapter.submit_errors)
+        if adapter.settled_cash_post_sell is not None:
+            _write_json(
+                run_root / "live_pilot_settled_cash.json",
+                adapter.settled_cash_post_sell,
+            )
         intended = _intended_from_submitted(submitted)
         _write_json(
             run_root / "live_pilot_orders_intended.json",
             {
                 **plan_validation.to_dict(),
                 "orders": intended,
+                "dropped_orders": dropped_orders,
+                "dropped_orders_count": len(dropped_orders),
+                "dropped_sell_orders_count": sum(
+                    1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
+                ),
                 **_entry_policy_summary(intended=intended, submitted=[], dry_run=False),
             },
         )
@@ -2327,11 +2819,19 @@ def _run_live_pilot_core_path(
         cap_source_override=_cap_source,
         portfolio_value_usd=_cap_pv,
     )
-    terminal_status = (
-        "DRY_RUN"
-        if gate.dry_run
-        else ("SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION")
-    )
+    # Reconciliation status semantics (WARNING §f fix): CLEAN now requires actual
+    # fills; a fully-submitted-but-unfilled/open batch is its own non-failure
+    # status (SUBMITTED_UNFILLED) rather than CLEAN-with-zero-fills or a false
+    # FAILED_RECONCILIATION. See _reconcile() for the full state machine.
+    _recon_status = str(reconciliation.get("status") or "")
+    if gate.dry_run:
+        terminal_status = "DRY_RUN"
+    elif _recon_status == "CLEAN":
+        terminal_status = "SUBMITTED"
+    elif _recon_status == "SUBMITTED_UNFILLED":
+        terminal_status = "SUBMITTED_UNFILLED"
+    else:
+        terminal_status = "FAILED_RECONCILIATION"
     summary = {
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
@@ -2351,6 +2851,14 @@ def _run_live_pilot_core_path(
         "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
+        # BLOCKER 3 audit trail: every order dropped at validation (plan-level or
+        # asset-level), with its own reason_code — never silently absorbed into
+        # the intended/submitted counts.
+        "dropped_orders_count": len(dropped_orders),
+        "dropped_sell_orders_count": sum(
+            1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
+        ),
+        "dropped_orders": dropped_orders,
         **_next_run_expectation(
             terminal_status=terminal_status,
             reason_code=reconciliation.get("status"),
@@ -2757,12 +3265,19 @@ def refresh_live_pilot_reconciliation(
     reconciliation["broker_status_refresh_claims_broker_truth"] = not bool(refresh_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
 
+    _refreshed_recon_status = str(reconciliation.get("status") or "")
+    if _refreshed_recon_status == "CLEAN":
+        _refreshed_terminal_status = "SUBMITTED"
+    elif _refreshed_recon_status == "SUBMITTED_UNFILLED":
+        _refreshed_terminal_status = "SUBMITTED_UNFILLED"
+    else:
+        _refreshed_terminal_status = "FAILED_RECONCILIATION"
     summary = {
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_root.name,
-        "mode": LIVE_PILOT_MODE.upper(),
-        "terminal_status": "SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION",
+        "mode": _derive_execution_mode(run_root),
+        "terminal_status": _refreshed_terminal_status,
         "reason_code": reconciliation.get("status"),
         "live_orders_allowed": True,
         "dry_run": False,
@@ -2772,7 +3287,7 @@ def refresh_live_pilot_reconciliation(
         "run_root": str(run_root),
         "refreshed_existing_run": True,
         **_next_run_expectation(
-            terminal_status="SUBMITTED" if reconciliation.get("status") == "CLEAN" else "FAILED_RECONCILIATION",
+            terminal_status=_refreshed_terminal_status,
             reason_code=reconciliation.get("status"),
             reconciliation_state=reconciliation.get("state"),
         ),

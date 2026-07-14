@@ -47,8 +47,7 @@ def test_position_cap_trims_single_name_to_explicit_cap() -> None:
 
 def test_default_position_cap_is_concentration_ceiling() -> None:
     """Concentration is the model: the default per-name cap follows the
-    concentration ceiling (0.50), so a concentrated 45% name is NOT re-clipped
-    to the old broad-book 10%; anything above the ceiling still trims."""
+    temporary pilot ceiling (0.30); excess remains explicit cash."""
     controls = RiskControls()
     result = controls.apply_to_targets(
         _targets([("AAA", "trend", 0.45), ("BBB", "value", 0.55)]),
@@ -56,8 +55,9 @@ def test_default_position_cap_is_concentration_ceiling() -> None:
     )
 
     by = dict(zip(result.weights["ticker"], result.weights["target_weight"]))
-    assert by["AAA"] == pytest.approx(0.45)
-    assert by["BBB"] == pytest.approx(0.50)
+    assert by["AAA"] == pytest.approx(0.30)
+    assert by["BBB"] == pytest.approx(0.30)
+    assert result.cash_target_weight == pytest.approx(0.40)
 
 
 def test_sector_cap_scales_sector_to_thirty_percent() -> None:

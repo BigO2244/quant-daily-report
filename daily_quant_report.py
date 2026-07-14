@@ -715,7 +715,8 @@ def _resolve_live_construction_policy(model_equity: float | None) -> dict[str, f
 
     # Position-cap default comes from the SINGLE source of truth in
     # core.risk_controls (explicit MAX_POSITION_PCT env wins there, else the
-    # concentration ceiling CAERUS_CONCENTRATED_MAX_WEIGHT, default 0.50) so
+    # concentration ceiling CAERUS_CONCENTRATED_MAX_WEIGHT, capped at the
+    # temporary pilot maximum of 0.30) so
     # construction and execution-time risk controls can never disagree.
     # Known-safe: concentrate_targets re-derives weights from convictions under
     # its own cap, so this cannot loosen the final book.
@@ -725,7 +726,10 @@ def _resolve_live_construction_policy(model_equity: float | None) -> dict[str, f
 
     max_position_weight = max(
         WEIGHT_TOLERANCE,
-        min(1.0, _snapshot_risk_value("MAX_POSITION_PCT", default_max_position_weight)),
+        min(
+            CONCENTRATED_MAX_WEIGHT,
+            _snapshot_risk_value("MAX_POSITION_PCT", default_max_position_weight),
+        ),
     )
     default_min_position_weight = 0.05 if small_account else 0.02
     min_position_weight = max(
@@ -4357,15 +4361,16 @@ def _build_market_analyzer_payload(
 # ============================================================
 # Concentrated-alpha construction (ALWAYS ON — concentration is the model)
 # ============================================================
-CONCENTRATED_TOP_N_MIN = 3
+CONCENTRATED_TOP_N_MIN = 5
 CONCENTRATED_TOP_N_MAX = 7
 CONCENTRATED_TOP_N_FALLBACK = 5
+CONCENTRATED_MAX_WEIGHT = 0.30
 
 
 def _concentrated_top_n(vix_regime: dict | None) -> tuple[int, str]:
     """Regime-adaptive top-N for the concentrated book.
 
-    N = clamp(int(vix_regime["max_positions"]), 3, 7); falls back to 5 when the
+    N = clamp(int(vix_regime["max_positions"]), 5, 7); falls back to 5 when the
     regime state is unavailable. An explicitly-set CAERUS_CONCENTRATED_TOP_N env
     remains an emergency operator override (env wins ONLY when set non-empty).
 
@@ -4375,7 +4380,10 @@ def _concentrated_top_n(vix_regime: dict | None) -> tuple[int, str]:
     env_val = os.environ.get("CAERUS_CONCENTRATED_TOP_N")
     if env_val not in (None, ""):
         try:
-            return max(1, int(env_val)), "env_override"
+            return max(
+                CONCENTRATED_TOP_N_MIN,
+                min(CONCENTRATED_TOP_N_MAX, int(env_val)),
+            ), "env_override"
         except (TypeError, ValueError):
             logger.warning(
                 "[CONCENTRATED_ALPHA] Invalid CAERUS_CONCENTRATED_TOP_N=%r; "
@@ -4393,9 +4401,14 @@ def _concentrated_top_n(vix_regime: dict | None) -> tuple[int, str]:
 
 def _concentrated_max_weight() -> float:
     try:
-        return float(os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", "0.50"))
+        configured = float(
+            os.environ.get("CAERUS_CONCENTRATED_MAX_WEIGHT", str(CONCENTRATED_MAX_WEIGHT))
+        )
+        if configured <= 0.0:
+            return CONCENTRATED_MAX_WEIGHT
+        return min(CONCENTRATED_MAX_WEIGHT, configured)
     except (TypeError, ValueError):
-        return 0.50
+        return CONCENTRATED_MAX_WEIGHT
 
 
 # ============================================================
@@ -4465,7 +4478,7 @@ def build_daily_snapshot(
         weights_df["sleeve"] = weights_df["sleeve_name"]
     # Concentrated-alpha (ALWAYS ON — concentration is the model): replace the broad
     # book with the top-N highest-conviction names, conviction-weighted, cap per name.
-    # N adapts to the VIX regime (clamped 3..7, fallback 5). Regime/sleeve scoring
+    # N adapts to the VIX regime (clamped 5..7, fallback 5). Regime/sleeve scoring
     # upstream is untouched; cash becomes the residual after concentration and honors
     # the engine's cash weight (risk-off) as a floor.
     #

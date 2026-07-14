@@ -47,6 +47,7 @@ def _armed_env(**overrides: str | None) -> dict[str, str]:
         "CAERUS_LIVE_PILOT_MAX_ORDERS": "1",
         "CAERUS_LIVE_PILOT_DRY_RUN": "0",
         LIVE_PILOT_KILL_SWITCH_ENV: "0",
+        "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "1",
     }
     for key, value in overrides.items():
         if value is None:

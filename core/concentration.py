@@ -8,7 +8,7 @@ This deliberately does NOT re-decide which sleeve is right for the regime or how
 names are scored -- that is the engine's job and stays upstream. It only replaces the
 "pad out to a broad book" behavior with "hold the few names scoring highest," sized in
 proportion to their conviction and capped so a single strong name may run up to
-``max_position_weight`` (default 0.50). Whatever cannot be deployed under the cap falls
+``max_position_weight`` (temporary pilot default 0.30). Whatever cannot be deployed under the cap falls
 to cash rather than being spread back across more names.
 
 Conviction proxy: the combined ``target_weight`` from the allocator. That weight already
@@ -21,7 +21,9 @@ from __future__ import annotations
 import pandas as pd
 
 DEFAULT_TOP_N = 5
-DEFAULT_MAX_POSITION_WEIGHT = 0.50
+MIN_TOP_N = 5
+MAX_TOP_N = 7
+DEFAULT_MAX_POSITION_WEIGHT = 0.30
 DEFAULT_TARGET_CASH_WEIGHT = 0.05
 _EPS = 1e-12
 
@@ -73,8 +75,8 @@ def concentrate_targets(
     Args:
         weights: combined target frame with at least ``ticker`` and ``target_weight``;
             a ``sleeve`` column is preserved if present.
-        top_n: number of highest-conviction names to hold (e.g. 3-5).
-        max_position_weight: per-name ceiling; a strong name may run up to this (0.50).
+        top_n: number of highest-conviction names to hold (temporary pilot range 5-7).
+        max_position_weight: per-name ceiling; temporary pilot maximum is 0.30.
         target_cash_weight: cash held back before capping (deployed budget = 1 - this).
     """
     if int(top_n) <= 0:
