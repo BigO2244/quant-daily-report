@@ -246,6 +246,8 @@ def account_report(account: str, shadow_specs: list[dict]) -> dict:
     nav_rows = read_csv_rows(accdir / "daily_nav.csv")
     acts = read_jsonl(accdir / "activities.jsonl")
     fills = read_csv_rows(accdir / "fills.csv")
+    manifest_path = accdir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     if not nav_rows:
         return {"account": account, "error": "no ledger NAV — run build_broker_truth_ledger.py"}
 
@@ -258,6 +260,14 @@ def account_report(account: str, shadow_specs: list[dict]) -> dict:
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "external_flows": {k: round(v, 2) for k, v in sorted(flows.items())},
         "realized": metrics,
+        "ledger_quality": {
+            "reconciliation_pass": (manifest.get("reconciliation") or {}).get("pass"),
+            "nav_rows": manifest.get("nav_rows"),
+            "daily_state_rows": manifest.get("daily_state_rows"),
+            "daily_state_complete_rows": manifest.get("daily_state_complete_rows"),
+            "missing_trading_dates": manifest.get("missing_trading_dates", []),
+            "flags": manifest.get("flags", []),
+        },
         "shadow_vs_realized": {},
         "_shadow_series_full": {},
     }
@@ -289,10 +299,15 @@ def render_markdown(reports: list) -> str:
             continue
         m = rep["realized"]
         flows = rep["external_flows"]
+        quality = rep.get("ledger_quality") or {}
         lines += [
             "",
             f"Window: **{m['start_date']} → {m['end_date']}** ({m['obs_days']} trading days). "
             f"External flows: {json.dumps(flows) if flows else 'none'}.",
+            f"Ledger reconciliation: **{quality.get('reconciliation_pass')}**; "
+            f"daily position/cash states complete: "
+            f"{quality.get('daily_state_complete_rows')}/{quality.get('daily_state_rows')}; "
+            f"missing trading dates: {quality.get('missing_trading_dates') or 'none'}.",
             "",
             "| Metric | Value |",
             "|---|---|",

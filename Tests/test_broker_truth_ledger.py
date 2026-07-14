@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import broker_ledger_report as rpt  # noqa: E402
 import build_broker_truth_ledger as bld  # noqa: E402
+import build_tca as tca  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,66 @@ def test_append_jsonl_dedupe_is_idempotent(tmp_path):
     assert len(bld.read_jsonl(path)) == 2
 
 
+def test_revisioned_daily_state_is_idempotent_and_preserves_corrections(tmp_path):
+    path = tmp_path / "daily_state.jsonl"
+    row = {"date": "2026-07-13", "equity": 100.0, "positions": []}
+    assert bld.append_revisioned_daily_state(path, [row], "2026-07-14T00:00:00Z") == 1
+    assert bld.append_revisioned_daily_state(path, [row], "2026-07-14T01:00:00Z") == 0
+    corrected = {**row, "equity": 101.0}
+    assert bld.append_revisioned_daily_state(path, [corrected], "2026-07-14T02:00:00Z") == 1
+    rows = bld.read_jsonl(path)
+    assert [r["revision"] for r in rows] == [1, 2]
+    assert [r["equity"] for r in rows] == [100.0, 101.0]
+
+
+def test_missing_trading_dates_excludes_market_holidays():
+    # July 3, 2026 was the observed Independence Day closure.
+    have = {"2026-07-02", "2026-07-06"}
+    assert bld.missing_trading_dates(
+        dt.date(2026, 7, 2), dt.date(2026, 7, 7), have
+    ) == []
+
+
+def test_build_daily_states_reconstructs_positions_market_value_and_cash():
+    nav = _nav([("2026-07-01", 1000.0), ("2026-07-02", 1015.0)])
+    fills = [
+        {"trade_date_et": "2026-07-01", "symbol": "AAPL", "side": "buy", "qty": 2},
+        {"trade_date_et": "2026-07-02", "symbol": "AAPL", "side": "sell", "qty": 1},
+    ]
+    states, flags = bld.build_daily_states(
+        nav, fills, {"AAPL": {"2026-07-01": 100.0, "2026-07-02": 105.0}}
+    )
+    assert flags == []
+    assert states[0]["positions"][0]["qty"] == 2
+    assert states[0]["cash"] == 800.0
+    assert states[1]["positions"][0]["qty"] == 1
+    assert states[1]["cash"] == 910.0
+
+
+def test_build_daily_states_fails_closed_on_missing_mark():
+    states, flags = bld.build_daily_states(
+        _nav([("2026-07-01", 1000.0)]),
+        [{"trade_date_et": "2026-07-01", "symbol": "AAPL", "side": "buy", "qty": 2}],
+        {},
+    )
+    assert states[0]["valuation_complete"] is False
+    assert states[0]["cash"] is None
+    assert flags == ["DAILY_STATE_UNPRICED date=2026-07-01 symbols=AAPL"]
+
+
+def test_build_daily_states_applies_option_contract_multiplier():
+    symbol = "SPY260417P00680000"
+    states, flags = bld.build_daily_states(
+        _nav([("2026-04-10", 1000.0)]),
+        [{"trade_date_et": "2026-04-10", "symbol": symbol, "side": "buy", "qty": 1}],
+        {symbol: {"2026-04-10": 5.52}},
+    )
+    assert flags == []
+    assert states[0]["positions"][0]["multiplier"] == 100.0
+    assert states[0]["positions"][0]["market_value"] == 552.0
+    assert states[0]["cash"] == 448.0
+
+
 def test_reconcile_flags_position_mismatch():
     acct = {"equity": "1000", "cash": "500"}
     positions = [{"symbol": "AAPL", "qty": "2", "market_value": "500"}]
@@ -73,7 +134,7 @@ def test_reconcile_flags_position_mismatch():
 
 
 def test_reconcile_passes_when_consistent():
-    acct = {"equity": "1000", "cash": "500"}
+    acct = {"equity": "1000", "last_equity": "1005", "cash": "500"}
     positions = [{"symbol": "AAPL", "qty": "2", "market_value": "500"}]
     nav_rows = [{"date": "2026-07-13", "equity": "1005"}]
     fills = [
@@ -196,3 +257,62 @@ def test_flows_by_date_only_external_types():
     ]
     flows = rpt.flows_by_date(acts)
     assert flows == {"2026-06-22": 500.0}
+
+
+# ---------------------------------------------------------------------------
+# build_tca — arrival and adversarial reconciliation
+# ---------------------------------------------------------------------------
+
+def test_quote_mid_uses_latest_quote_at_or_before_submission():
+    sub = bld.parse_iso("2026-07-13T13:35:30Z")
+    quotes = [
+        {"t": "2026-07-13T13:35:20Z", "bp": 99.0, "ap": 101.0},
+        {"t": "2026-07-13T13:35:31Z", "bp": 100.0, "ap": 102.0},  # future
+    ]
+    mid, ts = tca.quote_mid_at_or_before(quotes, sub)
+    assert mid == 100.0
+    assert ts == bld.parse_iso("2026-07-13T13:35:20Z")
+
+
+def test_quote_mid_rejects_stale_or_crossed_quotes():
+    sub = bld.parse_iso("2026-07-13T13:35:30Z")
+    assert tca.quote_mid_at_or_before(
+        [{"t": "2026-07-13T13:20:00Z", "bp": 99.0, "ap": 101.0}], sub
+    ) == (None, None)
+    assert tca.quote_mid_at_or_before(
+        [{"t": "2026-07-13T13:35:20Z", "bp": 102.0, "ap": 101.0}], sub
+    ) == (None, None)
+
+
+def test_decision_price_prefers_generating_run_over_trade_date_rerun():
+    intended = {
+        "by_run": {
+            "2026-03-10:main:growth_engine_v4": {
+                "prices": {("AAPL", "buy"): 100.0}
+            }
+        },
+        "by_date": {
+            "2026-03-11": {"prices": {("AAPL", "buy"): 105.0}}
+        },
+    }
+    order = {
+        "symbol": "AAPL",
+        "side": "buy",
+        "client_order_id": "2026-03-10:main:growth_engine_v4_AAPL_BUY_2.0",
+    }
+    assert tca.decision_price_for_order(order, "2026-03-11", intended) == (
+        100.0,
+        "intended_orders_run_id_exact_side",
+    )
+
+
+def test_tca_forced_residual_does_not_count_as_validated_reconciliation():
+    row = {b: 0.0 for b in tca.BUCKETS}
+    row.update({"date": "2026-07-13", "gap": -0.01, "r_real": 0.0, "r_intended_series": 0.01})
+    row["residual"] = -0.01
+    summary = tca.summarize(
+        "paper", [row], [], {"overlap": ("2026-07-12", "2026-07-13"), "days": 1, "flags": []}, "fixture.csv"
+    )
+    assert summary["reconciles"] is True
+    assert summary["attribution_validated"] is False
+    assert summary["validation"]["residual_share_of_absolute_attribution"] == 1.0

@@ -55,6 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LEDGER_ROOT = REPO_ROOT / "outputs" / "ledger"
 TCA_ROOT = REPO_ROOT / "outputs" / "tca"
 ET = ZoneInfo("America/New_York")
+OCC_OPTION_SYMBOL = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from build_broker_truth_ledger import (  # noqa: E402
@@ -125,15 +126,25 @@ class MarketData:
         resp.raise_for_status()
 
     def daily_closes(self, symbols: list, start: str, end: str) -> dict:
-        """{symbol: {date: close}} via cached multi-symbol daily bars."""
+        """{symbol: {date: close}} via stock and option daily bars."""
         cache = self.cache_dir / f"daily_closes_{start}_{end}.json"
         if cache.exists():
             data = json.loads(cache.read_text())
-            if set(symbols) <= set(data.get("_symbols", [])):
+            if data.get("_schema") == 3 and set(symbols) <= set(data.get("_symbols", [])):
                 return data["closes"]
+        option_symbols = sorted(symbol for symbol in symbols if OCC_OPTION_SYMBOL.match(symbol))
+        stock_symbols = sorted(set(symbols) - set(option_symbols))
+        alias_path = REPO_ROOT / "data" / "security_master" / "manual_aliases.json"
+        aliases = {}
+        if alias_path.exists():
+            aliases = (json.loads(alias_path.read_text()).get("aliases") or {})
+        provider_to_requested: dict[str, list[str]] = defaultdict(list)
+        for symbol in stock_symbols:
+            provider_to_requested[aliases.get(symbol, symbol)].append(symbol)
+        provider_symbols = sorted(provider_to_requested)
         closes: dict[str, dict] = defaultdict(dict)
-        for i in range(0, len(symbols), 100):
-            chunk = symbols[i : i + 100]
+        for i in range(0, len(provider_symbols), 100):
+            chunk = provider_symbols[i : i + 100]
             token = None
             while True:
                 params = {
@@ -147,15 +158,37 @@ class MarketData:
                 if token:
                     params["page_token"] = token
                 data = self._get("/v2/stocks/bars", params)
-                for sym, bars in (data.get("bars") or {}).items():
+                for provider_symbol, bars in (data.get("bars") or {}).items():
+                    for requested_symbol in provider_to_requested.get(provider_symbol, [provider_symbol]):
+                        for b in bars:
+                            d = parse_iso(b["t"]).astimezone(ET).date().isoformat()
+                            closes[requested_symbol][d] = b["c"]
+                token = data.get("next_page_token")
+                if not token:
+                    break
+        for i in range(0, len(option_symbols), 100):
+            chunk = option_symbols[i : i + 100]
+            token = None
+            while True:
+                params = {
+                    "symbols": ",".join(chunk),
+                    "timeframe": "1Day",
+                    "start": start,
+                    "end": end,
+                    "limit": 10000,
+                }
+                if token:
+                    params["page_token"] = token
+                data = self._get("/v1beta1/options/bars", params)
+                for symbol, bars in (data.get("bars") or {}).items():
                     for b in bars:
-                        d = parse_iso(b["t"]).astimezone(ET).date().isoformat()
-                        closes[sym][d] = b["c"]
+                        day = parse_iso(b["t"]).astimezone(ET).date().isoformat()
+                        closes[symbol][day] = b["c"]
                 token = data.get("next_page_token")
                 if not token:
                     break
         out = {s: dict(v) for s, v in closes.items()}
-        atomic_write(cache, json.dumps({"_symbols": symbols, "closes": out}))
+        atomic_write(cache, json.dumps({"_schema": 3, "_symbols": symbols, "closes": out}))
         return out
 
     def minute_bars_window(self, date: str, symbols: list, start_utc: str, end_utc: str) -> dict:
@@ -163,11 +196,13 @@ class MarketData:
         cache = self.cache_dir / f"arrival_{date}.json"
         if cache.exists():
             data = json.loads(cache.read_text())
-            if set(symbols) <= set(data.get("_symbols", [])):
+            if data.get("_schema") == 2 and set(symbols) <= set(data.get("_symbols", [])):
                 return data["bars"]
+        option_symbols = sorted(symbol for symbol in symbols if OCC_OPTION_SYMBOL.match(symbol))
+        stock_symbols = sorted(set(symbols) - set(option_symbols))
         allbars: dict[str, list] = defaultdict(list)
-        for i in range(0, len(symbols), 100):
-            chunk = symbols[i : i + 100]
+        for i in range(0, len(stock_symbols), 100):
+            chunk = stock_symbols[i : i + 100]
             token = None
             while True:
                 params = {
@@ -186,9 +221,68 @@ class MarketData:
                 token = data.get("next_page_token")
                 if not token:
                     break
+        for i in range(0, len(option_symbols), 100):
+            chunk = option_symbols[i : i + 100]
+            token = None
+            while True:
+                params = {
+                    "symbols": ",".join(chunk),
+                    "timeframe": "1Min",
+                    "start": start_utc,
+                    "end": end_utc,
+                    "limit": 10000,
+                }
+                if token:
+                    params["page_token"] = token
+                data = self._get("/v1beta1/options/bars", params)
+                for sym, values in (data.get("bars") or {}).items():
+                    allbars[sym].extend(values)
+                token = data.get("next_page_token")
+                if not token:
+                    break
         out = {s: v for s, v in allbars.items()}
-        atomic_write(cache, json.dumps({"_symbols": symbols, "bars": out}))
+        atomic_write(cache, json.dumps({"_schema": 2, "_symbols": symbols, "bars": out}))
         return out
+
+    def quote_before(self, symbol: str, submitted_at: dt.datetime, cache_key: str):
+        """Last historical quote at/before submission without bulk quote pulls.
+
+        A multi-symbol, multi-minute quote request can return millions of ticks.
+        One descending, one-symbol request capped at one quote is bounded and is
+        exactly the observation TCA needs.
+        """
+        cache = self.cache_dir / "arrival_quotes" / f"{cache_key}.json"
+        if cache.exists():
+            data = json.loads(cache.read_text())
+            return data.get("mid"), parse_iso(data["timestamp"]) if data.get("timestamp") else None
+        legacy = cache.with_name(f"{cache_key.removeprefix('v2_')}.json")
+        if legacy.exists():
+            data = json.loads(legacy.read_text())
+            if data.get("mid") is not None and data.get("timestamp"):
+                atomic_write(cache, json.dumps(data))
+                return data["mid"], parse_iso(data["timestamp"])
+        start = submitted_at - dt.timedelta(minutes=5)
+        if OCC_OPTION_SYMBOL.match(symbol):
+            return None, None  # Alpaca exposes historical option bars/trades, not historical quotes.
+        endpoint = "/v2/stocks/quotes"
+        payload = self._get(
+            endpoint,
+            {
+                "symbols": symbol,
+                "start": start.isoformat().replace("+00:00", "Z"),
+                "end": submitted_at.isoformat().replace("+00:00", "Z"),
+                "limit": 1,
+                "sort": "desc",
+                "feed": "iex",
+            },
+        )
+        mid, quote_ts = quote_mid_at_or_before((payload.get("quotes") or {}).get(symbol, []), submitted_at)
+        atomic_write(
+            cache,
+            json.dumps({"symbol": symbol, "submitted_at": submitted_at.isoformat(), "mid": mid,
+                        "timestamp": quote_ts.isoformat() if quote_ts else None}),
+        )
+        return mid, quote_ts
 
 
 # --------------------------------------------------------------------------
@@ -206,16 +300,19 @@ def latest_intended_series() -> tuple[Path, list]:
 
 
 def load_intended_orders() -> dict:
-    """date -> {(ticker, side): decision_price} from the latest run per date."""
-    by_date: dict[str, Path] = {}
-    for p in sorted((REPO_ROOT / "outputs" / "runs").glob("*/broker/intended_orders_*.json")):
+    """Decision prices indexed by both decision run id and date.
+
+    Orders can be submitted the next morning from a prior-day plan, and a later
+    blocked rerun can coexist with the run that actually generated the order.
+    The client order id embeds the run id, so preserve every run rather than
+    collapsing to an arbitrary latest file first.
+    """
+    paths = list(sorted((REPO_ROOT / "outputs" / "runs").glob("*/broker/intended_orders_*.json")))
+    paths += list(sorted((REPO_ROOT / "outputs" / "broker").glob("intended_orders_*.json")))
+    by_date: dict[str, dict] = {}
+    by_run: dict[str, dict] = {}
+    for p in paths:
         d = p.stem.replace("intended_orders_", "")
-        by_date[d] = p  # sorted order => latest run wins
-    for p in sorted((REPO_ROOT / "outputs" / "broker").glob("intended_orders_*.json")):
-        d = p.stem.replace("intended_orders_", "")
-        by_date.setdefault(d, p)
-    out: dict[str, dict] = {}
-    for d, p in by_date.items():
         try:
             doc = json.loads(p.read_text())
         except Exception:
@@ -228,8 +325,16 @@ def load_intended_orders() -> dict:
                 px = 0.0
             if math.isfinite(px) and px > 0:
                 recs[(o.get("ticker"), (o.get("side") or "").lower())] = px
-        out[d] = {"prices": recs, "path": str(p.relative_to(REPO_ROOT)), "blocked": doc.get("execution_blocked")}
-    return out
+        entry = {
+            "prices": recs,
+            "path": str(p.relative_to(REPO_ROOT)),
+            "blocked": doc.get("execution_blocked"),
+            "date": d,
+        }
+        by_date[d] = entry
+        if doc.get("run_id"):
+            by_run[doc["run_id"]] = entry
+    return {"by_date": by_date, "by_run": by_run}
 
 
 def dedupe_orders(orders: list) -> list:
@@ -242,6 +347,44 @@ def dedupe_orders(orders: list) -> list:
     return sorted(latest.values(), key=lambda o: o.get("submitted_at") or "")
 
 
+def quote_mid_at_or_before(quotes: list[dict], timestamp: dt.datetime, max_age_minutes: int = 5):
+    """Return (mid, quote timestamp) without using post-arrival information."""
+    best = None
+    for quote in quotes:
+        quote_ts = parse_iso(quote["t"])
+        bid, ask = float(quote.get("bp") or 0), float(quote.get("ap") or 0)
+        if bid <= 0 or ask <= 0 or ask < bid or quote_ts > timestamp:
+            continue
+        if best is None or quote_ts > best[0]:
+            best = (quote_ts, (bid + ask) / 2.0)
+    if best is None or timestamp - best[0] > dt.timedelta(minutes=max_age_minutes):
+        return None, None
+    return best[1], best[0]
+
+
+def decision_price_for_order(order: dict, trade_date: str, intended_orders: dict):
+    """Resolve the exact-side price from the generating run, then trade date."""
+    symbol, side = order["symbol"], (order.get("side") or "").lower()
+    client_id = order.get("client_order_id") or ""
+    run_entry = next(
+        (
+            entry
+            for run_id, entry in intended_orders.get("by_run", {}).items()
+            if client_id.startswith(run_id)
+        ),
+        None,
+    )
+    run_price = (run_entry or {}).get("prices", {}).get((symbol, side))
+    date_price = (
+        intended_orders.get("by_date", {}).get(trade_date, {}).get("prices", {}).get((symbol, side))
+    )
+    if run_price:
+        return run_price, "intended_orders_run_id_exact_side"
+    if date_price:
+        return date_price, "intended_orders_trade_date_exact_side"
+    return None, "missing"
+
+
 # --------------------------------------------------------------------------
 # Order-level TCA (implementation shortfall: delay + slippage)
 # --------------------------------------------------------------------------
@@ -249,6 +392,10 @@ def dedupe_orders(orders: list) -> list:
 def build_order_tca(account: str, md: MarketData, intended_orders: dict) -> list:
     accdir = LEDGER_ROOT / account
     orders = dedupe_orders(read_jsonl(accdir / "orders.jsonl"))
+    fills_by_order: dict[str, list[dict]] = defaultdict(list)
+    for fill in read_csv_rows(accdir / "fills.csv"):
+        if fill.get("order_id"):
+            fills_by_order[fill["order_id"]].append(fill)
     rows = []
     # group orders by ET trade date for windowed minute-bar pulls
     by_date: dict[str, list] = defaultdict(list)
@@ -258,38 +405,78 @@ def build_order_tca(account: str, md: MarketData, intended_orders: dict) -> list
         d = parse_iso(o["submitted_at"]).astimezone(ET).date().isoformat()
         by_date[d].append(o)
 
+    all_dates = sorted(by_date)
+    all_symbols = sorted({o["symbol"] for o in orders if not OCC_OPTION_SYMBOL.match(o["symbol"])})
+    decision_closes = {}
+    if all_dates:
+        start = (dt.date.fromisoformat(all_dates[0]) - dt.timedelta(days=10)).isoformat()
+        decision_closes = md.daily_closes(all_symbols, start, all_dates[-1])
+
     for d, day_orders in sorted(by_date.items()):
         subs = [parse_iso(o["submitted_at"]) for o in day_orders]
         start = (min(subs) - dt.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
         end = (max(subs) + dt.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        occ = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
-        symbols = sorted({o["symbol"] for o in day_orders if not occ.match(o["symbol"])})
+        occ = OCC_OPTION_SYMBOL
+        symbols = sorted({o["symbol"] for o in day_orders})
         try:
             bars = md.minute_bars_window(d, symbols, start, end) if symbols else {}
         except Exception as exc:
             log(f"{account}: minute bars unavailable for {d} ({exc}) — daily fallback")
             bars = {}
-        day_prices = intended_orders.get(d, {}).get("prices", {})
         for o in day_orders:
             sym, side = o["symbol"], (o.get("side") or "").lower()
             sign = 1 if side == "buy" else -1
             sub_ts = parse_iso(o["submitted_at"])
-            decision = day_prices.get((sym, side)) or day_prices.get((sym, "buy" if side == "sell" else "sell"))
-            decision_src = "intended_orders" if day_prices.get((sym, side)) else ("intended_orders_other_side" if decision else "missing")
-            # Arrival: open of the minute bar containing submission (bar open
-            # time <= submitted_at, so never post-fill information).
-            arrival = None
-            arrival_src = "missing"
-            best = None
-            for b in bars.get(sym, []):
-                bt = parse_iso(b["t"])
-                if bt <= sub_ts and (best is None or bt > best[0]):
-                    best = (bt, b)
-            if best is not None and (sub_ts - best[0]) <= dt.timedelta(minutes=5):
-                arrival = best[1]["o"]
-                arrival_src = f"1min_bar_open@{best[0].astimezone(ET).strftime('%H:%M')}ET"
-            filled_qty = float(o.get("filled_qty") or 0)
-            fill_px = float(o.get("filled_avg_price") or 0) or None
+            decision, decision_src = decision_price_for_order(o, d, intended_orders)
+            if decision is None:
+                prior_dates = [day for day in decision_closes.get(sym, {}) if day < d]
+                if not prior_dates and occ.match(sym):
+                    option_start = (dt.date.fromisoformat(d) - dt.timedelta(days=10)).isoformat()
+                    option_closes = md.daily_closes([sym], option_start, d)
+                    decision_closes[sym] = option_closes.get(sym, {})
+                    prior_dates = [day for day in decision_closes.get(sym, {}) if day < d]
+                if prior_dates:
+                    prior_day = max(prior_dates)
+                    decision = decision_closes[sym][prior_day]
+                    decision_src = f"FALLBACK_alpaca_prior_close@{prior_day}_missing_model_artifact"
+            # Primary arrival is the last valid bid/ask midpoint at or before
+            # submission. A minute-bar open is an explicitly labeled fallback.
+            arrival = quote_ts = None
+            try:
+                arrival, quote_ts = md.quote_before(sym, sub_ts, f"v2_{account}_{o['id']}")
+            except Exception as exc:
+                log(f"{account}: quote unavailable for {o['id']} {sym} ({exc}) — bar fallback")
+            arrival_src = (
+                f"quote_mid@{quote_ts.astimezone(ET).strftime('%H:%M:%S')}ET"
+                if quote_ts is not None
+                else "missing"
+            )
+            if arrival is None:
+                best = None
+                for b in bars.get(sym, []):
+                    bt = parse_iso(b["t"])
+                    if bt <= sub_ts and (best is None or bt > best[0]):
+                        best = (bt, b)
+                if best is not None and (sub_ts - best[0]) <= dt.timedelta(minutes=5):
+                    arrival = float(best[1]["o"])
+                    arrival_src = f"FALLBACK_1min_bar_open@{best[0].astimezone(ET).strftime('%H:%M')}ET"
+            if arrival is None:
+                fallback_dates = [day for day in decision_closes.get(sym, {}) if day < d]
+                if fallback_dates:
+                    fallback_day = max(fallback_dates)
+                    arrival = float(decision_closes[sym][fallback_day])
+                    arrival_src = f"FALLBACK_alpaca_prior_daily_close@{fallback_day}"
+            order_fills = fills_by_order.get(o["id"], [])
+            filled_qty = sum(float(fill.get("qty") or 0) for fill in order_fills)
+            fill_price_notional = sum(
+                float(fill.get("qty") or 0) * float(fill.get("price") or 0)
+                for fill in order_fills
+            )
+            fill_notional = sum(
+                float(fill.get("notional") or 0)
+                for fill in order_fills
+            )
+            fill_px = fill_price_notional / filled_qty if filled_qty else None
             qty = float(o.get("qty") or 0) or None
             delay_bps = slippage_bps = is_bps = None
             if decision and arrival:
@@ -298,7 +485,7 @@ def build_order_tca(account: str, md: MarketData, intended_orders: dict) -> list
                 slippage_bps = sign * (fill_px - arrival) / arrival * 1e4
             if decision and fill_px:
                 is_bps = sign * (fill_px - decision) / decision * 1e4
-            notional = (fill_px or 0) * filled_qty
+            notional = fill_notional
             rows.append(
                 {
                     "trade_date_et": d,
@@ -312,11 +499,14 @@ def build_order_tca(account: str, md: MarketData, intended_orders: dict) -> list
                     "filled_at": o.get("filled_at"),
                     "qty": qty,
                     "filled_qty": filled_qty,
+                    "fill_count": len(order_fills),
+                    "fill_activity_ids": ";".join(fill["activity_id"] for fill in order_fills),
                     "decision_price": decision,
                     "decision_source": decision_src,
                     "arrival_price": arrival,
                     "arrival_source": arrival_src,
                     "fill_price": fill_px,
+                    "fill_price_source": "alpaca_fill_activities_vwap" if order_fills else "missing",
                     "filled_notional": round(notional, 2),
                     "delay_bps": round(delay_bps, 2) if delay_bps is not None else None,
                     "slippage_bps": round(slippage_bps, 2) if slippage_bps is not None else None,
@@ -382,12 +572,12 @@ def build_daily_decomposition(account: str, md: MarketData, intended_rows: list,
     # OCC option symbols (gated overlay; 2 net-zero round trips) cannot be
     # priced from the stock-bars endpoint — their effect lands in `residual`
     # on their trade dates and is flagged.
-    occ = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
+    occ = OCC_OPTION_SYMBOL
     all_syms = {f["symbol"] for f in fills} | {
         p["symbol"] for d in common for p in intended[d]["positions"]
     }
     option_syms = {s for s in all_syms if occ.match(s)}
-    symbols = sorted(all_syms - option_syms)
+    symbols = sorted(all_syms)
     closes = md.daily_closes(symbols, common[0], common[-1])
     log(f"{account}: daily closes for {len(symbols)} symbols {common[0]}..{common[-1]}")
 
@@ -439,14 +629,12 @@ def build_daily_decomposition(account: str, md: MarketData, intended_rows: list,
         for sym, q in running_qty.items():
             if abs(q) < 1e-9:
                 continue
-            if sym in option_syms:
-                flags.append(f"{d1}: OPTION_UNPRICED held {sym} — effect in residual")
-                continue
             c0 = close(sym, d0)
             if c0 is None:
                 flags.append(f"{d1}: no close for held {sym} @ {d0}")
                 continue
-            w_act[sym] = q * c0 / E0
+            multiplier = 100.0 if sym in option_syms else 1.0
+            w_act[sym] = q * c0 * multiplier / E0
 
         # intended BOD weights (book recorded at d0)
         ib = intended[d0]
@@ -502,15 +690,13 @@ def build_daily_decomposition(account: str, md: MarketData, intended_rows: list,
         # execution vs same-day close for fills on d1
         exec_trading = 0.0
         for f in fills_by_date.get(d1, []):
-            if f["symbol"] in option_syms:
-                flags.append(f"{d1}: OPTION_UNPRICED fill {f['symbol']} — effect in residual")
-                continue
             c1 = close(f["symbol"], d1)
             if c1 is None:
                 flags.append(f"{d1}: no close for filled {f['symbol']}")
                 continue
             sgn = 1 if f["side"] == "buy" else -1
-            exec_trading += sgn * float(f["qty"]) * (c1 - float(f["price"])) / E0
+            multiplier = 100.0 if f["symbol"] in option_syms else 1.0
+            exec_trading += sgn * float(f["qty"]) * multiplier * (c1 - float(f["price"])) / E0
 
         fees = fees_by_date.get(d1, 0.0) / E0
         divs = div_by_date.get(d1, 0.0) / E0
@@ -564,7 +750,19 @@ def summarize(account: str, daily: list, order_rows: list, meta: dict, intended_
     slip_usd = sum(o["slippage_cost_usd"] or 0 for o in filled)
     covered = [o for o in filled if o["delay_bps"] is not None]
     arrival_fallback = [o for o in filled if o["arrival_price"] is None]
+    arrival_proxy = [o for o in filled if str(o.get("arrival_source") or "").startswith("FALLBACK_")]
     decision_missing = [o for o in filled if o["decision_price"] is None]
+    decision_proxy = [o for o in filled if str(o.get("decision_source") or "").startswith("FALLBACK_")]
+    math_reconciles = abs(sum(tot.values()) - tot_gap) < 1e-9
+    residual_abs = sum(abs(r["residual"]) for r in daily)
+    residual_net_bps = abs(tot["residual"]) * 1e4
+    non_residual_abs = sum(abs(r[b]) for r in daily for b in BUCKETS if b != "residual")
+    residual_share = residual_abs / max(residual_abs + non_residual_abs, 1e-12)
+    # A forced closure term can make any decomposition add up. Treat the
+    # attribution as validated only when residual is economically immaterial.
+    attribution_validated = (
+        math_reconciles and residual_share <= 0.10 and residual_net_bps <= 10.0
+    )
 
     # biggest daily leaks per bucket
     leaks = []
@@ -586,18 +784,30 @@ def summarize(account: str, daily: list, order_rows: list, meta: dict, intended_
         "gap_geometric_cum": round((prod_real - 1) - (prod_int - 1), 6),
         "compounding_note": "buckets reconcile the arithmetic sum of daily gaps; the geometric cumulative gap differs by cross-compounding",
         "buckets_sum": round(sum(tot.values()), 6),
-        "reconciles": abs(sum(tot.values()) - tot_gap) < 1e-9,
+        "reconciles": math_reconciles,
+        "attribution_validated": attribution_validated,
+        "validation": {
+            "mathematical_identity": math_reconciles,
+            "absolute_residual_bps": round(residual_abs * 1e4, 1),
+            "absolute_net_residual_bps": round(residual_net_bps, 1),
+            "residual_share_of_absolute_attribution": round(residual_share, 6),
+            "maximum_residual_share": 0.10,
+            "maximum_absolute_net_residual_bps": 10.0,
+            "note": "Mathematical closure alone is not validation because residual is a forced closure bucket.",
+        },
         "buckets": {b: {"total_return_contrib": round(tot[b], 6), "bps": round(tot[b] * 1e4, 1),
                         "group": BUCKET_NOTES[b][0], "fixability": BUCKET_NOTES[b][1]} for b in BUCKETS},
         "order_level": {
             "orders": len(order_rows),
             "filled_orders": len(filled),
             "delay_covered_orders": len(covered),
-            "arrival_fallback_orders": len(arrival_fallback),
+            "arrival_missing_orders": len(arrival_fallback),
+            "arrival_proxy_orders": len(arrival_proxy),
             "decision_price_missing_orders": len(decision_missing),
+            "decision_price_proxy_orders": len(decision_proxy),
             "delay_cost_usd_total": round(delay_usd, 2),
             "slippage_cost_usd_total": round(slip_usd, 2),
-            "note": "delay/slippage are per-order implementation shortfall vs the intended decision price; arrival = 1-min bar open at/just before submission (no post-fill info)",
+            "note": "delay/slippage use exact-side intended prices, historical quote midpoints at/before submission, and exact Alpaca fill-activity VWAP; proxy/missing arrivals are explicit",
         },
         "biggest_daily_leaks": leaks[:10],
         "data_flags_count": len(meta["flags"]),
@@ -639,7 +849,13 @@ def render_report(summaries: list) -> str:
             "",
             f"Total gap (sum of daily realized − intended): **{s['gap_total_arithmetic_sum_daily']*1e4:+.1f} bps**"
             f" (geometric cumulative: {s['gap_geometric_cum']*1e4:+.1f} bps). "
-            f"Buckets sum to {s['buckets_sum']*1e4:+.1f} bps — reconciles: **{s['reconciles']}**.",
+            f"Buckets sum to {s['buckets_sum']*1e4:+.1f} bps — mathematical identity: "
+            f"**{s['reconciles']}**; attribution validated: **{s['attribution_validated']}**.",
+            f"Absolute residual is {s['validation']['absolute_residual_bps']:.1f} bps "
+            f"({s['validation']['residual_share_of_absolute_attribution']:.1%} of absolute attribution; "
+            f"limit {s['validation']['maximum_residual_share']:.0%}); net residual is "
+            f"{s['validation']['absolute_net_residual_bps']:.1f} bps "
+            f"(limit {s['validation']['maximum_absolute_net_residual_bps']:.1f}).",
             "",
             "| Bucket | bps | Group | Fixability |",
             "|---|---|---|---|",
@@ -654,7 +870,9 @@ def render_report(summaries: list) -> str:
             f"{ol['filled_orders']} filled orders; delay ${ol['delay_cost_usd_total']:+,.2f}, "
             f"slippage ${ol['slippage_cost_usd_total']:+,.2f} "
             f"({ol['delay_covered_orders']} orders with full decision+arrival coverage; "
-            f"{ol['arrival_fallback_orders']} lacked minute-bar arrival data; "
+            f"{ol['arrival_proxy_orders']} used an explicitly flagged bar proxy; "
+            f"{ol['arrival_missing_orders']} lacked arrival data; "
+            f"{ol.get('decision_price_proxy_orders', 0)} used a flagged prior-close decision proxy; "
             f"{ol.get('decision_price_missing_orders', 0)} lacked a decision price).",
             "",
             "**Biggest daily leaks:**",
@@ -666,8 +884,8 @@ def render_report(summaries: list) -> str:
     L += [
         "## Caveats",
         "",
-        "- Arrival prices use the IEX feed 1-minute bar open at/just before submission; "
-        "orders without minute coverage fall back and are flagged, never silently filled in.",
+        "- Arrival prices use the last valid IEX bid/ask midpoint at or before submission. "
+        "A 1-minute bar-open proxy is used only when quotes are unavailable and is explicitly flagged.",
         "- `price_marking` is a measurement bucket: the intended engine marks its book at its "
         "own plan prices; valuing the same book at broker closes differs. It is not a trading leak.",
         "- Days with external cash flows are excluded from the decomposition and flagged.",
@@ -689,7 +907,10 @@ def main() -> int:
 
     src_path, intended_rows = latest_intended_series()
     intended_orders = load_intended_orders()
-    log(f"intended series: {src_path.relative_to(REPO_ROOT)}; intended orders for {len(intended_orders)} dates")
+    log(
+        f"intended series: {src_path.relative_to(REPO_ROOT)}; intended orders for "
+        f"{len(intended_orders['by_date'])} dates / {len(intended_orders['by_run'])} runs"
+    )
 
     summaries = []
     ok = True
@@ -705,7 +926,7 @@ def main() -> int:
         summary = summarize(account, daily, order_rows, meta, str(src_path.relative_to(REPO_ROOT)))
         write_outputs(account, daily, order_rows, summary)
         summaries.append(summary)
-        ok = ok and summary["reconciles"]
+        ok = ok and summary["attribution_validated"]
     if summaries:
         atomic_write(TCA_ROOT / "TCA_REPORT.md", render_report(summaries))
         log(f"wrote {TCA_ROOT / 'TCA_REPORT.md'}; reconciles={ok}")
