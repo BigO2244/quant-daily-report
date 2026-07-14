@@ -31,6 +31,7 @@ set +a
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/runtime_env.sh"
 activate_runtime_venv "${REPO_ROOT}" || exit 1
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
 
 truthy() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -64,30 +65,20 @@ if ! truthy "${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"; then
     exit 0
 fi
 
-RUN_ROOT="$(find outputs/live_pilot/runs -maxdepth 1 -type d -name "${REPORT_DATE}T*" -print 2>/dev/null | sort | tail -1)"
-if [[ -z "${RUN_ROOT}" ]]; then
-    echo "WARN: no LIVE_PILOT run found for ${REPORT_DATE}; nothing to confirm."
-    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
-    exit 0
-fi
+# Backstop sweep: confirm EVERY terminal run for the trade date exactly once
+# (dedupe ledger), and FAIL LOUD (email alert) if there is no run to confirm or
+# a confirmation email fails. This replaces the prior "last-sorted run dir at a
+# fixed time" race that let a real armed submit (2026-07-10 10:09) go unreported
+# and the silent exit-0 when no run was found. The execute lane also invokes the
+# same sweep on completion so a run finishing after this scheduled time is still
+# confirmed; dedupe makes the two paths idempotent.
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/live_pilot_confirm_lib.sh"
 
-RESULTS_PATH="${RUN_ROOT}/execution_results.json"
-if [[ ! -f "${RESULTS_PATH}" ]]; then
-    echo "FATAL: LIVE_PILOT execution results missing: ${RESULTS_PATH}"
-    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
-    exit 1
-fi
+SWEEP_RC=0
+live_pilot_confirm_sweep \
+    "outputs/live_pilot/runs" \
+    "outputs/live_pilot/state/confirm_sent_ledger.jsonl" || SWEEP_RC=$?
 
-export EMAIL_PRETRADE=0
-export EMAIL_TRADING_CONFIRMATION=1
-export EMAIL_INLINE_REPORTS=0
-export EMAIL_MARKET_CONDITIONS=0
-export EMAIL_INTERNAL_DEBUG=0
-export TRADING_CONFIRMATION_RESULTS_PATH="${RESULTS_PATH}"
-export TRADING_CONFIRMATION_RUN_ROOT="${RUN_ROOT}"
-
-echo "run_root=${RUN_ROOT}"
-echo "results_path=${RESULTS_PATH}"
-python3 -m scripts.send_trading_confirmation_email
-
-echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
+echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${SWEEP_RC}"
+exit ${SWEEP_RC}

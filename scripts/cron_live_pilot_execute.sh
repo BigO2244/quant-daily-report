@@ -132,6 +132,28 @@ print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
 }
 
+confirm_completed_runs() {
+    # Execute-completion hook: immediately confirm every terminal run for today
+    # that is not yet confirmed. This closes the race that let the 2026-07-10
+    # 10:09 armed submit go unreported: the scheduled confirm sweep runs at a
+    # fixed time and cannot see a run that finishes later, so the lane that just
+    # produced the run triggers the same sweep here. Dedupe (the JSONL sent
+    # ledger) makes this idempotent with the scheduled cron. Best-effort: never
+    # changes the execute lane's exit code.
+    if [[ -f "${REPO_ROOT}/.env" ]]; then
+        set -a
+        # shellcheck disable=SC1091
+        source "${REPO_ROOT}/.env"
+        set +a
+    fi
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/scripts/live_pilot_confirm_lib.sh"
+    live_pilot_confirm_sweep \
+        "outputs/live_pilot/runs" \
+        "outputs/live_pilot/state/confirm_sent_ledger.jsonl" \
+        || echo "WARN: execute-completion confirm hook reported problems (non-blocking)"
+}
+
 write_gate_state_blocked() {
     local reason="$1"
     "${PYTHON_BIN}" scripts/live_pilot_write_gate_state.py \
@@ -279,6 +301,7 @@ write_live_pilot_pointer "dry_run" "${DRY_RUN_ID}" "${DRY_RUN_ROOT}" "dry_run_co
 
 if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}" != "1" ]]; then
     echo "LIVE_PILOT scheduled submission paused: CAERUS_LIVE_PILOT_SUBMIT_APPROVED is not 1."
+    confirm_completed_runs
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
     exit 0
 fi
@@ -295,6 +318,11 @@ LIVE_TERMINAL_STATUS="$(summary_field "${LIVE_OUTPUT}" terminal_status || true)"
 if [[ -n "${LIVE_RUN_ROOT}" ]]; then
     write_live_pilot_pointer "${LIVE_TERMINAL_STATUS:-unknown}" "${LIVE_RUN_ID}" "${LIVE_RUN_ROOT}" "scheduled_submission_completed"
 fi
+
+# Execute-completion hook: confirm the just-completed submit run (and the dry
+# run) now, so an armed submission is reported even if it finished after the
+# scheduled confirm sweep. Dedupe keeps it idempotent with the 09:45 cron.
+confirm_completed_runs
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${LIVE_STATUS}"
 exit "${LIVE_STATUS}"
