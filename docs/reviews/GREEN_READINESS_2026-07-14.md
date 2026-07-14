@@ -2,7 +2,7 @@
 
 ## Executive verdict
 
-**NOT_READY** pending canonical VM deployment and non-submitting live-account validation. The source candidate has zero new full-suite failures and all targeted safety tests pass. Live remains disarmed. This verdict must not become `READY_TO_ARM` until the deployment, ledger job, and repeated official dry run are evidenced below.
+**READY_TO_ARM.** All GREEN criteria passed at the runtime-tested source SHA `d88c0eabfbab100a824a47ea0a26214891f3c875`. The final review-document merge is documentation-only; its resulting main SHA is recorded in the PR/handoff and must be fast-forwarded to the VM before owner re-arm. Live remains disarmed and no order was placed or cancelled.
 
 ## Current source and runtime state
 
@@ -11,9 +11,9 @@
 | Pre-integration `origin/main` | `d3fb068c67c3dd4a3a16388b5717826d6e72e602` |
 | Safety release | `85a6fe26ef5a5aba95c9f4329552340e465db318` |
 | Ledger/TCA integration base | `7c027c11c5bb5e5c3e96f1e243aea5688b7b112a` |
-| Candidate branch | `codex/green-readiness-2026-07-14` (commit pending at time of this review draft) |
-| VM HEAD | `85a6fe26ef5a5aba95c9f4329552340e465db318` (detached; deployment pending) |
-| VM deploy-state SHA | `85a6fe26ef5a5aba95c9f4329552340e465db318` |
+| Runtime-tested `origin/main` | `d88c0eabfbab100a824a47ea0a26214891f3c875` |
+| VM HEAD at evidence capture | `d88c0eabfbab100a824a47ea0a26214891f3c875` (`main`) |
+| VM deploy-state SHA at evidence capture | `d88c0eabfbab100a824a47ea0a26214891f3c875` |
 
 Effective VM gates after the authorized atomic safety action:
 
@@ -70,17 +70,17 @@ The research branch was preserved but not merged. The independent per-layer sect
 |---|---|
 | Live gates were ambiguously armed | Closed: atomic backup; kill switch `1`; submit approval `0`; exact changed-key proof |
 | Open live orders could exist | Closed: canonical GET-only live query returned `0` |
-| VM safety release was detached and ahead of main | Source closed: all 16 commits integrated; VM deployment pending |
-| Ledger/TCA work was local and VM-only | Source closed: backup branch pushed; five source/test files integrated and tracked; VM canonicalization pending |
+| VM safety release was detached and ahead of main | Closed: all 16 commits integrated; VM fast-forwarded to canonical main |
+| Ledger/TCA work was local and VM-only | Closed: backup pushed; five files tracked; byte-identical VM copies preserved outside repo; VM source canonical |
 | Research work was not durable | Closed: existing July 14 research branch pushed unchanged |
 | Three-to-five-name ranking lacked evidence | Closed in policy: no regime or override can request fewer than five; range is `[5,7]` |
 | Single-name pilot exposure was too high | Closed in shared controls: defaults/overrides are bounded at 30% |
 | Paper/live configuration could diverge | Closed: both consume the same signals loader and risk controls; parity test passes |
 | Unknown layer classification could trade live | Closed: live plan blocks with `live_pilot_layer_unresolved` |
 | Gates could change after planning | Closed: kill switch and submit approval are re-read immediately before every broker submit |
-| Dry run or rerun could mutate broker state | Source/test closed; live-account repeated dry-run evidence pending |
+| Dry run or rerun could mutate broker state | Closed: two official dry runs had identical pre/post state and zero broker submissions/cancellations |
 | Ledger reruns could duplicate or overwrite history | Closed in tests: append dedupe and revisioned prior-row preservation pass |
-| NAV/TCA could disagree with Alpaca truth | Unit/integration reconciliation passes; live ledger job evidence pending |
+| NAV/TCA could disagree with Alpaca truth | Closed: live and paper ledger reconciliation passed; TCA report `reconciles=True` |
 
 ## Strategy guardrails and rationale
 
@@ -111,7 +111,7 @@ Coverage includes shared transition, paper execution parity/lifecycle, live exec
 
 Baseline at `7c027c1`: **27 failed, 2670 passed, 11 skipped, 5 subtests passed**.
 
-Candidate: **26 failed, 2675 passed, 11 skipped, 5 subtests passed**.
+Final candidate: **26 failed, 2676 passed, 11 skipped, 5 subtests passed**.
 
 Set comparison:
 
@@ -157,18 +157,30 @@ These are pre-existing research/fixture/environment expectations and do not over
 
 ## Dry-run reconciliation evidence
 
-Pending Phase 6. Required before verdict upgrade: read-only pre/post account and open-order equality, official live-pilot dry run twice, zero submissions/cancellations, target count at least five, max target at most 30%, explicit cash reconciliation, complete pricing/holding partition, explicit settled-cash verdict, per-order reconciliation, matching operator/confirmation artifacts, SHA pass, truthful report classification, and collision-free rerun.
+The official scheduled live-pilot path ran twice after the reporting fix, under `kill-switch=1` and `submit-approved=0`:
+
+- Run IDs: `2026-07-14T20260714T173952-0400_live_pilot_cron_dry` and `2026-07-14T20260714T174015-0400_live_pilot_cron_dry`.
+- Plan: `READY_FOR_MANUAL_APPROVAL`; 7 targets; maximum target `0.1965081857`; cash `0.05`; target plus cash `1.0`; every target priced.
+- Current holdings `ALL` and `C` each appeared exactly once in keep/reduce/sell partition (both sell); no dropped orders.
+- Each run intended 6 orders and recorded 6 `DRY_RUN_NOT_SUBMITTED` rows; broker-submitted count was zero.
+- Reconciliation was `DRY_RUN_NO_SUBMISSION` / state `DRY_RUN`; settled cash was `$293.20`; `settled_cash_fail_closed=false` with an explicit verdict.
+- Pre/post account, positions, and open-order snapshots were identical within each run.
+- Client order IDs were unique within each run and disjoint across runs.
+- Operator summary status was authoritative `DRY_RUN`; confirmation email was accepted and marked sent; post-reconciliation was `DRY_RUN_NO_SUBMISSION`, not `UNKNOWN`.
+- Running SHA, `origin/main`, and deploy-state were identical at `d88c0eab...`; SHA drift and working-tree dirty flags were false.
+- Live open orders remained count `0` with stable canonical hash `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` before/after validation.
+- No cancellation path was called; source contains no dry-run cancellation action.
 
 ## Ledger/TCA durability and cron
 
 - All five formerly VM-only source/test files are tracked in the candidate.
 - Installed VM cron already contains one GET-only broker-ledger entry at `45 19 * * 1-5`; source `scripts/crontab.txt` now contains the identical entry.
 - Ledger append/revision idempotency, prior-row preservation, realized performance, TCA decomposition, and portfolio-history/NAV tests pass.
-- Canonical deployment and one live read-only ledger job remain pending.
+- The GET-only ledger/report/TCA job completed `rc=0`: paper and live NAV reconciliations passed, no new orders/fills were added, TCA wrote its report with `reconciles=True`, and the live open-order hash was unchanged.
 
 ## Source-control and VM cleanliness
 
-Local candidate worktree was created fresh from `origin/main`; unrelated user worktrees were not modified. Source review found no credentials, runtime outputs, generated broker account data, or research artifacts in the candidate diff. VM currently has no tracked changes and exactly the five expected untracked ledger/reporting source files; deployment must reconcile those files byte-for-byte before fast-forwarding, preserve `outputs/ledger` and `outputs/tca`, and prove no executable source drift afterward.
+Local candidate worktree was created fresh from `origin/main`; unrelated user worktrees were not modified. Source review found no credentials, runtime outputs, generated broker account data, or research artifacts in the candidate diff. The five VM-only files matched the reviewed tracked files byte-for-byte and were preserved at `/home/brettolson/.caerus/green-readiness-untracked-20260714T211848Z` before deployment. VM tracked source is clean; no untracked executable Python/shell file exists under `scripts/`, `core/`, `paper/`, or `transition/`. Installed and tracked cron active-command sets are identical, with exactly one broker-ledger entry.
 
 ## Explicit non-changes
 
@@ -182,10 +194,10 @@ Local candidate worktree was created fresh from `origin/main`; unrelated user wo
 
 ## Known residual risks
 
-- VM is still detached at the old release until Phase 5 completes.
-- Live-account dry-run and report truthfulness are not yet evidenced.
-- The unchanged 26-node full-suite baseline debt remains.
-- Runtime target count can be below five only if fewer than five eligible upstream candidates exist; the selector still requests at least five. A live dry run must demonstrate at least five actual priced targets before `READY_TO_ARM`.
+- The unchanged 26-node full-suite baseline debt remains and should be remediated separately.
+- Runtime target count can be below five only if fewer than five eligible upstream candidates exist; the selector requests at least five and the validated live plan produced seven.
+- Dry-run validation proves construction, gating, reconciliation, and broker non-mutation, but not future live fill quality or slippage.
+- The live account remains intentionally disarmed until the owner explicitly says `ARM LIVE`.
 
 ## Rollback
 
@@ -199,13 +211,64 @@ Local candidate worktree was created fresh from `origin/main`; unrelated user wo
 
 ## Final owner checklist
 
-- [ ] Verdict is `READY_TO_ARM` after all pending sections are evidenced.
-- [ ] `origin/main`, VM HEAD, and deploy-state SHA are identical.
-- [ ] VM source is clean and canonical; no untracked executable source remains.
-- [ ] Kill switch is `1`; submit approval is `0`.
-- [ ] Live open orders are zero and unchanged across both dry runs.
-- [ ] Dry-run target count is at least five; max target is at most 30%; cash reconciles.
-- [ ] Holdings, prices, orders, settled cash/GFV, confirmation, and NAV reconcile.
-- [ ] Ledger cron is sourced from git and one ledger/TCA run passes without broker mutation.
-- [ ] No unresolved P0/P1 defect remains.
+- [x] Verdict is `READY_TO_ARM`; all evidence sections are complete.
+- [x] Runtime-tested `origin/main`, VM HEAD, and deploy-state SHA are identical.
+- [x] VM source is clean and canonical; no untracked executable source remains.
+- [x] Kill switch is `1`; submit approval is `0`.
+- [x] Live open orders are zero and unchanged across both dry runs.
+- [x] Dry-run target count is at least five; max target is at most 30%; cash reconciles.
+- [x] Holdings, prices, orders, settled cash/GFV, confirmation, and NAV reconcile.
+- [x] Ledger cron is sourced from git and one ledger/TCA run passed without broker mutation.
+- [x] No unresolved P0/P1 defect remains.
 - [ ] Owner has reviewed the GREEN packet and explicitly says `ARM LIVE` before any re-arm.
+
+## Proposed owner re-arm commands — do not run before `ARM LIVE`
+
+The owner should first re-verify `origin/main == VM HEAD == deploy-state`, zero open live orders, and this document. After saying exactly `ARM LIVE`, atomically back up and edit only the two gate keys:
+
+```bash
+ssh caerus-vm 'python3 - <<"PY"
+import os, tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path.home() / ".caerus" / "live_pilot.env"
+backup = path.with_name(f"live_pilot.env.backup-arm-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}")
+backup.write_bytes(path.read_bytes())
+os.chmod(backup, 0o600)
+updates = {
+    "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
+    "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "1",
+}
+lines = path.read_text().splitlines()
+seen = set()
+for i, line in enumerate(lines):
+    key = line.split("=", 1)[0].removeprefix("export ").strip()
+    if key in updates:
+        prefix = "export " if line.startswith("export ") else ""
+        lines[i] = f"{prefix}{key}={updates[key]}"
+        seen.add(key)
+if seen != set(updates):
+    raise SystemExit(f"missing required gate keys: {sorted(set(updates)-seen)}")
+fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", text=True)
+try:
+    with os.fdopen(fd, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+        fh.flush(); os.fsync(fh.fileno())
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+finally:
+    if os.path.exists(tmp): os.unlink(tmp)
+print(f"backup={backup}")
+print("changed=CAERUS_LIVE_PILOT_KILL_SWITCH,CAERUS_LIVE_PILOT_SUBMIT_APPROVED")
+PY
+set -a; source ~/.caerus/live_pilot.env; set +a
+printf "kill-switch=%s submit-approved=%s\n" "$CAERUS_LIVE_PILOT_KILL_SWITCH" "$CAERUS_LIVE_PILOT_SUBMIT_APPROVED"'
+```
+
+Expected verification output ends with:
+
+```text
+changed=CAERUS_LIVE_PILOT_KILL_SWITCH,CAERUS_LIVE_PILOT_SUBMIT_APPROVED
+kill-switch=0 submit-approved=1
+```
