@@ -1,0 +1,9 @@
+term,contribution,refused,refusal_reason
+unexplained(intercept),-0.0017687828057013502,False,
+market,0.11203839030908294,False,
+momentum,0.04542125003397568,False,
+size,0.0049690537539247995,False,
+value,-0.018811686047637437,False,
+quality,0.0008547664392261679,False,
+lowvol,-0.01873309655171774,False,
+residual,-0.004143832542881576,False,

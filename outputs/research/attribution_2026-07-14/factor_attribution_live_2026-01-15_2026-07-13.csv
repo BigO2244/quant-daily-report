@@ -1,0 +1,9 @@
+term,contribution,refused,refusal_reason
+unexplained(intercept),,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+market,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+momentum,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+size,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+value,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+quality,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+lowvol,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
+residual,,True,N=11 < MIN_FACTOR_OBS=60 (6 regressors)
