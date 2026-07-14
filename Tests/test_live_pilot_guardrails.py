@@ -94,7 +94,6 @@ def test_live_pilot_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None
         (LIVE_PILOT_SLEEVE_ID_ENV, None, "missing_live_pilot_sleeve_id"),
         (LIVE_PILOT_ACCOUNT_ID_ENV, None, "missing_live_pilot_expected_account_id"),
         (LIVE_PILOT_MAX_ORDERS_ENV, None, "missing_positive_live_pilot_max_orders"),
-        (LIVE_PILOT_KILL_SWITCH_ENV, "1", "live_pilot_kill_switch_enabled"),
     ],
 )
 def test_live_pilot_refuses_missing_or_invalid_gates(
@@ -151,6 +150,25 @@ def test_live_pilot_kill_switch_blocks_submission(monkeypatch: pytest.MonkeyPatc
 
     assert result.status == "BLOCKED"
     assert result.reason_code == "live_pilot_kill_switch_enabled"
+    assert result.live_orders_allowed is False
+
+
+def test_live_pilot_dry_run_is_allowed_while_kill_switch_engaged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch, dry_run="1")
+    monkeypatch.setenv(LIVE_PILOT_KILL_SWITCH_ENV, "1")
+
+    result = build_live_pilot_gate_result(
+        broker_paper=False,
+        base_url="https://api.alpaca.markets",
+        submission_intent=False,
+    )
+
+    assert result.status == "PASS"
+    assert result.reason_code == "live_pilot_dry_run_enabled"
+    assert result.kill_switch is True
     assert result.live_orders_allowed is False
 
 
