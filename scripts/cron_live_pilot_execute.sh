@@ -84,8 +84,40 @@ echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "schedule_enabled=${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"
 echo "cron_approved=${CAERUS_LIVE_PILOT_CRON_APPROVED}"
 echo "submit_approved=${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}"
-_DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
-echo "deployed_sha=${_DEPLOY_SHA}"
+# BLOCKER 4 (§f): the ONE running-truth SHA is `git rev-parse HEAD` — the code
+# this process actually runs — NOT the deploy marker. The deploy-drift guard
+# (scripts/live_pilot_sha_guard.py) compares HEAD against deploy_state.json's
+# deployed_sha and reports a dirty working tree. Drift/dirty fails the SUBMIT
+# path closed (enforced below, immediately before submission); the DRY path
+# proceeds but flags the drift loudly here.
+RUNNING_SHA="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
+echo "running_sha=${RUNNING_SHA}"
+# The guard exits non-zero when SUBMIT must be blocked (that IS a valid verdict,
+# not a failure), so capture stdout unconditionally and let the parse below read
+# the JSON verdict. `|| true` keeps `set -e` from aborting on the block exit code.
+SHA_GUARD_JSON="$("${PYTHON_BIN}" scripts/live_pilot_sha_guard.py --repo-root "${REPO_ROOT}" 2>/dev/null)" || true
+# Extract guard fields via a single python read (summary_field is defined later
+# in this file, so it is not usable at this point in execution order).
+eval "$(
+    SHA_GUARD_JSON="${SHA_GUARD_JSON}" "${PYTHON_BIN}" - <<'PY'
+import json, os, shlex
+d = json.loads(os.environ.get("SHA_GUARD_JSON") or "{}")
+def emit(k, v):
+    print(f"{k}={shlex.quote('' if v is None else str(v))}")
+emit("_DEPLOY_SHA", d.get("deployed_sha") or "unknown")
+emit("SHA_DRIFT", d.get("sha_drift"))
+emit("SHA_TREE_DIRTY", d.get("tree_dirty"))
+emit("SHA_BLOCK_SUBMIT", d.get("block_submit"))
+emit("SHA_DRIFT_REASON", d.get("reason_code") or "")
+emit("SHA_DRIFT_MESSAGE", d.get("message") or "")
+PY
+)"
+echo "deployed_sha=${_DEPLOY_SHA:-unknown}"
+echo "deploy_sha_drift=${SHA_DRIFT:-unknown} working_tree_dirty=${SHA_TREE_DIRTY:-unknown}"
+if [[ "${SHA_BLOCK_SUBMIT}" == "True" ]]; then
+    echo "!!! DEPLOY DRIFT DETECTED: ${SHA_DRIFT_MESSAGE}"
+    echo "!!! reason=${SHA_DRIFT_REASON} — SUBMIT will fail closed; DRY continues with drift flagged."
+fi
 
 write_live_pilot_pointer() {
     local status="$1"
@@ -304,6 +336,18 @@ if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}" != "1" ]]; then
     confirm_completed_runs || true
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=0"
     exit 0
+fi
+
+# BLOCKER 4 (§f) drift guard — SUBMIT fails closed if the running HEAD is not the
+# deployed/audited SHA, if the working tree is dirty, or if HEAD is unresolvable.
+# This makes "audited SHA == deployed SHA" mechanically enforced, not aspirational.
+# (The DRY run above already ran and flagged any drift; only submission is gated.)
+if [[ "${SHA_BLOCK_SUBMIT}" == "True" ]]; then
+    echo "FATAL: LIVE_PILOT submission blocked by deploy-drift guard: ${SHA_DRIFT_MESSAGE}"
+    write_gate_state_blocked "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}"
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
+    exit 1
 fi
 
 echo "=== LIVE_PILOT SCHEDULED SUBMISSION ==="
