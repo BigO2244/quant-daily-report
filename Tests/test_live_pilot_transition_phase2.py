@@ -119,18 +119,34 @@ def _july6_positions():
     ]
 
 
-def test_july6_live_path_drops_unwhitelisted_rotation_sell_but_buy_proceeds(tmp_path: Path) -> None:
-    # BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): this used to assert the WHOLE
-    # run BLOCKED because ABBV's sell failed the whitelist check. Per-order
-    # partitioning now drops only the invalid SELL (flagged loudly, critical
-    # severity, in dropped_orders) and lets the still-valid BUY proceed to the
-    # dry-run boundary instead of halting the entire batch.
+def test_july6_settled_cash_clamp_and_unwhitelisted_sell_block(tmp_path: Path) -> None:
+    # MERGE RECONCILIATION (release/pre-arm-fixes-2026-07-13):
+    # Two independently-verified fixes interact on this exact July-6 fixture.
+    #  * BLOCKER 3 (per-order validation): an unwhitelisted rotation SELL is now
+    #    dropped PER ORDER (loudly) instead of hard-blocking the whole batch at
+    #    validation — proven with FUNDED fixtures in
+    #    test_live_pilot_execution_path.py::{test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed,
+    #    test_invalid_sell_of_held_position_dropped_loudly_others_proceed}.
+    #  * BLOCKER 2 (settled-cash/GFV clamp): the planning budget no longer credits
+    #    the 95% expected-sell-proceeds haircut (those proceeds are UNSETTLED) — it
+    #    is clamped to settled cash ($0.88) and trimmed by the 0.98 slippage buffer.
+    # On THIS $0.88 fixture the settled-cash clamp legitimately clips the ALL buy to
+    # zero (there is no settled cash to fund it), so the only order reaching the
+    # gate is the unwhitelisted ABBV sell, which is dropped per-order — leaving zero
+    # actionable orders and a fail-closed BLOCK. The per-order fix's "buy proceeds"
+    # narrative was only ever achievable via the pre-clamp budget that credited
+    # unsettled proceeds (the GFV bug Blocker 2 fixes), so under the merged code this
+    # fixture correctly BLOCKS. Both mechanisms are visible below.
     broker = FakeBroker(buying_power="0.88", cash="0.88", equity="506.82", positions=_july6_positions())
     plan = {"target_portfolio": [_target_row("ALL", 0.5, 180.0)]}
 
     result, run_root = _run(broker, plan, run_id="run-july6-rotation", tmp_path=tmp_path)
 
-    assert result["terminal_status"] == "DRY_RUN"
+    assert result["terminal_status"] == "BLOCKED"
+    # Per-order whitelist drop ran (ABBV) AND the surviving set is empty after the
+    # settled-cash clamp starved the buy -> fail-closed.
+    assert "sell_not_whitelisted" in result["reason_code"]
+    assert "no_live_pilot_orders_after_validation" in result["reason_code"]
     assert broker.submit_calls == 0
 
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
@@ -140,24 +156,10 @@ def test_july6_live_path_drops_unwhitelisted_rotation_sell_but_buy_proceeds(tmp_
     # an actionable unwhitelisted exit, while sub-$100 C is dust.
     assert set(transition["holdings_to_sell"]) == {"ABBV"}
 
-    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
-    dropped = intended["dropped_orders"]
-    assert len(dropped) == 1
-    assert dropped[0]["symbol"] == "ABBV"
-    assert dropped[0]["side"] == "SELL"
-    assert dropped[0]["severity"] == "critical"
-    assert "sell_not_whitelisted" in dropped[0]["reason_code"]
-    # The BUY of ALL survived partitioning and is still the intended order.
-    assert {row["symbol"] for row in intended["orders"]} == {"ALL"}
-    assert result["dropped_orders_count"] == 1
-    assert result["dropped_sell_orders_count"] == 1
-
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     assert capital_gate["decision"] == "ALLOWED"
     assert capital_gate["required_sell_count"] == 1  # paper-native min-trade floor drops C dust
-    # Settled-cash guard (Blocker #2): the planning budget no longer credits the 95%
-    # expected-sell-proceeds haircut (those proceeds are unsettled) — it is clamped to
-    # settled cash ($0.88) and trimmed by the 0.98 slippage buffer.
+    # Settled-cash guard (Blocker #2): clamped to settled cash ($0.88) * 0.98 buffer.
     assert capital_gate["tradable_capital_usd"] == 0.88 * 0.98
 
 
