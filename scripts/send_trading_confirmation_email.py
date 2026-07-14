@@ -545,7 +545,10 @@ def _format_reconciliation_section(recon: dict) -> tuple[str, str, bool]:
     payload = recon.get("payload") if isinstance(recon.get("payload"), dict) else {}
     path = recon.get("path")
     path_text = str(path) if path else "unavailable"
-    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION"}
+    # SUBMITTED_UNFILLED (WARNING §f fix) is a non-terminal in-flight broker
+    # state, not a drift/failure signal — treat it as healthy here too so this
+    # section doesn't render an open-but-not-yet-filled batch as unhealthy.
+    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION", "SUBMITTED_UNFILLED"}
     if healthy:
         explanation = "Broker positions match expected post-execution state."
     elif status == "DRIFT_DETECTED":
@@ -754,6 +757,13 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     elif operator_execution_status == "partial":
         status_display = "PARTIAL"
         status_emoji = "⚠️"
+    elif status == "SUBMITTED_UNFILLED" or operator_execution_status == "submitted_unfilled":
+        # WARNING §f fix: orders are live at the broker and not yet (fully)
+        # filled. This is NOT a failure (no HALTED) and NOT a completed
+        # execution (no EXECUTED) — it needs its own display so the email is
+        # never mistaken for either a clean success or a halt.
+        status_display = "SUBMITTED_UNFILLED"
+        status_emoji = "🕒"
     elif status == STATUS_HALTED or halt_reason:
         status_display = "HALTED"
         status_emoji = "🛑"
@@ -771,6 +781,8 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         reason_line = f"Skip reason: Duplicate execution detected for run_id {run_id}"
     elif status_display == "RECONCILED_SUCCESS":
         reason_line = f"Final reason: {final_execution_reason or 'raw_partial_reconciled_to_target_state'}"
+    elif status_display == "SUBMITTED_UNFILLED":
+        reason_line = "Status reason: orders submitted and accepted by the broker, not yet fully filled"
     elif halt_reason:
         reason_line = f"Halt reason: {halt_reason}"
     else:
@@ -898,6 +910,11 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     action_items: list[str] = []
     if status_display in {"HALTED", "PARTIAL"}:
         action_items.append("Review execution halt before next run.")
+    elif status_display == "SUBMITTED_UNFILLED":
+        action_items.append(
+            "Orders are live at the broker and not yet fully filled; monitor for "
+            "fill/expiration before the next scheduled run (not a failure)."
+        )
     if not recon_healthy:
         action_items.append("Review reconciliation drift before next run.")
     if not shadow_healthy:

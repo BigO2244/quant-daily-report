@@ -119,14 +119,18 @@ def _july6_positions():
     ]
 
 
-def test_july6_live_path_blocks_unwhitelisted_rotation_sell(tmp_path: Path) -> None:
+def test_july6_live_path_drops_unwhitelisted_rotation_sell_but_buy_proceeds(tmp_path: Path) -> None:
+    # BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): this used to assert the WHOLE
+    # run BLOCKED because ABBV's sell failed the whitelist check. Per-order
+    # partitioning now drops only the invalid SELL (flagged loudly, critical
+    # severity, in dropped_orders) and lets the still-valid BUY proceed to the
+    # dry-run boundary instead of halting the entire batch.
     broker = FakeBroker(buying_power="0.88", cash="0.88", equity="506.82", positions=_july6_positions())
     plan = {"target_portfolio": [_target_row("ALL", 0.5, 180.0)]}
 
     result, run_root = _run(broker, plan, run_id="run-july6-rotation", tmp_path=tmp_path)
 
-    assert result["terminal_status"] == "BLOCKED"
-    assert "sell_not_whitelisted" in result["reason_code"]
+    assert result["terminal_status"] == "DRY_RUN"
     assert broker.submit_calls == 0
 
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
@@ -135,6 +139,18 @@ def test_july6_live_path_blocks_unwhitelisted_rotation_sell(tmp_path: Path) -> N
     # The paper-native core applies the min-trade floor before validation; ABBV remains
     # an actionable unwhitelisted exit, while sub-$100 C is dust.
     assert set(transition["holdings_to_sell"]) == {"ABBV"}
+
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    dropped = intended["dropped_orders"]
+    assert len(dropped) == 1
+    assert dropped[0]["symbol"] == "ABBV"
+    assert dropped[0]["side"] == "SELL"
+    assert dropped[0]["severity"] == "critical"
+    assert "sell_not_whitelisted" in dropped[0]["reason_code"]
+    # The BUY of ALL survived partitioning and is still the intended order.
+    assert {row["symbol"] for row in intended["orders"]} == {"ALL"}
+    assert result["dropped_orders_count"] == 1
+    assert result["dropped_sell_orders_count"] == 1
 
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     assert capital_gate["decision"] == "ALLOWED"

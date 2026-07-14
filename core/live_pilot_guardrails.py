@@ -4,7 +4,7 @@ import hashlib
 import logging
 import os
 from decimal import Decimal, ROUND_HALF_UP
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Mapping
 
 from core.trading_mode import canonical_trading_mode
@@ -128,18 +128,48 @@ class LivePilotOrder:
 
 
 @dataclass(frozen=True)
+class LivePilotDroppedOrder:
+    """A per-order record of an order that failed validation and was DROPPED.
+
+    Per-order partitioning (BLOCKER 3, PRE_ARM_SWEEP_2026-07-13 §d): an invalid or
+    unresolvable order is dropped and flagged here with a per-order reason_code;
+    it never blocks the rest of the batch. A dropped SELL is marked
+    ``severity="critical"`` (it means we are failing to exit a held position — a
+    buy-side problem must never carry the same weight) so it is impossible to
+    miss in the artifacts/summary even though it does not halt the run.
+    """
+
+    symbol: str
+    side: str
+    reason_code: str
+    severity: str
+    stage: str = "plan_validation"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "symbol": self.symbol,
+            "side": self.side,
+            "reason_code": self.reason_code,
+            "severity": self.severity,
+            "stage": self.stage,
+        }
+
+
+@dataclass(frozen=True)
 class LivePilotPlanValidation:
     status: str
     reason_codes: list[str]
     orders: list[LivePilotOrder]
     total_notional: float
     operator_action: str
+    dropped_orders: list[LivePilotDroppedOrder] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "status": self.status,
             "reason_codes": list(self.reason_codes),
             "orders": [order.to_dict() for order in self.orders],
+            "dropped_orders": [dropped.to_dict() for dropped in self.dropped_orders],
             "total_notional": self.total_notional,
             "operator_action": self.operator_action,
         }
@@ -534,14 +564,53 @@ def validate_live_pilot_plan(
     max_orders: int,
     run_id: str,
 ) -> LivePilotPlanValidation:
+    """Validate the day's candidate live-pilot orders with PER-ORDER partitioning.
+
+    BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): previously a single invalid or
+    unresolvable order (bad symbol format, unsupported asset, sell not
+    whitelisted, ...) put ALL of that trade's errors into one list and returned
+    ``orders=[]`` the moment ANY error existed — so one bad BUY candidate blocked
+    the SELLs that free capital too. Now each order is validated independently:
+    a failing order is DROPPED (recorded in ``dropped_orders`` with its own
+    reason_code) and every other order proceeds. The whole batch is only
+    ``BLOCKED`` when NOT ONE order survives, or when a genuine BATCH-level
+    constraint (order-count ceiling, total buy notional over the approved cap)
+    is violated by the surviving orders — those two remain batch-scoped because
+    there is no principled per-order way to decide which order to keep/drop to
+    satisfy them, unlike a per-symbol validity problem.
+    """
     environ = _env_mapping(env)
-    errors: list[str] = []
+    batch_errors: list[str] = []
     orders: list[LivePilotOrder] = []
+    dropped: list[LivePilotDroppedOrder] = []
     total = 0.0
     sell_whitelist = _sell_whitelist(environ)
     sell_all_allowed = _sell_all_symbols_allowed(environ)
     sells_enabled = _truthy(environ.get(LIVE_PILOT_SELLS_ENABLED_ENV))
     fractional_allowed = _fractional_allowed(environ)
+
+    def _drop(symbol: str, side: str, reason_code: str) -> None:
+        # A dropped SELL means we are failing to exit a HELD position — treat it
+        # as critical/loud even though (per the partitioning fix) it does not
+        # block the rest of the batch. A dropped BUY is a lower-severity miss.
+        severity = "critical" if side == "SELL" else "warning"
+        dropped.append(
+            LivePilotDroppedOrder(
+                symbol=symbol,
+                side=side,
+                reason_code=reason_code,
+                severity=severity,
+                stage="plan_validation",
+            )
+        )
+        if severity == "critical":
+            logger.error(
+                "live_pilot_sell_dropped_at_validation: symbol=%s reason=%s — "
+                "an intended SELL of a held position was dropped; it will NOT be "
+                "submitted this run. Other orders proceed.",
+                symbol,
+                reason_code,
+            )
 
     for index, raw_trade in enumerate(trades or []):
         symbol = _clean_symbol(raw_trade.get("symbol") or raw_trade.get("ticker"))
@@ -555,44 +624,44 @@ def validate_live_pilot_plan(
         )
         order_type = str(raw_trade.get("order_type") or "limit").strip().lower()
         if not symbol:
-            errors.append(f"order_{index}:missing_symbol")
+            _drop(f"order_{index}", side, "missing_symbol")
             continue
         if not symbol.replace(".", "").isalpha():
-            errors.append(f"{symbol}:unsupported_symbol_format")
+            _drop(symbol, side, f"{symbol}:unsupported_symbol_format")
             continue
         if symbol.endswith("USD") and len(symbol) > 4:
-            errors.append(f"{symbol}:unsupported_crypto_symbol")
+            _drop(symbol, side, f"{symbol}:unsupported_crypto_symbol")
             continue
         if side not in {"BUY", "SELL"}:
-            errors.append(f"{symbol}:unsupported_side:{side or 'missing'}")
+            _drop(symbol, side, f"{symbol}:unsupported_side:{side or 'missing'}")
             continue
         if side == "SELL" and not sells_enabled:
             # Master gate (fail-closed): live sells are globally disabled unless
             # CAERUS_LIVE_PILOT_SELLS_ENABLED is explicitly on. This sits in front
             # of the per-symbol whitelist so the whitelist alone can never arm sells.
-            errors.append(f"{symbol}:sells_disabled")
+            _drop(symbol, side, f"{symbol}:sells_disabled")
             continue
         if side == "SELL" and not sell_all_allowed and symbol not in sell_whitelist:
-            errors.append(f"{symbol}:sell_not_whitelisted")
+            _drop(symbol, side, f"{symbol}:sell_not_whitelisted")
             continue
         if qty is None or qty <= 0:
-            errors.append(f"{symbol}:non_positive_qty")
+            _drop(symbol, side, f"{symbol}:non_positive_qty")
             continue
         if not fractional_allowed and abs(qty - round(qty)) > 1e-9:
-            errors.append(f"{symbol}:fractional_qty_not_allowed")
+            _drop(symbol, side, f"{symbol}:fractional_qty_not_allowed")
             continue
         if order_type not in {"limit", "market"}:
-            errors.append(f"{symbol}:unsupported_order_type:{order_type or 'missing'}")
+            _drop(symbol, side, f"{symbol}:unsupported_order_type:{order_type or 'missing'}")
             continue
         if limit_price is None or limit_price <= 0:
-            errors.append(f"{symbol}:missing_positive_cap_enforcement_price")
+            _drop(symbol, side, f"{symbol}:missing_positive_cap_enforcement_price")
             continue
         original_limit_price = _safe_float(raw_trade.get("original_limit_price")) or float(limit_price)
         normalized_input = _safe_float(raw_trade.get("normalized_limit_price")) or float(limit_price)
         normalized_limit_price = normalize_live_pilot_limit_price(normalized_input)
         notional = round(float(qty) * float(normalized_limit_price), 6)
         if notional <= 0:
-            errors.append(f"{symbol}:non_positive_notional")
+            _drop(symbol, side, f"{symbol}:non_positive_notional")
             continue
         total += notional
         orders.append(
@@ -613,11 +682,11 @@ def validate_live_pilot_plan(
         )
 
     if not orders:
-        errors.append("no_live_pilot_orders_after_validation")
+        batch_errors.append("no_live_pilot_orders_after_validation")
     buy_count = sum(1 for order in orders if order.side == "BUY")
     if buy_count > int(max_orders):
-        errors.append("live_pilot_order_count_exceeds_max_orders")
-        errors.append("live_pilot_buy_order_count_exceeds_max_orders")
+        batch_errors.append("live_pilot_order_count_exceeds_max_orders")
+        batch_errors.append("live_pilot_buy_order_count_exceeds_max_orders")
     # The cap bounds deployed BUY notional (the "portfolio size for Live"), not gross
     # turnover. A full rebalance sells over-weight/removed names AND buys under-weight
     # ones; summing both sides would block legitimate high-turnover rebalances whose
@@ -633,13 +702,17 @@ def validate_live_pilot_plan(
             "as uncapped (portfolio-proportional sizing, no fixed USD ceiling)."
         )
     elif buy_notional > float(capital_cap_usd):
-        errors.append("live_pilot_total_notional_exceeds_cap")
+        batch_errors.append("live_pilot_total_notional_exceeds_cap")
 
-    if errors:
+    if batch_errors:
+        # Batch-level failure (nothing survived, or a genuine batch-scoped sizing
+        # constraint was tripped by the surviving orders) — fail closed exactly as
+        # before. dropped_orders is still attached for the audit trail.
         return LivePilotPlanValidation(
             status="BLOCKED",
-            reason_codes=errors,
+            reason_codes=batch_errors + [d.reason_code for d in dropped],
             orders=[],
+            dropped_orders=dropped,
             total_notional=round(total, 6),
             operator_action="Fix or remove blocked live pilot orders; no live orders may be submitted.",
         )
@@ -647,8 +720,16 @@ def validate_live_pilot_plan(
         status="PASS",
         reason_codes=[],
         orders=orders,
+        dropped_orders=dropped,
         total_notional=round(total, 6),
-        operator_action="Validated live pilot orders may proceed only if all runtime guardrails pass.",
+        operator_action=(
+            "Validated live pilot orders may proceed only if all runtime guardrails pass."
+            if not dropped
+            else (
+                "Some candidate orders were dropped at validation (see dropped_orders); "
+                "all remaining valid orders may proceed only if all runtime guardrails pass."
+            )
+        ),
     )
 
 
