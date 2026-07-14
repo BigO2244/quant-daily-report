@@ -23,5 +23,10 @@ rc=0
 python3 scripts/build_broker_truth_ledger.py --account both || rc=$?
 python3 scripts/broker_ledger_report.py || rc=$?
 
+# Refresh the intended target-book NAV (read-only artifact builder), then TCA.
+TRADE_DATE="$(TZ=America/New_York date +%F)"
+python3 scripts/run_operational_drag_analysis.py --date "${TRADE_DATE}" >/dev/null || rc=$?
+python3 scripts/build_tca.py --account both || rc=$?
+
 echo "[cron_broker_ledger] done rc=${rc} $(date -u +%FT%TZ)"
 exit "${rc}"
