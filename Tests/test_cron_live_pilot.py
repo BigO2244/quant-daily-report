@@ -53,13 +53,19 @@ def test_live_pilot_cron_execute_preserves_live_safety_gates() -> None:
 
 def test_live_pilot_cron_confirm_uses_explicit_results_path_not_paper_pointer() -> None:
     text = CONFIRM_SCRIPT.read_text(encoding="utf-8")
+    lib = Path("scripts/live_pilot_confirm_lib.sh").read_text(encoding="utf-8")
 
     assert 'export MODE="live_pilot"' in text
     assert 'export TRADING_MODE="live_pilot"' in text
-    assert 'export TRADING_CONFIRMATION_RESULTS_PATH="${RESULTS_PATH}"' in text
-    assert 'export TRADING_CONFIRMATION_RUN_ROOT="${RUN_ROOT}"' in text
-    assert "python3 -m scripts.send_trading_confirmation_email" in text
+    # The confirm cron now delegates to the shared dedupe sweep (no fixed-time
+    # last-sorted-dir race); the live lane must never read the paper pointer.
+    assert 'source "${REPO_ROOT}/scripts/live_pilot_confirm_lib.sh"' in text
+    assert "live_pilot_confirm_sweep" in text
     assert "outputs/workflow/${REPORT_DATE}/execution.json" not in text
+    # The sweep drives each confirmation from that run's explicit results path.
+    assert 'export TRADING_CONFIRMATION_RESULTS_PATH="${results_path}"' in lib
+    assert 'export TRADING_CONFIRMATION_RUN_ROOT="${run_root}"' in lib
+    assert "-m scripts.send_trading_confirmation_email" in lib
 
 
 def test_vm_crontab_includes_live_pilot_automation_lane() -> None:
