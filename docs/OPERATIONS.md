@@ -67,6 +67,20 @@ Recovery artifacts:
 - `outputs/workflow/YYYY-MM-DD/precompute_bundle_validation.json`
 - `outputs/workflow/YYYY-MM-DD/precompute_self_heal.json`
 
+## Paper Execution Retry Harness
+
+The paper execution cron owns one lane-wide transient retry budget: immediate,
+then +30 seconds, +1 minute, +5 minutes, and +1 hour. It reruns the complete
+paper lane only when broker-read failure occurred before submission and the
+artifacts prove `submitted_count=0`. Permanent errors and all post-submission
+failures escalate without retry. The live lane is unchanged.
+
+Inspect `outputs/workflow/YYYY-MM-DD/paper_execution_retry.json` for attempt
+timestamps, run roots, reasons, the next delay, and escalation delivery status.
+The harness uses the account-wide `outputs/workflow/paper_execution_retry.lock`
+to prevent overlapping automatic or manual paper execution, including runs
+started with different report dates, while retries remain active.
+
 ## Phase 4 Governance Direction
 
 The next planned hardening phase is **Phase 4: Artifact Governance +

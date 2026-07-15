@@ -174,6 +174,26 @@ use `planned_payload_exact`, `PREV_CLOSE`, `PRECOMPUTE_VALIDATED`, and
 `precompute_bundle` provenance. The stale same-day open-price guard remains
 fail-closed for explicit `rebuilt_from_signals` execution.
 
+### Paper broker-read retry and escalation
+
+`scripts/cron_execute.sh` is wrapped by a PAPER-only, lane-wide retry harness.
+The first attempt runs immediately. A transient broker timeout, connection
+failure, HTTP 408/429, or HTTP 5xx failure that occurs before any submission is
+retried after 30 seconds, 1 minute, 5 minutes, and 1 hour. Each attempt reruns
+the complete paper workflow so bundle validation, broker truth, market-hours,
+and submission gates are evaluated from current state.
+
+- Live-pilot execution is not retried by this harness.
+- Authentication, authorization, configuration, and other permanent failures
+  escalate immediately.
+- Any attempt with a submitted order is never retried.
+- During a wait, the execution pointer remains `running` with a real run root,
+  so the 10:00 confirmation does not mislabel the run as missing.
+- Final exhaustion remains fail-closed, sends a direct escalation, and records
+  `outputs/workflow/<DATE>/paper_execution_retry.json`.
+- Any recovery after 10:00 ET invokes only the canonical trading-confirmation
+  sender once; a dated idempotency artifact prevents duplicate late sends.
+
 ### After VM execution
 
 - `outputs/runs/<RUN_ID>/logs/ci_alpaca_run.log` — full execution log

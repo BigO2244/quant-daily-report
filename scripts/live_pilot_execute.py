@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from brokers.alpaca_broker import AlpacaBroker, alpaca_client_order_id
+from core.broker_retry_policy import is_retryable_broker_read_error
 from core.live_trade_ledger import record_live_order
 from core.live_pilot_guardrails import (
     LIVE_PILOT_MODE,
@@ -463,10 +464,27 @@ def _open_pilot_order_check(broker: Any, *, intended_symbols: set[str]) -> dict[
     }
 
 
-def _broker_snapshot(broker: Any) -> dict[str, Any]:
+def _broker_snapshot(
+    broker: Any,
+    *,
+    fail_on_open_order_lookup: bool = False,
+) -> dict[str, Any]:
     account = broker.get_account() if hasattr(broker, "get_account") else {}
     positions = broker.get_positions() if hasattr(broker, "get_positions") else []
     open_orders = _list_open_orders(broker)
+    lookup_failure = next(
+        (
+            order
+            for order in open_orders
+            if str(order.get("status") or "") == "OPEN_ORDER_LOOKUP_FAILED"
+        ),
+        None,
+    )
+    if fail_on_open_order_lookup and lookup_failure is not None:
+        raise RuntimeError(
+            "paper broker open-order snapshot failed: "
+            f"{lookup_failure.get('error') or 'unknown broker lookup error'}"
+        )
     return {
         "captured_at": _now_utc(),
         "account": _public_account(account),
@@ -2935,6 +2953,7 @@ def _write_blocked_artifacts(
         "live_orders_allowed": False,
         "submitted_count": 0,
         "operator_action": operator_action,
+        "run_root": str(run_root),
         **_next_run_expectation(
             terminal_status="BLOCKED",
             reason_code=reason_code,
@@ -3090,16 +3109,28 @@ def run_live_pilot(
         broker_paper = bool(getattr(broker, "paper", broker_paper))
         base_url = str(getattr(broker, "base_url", "") or base_url)
 
+    paper_mode = str(gate.requested_mode or "").strip().lower() == PAPER_MODE
     try:
-        pre_snapshot = _broker_snapshot(broker)
+        pre_snapshot = _broker_snapshot(
+            broker,
+            fail_on_open_order_lookup=paper_mode,
+        )
     except Exception as exc:
+        transient_paper_failure = paper_mode and is_retryable_broker_read_error(exc)
+        reason_code = (
+            "paper_broker_snapshot_transient_failed"
+            if transient_paper_failure
+            else "paper_broker_snapshot_non_retryable"
+            if paper_mode
+            else "live_pilot_pre_snapshot_failed"
+        )
         return _write_blocked_artifacts(
             run_root=run_root,
             run_id=run_id,
             trade_date=trade_date,
             env=environ,
-            reason_code="live_pilot_pre_snapshot_failed",
-            operator_action=f"Resolve read-only broker snapshot failure before live pilot: {exc}",
+            reason_code=reason_code,
+            operator_action=f"Resolve read-only broker snapshot failure before execution: {exc}",
             preflight=preflight,
         )
     _write_json(run_root / "live_pilot_broker_snapshot_pre.json", pre_snapshot)

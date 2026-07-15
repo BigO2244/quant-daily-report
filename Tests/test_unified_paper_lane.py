@@ -131,6 +131,30 @@ class FakePaperBroker:
         return self.submit_market_order(**kwargs)
 
 
+class FailingSnapshotPaperBroker(FakePaperBroker):
+    def __init__(self, error: Exception, *, stage: str = "account") -> None:
+        super().__init__()
+        self.error = error
+        self.stage = stage
+        self.account_calls = 0
+
+    def get_account(self):
+        self.account_calls += 1
+        if self.stage == "account":
+            raise self.error
+        return super().get_account()
+
+    def get_positions(self):
+        if self.stage == "positions":
+            raise self.error
+        return super().get_positions()
+
+    def list_orders(self, status="open", limit=100):
+        if self.stage == "open_orders":
+            raise self.error
+        return super().list_orders(status=status, limit=limit)
+
+
 def _plan() -> dict[str, object]:
     return {
         "trades": [
@@ -240,6 +264,60 @@ def test_paper_mode_on_live_host_blocks_before_any_submission(tmp_path: Path) ->
     assert broker.submit_calls == 0
 
 
+def test_paper_snapshot_timeout_is_classified_for_lane_wide_retry(tmp_path: Path) -> None:
+    broker = FailingSnapshotPaperBroker(
+        RuntimeError('Alpaca get_account failed: {"code":50410000,"message":"request timed out"}')
+    )
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_paper_env(dry_run="1"),
+        run_id="paper-transient-snapshot",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=_market_open_now(),
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "paper_broker_snapshot_transient_failed"
+    assert result["run_root"].endswith("paper-transient-snapshot")
+    assert broker.account_calls == 1
+    assert broker.submit_calls == 0
+
+
+@pytest.mark.parametrize("stage", ["positions", "open_orders"])
+def test_paper_full_snapshot_stage_timeouts_are_retryable(tmp_path: Path, stage: str) -> None:
+    broker = FailingSnapshotPaperBroker(RuntimeError("504 request timed out"), stage=stage)
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_paper_env(dry_run="1"),
+        run_id=f"paper-transient-{stage}",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=_market_open_now(),
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "paper_broker_snapshot_transient_failed"
+    assert broker.submit_calls == 0
+
+
+def test_paper_snapshot_auth_failure_is_not_retryable(tmp_path: Path) -> None:
+    broker = FailingSnapshotPaperBroker(RuntimeError("401 unauthorized: invalid paper credentials"))
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_paper_env(dry_run="1"),
+        run_id="paper-auth-snapshot",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=_market_open_now(),
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "paper_broker_snapshot_non_retryable"
+    assert broker.account_calls == 1
+    assert broker.submit_calls == 0
+
+
 def _concentrated_plan() -> dict[str, object]:
     """A concentrated-alpha style target (top-name weight 0.50)."""
     return {
@@ -323,6 +401,16 @@ def test_cron_execute_pins_planning_equity_to_capital_cap() -> None:
     # The live lane must NOT pin planning equity (live sizes against real equity).
     live = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
     assert "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP" not in live
+
+
+def test_retry_harness_wraps_only_paper_cron() -> None:
+    paper = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
+    live = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
+
+    assert "scripts.paper_execution_retry" in paper
+    assert "CAERUS_PAPER_RETRY_CHILD" in paper
+    assert "scripts.paper_execution_retry" not in live
+    assert "CAERUS_PAPER_RETRY_CHILD" not in live
 
 
 def test_cron_execute_does_not_export_kill_switch() -> None:

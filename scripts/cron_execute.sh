@@ -54,6 +54,18 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
     exit 1
 fi
 
+# --- Lane-wide transient retry harness (PAPER only) ---
+# The outer invocation owns one retry budget across cap resolution, dry run, and
+# submission pre-snapshot checks. Child attempts re-run this script with every
+# validation/gate refreshed. Live execution uses a different cron and never
+# enters this wrapper.
+if [[ "${CAERUS_PAPER_RETRY_CHILD:-0}" != "1" ]]; then
+    export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
+    exec "${PYTHON_BIN}" -m scripts.paper_execution_retry \
+        --trade-date "${REPORT_DATE}" \
+        --repo-root "${REPO_ROOT}"
+fi
+
 # --- Mode / endpoint: PAPER, always ---
 export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
 export MODE="paper"
@@ -163,7 +175,32 @@ write_paper_pointer() {
 
 fail_lane() {
     # fail_lane <reason_code>: write a failed pointer, log, exit 1.
-    write_paper_pointer "${SUBMIT_RUN_ID}" "" "BLOCKED" "$1"
+    FAIL_RUN_ROOT="${PAPER_LANE_ROOT}/runs/${SUBMIT_RUN_ID}"
+    mkdir -p "${FAIL_RUN_ROOT}"
+    FAIL_REASON="$1" FAIL_RUN_ROOT="${FAIL_RUN_ROOT}" "${PYTHON_BIN}" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+run_root = Path(os.environ["FAIL_RUN_ROOT"])
+payload = {
+    "run_id": run_root.name,
+    "terminal_status": "BLOCKED",
+    "reason": os.environ["FAIL_REASON"],
+    "halt_reason": os.environ["FAIL_REASON"],
+    "submitted_count": 0,
+    "run_root": str(run_root),
+}
+(run_root / "execution_results.json").write_text(
+    json.dumps(payload, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
+    write_paper_pointer \
+        "${SUBMIT_RUN_ID}" \
+        "${FAIL_RUN_ROOT}" \
+        "BLOCKED" \
+        "$1"
     echo "FATAL: paper lane blocked: $1"
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
     exit 1
@@ -299,12 +336,29 @@ PLAN_CAP="$(printf '%s' "${CAP_RESOLVE}" | cut -f1)"
 CAP_SOURCE="$(printf '%s' "${CAP_RESOLVE}" | cut -f2)"
 if [[ -z "${PLAN_CAP}" ]]; then
     echo "FATAL: could not resolve paper capital cap (source=${CAP_SOURCE})"
-    fail_lane "paper_lane_capital_cap_unresolved"
+    CAP_FAILURE_REASON="$(
+        CAP_ERROR="${CAP_SOURCE}" "${PYTHON_BIN}" - <<'PY'
+import os
+from core.broker_retry_policy import is_retryable_broker_read_error
+
+error = os.environ.get("CAP_ERROR", "")
+print(
+    "paper_lane_capital_cap_transient_read_failed"
+    if is_retryable_broker_read_error(error)
+    else "paper_lane_capital_cap_unresolved"
+)
+PY
+    )"
+    fail_lane "${CAP_FAILURE_REASON}"
 fi
 echo "resolved_capital_cap=${PLAN_CAP} (source=${CAP_SOURCE})"
 
 # --- Mark execution running for the confirm flow ---
-write_paper_pointer "${SUBMIT_RUN_ID}" "" "running" ""
+write_paper_pointer \
+    "${DRY_RUN_ID}" \
+    "${PAPER_LANE_ROOT}/runs/${DRY_RUN_ID}" \
+    "running" \
+    "paper_dry_run_started"
 
 # --- Build the full-rebalance plan (same builder as live; paper-scoped dirs) ---
 set +e
@@ -363,6 +417,11 @@ fi
 
 # --- Pass 2: PAPER SUBMISSION (real paper orders to paper-api) ---
 echo "=== PAPER LANE SUBMISSION ==="
+write_paper_pointer \
+    "${SUBMIT_RUN_ID}" \
+    "${PAPER_LANE_ROOT}/runs/${SUBMIT_RUN_ID}" \
+    "running" \
+    "paper_submission_started"
 set +e
 SUBMIT_OUTPUT="$(CAERUS_LIVE_PILOT_DRY_RUN=0 "${PYTHON_BIN}" scripts/live_pilot_execute.py \
     --plan "${PLAN_PATH}" --run-id "${SUBMIT_RUN_ID}" --output-root "${PAPER_LANE_ROOT}" 2>&1)"

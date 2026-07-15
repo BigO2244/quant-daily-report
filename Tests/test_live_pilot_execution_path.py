@@ -109,6 +109,16 @@ class FakeBroker:
         }
 
 
+class FailingLiveSnapshotBroker(FakeBroker):
+    def __init__(self) -> None:
+        super().__init__()
+        self.account_calls = 0
+
+    def get_account(self):
+        self.account_calls += 1
+        raise RuntimeError("504 request timed out")
+
+
 class GateFlipBroker(FakeBroker):
     """Flip one mutable runtime gate after planning but before adapter submit."""
 
@@ -336,6 +346,24 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     history = json.loads((run_root / "live_pilot_entry_attempt_history.json").read_text())
     assert history["orders"][0]["sleeve"] == "polaris"
     assert history["orders"][0]["source_strategy_id"] == "polaris"
+
+
+def test_live_snapshot_timeout_remains_single_attempt_and_fail_closed(tmp_path: Path) -> None:
+    broker = FailingLiveSnapshotBroker()
+
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=_env(dry_run="1"),
+        run_id="run-live-snapshot-timeout",
+        output_root=tmp_path / "outputs" / "live_pilot",
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "live_pilot_pre_snapshot_failed"
+    assert result["run_root"].endswith("run-live-snapshot-timeout")
+    assert broker.account_calls == 1
+    assert broker.submit_calls == 0
 
 
 def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) -> None:
