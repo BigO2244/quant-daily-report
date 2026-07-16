@@ -81,8 +81,8 @@ def _env(*, dry_run="1", fractional="1"):
         "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL": fractional,
         # Disarmed ONLY for the test harness; production kill switch stays engaged.
         "CAERUS_LIVE_PILOT_KILL_SWITCH": "0",
-        # Master sell gate fails closed: enabled here so rotation/whitelist fixtures
-        # exercise the whitelist behavior. Default-off behavior has dedicated coverage.
+        # Master sell gate fails closed: enabled here so rotation fixtures reach
+        # broker-inventory validation. Default-off behavior has dedicated coverage.
         "CAERUS_LIVE_PILOT_SELLS_ENABLED": "1",
     }
 
@@ -108,8 +108,8 @@ def _run(broker, plan, *, dry_run="1", fractional="1", run_id="run-p2", tmp_path
 
 
 # --------------------------------------------------------------------------- #
-# 1. July 6 — live path no longer blocks rotation in the engine, but sell whitelist
-# still blocks any unapproved SELL before submission.
+# 1. July 6 — live path authorizes held exits from immutable broker inventory while
+# the settled-cash guard still prevents unsafe buys.
 # --------------------------------------------------------------------------- #
 def _july6_positions():
     return [
@@ -119,42 +119,29 @@ def _july6_positions():
     ]
 
 
-def test_july6_settled_cash_clamp_and_unwhitelisted_sell_block(tmp_path: Path) -> None:
-    # MERGE RECONCILIATION (release/pre-arm-fixes-2026-07-13):
-    # Two independently-verified fixes interact on this exact July-6 fixture.
-    #  * BLOCKER 3 (per-order validation): an unwhitelisted rotation SELL is now
-    #    dropped PER ORDER (loudly) instead of hard-blocking the whole batch at
-    #    validation — proven with FUNDED fixtures in
-    #    test_live_pilot_execution_path.py::{test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed,
-    #    test_invalid_sell_of_held_position_dropped_loudly_others_proceed}.
-    #  * BLOCKER 2 (settled-cash/GFV clamp): the planning budget no longer credits
-    #    the 95% expected-sell-proceeds haircut (those proceeds are UNSETTLED) — it
-    #    is clamped to settled cash ($0.88) and trimmed by the 0.98 slippage buffer.
-    # On THIS $0.88 fixture the settled-cash clamp legitimately clips the ALL buy to
-    # zero (there is no settled cash to fund it), so the only order reaching the
-    # gate is the unwhitelisted ABBV sell, which is dropped per-order — leaving zero
-    # actionable orders and a fail-closed BLOCK. The per-order fix's "buy proceeds"
-    # narrative was only ever achievable via the pre-clamp budget that credited
-    # unsettled proceeds (the GFV bug Blocker 2 fixes), so under the merged code this
-    # fixture correctly BLOCKS. Both mechanisms are visible below.
+def test_july6_settled_cash_clamp_allows_held_exit_but_no_buy(tmp_path: Path) -> None:
+    # Broker inventory supersedes stale static sell configuration for held exits.
+    # The settled-cash/GFV clamp independently leaves only $0.88 of settled cash,
+    # so the ALL buy is still clipped to zero. Dry-run mode proves the exit intent
+    # without exercising broker submission.
     broker = FakeBroker(buying_power="0.88", cash="0.88", equity="506.82", positions=_july6_positions())
     plan = {"target_portfolio": [_target_row("ALL", 0.5, 180.0)]}
 
     result, run_root = _run(broker, plan, run_id="run-july6-rotation", tmp_path=tmp_path)
 
-    assert result["terminal_status"] == "BLOCKED"
-    # Per-order whitelist drop ran (ABBV) AND the surviving set is empty after the
-    # settled-cash clamp starved the buy -> fail-closed.
-    assert "sell_not_whitelisted" in result["reason_code"]
-    assert "no_live_pilot_orders_after_validation" in result["reason_code"]
+    assert result["terminal_status"] == "DRY_RUN"
     assert broker.submit_calls == 0
 
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["schema_version"] == "caerus.execution_core_transition_plan.v1"
     assert transition["blocked"] is False
     # The paper-native core applies the min-trade floor before validation; ABBV remains
-    # an actionable unwhitelisted exit, while sub-$100 C is dust.
+    # an actionable held exit, while sub-$100 C is dust.
     assert set(transition["holdings_to_sell"]) == {"ABBV"}
+
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    assert [(row["symbol"], row["side"]) for row in intended["orders"]] == [("ABBV", "SELL")]
+    assert intended["dropped_orders"] == []
 
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     assert capital_gate["decision"] == "ALLOWED"
@@ -272,6 +259,30 @@ def test_uncountable_held_position_missing_qty_blocks(tmp_path: Path) -> None:
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["diagnostics"]["unpriceable_holding_symbol"] == "XYZ"
     assert "missing_zero_or_nonfinite_qty" in transition["diagnostics"]["unpriceable_holding_reason"]
+
+
+def test_negative_live_position_qty_fails_closed(tmp_path: Path) -> None:
+    broker = FakeBroker(
+        buying_power="500",
+        cash="500",
+        equity="500",
+        positions=[{"symbol": "XYZ", "qty": "-2", "market_value": "200"}],
+    )
+    plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
+
+    result, run_root = _run(
+        broker,
+        plan,
+        dry_run="1",
+        run_id="run-negative-qty",
+        tmp_path=tmp_path,
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION
+    assert broker.submit_calls == 0
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert "negative_qty_not_supported" in transition["diagnostics"]["unpriceable_holding_reason"]
 
 
 def test_symbol_missing_holding_blocks_rotation(tmp_path: Path) -> None:

@@ -134,6 +134,25 @@ class GateFlipBroker(FakeBroker):
         return asset
 
 
+class PositionShrinkBroker(FakeBroker):
+    """Position exists at planning snapshot, then disappears before submission."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            buying_power="150",
+            cash="150",
+            equity="500",
+            positions=[{"symbol": "OLD", "qty": "1", "market_value": "100"}],
+        )
+        self.position_reads = 0
+
+    def get_positions(self):
+        self.position_reads += 1
+        if self.position_reads == 1:
+            return super().get_positions()
+        return []
+
+
 def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
     return {
         "TRADING_MODE": "live_pilot",
@@ -425,7 +444,7 @@ def test_live_trade_ledger_write_failure_does_not_propagate(tmp_path: Path, monk
     )
 
 
-def test_unwhitelisted_live_sell_blocks_before_broker_submission_and_records_capital_gate(
+def test_stale_sell_whitelist_does_not_block_held_exits_in_dry_run(
     tmp_path: Path,
 ) -> None:
     broker = FakeBroker(
@@ -442,21 +461,19 @@ def test_unwhitelisted_live_sell_blocks_before_broker_submission_and_records_cap
     result = run_live_pilot(
         plan=_all_plan(),
         broker=broker,
-        env=_env(dry_run="0"),
+        env=_env(dry_run="1"),
         run_id="run-existing-positions",
         output_root=tmp_path / "outputs" / "live_pilot",
         now_et=_market_open_now(),
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-existing-positions"
-    assert result["terminal_status"] == "BLOCKED"
-    assert "sell_not_whitelisted" in result["reason_code"]
+    assert result["terminal_status"] == "DRY_RUN"
     assert broker.submit_calls == 0
     assert broker.market_calls == 0
     assert broker.limit_calls == 0
     gate_state = _gate_state(run_root)
-    assert gate_state["decision"] == "BLOCKED"
-    assert "sell_not_whitelisted" in gate_state["block_reason"]
+    assert gate_state["decision"] == "ALLOWED"
     assert gate_state["broker_orders_submitted"] == 0
 
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
@@ -469,15 +486,16 @@ def test_unwhitelisted_live_sell_blocks_before_broker_submission_and_records_cap
     assert capital_gate["broker_orders_submitted"] == 0
     assert [row["symbol"] for row in capital_gate["live_positions_before"]] == ["ABBV", "ALL", "C"]
 
-    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
-    assert submitted["orders"] == []
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    held_exits = {(row["symbol"], row["side"]) for row in intended["orders"]}
+    assert ("ABBV", "SELL") in held_exits
+    assert ("C", "SELL") not in held_exits  # sub-$100 dust is clipped by the core
+    assert intended["dropped_orders"] == []
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
-    assert reconciliation["status"] == "BLOCKED_PRE_SUBMISSION"
-    assert reconciliation["state"] == "BLOCKED"
-    assert reconciliation["buy_block_reason"] is None
+    assert reconciliation["status"] == "DRY_RUN_NO_SUBMISSION"
     results = json.loads((run_root / "execution_results.json").read_text())
-    assert results["status"] == "BLOCKED"
-    assert results["broker_responses"] == []
+    assert results["status"] == "DRY_RUN"
+    assert [row["status"] for row in results["broker_responses"]] == ["DRY_RUN_NOT_SUBMITTED"]
 
 
 def _rotation_plan() -> dict[str, object]:
@@ -530,6 +548,29 @@ def test_core_routed_live_rotation_sells_settles_rebudgets_and_buys(tmp_path: Pa
     assert capital_gate["post_sell_buy_budget"]["buy_budget_after_safeguards"] == (250.0 - 100.0) * 0.98
     assert capital_gate["post_sell_buy_budget"]["settled_cash_guard"]["buy_buffer_pct"] == 0.98
     assert capital_gate["post_sell_buy_budget"]["settled_cash_guard"]["settled_cash"] == 150.0
+
+
+def test_sell_inventory_is_rechecked_immediately_before_fake_submission(tmp_path: Path) -> None:
+    broker = PositionShrinkBroker()
+    env = _env(dry_run="0", max_orders="1")
+
+    result = run_live_pilot(
+        plan=_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-position-shrank",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-position-shrank"
+    assert broker.submit_calls == 0
+    assert broker.market_calls == 0
+    assert broker.limit_calls == 0
+    submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
+    assert [row["status"] for row in submitted["orders"]] == ["REJECTED"]
+    assert "live_pilot_sell_inventory_changed:OLD" in submitted["orders"][0]["error"]
+    assert result["terminal_status"] != "CLEAN"
 
 
 def test_core_routed_live_filled_sell_with_reflected_cash_allows_buy(tmp_path: Path) -> None:
@@ -1191,9 +1232,8 @@ def test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed(tmp_path: Path
     assert reconciliation["submitted_count"] == 8
 
 
-def test_invalid_sell_of_held_position_dropped_loudly_others_proceed(tmp_path: Path) -> None:
-    """An invalid SELL of a held position is dropped (critical severity, loud
-    log) but does not block the other sell or the buys."""
+def test_stale_sell_whitelist_cannot_drop_held_position_exit(tmp_path: Path) -> None:
+    """Broker inventory authorizes both held exits; the static list is stale."""
     broker = FakeBroker(
         buying_power="10000",
         cash="10000",
@@ -1204,7 +1244,8 @@ def test_invalid_sell_of_held_position_dropped_loudly_others_proceed(tmp_path: P
         ],
     )
     env = _env(dry_run="1", max_orders="10")
-    # Only COTY is whitelisted for sale; ALLX's sell is invalid (not whitelisted).
+    # Only COTY is present in the stale static list. Both broker-held exits must
+    # survive validation, while this dry run proves no broker submission occurs.
     env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "COTY"
     env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "100000"
 
@@ -1219,19 +1260,15 @@ def test_invalid_sell_of_held_position_dropped_loudly_others_proceed(tmp_path: P
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-partition-bad-sell"
     assert result["terminal_status"] == "DRY_RUN"
-    assert result["dropped_orders_count"] == 1
-    assert result["dropped_sell_orders_count"] == 1
+    assert broker.submit_calls == 0
+    assert result["dropped_orders_count"] == 0
+    assert result["dropped_sell_orders_count"] == 0
 
     intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
-    dropped = intended["dropped_orders"]
-    assert len(dropped) == 1
-    assert dropped[0]["symbol"] == "ALLX"
-    assert dropped[0]["side"] == "SELL"
-    assert dropped[0]["severity"] == "critical"
-    assert "sell_not_whitelisted" in dropped[0]["reason_code"]
+    assert intended["dropped_orders"] == []
 
     surviving = {(row["symbol"], row["side"]) for row in intended["orders"]}
-    assert ("ALLX", "SELL") not in surviving
+    assert ("ALLX", "SELL") in surviving
     assert ("COTY", "SELL") in surviving
     assert sum(1 for row in intended["orders"] if row["side"] == "BUY") == 7
 
@@ -1335,31 +1372,36 @@ def test_live_pilot_market_order_fails_closed_outside_market_hours(tmp_path: Pat
 
 # --------------------------------------------------------------------------- #
 # Master sell gate (CAERUS_LIVE_PILOT_SELLS_ENABLED), fail-closed.
-# A sell may only proceed when the master flag is explicitly on AND the symbol
-# is whitelisted; the flag sits in front of the per-symbol whitelist so the
-# whitelist alone can never arm live selling.
+# A sell may only proceed when the master flag is explicitly on AND immutable
+# broker inventory proves the position is held. Static whitelist configuration
+# cannot arm live selling.
 # --------------------------------------------------------------------------- #
 def _sell_trade(symbol: str = "ABBV", qty: float = 1.0, price: float = 150.0) -> dict[str, object]:
     return {"symbol": symbol, "side": "SELL", "qty": qty, "limit_price": price, "order_type": "market"}
 
 
-def _validate_sell(**env_overrides):
+def _validate_sell(*, sell_inventory: dict[str, object] | None = None, **env_overrides):
     from core.live_pilot_guardrails import validate_live_pilot_plan
 
     env = _env(dry_run="1")
     env.pop("CAERUS_LIVE_PILOT_SELLS_ENABLED", None)  # start from the true production default (off)
     env.update(env_overrides)
+    inventory = {"ABBV": 1.0} if sell_inventory is None else sell_inventory
     return validate_live_pilot_plan(
-        [_sell_trade()], env=env, capital_cap_usd=500.0, max_orders=1, run_id="t-sellgate"
+        [_sell_trade()],
+        env=env,
+        capital_cap_usd=500.0,
+        max_orders=1,
+        run_id="t-sellgate",
+        sell_inventory=inventory,
     )
 
 
-def test_master_sell_gate_default_off_blocks_even_when_whitelisted() -> None:
-    v = _validate_sell(CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV")  # flag unset -> fail-closed
+def test_master_sell_gate_default_off_blocks_even_when_held() -> None:
+    v = _validate_sell()  # flag unset -> fail-closed
     assert v.status == "BLOCKED"
     assert any("sells_disabled" in r for r in v.reason_codes)
-    # Master gate precedes the whitelist check, so the whitelist reason does not fire.
-    assert not any("sell_not_whitelisted" in r for r in v.reason_codes)
+    assert not any("sell_position_not_held" in r for r in v.reason_codes)
 
 
 def test_master_sell_gate_explicit_off_blocks() -> None:
@@ -1368,34 +1410,39 @@ def test_master_sell_gate_explicit_off_blocks() -> None:
     assert any("sells_disabled" in r for r in v.reason_codes)
 
 
-def test_master_sell_gate_on_but_not_whitelisted_still_blocks() -> None:
-    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1")  # enabled, but no whitelist
+def test_master_sell_gate_on_and_held_passes_without_static_whitelist() -> None:
+    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1")
+    assert v.status == "PASS"
+    assert [o.side for o in v.orders] == ["SELL"]
+
+
+def test_master_sell_gate_on_but_unheld_blocks_even_when_whitelisted() -> None:
+    v = _validate_sell(
+        sell_inventory={},
+        CAERUS_LIVE_PILOT_SELLS_ENABLED="1",
+        CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV",
+    )
     assert v.status == "BLOCKED"
-    assert any("sell_not_whitelisted" in r for r in v.reason_codes)
-    assert not any("sells_disabled" in r for r in v.reason_codes)
+    assert any("sell_position_not_held" in r for r in v.reason_codes)
 
 
-def test_master_sell_gate_on_and_whitelisted_passes() -> None:
-    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1", CAERUS_LIVE_PILOT_SELL_WHITELIST="ABBV")
-    assert v.status == "PASS"
-    assert [o.side for o in v.orders] == ["SELL"]
-
-
-def test_sell_wildcard_allows_any_symbol_when_master_enabled() -> None:
-    # Full model: "*" permits selling any symbol (here ABBV, which is not otherwise
-    # named), gated only by the master flag + account-id pin.
-    v = _validate_sell(CAERUS_LIVE_PILOT_SELLS_ENABLED="1", CAERUS_LIVE_PILOT_SELL_WHITELIST="*")
-    assert v.status == "PASS"
-    assert [o.side for o in v.orders] == ["SELL"]
+def test_sell_wildcard_cannot_authorize_unheld_symbol() -> None:
+    v = _validate_sell(
+        sell_inventory={},
+        CAERUS_LIVE_PILOT_SELLS_ENABLED="1",
+        CAERUS_LIVE_PILOT_SELL_WHITELIST="*",
+    )
+    assert v.status == "BLOCKED"
+    assert any("sell_position_not_held" in r for r in v.reason_codes)
 
 
 def test_sell_wildcard_does_not_bypass_master_gate() -> None:
-    # The wildcard must not arm sells on its own: the fail-closed master flag
-    # (unset here) still blocks before the whitelist/wildcard is consulted.
+    # Legacy wildcard config must not arm sells on its own: the fail-closed master
+    # flag (unset here) still blocks before broker inventory is consulted.
     v = _validate_sell(CAERUS_LIVE_PILOT_SELL_WHITELIST="*")  # SELLS_ENABLED popped -> off
     assert v.status == "BLOCKED"
     assert any("sells_disabled" in r for r in v.reason_codes)
-    assert not any("sell_not_whitelisted" in r for r in v.reason_codes)
+    assert not any("sell_position_not_held" in r for r in v.reason_codes)
 
 
 # --------------------------------------------------------------------------- #

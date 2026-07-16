@@ -8,6 +8,7 @@ import math
 import os
 import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
@@ -559,6 +560,7 @@ def _derived_position_price(position: Mapping[str, Any]) -> float | None:
 
 def _malformed_holding_reason(position: Mapping[str, Any]) -> str | None:
     symbol = str(position.get("symbol") or "").strip().upper()
+    position_side = str(position.get("side") or "").strip().lower()
     qty = _finite_float(position.get("qty"))
     market_value = _finite_float(position.get("market_value"))
     reasons: list[str] = []
@@ -566,6 +568,12 @@ def _malformed_holding_reason(position: Mapping[str, Any]) -> str | None:
         reasons.append("missing_symbol")
     if qty is None or abs(qty) <= 1e-12:
         reasons.append("missing_zero_or_nonfinite_qty")
+    elif qty < 0.0:
+        # The live pilot is long-only. Never coerce a short broker position into
+        # positive sell inventory, which could authorize an accidental short sale.
+        reasons.append("negative_qty_not_supported")
+    if position_side == "short":
+        reasons.append("short_position_not_supported")
     if market_value is None or market_value <= 0.0:
         reasons.append("missing_nonpositive_or_nonfinite_market_value")
     if not reasons and _derived_position_price(position) is None:
@@ -587,9 +595,9 @@ def _holding_frames_from_snapshot(pre_snapshot: Mapping[str, Any]) -> tuple[pd.D
             continue
         qty = float(_finite_float(raw.get("qty")) or 0.0)
         price = float(_derived_position_price(raw) or 0.0)
-        if not symbol or abs(qty) <= 1e-12 or price <= 0.0:
+        if not symbol or qty <= 1e-12 or price <= 0.0:
             continue
-        rows.append({"ticker": symbol, "sleeve": "live_pilot", "shares": abs(qty)})
+        rows.append({"ticker": symbol, "sleeve": "live_pilot", "shares": qty})
         price_by_symbol[symbol] = price
     frame = pd.DataFrame(rows, columns=["ticker", "sleeve", "shares"])
     return frame, pd.Series(price_by_symbol, dtype=float), malformed
@@ -728,6 +736,19 @@ def _max_incremental_need(request: ExecutionRequest) -> tuple[str | None, float]
             max_symbol = symbol
             max_need = float(need)
     return max_symbol, float(max_need)
+
+
+def _sell_inventory_from_request(request: ExecutionRequest) -> dict[str, float]:
+    """Return immutable positive long inventory used to authorize live SELLs."""
+    inventory: dict[str, float] = {}
+    if request.holdings is None or request.holdings.empty:
+        return inventory
+    for _, row in request.holdings.iterrows():
+        symbol = str(row.get("ticker") or "").strip().upper()
+        qty = _finite_float(row.get("shares"))
+        if symbol and qty is not None and qty > 0.0:
+            inventory[symbol] = inventory.get(symbol, 0.0) + float(qty)
+    return inventory
 
 
 def _core_rows_from_frame(frame: pd.DataFrame, *, plan: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1626,8 +1647,8 @@ def _holdings_frame_from_broker_positions(positions: Any) -> pd.DataFrame:
             continue
         symbol = str(raw.get("symbol") or "").strip().upper()
         qty = float(_finite_float(raw.get("qty")) or 0.0)
-        if symbol and abs(qty) > 1e-12:
-            rows.append({"ticker": symbol, "sleeve": "live_pilot", "shares": abs(qty)})
+        if symbol and qty > 1e-12:
+            rows.append({"ticker": symbol, "sleeve": "live_pilot", "shares": qty})
     return pd.DataFrame(rows, columns=["ticker", "sleeve", "shares"])
 
 
@@ -1671,6 +1692,38 @@ class LivePilotCoreAdapter:
         # list_orders payload cannot hide these proceeds from the clamp.
         self._confirmed_sell_fills: list[dict[str, Any]] = []
 
+    def _assert_current_sell_inventory(self, intent: OrderIntent) -> None:
+        """Fail closed if broker inventory shrank after the planning snapshot."""
+        try:
+            positions = self.broker.get_positions()
+        except Exception as exc:
+            raise RuntimeError(f"live_pilot_sell_inventory_refresh_failed:{exc}") from exc
+        if not isinstance(positions, list):
+            raise RuntimeError("live_pilot_sell_inventory_refresh_invalid")
+
+        symbol = str(intent.symbol or "").strip().upper()
+        current_qty = Decimal("0")
+        for raw in positions:
+            if not isinstance(raw, Mapping):
+                continue
+            if str(raw.get("symbol") or "").strip().upper() != symbol:
+                continue
+            malformed_reason = _malformed_holding_reason(raw)
+            if malformed_reason:
+                raise RuntimeError(
+                    f"live_pilot_sell_inventory_malformed:{symbol}:{malformed_reason}"
+                )
+            qty = _finite_float(raw.get("qty"))
+            if qty is not None and qty > 0.0:
+                current_qty += Decimal(str(qty))
+
+        requested_qty = Decimal(str(intent.shares))
+        if requested_qty <= 0 or current_qty < requested_qty:
+            raise RuntimeError(
+                "live_pilot_sell_inventory_changed:"
+                f"{symbol}:held={current_qty}:requested={requested_qty}"
+            )
+
     def _client_order_id(self, intent: OrderIntent) -> str:
         self._sequence += 1
         # Hash-collapse to a UNIQUE <=48-char id. Naive [:48] truncation dropped the
@@ -1713,6 +1766,8 @@ class LivePilotCoreAdapter:
         policy = self._policy(submitted_intent)
         submitted_order_type = str(policy.get("submitted_order_type") or "market").strip().lower()
         try:
+            if str(submitted_intent.side or "").strip().upper() == "SELL":
+                self._assert_current_sell_inventory(submitted_intent)
             # Re-read the mutable runtime gates at the last possible point before
             # each broker submission. A gate flip after planning must fail closed.
             validate_live_pilot_submission_guardrails(
@@ -2166,7 +2221,7 @@ def _request_excluding_dropped_orders(
     *validation gate* allows. For a real (non-dry) run, ``execute_lifecycle``
     independently recomputes trades from this ``ExecutionRequest`` — without
     this filter, a symbol dropped at validation (bad symbol, non-tradable
-    asset, sell not whitelisted, sells disabled, ...) would still be
+    asset, sell inventory mismatch, sells disabled, ...) would still be
     recomputed and submitted by the engine, silently defeating the partition
     (and, for a dropped SELL, submitting an order guardrails explicitly
     rejected). A dropped BUY target is simply removed from the target book
@@ -2524,9 +2579,10 @@ def _run_live_pilot_core_path(
         capital_cap_usd=float(gate.capital_cap_usd or 0.0),
         max_orders=int(gate.max_orders or 0),
         run_id=run_id,
+        sell_inventory=_sell_inventory_from_request(request),
     )
     # BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): validate_live_pilot_plan now
-    # partitions PER ORDER — a bad symbol/whitelist/sells-disabled problem drops
+    # partitions PER ORDER — a bad symbol/inventory/sells-disabled problem drops
     # only that order (recorded below) rather than blocking the whole batch.
     # plan_validation.status is only "BLOCKED" when NOT ONE order survived, or a
     # genuine batch-level constraint (order-count/cap) was tripped.

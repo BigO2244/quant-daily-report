@@ -28,10 +28,10 @@ LIVE_PILOT_SUBMIT_APPROVED_ENV = "CAERUS_LIVE_PILOT_SUBMIT_APPROVED"
 LIVE_PILOT_DRY_RUN_ENV = "CAERUS_LIVE_PILOT_DRY_RUN"
 LIVE_PILOT_CRON_APPROVED_ENV = "CAERUS_LIVE_PILOT_CRON_APPROVED"
 LIVE_PILOT_SELL_WHITELIST_ENV = "CAERUS_LIVE_PILOT_SELL_WHITELIST"
-# Master enable for live sells, fail-closed: a sell is only planned/submitted when
-# this flag is explicitly on AND the symbol is whitelisted. Default (unset/garbage)
-# disables all sells, so the per-symbol whitelist can never be the sole thing
-# standing between an armed lane and selling real positions.
+# Master enable for live sells, fail-closed. Production execution additionally
+# proves every SELL against the immutable pretrade broker inventory. The legacy
+# per-symbol whitelist is retained as configuration metadata, but never authorizes
+# a production sell on its own.
 LIVE_PILOT_SELLS_ENABLED_ENV = "CAERUS_LIVE_PILOT_SELLS_ENABLED"
 LIVE_PILOT_ALLOW_FRACTIONAL_ENV = "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"
 LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV = "CAERUS_LIVE_PILOT_MAX_SLIPPAGE_BPS"
@@ -537,23 +537,6 @@ def _safe_float(value: object) -> float | None:
     return numeric
 
 
-def _sell_whitelist(env: Mapping[str, str]) -> set[str]:
-    raw = str(env.get(LIVE_PILOT_SELL_WHITELIST_ENV) or "").strip()
-    return {_clean_symbol(item) for item in raw.split(",") if _clean_symbol(item)}
-
-
-def _sell_all_symbols_allowed(env: Mapping[str, str]) -> bool:
-    """Wildcard sell allowlist for a full buy/sell/hold model.
-
-    ``CAERUS_LIVE_PILOT_SELL_WHITELIST="*"`` permits selling ANY symbol, so the
-    strategy — not a hand-maintained per-symbol list — decides what to sell.
-    Selling remains gated by the fail-closed master flag
-    (``CAERUS_LIVE_PILOT_SELLS_ENABLED``) and the account-id pin. Only the exact
-    literal ``*`` is treated as the wildcard (never a ticker like ``ALL``).
-    """
-    return str(env.get(LIVE_PILOT_SELL_WHITELIST_ENV) or "").strip() == "*"
-
-
 def _fractional_allowed(env: Mapping[str, str]) -> bool:
     return _truthy(env.get(LIVE_PILOT_ALLOW_FRACTIONAL_ENV))
 
@@ -570,12 +553,13 @@ def validate_live_pilot_plan(
     capital_cap_usd: float,
     max_orders: int,
     run_id: str,
+    sell_inventory: Mapping[str, object] | None = None,
 ) -> LivePilotPlanValidation:
     """Validate the day's candidate live-pilot orders with PER-ORDER partitioning.
 
     BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): previously a single invalid or
-    unresolvable order (bad symbol format, unsupported asset, sell not
-    whitelisted, ...) put ALL of that trade's errors into one list and returned
+    unresolvable order (bad symbol format, unsupported asset, unauthorized sell,
+    ...) put ALL of that trade's errors into one list and returned
     ``orders=[]`` the moment ANY error existed — so one bad BUY candidate blocked
     the SELLs that free capital too. Now each order is validated independently:
     a failing order is DROPPED (recorded in ``dropped_orders`` with its own
@@ -591,10 +575,26 @@ def validate_live_pilot_plan(
     orders: list[LivePilotOrder] = []
     dropped: list[LivePilotDroppedOrder] = []
     total = 0.0
-    sell_whitelist = _sell_whitelist(environ)
-    sell_all_allowed = _sell_all_symbols_allowed(environ)
     sells_enabled = _truthy(environ.get(LIVE_PILOT_SELLS_ENABLED_ENV))
     fractional_allowed = _fractional_allowed(environ)
+    # Only finite positive long broker positions are eligible, and cumulative
+    # SELL quantity is bounded by the pretrade holding so this boundary cannot
+    # accidentally synthesize a short position. Missing inventory fails closed.
+    normalized_sell_inventory: dict[str, Decimal] | None = None
+    if sell_inventory is not None:
+        normalized_sell_inventory = {}
+        for raw_symbol, raw_qty in sell_inventory.items():
+            inventory_symbol = _clean_symbol(raw_symbol)
+            inventory_qty = _safe_float(raw_qty)
+            if (
+                inventory_symbol
+                and inventory_qty is not None
+                and inventory_qty == inventory_qty
+                and inventory_qty not in {float("inf"), float("-inf")}
+                and inventory_qty > 0.0
+            ):
+                normalized_sell_inventory[inventory_symbol] = Decimal(str(inventory_qty))
+    planned_sell_qty: dict[str, Decimal] = {}
 
     def _drop(symbol: str, side: str, reason_code: str) -> None:
         # A dropped SELL means we are failing to exit a HELD position — treat it
@@ -644,12 +644,9 @@ def validate_live_pilot_plan(
             continue
         if side == "SELL" and not sells_enabled:
             # Master gate (fail-closed): live sells are globally disabled unless
-            # CAERUS_LIVE_PILOT_SELLS_ENABLED is explicitly on. This sits in front
-            # of the per-symbol whitelist so the whitelist alone can never arm sells.
+            # CAERUS_LIVE_PILOT_SELLS_ENABLED is explicitly on. Broker inventory
+            # remains mandatory even when the master gate is enabled.
             _drop(symbol, side, f"{symbol}:sells_disabled")
-            continue
-        if side == "SELL" and not sell_all_allowed and symbol not in sell_whitelist:
-            _drop(symbol, side, f"{symbol}:sell_not_whitelisted")
             continue
         if qty is None or qty <= 0:
             _drop(symbol, side, f"{symbol}:non_positive_qty")
@@ -670,6 +667,20 @@ def validate_live_pilot_plan(
         if notional <= 0:
             _drop(symbol, side, f"{symbol}:non_positive_notional")
             continue
+        if side == "SELL":
+            if normalized_sell_inventory is None:
+                _drop(symbol, side, f"{symbol}:sell_inventory_unavailable")
+                continue
+            else:
+                held_qty = normalized_sell_inventory.get(symbol)
+                if held_qty is None:
+                    _drop(symbol, side, f"{symbol}:sell_position_not_held")
+                    continue
+                cumulative_qty = planned_sell_qty.get(symbol, Decimal("0")) + Decimal(str(qty))
+                if cumulative_qty > held_qty:
+                    _drop(symbol, side, f"{symbol}:sell_qty_exceeds_held_position")
+                    continue
+                planned_sell_qty[symbol] = cumulative_qty
         total += notional
         orders.append(
             LivePilotOrder(
@@ -698,7 +709,7 @@ def validate_live_pilot_plan(
     # turnover. A full rebalance sells over-weight/removed names AND buys under-weight
     # ones; summing both sides would block legitimate high-turnover rebalances whose
     # buys stay within the portfolio value. Sells are exits (they fund buys, gated by
-    # the fail-closed sells master flag + whitelist) and never consume the buying cap.
+    # the fail-closed sells master flag + broker inventory) and never consume the buying cap.
     buy_notional = sum(order.notional for order in orders if order.side == "BUY")
     if capital_cap_usd is None:
         # Uncapped: a None cap means no fixed USD ceiling — buys size proportionally to

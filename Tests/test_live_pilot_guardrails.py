@@ -61,8 +61,8 @@ def _approve(monkeypatch: pytest.MonkeyPatch, *, dry_run: str = "1") -> None:
     # "off" value; an unset/garbage value blocks. Disarm it for the approve fixture.
     monkeypatch.setenv(LIVE_PILOT_KILL_SWITCH_ENV, "0")
     monkeypatch.setenv("CAERUS_LIVE_PILOT_SUBMIT_APPROVED", "1")
-    # Master sell gate fails closed: enable it so sell-path fixtures reach the
-    # per-symbol whitelist check. Default-off behavior has dedicated coverage.
+    # Master sell gate fails closed: enable it so sell-path fixtures can reach
+    # broker-inventory validation. Default-off behavior has dedicated coverage.
     monkeypatch.setenv("CAERUS_LIVE_PILOT_SELLS_ENABLED", "1")
 
 
@@ -358,6 +358,7 @@ def test_full_rebalance_high_turnover_not_blocked_by_cap(monkeypatch: pytest.Mon
         capital_cap_usd=502,
         max_orders=50,
         run_id="full-rebalance",
+        sell_inventory={"OLD": 3},
     )
     assert result.status == "PASS", result.reason_codes
     assert result.total_notional == 550.0  # gross reported unchanged
@@ -379,9 +380,120 @@ def test_full_rebalance_blocks_when_buys_exceed_cap(monkeypatch: pytest.MonkeyPa
         capital_cap_usd=502,
         max_orders=50,
         run_id="over-buy",
+        sell_inventory={"OLD": 1},
     )
     assert result.status == "BLOCKED"
     assert "live_pilot_total_notional_exceeds_cap" in result.reason_codes
+
+
+def test_broker_inventory_supersedes_stale_sell_whitelist(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELL_WHITELIST", "SOME_OTHER_SYMBOL")
+
+    result = validate_live_pilot_plan(
+        [{"ticker": "OLD", "side": "SELL", "shares": 3, "limit_price": 100}],
+        capital_cap_usd=500,
+        max_orders=1,
+        run_id="held-exit",
+        sell_inventory={"OLD": 3},
+    )
+
+    assert result.status == "PASS", result.reason_codes
+    assert [(order.symbol, order.side, order.qty) for order in result.orders] == [
+        ("OLD", "SELL", 3.0)
+    ]
+
+
+def test_broker_inventory_blocks_unheld_and_oversized_sells(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELL_WHITELIST", "*")
+
+    unheld = validate_live_pilot_plan(
+        [{"ticker": "OLD", "side": "SELL", "shares": 1, "limit_price": 100}],
+        capital_cap_usd=500,
+        max_orders=1,
+        run_id="unheld-exit",
+        sell_inventory={},
+    )
+    oversized = validate_live_pilot_plan(
+        [{"ticker": "OLD", "side": "SELL", "shares": 4, "limit_price": 100}],
+        capital_cap_usd=500,
+        max_orders=1,
+        run_id="oversized-exit",
+        sell_inventory={"OLD": 3},
+    )
+
+    assert unheld.status == "BLOCKED"
+    assert "OLD:sell_position_not_held" in unheld.reason_codes
+    assert oversized.status == "BLOCKED"
+    assert "OLD:sell_qty_exceeds_held_position" in oversized.reason_codes
+
+
+def test_broker_inventory_blocks_cumulative_oversell(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+
+    result = validate_live_pilot_plan(
+        [
+            {"ticker": "OLD", "side": "SELL", "shares": 2, "limit_price": 100},
+            {"ticker": "OLD", "side": "SELL", "shares": 2, "limit_price": 100},
+        ],
+        capital_cap_usd=500,
+        max_orders=1,
+        run_id="cumulative-oversell",
+        sell_inventory={"OLD": 3},
+    )
+
+    assert result.status == "PASS"
+    assert [order.qty for order in result.orders] == [2.0]
+    assert [drop.reason_code for drop in result.dropped_orders] == [
+        "OLD:sell_qty_exceeds_held_position"
+    ]
+
+
+@pytest.mark.parametrize("inventory_qty", [0, -1, "nan", "inf", None])
+def test_nonpositive_or_malformed_inventory_never_authorizes_sell(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_qty: object,
+) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+
+    result = validate_live_pilot_plan(
+        [{"ticker": "OLD", "side": "SELL", "shares": 1, "limit_price": 100}],
+        capital_cap_usd=500,
+        max_orders=1,
+        run_id="bad-inventory",
+        sell_inventory={"OLD": inventory_qty},
+    )
+
+    assert result.status == "BLOCKED"
+    assert "OLD:sell_position_not_held" in result.reason_codes
+
+
+def test_sell_inventory_does_not_bypass_master_gate_or_authorize_buys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch)
+    monkeypatch.setenv("CAERUS_LIVE_PILOT_SELLS_ENABLED", "0")
+
+    result = validate_live_pilot_plan(
+        [
+            {"ticker": "OLD", "side": "SELL", "shares": 1, "limit_price": 100},
+            {"ticker": "NEW", "side": "BUY", "shares": 1, "limit_price": 100},
+        ],
+        capital_cap_usd=500,
+        max_orders=1,
+        run_id="inventory-side-isolation",
+        sell_inventory={"OLD": 1},
+    )
+
+    assert result.status == "PASS"
+    assert [(order.symbol, order.side) for order in result.orders] == [("NEW", "BUY")]
+    assert [drop.reason_code for drop in result.dropped_orders] == ["OLD:sells_disabled"]
 
 
 def test_plan_validation_normalizes_limit_price(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -443,7 +555,7 @@ def test_plan_validation_allows_fr104_market_order_with_cap_price(monkeypatch: p
 @pytest.mark.parametrize(
     ("trade", "reason"),
     [
-        ({"ticker": "AAPL", "side": "SELL", "shares": 1, "limit_price": 10}, "AAPL:sell_not_whitelisted"),
+        ({"ticker": "AAPL", "side": "SELL", "shares": 1, "limit_price": 10}, "AAPL:sell_inventory_unavailable"),
         ({"ticker": "AAPL", "side": "BUY", "shares": -1, "limit_price": 10}, "AAPL:non_positive_qty"),
         ({"ticker": "BTCUSD", "side": "BUY", "shares": 1, "limit_price": 10}, "BTCUSD:unsupported_crypto_symbol"),
         ({"ticker": "AAPL", "side": "BUY", "shares": 1, "order_type": "stop", "price": 10}, "AAPL:unsupported_order_type:stop"),
