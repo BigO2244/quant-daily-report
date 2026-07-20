@@ -20,6 +20,7 @@ Terminal-status mapping (executor terminal_status -> pointer status):
 - ``BLOCKED`` with reason ``live_pilot_transition_no_actionable_order``
                             -> ``no_action`` (book already at target; benign no-op)
 - ``BLOCKED`` (other)       -> ``failed_blocked``
+- ``SUBMITTED_UNFILLED``    -> ``failed_incomplete`` (orders exist; never retry)
 - ``FAILED_RECONCILIATION`` -> ``failed_reconciliation``
 - anything else / missing   -> ``failed_unknown``
 
@@ -64,6 +65,8 @@ def map_terminal_status(terminal_status: str, reason_code: str = "") -> tuple[st
         return TERMINAL_STATUS_NO_ACTION, "no_actionable_order"
     if upper == "BLOCKED":
         return "failed_blocked", reason or None
+    if upper == "SUBMITTED_UNFILLED":
+        return "failed_incomplete", "SUBMITTED_UNFILLED"
     if upper == "FAILED_RECONCILIATION":
         return "failed_reconciliation", reason or None
     return "failed_unknown", (terminal or "missing_terminal_status")
