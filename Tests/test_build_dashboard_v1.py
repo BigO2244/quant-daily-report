@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.research.build_dashboard_v1 import DashboardV1Builder, parse_args, write_dashboard_v1_payload
 
 
@@ -265,9 +267,11 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
     broker_dir = tmp_path / "outputs" / "broker"
     snapshot_dir = tmp_path / "outputs" / "broker_snapshot"
     perf_dir = tmp_path / "outputs" / "perf"
+    plans_dir = tmp_path / "outputs" / "paper_lane" / "plans"
     broker_dir.mkdir(parents=True)
     snapshot_dir.mkdir(parents=True)
     perf_dir.mkdir(parents=True)
+    plans_dir.mkdir(parents=True)
 
     report_date = "2026-04-21"
     captured_at = "2026-04-21T14:05:00+00:00"
@@ -371,6 +375,19 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
         "2026-04-21,505,0.01\n",
         encoding="utf-8",
     )
+    (plans_dir / f"live_pilot_plan_{report_date}.json").write_text(
+        json.dumps(
+            {
+                "trade_date": report_date,
+                "cash_target_weight": 0.25,
+                "target_portfolio": [
+                    {"ticker": "AAPL", "target_weight": 0.75},
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     payload = DashboardV1Builder(tmp_path, report_date=report_date).build()
 
@@ -380,6 +397,11 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
     assert payload["sections"]["positions"]["summary"]["positions_count"] == 2
     assert payload["sections"]["trades_today"]["summary"]["fills_count"] == 2
     assert payload["sections"]["performance_history"]["summary"]["latest_nav"] == 10000.0
+    assert payload["sections"]["performance_history"]["summary"]["inception_nav"] == 9900.0
+    assert (
+        payload["sections"]["performance_history"]["summary"]["inception_nav_source"]
+        == "first_recorded_broker_equity"
+    )
     assert "shadow_command_center" in payload["sections"]
     assert "system_health_console" in payload["sections"]
     assert "regime_market_state" in payload["sections"]
@@ -392,6 +414,11 @@ def test_build_dashboard_v1_happy_path(tmp_path: Path) -> None:
     assert "account_layers" in payload["sections"]
     assert "governance_state" in payload["sections"]
     assert "operator_control_tower" in payload["sections"]
+    assert "edge_attribution" in payload["sections"]
+    fidelity = payload["sections"]["edge_attribution"]["target_fidelity"]
+    assert fidelity["actual_weight_in_target_names"] == pytest.approx(0.4)
+    assert fidelity["off_target_weight"] == pytest.approx(0.35)
+    assert fidelity["target_attainment_ratio"] == pytest.approx(0.4 / 0.75)
     assert payload["sections"]["decision_grade"]["status"] == "PARTIAL"
     assert isinstance(payload["sections"]["operator_control_tower"]["summary"]["operator_action_required"], bool)
     assert len(payload["sections"]["operator_control_tower"]["cards"]) == 6

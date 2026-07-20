@@ -99,6 +99,12 @@ export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
 # paper arms them with the wildcard so the full buy/sell/hold model is exercised.
 export CAERUS_LIVE_PILOT_SELLS_ENABLED="1"
 export CAERUS_LIVE_PILOT_SELL_WHITELIST="*"
+# Paper-only target-fidelity cleanup. Fractional entries remain disabled; this
+# permits exact exits of legacy fractional holdings that are no longer in the
+# target portfolio. The executor additionally requires the paper_lane output
+# ancestry, so this flag is inert on the real-money live-pilot lane.
+export CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED="1"
+export CAERUS_PAPER_FRACTIONAL_EXIT_MIN_NOTIONAL_USD="1.00"
 # Approval-style gates: set inline =1 for paper. WHY: these flags exist to force
 # a HUMAN arming step before real-money submission on the live lane. The paper
 # lane submits only to the paper endpoint (asserted above; the gate stack and the
@@ -156,6 +162,7 @@ echo "lane_params_fingerprint=${CAERUS_LANE_PARAMS_FINGERPRINT}"
 echo "capital_cap_pin=${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "min_trade_usd=${CAERUS_LIVE_PILOT_MIN_TRADE_USD}"
+echo "paper_fractional_exit_enabled=${CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED}"
 _DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
 echo "deployed_sha=${_DEPLOY_SHA}"
 

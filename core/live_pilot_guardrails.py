@@ -554,6 +554,7 @@ def validate_live_pilot_plan(
     max_orders: int,
     run_id: str,
     sell_inventory: Mapping[str, object] | None = None,
+    allow_fractional_sells: bool = False,
 ) -> LivePilotPlanValidation:
     """Validate the day's candidate live-pilot orders with PER-ORDER partitioning.
 
@@ -651,7 +652,10 @@ def validate_live_pilot_plan(
         if qty is None or qty <= 0:
             _drop(symbol, side, f"{symbol}:non_positive_qty")
             continue
-        if not fractional_allowed and abs(qty - round(qty)) > 1e-9:
+        row_fractional_allowed = fractional_allowed or (
+            side == "SELL" and bool(allow_fractional_sells)
+        )
+        if not row_fractional_allowed and abs(qty - round(qty)) > 1e-9:
             _drop(symbol, side, f"{symbol}:fractional_qty_not_allowed")
             continue
         if order_type not in {"limit", "market"}:

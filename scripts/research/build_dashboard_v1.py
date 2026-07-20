@@ -481,6 +481,8 @@ class DashboardV1Builder:
                 "is_stale": True,
                 "summary": {
                     "inception_date": None,
+                    "inception_nav": None,
+                    "inception_nav_source": "first_recorded_broker_equity",
                     "latest_nav": None,
                     "since_inception_return": None,
                     "spy_since_inception_return": None,
@@ -612,6 +614,8 @@ class DashboardV1Builder:
             "is_stale": latest_nav_date != self.report_date,
             "summary": {
                 "inception_date": nav_rows[0]["date"] if nav_rows else None,
+                "inception_nav": start_nav,
+                "inception_nav_source": "first_recorded_broker_equity",
                 "latest_nav": latest_nav,
                 "since_inception_return": since_inception_return,
                 "spy_since_inception_return": spy_since_return,
@@ -1943,6 +1947,224 @@ class DashboardV1Builder:
             },
         }
 
+    def _build_edge_attribution(
+        self,
+        *,
+        positions: dict[str, Any],
+        nav: dict[str, Any],
+        performance: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Explain whether benchmark drag is signal or portfolio-expression drag.
+
+        This section is diagnostic. It does not change targets or authorize an
+        order. Current target fidelity is computed directly from the paper plan
+        and authoritative broker weights; realized intended-vs-actual drag is
+        loaded from the existing read-only operational-drag pipeline.
+        """
+        plan_path = (
+            self.repo_root
+            / "outputs"
+            / "paper_lane"
+            / "plans"
+            / f"live_pilot_plan_{self.report_date}.json"
+        )
+        plan = _read_json(plan_path)
+        plan = plan if isinstance(plan, dict) else {}
+        self._record_source(
+            section="edge_attribution",
+            label="paper target portfolio",
+            path=plan_path,
+            source_type="paper_transition_plan",
+            trust_level="canonical",
+            as_of=str(plan.get("trade_date") or "") or None,
+            used=bool(plan),
+        )
+
+        target_rows = plan.get("target_portfolio") if isinstance(plan.get("target_portfolio"), list) else []
+        target_weights: dict[str, float] = {}
+        for row in target_rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+            weight = _to_float(row.get("target_weight"))
+            if symbol and weight is not None and weight >= 0.0:
+                target_weights[symbol] = target_weights.get(symbol, 0.0) + float(weight)
+
+        actual_rows = positions.get("rows") if isinstance(positions.get("rows"), list) else []
+        actual_weights: dict[str, float] = {}
+        quantities: dict[str, float] = {}
+        for row in actual_rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+            weight = _to_float(row.get("weight"))
+            qty = _to_float(row.get("qty") or row.get("quantity"))
+            if symbol and weight is not None:
+                actual_weights[symbol] = actual_weights.get(symbol, 0.0) + float(weight)
+            if symbol and qty is not None:
+                quantities[symbol] = quantities.get(symbol, 0.0) + float(qty)
+
+        target_weight_sum = sum(target_weights.values())
+        actual_target_weight = sum(actual_weights.get(symbol, 0.0) for symbol in target_weights)
+        matched_target_weight = sum(
+            min(actual_weights.get(symbol, 0.0), target_weight)
+            for symbol, target_weight in target_weights.items()
+        )
+        off_target_weight = sum(
+            weight for symbol, weight in actual_weights.items() if symbol not in target_weights
+        )
+        target_cash_weight = _to_float(plan.get("cash_target_weight"))
+        actual_cash_weight = (
+            float(nav["cash"]) / float(nav["equity"])
+            if nav.get("cash") is not None and nav.get("equity") not in (None, 0)
+            else None
+        )
+        name_gap = sum(
+            abs(actual_weights.get(symbol, 0.0) - target_weights.get(symbol, 0.0))
+            for symbol in set(actual_weights) | set(target_weights)
+        )
+        cash_gap = (
+            abs(actual_cash_weight - target_cash_weight)
+            if actual_cash_weight is not None and target_cash_weight is not None
+            else None
+        )
+        total_abs_gap = name_gap + (cash_gap or 0.0)
+        missing_targets = sorted(
+            symbol for symbol, weight in target_weights.items()
+            if weight > 0.0 and actual_weights.get(symbol, 0.0) < 0.001
+        )
+        off_target_fractional = sorted(
+            symbol for symbol, qty in quantities.items()
+            if symbol not in target_weights and abs(qty - round(qty)) > 1e-9
+        )
+
+        run_candidates = sorted(
+            (self.repo_root / "outputs" / "paper_lane" / "runs").glob(
+                f"{self.report_date}T*_paper_cron_submit"
+            )
+        )
+        run_root = run_candidates[-1] if run_candidates else None
+        execution_path = run_root / "execution_results.json" if run_root else None
+        intended_path = run_root / "live_pilot_orders_intended.json" if run_root else None
+        execution = _read_json(execution_path) if execution_path else None
+        intended = _read_json(intended_path) if intended_path else None
+        execution = execution if isinstance(execution, dict) else {}
+        intended = intended if isinstance(intended, dict) else {}
+        self._record_source(
+            section="edge_attribution",
+            label="paper execution outcome",
+            path=execution_path,
+            source_type="paper_execution_results",
+            trust_level="canonical",
+            as_of=self.report_date if execution else None,
+            used=bool(execution),
+        )
+
+        drag_dir = self.repo_root / "outputs" / "operational_drag" / self.report_date
+        drag_path = drag_dir / "operational_drag.json"
+        drag_payload = _read_json(drag_path)
+        drag_payload = drag_payload if isinstance(drag_payload, dict) else {}
+        drag_latest = drag_payload.get("latest") if isinstance(drag_payload.get("latest"), dict) else {}
+        self._record_source(
+            section="edge_attribution",
+            label="intended versus actual return attribution",
+            path=drag_path,
+            source_type="operational_drag",
+            trust_level="diagnostic",
+            as_of=str(drag_latest.get("date") or "") or None,
+            used=bool(drag_payload),
+        )
+
+        nav_values = [
+            _to_float(row.get("equity"))
+            for row in performance.get("_nav_rows") or []
+            if _to_float(row.get("equity")) is not None
+        ]
+        bench_values = [
+            _to_float(row.get("spy_close"))
+            for row in performance.get("_bench_rows") or []
+            if _to_float(row.get("spy_close")) is not None
+        ]
+        rolling_20d_port = self._compute_window_return(nav_values, 20)
+        rolling_20d_spy = self._compute_window_return(bench_values, 20)
+        rolling_20d_excess = (
+            rolling_20d_port - rolling_20d_spy
+            if rolling_20d_port is not None and rolling_20d_spy is not None
+            else None
+        )
+        fidelity_blocked = bool(target_weights) and (
+            off_target_weight > 0.05 or total_abs_gap > 0.10 or bool(missing_targets)
+        )
+        signal_weakness = rolling_20d_excess is not None and rolling_20d_excess < 0.0
+        classification = (
+            "MIXED_SIGNAL_AND_PORTFOLIO_DRAG"
+            if signal_weakness and fidelity_blocked
+            else "PORTFOLIO_FIDELITY_DRAG"
+            if fidelity_blocked
+            else "RECENT_SIGNAL_WEAKNESS"
+            if signal_weakness
+            else "NO_CURRENT_EDGE_BLOCKER_IDENTIFIED"
+        )
+        if fidelity_blocked:
+            self._mark(
+                _check(
+                    "paper_target_fidelity",
+                    "warn",
+                    "non_blocking",
+                    "Paper broker holdings materially differ from the current target portfolio.",
+                )
+            )
+
+        return {
+            "as_of": self.report_date,
+            "is_stale": not bool(plan) or performance.get("as_of") != self.report_date,
+            "status": "WATCH" if fidelity_blocked or signal_weakness else "OK",
+            "classification": classification,
+            "performance": {
+                "rolling_20d_portfolio_return": rolling_20d_port,
+                "rolling_20d_spy_return": rolling_20d_spy,
+                "rolling_20d_excess_return": rolling_20d_excess,
+                "since_inception_excess_return": (performance.get("summary") or {}).get(
+                    "excess_since_inception_return"
+                ),
+            },
+            "target_fidelity": {
+                "target_name_count": len(target_weights),
+                "actual_position_count": len(actual_weights),
+                "target_weight_sum": target_weight_sum,
+                "actual_weight_in_target_names": actual_target_weight,
+                "matched_target_weight": matched_target_weight,
+                "target_attainment_ratio": (
+                    matched_target_weight / target_weight_sum if target_weight_sum > 0.0 else None
+                ),
+                "off_target_weight": off_target_weight,
+                "target_cash_weight": target_cash_weight,
+                "actual_cash_weight": actual_cash_weight,
+                "total_absolute_weight_gap": total_abs_gap,
+                "missing_target_symbols": missing_targets,
+                "off_target_fractional_symbols": off_target_fractional,
+            },
+            "execution": {
+                "run_id": execution.get("run_id"),
+                "status": execution.get("status"),
+                "reason": execution.get("reason"),
+                "intended_count": len(intended.get("orders") or []),
+                "submitted_count": execution.get("submitted_count"),
+                "filled_count": execution.get("filled_count"),
+                "suppressed_buy_count": execution.get(
+                    "remaining_blocked_or_suppressed_buy_count"
+                ),
+            },
+            "operational_drag": {
+                "available": bool(drag_payload.get("available")),
+                "confidence": drag_payload.get("confidence"),
+                "date": drag_latest.get("date"),
+                "daily": drag_latest.get("daily_operational_drag"),
+                "cumulative": drag_latest.get("cumulative_operational_drag"),
+                "reason_codes": drag_payload.get("reason_codes") or [],
+            },
+        }
+
     def _freshness_checks(self, sections: dict[str, Any]) -> None:
         now = self.generated_at
         for name in ("positions", "nav", "trades_today"):
@@ -2004,6 +2226,11 @@ class DashboardV1Builder:
             "sleeve_inventory": sleeve_inventory_section,
             "baseline_alpha_comparison": baseline_alpha_section,
         }
+        sections["edge_attribution"] = self._build_edge_attribution(
+            positions=positions_section,
+            nav=nav_section,
+            performance=performance_section,
+        )
         account_layers_section = self._build_account_layers(sections)
         sections["account_layers"] = account_layers_section
         governance_section = self._build_governance_state(sections)
