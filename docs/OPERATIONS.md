@@ -81,6 +81,12 @@ The harness uses the account-wide `outputs/workflow/paper_execution_retry.lock`
 to prevent overlapping automatic or manual paper execution, including runs
 started with different report dates, while retries remain active.
 
+Once orders are accepted, `SUBMITTED_UNFILLED` is observed against the same
+persisted broker order IDs (24 reads, five seconds apart by default). This path
+never invokes the lane again and therefore cannot duplicate orders. A fill
+converges the original run and confirmation pointer; exhaustion remains
+`failed_incomplete` and escalates for operator review.
+
 ## Phase 4 Governance Direction
 
 The next planned hardening phase is **Phase 4: Artifact Governance +

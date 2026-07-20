@@ -28,6 +28,8 @@ from scripts.paper_lane_write_execution_pointer import write_paper_lane_pointers
 
 
 PAPER_EXECUTION_RETRY_DELAYS_SECONDS = (30, 60, 300, 3600)
+PAPER_FILL_REFRESH_ATTEMPTS = 24
+PAPER_FILL_REFRESH_DELAY_SECONDS = 5
 TRANSIENT_PAPER_FAILURE_REASONS = {
     "paper_lane_capital_cap_transient_read_failed",
     "paper_broker_snapshot_transient_failed",
@@ -63,6 +65,40 @@ class AttemptOutcome:
     run_id: str
     run_root: str
     error: str
+    fill_refresh_count: int = 0
+
+
+def observe_submitted_run(
+    *,
+    initial: AttemptOutcome,
+    refresh_once: Callable[[int], AttemptOutcome],
+    max_attempts: int = PAPER_FILL_REFRESH_ATTEMPTS,
+    delay_seconds: float = PAPER_FILL_REFRESH_DELAY_SECONDS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> AttemptOutcome:
+    """Poll one accepted PAPER run without invoking the submission lane again."""
+    if initial.reason_code != "SUBMITTED_UNFILLED" or initial.submitted_count <= 0:
+        return initial
+
+    outcome = initial
+    attempts = max(1, int(max_attempts))
+    for attempt in range(1, attempts + 1):
+        refreshed = refresh_once(attempt)
+        outcome = AttemptOutcome(
+            exit_code=refreshed.exit_code,
+            retryable=refreshed.retryable,
+            reason_code=refreshed.reason_code,
+            submitted_count=refreshed.submitted_count,
+            run_id=refreshed.run_id,
+            run_root=refreshed.run_root,
+            error=refreshed.error,
+            fill_refresh_count=attempt,
+        )
+        if outcome.exit_code == 0 or outcome.reason_code != "SUBMITTED_UNFILLED":
+            return outcome
+        if attempt < attempts:
+            sleep_fn(max(0.0, float(delay_seconds)))
+    return outcome
 
 
 def inspect_attempt(
@@ -151,6 +187,7 @@ def run_retry_harness(
             "last_reason_code": outcome.reason_code,
             "last_error": outcome.error,
             "submitted_count": outcome.submitted_count,
+            "fill_refresh_count": outcome.fill_refresh_count,
             "escalation_required": status == "ESCALATION_REQUIRED",
             "live_lane_affected": False,
         }
@@ -172,6 +209,7 @@ def run_retry_harness(
                 "retryable": outcome.retryable,
                 "reason_code": outcome.reason_code,
                 "submitted_count": outcome.submitted_count,
+                "fill_refresh_count": outcome.fill_refresh_count,
                 "run_id": outcome.run_id,
                 "run_root": outcome.run_root,
                 "error": outcome.error,
@@ -270,12 +308,84 @@ def main(argv: list[str] | None = None) -> int:
         started_ns = time.time_ns()
         paper_script = repo_root / "scripts" / "cron_execute.sh"
         completed = subprocess.run([str(paper_script)], cwd=repo_root, env=env, check=False)
-        return inspect_attempt(
+        outcome = inspect_attempt(
             repo_root,
             args.trade_date,
             completed.returncode,
             not_before_ns=started_ns,
         )
+        if outcome.reason_code != "SUBMITTED_UNFILLED" or outcome.submitted_count <= 0:
+            return outcome
+
+        run_root = Path(outcome.run_root)
+        if not run_root.is_absolute():
+            run_root = repo_root / run_root
+        write_paper_lane_pointers(
+            trade_date=args.trade_date,
+            run_id=outcome.run_id,
+            run_root=outcome.run_root,
+            terminal_status="running",
+            reason_code="paper_fill_observation_in_progress",
+            workspace_root=str(repo_root),
+        )
+
+        def refresh_once(_refresh_attempt: int) -> AttemptOutcome:
+            refreshed = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/live_pilot_execute.py",
+                    "--refresh-run",
+                    str(run_root),
+                ],
+                cwd=repo_root,
+                env=dict(os.environ),
+                check=False,
+            )
+            results_path = run_root / "execution_results.json"
+            try:
+                results = json.loads(results_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                results = {}
+            reason = str(
+                results.get("reason")
+                or results.get("status")
+                or "paper_fill_refresh_artifact_unresolved"
+            ).strip()
+            return AttemptOutcome(
+                exit_code=int(refreshed.returncode),
+                retryable=False,
+                reason_code=reason,
+                submitted_count=int(results.get("submitted_count") or outcome.submitted_count),
+                run_id=outcome.run_id,
+                run_root=outcome.run_root,
+                error=_sanitized_error(results.get("halt_reason") or reason),
+            )
+
+        observed = observe_submitted_run(
+            initial=outcome,
+            refresh_once=refresh_once,
+            max_attempts=int(
+                os.environ.get("CAERUS_PAPER_FILL_REFRESH_ATTEMPTS")
+                or PAPER_FILL_REFRESH_ATTEMPTS
+            ),
+            delay_seconds=float(
+                os.environ.get("CAERUS_PAPER_FILL_REFRESH_DELAY_SECONDS")
+                or PAPER_FILL_REFRESH_DELAY_SECONDS
+            ),
+        )
+        write_paper_lane_pointers(
+            trade_date=args.trade_date,
+            run_id=observed.run_id,
+            run_root=observed.run_root,
+            terminal_status=("SUBMITTED" if observed.exit_code == 0 else observed.reason_code),
+            reason_code=observed.reason_code,
+            status_message=(
+                f"same-run broker status refreshes: {observed.fill_refresh_count}; "
+                "no orders resubmitted"
+            ),
+            workspace_root=str(repo_root),
+        )
+        return observed
 
     def mark_retrying(outcome: AttemptOutcome, delay: int) -> None:
         write_paper_lane_pointers(

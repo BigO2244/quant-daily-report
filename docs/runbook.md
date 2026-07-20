@@ -187,6 +187,10 @@ and submission gates are evaluated from current state.
 - Authentication, authorization, configuration, and other permanent failures
   escalate immediately.
 - Any attempt with a submitted order is never retried.
+- An accepted `SUBMITTED_UNFILLED` run gets up to 24 read-only broker-status
+  refreshes at five-second intervals. The original order IDs are observed; the
+  submission lane is never invoked again. A fill converges the original run and
+  execution pointer before confirmation, while exhaustion remains fail-closed.
 - During a wait, the execution pointer remains `running` with a real run root,
   so the 10:00 confirmation does not mislabel the run as missing.
 - Final exhaustion remains fail-closed, sends a direct escalation, and records

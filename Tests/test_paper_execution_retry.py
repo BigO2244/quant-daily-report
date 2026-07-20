@@ -15,6 +15,7 @@ from scripts.paper_execution_retry import (
     PAPER_EXECUTION_RETRY_DELAYS_SECONDS,
     AttemptOutcome,
     inspect_attempt,
+    observe_submitted_run,
     run_retry_harness,
 )
 from scripts.paper_lane_write_execution_pointer import write_paper_lane_pointers
@@ -96,6 +97,67 @@ def test_nonretryable_failure_escalates_immediately_without_sleeping() -> None:
     assert sleeps == []
     assert payload["attempt_count"] == 1
     assert payload["status"] == "ESCALATION_REQUIRED"
+
+
+def test_submitted_unfilled_refreshes_original_run_until_filled() -> None:
+    initial = _outcome(
+        exit_code=1,
+        retryable=False,
+        reason="SUBMITTED_UNFILLED",
+        submitted_count=5,
+    )
+    refresh_calls: list[int] = []
+    sleeps: list[float] = []
+
+    def refresh_once(attempt: int) -> AttemptOutcome:
+        refresh_calls.append(attempt)
+        return _outcome(
+            exit_code=0 if attempt == 3 else 1,
+            retryable=False,
+            reason="CLEAN" if attempt == 3 else "SUBMITTED_UNFILLED",
+            submitted_count=5,
+        )
+
+    outcome = observe_submitted_run(
+        initial=initial,
+        refresh_once=refresh_once,
+        max_attempts=5,
+        delay_seconds=2,
+        sleep_fn=sleeps.append,
+    )
+
+    assert outcome.exit_code == 0
+    assert outcome.reason_code == "CLEAN"
+    assert outcome.fill_refresh_count == 3
+    assert refresh_calls == [1, 2, 3]
+    assert sleeps == [2.0, 2.0]
+
+
+def test_submitted_unfilled_exhausts_read_only_observation_window() -> None:
+    initial = _outcome(
+        exit_code=1,
+        retryable=False,
+        reason="SUBMITTED_UNFILLED",
+        submitted_count=5,
+    )
+    refresh_calls: list[int] = []
+
+    def refresh_once(attempt: int) -> AttemptOutcome:
+        refresh_calls.append(attempt)
+        return initial
+
+    outcome = observe_submitted_run(
+        initial=initial,
+        refresh_once=refresh_once,
+        max_attempts=3,
+        delay_seconds=0,
+        sleep_fn=lambda _delay: None,
+    )
+
+    assert outcome.exit_code == 1
+    assert outcome.reason_code == "SUBMITTED_UNFILLED"
+    assert outcome.fill_refresh_count == 3
+    assert refresh_calls == [1, 2, 3]
 
 
 def test_post_submission_failure_is_never_retried() -> None:
