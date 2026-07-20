@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from core.strategy_registry import active_shadow_security_selection_ids
 from scripts.caerus_daily_health_check import build_health_check, render_console, write_artifacts
 
 
@@ -50,10 +51,19 @@ def _write_base_artifacts(root: Path, *, reconciliation: dict | None = None, vix
             "trade_date": TRADE_DATE,
             "benchmark_symbol": "SPY",
             "strategies": {
-                "caerus_polaris": {"data_status": "OK", "status": "OK", "rolling_count_of_valid_days": 6},
-                "caerus_orion": {"data_status": "OK", "status": "OK", "rolling_count_of_valid_days": 6},
-                "caerus_lyra": {"data_status": "OK", "status": "OK", "rolling_count_of_valid_days": 6},
-                "spy_benchmark": {"data_status": "OK", "status": "OK", "rolling_count_of_valid_days": 6},
+                **{
+                    strategy_id: {
+                        "data_status": "OK",
+                        "status": "OK",
+                        "rolling_count_of_valid_days": 6,
+                    }
+                    for strategy_id in active_shadow_security_selection_ids()
+                },
+                "spy_benchmark": {
+                    "data_status": "OK",
+                    "status": "OK",
+                    "rolling_count_of_valid_days": 6,
+                },
             },
         },
     )
