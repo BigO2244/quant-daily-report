@@ -2384,10 +2384,22 @@ def _run_live_pilot_core_path(
     settled_report["order_history_availability"] = settled_availability
     settled_report["phase"] = "planning"
     _write_json(run_root / "live_pilot_settled_cash.json", settled_report)
+    paper_fractional_exit_enabled = (
+        _derive_execution_mode(run_root) == PAPER_MODE.upper()
+        and str(env.get("CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED") or "").strip().lower()
+        in {"1", "true", "yes", "y", "on"}
+    )
+    fractional_sell_min_trade_usd = _finite_float(
+        env.get("CAERUS_PAPER_FRACTIONAL_EXIT_MIN_NOTIONAL_USD")
+    )
+    if fractional_sell_min_trade_usd is None or fractional_sell_min_trade_usd <= 0.0:
+        fractional_sell_min_trade_usd = 1.0
     config = live_pilot_execution_config(
         approved_cap_usd=gate.capital_cap_usd,
         allow_fractional=str(env.get("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL") or "").strip().lower()
         in {"1", "true", "yes", "y", "on"},
+        allow_fractional_sells=paper_fractional_exit_enabled,
+        fractional_sell_min_trade_usd=float(fractional_sell_min_trade_usd),
         max_orders=int(gate.max_orders or 1),
         min_trade_usd=float(min_trade_usd),
         buy_buffer_pct=float(buy_buffer_pct),
@@ -2580,6 +2592,7 @@ def _run_live_pilot_core_path(
         max_orders=int(gate.max_orders or 0),
         run_id=run_id,
         sell_inventory=_sell_inventory_from_request(request),
+        allow_fractional_sells=paper_fractional_exit_enabled,
     )
     # BLOCKER 3 fix (PRE_ARM_SWEEP_2026-07-13 §d): validate_live_pilot_plan now
     # partitions PER ORDER — a bad symbol/inventory/sells-disabled problem drops

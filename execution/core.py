@@ -53,6 +53,8 @@ class OrderPolicy:
     min_trade_usd: float = 100.0
     slippage_bps: float = 0.0
     cash_buffer_bps: float = 0.0
+    allow_fractional_sells: bool = False
+    fractional_sell_min_trade_usd: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -274,6 +276,8 @@ def paper_execution_config(
         capital=CapitalPolicy(target_cash_weight=float(target_cash_weight)),
         orders=OrderPolicy(
             allow_fractional=bool(cfg.allow_fractional),
+            allow_fractional_sells=bool(cfg.allow_fractional_sells),
+            fractional_sell_min_trade_usd=float(cfg.fractional_sell_min_trade_dollars),
             min_trade_usd=float(cfg.min_trade_dollars),
             slippage_bps=float(cfg.slippage_bps),
             cash_buffer_bps=float(cfg.cash_buffer_bps),
@@ -296,6 +300,8 @@ def live_pilot_execution_config(
     *,
     approved_cap_usd: float | None,
     allow_fractional: bool = False,
+    allow_fractional_sells: bool = False,
+    fractional_sell_min_trade_usd: float = 1.0,
     max_orders: int = 1,
     min_trade_usd: float = 100.0,
     equity_collar_max_usd: float | None = None,
@@ -330,6 +336,8 @@ def live_pilot_execution_config(
         risk_action="block",
         cash_target_weight_default=0.0,
         rebalance_deadband_pct=0.0,
+        allow_fractional_sells=bool(allow_fractional_sells),
+        fractional_sell_min_trade_dollars=float(fractional_sell_min_trade_usd),
     )
     return ExecutionCoreConfig(
         mode="live_pilot",
@@ -346,6 +354,8 @@ def live_pilot_execution_config(
         ),
         orders=OrderPolicy(
             allow_fractional=bool(allow_fractional),
+            allow_fractional_sells=bool(allow_fractional_sells),
+            fractional_sell_min_trade_usd=float(fractional_sell_min_trade_usd),
             min_trade_usd=float(min_trade_usd),
             slippage_bps=0.0,
             cash_buffer_bps=0.0,

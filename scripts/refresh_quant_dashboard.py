@@ -497,6 +497,7 @@ def main() -> int:
     report_date = _resolve_report_date(args.trade_date)
     result: dict[str, object] = {
         "live_refresh": None,
+        "operational_drag": None,
         "dashboard": None,
     }
     # FR-059: broker telemetry failures must be visible and actionable rather
@@ -542,6 +543,28 @@ def main() -> int:
             live_status["reason_codes"].append(reason)
     result["live_status"] = live_status
     result["live_telemetry_staleness"] = staleness
+
+    try:
+        from research.operational_drag import build_operational_drag_analysis
+
+        drag = build_operational_drag_analysis(
+            trade_date=report_date,
+            repo_root=repo_root,
+            write=True,
+        )
+        result["operational_drag"] = {
+            "status": "ok",
+            "available": drag.get("available"),
+            "confidence": drag.get("confidence"),
+            "artifact_paths": drag.get("artifact_paths"),
+            "reason_codes": drag.get("reason_codes") or [],
+        }
+    except Exception as exc:
+        logger.warning("[DASHBOARD_REFRESH] operational drag refresh skipped: %s", exc)
+        result["operational_drag"] = {
+            "status": "failed",
+            "error": str(exc),
+        }
 
     result["dashboard"] = rebuild_dashboard(
         repo_root=repo_root,

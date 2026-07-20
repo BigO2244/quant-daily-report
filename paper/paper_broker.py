@@ -181,6 +181,12 @@ class PaperConfig:
     # below this fraction of total equity. Suppresses churn on tiny drifts.
     # Set to 0.0 to disable. 0.01 = "only trade names drifted >1% of equity".
     rebalance_deadband_pct: float = 0.01
+    # Paper-only portfolio-fidelity escape hatch. When enabled by the caller,
+    # SELL orders may preserve fractional quantities even when BUY sizing stays
+    # whole-share-only. This lets the paper book close legacy fractional dust
+    # without broadening fractional entry behavior.
+    allow_fractional_sells: bool = False
+    fractional_sell_min_trade_dollars: float = 1.0
 
 
 def load_config(path: str) -> PaperConfig:
@@ -717,11 +723,12 @@ def build_rebalance_trades(
 
         current_shares = float(h.get(tkr, 0.0))
         raw_delta = float(target_shares) - current_shares
-        delta = raw_delta if cfg.allow_fractional else _round_toward_zero(raw_delta)
+        fractional_sell = bool(cfg.allow_fractional_sells and raw_delta < 0.0)
+        delta = raw_delta if (cfg.allow_fractional or fractional_sell) else _round_toward_zero(raw_delta)
 
         if abs(delta) < 1e-12:
             continue
-        if not cfg.allow_fractional and abs(delta) < 1.0:
+        if not cfg.allow_fractional and not fractional_sell and abs(delta) < 1.0:
             continue
 
         # ------------------------------------------------------------ #
@@ -752,7 +759,12 @@ def build_rebalance_trades(
         side = "BUY" if delta > 0 else "SELL"
         slipped_px, slip_cost_per_share = apply_slippage(px, side, cfg.slippage_bps)
         trade_notional = abs(delta) * slipped_px
-        if trade_notional < cfg.min_trade_dollars:
+        min_trade_dollars = (
+            float(cfg.fractional_sell_min_trade_dollars)
+            if side == "SELL" and cfg.allow_fractional_sells
+            else float(cfg.min_trade_dollars)
+        )
+        if trade_notional < min_trade_dollars:
             continue
 
         if side == "SELL":
@@ -1293,16 +1305,24 @@ def _normalize_and_filter_executable_trades(
         rounded = row.to_dict()
         shares = abs(float(rounded.get("shares", 0.0)))
         price = float(rounded.get("price", 0.0))
-        rounded_shares = shares if cfg.allow_fractional else float(math.floor(shares))
+        side = str(rounded.get("side") or "").strip().upper()
+        fractional_sell = bool(side in {"SELL", "CLOSE", "REDUCE"} and cfg.allow_fractional_sells)
+        row_allows_fractional = bool(cfg.allow_fractional or fractional_sell)
+        rounded_shares = shares if row_allows_fractional else float(math.floor(shares))
 
         if rounded_shares <= 1e-12 or (
-            not cfg.allow_fractional and rounded_shares < 1.0
+            not row_allows_fractional and rounded_shares < 1.0
         ):
             dropped_zero_shares += 1
             continue
 
         notional = abs(rounded_shares * price)
-        if notional < float(cfg.min_trade_dollars):
+        min_trade_dollars = (
+            float(cfg.fractional_sell_min_trade_dollars)
+            if fractional_sell
+            else float(cfg.min_trade_dollars)
+        )
+        if notional < min_trade_dollars:
             dropped_min_notional += 1
             continue
 
