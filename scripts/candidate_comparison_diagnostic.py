@@ -12,6 +12,7 @@ import argparse
 import csv
 import datetime as dt
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -86,15 +87,60 @@ def _load_active_universe(repo_root: Path) -> tuple[set[str], Path]:
     return symbols, path
 
 
-def _latest_security_master(repo_root: Path, *, as_of: str | None) -> tuple[dict[str, Any], Path | None]:
+def _read_security_master_subset(path: Path, *, tickers: set[str]) -> dict[str, Any] | None:
+    """Read only requested symbol rows without materializing the large artifact.
+
+    The production security master also contains large event and provenance
+    arrays.  Expanding all of them with ``json.load`` is unnecessary for this
+    diagnostic and can create avoidable memory pressure on the scheduler VM.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    date_match = re.search(r'"asof_date"\s*:\s*"([0-9]{4}-[0-9]{2}-[0-9]{2})"', text)
+    symbols_match = re.search(r'"symbols"\s*:\s*\[', text)
+    if symbols_match is None:
+        return None
+    decoder = json.JSONDecoder()
+    index = symbols_match.end()
+    selected: list[dict[str, Any]] = []
+    while index < len(text):
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            row, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+        if symbol in tickers:
+            selected.append(row)
+            if len(selected) == len(tickers):
+                break
+    return {
+        "asof_date": date_match.group(1) if date_match else None,
+        "symbols": selected,
+    }
+
+
+def _latest_security_master(
+    repo_root: Path,
+    *,
+    as_of: str | None,
+    tickers: set[str],
+) -> tuple[dict[str, Any], Path | None]:
     root = repo_root / "data" / "security_master"
     for directory in _dated_dirs(root, as_of=as_of):
         path = directory / "ticker_universe.json"
-        payload = _read_json(path)
+        payload = _read_security_master_subset(path, tickers=tickers)
         if payload is not None:
             return payload, path
     latest_path = root / "ticker_universe_latest.json"
-    payload = _read_json(latest_path)
+    payload = _read_security_master_subset(latest_path, tickers=tickers)
     if payload is not None:
         artifact_date = _iso_date(str(payload.get("asof_date") or ""))
         if as_of is None or artifact_date is None or artifact_date <= str(as_of):
@@ -303,7 +349,11 @@ def build_candidate_comparison(
         raise ValueError(f"invalid --as-of date: {as_of!r}")
 
     universe, universe_path = _load_active_universe(root)
-    security_master, security_master_path = _latest_security_master(root, as_of=ceiling)
+    security_master, security_master_path = _latest_security_master(
+        root,
+        as_of=ceiling,
+        tickers=set(normalized),
+    )
     security_index = _security_master_index(security_master)
     shadow_dir, latest_shadow_attempt = _latest_valid_shadow(root, as_of=ceiling)
     strategies = _load_shadow_strategies(shadow_dir)

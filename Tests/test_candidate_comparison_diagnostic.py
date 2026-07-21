@@ -178,3 +178,17 @@ def test_missing_artifacts_fail_to_partial_without_inventing_scores(tmp_path: Pa
     assert meta["latest_score"] is None
     assert meta["sleeve_rank"] is None
     assert meta["primary_blocker"] == "NO_VALID_SHADOW_ARTIFACT"
+
+
+def test_security_master_reader_ignores_large_unrelated_sections(tmp_path: Path) -> None:
+    _build_fixture(tmp_path)
+    path = tmp_path / "data" / "security_master" / "2026-07-20" / "ticker_universe.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["events"] = {"inactive_symbols": [{"symbol": f"ZZ{i}", "detail": "x" * 500} for i in range(500)]}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = build_candidate_comparison(tickers=["MU"], repo_root=tmp_path, as_of="2026-07-20")
+
+    mu = _by_ticker(result, "MU")
+    assert mu["security_master_present"] is True
+    assert mu["security_master_tradable"] is True
