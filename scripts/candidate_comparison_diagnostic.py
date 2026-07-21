@@ -78,7 +78,9 @@ def _load_active_universe(repo_root: Path) -> tuple[set[str], Path]:
     symbols: set[str] = set()
     try:
         with path.open(newline="", encoding="utf-8") as handle:
-            for row in csv.DictReader(handle):
+            # The deployed universe currently carries a leading blank line.
+            # Skip blank records so DictReader sees the actual header.
+            for row in csv.DictReader(line for line in handle if line.strip()):
                 symbol = str(row.get("ticker") or "").strip().upper()
                 if symbol:
                     symbols.add(symbol)

@@ -192,3 +192,13 @@ def test_security_master_reader_ignores_large_unrelated_sections(tmp_path: Path)
     mu = _by_ticker(result, "MU")
     assert mu["security_master_present"] is True
     assert mu["security_master_tradable"] is True
+
+
+def test_universe_reader_accepts_leading_blank_line(tmp_path: Path) -> None:
+    _build_fixture(tmp_path)
+    path = tmp_path / "data" / "universe.csv"
+    path.write_text("\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = build_candidate_comparison(tickers=["MU"], repo_root=tmp_path)
+
+    assert _by_ticker(result, "MU")["universe_eligible"] is True
