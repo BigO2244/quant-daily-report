@@ -16,6 +16,11 @@ def test_vm_validation_helper_uses_canonical_venv_and_targeted_tests() -> None:
     assert "Tests/test_sleeve_numeric_diagnostics.py" in text
     assert "Tests/test_target_attainment.py" in text
     assert "git status --short" in text
+    assert "scripts/live_pilot_sha_guard.py" in text
+    assert "CAERUS_DEPLOY_CANDIDATE_SHA" in text
+    assert "CAERUS_DEPLOY_INTERNAL" in text
+    assert "candidate mode is restricted to the detached deployment worktree" in text
+    assert "deployment_attestation=verified" in text
     assert "[VM_VALIDATION][PASS]" in text
 
 

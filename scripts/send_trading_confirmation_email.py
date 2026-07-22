@@ -773,6 +773,19 @@ _INTERNAL_ADAPTER_REASON_MARKERS = (
     "unsupported operand",
 )
 
+_SYSTEM_SAFETY_REASON_MARKERS = (
+    "live_pilot_deploy_",
+    "live_pilot_running_sha_",
+    "live_pilot_working_tree_",
+    "live_pilot_kill_switch_",
+    "live_pilot_deployment_in_progress",
+    "live_pilot_gate_blocked",
+    "deploy drift guard",
+    "precompute_bundle_",
+    "missing_live_pilot_",
+    "invalid_live_pilot_",
+)
+
 
 def _classify_reason(reason: object) -> str:
     """Label a rejection/blocked reason as an internal adapter error vs a broker
@@ -785,6 +798,8 @@ def _classify_reason(reason: object) -> str:
     lowered = text.lower()
     if any(marker in lowered for marker in _INTERNAL_ADAPTER_REASON_MARKERS):
         return f"internal adapter error (not a broker decline): {text}"
+    if any(marker in lowered for marker in _SYSTEM_SAFETY_REASON_MARKERS):
+        return f"system safety block (not a broker decline): {text}"
     return f"broker decline: {text}"
 
 
@@ -1035,7 +1050,13 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     # ------------------------------------------------------------------ #
     action_items: list[str] = []
     if status_display in {"HALTED", "PARTIAL"}:
-        action_items.append("Review execution halt before next run.")
+        halt_text = str(halt_reason or "").lower()
+        if "deploy" in halt_text or "working_tree" in halt_text:
+            action_items.append(
+                "Validate and attest the exact VM deployment before the next live run; do not bypass the deployment guard."
+            )
+        else:
+            action_items.append("Review execution halt before next run.")
     elif status_display == "SUBMITTED_UNFILLED":
         action_items.append(
             "Orders are live at the broker and not yet fully filled; monitor for "

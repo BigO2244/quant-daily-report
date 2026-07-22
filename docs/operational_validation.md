@@ -45,7 +45,7 @@ Before push:
 .venv/bin/python3 scripts/operational_validation.py
 ```
 
-After VM fast-forward:
+After the canonical VM deployment (`./scripts/deploy.sh`):
 
 ```bash
 ./scripts/ops/run_vm_validation.sh
@@ -77,9 +77,13 @@ environment:
 - `/home/brettolson/.venvs/quant-daily-report/bin/python`
 - `/home/brettolson/.venvs/quant-daily-report/bin/pytest`
 
-It fails fast if either binary is missing, prints git hash and working-tree
+It fails fast if either binary is missing, verifies the v2 deployment
+attestation matches the exact full `HEAD`, prints git hash and working-tree
 state, runs the read-only operational validator, compiles the FR-069 sleeve
-validators, and runs a small no-broker targeted test slice.
+validators, and runs a small no-broker targeted test slice. A raw pull with a
+stale marker therefore fails validation. Candidate mode is accepted only from
+the internal deployment command while validating a detached worktree; exporting
+the candidate SHA on production `main` cannot bypass attestation verification.
 
 For cron-adjacent changes:
 

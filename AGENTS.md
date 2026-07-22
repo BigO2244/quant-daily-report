@@ -542,7 +542,7 @@ Four independent layers prevent position and regime whipsaw:
 Canonical deployment model:
 - `origin/main` is the canonical source of truth for deployable source.
 - The scheduler VM is a deploy target, not a canonical source.
-- Standard flow is `commit -> push -> pull/fast-forward on VM -> validate`.
+- Standard flow is `commit -> push -> scripts/deploy.sh on VM -> attest`.
 - VM deployment must be fast-forwardable from `origin/main`; do not create VM
   merge commits, rebase VM history, or force-overwrite VM source.
 - Local commits do not deploy to the VM until pushed and pulled on the VM.
@@ -578,8 +578,10 @@ Canonical deployment sequence:
 2. Isolated commit with rollback boundary clear.
 3. Push to `origin/main`.
 4. VM audit: status, HEAD, staged/unstaged/untracked drift.
-5. VM fast-forward only from `origin/main`.
-6. Run operational validation and targeted checks.
+5. Run `scripts/deploy.sh`; it validates a pinned `origin/main` SHA in a
+   temporary worktree, publishes by fast-forward only, and atomically records
+   the exact full-SHA attestation.
+6. Run routine VM validation to verify the published attestation and targeted checks.
 7. Observe the wave-specific runtime artifacts before considering the wave
    fully settled.
 
@@ -587,7 +589,7 @@ Canonical rollback process:
 1. Record VM status, HEAD, and relevant runtime evidence.
 2. Prefer `git revert <bad-commit>` locally.
 3. Push the revert commit.
-4. VM fast-forward to the revert.
+4. VM deploy the revert through `scripts/deploy.sh`.
 5. Re-run operational validation and targeted checks.
 6. Preserve generated recovery/status artifacts as evidence; do not delete them
    as a rollback shortcut.
@@ -791,7 +793,7 @@ Runtime separation:
 - Scheduler host path: `~/quant-daily-report`
 - Cron source: `scripts/crontab.txt` — install with `crontab scripts/crontab.txt`
 - Canonical deploy source: `origin/main`
-- Standard VM deploy: fetch/pull fast-forward from `origin/main`, then validate
+- Standard VM deploy: run `scripts/deploy.sh`; raw pull/merge is not a complete deployment
 - SCP is exception-only; reconcile any SCP hotfix back through git before
   considering deployment deterministic again
 - Preserve recovery patches and VM stashes until they have been explicitly

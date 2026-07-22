@@ -13,9 +13,9 @@
 - Canonical deployable source is `origin/main`.
 - The scheduler VM at `~/quant-daily-report` is a deploy target, not the source
   of truth.
-- Standard deployment flow is `commit -> push -> fast-forward pull on VM -> validate`.
+- Standard deployment flow is `commit -> push -> scripts/deploy.sh on VM -> attest`.
 - Rollback-first governance is canonical: prefer `git revert`, push, VM
-  fast-forward, then validation.
+  `scripts/deploy.sh`, then validation.
 - Wave deployments group related changes by rollback boundary and observation
   surface. Scheduler, cache, and recovery changes remain `DEPLOYED_OBSERVING`
   until runtime artifacts confirm healthy behavior.

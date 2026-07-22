@@ -302,6 +302,7 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         }
 
     summary = _load_json(run_root / "live_pilot_operator_summary.json")
+    gate_state = _load_json(run_root / "live_pilot_gate_state.json")
     recon = _load_json(run_root / "live_pilot_reconciliation.json")
     evidence = _load_json(run_root / "live_pilot_evidence_metrics.json")
     execution_results = _load_json(run_root / "execution_results.json")
@@ -373,8 +374,19 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         evidence.get("remaining_blocked_or_suppressed_buy_count"),
         max(int(approved_buy_count or 0) - int(submitted_buy_count or 0), 0),
     )
+    gate_decision = str(gate_state.get("decision") or "").strip().upper()
+    payload_status = str(execution_results.get("status") or "").strip().upper()
+    if gate_decision == "BLOCKED":
+        live_status = "BLOCKED"
+    elif payload_status:
+        live_status = payload_status
+    elif gate_state:
+        live_status = "DEGRADED"
+    else:
+        live_status = "OK"
+    gate_reason = gate_state.get("block_reason")
     return {
-        "status": "OK",
+        "status": live_status,
         "latest_run_id": summary.get("run_id") or run_root.name,
         "latest_run_root": str(run_root),
         "latest_plan_path": summary.get("plan_path") or "unavailable",
@@ -383,7 +395,7 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         "open_orders": open_orders,
         "positions": positions,
         "filled_orders": filled,
-        "reconciliation_status": recon.get("status") or summary.get("reason_code") or "unavailable",
+        "reconciliation_status": recon.get("status") or gate_reason or summary.get("reason_code") or "unavailable",
         "evidence_metrics": evidence,
         "execution_results": execution_results,
         "approved_buy_count": approved_buy_count,
@@ -392,8 +404,8 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         "escalated_buy_count": escalated_buy_count,
         "remaining_blocked_or_suppressed_buy_count": remaining_blocked_or_suppressed_buy_count,
         "blocked_or_suppressed_buy_reason": (
-            summary.get("reason_code")
-            if int(remaining_blocked_or_suppressed_buy_count or 0) > 0
+            gate_reason or summary.get("reason_code")
+            if gate_decision == "BLOCKED" or int(remaining_blocked_or_suppressed_buy_count or 0) > 0
             else "none"
         ),
         "entry_execution_policy": _first_present(

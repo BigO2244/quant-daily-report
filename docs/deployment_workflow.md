@@ -45,14 +45,16 @@ Use this sequence for normal source deployments:
 6. Fetch and verify canonical target:
    - `git fetch origin`
    - `git log origin/main -1 --oneline`
-7. Fast-forward only:
-   - preferred: `git pull --ff-only origin main`
-   - equivalent when already fetched: `git merge --ff-only origin/main`
-8. Validate:
+7. Run the one canonical VM deployment command:
+   - `./scripts/deploy.sh`
+   - The script takes the deployment/execution lock, pins the full
+     `origin/main` SHA, validates it in a detached temporary worktree, publishes
+     it by fast-forward only, and atomically writes the v2 deployment
+     attestation only after validation passes.
+8. Verify the completed attestation:
    - `git status`
    - `git log -1 --oneline`
    - `./scripts/ops/run_vm_validation.sh`
-   - targeted syntax/tests based on changed files
 9. Observe wave-specific runtime artifacts before closing the deployment:
    - shadow orchestration: `outputs/workflow/<date>/shadow*.json`
    - self-heal recovery: `outputs/workflow/<date>/*self_heal.json`
@@ -96,6 +98,45 @@ Canonical one-command VM validation from a local shell:
 ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'
 ```
 
+Canonical deployment from a local shell:
+
+```text
+ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/deploy.sh'
+```
+
+Do not use a raw `git pull` or `git merge` as a deployment. Those commands can
+advance `HEAD` without producing a validated deployment attestation; routine VM
+validation and live submission will fail closed until `scripts/deploy.sh`
+completes.
+
+### One-Time v1 to v2 Bootstrap
+
+The first rollout of the v2 attestation is special because the VM begins by
+executing its existing v1 `deploy.sh`. Use one controlled two-pass command:
+
+```text
+ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/deploy.sh && ./scripts/deploy.sh && ./scripts/ops/run_vm_validation.sh'
+```
+
+The first pass advances to the commit containing the new deployment machinery;
+the second pass runs that new machinery and writes the required v2 full-SHA
+attestation. Verify `[VM_VALIDATION][PASS]` before considering the bootstrap
+complete. After this one-time migration, every normal deployment is one
+`./scripts/deploy.sh` invocation.
+
+Candidate validation is transactional: a failed candidate does not advance the
+production checkout or replace its prior marker. Publication is intentionally
+fail-closed rather than a single filesystem transaction across Git and JSON: if
+the process stops after the fast-forward but before marker replacement, live
+submission remains blocked and rerunning `./scripts/deploy.sh` safely completes
+the attestation.
+
+The deployment lock is shared with the live-pilot execution lane. Lock waits are
+bounded and a live run that encounters an active deployment writes an actionable
+`live_pilot_deployment_in_progress` terminal block. Deploy outside the market
+execution window; the lock does not claim to pause every paper, research, or
+reporting process.
+
 Do not run trading workflows, regenerate broker snapshots, or trigger cron jobs
 as a deployment validation shortcut.
 
@@ -122,8 +163,7 @@ Canonical source rollback:
 ```text
 git revert <commit>
 git push origin main
-VM: git fetch origin
-VM: git pull --ff-only origin main
+VM: ./scripts/deploy.sh
 VM: ./scripts/ops/run_vm_validation.sh
 ```
 
@@ -143,8 +183,9 @@ The normal VM state before deployment is:
 - no unexplained untracked production source
 - `main` can fast-forward to `origin/main`
 
-If `git merge --ff-only origin/main` fails, stop and report. Do not create a
-merge commit on the VM.
+The deployment script enforces fast-forward ancestry. If it rejects the target,
+stop and report. Do not create a merge commit, reset the VM, or bypass the
+attestation writer.
 
 ## Drift Detection Expectations
 
@@ -234,6 +275,8 @@ SCP-only source must not remain the production truth.
 
 - [ ] VM HEAD matches expected `origin/main`.
 - [ ] VM working tree is clean.
+- [ ] `outputs/deploy_state.json` is a v2 `PASS` attestation whose full
+      `deployed_sha`, `validated_sha`, and `target_sha` equal VM `HEAD`.
 - [ ] `./scripts/ops/run_vm_validation.sh` has `[VM_VALIDATION][PASS]`.
 - [ ] Relevant syntax checks passed.
 - [ ] Targeted pytest slices passed if required.
