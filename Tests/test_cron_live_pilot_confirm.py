@@ -153,3 +153,22 @@ def test_sweep_confirms_only_new_run_after_late_submit(tmp_path: Path) -> None:
     sent = [ln for ln in send_log.read_text().splitlines() if ln.strip()]
     assert len(sent) == 2  # the previously-unreported submit is now confirmed
     assert sent[1].endswith("_live_pilot_cron_submit")
+
+
+def test_sweep_fails_loud_when_dry_run_masks_unconfirmable_block(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    ledger = tmp_path / "ledger.jsonl"
+    send_log = tmp_path / "sends.log"
+    dry = "2026-07-10T093604-0400_live_pilot_cron_dry"
+    gate = "2026-07-10T093601-0400_live_pilot_cron_gate"
+    _write_run(runs, dry, "DRY_RUN_NO_SUBMISSION")
+    pointer = tmp_path / "workflow" / "2026-07-10" / "live_pilot_execution.json"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text(
+        '{"run_id":"' + gate + '","status":"blocked","status_message":"live_pilot_deploy_sha_drift"}',
+        encoding="utf-8",
+    )
+
+    proc = _run_sweep(tmp_path, runs, ledger, send_log)
+    assert "SWEEP_RC=1" in proc.stdout, proc.stdout + proc.stderr
+    assert "terminal LIVE_PILOT workflow outcome is not confirmable" in proc.stdout

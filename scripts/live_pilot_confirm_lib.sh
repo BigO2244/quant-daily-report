@@ -48,7 +48,7 @@ except Exception as exc:  # noqa: BLE001 - alerting must not raise
 PYEOF
 }
 
-live_pilot_confirm_sweep() {
+_live_pilot_confirm_sweep_locked() {
     local runs_root="${1:-outputs/live_pilot/runs}"
     local ledger="${2:-outputs/live_pilot/state/confirm_sent_ledger.jsonl}"
     local discover_mod="scripts.live_pilot_confirm_discover"
@@ -68,11 +68,27 @@ live_pilot_confirm_sweep() {
         return 1
     }
 
-    local has_any pending_count terminal_count
+    local has_any pending_count terminal_count unconfirmable_count
     has_any="$(printf '%s\n' "${summary}" | sed -n 's/^has_any_run=//p')"
     terminal_count="$(printf '%s\n' "${summary}" | sed -n 's/^terminal_count=//p')"
     pending_count="$(printf '%s\n' "${summary}" | sed -n 's/^pending_count=//p')"
-    echo "confirm_sweep: has_any_run=${has_any} terminal_count=${terminal_count} pending_count=${pending_count}"
+    unconfirmable_count="$(printf '%s\n' "${summary}" | sed -n 's/^unconfirmable_count=//p')"
+    echo "confirm_sweep: has_any_run=${has_any} terminal_count=${terminal_count} pending_count=${pending_count} unconfirmable_count=${unconfirmable_count}"
+
+    if [[ "${unconfirmable_count:-0}" != "0" ]]; then
+        echo "ALERT: terminal LIVE_PILOT workflow outcome is not confirmable for ${REPORT_DATE}."
+        live_pilot_confirm_alert \
+            "❌ [LIVE_PILOT] Terminal outcome is UNCONFIRMABLE — ${REPORT_DATE}" \
+            "The LIVE_PILOT workflow pointer names a terminal run, but that run has no terminal execution_results.json.
+
+An earlier dry run must not mask a later wrapper-level block.
+
+Check:
+- outputs/workflow/${REPORT_DATE}/live_pilot_execution.json
+- ${runs_root}
+- logs/live_pilot_execute_${REPORT_DATE}.log" || true
+        return 1
+    fi
 
     if [[ "${has_any}" != "1" ]]; then
         # FAIL LOUD: a scheduled sweep found NO run for a trade date. This is the
@@ -143,5 +159,33 @@ This run is NOT recorded as confirmed and will be retried on the next sweep. Inv
         fi
     done <<< "${pending_lines}"
 
+    return ${sweep_rc}
+}
+
+live_pilot_confirm_sweep() {
+    local ledger="${2:-outputs/live_pilot/state/confirm_sent_ledger.jsonl}"
+    local lock_path="${ledger}.lock"
+    local lock_dir="${lock_path}.d"
+    local sweep_rc=0 lock_attempts=0
+    mkdir -p "$(dirname "${lock_path}")"
+    if command -v flock >/dev/null 2>&1; then
+        exec 7>"${lock_path}"
+        flock -x 7
+        _live_pilot_confirm_sweep_locked "$@" || sweep_rc=$?
+        flock -u 7
+        exec 7>&-
+    else
+        # macOS test/development fallback. The production Linux VM uses flock.
+        while ! mkdir "${lock_dir}" 2>/dev/null; do
+            lock_attempts=$((lock_attempts + 1))
+            if [[ "${lock_attempts}" -ge 300 ]]; then
+                echo "ERROR: timed out waiting for confirmation sweep lock: ${lock_dir}" >&2
+                return 1
+            fi
+            sleep 0.1
+        done
+        _live_pilot_confirm_sweep_locked "$@" || sweep_rc=$?
+        rmdir "${lock_dir}"
+    fi
     return ${sweep_rc}
 }

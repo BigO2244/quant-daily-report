@@ -46,6 +46,12 @@ def test_live_pilot_cron_execute_preserves_live_safety_gates() -> None:
     assert "CAERUS_LIVE_PILOT_DRY_RUN=0" in text
     assert text.index("CAERUS_LIVE_PILOT_DRY_RUN=1") < text.index("CAERUS_LIVE_PILOT_DRY_RUN=0")
     assert 'if [[ "${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}" != "1" ]]; then' in text
+    assert 'flock -s -w 30 8' in text
+    assert "live_pilot_deployment_in_progress" in text
+    assert "finish_blocked_run" in text
+    assert text.count("refresh_sha_guard") >= 3  # definition + startup + immediate pre-submit refresh
+    assert "live_pilot_deploy_guard_unreadable" in text
+    assert '--guard-message "${SHA_DRIFT_MESSAGE:-}"' in text
     assert 'Path("outputs") / "workflow" / trade_date / "live_pilot_execution.json"' in text
     assert text.index("missing_live_pilot_approval") < text.index("scripts/live_pilot_build_plan_from_precompute.py")
     assert text.index("live_pilot_capital_cap_unresolved") < text.index("scripts/live_pilot_build_plan_from_precompute.py")

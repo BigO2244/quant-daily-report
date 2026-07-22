@@ -36,6 +36,16 @@ set +a
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/lane_params.sh"
 
+# Deployments take the same lock exclusively. Holding a shared lock for the
+# entire execution lifecycle prevents HEAD from changing between validation,
+# dry-run planning, and broker submission.
+mkdir -p "${HOME}/.caerus"
+exec 8>"${HOME}/.caerus/source_deploy.lock"
+DEPLOY_LOCK_BLOCKED=0
+if ! flock -s -w 30 8; then
+    DEPLOY_LOCK_BLOCKED=1
+fi
+
 truthy() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
         1|true|yes|y|on|approve_live_pilot) return 0 ;;
@@ -90,28 +100,46 @@ echo "submit_approved=${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}"
 # deployed_sha and reports a dirty working tree. Drift/dirty fails the SUBMIT
 # path closed (enforced below, immediately before submission); the DRY path
 # proceeds but flags the drift loudly here.
-RUNNING_SHA="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
-echo "running_sha=${RUNNING_SHA}"
-# The guard exits non-zero when SUBMIT must be blocked (that IS a valid verdict,
-# not a failure), so capture stdout unconditionally and let the parse below read
-# the JSON verdict. `|| true` keeps `set -e` from aborting on the block exit code.
-SHA_GUARD_JSON="$("${PYTHON_BIN}" scripts/live_pilot_sha_guard.py --repo-root "${REPO_ROOT}" 2>/dev/null)" || true
-# Extract guard fields via a single python read (summary_field is defined later
-# in this file, so it is not usable at this point in execution order).
-eval "$(
-    SHA_GUARD_JSON="${SHA_GUARD_JSON}" "${PYTHON_BIN}" - <<'PY'
+refresh_sha_guard() {
+    local guard_rc=0
+    SHA_GUARD_JSON="$("${PYTHON_BIN}" scripts/live_pilot_sha_guard.py --repo-root "${REPO_ROOT}" 2>/dev/null)" || guard_rc=$?
+    # Malformed/empty guard output is itself a fail-closed verdict. The submit
+    # path must never inherit a stale prior value after a guard failure.
+    eval "$(
+        SHA_GUARD_JSON="${SHA_GUARD_JSON}" SHA_GUARD_RC="${guard_rc}" "${PYTHON_BIN}" - <<'PY'
 import json, os, shlex
-d = json.loads(os.environ.get("SHA_GUARD_JSON") or "{}")
+try:
+    d = json.loads(os.environ.get("SHA_GUARD_JSON") or "{}")
+except Exception:
+    d = {}
 def emit(k, v):
     print(f"{k}={shlex.quote('' if v is None else str(v))}")
+valid = isinstance(d, dict) and isinstance(d.get("block_submit"), bool)
+emit("RUNNING_SHA", d.get("running_sha") or "unknown")
 emit("_DEPLOY_SHA", d.get("deployed_sha") or "unknown")
 emit("SHA_DRIFT", d.get("sha_drift"))
 emit("SHA_TREE_DIRTY", d.get("tree_dirty"))
-emit("SHA_BLOCK_SUBMIT", d.get("block_submit"))
-emit("SHA_DRIFT_REASON", d.get("reason_code") or "")
-emit("SHA_DRIFT_MESSAGE", d.get("message") or "")
+emit("SHA_BLOCK_SUBMIT", d.get("block_submit") if valid else True)
+emit("SHA_DRIFT_REASON", d.get("reason_code") if valid else "live_pilot_deploy_guard_unreadable")
+emit("SHA_DRIFT_MESSAGE", d.get("message") if valid else "DEPLOY DRIFT GUARD: verdict output missing or malformed")
+emit("SHA_GUARD_RC", os.environ.get("SHA_GUARD_RC") or "0")
 PY
-)"
+    )"
+}
+
+RUNNING_SHA="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
+echo "running_sha=${RUNNING_SHA}"
+if [[ "${DEPLOY_LOCK_BLOCKED}" == "0" ]]; then
+    refresh_sha_guard
+else
+    _DEPLOY_SHA="unknown"
+    SHA_DRIFT="unknown"
+    SHA_TREE_DIRTY="unknown"
+    SHA_BLOCK_SUBMIT="True"
+    SHA_DRIFT_REASON="live_pilot_deployment_in_progress"
+    SHA_DRIFT_MESSAGE="LIVE_PILOT blocked: deployment holds the source lock"
+    SHA_GUARD_RC="lock_timeout"
+fi
 echo "deployed_sha=${_DEPLOY_SHA:-unknown}"
 echo "deploy_sha_drift=${SHA_DRIFT:-unknown} working_tree_dirty=${SHA_TREE_DIRTY:-unknown}"
 if [[ "${SHA_BLOCK_SUBMIT}" == "True" ]]; then
@@ -193,8 +221,27 @@ write_gate_state_blocked() {
         --trade-date "${REPORT_DATE}" \
         --decision BLOCKED \
         --block-reason "${reason}" \
+        --running-sha "${RUNNING_SHA:-}" \
+        --deployed-sha "${_DEPLOY_SHA:-}" \
+        --tree-dirty "${SHA_TREE_DIRTY:-}" \
+        --guard-message "${SHA_DRIFT_MESSAGE:-}" \
         --output-root outputs/live_pilot >/dev/null || true
 }
+
+finish_blocked_run() {
+    local reason="$1"
+    local exit_code="${2:-1}"
+    write_gate_state_blocked "${reason}"
+    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "${reason}"
+    confirm_completed_runs || true
+    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${exit_code}"
+    exit "${exit_code}"
+}
+
+if [[ "${DEPLOY_LOCK_BLOCKED}" == "1" ]]; then
+    echo "FATAL: LIVE_PILOT source lock unavailable; deployment is in progress" >&2
+    finish_blocked_run "live_pilot_deployment_in_progress" 1
+fi
 
 if ! truthy "${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"; then
     echo "LIVE_PILOT schedule disabled: set CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1 to enable scheduled dry-run/live-pilot lifecycle."
@@ -342,12 +389,14 @@ fi
 # deployed/audited SHA, if the working tree is dirty, or if HEAD is unresolvable.
 # This makes "audited SHA == deployed SHA" mechanically enforced, not aspirational.
 # (The DRY run above already ran and flagged any drift; only submission is gated.)
+# Re-read the guard immediately before submission. The shared deployment lock
+# prevents legitimate deploy movement, while this fresh verdict also catches
+# any unexpected tree mutation that occurred during plan/dry-run processing.
+refresh_sha_guard
+echo "pre_submit_deployed_sha=${_DEPLOY_SHA:-unknown} guard_rc=${SHA_GUARD_RC:-unknown}"
 if [[ "${SHA_BLOCK_SUBMIT}" == "True" ]]; then
     echo "FATAL: LIVE_PILOT submission blocked by deploy-drift guard: ${SHA_DRIFT_MESSAGE}"
-    write_gate_state_blocked "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}"
-    write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}"
-    echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
-    exit 1
+    finish_blocked_run "${SHA_DRIFT_REASON:-live_pilot_deploy_sha_drift}" 1
 fi
 
 echo "=== LIVE_PILOT SCHEDULED SUBMISSION ==="

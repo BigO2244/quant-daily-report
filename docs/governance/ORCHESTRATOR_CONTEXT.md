@@ -55,6 +55,10 @@ artifacts and an explicit research-to-production promotion ladder.
 - Static IPs are non-authoritative.
 - Canonical non-interactive VM validation:
   `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'`
+- Canonical VM deployment:
+  `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/deploy.sh'`
+- A raw VM `git pull` or `git merge` is not a completed deployment because it
+  does not produce the validated full-SHA attestation required by live execution.
 
 ## Canonical Governance References
 

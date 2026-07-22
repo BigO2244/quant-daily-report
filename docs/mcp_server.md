@@ -269,10 +269,10 @@ After review, deploy by the normal deterministic source flow:
 
 ```bash
 git push origin main
-gcloud compute ssh brettolson@alpha-stack-scheduler --zone us-central1-a
+ssh caerus-vm
 cd ~/quant-daily-report
 git status --short
-git pull --ff-only origin main
+./scripts/deploy.sh
 source venv/bin/activate
 python3 scripts/research_registry_mcp_server.py --help
 python3 scripts/research_registry_mcp_server.py smoke \

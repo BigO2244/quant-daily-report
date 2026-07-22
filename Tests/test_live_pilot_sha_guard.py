@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 
 from core.live_pilot_sha_guard import (
+    DEPLOY_STATE_SCHEMA,
+    REASON_DEPLOY_ATTESTATION_INVALID,
     REASON_DEPLOY_SHA_DRIFT,
     REASON_DEPLOY_SHA_UNKNOWN,
     REASON_RUNNING_SHA_UNAVAILABLE,
@@ -40,12 +42,10 @@ def test_pin_verified_full_match_clean_tree_allows_submit():
     assert "pin verified" in v.message
 
 
-def test_short_deploy_marker_matches_full_head():
-    # deploy.sh historically wrote `git rev-parse --short HEAD`; short/full must
-    # be treated as the same commit (prefix equivalence), not drift.
+def test_short_deploy_marker_is_rejected():
     v = evaluate_sha_drift(FULL, SHORT, tree_dirty=False)
-    assert v.block_submit is False
-    assert v.sha_drift is False
+    assert v.block_submit is True
+    assert v.sha_drift is True
 
 
 def test_sha_drift_blocks_submit():
@@ -131,15 +131,33 @@ def git_repo(tmp_path: Path) -> Path:
     _git(repo, "config", "user.email", "t@t.t")
     _git(repo, "config", "user.name", "t")
     (repo / "a.txt").write_text("hello\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("outputs/\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     return repo
 
 
+def _write_attestation(path: Path, sha: str) -> Path:
+    return write_deploy_state(
+        path,
+        sha,
+        branch="main",
+        metadata={
+            "schema_version": DEPLOY_STATE_SCHEMA,
+            "source_ref": "origin/main",
+            "validated_sha": sha,
+            "target_sha": sha,
+            "validation_status": "PASS",
+            "validated_at": "2026-07-22T12:00:00Z",
+            "validation_command": "scripts/ops/run_vm_validation.sh",
+        },
+    )
+
+
 def test_resolve_clean_tree_matching_deploy_allows(git_repo: Path):
     head = _git(git_repo, "rev-parse", "HEAD")
     ds = git_repo / "outputs" / "deploy_state.json"
-    write_deploy_state(ds, head)
+    _write_attestation(ds, head)
     v = resolve_sha_state(git_repo, ds)
     assert v.block_submit is False
     assert v.running_sha == head
@@ -149,7 +167,7 @@ def test_resolve_clean_tree_matching_deploy_allows(git_repo: Path):
 def test_resolve_dirty_tree_blocks(git_repo: Path):
     head = _git(git_repo, "rev-parse", "HEAD")
     ds = git_repo / "outputs" / "deploy_state.json"
-    write_deploy_state(ds, head)
+    _write_attestation(ds, head)
     (git_repo / "a.txt").write_text("dirty change\n", encoding="utf-8")
     v = resolve_sha_state(git_repo, ds)
     assert v.tree_dirty is True
@@ -159,18 +177,50 @@ def test_resolve_dirty_tree_blocks(git_repo: Path):
 
 def test_resolve_drift_blocks(git_repo: Path):
     ds = git_repo / "outputs" / "deploy_state.json"
-    write_deploy_state(ds, OTHER)  # deploy marker names a different commit
+    _write_attestation(ds, OTHER)  # deploy marker names a different commit
     v = resolve_sha_state(git_repo, ds)
     assert v.sha_drift is True
     assert v.block_submit is True
 
 
-def test_resolve_untracked_artifacts_do_not_count_as_dirty(git_repo: Path):
+def test_resolve_gitignored_artifacts_do_not_count_as_dirty(git_repo: Path):
     # outputs/ (gitignored runtime evidence) must not trip the dirty guard.
     head = _git(git_repo, "rev-parse", "HEAD")
     ds = git_repo / "outputs" / "deploy_state.json"
-    write_deploy_state(ds, head)
-    (git_repo / "runtime_artifact.log").write_text("evidence\n", encoding="utf-8")
+    _write_attestation(ds, head)
+    (git_repo / "outputs").mkdir(exist_ok=True)
+    (git_repo / "outputs" / "runtime_artifact.log").write_text("evidence\n", encoding="utf-8")
     v = resolve_sha_state(git_repo, ds)
     assert v.tree_dirty is False
     assert v.block_submit is False
+
+
+def test_resolve_untracked_source_blocks(git_repo: Path):
+    head = _git(git_repo, "rev-parse", "HEAD")
+    ds = git_repo / "outputs" / "deploy_state.json"
+    _write_attestation(ds, head)
+    (git_repo / "untracked_module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    v = resolve_sha_state(git_repo, ds)
+    assert v.tree_dirty is True
+    assert REASON_WORKING_TREE_DIRTY in (v.reason_code or "")
+
+
+def test_resolve_matching_legacy_marker_is_invalid(git_repo: Path):
+    head = _git(git_repo, "rev-parse", "HEAD")
+    ds = git_repo / "outputs" / "deploy_state.json"
+    write_deploy_state(ds, head, branch="main")
+    v = resolve_sha_state(git_repo, ds)
+    assert v.block_submit is True
+    assert REASON_DEPLOY_ATTESTATION_INVALID in (v.reason_code or "")
+
+
+def test_resolve_non_pass_attestation_is_invalid(git_repo: Path):
+    head = _git(git_repo, "rev-parse", "HEAD")
+    ds = git_repo / "outputs" / "deploy_state.json"
+    _write_attestation(ds, head)
+    payload = json.loads(ds.read_text(encoding="utf-8"))
+    payload["validation_status"] = "FAILED"
+    ds.write_text(json.dumps(payload), encoding="utf-8")
+    v = resolve_sha_state(git_repo, ds)
+    assert v.block_submit is True
+    assert REASON_DEPLOY_ATTESTATION_INVALID in (v.reason_code or "")

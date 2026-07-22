@@ -158,6 +158,33 @@ def discover_pending(
     pending = [run for run in terminal if run["run_id"] not in sent]
     already_sent = [run for run in terminal if run["run_id"] in sent]
 
+    # The workflow pointer is the wrapper's terminal truth. A terminal pointer
+    # whose run has no confirmable execution_results.json must fail loud even if
+    # an earlier dry run exists; otherwise that dry run masks the real block.
+    outputs_root = (
+        runs_root.parent.parent
+        if runs_root.name == "runs" and runs_root.parent.name == "live_pilot"
+        else runs_root.parent
+    )
+    workflow_pointer_path = outputs_root / "workflow" / trade_date / "live_pilot_execution.json"
+    workflow_pointer = _read_json(workflow_pointer_path)
+    unconfirmable: list[dict[str, Any]] = []
+    if workflow_pointer:
+        pointer_status = str(workflow_pointer.get("status") or "").strip()
+        pointer_run_id = str(workflow_pointer.get("run_id") or "").strip()
+        pointer_terminal = pointer_status.lower() not in _NON_TERMINAL_STATUSES | {"disabled"}
+        terminal_ids = {str(run.get("run_id") or "") for run in terminal}
+        if pointer_terminal and pointer_run_id and pointer_run_id not in terminal_ids:
+            unconfirmable.append(
+                {
+                    "run_id": pointer_run_id,
+                    "status": pointer_status,
+                    "run_root": str(workflow_pointer.get("run_root") or ""),
+                    "pointer_path": str(workflow_pointer_path),
+                    "reason": str(workflow_pointer.get("status_message") or "terminal_result_missing"),
+                }
+            )
+
     return {
         "trade_date": trade_date,
         "runs_root": str(runs_root),
@@ -166,6 +193,9 @@ def discover_pending(
         "terminal_count": len(terminal),
         "pending_count": len(pending),
         "already_sent_count": len(already_sent),
+        "unconfirmable_count": len(unconfirmable),
+        "unconfirmable": unconfirmable,
+        "workflow_pointer_path": str(workflow_pointer_path),
         "pending": pending,
         "terminal": terminal,
     }
@@ -178,6 +208,7 @@ def _cmd_discover(args: argparse.Namespace) -> int:
         print(f"terminal_count={result['terminal_count']}")
         print(f"pending_count={result['pending_count']}")
         print(f"already_sent_count={result['already_sent_count']}")
+        print(f"unconfirmable_count={result['unconfirmable_count']}")
         return 0
     if args.emit_pending:
         for run in result["pending"]:

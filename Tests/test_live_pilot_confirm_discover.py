@@ -124,3 +124,46 @@ def test_other_date_runs_are_ignored(tmp_path: Path) -> None:
     result = discover_pending("2026-07-10", runs, ledger)
     assert result["terminal_count"] == 1
     assert result["pending"][0]["run_id"].startswith("2026-07-10T")
+
+
+def test_later_blocked_pointer_cannot_be_masked_by_dry_run(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    ledger = tmp_path / "ledger.jsonl"
+    dry = "2026-07-22T093606-0400_live_pilot_cron_dry"
+    gate = "2026-07-22T093601-0400_live_pilot_cron_gate"
+    _make_run(runs, dry, "DRY_RUN_NO_SUBMISSION")
+    pointer = tmp_path / "workflow" / "2026-07-22" / "live_pilot_execution.json"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text(
+        json.dumps(
+            {
+                "run_id": gate,
+                "run_root": str(runs / gate),
+                "status": "blocked",
+                "status_message": "live_pilot_deploy_sha_drift",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = discover_pending("2026-07-22", runs, ledger)
+    assert result["terminal_count"] == 1
+    assert result["pending"][0]["run_id"] == dry
+    assert result["unconfirmable_count"] == 1
+    assert result["unconfirmable"][0]["run_id"] == gate
+
+
+def test_blocked_pointer_is_confirmable_when_gate_result_exists(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    ledger = tmp_path / "ledger.jsonl"
+    gate = "2026-07-22T093601-0400_live_pilot_cron_gate"
+    _make_run(runs, gate, "HALTED")
+    pointer = tmp_path / "workflow" / "2026-07-22" / "live_pilot_execution.json"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text(
+        json.dumps({"run_id": gate, "run_root": str(runs / gate), "status": "blocked"}),
+        encoding="utf-8",
+    )
+    result = discover_pending("2026-07-22", runs, ledger)
+    assert result["unconfirmable_count"] == 0
+    assert result["pending"][0]["run_id"] == gate

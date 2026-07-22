@@ -13,8 +13,8 @@ Current deployment governance:
   paper execution through cron.
 - GitHub daily precompute/live workflows are dispatch-only safety paths, not the
   normal scheduler.
-- Standard source deployment is `commit -> push -> fast-forward pull on VM -> validate`.
-- Rollback is by git revert plus VM fast-forward whenever possible.
+- Standard source deployment is `commit -> push -> scripts/deploy.sh on VM -> attest`.
+- Rollback is by git revert, push, then the same attested VM deployment command.
 - Wave deployments are validated locally, deployed through git, then observed
   through runtime status artifacts before being considered fully settled.
 - SCP is exception-only and must be reconciled back through git.
