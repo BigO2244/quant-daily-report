@@ -1,0 +1,76 @@
+{
+  "schema_version": "caerus_alpha_lab_gcp_storage_policy_v1",
+  "classification": "RESEARCH_ONLY_NON_EXECUTIONAL",
+  "owner": "Caerus Research Program",
+  "gcp": {
+    "project_id": "alpha-stack-490922",
+    "zone": "us-central1-a",
+    "ssh_alias": "caerus-vm",
+    "instance": "alpha-stack-scheduler",
+    "disk": "disk-20260717-164633",
+    "mount": "/mnt/disks/alpha-lab",
+    "repository_root": "/mnt/disks/alpha-lab/alpha-lab-project",
+    "authoritative_data_root": "/mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab",
+    "minimum_free_gib_before_collection": 50
+  },
+  "namespaces": {
+    "source_bundles": "data_spine/<source_id>/<bundle_id>/",
+    "hypothesis_runs": "<hypothesis_id>/<run_id>/",
+    "forward_observations": "options_proxy_forward/<artifact_class>/<as_of_date>/<run_id>/",
+    "shared_working_data": "shared/",
+    "provider_readiness": "provider_readiness/"
+  },
+  "identifiers": {
+    "bundle_id": "<UTC_YYYYMMDDTHHMMSSZ>-<12_hex_content_hash>",
+    "hypothesis_id": "HYP-YYYY-NNN",
+    "timestamps": "UTC RFC3339 with Z suffix"
+  },
+  "artifact_states": {
+    "staging": ".staging/ and resumable checkpoint files are incomplete and never decision-grade",
+    "final": "payload files are immutable and manifest.json is written last",
+    "superseded": "retained for lineage and referenced by a newer manifest; never overwritten or deleted"
+  },
+  "required_manifest_fields": [
+    "schema_version",
+    "classification",
+    "retrieved_at",
+    "files",
+    "credentials_persisted",
+    "trading_behavior_changed"
+  ],
+  "required_file_record_fields": [
+    "name",
+    "bytes",
+    "sha256"
+  ],
+  "rules": {
+    "authoritative_write_location": "GCP_ONLY",
+    "mac_role": "FROZEN_ROLLBACK_READ_ONLY",
+    "write_mode": "ATOMIC_APPEND_ONLY",
+    "overwrite_finalized_artifacts": false,
+    "manifest_written_last": true,
+    "persist_credentials": false,
+    "allow_broker_credentials": false,
+    "allow_trading_artifacts": false,
+    "allow_production_scheduler_integration": false,
+    "require_point_in_time_metadata": true,
+    "require_sha256": true,
+    "require_byte_count": true,
+    "require_source_and_license_metadata": true,
+    "require_no_active_collector_preflight": true,
+    "maximum_concurrent_collectors": 1,
+    "delete_source_after_copy": false
+  },
+  "backup": {
+    "resource_policy": "alpha-lab-weekly-snapshot",
+    "schedule": "Sunday 06:00 UTC",
+    "scheduled_snapshot_retention_days": 28,
+    "preserve_snapshot_when_source_disk_deleted": true,
+    "snapshots_are_recovery_not_primary_access": true
+  },
+  "future_object_archive": {
+    "status": "NOT_CONFIGURED",
+    "rule": "Do not claim GCS replication until a private bucket, writer identity, immutable upload precondition, and restore test are all verified.",
+    "scheduler_vm_write_scope_change_authorized": false
+  }
+}

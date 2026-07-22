@@ -9,6 +9,17 @@ portfolio utility, and research prioritization.
 Read `README.md` and `CURRENT_STATE.md` before substantive work. The parent
 repository's governance and safety rules still apply.
 
+Before collecting, moving, reading, or documenting Alpha Lab research data,
+read `DATA_STORAGE_GOVERNANCE.md` and `gcp_storage_policy.json`. New collection
+must use the authoritative GCP research root. The Mac output tree is frozen
+rollback data and must not receive new artifacts.
+
+Before assessing lifecycle readiness, requesting licensed data, creating a CIO
+decision item, or recommending Shadow/Paper review, read `CONTROL_PLANE.md`.
+Use its immutable candidate snapshots and fail-closed queue. A research agent
+may draft a data-access request or promotion nomination; it may not approve a
+purchase, alter the strategy registry, activate Shadow, or promote to Paper.
+
 ## Conversation Mode
 
 - Start with the investment idea, not implementation details.
@@ -37,6 +48,10 @@ Conversation alone does not authorize research code or experiments.
 5. `REJECT`, `ITERATE`, or `EVIDENCE_READY_FOR_OWNER_REVIEW` — record the
    research verdict. Only Brett may then record `PURSUE`, `PARK`, or `KILL` in
    `DECISION_LOG.md`.
+
+After `EVIDENCE_READY_FOR_OWNER_REVIEW`, route the candidate through the
+discovery-to-decision control plane. Owner decisions permit separately governed
+next-step work; they do not themselves perform lifecycle transitions.
 
 If Brett has not used the relevant transition phrase, remain in the current
 state and continue strategy discussion.
