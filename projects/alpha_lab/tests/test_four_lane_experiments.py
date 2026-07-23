@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -156,6 +157,12 @@ def test_data_gate_blocks_without_certified_pit_assets(tmp_path):
     assert result["return_variants_attempted"] == 0
     assert result["data_gate_attempts_including_current"] == 1
     assert (Path(payload["run_dir"]) / "events.jsonl").is_file()
+    evaluator_input = json.loads(
+        (Path(payload["run_dir"]) / "evaluator_input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert evaluator_input["repo_root"] == str(tmp_path)
 
 
 def test_data_gate_rejects_path_traversal_before_writing(tmp_path):

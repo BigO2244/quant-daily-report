@@ -403,6 +403,7 @@ def run_lane(
         "hypothesis_id": lane.hypothesis_id,
         "experiment_id": lane.experiment_id,
         "checked_at": checked_at,
+        "repo_root": str(repo_root),
         "provider_gate_hash": canonical_hash(gate_packet),
         "assets": {
             item["asset_id"]: {
