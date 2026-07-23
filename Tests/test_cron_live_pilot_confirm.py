@@ -48,6 +48,92 @@ def test_execute_cron_has_completion_hook() -> None:
     assert text.count("confirm_completed_runs") >= 3  # def + 2 call sites
 
 
+def test_execute_completion_hook_restores_live_broker_context_after_email_env() -> None:
+    text = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
+    start = text.index("confirm_completed_runs() (")
+    end = text.index("\n)\n", start)
+    hook = text[start:end]
+
+    email_env = hook.index('source "${REPO_ROOT}/.env"')
+    live_env = hook.index('source "${ENV_FILE}"', email_env)
+    live_mode = hook.index('export TRADING_MODE="live_pilot"', live_env)
+    live_endpoint = hook.index('export ALPACA_BASE_URL="https://api.alpaca.markets"', live_mode)
+    sweep = hook.index("live_pilot_confirm_sweep", live_endpoint)
+
+    assert email_env < live_env < live_mode < live_endpoint < sweep
+    assert 'export ALPACA_PAPER="0"' in hook
+
+
+def test_execute_completion_hook_uses_live_credentials_and_keeps_smtp_env(tmp_path: Path) -> None:
+    text = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
+    start = text.index("confirm_completed_runs() (")
+    end = text.index("\n)\n", start) + len("\n)")
+    hook = text[start:end]
+
+    fake_repo = tmp_path / "repo"
+    scripts_dir = fake_repo / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (fake_repo / ".env").write_text(
+        "\n".join(
+            [
+                "SMTP_HOST=smtp.example.test",
+                "ALPACA_API_KEY_ID=paper-key",
+                "ALPACA_API_SECRET_KEY=paper-secret",
+                "ALPACA_PAPER=1",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    live_env = tmp_path / "live_pilot.env"
+    live_env.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY_ID=live-key",
+                "ALPACA_API_SECRET_KEY=live-secret",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (scripts_dir / "live_pilot_confirm_lib.sh").write_text(
+        textwrap.dedent(
+            """\
+            live_pilot_confirm_sweep() {
+                printf '%s|%s|%s|%s|%s|%s\n' \
+                    "$SMTP_HOST" "$ALPACA_API_KEY_ID" "$ALPACA_API_SECRET_KEY" \
+                    "$ALPACA_PAPER" "$ALPACA_BASE_URL" "$TRADING_MODE"
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "\n".join(
+                [
+                    f'REPO_ROOT="{fake_repo}"',
+                    f'ENV_FILE="{live_env}"',
+                    hook,
+                    "confirm_completed_runs",
+                ]
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert proc.stdout.strip() == (
+        "smtp.example.test|live-key|live-secret|0|"
+        "https://api.alpaca.markets|live_pilot"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Functional sweep test (stubbed sender)
 # --------------------------------------------------------------------------- #

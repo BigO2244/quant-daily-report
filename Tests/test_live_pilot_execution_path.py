@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import core.live_trade_ledger as live_trade_ledger
+from core.live_pilot_guardrails import account_id_hash
 from scripts.live_pilot_execute import (
     LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
@@ -1071,6 +1072,70 @@ def test_refresh_existing_market_order_updates_stale_pending_to_filled(tmp_path:
     assert results["open_orders_count"] == 0
     assert results["broker_status_refresh"] == "OK"
     assert results["idle_cash_reason"] != "submitted_not_filled"
+
+
+def test_refresh_live_pilot_rejects_wrong_broker_context_before_artifact_overwrite(
+    tmp_path: Path,
+) -> None:
+    class WrongAccountBroker(FakeBroker):
+        paper = True
+        base_url = "https://paper-api.alpaca.markets"
+
+        def __init__(self) -> None:
+            super().__init__(order_status="filled")
+            self.order_lookups = 0
+
+        def get_account(self):
+            return {
+                "id": "paper-account",
+                "status": "ACTIVE",
+                "cash": "10000",
+                "equity": "10000",
+                "buying_power": "10000",
+                "portfolio_value": "10000",
+            }
+
+        def get_order(self, order_id):
+            self.order_lookups += 1
+            return super().get_order(order_id)
+
+    broker = WrongAccountBroker()
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-wrong-context"
+    run_root.mkdir(parents=True)
+    (run_root / "live_pilot_orders_intended.json").write_text(
+        json.dumps({"orders": [{"symbol": "AAPL", "side": "BUY", "qty": 1}]}),
+        encoding="utf-8",
+    )
+    submitted_path = run_root / "live_pilot_orders_submitted.json"
+    original_submitted = {
+        "orders": [
+            {
+                "symbol": "AAPL",
+                "side": "BUY",
+                "qty": 1,
+                "status": "OrderStatus.PENDING_NEW",
+                "order": {"id": "live-order-1", "status": "OrderStatus.PENDING_NEW"},
+            }
+        ]
+    }
+    submitted_path.write_text(json.dumps(original_submitted), encoding="utf-8")
+    (run_root / "live_pilot_broker_snapshot_pre.json").write_text(
+        json.dumps(
+            {
+                "account": {
+                    "account_id_hash": account_id_hash("expected-live-account"),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="live_pilot_refresh_context_invalid"):
+        refresh_live_pilot_reconciliation(run_root=run_root, broker=broker)
+
+    assert broker.order_lookups == 0
+    assert json.loads(submitted_path.read_text(encoding="utf-8")) == original_submitted
+    assert not (run_root / "live_pilot_reconciliation.json").exists()
 
 
 def test_snapshot_time_partial_fill_produces_submitted_unfilled_not_failed(tmp_path: Path) -> None:

@@ -192,7 +192,7 @@ print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
 }
 
-confirm_completed_runs() {
+confirm_completed_runs() (
     # Execute-completion hook: immediately confirm every terminal run for today
     # that is not yet confirmed. This closes the race that let the 2026-07-10
     # 10:09 armed submit go unreported: the scheduled confirm sweep runs at a
@@ -206,13 +206,28 @@ confirm_completed_runs() {
         source "${REPO_ROOT}/.env"
         set +a
     fi
+    # The repository .env supplies SMTP settings but is paper-lane-oriented and
+    # may also define Alpaca credentials/endpoint flags. Restore the dedicated
+    # live-pilot environment *after* loading it, exactly as the scheduled
+    # confirmation wrapper does. Keep this hook in a subshell so neither source
+    # can leak changed credentials back into the execution wrapper.
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+    export MODE="live_pilot"
+    export TRADING_MODE="live_pilot"
+    export WORKFLOW_KIND="live_pilot"
+    export CAERUS_LIVE_PILOT_CRON_CONTEXT="1"
+    export ALPACA_PAPER="0"
+    export ALPACA_BASE_URL="https://api.alpaca.markets"
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/scripts/live_pilot_confirm_lib.sh"
     live_pilot_confirm_sweep \
         "outputs/live_pilot/runs" \
         "outputs/live_pilot/state/confirm_sent_ledger.jsonl" \
         || echo "WARN: execute-completion confirm hook reported problems (non-blocking)"
-}
+)
 
 write_gate_state_blocked() {
     local reason="$1"

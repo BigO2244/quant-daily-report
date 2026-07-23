@@ -3311,6 +3311,39 @@ def refresh_live_pilot_reconciliation(
 ) -> dict[str, Any]:
     run_root = Path(run_root)
     broker = broker or AlpacaBroker.from_env()
+    if _derive_execution_mode(run_root) == LIVE_PILOT_MODE.upper():
+        # Confirmation is allowed to load the shared repository .env for SMTP,
+        # but broker truth for a LIVE_PILOT run must never be fetched from the
+        # paper account (or a different live account). Validate the read-only
+        # broker context before looking up orders or overwriting canonical run
+        # artifacts.
+        account = broker.get_account() if hasattr(broker, "get_account") else {}
+        actual_hash = account_id_hash((account or {}).get("id")) if (account or {}).get("id") else ""
+        pre_snapshot_path = run_root / "live_pilot_broker_snapshot_pre.json"
+        pre_snapshot = _load_plan(pre_snapshot_path) if pre_snapshot_path.exists() else {}
+        run_account_hash = str(
+            ((pre_snapshot.get("account") or {}).get("account_id_hash") or "")
+        ).strip().lower()
+        pinned_account_hash = str(
+            os.getenv("CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH") or ""
+        ).strip().lower()
+        context_errors: list[str] = []
+        if getattr(broker, "paper", None) is True:
+            context_errors.append("paper_broker")
+        base_url = str(getattr(broker, "base_url", "") or "").strip()
+        if base_url and not _is_live_host(base_url):
+            context_errors.append("non_live_endpoint")
+        if not actual_hash:
+            context_errors.append("missing_broker_account_id")
+        if run_account_hash and actual_hash.lower() != run_account_hash:
+            context_errors.append("run_account_hash_mismatch")
+        if pinned_account_hash and actual_hash.lower() != pinned_account_hash:
+            context_errors.append("pinned_account_hash_mismatch")
+        if context_errors:
+            raise RuntimeError(
+                "live_pilot_refresh_context_invalid:" + ",".join(context_errors)
+            )
+
     intended_payload = _load_plan(run_root / "live_pilot_orders_intended.json")
     submitted_payload = _load_plan(run_root / "live_pilot_orders_submitted.json")
     intended = _trades_from_plan(intended_payload)
