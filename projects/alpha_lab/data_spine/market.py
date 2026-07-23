@@ -73,7 +73,7 @@ def materialize_market_panels(
     # spill bounded intermediate state to the research disk instead of letting
     # a four-thread, multi-gigabyte build trigger the kernel OOM killer.
     connection.execute("PRAGMA threads=1")
-    connection.execute("PRAGMA memory_limit='650MB'")
+    connection.execute("PRAGMA memory_limit='900MB'")
     connection.execute("PRAGMA preserve_insertion_order=false")
     connection.execute("PRAGMA temp_directory='{}'".format(
         str(temporary_directory.resolve()).replace("'", "''")
