@@ -164,6 +164,18 @@ def run_evaluator(
         raise ContractValidationError("frozen evaluator requires a ready data gate")
     if input_packet.get("hypothesis_id") != spec.hypothesis_id:
         raise ContractValidationError("input hypothesis does not match evaluator spec")
+    packet_assets = input_packet.get("assets")
+    if not isinstance(packet_assets, Mapping):
+        raise ContractValidationError("evaluator input requires certified assets")
+    missing_contracts = sorted(
+        set(spec.data_contract_ids) - {str(item) for item in packet_assets}
+    )
+    if missing_contracts:
+        raise ContractValidationError(
+            "evaluator input is missing frozen data contracts: {}".format(
+                ",".join(missing_contracts)
+            )
+        )
 
     module = importlib.import_module(spec.module)
     source_path = Path(inspect.getsourcefile(module) or "").resolve()
