@@ -22,7 +22,10 @@ def _quote(path: Path) -> str:
 
 
 def materialize_market_panels(
-    *, repo_root: Path, sep_manifest_path: Path
+    *,
+    repo_root: Path,
+    sep_manifest_path: Path,
+    resume_staged_database: bool = False,
 ) -> Dict[str, Any]:
     try:
         import duckdb
@@ -65,7 +68,13 @@ def materialize_market_panels(
         repo_root / "outputs/research/alpha_lab/shared/.duckdb_tmp"
     )
     temporary_directory.mkdir(parents=True, exist_ok=True)
-    database.unlink(missing_ok=True)
+    if resume_staged_database:
+        if not database.is_file():
+            raise FileNotFoundError(
+                "resumable market staging database is absent: {}".format(database)
+            )
+    else:
+        database.unlink(missing_ok=True)
     price_staging_path.unlink(missing_ok=True)
     characteristics_staging_path.unlink(missing_ok=True)
     connection = duckdb.connect(str(database))
@@ -82,7 +91,7 @@ def materialize_market_panels(
     try:
         connection.execute(
             """
-            CREATE TABLE security_master AS
+            CREATE TABLE IF NOT EXISTS security_master AS
             SELECT *, TRY_CAST(effective_start AS DATE) AS start_date,
                    TRY_CAST(NULLIF(effective_end, '') AS DATE) AS end_date
             FROM read_csv_auto({}, header=true, all_varchar=true)
@@ -90,7 +99,7 @@ def materialize_market_panels(
         )
         connection.execute(
             """
-            CREATE TABLE actions AS
+            CREATE TABLE IF NOT EXISTS actions AS
             SELECT ticker, TRY_CAST(date AS DATE) AS date,
                    COALESCE(MAX(TRY_CAST(value AS DOUBLE)) FILTER
                      (WHERE action IN ('split','adrratiosplit')), 1.0) AS split_factor,
@@ -106,7 +115,7 @@ def materialize_market_panels(
         # live and exhausted the bounded VM memory even while DuckDB spilled.
         connection.execute(
             """
-            CREATE TABLE raw_prices AS
+            CREATE TABLE IF NOT EXISTS raw_prices AS
             SELECT s.security_id,
                    TRY_CAST(p.date AS DATE) AS date,
                    TRY_CAST(p.open AS DOUBLE) * TRY_CAST(p.closeunadj AS DOUBLE) /
@@ -126,7 +135,7 @@ def materialize_market_panels(
         )
         connection.execute(
             """
-            CREATE TABLE security_last_dates AS
+            CREATE TABLE IF NOT EXISTS security_last_dates AS
             SELECT security_id, MAX(date) AS last_date
             FROM raw_prices
             GROUP BY security_id
@@ -134,7 +143,7 @@ def materialize_market_panels(
         )
         connection.execute(
             """
-            CREATE TABLE staged_prices AS
+            CREATE TABLE IF NOT EXISTS staged_prices AS
             WITH lagged AS (
               SELECT r.*, d.last_date,
                      LAG(provider_closeadj) OVER
@@ -150,15 +159,23 @@ def materialize_market_panels(
         connection.execute(
             """
             COPY (
-              WITH indexed AS (
-                SELECT *,
-                  FIRST_VALUE(close) OVER (PARTITION BY security_id ORDER BY date) *
-                  EXP(SUM(LN(GREATEST(1.0 + COALESCE(daily_total_return, 0.0), 0.000000001)))
-                    OVER (PARTITION BY security_id ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW))
-                    AS causal_total_return_index,
-                  AVG(close * volume) OVER (PARTITION BY security_id ORDER BY date
-                    ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS dollar_ADV_20
+              WITH first_values AS (
+                SELECT security_id,
+                       ARG_MIN(close, date) AS first_close,
+                       ARG_MIN(provider_closeadj, date) AS first_provider_closeadj
                 FROM staged_prices
+                GROUP BY security_id
+              ), indexed AS (
+                SELECT p.*,
+                  f.first_close * p.provider_closeadj /
+                    NULLIF(f.first_provider_closeadj, 0.0)
+                    AS causal_total_return_index,
+                  AVG(p.close * p.volume) OVER (
+                    PARTITION BY p.security_id ORDER BY p.date
+                    ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+                  ) AS dollar_ADV_20
+                FROM staged_prices p
+                JOIN first_values f USING (security_id)
               )
               SELECT security_id, date, open, close,
                      causal_total_return_index AS closeadj, volume, dollar_ADV_20,
@@ -173,7 +190,6 @@ def materialize_market_panels(
                      CAST(date AS TIMESTAMP) + INTERVAL 1 DAY AS adjustment_available_at,
                      CAST(date AS TIMESTAMP) + INTERVAL 1 DAY AS available_at
               FROM indexed
-              ORDER BY security_id, date
             ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
             """.format(_quote(price_staging_path))
         )
@@ -255,7 +271,6 @@ def materialize_market_panels(
                      beta_252d, realized_volatility_20d,
                      prior_return_5d, prior_return_20d, prior_return_60d
               FROM with_equity
-              ORDER BY security_id, date
             ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
             """.format(
                 _quote(price_staging_path),

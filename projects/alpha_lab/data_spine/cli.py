@@ -189,6 +189,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("audit-insider-hydration")
     market = sub.add_parser("materialize-market")
     market.add_argument("--sep-manifest", type=Path, required=True)
+    market.add_argument("--resume-staged-database", action="store_true")
     terminal = sub.add_parser("terminal-return-sensitivity")
     terminal.add_argument("--panel", type=Path)
     return parser
@@ -488,7 +489,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         result = audit_insider_hydration(repo_root)
     elif args.command == "materialize-market":
         result = materialize_market_panels(
-            repo_root=repo_root, sep_manifest_path=args.sep_manifest
+            repo_root=repo_root,
+            sep_manifest_path=args.sep_manifest,
+            resume_staged_database=args.resume_staged_database,
         )
     elif args.command == "terminal-return-sensitivity":
         result = build_terminal_return_sensitivity(
