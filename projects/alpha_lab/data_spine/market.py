@@ -50,16 +50,31 @@ def materialize_market_panels(
     output_root = repo_root / "outputs/research/pit_liquidity"
     output_root.mkdir(parents=True, exist_ok=True)
     price_path = output_root / "pit_liquidity_panel.parquet"
+    price_staging_path = output_root / ".pit_liquidity_panel.parquet.tmp"
     characteristics_path = repo_root / "outputs/research/alpha_lab/shared/pit_characteristics.parquet"
     characteristics_path.parent.mkdir(parents=True, exist_ok=True)
+    characteristics_staging_path = characteristics_path.with_name(
+        ".pit_characteristics.parquet.tmp"
+    )
     database = repo_root / "outputs/research/alpha_lab/shared/.market_materialization.duckdb"
+    temporary_directory = (
+        repo_root / "outputs/research/alpha_lab/shared/.duckdb_tmp"
+    )
+    temporary_directory.mkdir(parents=True, exist_ok=True)
     database.unlink(missing_ok=True)
+    price_staging_path.unlink(missing_ok=True)
+    characteristics_staging_path.unlink(missing_ok=True)
     connection = duckdb.connect(str(database))
-    connection.execute("PRAGMA threads=4")
-    connection.execute("PRAGMA memory_limit='6GB'")
+    # The authoritative Alpha Lab VM is intentionally small.  Force DuckDB to
+    # spill bounded intermediate state to the research disk instead of letting
+    # a four-thread, multi-gigabyte build trigger the kernel OOM killer.
+    connection.execute("PRAGMA threads=1")
+    connection.execute("PRAGMA memory_limit='650MB'")
+    connection.execute("PRAGMA preserve_insertion_order=false")
     connection.execute("PRAGMA temp_directory='{}'".format(
-        str((repo_root / "outputs/research/alpha_lab/shared/.duckdb_tmp").resolve()).replace("'", "''")
+        str(temporary_directory.resolve()).replace("'", "''")
     ))
+    build_succeeded = False
     try:
         connection.execute(
             """
@@ -115,7 +130,6 @@ def materialize_market_panels(
             FROM lagged
             """.format(_quote(sep_path))
         )
-        price_path.unlink(missing_ok=True)
         connection.execute(
             """
             COPY (
@@ -144,7 +158,7 @@ def materialize_market_panels(
               FROM indexed
               ORDER BY security_id, date
             ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
-            """.format(_quote(price_path))
+            """.format(_quote(price_staging_path))
         )
 
         connection.execute(
@@ -180,7 +194,6 @@ def materialize_market_panels(
             ) WHERE rn=1
             """
         )
-        characteristics_path.unlink(missing_ok=True)
         connection.execute(
             """
             COPY (
@@ -228,7 +241,9 @@ def materialize_market_panels(
               ORDER BY security_id, date
             ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
             """.format(
-                _quote(price_path), _quote(factor_path), _quote(characteristics_path)
+                _quote(price_staging_path),
+                _quote(factor_path),
+                _quote(characteristics_staging_path),
             )
         )
         price_stats = connection.execute(
@@ -237,7 +252,7 @@ def materialize_market_panels(
                    COUNT(last_observed_total_return), COUNT(terminal_return)
             FROM read_parquet(?)
             """,
-            [str(price_path)],
+            [str(price_staging_path)],
         ).fetchone()
         characteristic_stats = connection.execute(
             """
@@ -246,11 +261,20 @@ def materialize_market_panels(
                    COUNT(realized_volatility_20d)
             FROM read_parquet(?)
             """,
-            [str(characteristics_path)],
+            [str(characteristics_staging_path)],
         ).fetchone()
+        build_succeeded = True
     finally:
         connection.close()
         database.unlink(missing_ok=True)
+        if not build_succeeded:
+            price_staging_path.unlink(missing_ok=True)
+            characteristics_staging_path.unlink(missing_ok=True)
+
+    # Publish only after both panels and their statistics complete.  A failed
+    # rebuild therefore leaves the last authoritative pair untouched.
+    price_staging_path.replace(price_path)
+    characteristics_staging_path.replace(characteristics_path)
 
     price_manifest = {
         "schema_version": "caerus_pit_liquidity_panel_v3",
