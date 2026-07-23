@@ -1,0 +1,16 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-009",
+  "evaluator_id": "cross_asset_trend_v1",
+  "technique_family": "TIME_SERIES",
+  "module": "projects.alpha_lab.evaluators.blocked_families",
+  "callable_name": "evaluate_cross_asset_trend",
+  "maximum_variants": 4,
+  "primary_metric": "validation_delta_portfolio_information_ratio",
+  "data_contract_ids": [
+    "cross_asset_price_panel_v1",
+    "factor_panel_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "bfc483a01fbbd5e1bac6dc65b8a486ae1b00957ddbd48f08658d1703e1d6c009"
+}

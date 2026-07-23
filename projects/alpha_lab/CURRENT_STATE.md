@@ -193,12 +193,16 @@ The separate Codex automation `Alpha Lab CIO review queue` checks for new or
 materially changed owner decisions at 18:45 ET on weekdays and remains quiet
 when the decision fingerprint is unchanged. See `CONTROL_PLANE.md`.
 
-## Constraint remediation prepared 2026-07-23
+## Constraint remediation and eight-family freeze — 2026-07-23
 
-Brett approved prioritizing a 12-family research workload. The workload is
-recorded in `STRATEGY_BACKLOG.md` without creating strategy identities or
-silently freezing new hypotheses. Seven new families remain in `DISCUSS` and
-still require the explicit `FREEZE HYPOTHESIS` and `RUN EXPERIMENT` transitions.
+Brett approved prioritizing a 12-family research workload and then explicitly
+used `FREEZE HYPOTHESIS` and `RUN EXPERIMENT` for the eight previously unfrozen
+families: current Caerus decomposition plus residual momentum, stock-specific
+seasonality, short-horizon reversal, cross-asset trend, executive tone
+surprise, net payout/share issuance, and asset growth/investment. They are
+HYP-2026-001 and HYP-2026-006 through HYP-2026-012. Every family has a hashed
+preregistration, bounded evaluator spec, locked 2025-01-01 through 2026-06-30
+challenge window, and secondary-only regime diagnostics.
 
 The price compiler no longer mislabels the provider's final observed daily
 return as a delisting or terminal settlement return. The v3 panel retains that

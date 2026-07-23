@@ -1337,6 +1337,18 @@ def test_terminal_return_sensitivity_relabels_legacy_proxy_without_certifying_it
         tmp_path
         / "outputs/research/alpha_lab/provider_readiness/pit_prices_liquidity_v1.json"
     ).exists()
+    sensitivity_certification = json.loads(
+        (
+            tmp_path
+            / "outputs/research/alpha_lab/provider_readiness/"
+            "terminal_return_sensitivity_v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert sensitivity_certification["status"] == "READY"
+    assert sensitivity_certification["historical_point_in_time_verified"] is True
+    assert "cannot support an alpha claim alone" in sensitivity_certification[
+        "methodology"
+    ]
 
 
 def test_market_materialization_does_not_mislabel_last_daily_return_as_settlement(
@@ -1427,6 +1439,15 @@ def test_market_materialization_does_not_mislabel_last_daily_return_as_settlemen
     assert manifest["schema_version"] == "caerus_pit_liquidity_panel_v3"
     assert manifest["verified_terminal_return_count"] == 0
     assert manifest["terminal_settlement_certified"] is False
+    observed_certification = json.loads(
+        (
+            tmp_path
+            / "outputs/research/alpha_lab/provider_readiness/"
+            "pit_observed_prices_v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert observed_certification["status"] == "READY"
+    assert observed_certification["historical_point_in_time_verified"] is True
 
 
 def test_form4_amendment_policy_excludes_ambiguous_issuer_without_guessing(

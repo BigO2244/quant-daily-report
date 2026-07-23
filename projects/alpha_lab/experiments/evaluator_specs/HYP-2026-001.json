@@ -1,0 +1,17 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-001",
+  "evaluator_id": "caerus_decomposition_v1",
+  "technique_family": "PORTFOLIO_CONSTRUCTION",
+  "module": "projects.alpha_lab.evaluators.blocked_families",
+  "callable_name": "evaluate_caerus_decomposition",
+  "maximum_variants": 6,
+  "primary_metric": "worst_case_cost_adjusted_incremental_information_ratio",
+  "data_contract_ids": [
+    "pit_observed_prices_v1",
+    "terminal_return_sensitivity_v1",
+    "caerus_research_decision_tape_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "ce208d5cd21e8244ee01dd43bfcfbafc8cd431edaefbbc1aba14bee1bc4da447"
+}

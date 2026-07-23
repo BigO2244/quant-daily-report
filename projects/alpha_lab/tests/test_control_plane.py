@@ -12,6 +12,7 @@ from projects.alpha_lab.control_plane.evaluator import (
     EvaluatorSpec,
     TechniqueFamily,
     inspect_evaluator_boundary,
+    load_spec,
 )
 from projects.alpha_lab.control_plane.lifecycle import assess_candidate, build_cio_queue
 from projects.alpha_lab.control_plane.models import (
@@ -258,6 +259,32 @@ def test_evaluator_contract_is_bounded_and_hash_checked(tmp_path):
     boundary = inspect_evaluator_boundary(unsafe)
     assert boundary["status"] == "FAIL"
     assert boundary["findings"] == ["forbidden_import:brokers.alpaca_broker"]
+
+
+def test_eight_newly_frozen_evaluator_specs_are_hash_valid():
+    spec_root = (
+        Path(__file__).parents[1] / "experiments" / "evaluator_specs"
+    )
+    expected = {
+        "HYP-2026-001",
+        "HYP-2026-006",
+        "HYP-2026-007",
+        "HYP-2026-008",
+        "HYP-2026-009",
+        "HYP-2026-010",
+        "HYP-2026-011",
+        "HYP-2026-012",
+    }
+    loaded = {load_spec(path).hypothesis_id for path in sorted(spec_root.glob("*.json"))}
+    assert loaded == expected
+    for module_name in (
+        "blocked_families.py",
+        "price_families.py",
+    ):
+        boundary = inspect_evaluator_boundary(
+            Path(__file__).parents[1] / "evaluators" / module_name
+        )
+        assert boundary["status"] == "PASS"
 
 
 def test_control_plane_has_no_production_imports_or_order_calls():

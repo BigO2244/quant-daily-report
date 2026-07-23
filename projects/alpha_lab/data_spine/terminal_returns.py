@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from projects.alpha_lab.factory import canonical_json
+from projects.alpha_lab.experiments.catalog import TERMINAL_RETURN_SENSITIVITY
 
+from .materialize import certify_asset
 from .storage import output_root, sha256_file, write_bundle_from_paths
 
 
@@ -218,6 +220,18 @@ def build_terminal_return_sensitivity(
             "sensitivity_only": True,
         },
         retrieved_at=timestamp,
+    )
+    certify_asset(
+        repo_root=root,
+        asset=TERMINAL_RETURN_SENSITIVITY,
+        data_files=(bundle["paths"]["terminal_return_sensitivity.parquet"],),
+        pit_verified=True,
+        methodology=(
+            "Outcome-only sensitivity envelope for securities whose observed "
+            "history terminates: every evaluator must report both a further "
+            "-100% return and zero incremental return; verified settlement "
+            "remains null and the artifact cannot support an alpha claim alone"
+        ),
     )
     envelope_path.unlink(missing_ok=True)
     quality_path.unlink(missing_ok=True)

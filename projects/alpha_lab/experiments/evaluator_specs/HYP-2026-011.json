@@ -1,0 +1,17 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-011",
+  "evaluator_id": "net_payout_share_issuance_v1",
+  "technique_family": "CROSS_SECTIONAL",
+  "module": "projects.alpha_lab.evaluators.blocked_families",
+  "callable_name": "evaluate_net_payout_share_issuance",
+  "maximum_variants": 2,
+  "primary_metric": "worst_case_annualized_excess_return_after_costs",
+  "data_contract_ids": [
+    "pit_net_payout_features_v1",
+    "pit_observed_prices_v1",
+    "terminal_return_sensitivity_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "1ef589c47a7b6b81aacb2c138f56600c77e2c4cbd3a78e1ee2086f8659a351fe"
+}

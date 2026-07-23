@@ -32,13 +32,28 @@ def test_frozen_hypothesis_hashes_match_bodies():
 
 
 def test_four_lane_ids_are_append_only_and_unique():
-    assert [lane.hypothesis_id for lane in LANES] == [
+    hypothesis_ids = [lane.hypothesis_id for lane in LANES]
+    assert hypothesis_ids[1:5] == [
         "HYP-2026-002",
         "HYP-2026-003",
         "HYP-2026-004",
         "HYP-2026-005",
     ]
-    assert len({lane.experiment_id for lane in LANES}) == 4
+    assert hypothesis_ids == [
+        "HYP-2026-001",
+        "HYP-2026-002",
+        "HYP-2026-003",
+        "HYP-2026-004",
+        "HYP-2026-005",
+        "HYP-2026-006",
+        "HYP-2026-007",
+        "HYP-2026-008",
+        "HYP-2026-009",
+        "HYP-2026-010",
+        "HYP-2026-011",
+        "HYP-2026-012",
+    ]
+    assert len({lane.experiment_id for lane in LANES}) == len(LANES)
 
 
 def test_catalog_gates_frozen_cross_lane_controls_and_event_inputs():

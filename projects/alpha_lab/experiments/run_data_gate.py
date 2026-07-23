@@ -321,6 +321,7 @@ def run_lane(
         "hypothesis_id": lane.hypothesis_id,
         "experiment_id": lane.experiment_id,
         "checked_at": checked_at,
+        "repo_root": str(repo_root),
         "local_readiness_audit": lane.local_readiness,
         "ready": ready,
         "assets": asset_results,
@@ -367,6 +368,31 @@ def run_lane(
             "scheduler, cron, deployment, or promotion surface was read or changed."
         ),
     }
+    evaluator_input = {
+        "schema_version": "caerus_alpha_lab_evaluator_input_v1",
+        "data_gate_status": outcome,
+        "hypothesis_id": lane.hypothesis_id,
+        "experiment_id": lane.experiment_id,
+        "checked_at": checked_at,
+        "provider_gate_hash": canonical_hash(gate_packet),
+        "assets": {
+            item["asset_id"]: {
+                "files": item["files"],
+                "gate_hash": item["gate_hash"],
+            }
+            for item in asset_results
+        },
+        "terminal_return_policy": (
+            "REPORT_BOTH_PESSIMISTIC_TOTAL_LOSS_AND_ZERO_INCREMENTAL"
+            if any(
+                item["asset_id"] == "terminal_return_sensitivity_v1"
+                for item in asset_results
+            )
+            else "FROZEN_DATA_CONTRACT"
+        ),
+        "challenge_access_authorized": False,
+        "trading_behavior_changed": False,
+    }
 
     run_dir = (
         lane_output_root / run_id
@@ -385,6 +411,9 @@ def run_lane(
     )
     (run_dir / "result.json").write_text(
         canonical_json(result) + "\n", encoding="utf-8"
+    )
+    (run_dir / "evaluator_input.json").write_text(
+        canonical_json(evaluator_input) + "\n", encoding="utf-8"
     )
     store = AppendOnlyJSONLEventStore(
         run_dir / "events.jsonl", research_root=research_root
@@ -409,7 +438,7 @@ def run_lane(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--all", action="store_true", help="run all four frozen gates")
+    group.add_argument("--all", action="store_true", help="run all frozen gates")
     group.add_argument(
         "--hypothesis-id",
         choices=tuple(LANE_BY_HYPOTHESIS),

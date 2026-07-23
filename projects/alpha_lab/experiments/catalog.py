@@ -92,6 +92,45 @@ PIT_PRICES = DataAsset(
     ),
 )
 
+PIT_OBSERVED_PRICES = DataAsset(
+    asset_id="pit_observed_prices_v1",
+    provider_id="caerus.alpha_lab",
+    dataset_id="observed_prices_without_terminal_settlement",
+    patterns=("outputs/research/pit_liquidity/pit_liquidity_panel.parquet",),
+    required_fields=(
+        "security_id",
+        "date",
+        "open",
+        "close",
+        "closeadj",
+        "volume",
+        "dollar_ADV_20",
+        "last_observed_total_return",
+        "available_at",
+    ),
+)
+
+TERMINAL_RETURN_SENSITIVITY = DataAsset(
+    asset_id="terminal_return_sensitivity_v1",
+    provider_id="caerus.alpha_lab",
+    dataset_id="unverified_terminal_return_sensitivity_envelope",
+    patterns=(
+        "outputs/research/alpha_lab/data_spine/"
+        "terminal_return_sensitivity/*/data/terminal_return_sensitivity.parquet",
+    ),
+    required_fields=(
+        "security_id",
+        "last_observed_date",
+        "last_observed_close",
+        "provider_final_day_total_return",
+        "verified_terminal_return",
+        "pessimistic_total_loss_return",
+        "zero_incremental_return",
+        "terminal_return_status",
+        "use_in_primary_point_estimate",
+    ),
+)
+
 FACTOR_PANEL = DataAsset(
     asset_id="factor_panel_v1",
     provider_id="caerus.alpha_lab",
@@ -322,6 +361,93 @@ SUPPLY_CHAIN_GRAPH = DataAsset(
     ),
 )
 
+CAERUS_DECISION_TAPE = DataAsset(
+    asset_id="caerus_research_decision_tape_v1",
+    provider_id="caerus.alpha_lab",
+    dataset_id="frozen_caerus_component_decision_tape",
+    patterns=("outputs/research/alpha_lab/shared/caerus_decision_tape.parquet",),
+    required_fields=(
+        "security_id",
+        "decision_at",
+        "available_at",
+        "eligible",
+        "momentum_score",
+        "quality_score",
+        "thematic_score",
+        "regime_budget",
+        "combined_score",
+        "selected",
+        "target_weight",
+        "exit_rule_state",
+    ),
+)
+
+CROSS_ASSET_PANEL = DataAsset(
+    asset_id="cross_asset_price_panel_v1",
+    provider_id="licensed.cross_asset",
+    dataset_id="pit_liquid_cross_asset_total_returns",
+    patterns=("outputs/research/alpha_lab/vendor_inputs/cross_asset/**/*",),
+    required_fields=(
+        "instrument_id",
+        "asset_group",
+        "date",
+        "available_at",
+        "total_return_index",
+        "inception_date",
+        "termination_date",
+        "replacement_instrument_id",
+    ),
+)
+
+EXECUTIVE_TRANSCRIPTS = DataAsset(
+    asset_id="executive_transcript_history_v1",
+    provider_id="licensed.transcripts",
+    dataset_id="pit_executive_transcripts",
+    patterns=("outputs/research/alpha_lab/vendor_inputs/transcripts/**/*",),
+    required_fields=(
+        "security_id",
+        "event_id",
+        "speaker_id",
+        "speaker_role",
+        "segment_type",
+        "published_at",
+        "available_at",
+        "correction_status",
+        "text",
+        "source_sha256",
+    ),
+)
+
+PIT_NET_PAYOUT_FEATURES = DataAsset(
+    asset_id="pit_net_payout_features_v1",
+    provider_id="sec.edgar",
+    dataset_id="filing_time_net_payout_features",
+    patterns=("outputs/research/alpha_lab/shared/pit_net_payout_features.parquet",),
+    required_fields=(
+        "security_id",
+        "fiscal_period_end",
+        "available_at",
+        "net_payout_yield",
+        "share_change_1y",
+        "source_accessions",
+    ),
+)
+
+PIT_ASSET_GROWTH_FEATURES = DataAsset(
+    asset_id="pit_asset_growth_features_v1",
+    provider_id="sec.edgar",
+    dataset_id="filing_time_asset_growth_features",
+    patterns=("outputs/research/alpha_lab/shared/pit_asset_growth_features.parquet",),
+    required_fields=(
+        "security_id",
+        "fiscal_period_end",
+        "available_at",
+        "asset_growth_1y",
+        "asset_growth_2y",
+        "source_accessions",
+    ),
+)
+
 
 SHARED = (
     PIT_SECURITY_MASTER,
@@ -332,7 +458,29 @@ SHARED = (
     SECTOR_RETURNS,
 )
 
+SENSITIVITY_SHARED = (
+    PIT_SECURITY_MASTER,
+    PIT_MEMBERSHIP,
+    PIT_OBSERVED_PRICES,
+    TERMINAL_RETURN_SENSITIVITY,
+    PIT_CHARACTERISTICS,
+    FACTOR_PANEL,
+    SECTOR_RETURNS,
+)
+
 LANES = (
+    ExperimentLane(
+        hypothesis_id="HYP-2026-001",
+        experiment_id="EXP-2026-0001",
+        slug="caerus_decomposition",
+        title="Current Caerus Decomposition",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-001_caerus_decomposition.md"
+        ),
+        local_readiness="BLOCKED_DERIVED_ASSET",
+        assets=SENSITIVITY_SHARED + (CAERUS_DECISION_TAPE,),
+    ),
     ExperimentLane(
         hypothesis_id="HYP-2026-002",
         experiment_id="EXP-2026-0002",
@@ -386,6 +534,88 @@ LANES = (
             SUPPLY_CHAIN_GRAPH,
             COMMODITY_CONTROLS,
         ),
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-006",
+        experiment_id="EXP-2026-0006",
+        slug="residual_momentum",
+        title="Residual Momentum",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/HYP-2026-006_residual_momentum.md"
+        ),
+        local_readiness="READY_AFTER_MARKET_REBUILD",
+        assets=SENSITIVITY_SHARED,
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-007",
+        experiment_id="EXP-2026-0007",
+        slug="stock_specific_seasonality",
+        title="Stock-Specific Return Seasonality",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-007_stock_specific_seasonality.md"
+        ),
+        local_readiness="READY_AFTER_MARKET_REBUILD",
+        assets=SENSITIVITY_SHARED,
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-008",
+        experiment_id="EXP-2026-0008",
+        slug="short_horizon_reversal",
+        title="Short-Horizon Reversal",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-008_short_horizon_reversal.md"
+        ),
+        local_readiness="READY_AFTER_MARKET_REBUILD",
+        assets=SENSITIVITY_SHARED,
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-009",
+        experiment_id="EXP-2026-0009",
+        slug="cross_asset_trend",
+        title="Cross-Asset Trend",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/HYP-2026-009_cross_asset_trend.md"
+        ),
+        local_readiness="BLOCKED_VENDOR",
+        assets=(CROSS_ASSET_PANEL, FACTOR_PANEL),
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-010",
+        experiment_id="EXP-2026-0010",
+        slug="executive_tone_surprise",
+        title="Executive and Managerial Tone Surprise",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-010_executive_tone_surprise.md"
+        ),
+        local_readiness="BLOCKED_VENDOR",
+        assets=SENSITIVITY_SHARED + (EARNINGS_EVENTS, EXECUTIVE_TRANSCRIPTS),
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-011",
+        experiment_id="EXP-2026-0011",
+        slug="net_payout_share_issuance",
+        title="Net Payout and Share Issuance",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-011_net_payout_share_issuance.md"
+        ),
+        local_readiness="BLOCKED_DERIVED_ASSET",
+        assets=SENSITIVITY_SHARED + (PIT_NET_PAYOUT_FEATURES,),
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-012",
+        experiment_id="EXP-2026-0012",
+        slug="asset_growth_investment",
+        title="Asset Growth and Investment",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-012_asset_growth_investment.md"
+        ),
+        local_readiness="BLOCKED_DERIVED_ASSET",
+        assets=SENSITIVITY_SHARED + (PIT_ASSET_GROWTH_FEATURES,),
     ),
 )
 

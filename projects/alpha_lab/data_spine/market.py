@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from projects.alpha_lab.experiments.catalog import PIT_CHARACTERISTICS, PIT_PRICES
+from projects.alpha_lab.experiments.catalog import (
+    PIT_CHARACTERISTICS,
+    PIT_OBSERVED_PRICES,
+    PIT_PRICES,
+)
 from projects.alpha_lab.factory import canonical_json
 
 from .materialize import certify_asset
@@ -324,6 +328,24 @@ def materialize_market_panels(
         pit_verified=False,
         methodology=price_manifest["return_method"],
         blockers=("delisting_settlement_payout_not_independently_verified",),
+    )
+    observed_price_blockers = []
+    if int(price_stats[5]) != 0:
+        observed_price_blockers.append(
+            "unverified_terminal_return_values_present_in_observed_panel"
+        )
+    certify_asset(
+        repo_root=repo_root,
+        asset=PIT_OBSERVED_PRICES,
+        data_files=(price_path,),
+        pit_verified=not observed_price_blockers,
+        methodology=(
+            "Causal provider total-return ratios through the last observed "
+            "trading day; no delisting settlement value is asserted, and "
+            "terminal outcomes require the separately certified two-scenario "
+            "sensitivity envelope"
+        ),
+        blockers=tuple(observed_price_blockers),
     )
     characteristic_blockers = []
     if characteristic_manifest["market_cap_coverage"] < 0.8:
