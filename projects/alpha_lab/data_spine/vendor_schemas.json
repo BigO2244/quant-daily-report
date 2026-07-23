@@ -1,0 +1,20 @@
+{
+  "analyst_estimates": {
+    "provider_contract": "licensed_analyst_detail_point_in_time",
+    "required_fields": [
+      "security_id", "analyst_id", "broker_id", "measure", "fiscal_period",
+      "estimate_value", "currency", "unit", "accounting_basis", "published_at",
+      "available_at", "revision_id", "supersedes_id", "withdrawal_status",
+      "correction_status", "per_share_adjustment_basis", "contributor_count"
+    ]
+  },
+  "supply_chain": {
+    "provider_contract": "effective_dated_supply_chain_relationships",
+    "required_fields": [
+      "customer_security_id", "supplier_security_id", "relationship_id",
+      "relationship_direction", "dependency_percent", "relationship_confidence",
+      "source_document", "first_known_at", "available_at", "effective_start",
+      "effective_end", "termination_status", "source_sha256"
+    ]
+  }
+}

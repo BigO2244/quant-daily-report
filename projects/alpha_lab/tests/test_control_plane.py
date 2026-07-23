@@ -25,6 +25,9 @@ from projects.alpha_lab.control_plane.models import (
     ResearchVerdict,
     ShadowStatus,
 )
+from projects.alpha_lab.evaluators.regime_diagnostics import (
+    summarize_regime_observations,
+)
 from projects.alpha_lab.factory import ContractValidationError, ResearchBoundaryError, canonical_hash
 
 
@@ -286,3 +289,40 @@ def test_control_plane_has_no_production_imports_or_order_calls():
             elif isinstance(node, ast.Call):
                 name = getattr(node.func, "attr", getattr(node.func, "id", ""))
                 assert name not in forbidden_calls, path
+
+
+def _regime_row(index: int, regime: str = "bull_trend"):
+    return {
+        "observation_id": "obs-{}".format(index),
+        "decision_at": "2020-01-01T16:00:00Z",
+        "regime_available_at": "2020-01-01T16:00:00Z",
+        "return_start_at": "2020-01-02T14:30:00Z",
+        "return_end_at": "2020-01-03T21:00:00Z",
+        "regime": regime,
+        "candidate_return": 0.02,
+        "benchmark_return": 0.01,
+    }
+
+
+def test_regime_diagnostics_enforce_point_in_time_and_sample_thresholds():
+    rows = [_regime_row(index) for index in range(31)]
+    rows.extend(_regime_row(100 + index, "bear_trend") for index in range(10))
+    payload = summarize_regime_observations(rows)
+    assert payload["observation_count"] == 41
+    assert payload["total_coverage_sufficient"] is False
+    assert payload["decision_grade_regimes"] == ["bull_trend"]
+    assert payload["regimes"]["bull_trend"]["confidence"] == "HIGH"
+    assert payload["regimes"]["bear_trend"]["confidence"] == "MEDIUM"
+    assert payload["regime_selection_coverage_ready"] is False
+    assert payload["regime_selection_claim_permitted"] is False
+    assert payload["primary_alpha_claim_permitted_from_regime_slice"] is False
+    assert payload["allocation_change_performed"] is False
+
+    lookahead = _regime_row(999)
+    lookahead["regime_available_at"] = "2020-01-02T16:00:00Z"
+    with pytest.raises(ContractValidationError, match="not available"):
+        summarize_regime_observations([lookahead])
+
+    duplicate = [_regime_row(1), _regime_row(1)]
+    with pytest.raises(ContractValidationError, match="duplicate observation"):
+        summarize_regime_observations(duplicate)

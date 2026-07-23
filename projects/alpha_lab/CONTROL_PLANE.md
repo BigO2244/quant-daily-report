@@ -109,6 +109,16 @@ must return the frozen primary metric name, number of variants attempted, and
 explicitly authorized, rejects a changed primary metric or excess variants,
 and statically rejects direct production imports or order calls.
 
+Every evaluator that produces dated return observations should also call
+`projects.alpha_lab.evaluators.regime_diagnostics.summarize_regime_observations`.
+The shared envelope enforces that the regime label was available by the decision
+timestamp, uses the canonical seven regime labels, requires 30 independent
+observations before a regime cell is decision-grade, and requires 252 total
+observations before regime-selection coverage is even eligible for review.
+Regime slices are secondary diagnostics: they cannot rescue a failed
+unconditional test, change allocation, or promote a model. A regime-specific
+claim or allocation rule requires its own separately frozen holdout.
+
 ```bash
 python -m projects.alpha_lab.control_plane.cli run-evaluator \
   --spec /path/to/frozen_evaluator_spec.json \
