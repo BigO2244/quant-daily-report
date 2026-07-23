@@ -234,3 +234,65 @@ def test_provider_certification_is_bound_to_file_hash_and_physical_schema(tmp_pa
     )
     assert result["gate"]["ready"] is False
     assert any("physical_field_absent" in item for item in result["gate"]["blockers"])
+
+
+def test_provider_gate_keeps_old_bundles_but_reads_certified_current_file(tmp_path):
+    import json
+
+    asset = DataAsset(
+        asset_id="immutable_bundle_v1",
+        provider_id="sample.provider",
+        dataset_id="sample.dataset",
+        patterns=("bundles/*/data/events.csv",),
+        required_fields=("security_id", "available_at"),
+    )
+    old = tmp_path / "bundles/old/data/events.csv"
+    current = tmp_path / "bundles/current/data/events.csv"
+    old.parent.mkdir(parents=True)
+    current.parent.mkdir(parents=True)
+    old.write_text(
+        "security_id,available_at\nOLD,2025-01-01T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    current.write_text(
+        "security_id,available_at\nNEW,2026-01-01T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    record = {
+        "path": "bundles/current/data/events.csv",
+        "bytes": current.stat().st_size,
+        "sha256": hashlib.sha256(current.read_bytes()).hexdigest(),
+    }
+    unsigned = {
+        "provider_id": asset.provider_id,
+        "dataset_id": asset.dataset_id,
+        "status": "READY",
+        "historical_point_in_time_verified": True,
+        "schema_validation_status": "PASS",
+        "data_files": [record],
+        "schema_manifest": [
+            {
+                "logical_field": field,
+                "source_path": record["path"],
+                "physical_field": field,
+                "data_type": "string",
+            }
+            for field in asset.required_fields
+        ],
+        "blockers": [],
+    }
+    certification_path = tmp_path / asset.certification_path
+    certification_path.parent.mkdir(parents=True)
+    certification_path.write_text(
+        json.dumps({**unsigned, "evidence_hash": canonical_hash(unsigned)}),
+        encoding="utf-8",
+    )
+    result = inspect_asset(
+        tmp_path,
+        asset,
+        datetime(2026, 7, 23, 19, 0, tzinfo=timezone.utc),
+    )
+    assert result["gate"]["ready"] is True
+    assert [record["path"] for record in result["files"]] == [
+        "bundles/current/data/events.csv"
+    ]

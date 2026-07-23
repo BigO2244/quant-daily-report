@@ -151,7 +151,37 @@ def _physical_fields(path: Path) -> set[str]:
 
 
 def inspect_asset(repo_root: Path, asset: DataAsset, checked_at: datetime) -> Dict[str, Any]:
-    files = _matching_files(repo_root, asset.patterns)
+    matched_files = _matching_files(repo_root, asset.patterns)
+    certification = _read_certification(repo_root, asset)
+    files = matched_files
+    # Immutable bundle patterns intentionally retain prior snapshots.  Once a
+    # certification exists, inspect only the exact current files it binds,
+    # while still requiring every declared path to be an existing member of
+    # the frozen asset pattern.  Otherwise a second valid rebuild would make
+    # the latest certification fail merely because the older evidence remains.
+    if certification is not None and isinstance(
+        certification.get("data_files"), list
+    ):
+        matched_set = set(matched_files)
+        certified_paths = []
+        for record in certification["data_files"]:
+            if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+                certified_paths = []
+                break
+            candidate = (repo_root / record["path"]).resolve()
+            try:
+                candidate.relative_to(repo_root.resolve())
+            except ValueError:
+                certified_paths = []
+                break
+            if candidate not in matched_set or not candidate.is_file():
+                certified_paths = []
+                break
+            certified_paths.append(candidate)
+        if certified_paths and len(certified_paths) == len(
+            certification["data_files"]
+        ):
+            files = sorted(set(certified_paths))
     file_records = [
         {
             "path": str(path.relative_to(repo_root)),
@@ -160,7 +190,6 @@ def inspect_asset(repo_root: Path, asset: DataAsset, checked_at: datetime) -> Di
         }
         for path in files
     ]
-    certification = _read_certification(repo_root, asset)
     blockers = []
     fields_available: Sequence[str] = ()
     pit_verified = False
