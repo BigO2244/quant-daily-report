@@ -73,7 +73,7 @@ def materialize_market_panels(
     # spill bounded intermediate state to the research disk instead of letting
     # a four-thread, multi-gigabyte build trigger the kernel OOM killer.
     connection.execute("PRAGMA threads=1")
-    connection.execute("PRAGMA memory_limit='900MB'")
+    connection.execute("PRAGMA memory_limit='1100MB'")
     connection.execute("PRAGMA preserve_insertion_order=false")
     connection.execute("PRAGMA temp_directory='{}'".format(
         str(temporary_directory.resolve()).replace("'", "''")
@@ -101,38 +101,55 @@ def materialize_market_panels(
             GROUP BY ticker, TRY_CAST(date AS DATE)
             """.format(_quote(actions_path))
         )
+        # Break the large join and the security-history window into persisted
+        # phases.  Combining them in one CTE kept both operators' working sets
+        # live and exhausted the bounded VM memory even while DuckDB spilled.
+        connection.execute(
+            """
+            CREATE TABLE raw_prices AS
+            SELECT s.security_id, s.cik, s.sector AS sector_id, p.ticker,
+                   TRY_CAST(p.date AS DATE) AS date,
+                   TRY_CAST(p.open AS DOUBLE) * TRY_CAST(p.closeunadj AS DOUBLE) /
+                     NULLIF(TRY_CAST(p.close AS DOUBLE), 0) AS open,
+                   TRY_CAST(p.high AS DOUBLE) AS high,
+                   TRY_CAST(p.low AS DOUBLE) AS low,
+                   TRY_CAST(p.closeunadj AS DOUBLE) AS close,
+                   TRY_CAST(p.closeadj AS DOUBLE) AS provider_closeadj,
+                   TRY_CAST(p.volume AS DOUBLE) AS volume,
+                   TRY_CAST(p.lastupdated AS DATE) AS source_lastupdated,
+                   COALESCE(a.split_factor, 1.0) AS split_factor,
+                   COALESCE(a.cash_dividend, 0.0) AS cash_dividend,
+                   a.action_types
+            FROM read_csv_auto({}, header=true) p
+            JOIN security_master s ON p.ticker=s.ticker
+              AND TRY_CAST(p.date AS DATE) >= s.start_date
+              AND (s.end_date IS NULL OR TRY_CAST(p.date AS DATE) <= s.end_date)
+            LEFT JOIN actions a ON p.ticker=a.ticker AND TRY_CAST(p.date AS DATE)=a.date
+            ORDER BY s.security_id, TRY_CAST(p.date AS DATE)
+            """.format(_quote(sep_path))
+        )
+        connection.execute(
+            """
+            CREATE TABLE security_last_dates AS
+            SELECT security_id, MAX(date) AS last_date
+            FROM raw_prices
+            GROUP BY security_id
+            """
+        )
         connection.execute(
             """
             CREATE TABLE staged_prices AS
-            WITH raw AS (
-              SELECT s.security_id, s.cik, s.sector AS sector_id, p.ticker,
-                     TRY_CAST(p.date AS DATE) AS date,
-                     TRY_CAST(p.open AS DOUBLE) * TRY_CAST(p.closeunadj AS DOUBLE) /
-                       NULLIF(TRY_CAST(p.close AS DOUBLE), 0) AS open,
-                     TRY_CAST(p.high AS DOUBLE) AS high,
-                     TRY_CAST(p.low AS DOUBLE) AS low,
-                     TRY_CAST(p.closeunadj AS DOUBLE) AS close,
-                     TRY_CAST(p.closeadj AS DOUBLE) AS provider_closeadj,
-                     TRY_CAST(p.volume AS DOUBLE) AS volume,
-                     TRY_CAST(p.lastupdated AS DATE) AS source_lastupdated,
-                     COALESCE(a.split_factor, 1.0) AS split_factor,
-                     COALESCE(a.cash_dividend, 0.0) AS cash_dividend,
-                     a.action_types
-              FROM read_csv_auto({}, header=true) p
-              JOIN security_master s ON p.ticker=s.ticker
-                AND TRY_CAST(p.date AS DATE) >= s.start_date
-                AND (s.end_date IS NULL OR TRY_CAST(p.date AS DATE) <= s.end_date)
-              LEFT JOIN actions a ON p.ticker=a.ticker AND TRY_CAST(p.date AS DATE)=a.date
-            ), lagged AS (
-              SELECT *, LAG(provider_closeadj) OVER
-                       (PARTITION BY security_id ORDER BY date) AS prior_closeadj,
-                     MAX(date) OVER (PARTITION BY security_id) AS last_date
-              FROM raw
+            WITH lagged AS (
+              SELECT r.*, d.last_date,
+                     LAG(provider_closeadj) OVER
+                       (PARTITION BY r.security_id ORDER BY r.date) AS prior_closeadj
+              FROM raw_prices r
+              JOIN security_last_dates d USING (security_id)
             )
             SELECT *, CASE WHEN prior_closeadj > 0 AND provider_closeadj >= 0 THEN
                    provider_closeadj / prior_closeadj - 1.0 END AS daily_total_return
             FROM lagged
-            """.format(_quote(sep_path))
+            """
         )
         connection.execute(
             """
