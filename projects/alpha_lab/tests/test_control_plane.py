@@ -26,6 +26,7 @@ from projects.alpha_lab.control_plane.models import (
     ResearchVerdict,
     ShadowStatus,
 )
+from projects.alpha_lab.evaluators.price_families import _summarize_rows
 from projects.alpha_lab.evaluators.regime_diagnostics import (
     summarize_regime_observations,
 )
@@ -285,6 +286,61 @@ def test_eight_newly_frozen_evaluator_specs_are_hash_valid():
             Path(__file__).parents[1] / "evaluators" / module_name
         )
         assert boundary["status"] == "PASS"
+
+
+def test_price_family_primary_metric_includes_stress_cost_and_capacity():
+    rows = [
+        {
+            "variant_id": "primary",
+            "decision_date": "2020-01-31",
+            "return_end_date": "2020-02-28",
+            "sample_phase": "VALIDATION",
+            "candidate_pessimistic_return": 0.02,
+            "benchmark_pessimistic_return": 0.01,
+            "candidate_zero_incremental_return": 0.021,
+            "benchmark_zero_incremental_return": 0.01,
+            "selected_min_dollar_adv": 2_000_000.0,
+            "selected_count": 10,
+            "market_20": 0.01,
+            "market_63": 0.02,
+            "market_vol_20": 0.15,
+        },
+        {
+            "variant_id": "primary",
+            "decision_date": "2020-02-28",
+            "return_end_date": "2020-03-31",
+            "sample_phase": "VALIDATION",
+            "candidate_pessimistic_return": 0.018,
+            "benchmark_pessimistic_return": 0.01,
+            "candidate_zero_incremental_return": 0.019,
+            "benchmark_zero_incremental_return": 0.01,
+            "selected_min_dollar_adv": 2_000_000.0,
+            "selected_count": 10,
+            "market_20": -0.01,
+            "market_63": 0.01,
+            "market_vol_20": 0.18,
+        },
+    ]
+    summary = _summarize_rows(
+        rows,
+        annualization=12,
+        base_one_way_cost_bps=15.0,
+        stress_one_way_cost_bps=30.0,
+        capacity_fraction_of_adv=0.05,
+    )
+    validation = summary["phases"]["VALIDATION"]["cost_scenarios"]
+    assert validation["stress"]["pessimistic"][
+        "annualized_excess_return_after_costs"
+    ] < validation["base"]["pessimistic"][
+        "annualized_excess_return_after_costs"
+    ]
+    assert summary[
+        "worst_case_validation_annualized_excess_return_after_costs"
+    ] == validation["stress"]["pessimistic"][
+        "annualized_excess_return_after_costs"
+    ]
+    assert summary["conservative_validation_capacity_dollars"] == 1_000_000
+    assert summary["capacity_supports_one_million_dollars"] is True
 
 
 def test_control_plane_has_no_production_imports_or_order_calls():

@@ -92,50 +92,120 @@ def _summarize_rows(
     rows: Iterable[Mapping[str, Any]],
     *,
     annualization: int,
-    one_way_cost_bps: float,
+    base_one_way_cost_bps: float,
+    stress_one_way_cost_bps: float,
+    capacity_fraction_of_adv: float,
 ) -> Dict[str, Any]:
     records = [dict(row) for row in rows]
     phases: Dict[str, Any] = {}
-    round_trip = 2.0 * one_way_cost_bps / 10000.0
+    cost_levels = {
+        "base": base_one_way_cost_bps,
+        "stress": stress_one_way_cost_bps,
+    }
     for phase in ("DISCOVERY", "VALIDATION"):
         selected = [row for row in records if row["sample_phase"] == phase]
-        phase_result: Dict[str, Any] = {"observation_count": len(selected)}
-        for scenario in ("pessimistic", "zero_incremental"):
-            active = [
-                float(row["candidate_{}_return".format(scenario)])
-                - float(row["benchmark_{}_return".format(scenario)])
-                - round_trip
-                for row in selected
-                if row["candidate_{}_return".format(scenario)] is not None
-                and row["benchmark_{}_return".format(scenario)] is not None
-            ]
-            mean = sum(active) / len(active) if active else None
-            if len(active) > 1:
-                variance = sum((item - mean) ** 2 for item in active) / (
-                    len(active) - 1
-                )
-                volatility = math.sqrt(variance)
-                t_stat = mean / (volatility / math.sqrt(len(active))) if volatility else None
-            else:
-                volatility = None
-                t_stat = None
-            phase_result[scenario] = {
-                "observation_count": len(active),
-                "mean_active_return_after_costs": mean,
-                "annualized_excess_return_after_costs": (
-                    mean * annualization if mean is not None else None
-                ),
-                "active_return_volatility": volatility,
-                "t_statistic": t_stat,
+        phase_result: Dict[str, Any] = {
+            "observation_count": len(selected),
+            "cost_scenarios": {},
+        }
+        for cost_label, one_way_cost_bps in cost_levels.items():
+            round_trip = 2.0 * one_way_cost_bps / 10000.0
+            cost_result: Dict[str, Any] = {
+                "one_way_cost_bps": one_way_cost_bps,
+                "round_trip_cost_bps": 2.0 * one_way_cost_bps,
             }
+            for scenario in ("pessimistic", "zero_incremental"):
+                active = [
+                    (
+                        row,
+                        float(row["candidate_{}_return".format(scenario)])
+                        - float(row["benchmark_{}_return".format(scenario)])
+                        - round_trip,
+                    )
+                    for row in selected
+                    if row["candidate_{}_return".format(scenario)] is not None
+                    and row["benchmark_{}_return".format(scenario)] is not None
+                ]
+                values = [item[1] for item in active]
+                mean = sum(values) / len(values) if values else None
+                if len(values) > 1:
+                    variance = sum((item - mean) ** 2 for item in values) / (
+                        len(values) - 1
+                    )
+                    volatility = math.sqrt(variance)
+                    t_stat = (
+                        mean / (volatility / math.sqrt(len(values)))
+                        if volatility
+                        else None
+                    )
+                else:
+                    volatility = None
+                    t_stat = None
+                annual_contributions: Dict[str, float] = {}
+                for row, value in active:
+                    year = _iso_date(row["decision_date"])[:4]
+                    annual_contributions[year] = (
+                        annual_contributions.get(year, 0.0) + value
+                    )
+                positive_total = sum(
+                    max(value, 0.0) for value in annual_contributions.values()
+                )
+                maximum_positive_year_share = (
+                    max(
+                        (
+                            max(value, 0.0) / positive_total
+                            for value in annual_contributions.values()
+                        ),
+                        default=None,
+                    )
+                    if positive_total > 0
+                    else None
+                )
+                cost_result[scenario] = {
+                    "observation_count": len(values),
+                    "mean_active_return_after_costs": mean,
+                    "annualized_excess_return_after_costs": (
+                        mean * annualization if mean is not None else None
+                    ),
+                    "active_return_volatility": volatility,
+                    "t_statistic": t_stat,
+                    "annual_active_return_contributions": dict(
+                        sorted(annual_contributions.items())
+                    ),
+                    "maximum_positive_year_contribution_share": (
+                        maximum_positive_year_share
+                    ),
+                }
+            phase_result["cost_scenarios"][cost_label] = cost_result
+        # Retain the original base-cost scenario keys for stable downstream
+        # reads while making the full frozen cost envelope explicit.
+        phase_result["pessimistic"] = phase_result["cost_scenarios"]["base"][
+            "pessimistic"
+        ]
+        phase_result["zero_incremental"] = phase_result["cost_scenarios"]["base"][
+            "zero_incremental"
+        ]
         phases[phase] = phase_result
 
     validation_values = [
-        phases["VALIDATION"][scenario]["annualized_excess_return_after_costs"]
+        phases["VALIDATION"]["cost_scenarios"][cost_label][scenario][
+            "annualized_excess_return_after_costs"
+        ]
+        for cost_label in ("base", "stress")
         for scenario in ("pessimistic", "zero_incremental")
     ]
     finite_validation = [item for item in validation_values if item is not None]
     worst_case = min(finite_validation) if finite_validation else None
+    validation_capacity = [
+        float(row["selected_min_dollar_adv"])
+        * capacity_fraction_of_adv
+        * int(row["selected_count"])
+        for row in records
+        if row["sample_phase"] == "VALIDATION"
+        and row.get("selected_min_dollar_adv") is not None
+        and row.get("selected_count") is not None
+    ]
+    conservative_capacity = min(validation_capacity) if validation_capacity else None
 
     regime_rows = []
     for row in records:
@@ -164,6 +234,21 @@ def _summarize_rows(
     return {
         "phases": phases,
         "worst_case_validation_annualized_excess_return_after_costs": worst_case,
+        "cost_levels_one_way_bps": cost_levels,
+        "cost_model": (
+            "conservative full round-trip turnover charged at every rebalance"
+        ),
+        "positive_in_all_validation_terminal_and_cost_scenarios": (
+            bool(finite_validation)
+            and len(finite_validation) == 4
+            and all(value > 0 for value in finite_validation)
+        ),
+        "conservative_validation_capacity_dollars": conservative_capacity,
+        "capacity_fraction_of_adv": capacity_fraction_of_adv,
+        "capacity_supports_one_million_dollars": (
+            conservative_capacity is not None and conservative_capacity >= 1_000_000
+        ),
+        "corrected_significance_gate_status": "NOT_IMPLEMENTED",
         "terminal_scenarios_reported": [
             "pessimistic_total_loss",
             "zero_incremental",
@@ -181,7 +266,9 @@ def _ranked_price_variant(
     hold: int,
     cadence: str,
     direction: float,
-    one_way_cost_bps: float,
+    base_one_way_cost_bps: float,
+    stress_one_way_cost_bps: float,
+    capacity_fraction_of_adv: float,
     volatility_scale: bool = False,
 ) -> Dict[str, Any]:
     price = _asset_path(packet, "pit_observed_prices_v1")
@@ -287,6 +374,8 @@ def _ranked_price_variant(
                    MAX(market_20) AS market_20, MAX(market_63) AS market_63,
                    MAX(market_vol_20) AS market_vol_20,
                    COUNT(*) FILTER (WHERE bucket=5) AS selected_count,
+                   MIN(dollar_ADV_20) FILTER (WHERE bucket=5)
+                     AS selected_min_dollar_adv,
                    COUNT(*) AS eligible_count
             FROM ranked
             GROUP BY date
@@ -315,7 +404,11 @@ def _ranked_price_variant(
     finally:
         connection.close()
     summary = _summarize_rows(
-        rows, annualization=annualization, one_way_cost_bps=one_way_cost_bps
+        rows,
+        annualization=annualization,
+        base_one_way_cost_bps=base_one_way_cost_bps,
+        stress_one_way_cost_bps=stress_one_way_cost_bps,
+        capacity_fraction_of_adv=capacity_fraction_of_adv,
     )
     summary["variant_id"] = variant_id
     summary["cadence"] = cadence
@@ -427,7 +520,10 @@ def _seasonality_variant(
                      AS candidate_zero_incremental_return,
                    AVG(zero_incremental_return) AS benchmark_zero_incremental_return,
                    MAX(market_20) AS market_20,MAX(market_63) AS market_63,
-                   MAX(market_vol_20) AS market_vol_20
+                   MAX(market_vol_20) AS market_vol_20,
+                   COUNT(*) FILTER(WHERE bucket=5) AS selected_count,
+                   MIN(dollar_ADV_20) FILTER(WHERE bucket=5)
+                     AS selected_min_dollar_adv
             FROM ranked GROUP BY date
             HAVING COUNT(*)>=50 AND COUNT(*) FILTER(WHERE bucket=5)>=10
             ORDER BY date
@@ -443,7 +539,13 @@ def _seasonality_variant(
         ).fetchdf().to_dict("records")
     finally:
         connection.close()
-    summary = _summarize_rows(rows, annualization=12, one_way_cost_bps=15.0)
+    summary = _summarize_rows(
+        rows,
+        annualization=12,
+        base_one_way_cost_bps=15.0,
+        stress_one_way_cost_bps=30.0,
+        capacity_fraction_of_adv=0.05,
+    )
     summary["variant_id"] = variant_id
     summary["target_month_offset"] = target_month_offset
     return summary
@@ -461,7 +563,9 @@ def evaluate_residual_momentum(packet: Dict[str, Any], *, phase: str) -> Dict[st
             hold=21,
             cadence="MONTHLY",
             direction=1.0,
-            one_way_cost_bps=15.0,
+            base_one_way_cost_bps=15.0,
+            stress_one_way_cost_bps=30.0,
+            capacity_fraction_of_adv=0.05,
         ),
         _ranked_price_variant(
             packet,
@@ -471,7 +575,9 @@ def evaluate_residual_momentum(packet: Dict[str, Any], *, phase: str) -> Dict[st
             hold=21,
             cadence="MONTHLY",
             direction=1.0,
-            one_way_cost_bps=15.0,
+            base_one_way_cost_bps=15.0,
+            stress_one_way_cost_bps=30.0,
+            capacity_fraction_of_adv=0.05,
         ),
         _ranked_price_variant(
             packet,
@@ -481,7 +587,9 @@ def evaluate_residual_momentum(packet: Dict[str, Any], *, phase: str) -> Dict[st
             hold=21,
             cadence="MONTHLY",
             direction=1.0,
-            one_way_cost_bps=15.0,
+            base_one_way_cost_bps=15.0,
+            stress_one_way_cost_bps=30.0,
+            capacity_fraction_of_adv=0.05,
         ),
     ]
     return {
@@ -543,7 +651,9 @@ def evaluate_short_horizon_reversal(
             hold=5,
             cadence="WEEKLY",
             direction=-1.0,
-            one_way_cost_bps=25.0,
+            base_one_way_cost_bps=25.0,
+            stress_one_way_cost_bps=50.0,
+            capacity_fraction_of_adv=0.02,
         ),
         _ranked_price_variant(
             packet,
@@ -553,7 +663,9 @@ def evaluate_short_horizon_reversal(
             hold=20,
             cadence="MONTHLY",
             direction=-1.0,
-            one_way_cost_bps=25.0,
+            base_one_way_cost_bps=25.0,
+            stress_one_way_cost_bps=50.0,
+            capacity_fraction_of_adv=0.02,
         ),
         _ranked_price_variant(
             packet,
@@ -563,7 +675,9 @@ def evaluate_short_horizon_reversal(
             hold=5,
             cadence="WEEKLY",
             direction=-1.0,
-            one_way_cost_bps=25.0,
+            base_one_way_cost_bps=25.0,
+            stress_one_way_cost_bps=50.0,
+            capacity_fraction_of_adv=0.02,
             volatility_scale=True,
         ),
     ]
