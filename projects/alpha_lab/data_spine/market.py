@@ -73,7 +73,7 @@ def materialize_market_panels(
     # spill bounded intermediate state to the research disk instead of letting
     # a four-thread, multi-gigabyte build trigger the kernel OOM killer.
     connection.execute("PRAGMA threads=1")
-    connection.execute("PRAGMA memory_limit='1100MB'")
+    connection.execute("PRAGMA memory_limit='900MB'")
     connection.execute("PRAGMA preserve_insertion_order=false")
     connection.execute("PRAGMA temp_directory='{}'".format(
         str(temporary_directory.resolve()).replace("'", "''")
@@ -107,16 +107,13 @@ def materialize_market_panels(
         connection.execute(
             """
             CREATE TABLE raw_prices AS
-            SELECT s.security_id, s.cik, s.sector AS sector_id, p.ticker,
+            SELECT s.security_id,
                    TRY_CAST(p.date AS DATE) AS date,
                    TRY_CAST(p.open AS DOUBLE) * TRY_CAST(p.closeunadj AS DOUBLE) /
                      NULLIF(TRY_CAST(p.close AS DOUBLE), 0) AS open,
-                   TRY_CAST(p.high AS DOUBLE) AS high,
-                   TRY_CAST(p.low AS DOUBLE) AS low,
                    TRY_CAST(p.closeunadj AS DOUBLE) AS close,
                    TRY_CAST(p.closeadj AS DOUBLE) AS provider_closeadj,
                    TRY_CAST(p.volume AS DOUBLE) AS volume,
-                   TRY_CAST(p.lastupdated AS DATE) AS source_lastupdated,
                    COALESCE(a.split_factor, 1.0) AS split_factor,
                    COALESCE(a.cash_dividend, 0.0) AS cash_dividend,
                    a.action_types
@@ -125,7 +122,6 @@ def materialize_market_panels(
               AND TRY_CAST(p.date AS DATE) >= s.start_date
               AND (s.end_date IS NULL OR TRY_CAST(p.date AS DATE) <= s.end_date)
             LEFT JOIN actions a ON p.ticker=a.ticker AND TRY_CAST(p.date AS DATE)=a.date
-            ORDER BY s.security_id, TRY_CAST(p.date AS DATE)
             """.format(_quote(sep_path))
         )
         connection.execute(

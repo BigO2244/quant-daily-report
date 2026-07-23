@@ -1419,7 +1419,8 @@ def test_market_materialization_does_not_mislabel_last_daily_return_as_settlemen
     try:
         row = connection.execute(
             """
-            SELECT last_observed_total_return, delisting_return, terminal_return
+            SELECT closeadj, last_observed_total_return, delisting_return,
+                   terminal_return
             FROM read_parquet(?)
             ORDER BY date DESC
             LIMIT 1
@@ -1428,9 +1429,10 @@ def test_market_materialization_does_not_mislabel_last_daily_return_as_settlemen
         ).fetchone()
     finally:
         connection.close()
-    assert row[0] == pytest.approx(0.10)
-    assert row[1] is None
+    assert row[0] == pytest.approx(11.0)
+    assert row[1] == pytest.approx(0.10)
     assert row[2] is None
+    assert row[3] is None
     manifest = json.loads(
         (
             tmp_path / "outputs/research/pit_liquidity/manifest.json"
