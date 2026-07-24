@@ -21,6 +21,18 @@ def _quote(path: Path) -> str:
     return "'{}'".format(str(path.resolve()).replace("'", "''"))
 
 
+def _is_complete_parquet(path: Path) -> bool:
+    """Return whether *path* has a readable footer and at least one row."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    try:
+        import pyarrow.parquet as pq
+
+        return pq.ParquetFile(path).metadata.num_rows > 0
+    except Exception:
+        return False
+
+
 def materialize_market_panels(
     *,
     repo_root: Path,
@@ -75,8 +87,23 @@ def materialize_market_panels(
             )
     else:
         database.unlink(missing_ok=True)
-    price_staging_path.unlink(missing_ok=True)
-    characteristics_staging_path.unlink(missing_ok=True)
+        price_staging_path.unlink(missing_ok=True)
+        characteristics_staging_path.unlink(missing_ok=True)
+    price_checkpoint = (
+        resume_staged_database and _is_complete_parquet(price_staging_path)
+    )
+    characteristics_checkpoint = (
+        resume_staged_database
+        and _is_complete_parquet(characteristics_staging_path)
+    )
+    if characteristics_checkpoint and not price_checkpoint:
+        raise RuntimeError(
+            "characteristics checkpoint exists without a complete price checkpoint"
+        )
+    if not price_checkpoint:
+        price_staging_path.unlink(missing_ok=True)
+    if not characteristics_checkpoint:
+        characteristics_staging_path.unlink(missing_ok=True)
     connection = duckdb.connect(str(database))
     # The authoritative Alpha Lab VM is intentionally small.  Force DuckDB to
     # spill bounded intermediate state to the research disk instead of letting
@@ -156,83 +183,89 @@ def materialize_market_panels(
             FROM lagged
             """
         )
-        connection.execute(
-            """
-            COPY (
-              WITH first_values AS (
-                SELECT security_id,
-                       ARG_MIN(close, date) AS first_close,
-                       ARG_MIN(provider_closeadj, date) AS first_provider_closeadj
-                FROM staged_prices
-                GROUP BY security_id
-              ), rolling_adv AS (
-                SELECT security_id, date,
-                  AVG(p.close * p.volume) OVER (
-                    PARTITION BY p.security_id ORDER BY p.date
-                    ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
-                  ) AS dollar_ADV_20
-                FROM staged_prices p
-              )
-              SELECT p.security_id, p.date, p.open, p.close,
-                     f.first_close * p.provider_closeadj /
-                       NULLIF(f.first_provider_closeadj, 0.0) AS closeadj,
-                     p.volume, a.dollar_ADV_20,
-                     p.split_factor, p.cash_dividend,
-                     CASE WHEN p.action_types IS NULL THEN ''
-                          ELSE MD5(p.security_id || '|' || CAST(p.date AS VARCHAR) || '|' || p.action_types) END
-                       AS corporate_action_id,
-                     CASE WHEN p.date=p.last_date THEN p.daily_total_return END
-                       AS last_observed_total_return,
-                     NULL::DOUBLE AS delisting_return,
-                     NULL::DOUBLE AS terminal_return,
-                     CAST(p.date AS TIMESTAMP) + INTERVAL 1 DAY AS adjustment_available_at,
-                     CAST(p.date AS TIMESTAMP) + INTERVAL 1 DAY AS available_at
-              FROM staged_prices p
-              JOIN first_values f USING (security_id)
-              JOIN rolling_adv a USING (security_id, date)
-            ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
-            """.format(_quote(price_staging_path))
-        )
+        if not price_checkpoint:
+            connection.execute(
+                """
+                COPY (
+                  WITH first_values AS (
+                    SELECT security_id,
+                           ARG_MIN(close, date) AS first_close,
+                           ARG_MIN(provider_closeadj, date) AS first_provider_closeadj
+                    FROM staged_prices
+                    GROUP BY security_id
+                  ), rolling_adv AS (
+                    SELECT security_id, date,
+                      AVG(p.close * p.volume) OVER (
+                        PARTITION BY p.security_id ORDER BY p.date
+                        ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+                      ) AS dollar_ADV_20
+                    FROM staged_prices p
+                  )
+                  SELECT p.security_id, p.date, p.open, p.close,
+                         f.first_close * p.provider_closeadj /
+                           NULLIF(f.first_provider_closeadj, 0.0) AS closeadj,
+                         p.volume, a.dollar_ADV_20,
+                         p.split_factor, p.cash_dividend,
+                         CASE WHEN p.action_types IS NULL THEN ''
+                              ELSE MD5(p.security_id || '|' || CAST(p.date AS VARCHAR) || '|' || p.action_types) END
+                           AS corporate_action_id,
+                         CASE WHEN p.date=p.last_date THEN p.daily_total_return END
+                           AS last_observed_total_return,
+                         NULL::DOUBLE AS delisting_return,
+                         NULL::DOUBLE AS terminal_return,
+                         CAST(p.date AS TIMESTAMP) + INTERVAL 1 DAY AS adjustment_available_at,
+                         CAST(p.date AS TIMESTAMP) + INTERVAL 1 DAY AS available_at
+                  FROM staged_prices p
+                  JOIN first_values f USING (security_id)
+                  JOIN rolling_adv a USING (security_id, date)
+                ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
+                """.format(_quote(price_staging_path))
+            )
+            price_checkpoint = True
 
-        connection.execute(
-            """
-            CREATE TABLE sec_facts AS
-            SELECT cik, logical_fact, TRY_CAST(value AS DOUBLE) AS value,
-                   TRY_CAST(available_at AS TIMESTAMP) AS available_at,
-                   TRY_CAST("end" AS DATE) AS fact_end, accession_number
-            FROM read_csv_auto({}, header=true)
-            WHERE logical_fact IN ('shares_outstanding','stockholders_equity','stockholders_equity_including_nci')
-              AND TRY_CAST(value AS DOUBLE) IS NOT NULL
-            """.format(_quote(facts_path))
-        )
-        connection.execute(
-            """
-            CREATE TABLE shares AS
-            SELECT * EXCLUDE(rn) FROM (
-              SELECT *, ROW_NUMBER() OVER (PARTITION BY cik, CAST(available_at AS DATE)
-                ORDER BY fact_end DESC NULLS LAST, accession_number DESC) rn
-              FROM sec_facts WHERE logical_fact='shares_outstanding'
-            ) WHERE rn=1
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE equity AS
-            SELECT * EXCLUDE(rn) FROM (
-              SELECT *, ROW_NUMBER() OVER (PARTITION BY cik, CAST(available_at AS DATE)
-                ORDER BY CASE WHEN logical_fact='stockholders_equity' THEN 0 ELSE 1 END,
-                         fact_end DESC NULLS LAST, accession_number DESC) rn
-              FROM sec_facts WHERE logical_fact IN
-                ('stockholders_equity','stockholders_equity_including_nci')
-            ) WHERE rn=1
-            """
-        )
-        connection.execute(
-            """
-            COPY (
-              WITH prices AS (
+        if not characteristics_checkpoint:
+            # Persist each characteristics operator separately so DuckDB can
+            # release its working set between the lag windows, factor windows,
+            # and two filing-time ASOF joins.  The checkpoint tables also make
+            # a bounded-memory failure resumable without rebuilding prices.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sec_facts AS
+                SELECT cik, logical_fact, TRY_CAST(value AS DOUBLE) AS value,
+                       TRY_CAST(available_at AS TIMESTAMP) AS available_at,
+                       TRY_CAST("end" AS DATE) AS fact_end, accession_number
+                FROM read_csv_auto({}, header=true)
+                WHERE logical_fact IN ('shares_outstanding','stockholders_equity','stockholders_equity_including_nci')
+                  AND TRY_CAST(value AS DOUBLE) IS NOT NULL
+                """.format(_quote(facts_path))
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS shares AS
+                SELECT * EXCLUDE(rn) FROM (
+                  SELECT *, ROW_NUMBER() OVER (PARTITION BY cik, CAST(available_at AS DATE)
+                    ORDER BY fact_end DESC NULLS LAST, accession_number DESC) rn
+                  FROM sec_facts WHERE logical_fact='shares_outstanding'
+                ) WHERE rn=1
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS equity AS
+                SELECT * EXCLUDE(rn) FROM (
+                  SELECT *, ROW_NUMBER() OVER (PARTITION BY cik, CAST(available_at AS DATE)
+                    ORDER BY CASE WHEN logical_fact='stockholders_equity' THEN 0 ELSE 1 END,
+                             fact_end DESC NULLS LAST, accession_number DESC) rn
+                  FROM sec_facts WHERE logical_fact IN
+                    ('stockholders_equity','stockholders_equity_including_nci')
+                ) WHERE rn=1
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characteristic_prices AS
                 SELECT p.security_id, p.date, p.available_at, p.close,
-                       p.closeadj, s.cik, s.sector_id,
+                       s.cik, s.sector_id,
                        p.closeadj / LAG(p.closeadj) OVER
                          (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS daily_return,
                        p.closeadj / LAG(p.closeadj, 5) OVER
@@ -242,43 +275,73 @@ def materialize_market_panels(
                        p.closeadj / LAG(p.closeadj, 60) OVER
                          (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS prior_return_60d
                 FROM read_parquet({}) p
-                JOIN (SELECT DISTINCT security_id, cik, sector AS sector_id FROM security_master) s
-                  USING (security_id)
-              ), with_factors AS (
-                SELECT p.*, TRY_CAST(f.MKT_RF AS DOUBLE) AS market_return
-                FROM prices p LEFT JOIN read_csv_auto({}, header=true) f
-                  ON p.date=TRY_CAST(f.date AS DATE)
-              ), rolling AS (
-                SELECT *,
-                  STDDEV_SAMP(daily_return) OVER (PARTITION BY security_id ORDER BY date
-                    ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) * SQRT(252.0) AS realized_volatility_20d,
-                  COVAR_SAMP(daily_return, market_return) OVER (PARTITION BY security_id ORDER BY date
-                    ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) /
-                  NULLIF(VAR_SAMP(market_return) OVER (PARTITION BY security_id ORDER BY date
-                    ROWS BETWEEN 251 PRECEDING AND CURRENT ROW), 0) AS beta_252d
-                FROM with_factors
-              ), with_shares AS (
-                SELECT r.*, sh.value AS shares_outstanding
-                FROM rolling r ASOF LEFT JOIN shares sh
-                  ON r.cik=sh.cik AND CAST(r.available_at AS TIMESTAMP) >= sh.available_at
-              ), with_equity AS (
-                SELECT r.*, eq.value AS stockholders_equity
-                FROM with_shares r ASOF LEFT JOIN equity eq
-                  ON r.cik=eq.cik AND CAST(r.available_at AS TIMESTAMP) >= eq.available_at
-              )
-              SELECT security_id, date, available_at, sector_id,
-                     close * shares_outstanding AS market_cap,
-                     stockholders_equity / NULLIF(close * shares_outstanding, 0) AS book_to_market,
-                     beta_252d, realized_volatility_20d,
-                     prior_return_5d, prior_return_20d, prior_return_60d
-              FROM with_equity
-            ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
-            """.format(
-                _quote(price_staging_path),
-                _quote(factor_path),
-                _quote(characteristics_staging_path),
+                JOIN (
+                  SELECT DISTINCT security_id, cik, sector AS sector_id
+                  FROM security_master
+                ) s USING (security_id)
+                """.format(_quote(price_staging_path))
             )
-        )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characteristic_factor_rows AS
+                SELECT p.*, TRY_CAST(f.MKT_RF AS DOUBLE) AS market_return
+                FROM characteristic_prices p
+                LEFT JOIN read_csv_auto({}, header=true) f
+                  ON p.date=TRY_CAST(f.date AS DATE)
+                """.format(_quote(factor_path))
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characteristic_rolling AS
+                SELECT security_id, date, available_at, close, cik, sector_id,
+                       prior_return_5d, prior_return_20d, prior_return_60d,
+                       STDDEV_SAMP(daily_return) OVER (
+                         PARTITION BY security_id ORDER BY date
+                         ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+                       ) * SQRT(252.0) AS realized_volatility_20d,
+                       COVAR_SAMP(daily_return, market_return) OVER (
+                         PARTITION BY security_id ORDER BY date
+                         ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                       ) /
+                       NULLIF(VAR_SAMP(market_return) OVER (
+                         PARTITION BY security_id ORDER BY date
+                         ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                       ), 0) AS beta_252d
+                FROM characteristic_factor_rows
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characteristic_with_shares AS
+                SELECT r.*, sh.value AS shares_outstanding
+                FROM characteristic_rolling r ASOF LEFT JOIN shares sh
+                  ON r.cik=sh.cik
+                 AND CAST(r.available_at AS TIMESTAMP) >= sh.available_at
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characteristic_with_equity AS
+                SELECT r.*, eq.value AS stockholders_equity
+                FROM characteristic_with_shares r ASOF LEFT JOIN equity eq
+                  ON r.cik=eq.cik
+                 AND CAST(r.available_at AS TIMESTAMP) >= eq.available_at
+                """
+            )
+            connection.execute(
+                """
+                COPY (
+                  SELECT security_id, date, available_at, sector_id,
+                         close * shares_outstanding AS market_cap,
+                         stockholders_equity /
+                           NULLIF(close * shares_outstanding, 0) AS book_to_market,
+                         beta_252d, realized_volatility_20d,
+                         prior_return_5d, prior_return_20d, prior_return_60d
+                  FROM characteristic_with_equity
+                ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
+                """.format(_quote(characteristics_staging_path))
+            )
+            characteristics_checkpoint = True
         price_stats = connection.execute(
             """
             SELECT COUNT(*), COUNT(DISTINCT security_id), MIN(date), MAX(date),
@@ -299,10 +362,16 @@ def materialize_market_panels(
         build_succeeded = True
     finally:
         connection.close()
-        database.unlink(missing_ok=True)
-        if not build_succeeded:
-            price_staging_path.unlink(missing_ok=True)
-            characteristics_staging_path.unlink(missing_ok=True)
+        if build_succeeded:
+            database.unlink(missing_ok=True)
+        else:
+            # Retain only valid, completed Parquet checkpoints and the staged
+            # DuckDB tables.  A later --resume-staged-database run can continue
+            # from the last completed phase without exposing partial outputs.
+            if not _is_complete_parquet(price_staging_path):
+                price_staging_path.unlink(missing_ok=True)
+            if not _is_complete_parquet(characteristics_staging_path):
+                characteristics_staging_path.unlink(missing_ok=True)
 
     # Publish only after both panels and their statistics complete.  A failed
     # rebuild therefore leaves the last authoritative pair untouched.
