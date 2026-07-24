@@ -33,6 +33,48 @@ def _is_complete_parquet(path: Path) -> bool:
         return False
 
 
+def _materialize_bucketed_table(
+    connection: Any,
+    *,
+    stage: str,
+    create_sql: str,
+    insert_sql: str,
+    bucket_count: int = 32,
+) -> None:
+    """Materialize a large security-partitioned table in resumable buckets."""
+    connection.execute(create_sql)
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS characteristic_build_buckets (
+          stage VARCHAR NOT NULL,
+          bucket INTEGER NOT NULL,
+          PRIMARY KEY (stage, bucket)
+        )
+        """
+    )
+    completed = {
+        int(row[0])
+        for row in connection.execute(
+            "SELECT bucket FROM characteristic_build_buckets WHERE stage=?",
+            [stage],
+        ).fetchall()
+    }
+    for bucket in range(bucket_count):
+        if bucket in completed:
+            continue
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute(insert_sql.format(bucket=bucket))
+            connection.execute(
+                "INSERT INTO characteristic_build_buckets VALUES (?, ?)",
+                [stage, bucket],
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+
 def materialize_market_panels(
     *,
     repo_root: Path,
@@ -266,80 +308,188 @@ def materialize_market_panels(
             )
             connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS characteristic_return_windows AS
-                SELECT p.security_id, p.date,
-                       p.closeadj / LAG(p.closeadj) OVER
-                         (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS daily_return,
-                       p.closeadj / LAG(p.closeadj, 5) OVER
-                         (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS prior_return_5d,
-                       p.closeadj / LAG(p.closeadj, 20) OVER
-                         (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS prior_return_20d,
-                       p.closeadj / LAG(p.closeadj, 60) OVER
-                         (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS prior_return_60d
-                FROM read_parquet({}) p
-                """.format(_quote(price_staging_path))
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS characteristic_prices AS
+                CREATE TABLE IF NOT EXISTS characteristic_price_base AS
                 SELECT p.security_id, p.date, p.available_at, p.close,
-                       s.cik, s.sector_id, r.daily_return,
-                       r.prior_return_5d, r.prior_return_20d,
-                       r.prior_return_60d
+                       p.closeadj, s.cik, s.sector_id,
+                       CAST(MOD(HASH(p.security_id), 32) AS INTEGER) AS bucket
                 FROM read_parquet({}) p
                 JOIN (
                   SELECT DISTINCT security_id, cik, sector AS sector_id
                   FROM security_master
                 ) s USING (security_id)
-                JOIN characteristic_return_windows r USING (security_id, date)
                 """.format(_quote(price_staging_path))
             )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS characteristic_factor_rows AS
-                SELECT p.*, TRY_CAST(f.MKT_RF AS DOUBLE) AS market_return
-                FROM characteristic_prices p
-                LEFT JOIN read_csv_auto({}, header=true) f
-                  ON p.date=TRY_CAST(f.date AS DATE)
-                """.format(_quote(factor_path))
+            _materialize_bucketed_table(
+                connection,
+                stage="return_windows",
+                create_sql="""
+                    CREATE TABLE IF NOT EXISTS characteristic_return_windows (
+                      security_id VARCHAR,
+                      date DATE,
+                      daily_return DOUBLE,
+                      prior_return_5d DOUBLE,
+                      prior_return_20d DOUBLE,
+                      prior_return_60d DOUBLE,
+                      bucket INTEGER
+                    )
+                """,
+                insert_sql="""
+                    INSERT INTO characteristic_return_windows
+                    SELECT security_id, date,
+                           closeadj / LAG(closeadj) OVER
+                             (PARTITION BY security_id ORDER BY date) - 1.0,
+                           closeadj / LAG(closeadj, 5) OVER
+                             (PARTITION BY security_id ORDER BY date) - 1.0,
+                           closeadj / LAG(closeadj, 20) OVER
+                             (PARTITION BY security_id ORDER BY date) - 1.0,
+                           closeadj / LAG(closeadj, 60) OVER
+                             (PARTITION BY security_id ORDER BY date) - 1.0,
+                           bucket
+                    FROM characteristic_price_base
+                    WHERE bucket={bucket}
+                """,
             )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS characteristic_rolling AS
-                SELECT security_id, date, available_at, close, cik, sector_id,
-                       prior_return_5d, prior_return_20d, prior_return_60d,
-                       STDDEV_SAMP(daily_return) OVER (
-                         PARTITION BY security_id ORDER BY date
-                         ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
-                       ) * SQRT(252.0) AS realized_volatility_20d,
-                       COVAR_SAMP(daily_return, market_return) OVER (
-                         PARTITION BY security_id ORDER BY date
-                         ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
-                       ) /
-                       NULLIF(VAR_SAMP(market_return) OVER (
-                         PARTITION BY security_id ORDER BY date
-                         ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
-                       ), 0) AS beta_252d
-                FROM characteristic_factor_rows
-                """
+            _materialize_bucketed_table(
+                connection,
+                stage="factor_rows",
+                create_sql="""
+                    CREATE TABLE IF NOT EXISTS characteristic_factor_rows (
+                      security_id VARCHAR,
+                      date DATE,
+                      available_at TIMESTAMP,
+                      close DOUBLE,
+                      cik VARCHAR,
+                      sector_id VARCHAR,
+                      daily_return DOUBLE,
+                      prior_return_5d DOUBLE,
+                      prior_return_20d DOUBLE,
+                      prior_return_60d DOUBLE,
+                      market_return DOUBLE,
+                      bucket INTEGER
+                    )
+                """,
+                insert_sql="""
+                    INSERT INTO characteristic_factor_rows
+                    SELECT b.security_id, b.date, b.available_at, b.close,
+                           b.cik, b.sector_id, r.daily_return,
+                           r.prior_return_5d, r.prior_return_20d,
+                           r.prior_return_60d,
+                           TRY_CAST(f.MKT_RF AS DOUBLE), b.bucket
+                    FROM (
+                      SELECT * FROM characteristic_price_base
+                      WHERE bucket={bucket}
+                    ) b
+                    JOIN (
+                      SELECT * FROM characteristic_return_windows
+                      WHERE bucket={bucket}
+                    ) r USING (security_id, date, bucket)
+                    LEFT JOIN read_csv_auto({}, header=true) f
+                      ON b.date=TRY_CAST(f.date AS DATE)
+                """.format(_quote(factor_path), bucket="{bucket}"),
             )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS characteristic_with_shares AS
-                SELECT r.*, sh.value AS shares_outstanding
-                FROM characteristic_rolling r ASOF LEFT JOIN shares sh
-                  ON r.cik=sh.cik
-                 AND CAST(r.available_at AS TIMESTAMP) >= sh.available_at
-                """
+            _materialize_bucketed_table(
+                connection,
+                stage="rolling",
+                create_sql="""
+                    CREATE TABLE IF NOT EXISTS characteristic_rolling (
+                      security_id VARCHAR,
+                      date DATE,
+                      available_at TIMESTAMP,
+                      close DOUBLE,
+                      cik VARCHAR,
+                      sector_id VARCHAR,
+                      prior_return_5d DOUBLE,
+                      prior_return_20d DOUBLE,
+                      prior_return_60d DOUBLE,
+                      realized_volatility_20d DOUBLE,
+                      beta_252d DOUBLE,
+                      bucket INTEGER
+                    )
+                """,
+                insert_sql="""
+                    INSERT INTO characteristic_rolling
+                    SELECT security_id, date, available_at, close, cik,
+                           sector_id, prior_return_5d, prior_return_20d,
+                           prior_return_60d,
+                           STDDEV_SAMP(daily_return) OVER (
+                             PARTITION BY security_id ORDER BY date
+                             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+                           ) * SQRT(252.0),
+                           COVAR_SAMP(daily_return, market_return) OVER (
+                             PARTITION BY security_id ORDER BY date
+                             ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                           ) /
+                           NULLIF(VAR_SAMP(market_return) OVER (
+                             PARTITION BY security_id ORDER BY date
+                             ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                           ), 0),
+                           bucket
+                    FROM characteristic_factor_rows
+                    WHERE bucket={bucket}
+                """,
             )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS characteristic_with_equity AS
-                SELECT r.*, eq.value AS stockholders_equity
-                FROM characteristic_with_shares r ASOF LEFT JOIN equity eq
-                  ON r.cik=eq.cik
-                 AND CAST(r.available_at AS TIMESTAMP) >= eq.available_at
-                """
+            _materialize_bucketed_table(
+                connection,
+                stage="with_shares",
+                create_sql="""
+                    CREATE TABLE IF NOT EXISTS characteristic_with_shares (
+                      security_id VARCHAR,
+                      date DATE,
+                      available_at TIMESTAMP,
+                      close DOUBLE,
+                      cik VARCHAR,
+                      sector_id VARCHAR,
+                      prior_return_5d DOUBLE,
+                      prior_return_20d DOUBLE,
+                      prior_return_60d DOUBLE,
+                      realized_volatility_20d DOUBLE,
+                      beta_252d DOUBLE,
+                      bucket INTEGER,
+                      shares_outstanding DOUBLE
+                    )
+                """,
+                insert_sql="""
+                    INSERT INTO characteristic_with_shares
+                    SELECT r.*, sh.value
+                    FROM (
+                      SELECT * FROM characteristic_rolling
+                      WHERE bucket={bucket}
+                    ) r ASOF LEFT JOIN shares sh
+                      ON r.cik=sh.cik
+                     AND CAST(r.available_at AS TIMESTAMP) >= sh.available_at
+                """,
+            )
+            _materialize_bucketed_table(
+                connection,
+                stage="with_equity",
+                create_sql="""
+                    CREATE TABLE IF NOT EXISTS characteristic_with_equity (
+                      security_id VARCHAR,
+                      date DATE,
+                      available_at TIMESTAMP,
+                      close DOUBLE,
+                      cik VARCHAR,
+                      sector_id VARCHAR,
+                      prior_return_5d DOUBLE,
+                      prior_return_20d DOUBLE,
+                      prior_return_60d DOUBLE,
+                      realized_volatility_20d DOUBLE,
+                      beta_252d DOUBLE,
+                      bucket INTEGER,
+                      shares_outstanding DOUBLE,
+                      stockholders_equity DOUBLE
+                    )
+                """,
+                insert_sql="""
+                    INSERT INTO characteristic_with_equity
+                    SELECT r.*, eq.value
+                    FROM (
+                      SELECT * FROM characteristic_with_shares
+                      WHERE bucket={bucket}
+                    ) r ASOF LEFT JOIN equity eq
+                      ON r.cik=eq.cik
+                     AND CAST(r.available_at AS TIMESTAMP) >= eq.available_at
+                """,
             )
             connection.execute(
                 """
