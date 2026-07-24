@@ -109,10 +109,10 @@ def materialize_market_panels(
     # spill bounded intermediate state to the research disk instead of letting
     # a four-thread, multi-gigabyte build trigger the kernel OOM killer.
     connection.execute("PRAGMA threads=1")
-    # The narrow characteristics lag table peaks just above DuckDB's 700 MB
-    # decimal limit (667.5 MiB).  Keep a measured 730 MB hard cap so its final
-    # 18.2 MiB block fits without returning to an unbounded in-memory build.
-    connection.execute("PRAGMA memory_limit='730MB'")
+    # The narrow characteristics lag table has a measured peak just under
+    # 702 MiB.  Keep a 780 MB decimal hard cap (about 744 MiB) so the final
+    # allocation block fits without returning to an unbounded in-memory build.
+    connection.execute("PRAGMA memory_limit='780MB'")
     connection.execute("PRAGMA preserve_insertion_order=false")
     connection.execute("PRAGMA temp_directory='{}'".format(
         str(temporary_directory.resolve()).replace("'", "''")
