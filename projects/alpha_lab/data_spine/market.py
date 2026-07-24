@@ -109,10 +109,10 @@ def materialize_market_panels(
     # spill bounded intermediate state to the research disk instead of letting
     # a four-thread, multi-gigabyte build trigger the kernel OOM killer.
     connection.execute("PRAGMA threads=1")
-    # The narrow characteristics lag table has a measured peak just under
-    # 702 MiB.  Keep a 780 MB decimal hard cap (about 744 MiB) so the final
-    # allocation block fits without returning to an unbounded in-memory build.
-    connection.execute("PRAGMA memory_limit='780MB'")
+    # The three-column characteristics lag window has a measured peak of about
+    # 744.3 MiB.  Keep an 800 MB decimal hard cap (about 763 MiB) so the final
+    # allocation page fits without returning to an unbounded in-memory build.
+    connection.execute("PRAGMA memory_limit='800MB'")
     connection.execute("PRAGMA preserve_insertion_order=false")
     connection.execute("PRAGMA temp_directory='{}'".format(
         str(temporary_directory.resolve()).replace("'", "''")
