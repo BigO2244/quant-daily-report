@@ -85,6 +85,9 @@ def build_terminal_return_sensitivity(
     quality_path.unlink(missing_ok=True)
 
     connection = duckdb.connect()
+    connection.execute("PRAGMA threads=1")
+    connection.execute("PRAGMA memory_limit='500MB'")
+    connection.execute("PRAGMA preserve_insertion_order=false")
     try:
         columns = _panel_columns(connection, price_path)
         if not {"security_id", "date", "close"} <= columns:
@@ -116,11 +119,16 @@ def build_terminal_return_sensitivity(
         connection.execute(
             """
             COPY (
-              WITH ranked AS (
-                SELECT *, ROW_NUMBER() OVER (
-                  PARTITION BY security_id ORDER BY date DESC
-                ) AS terminal_rank
-                FROM read_parquet({})
+              WITH last_rows AS (
+                SELECT p.security_id,
+                       ARG_MAX(TRY_CAST(p.date AS DATE), p.date)
+                         AS last_observed_date,
+                       ARG_MAX(TRY_CAST(p.close AS DOUBLE), p.date)
+                         AS last_observed_close,
+                       ARG_MAX(TRY_CAST({} AS DOUBLE), p.date)
+                         AS provider_final_day_total_return
+                FROM read_parquet({}) p
+                GROUP BY p.security_id
               ),
               panel_meta AS (
                 SELECT MAX(TRY_CAST(date AS DATE)) AS panel_max_date
@@ -129,29 +137,27 @@ def build_terminal_return_sensitivity(
               SELECT
                 p.security_id,
                 m.ticker,
-                TRY_CAST(p.date AS DATE) AS last_observed_date,
+                p.last_observed_date,
                 m.effective_end AS membership_end_date,
                 m.last_price_date,
-                TRY_CAST(p.close AS DOUBLE) AS last_observed_close,
-                TRY_CAST({} AS DOUBLE) AS provider_final_day_total_return,
+                p.last_observed_close,
+                p.provider_final_day_total_return,
                 NULL::DOUBLE AS verified_terminal_return,
                 -1.0::DOUBLE AS pessimistic_total_loss_return,
                 0.0::DOUBLE AS zero_incremental_return,
                 'UNVERIFIED_TERMINAL_SETTLEMENT' AS terminal_return_status,
                 false AS use_in_primary_point_estimate,
                 meta.panel_max_date
-              FROM ranked p
+              FROM last_rows p
               JOIN security_master m USING (security_id)
               CROSS JOIN panel_meta meta
-              WHERE p.terminal_rank=1
-                AND m.effective_end IS NOT NULL
+              WHERE m.effective_end IS NOT NULL
                 AND m.effective_end <= meta.panel_max_date
-              ORDER BY p.security_id
             ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD)
             """.format(
-                _quote(price_path),
-                _quote(price_path),
                 observed_expression,
+                _quote(price_path),
+                _quote(price_path),
                 _quote(envelope_path),
             )
         )
