@@ -165,31 +165,31 @@ def materialize_market_panels(
                        ARG_MIN(provider_closeadj, date) AS first_provider_closeadj
                 FROM staged_prices
                 GROUP BY security_id
-              ), indexed AS (
-                SELECT p.*,
-                  f.first_close * p.provider_closeadj /
-                    NULLIF(f.first_provider_closeadj, 0.0)
-                    AS causal_total_return_index,
+              ), rolling_adv AS (
+                SELECT security_id, date,
                   AVG(p.close * p.volume) OVER (
                     PARTITION BY p.security_id ORDER BY p.date
                     ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
                   ) AS dollar_ADV_20
                 FROM staged_prices p
-                JOIN first_values f USING (security_id)
               )
-              SELECT security_id, date, open, close,
-                     causal_total_return_index AS closeadj, volume, dollar_ADV_20,
-                     split_factor, cash_dividend,
-                     CASE WHEN action_types IS NULL THEN ''
-                          ELSE MD5(security_id || '|' || CAST(date AS VARCHAR) || '|' || action_types) END
+              SELECT p.security_id, p.date, p.open, p.close,
+                     f.first_close * p.provider_closeadj /
+                       NULLIF(f.first_provider_closeadj, 0.0) AS closeadj,
+                     p.volume, a.dollar_ADV_20,
+                     p.split_factor, p.cash_dividend,
+                     CASE WHEN p.action_types IS NULL THEN ''
+                          ELSE MD5(p.security_id || '|' || CAST(p.date AS VARCHAR) || '|' || p.action_types) END
                        AS corporate_action_id,
-                     CASE WHEN date=last_date THEN daily_total_return END
+                     CASE WHEN p.date=p.last_date THEN p.daily_total_return END
                        AS last_observed_total_return,
                      NULL::DOUBLE AS delisting_return,
                      NULL::DOUBLE AS terminal_return,
-                     CAST(date AS TIMESTAMP) + INTERVAL 1 DAY AS adjustment_available_at,
-                     CAST(date AS TIMESTAMP) + INTERVAL 1 DAY AS available_at
-              FROM indexed
+                     CAST(p.date AS TIMESTAMP) + INTERVAL 1 DAY AS adjustment_available_at,
+                     CAST(p.date AS TIMESTAMP) + INTERVAL 1 DAY AS available_at
+              FROM staged_prices p
+              JOIN first_values f USING (security_id)
+              JOIN rolling_adv a USING (security_id, date)
             ) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)
             """.format(_quote(price_staging_path))
         )
@@ -231,7 +231,8 @@ def materialize_market_panels(
             """
             COPY (
               WITH prices AS (
-                SELECT p.*, s.cik, s.sector_id,
+                SELECT p.security_id, p.date, p.available_at, p.close,
+                       p.closeadj, s.cik, s.sector_id,
                        p.closeadj / LAG(p.closeadj) OVER
                          (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS daily_return,
                        p.closeadj / LAG(p.closeadj, 5) OVER
