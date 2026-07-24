@@ -1,6 +1,6 @@
 # Alpha Lab Current State
 
-As of 2026-07-14, the correct classification is:
+As of 2026-07-24 UTC, the correct classification is:
 
 > Caerus has a plausible weak broad-selection signal and positive short-window
 > paper performance. Independent, factor-adjusted, implementation-net alpha is
@@ -213,16 +213,59 @@ supports honest robustness work for future price-derived hypotheses but does
 not satisfy the frozen four-lane exact terminal-return gate.
 
 The original Form 4 materializer now resolves amendment ambiguity by
-fail-closed issuer exclusion instead of guessed supersession. A read-only audit
-of the current GCP tape found 1,733 issuers with amendments. Applying the frozen
-policy would retain 137,522 event rows and 113,248 eligible open-market purchase
-rows while excluding 173,314 event rows and 146,284 eligible purchase rows.
-Those are projected rebuild counts, not a new finalized tape: the authoritative
-GCP artifact and HYP-2026-003 provider gate remain unchanged until the code is
-deployed through the governed path and materialization is rerun.
+fail-closed issuer exclusion instead of guessed supersession. The remediation
+was deployed to the GCP Alpha Lab checkout and the full-history tape was rebuilt
+as immutable bundle
+`20260723T183854Z-f30d85ba2232`. It excludes all events for the 1,733 issuers
+with a captured Form 4/A and retains 137,522 event rows, including 113,248
+eligible open-market purchases. The provider certification is `READY`,
+historical point-in-time verification is true, and original ownership XML with
+exact EDGAR acceptance remains canonical. The prior tape remains immutable.
+HYP-2026-003 remains `UNPROVEN` until its own frozen gate is rerun; rebuilding
+the defining input is data remediation, not an insider-alpha result.
+
+The GCP market pair was also rebuilt and atomically published. The observed-
+price panel and filing-time characteristic panel each contain 21,840,452 rows
+and 12,554 security histories from 2011-01-03 through 2026-06-30. Their
+respective SHA-256 hashes are
+`7b6518bc30d84820b5113465fb23d54de36012195ed1672ed19aca9e216c99c0`
+and
+`4d93e2865c760dc3908b308640d862f89ab98c8d2440d9cadbe1e193786d7287`.
+Observed prices and characteristics are PIT-certified. The exact historical
+settlement contract remains correctly blocked; the separate terminal-return
+sensitivity bundle `20260724T051532Z-b9720e1e9675` reports both frozen
+pessimistic-total-loss and zero-incremental scenarios without claiming a
+verified settlement value.
 
 The apparent 2026-07-23 Shadow `NO_DATA` state was an expected premarket
 artifact, not a failed week-long collection. The 18:30 ET post-close hydrator
 completed successfully through 2026-07-22 and advanced the canonical Shadow NAV
 series to 49 rows. No Shadow runtime, cron, strategy, allocation, broker, paper,
 or live behavior was changed as part of this research remediation.
+
+## Eight-family frozen run outcome — 2026-07-24 UTC
+
+All eight authorized families passed through one deterministic data gate after
+the market rebuild. Three had complete frozen inputs and ran through DISCOVERY
+plus the locked 2019-2024 validation period. Five stopped before any return
+join. The untouched 2025-01-01 through 2026-06-30 challenge period was not
+accessed by any family.
+
+| Experiment | Family | Outcome | Frozen primary result or blocker |
+|---|---|---|---|
+| EXP-2026-0001 | Current Caerus decomposition | `ITERATE — BLOCKED_DATA` | Missing `caerus_research_decision_tape_v1` |
+| EXP-2026-0006 | Residual momentum | `PARK — UNPROVEN` | -6.56% worst-case validation annualized excess |
+| EXP-2026-0007 | Stock-specific seasonality | `PARK — UNPROVEN` | -7.29% worst-case validation annualized excess |
+| EXP-2026-0008 | Short-horizon reversal | `PARK — UNPROVEN` | -44.56% worst-case validation annualized excess |
+| EXP-2026-0009 | Cross-asset trend | `ITERATE — BLOCKED_DATA` | Missing `cross_asset_price_panel_v1` |
+| EXP-2026-0010 | Executive tone surprise | `ITERATE — BLOCKED_DATA` | Blocked PIT earnings-event semantics and transcript history |
+| EXP-2026-0011 | Net payout/share issuance | `ITERATE — BLOCKED_DATA` | Missing `pit_net_payout_features_v1` |
+| EXP-2026-0012 | Asset growth/investment | `ITERATE — BLOCKED_DATA` | Missing `pit_asset_growth_features_v1` |
+
+Capacity supported $1 million for all three evaluated primary variants, so
+capacity was not the reason they failed. Every evaluated primary was negative
+under the frozen cost/terminal envelope, and the corrected family-significance
+gate remains unimplemented. Regime diagnostics were secondary only: they made
+no alpha, allocation, activation, or promotion claim. All eight classifications
+remain `UNPROVEN`; the three `PARK` verdicts apply frozen experiment criteria
+and do not retire or reweight a production strategy.
