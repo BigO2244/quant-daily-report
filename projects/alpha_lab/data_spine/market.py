@@ -266,9 +266,8 @@ def materialize_market_panels(
             )
             connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS characteristic_prices AS
-                SELECT p.security_id, p.date, p.available_at, p.close,
-                       s.cik, s.sector_id,
+                CREATE TABLE IF NOT EXISTS characteristic_return_windows AS
+                SELECT p.security_id, p.date,
                        p.closeadj / LAG(p.closeadj) OVER
                          (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS daily_return,
                        p.closeadj / LAG(p.closeadj, 5) OVER
@@ -278,10 +277,21 @@ def materialize_market_panels(
                        p.closeadj / LAG(p.closeadj, 60) OVER
                          (PARTITION BY p.security_id ORDER BY p.date) - 1.0 AS prior_return_60d
                 FROM read_parquet({}) p
+                """.format(_quote(price_staging_path))
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characteristic_prices AS
+                SELECT p.security_id, p.date, p.available_at, p.close,
+                       s.cik, s.sector_id, r.daily_return,
+                       r.prior_return_5d, r.prior_return_20d,
+                       r.prior_return_60d
+                FROM read_parquet({}) p
                 JOIN (
                   SELECT DISTINCT security_id, cik, sector AS sector_id
                   FROM security_master
                 ) s USING (security_id)
+                JOIN characteristic_return_windows r USING (security_id, date)
                 """.format(_quote(price_staging_path))
             )
             connection.execute(
