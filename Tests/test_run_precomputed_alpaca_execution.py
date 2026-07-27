@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import scripts.run_precomputed_alpaca_execution as live_exec
 
 from scripts.run_precomputed_alpaca_execution import _precompute_reconciliation_halt_reason
+from scripts.run_precomputed_alpaca_execution import _validate_exact_planned_payload
 
 
 def test_precompute_reconciliation_halt_reason_pass_allows_execution() -> None:
@@ -33,6 +34,29 @@ def test_precompute_reconciliation_halt_reason_preserves_block_reason() -> None:
         )
         == "pretrade_blocked_reconciliation"
     )
+
+
+def test_exact_planned_payload_rejects_nonfinite_price_and_notional() -> None:
+    payload = {
+        "trade_date": "2026-03-27",
+        "execution_status": "PLANNED",
+        "trades": [
+            {
+                "ticker": "KLAC",
+                "side": "BUY",
+                "shares": 1,
+                "entry_price": float("nan"),
+                "notional": float("nan"),
+            }
+        ],
+    }
+
+    try:
+        _validate_exact_planned_payload(payload, trade_date="2026-03-27")
+    except RuntimeError as exc:
+        assert "planned_execution_payload_trade_missing_price" in str(exc)
+    else:
+        raise AssertionError("non-finite exact plan must fail closed")
 
 
 def test_run_pretrade_reconciliation_retries_once_after_self_heal(monkeypatch) -> None:

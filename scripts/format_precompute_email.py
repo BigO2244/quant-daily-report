@@ -14,6 +14,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core.dynamic_daily_email import render_dynamic_email_sections
+from core.precompute_bundle_validation import validate_precompute_bundle
 
 
 def _load_json(path: Path) -> dict:
@@ -42,6 +43,19 @@ def main() -> None:
     if not payload_path.exists():
         print(f"[ERROR] Precompute payload not found: {payload_path}")
         sys.exit(1)
+
+    validation = validate_precompute_bundle(
+        payload_path.parent,
+        trade_date=trade_date,
+        required_files=(payload_path.name,),
+    )
+    if validation["status"] != "OK":
+        reasons = ", ".join(validation.get("validation_failures") or ["unknown_failure"])
+        print(
+            f"[ERROR] Refusing to format invalid precompute evidence: {reasons}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     p = _load_json(payload_path)
     daily_snapshot = _load_json(daily_snapshot_path)

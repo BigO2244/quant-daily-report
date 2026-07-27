@@ -1043,7 +1043,18 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     shadow_text = shadow_scoreboard["text"]
     shadow_html = shadow_scoreboard["html"]
     shadow_healthy = str(shadow_scoreboard.get("status") or "").upper() == "OK" and "Artifact status: DEGRADED" not in shadow_text
-    dynamic_sections = render_dynamic_email_sections(_REPO_ROOT, trade_date)
+    scoped_live_pilot_root = (
+        Path(str(results.get("run_root")))
+        if str(results.get("run_root") or "").strip()
+        else results_path.parent
+        if results_path.name == "execution_results.json"
+        else None
+    )
+    dynamic_sections = render_dynamic_email_sections(
+        _REPO_ROOT,
+        trade_date,
+        live_pilot_run_root=scoped_live_pilot_root,
+    )
 
     # ------------------------------------------------------------------ #
     # Assemble body
@@ -1064,6 +1075,14 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
         )
     if not recon_healthy:
         action_items.append("Review reconciliation drift before next run.")
+    suppressed_buy_count = _to_int(
+        results.get("remaining_blocked_or_suppressed_buy_count")
+    )
+    if suppressed_buy_count > 0:
+        action_items.append(
+            f"Review {suppressed_buy_count} blocked/suppressed buy(s): "
+            f"{results.get('blocked_or_suppressed_buy_reason') or 'reason unavailable'}."
+        )
     if not shadow_healthy:
         action_items.append("Review shadow artifact generation or data coverage.")
     if not action_items:
@@ -1119,6 +1138,7 @@ def main() -> None:
     explicit_run_root = _explicit_run_root()
     latest = None if explicit_run_root is not None else _resolve_execution_pointer_optional(trade_date)
     run_root = explicit_run_root or (Path(str(latest.get("run_root") or "").strip()) if latest else None)
+    reconciliation_data = _load_reconciliation_data(trade_date, results_path)
     operator_summary_fields = {
         "run_id": str(results.get("run_id") or ""),
         "trade_date": str(results.get("trade_date") or ""),
@@ -1130,7 +1150,7 @@ def main() -> None:
         "post_execution_recon_status": (
             "DRY_RUN_NO_SUBMISSION"
             if str(results.get("status") or "").upper() == "DRY_RUN"
-            else results.get("post_execution_recon_status")
+            else reconciliation_data.get("status")
         ),
         "broker_authoritative_state": bool(
             results_path.name == "execution_results.json"

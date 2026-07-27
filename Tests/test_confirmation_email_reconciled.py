@@ -352,6 +352,28 @@ def test_live_pilot_confirmation_refresh_converts_stale_pending_market_order_to_
         ),
         encoding="utf-8",
     )
+    (run_root / "live_pilot_evidence_metrics.json").write_text(
+        json.dumps(
+            {
+                "capital_cap_usd": 500.0,
+                "filled_count": 0,
+                "fill_rate": 0.0,
+                "cash_deployment_rate": 0.0,
+                "idle_cash_reason": "submitted_not_filled",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "live_pilot_capital_usage.json").write_text(
+        json.dumps(
+            {
+                "capital_cap_usd": 500.0,
+                "filled_notional_usd": 0.0,
+                "cash_deployment_rate": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
     results_path = run_root / "execution_results.json"
     results = _results(
         run_id="live-run-filled",
@@ -400,3 +422,19 @@ def test_live_pilot_confirmation_refresh_converts_stale_pending_market_order_to_
     assert "Filled: 1" in body_text
     assert "broker_status_refresh: OK" in body_text
     assert "Filled qty: 1.0" in body_text
+    evidence = json.loads(
+        (run_root / "live_pilot_evidence_metrics.json").read_text(encoding="utf-8")
+    )
+    capital_usage = json.loads(
+        (run_root / "live_pilot_capital_usage.json").read_text(encoding="utf-8")
+    )
+    summary = json.loads(
+        (run_root / "live_pilot_operator_summary.json").read_text(encoding="utf-8")
+    )
+    assert evidence["filled_count"] == 1
+    assert evidence["fill_rate"] == 1.0
+    assert evidence["idle_cash_reason"] != "submitted_not_filled"
+    assert capital_usage["filled_notional_usd"] == 185.25
+    assert capital_usage["cash_deployment_rate"] == 0.3705
+    assert summary["filled_count"] == 1
+    assert summary["fill_rate"] == 1.0

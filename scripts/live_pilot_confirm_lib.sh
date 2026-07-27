@@ -137,11 +137,42 @@ Check:
         export TRADING_CONFIRMATION_RUN_ROOT="${run_root}"
 
         if "${PYTHON_BIN}" -m scripts.send_trading_confirmation_email; then
+            local receipt_fields status_at_send reconciliation_status display_status results_sha256
+            receipt_fields="$(
+                CONFIRM_RESULTS_PATH="${results_path}" CONFIRM_RUN_ROOT="${run_root}" "${PYTHON_BIN}" - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+
+results_path = Path(os.environ["CONFIRM_RESULTS_PATH"])
+run_root = Path(os.environ["CONFIRM_RUN_ROOT"])
+results = json.loads(results_path.read_text(encoding="utf-8"))
+recon_path = run_root / "live_pilot_reconciliation.json"
+recon = json.loads(recon_path.read_text(encoding="utf-8")) if recon_path.exists() else {}
+status = str(results.get("status") or "")
+reconciliation = str(recon.get("status") or "")
+display = (
+    "EXECUTED"
+    if status == "SUBMITTED" and reconciliation == "CLEAN"
+    else "DRY_RUN"
+    if status == "DRY_RUN"
+    else status
+)
+digest = hashlib.sha256(results_path.read_bytes()).hexdigest()
+print("\x1f".join((status, reconciliation, display, digest)))
+PY
+            )" || receipt_fields="${status}"$'\x1f\x1f\x1f'
+            IFS=$'\x1f' read -r status_at_send reconciliation_status display_status results_sha256 <<< "${receipt_fields}"
             "${PYTHON_BIN}" -m "${discover_mod}" mark-sent \
                 --run-id "${run_id}" \
                 --run-root "${run_root}" \
                 --trade-date "${REPORT_DATE}" \
-                --status "${status}" \
+                --status "${status_at_send:-${status}}" \
+                --discovered-status "${status}" \
+                --reconciliation-status "${reconciliation_status}" \
+                --display-status "${display_status}" \
+                --results-sha256 "${results_sha256}" \
                 --ledger "${ledger}" || {
                     echo "WARN: failed to record ${run_id} in dedupe ledger (may re-send next sweep)"
                 }

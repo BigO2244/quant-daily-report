@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import os
 from decimal import Decimal, ROUND_HALF_UP
 from dataclasses import dataclass, field
@@ -208,7 +209,7 @@ def _positive_float(value: object) -> float | None:
         numeric = float(str(value or "").strip())
     except (TypeError, ValueError):
         return None
-    return numeric if numeric > 0 else None
+    return numeric if math.isfinite(numeric) and numeric > 0 else None
 
 
 def _positive_int(value: object) -> int | None:
@@ -454,10 +455,16 @@ def build_live_pilot_gate_result(
             "live_pilot_submit_not_approved",
             f"Set {LIVE_PILOT_SUBMIT_APPROVED_ENV}=1 only for an owner-approved submission.",
         )
+    finite_order_notional = _positive_float(order_notional)
     if submission_intent and order_notional is None:
         return result(
             "missing_live_order_notional",
-            "Live pilot order submission requires a pre-submit notional estimate.",
+            "Live pilot order submission requires a finite positive pre-submit notional estimate.",
+        )
+    if submission_intent and finite_order_notional is None:
+        return result(
+            "nonfinite_or_nonpositive_live_order_notional",
+            "Live pilot order submission requires a finite positive pre-submit notional estimate.",
         )
     # An unset CAERUS_LIVE_PILOT_CAPITAL_CAP means UNCAPPED, not blocked. The design
     # intent is that live capital scales proportionally with portfolio assets — there
@@ -470,7 +477,7 @@ def build_live_pilot_gate_result(
             "(portfolio-proportional sizing, no fixed USD ceiling).",
             LIVE_PILOT_CAPITAL_CAP_ENV,
         )
-    elif order_notional is not None and float(order_notional) > cap:
+    elif finite_order_notional is not None and finite_order_notional > cap:
         return result(
             "order_notional_exceeds_live_pilot_cap",
             "Reduce or block the order; live pilot order notional exceeds the approved cap.",
@@ -534,7 +541,7 @@ def _safe_float(value: object) -> float | None:
         numeric = float(str(value or "").strip())
     except (TypeError, ValueError):
         return None
-    return numeric
+    return numeric if math.isfinite(numeric) else None
 
 
 def _fractional_allowed(env: Mapping[str, str]) -> bool:

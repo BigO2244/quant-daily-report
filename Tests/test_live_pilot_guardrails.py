@@ -245,6 +245,22 @@ def test_live_pilot_live_submit_requires_order_notional(monkeypatch: pytest.Monk
         )
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 0.0])
+def test_live_pilot_live_submit_rejects_nonfinite_or_nonpositive_notional(
+    monkeypatch: pytest.MonkeyPatch,
+    value: float,
+) -> None:
+    _clear(monkeypatch)
+    _approve(monkeypatch, dry_run="0")
+
+    with pytest.raises(RuntimeError, match="nonfinite_or_nonpositive_live_order_notional"):
+        validate_live_pilot_submission_guardrails(
+            broker_paper=False,
+            base_url="https://api.alpaca.markets",
+            order_notional=value,
+        )
+
+
 def test_live_pilot_live_submit_requires_notional_under_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear(monkeypatch)
     _approve(monkeypatch, dry_run="0")
@@ -286,6 +302,54 @@ def test_broker_market_submit_guard_failure_does_not_call_sdk(monkeypatch: pytes
             side="BUY",
             client_order_id="test-live-pilot-market",
         )
+    assert client.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("method", "kwargs"),
+    [
+        (
+            "submit_market_order",
+            {
+                "symbol": "AAPL",
+                "qty": float("nan"),
+                "side": "BUY",
+                "client_order_id": "bad-market",
+            },
+        ),
+        (
+            "submit_limit_order",
+            {
+                "symbol": "AAPL",
+                "qty": 1,
+                "side": "BUY",
+                "limit_price": float("nan"),
+                "client_order_id": "bad-limit",
+            },
+        ),
+    ],
+)
+def test_broker_rejects_nonfinite_inputs_before_sdk_call(
+    method: str,
+    kwargs: dict[str, object],
+) -> None:
+    class Client:
+        calls = 0
+
+        def submit_order(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("SDK submit must not be called")
+
+    client = Client()
+    broker = AlpacaBroker(
+        client,
+        paper=True,
+        base_url="https://paper-api.alpaca.markets",
+    )
+
+    with pytest.raises(RuntimeError, match="non-finite"):
+        getattr(broker, method)(**kwargs)
+
     assert client.calls == 0
 
 

@@ -1818,6 +1818,11 @@ def _coerce_float_or_none(value: object) -> float | None:
         return None
 
 
+def _coerce_finite_float_or_none(value: object) -> float | None:
+    numeric = _coerce_float_or_none(value)
+    return numeric if numeric is not None and math.isfinite(numeric) else None
+
+
 def _today_et_str() -> str:
     return dt.datetime.now(ZoneInfo("America/New_York")).date().strftime("%Y-%m-%d")
 
@@ -2034,6 +2039,7 @@ def build_execution_email_payload(
     turnover_dollars = _coerce_float_or_none((paper_summary or {}).get("turnover_notional"))
     turnover_pct = _coerce_float_or_none((paper_summary or {}).get("turnover_pct"))
     trades = []
+    invalid_execution_trades: list[dict[str, object]] = []
     source_rows = []
     row_reason_lookup: dict[tuple[str, str, str], dict[str, object]] = {}
 
@@ -2152,15 +2158,33 @@ def build_execution_email_payload(
                 continue
         elif shares < 1:
             continue
-        entry_price = risk.get("entry_price")
-        notional = None
-        try:
-            if entry_price is not None:
-                notional = shares * float(entry_price)
-            elif row.get("notional") is not None:
-                notional = abs(float(row.get("notional")))
-        except Exception:
-            notional = None
+        entry_price = _coerce_finite_float_or_none(risk.get("entry_price"))
+        if entry_price is None:
+            entry_price = _coerce_finite_float_or_none(row.get("price"))
+        source_notional = _coerce_finite_float_or_none(row.get("notional"))
+        if entry_price is None or entry_price <= 0.0:
+            invalid_execution_trades.append(
+                {
+                    "ticker": str(ticker or ""),
+                    "side": side,
+                    "reason": "missing_or_nonfinite_execution_price",
+                    "source": row_source or "unknown",
+                }
+            )
+            continue
+        notional = abs(float(shares) * entry_price)
+        if not math.isfinite(notional) or notional <= 0.0:
+            notional = abs(source_notional) if source_notional is not None else None
+        if notional is None or not math.isfinite(notional) or notional <= 0.0:
+            invalid_execution_trades.append(
+                {
+                    "ticker": str(ticker or ""),
+                    "side": side,
+                    "reason": "missing_or_nonfinite_execution_notional",
+                    "source": row_source or "unknown",
+                }
+            )
+            continue
         if min_trade_dollars is not None and notional is not None and abs(float(notional)) < float(min_trade_dollars):
             continue
         trades.append(
@@ -2168,9 +2192,9 @@ def build_execution_email_payload(
                 "ticker": ticker,
                 "side": side,
                 "shares": shares,
-                "entry_price": entry_price if entry_price is not None else row.get("price"),
-                "stop_loss": risk.get("stop_loss"),
-                "take_profit": risk.get("take_profit"),
+                "entry_price": entry_price,
+                "stop_loss": _coerce_finite_float_or_none(risk.get("stop_loss")),
+                "take_profit": _coerce_finite_float_or_none(risk.get("take_profit")),
                 "notional": notional if notional is not None else row.get("notional"),
                 "reason": row.get("reason"),
                 "notes": row.get("reason"),
@@ -2397,6 +2421,15 @@ def build_execution_email_payload(
         "pricing_source": pricing_source,
         "pricing_asof": pricing_asof,
         "trades": trades,
+        "invalid_execution_trades": invalid_execution_trades,
+        "invalid_execution_trade_count": len(invalid_execution_trades),
+        "invalid_execution_price_tickers": sorted(
+            {
+                str(row.get("ticker") or "")
+                for row in invalid_execution_trades
+                if row.get("reason") == "missing_or_nonfinite_execution_price"
+            }
+        ),
         "run_id": (paper_summary or {}).get("run_id", ""),
         "order_ids": order_ids,
         "cash_target_weight": target_cash_weight,
@@ -3011,7 +3044,11 @@ def compute_portfolio_equity_series(
     return portfolio_equity
 def _compute_execution_price(price_map: dict, ticker: str) -> float | None:
     entry = price_map.get(ticker, {})
-    return entry.get("next_open") or entry.get("last_close")
+    for candidate in (entry.get("next_open"), entry.get("last_close")):
+        numeric = _coerce_finite_float_or_none(candidate)
+        if numeric is not None and numeric > 0.0:
+            return numeric
+    return None
 def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
     price_map = {}
     if prices.empty:
@@ -3025,8 +3062,18 @@ def _build_price_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
         last_close = past["close"].iloc[-1] if not past.empty else None
         next_open = future["open"].iloc[0] if not future.empty else None
         price_map[ticker] = {
-            "last_close": float(last_close) if last_close is not None else None,
-            "next_open": float(next_open) if next_open is not None else None,
+            "last_close": (
+                numeric
+                if (numeric := _coerce_finite_float_or_none(last_close)) is not None
+                and numeric > 0.0
+                else None
+            ),
+            "next_open": (
+                numeric
+                if (numeric := _coerce_finite_float_or_none(next_open)) is not None
+                and numeric > 0.0
+                else None
+            ),
         }
     return price_map
 def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
@@ -3041,7 +3088,9 @@ def _build_atr_map(prices: pd.DataFrame, asof: pd.Timestamp) -> dict:
             atr_map[ticker] = None
         else:
             atr_map[ticker] = (
-                float(past["atr"].iloc[-1]) if pd.notna(past["atr"].iloc[-1]) else None
+                _coerce_finite_float_or_none(past["atr"].iloc[-1])
+                if pd.notna(past["atr"].iloc[-1])
+                else None
             )
     return atr_map
 def _format_df_for_email(df: pd.DataFrame) -> pd.DataFrame:
@@ -4659,7 +4708,7 @@ def build_daily_snapshot(
         for _, row in entries.iterrows():
             entry_map[row["ticker"]] = {
                 "entry_date": _fmt_date(pd.to_datetime(row["entry_date"])),
-                "entry_price": row.get("entry_price"),
+                "entry_price": _coerce_finite_float_or_none(row.get("entry_price")),
             }
     # Holdings
     holdings = []
@@ -4680,7 +4729,7 @@ def build_daily_snapshot(
         entry_date = (
             entry_info.get("entry_date") if entry_info else _fmt_date(report_date)
         )
-        entry_px = (
+        entry_px = _coerce_finite_float_or_none(
             entry_info.get("entry_price")
             if entry_info and entry_info.get("entry_price")
             else last_px

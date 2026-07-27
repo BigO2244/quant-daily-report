@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
@@ -382,10 +383,12 @@ def _precomputed_trades_frame(rows: tuple[dict[str, Any], ...]) -> pd.DataFrame:
     for row in rows:
         ticker = str(row.get("ticker") or "").upper()
         side = str(row.get("side") or "").upper()
-        shares = abs(float(row.get("shares") or row.get("quantity") or 0.0))
-        price = float(row.get("price") or row.get("entry_price") or 0.0)
-        notional = abs(float(row.get("notional") or (shares * price)))
+        shares = abs(_safe_float(row.get("shares") or row.get("quantity"), 0.0))
+        price = _safe_float(row.get("price") or row.get("entry_price"), 0.0)
+        notional = abs(_safe_float(row.get("notional"), shares * price))
         if not ticker or side not in {"BUY", "SELL", "CLOSE", "REDUCE"}:
+            continue
+        if shares <= 0.0 or price <= 0.0 or notional <= 0.0:
             continue
         normalized.append(
             {
@@ -403,9 +406,10 @@ def _precomputed_trades_frame(rows: tuple[dict[str, Any], ...]) -> pd.DataFrame:
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        return float(value)
+        numeric = float(value)
     except (TypeError, ValueError):
         return float(default)
+    return numeric if math.isfinite(numeric) else float(default)
 
 
 def _reserve_cash_for_policy(equity_value: float | None, policy: CapitalPolicy) -> float:

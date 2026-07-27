@@ -1,0 +1,61 @@
+{
+  "schema_version": "caerus.execution_evidence_correction.v1",
+  "trade_date": "2026-07-27",
+  "correction_type": "superseding_forensic_addendum",
+  "preserves_original_artifacts": true,
+  "deployed_sha_observed": "ff5aa480d3d59e2acbf6a56dc793bdeea3f7bcb5",
+  "original_planned_execution_payload_sha256": "f6fed0b8958a965ba915441080933e887e2b7cea161f796a260d49f397ecd44d",
+  "live_pilot": {
+    "run_id": "2026-07-27T20260727T093609-0400_live_pilot_cron_submit",
+    "submitted_count": 3,
+    "accepted_count": 3,
+    "filled_count": 3,
+    "rejected_count": 0,
+    "open_order_count_after_refresh": 0,
+    "reconciliation_status": "CLEAN",
+    "broker_execution_verdict": "GREEN"
+  },
+  "paper_lane": {
+    "run_id": "2026-07-27T20260727T093503-0400_paper_cron_submit",
+    "submitted_sells": 2,
+    "filled_sells_after_refresh": 2,
+    "suppressed_buy_count": 3,
+    "suppression_reason": "live_pilot_sell_settlement_timeout",
+    "target_attainment_verdict": "AMBER"
+  },
+  "precompute": {
+    "invalid_symbols": [
+      "KLAC",
+      "UNP"
+    ],
+    "execution_critical_invalid_symbol": "KLAC",
+    "original_contract_claimed_valid": true,
+    "forensic_verdict": "RED"
+  },
+  "local_repair_validation": {
+    "focused_regression_passed": 164,
+    "integrity_lifecycle_status_passed": 67,
+    "operational_validation": {
+      "passed": 6,
+      "warned": 0,
+      "failed": 0
+    },
+    "static_validation_passed": true,
+    "expanded_repository_run": {
+      "completed": false,
+      "passed_before_stop": 1754,
+      "failed_before_stop": 26,
+      "skipped_before_stop": 10,
+      "classification": "existing_environment_or_baseline_failures_observed"
+    }
+  },
+  "overall_verdict": "AMBER_PENDING_DEPLOYMENT_AND_NATIVE_CLEAN_RUN",
+  "green_acceptance_requires": [
+    "attested_patch_deployment",
+    "fail_closed_corrupt_bundle_validation",
+    "native_strict_json_precompute_bundle",
+    "cross_artifact_final_state_coherence",
+    "suppressed_buy_visibility",
+    "clean_native_paper_and_live_cycle"
+  ]
+}

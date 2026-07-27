@@ -420,6 +420,9 @@ def test_successful_mocked_live_pilot_submits_after_all_gates(tmp_path: Path) ->
     assert evidence["slippage_bps"] is not None
     usage = json.loads((run_root / "live_pilot_capital_usage.json").read_text())
     assert usage["submitted_notional_usd"] == 150
+    preflight = json.loads((run_root / "live_pilot_preflight.json").read_text())
+    assert preflight["account_id_match"] is True
+    assert preflight["account_match_reason"] == "account_id_match"
     gate_state = _gate_state(run_root)
     assert gate_state["decision"] == "ALLOWED"
     assert gate_state["broker_orders_submitted"] == 1
@@ -661,6 +664,13 @@ def test_core_routed_live_settlement_timeout_uses_actual_cash_and_does_not_overb
     transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
     assert transition["buy_orders_intended"] == []
     assert transition["diagnostics"]["rebudget"]["reason_codes"] == ["live_pilot_sell_settlement_timeout"]
+    intended = json.loads((run_root / "live_pilot_orders_intended.json").read_text())
+    assert intended["suppressed_orders_count"] == 1
+    assert intended["suppressed_orders"][0]["symbol"] == "NEW"
+    assert intended["suppressed_orders"][0]["suppression_reason"] == "live_pilot_sell_settlement_timeout"
+    results_artifact = json.loads((run_root / "execution_results.json").read_text())
+    assert results_artifact["remaining_blocked_or_suppressed_buy_count"] == 1
+    assert results_artifact["blocked_or_suppressed_buy_reason"] == "live_pilot_sell_settlement_timeout"
     capital_gate = json.loads((run_root / "live_pilot_capital_gate.json").read_text())
     assert capital_gate["post_sell_buy_budget"]["post_sell_cash"] == 150.0
 
@@ -880,6 +890,45 @@ def test_repeated_unfilled_live_buy_attempts_escalate_from_artifacts(tmp_path: P
     assert results["prior_unfilled_attempts"] == 3
     assert results["escalated_buy_count"] == 1
     assert results["unfilled_buy_count"] == 0
+
+
+def test_same_day_unfilled_retries_count_as_one_session(tmp_path: Path) -> None:
+    output_root = tmp_path / "outputs" / "live_pilot"
+    trade_date = "2026-06-23"
+    for idx in range(3):
+        prior_root = output_root / "runs" / f"{trade_date}T09{35 + idx}00-0400_retry{idx}"
+        prior_root.mkdir(parents=True)
+        (prior_root / "live_pilot_operator_summary.json").write_text(
+            json.dumps({"run_id": prior_root.name, "trade_date": trade_date}),
+            encoding="utf-8",
+        )
+        (prior_root / "live_pilot_orders_submitted.json").write_text(
+            json.dumps(
+                {
+                    "orders": [
+                        {
+                            "symbol": "AAPL",
+                            "side": "BUY",
+                            "status": "new",
+                            "submitted_order_type": "limit",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = run_live_pilot(
+        plan=_limit_plan(),
+        broker=FakeBroker(order_status="filled"),
+        env=_env(dry_run="0"),
+        run_id="run-same-day-retries",
+        output_root=output_root,
+        now_et=_market_open_now(),
+    )
+
+    assert result["prior_unfilled_attempts"] == 1
+    assert result["escalation_reason"] == "prior_unfilled_live_buy_attempts_detected"
 
 
 def test_over_cap_plan_does_not_submit_and_writes_operator_action(tmp_path: Path) -> None:

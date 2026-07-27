@@ -57,6 +57,42 @@ def test_build_execution_email_payload_uses_submitted_orders_for_partial_alpaca_
     assert payload["submitted_count"] == 4
 
 
+def test_build_execution_email_payload_excludes_nonfinite_trade_price() -> None:
+    payload = dqr.build_execution_email_payload(
+        trade_date="2026-07-27",
+        daily_snapshot={
+            "holdings": [],
+            "risk_levels": [
+                {
+                    "ticker": "KLAC",
+                    "entry_price": float("nan"),
+                    "stop_loss": float("nan"),
+                    "take_profit": float("nan"),
+                }
+            ],
+            "proposed_trades": [],
+        },
+        paper_summary={
+            "trading_mode": "PAPER",
+            "market_status": "OPEN",
+            "execution_trades": [
+                {
+                    "ticker": "KLAC",
+                    "side": "BUY",
+                    "shares": 1,
+                    "price": float("nan"),
+                    "notional": float("nan"),
+                }
+            ],
+        },
+    )
+
+    assert payload["trades"] == []
+    assert payload["invalid_execution_trade_count"] == 1
+    assert payload["invalid_execution_price_tickers"] == ["KLAC"]
+    assert payload["invalid_execution_trades"][0]["reason"] == "missing_or_nonfinite_execution_price"
+
+
 def test_execution_email_payload_preserves_fractional_submitted_quantities_and_lifecycle() -> None:
     daily_snapshot = {
         "holdings": [

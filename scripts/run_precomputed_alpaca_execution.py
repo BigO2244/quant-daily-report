@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -506,9 +507,10 @@ def _safe_float(value: object, default: float | None = None) -> float | None:
     try:
         if value is None or value == "":
             return default
-        return float(value)
+        numeric = float(value)
     except Exception:
         return default
+    return numeric if math.isfinite(numeric) else default
 
 
 def _expected_planned_trade_count(planned_payload: dict[str, object]) -> int | None:
@@ -586,8 +588,10 @@ def _validate_exact_planned_payload(
         notional = _safe_float(trade.get("notional"), 0.0) or 0.0
         if not ticker or side not in {"BUY", "SELL", "CLOSE", "REDUCE"} or shares <= 0.0:
             raise RuntimeError(f"planned_execution_payload_trade_invalid index={idx} ticker={ticker or 'missing'} side={side or 'missing'} shares={shares}")
-        if price <= 0.0 and notional <= 0.0:
+        if price <= 0.0:
             raise RuntimeError(f"planned_execution_payload_trade_missing_price index={idx} ticker={ticker}")
+        if notional <= 0.0:
+            raise RuntimeError(f"planned_execution_payload_trade_missing_notional index={idx} ticker={ticker}")
         normalized.append(dict(trade))
     resolution = resolve_trade_plan_symbols(normalized, today=trade_date)
     if resolution.status == "FAIL":

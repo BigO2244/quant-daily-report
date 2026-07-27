@@ -59,6 +59,10 @@ def test_live_pilot_cron_execute_preserves_live_safety_gates() -> None:
     assert 'Path("outputs") / "workflow" / trade_date / "live_pilot_execution.json"' in text
     assert text.index("missing_live_pilot_approval") < text.index("scripts/live_pilot_build_plan_from_precompute.py")
     assert text.index("live_pilot_capital_cap_unresolved") < text.index("scripts/live_pilot_build_plan_from_precompute.py")
+    assert 'LIVE_RUN_ROOT="outputs/live_pilot/runs/${LIVE_RUN_ID}"' in text
+    assert "--run-id \"${LIVE_RUN_ID}\" 2>&1" not in text
+    assert 'json_file_field "${LIVE_RUN_ROOT}/execution_results.json" status' in text
+    assert "scheduled_submission_confirmed" in text
 
 
 def test_live_pilot_cron_confirm_uses_explicit_results_path_not_paper_pointer() -> None:

@@ -39,6 +39,10 @@ def test_confirm_lib_fails_loud_on_no_run() -> None:
     assert "live_pilot_confirm_alert" in text
     assert 'No execution run to confirm' in text
     assert "smtplib" in text  # alert really sends mail
+    assert "CONFIRM_RESULTS_PATH" in text
+    assert "--discovered-status" in text
+    assert "--reconciliation-status" in text
+    assert "--results-sha256" in text
 
 
 def test_execute_cron_has_completion_hook() -> None:
