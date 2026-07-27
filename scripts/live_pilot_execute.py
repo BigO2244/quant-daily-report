@@ -5,6 +5,7 @@ import dataclasses
 import datetime as dt
 import json
 import math
+import numbers
 import os
 import sys
 import time
@@ -61,8 +62,13 @@ def _now_utc() -> str:
 
 
 def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, (str, bool)):
         return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else None
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -73,7 +79,12 @@ def _json_safe(value: Any) -> Any:
 def _write_json(path: Path, payload: Mapping[str, Any]) -> Path:
     safe_write_text(
         path,
-        json.dumps(_json_safe(dict(payload)), indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            _json_safe(dict(payload)),
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ) + "\n",
         allow_overwrite=True,
     )
     return path
@@ -1105,7 +1116,12 @@ def _entry_policy_for_order(
         current_run_id=run_id,
         symbol=str(getattr(order, "symbol", "") or ""),
     )
-    prior_count = len(prior_attempts)
+    prior_sessions = {
+        str(row.get("trade_date") or "").strip()
+        for row in prior_attempts
+        if str(row.get("trade_date") or "").strip()
+    }
+    prior_count = len(prior_sessions)
     if prior_count >= LIVE_PILOT_ENTRY_ESCALATION_SESSION_LIMIT:
         escalation_reason = "prior_unfilled_attempts_reached_three_session_limit"
     elif prior_count > 0:
@@ -1590,17 +1606,28 @@ def _build_evidence_metrics(
         if value is not None
     ]
     filled_notional = 0.0
+    filled_buy_notional = 0.0
     for row in submitted:
-        if str(row.get("status") or "").strip().lower() != "filled":
+        order = row.get("order") if isinstance(row.get("order"), Mapping) else {}
+        if _status_bucket(row.get("status") or order.get("status")) != "filled":
             continue
         fill = _fill_price(row)
-        qty = _safe_float(row.get("qty"))
+        qty = _safe_float(
+            row.get("filled_qty")
+            or row.get("filled_quantity")
+            or order.get("filled_qty")
+            or order.get("filled_quantity")
+            or row.get("qty")
+        )
         if fill is not None and qty is not None:
-            filled_notional += fill * qty
+            row_filled_notional = fill * qty
         else:
-            filled_notional += float(row.get("notional") or 0.0)
+            row_filled_notional = _finite_float(row.get("notional")) or 0.0
+        filled_notional += row_filled_notional
+        if _order_side(row) == "BUY":
+            filled_buy_notional += row_filled_notional
     cap = float(capital_cap_usd or 0.0)
-    cash_deployment_rate = (filled_notional / cap) if cap > 0 else None
+    cash_deployment_rate = (filled_buy_notional / cap) if cap > 0 else None
     if dry_run:
         idle_reason = "dry_run_no_capital_submitted"
     elif open_order_check and bool(open_order_check.get("block_submission")):
@@ -1628,6 +1655,7 @@ def _build_evidence_metrics(
         "reconciliation_clean_rate": 1.0 if str(reconciliation.get("status") or "").upper() == "CLEAN" else 0.0,
         "cash_deployment_rate": cash_deployment_rate,
         "filled_notional_usd": round(filled_notional, 6),
+        "filled_buy_notional_usd": round(filled_buy_notional, 6),
         "capital_cap_usd": capital_cap_usd,
         "idle_cash_reason": idle_reason,
     }
@@ -2780,6 +2808,8 @@ def _run_live_pilot_core_path(
         )
 
     submitted: list[dict[str, Any]]
+    reporting_intended = [dict(row) for row in intended]
+    suppressed_orders: list[dict[str, Any]] = []
     submit_errors: list[str] = []
     if gate.dry_run:
         submitted = [
@@ -2821,17 +2851,53 @@ def _run_live_pilot_core_path(
                 adapter.settled_cash_post_sell,
             )
         intended = _intended_from_submitted(submitted)
+        suppressed_orders = [
+            {
+                **dict(row),
+                "symbol": str(row.get("symbol") or row.get("ticker") or "").strip().upper(),
+                "ticker": str(row.get("ticker") or row.get("symbol") or "").strip().upper(),
+                "side": str(row.get("side") or "BUY").strip().upper(),
+                "suppressed": True,
+                "suppression_reason": row.get("block_reason") or row.get("reason"),
+            }
+            for row in (getattr(result, "rebudget_skipped", []) or [])
+            if isinstance(row, Mapping)
+        ]
+        reporting_intended = [*intended, *suppressed_orders]
+        suppression_reasons = sorted(
+            {
+                str(row.get("suppression_reason") or "").strip()
+                for row in suppressed_orders
+                if str(row.get("suppression_reason") or "").strip()
+            }
+        )
+        suppressed_reason = (
+            suppression_reasons[0]
+            if len(suppression_reasons) == 1
+            else "mixed"
+            if suppression_reasons
+            else NO_ESCALATION_REASON
+        )
+        reporting_entry_summary = _entry_policy_summary(
+            intended=reporting_intended,
+            submitted=submitted,
+            dry_run=False,
+        )
+        reporting_entry_summary["blocked_or_suppressed_buy_reason"] = suppressed_reason
         _write_json(
             run_root / "live_pilot_orders_intended.json",
             {
                 **plan_validation.to_dict(),
                 "orders": intended,
+                "approved_orders": reporting_intended,
+                "suppressed_orders": suppressed_orders,
+                "suppressed_orders_count": len(suppressed_orders),
                 "dropped_orders": dropped_orders,
                 "dropped_orders_count": len(dropped_orders),
                 "dropped_sell_orders_count": sum(
                     1 for row in dropped_orders if str(row.get("side") or "").upper() == "SELL"
                 ),
-                **_entry_policy_summary(intended=intended, submitted=[], dry_run=False),
+                **reporting_entry_summary,
             },
         )
         capital_gate = _build_live_pilot_capital_gate(
@@ -2862,14 +2928,22 @@ def _run_live_pilot_core_path(
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
     evidence_metrics = _build_evidence_metrics(
         dry_run=bool(gate.dry_run),
-        intended=intended,
+        intended=reporting_intended,
         submitted=submitted,
         reconciliation=reconciliation,
         capital_cap_usd=gate.capital_cap_usd,
         open_order_check=open_order_check,
         capital_gate=capital_gate,
     )
-    entry_summary = _entry_policy_summary(intended=intended, submitted=submitted, dry_run=bool(gate.dry_run))
+    entry_summary = _entry_policy_summary(
+        intended=reporting_intended,
+        submitted=submitted,
+        dry_run=bool(gate.dry_run),
+    )
+    if suppressed_orders:
+        entry_summary["blocked_or_suppressed_buy_reason"] = reporting_entry_summary[
+            "blocked_or_suppressed_buy_reason"
+        ]
     evidence_metrics.update(entry_summary)
     _write_json(run_root / "live_pilot_evidence_metrics.json", evidence_metrics)
     _write_json(
@@ -2882,6 +2956,7 @@ def _run_live_pilot_core_path(
             if gate.dry_run
             else sum(float(row.get("notional") or 0.0) for row in submitted if row.get("status") != "REJECTED"),
             "filled_notional_usd": evidence_metrics.get("filled_notional_usd"),
+            "filled_buy_notional_usd": evidence_metrics.get("filled_buy_notional_usd"),
             "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
             "dry_run": bool(gate.dry_run),
             **_capital_gate_report_fields(capital_gate),
@@ -2930,7 +3005,7 @@ def _run_live_pilot_core_path(
         "reason_code": reconciliation.get("status"),
         "live_orders_allowed": bool(gate.live_orders_allowed),
         "dry_run": bool(gate.dry_run),
-        "intended_count": len(intended),
+        "intended_count": len(reporting_intended),
         "submitted_count": 0 if gate.dry_run else len(submitted),
         "filled_count": reconciliation.get("filled_count"),
         "fill_rate": evidence_metrics.get("fill_rate"),
@@ -2962,12 +3037,17 @@ def _run_live_pilot_core_path(
             trade_date=trade_date,
             terminal_status=terminal_status,
             reason_code=reconciliation.get("status"),
-            intended=intended,
+            intended=reporting_intended,
             submitted=submitted,
             reconciliation=reconciliation,
             dry_run=bool(gate.dry_run),
             run_root=run_root,
-            extra_fields=_capital_gate_report_fields(capital_gate),
+            extra_fields={
+                **_capital_gate_report_fields(capital_gate),
+                **entry_summary,
+                "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+                "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
+            },
         ),
     )
     return summary
@@ -3250,6 +3330,16 @@ def run_live_pilot(
             account_id_hash=account_hash,
             enforce_account_match=True,
         )
+        preflight.update(
+            {
+                "account_id_match": account_gate.account_id_match,
+                "account_match_reason": account_gate.account_match_reason,
+                "expected_account_id_present": account_gate.expected_account_id_present,
+                "expected_account_id_hash_present": account_gate.expected_account_id_hash_present,
+                "account_pin_checked_at": _now_utc(),
+            }
+        )
+        _write_json(run_root / "live_pilot_preflight.json", preflight)
         if not account_gate.account_id_match:
             return _write_blocked_artifacts(
                 run_root=run_root,
@@ -3347,6 +3437,12 @@ def refresh_live_pilot_reconciliation(
     intended_payload = _load_plan(run_root / "live_pilot_orders_intended.json")
     submitted_payload = _load_plan(run_root / "live_pilot_orders_submitted.json")
     intended = _trades_from_plan(intended_payload)
+    approved_rows = intended_payload.get("approved_orders")
+    reporting_intended = (
+        [dict(row) for row in approved_rows if isinstance(row, Mapping)]
+        if isinstance(approved_rows, list)
+        else [dict(row) for row in intended if isinstance(row, Mapping)]
+    )
     submitted = [dict(row) for row in _trades_from_plan(submitted_payload)]
 
     refresh_errors: list[str] = []
@@ -3398,6 +3494,80 @@ def refresh_live_pilot_reconciliation(
     reconciliation["broker_status_refresh_claims_broker_truth"] = not bool(refresh_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
 
+    capital_gate = (
+        _load_plan(run_root / "live_pilot_capital_gate.json")
+        if (run_root / "live_pilot_capital_gate.json").exists()
+        else {}
+    )
+    open_order_check = (
+        _load_plan(run_root / "live_pilot_open_order_check.json")
+        if (run_root / "live_pilot_open_order_check.json").exists()
+        else {}
+    )
+    prior_evidence = (
+        _load_plan(run_root / "live_pilot_evidence_metrics.json")
+        if (run_root / "live_pilot_evidence_metrics.json").exists()
+        else {}
+    )
+    capital_cap_usd = _finite_float(
+        prior_evidence.get("capital_cap_usd")
+        or capital_gate.get("approved_cap_usd")
+        or capital_gate.get("capital_cap_usd")
+    )
+    entry_summary = _entry_policy_summary(
+        intended=reporting_intended,
+        submitted=refreshed,
+        dry_run=False,
+    )
+    suppressed_reason = str(
+        intended_payload.get("blocked_or_suppressed_buy_reason")
+        or prior_evidence.get("blocked_or_suppressed_buy_reason")
+        or NO_ESCALATION_REASON
+    )
+    if int(entry_summary.get("remaining_blocked_or_suppressed_buy_count") or 0) > 0:
+        entry_summary["blocked_or_suppressed_buy_reason"] = suppressed_reason
+    else:
+        entry_summary["blocked_or_suppressed_buy_reason"] = NO_ESCALATION_REASON
+    evidence_metrics = _build_evidence_metrics(
+        dry_run=False,
+        intended=reporting_intended,
+        submitted=refreshed,
+        reconciliation=reconciliation,
+        capital_cap_usd=capital_cap_usd,
+        open_order_check=open_order_check,
+        capital_gate=capital_gate,
+    )
+    evidence_metrics.update(entry_summary)
+    _write_json(run_root / "live_pilot_evidence_metrics.json", evidence_metrics)
+
+    prior_capital_usage = (
+        _load_plan(run_root / "live_pilot_capital_usage.json")
+        if (run_root / "live_pilot_capital_usage.json").exists()
+        else {}
+    )
+    _write_json(
+        run_root / "live_pilot_capital_usage.json",
+        {
+            **prior_capital_usage,
+            "schema_version": "live_pilot_capital_usage.v1",
+            "generated_at": _now_utc(),
+            "capital_cap_usd": capital_cap_usd,
+            "submitted_notional_usd": round(
+                sum(
+                    abs(_finite_float(row.get("notional")) or 0.0)
+                    for row in refreshed
+                    if _status_bucket(row.get("status")) != "rejected"
+                ),
+                6,
+            ),
+            "filled_notional_usd": evidence_metrics.get("filled_notional_usd"),
+            "filled_buy_notional_usd": evidence_metrics.get("filled_buy_notional_usd"),
+            "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+            "dry_run": False,
+            **_capital_gate_report_fields(capital_gate),
+        },
+    )
+
     _refreshed_recon_status = str(reconciliation.get("status") or "")
     if _refreshed_recon_status == "CLEAN":
         _refreshed_terminal_status = "SUBMITTED"
@@ -3405,7 +3575,13 @@ def refresh_live_pilot_reconciliation(
         _refreshed_terminal_status = "SUBMITTED_UNFILLED"
     else:
         _refreshed_terminal_status = "FAILED_RECONCILIATION"
+    prior_summary = (
+        _load_plan(run_root / "live_pilot_operator_summary.json")
+        if (run_root / "live_pilot_operator_summary.json").exists()
+        else {}
+    )
     summary = {
+        **prior_summary,
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
         "run_id": run_root.name,
@@ -3414,8 +3590,12 @@ def refresh_live_pilot_reconciliation(
         "reason_code": reconciliation.get("status"),
         "live_orders_allowed": True,
         "dry_run": False,
-        "intended_count": len(intended),
+        "intended_count": len(reporting_intended),
         "submitted_count": len(refreshed),
+        "filled_count": reconciliation.get("filled_count"),
+        "fill_rate": evidence_metrics.get("fill_rate"),
+        "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+        "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
         "run_root": str(run_root),
         "refreshed_existing_run": True,
@@ -3425,13 +3605,7 @@ def refresh_live_pilot_reconciliation(
             reconciliation_state=reconciliation.get("state"),
         ),
     }
-    summary.update(
-        _entry_policy_summary(
-            intended=[dict(row) for row in intended if isinstance(row, Mapping)],
-            submitted=refreshed,
-            dry_run=False,
-        )
-    )
+    summary.update(entry_summary)
     _write_json(run_root / "live_pilot_operator_summary.json", summary)
     _write_json(
         run_root / "execution_results.json",
@@ -3448,11 +3622,17 @@ def refresh_live_pilot_reconciliation(
             ),
             terminal_status=str(summary.get("terminal_status") or ""),
             reason_code=reconciliation.get("status"),
-            intended=[dict(row) for row in intended if isinstance(row, Mapping)],
+            intended=reporting_intended,
             submitted=refreshed,
             reconciliation=reconciliation,
             dry_run=False,
             run_root=run_root,
+            extra_fields={
+                **_capital_gate_report_fields(capital_gate),
+                **entry_summary,
+                "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
+                "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
+            },
         ),
     )
     return summary

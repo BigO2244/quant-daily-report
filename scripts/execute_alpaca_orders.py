@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -308,7 +309,7 @@ def _validate_order(trade: Dict[str, Any], idx: int) -> Tuple[bool, str | None]:
     except (ValueError, TypeError):
         return False, f"order_{idx}_invalid_qty_type:{type(qty).__name__}"
     
-    if qty <= 0:
+    if not math.isfinite(qty) or qty <= 0:
         return False, f"order_{idx}_non_positive_qty:{qty}"
     
     return True, None

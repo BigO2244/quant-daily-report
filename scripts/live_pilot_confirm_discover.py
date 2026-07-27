@@ -96,6 +96,10 @@ def append_sent_ledger(
     run_root: str,
     trade_date: str,
     status: str,
+    discovered_status: str = "",
+    reconciliation_status: str = "",
+    display_status: str = "",
+    results_sha256: str = "",
 ) -> bool:
     """Append a confirmation record. Idempotent: a run_id already present is not
     written again (dedupe survives concurrent sweeps)."""
@@ -106,10 +110,16 @@ def append_sent_ledger(
         return False
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
+        "schema_version": "live_pilot_confirmation_receipt.v1",
         "run_id": run_id,
         "run_root": str(run_root or ""),
         "trade_date": str(trade_date or ""),
         "status": str(status or ""),
+        "discovered_status": str(discovered_status or ""),
+        "status_at_send": str(status or ""),
+        "reconciliation_status": str(reconciliation_status or ""),
+        "display_status": str(display_status or ""),
+        "results_sha256": str(results_sha256 or ""),
         "sent_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     with ledger_path.open("a", encoding="utf-8") as handle:
@@ -230,6 +240,10 @@ def _cmd_mark_sent(args: argparse.Namespace) -> int:
         run_root=args.run_root or "",
         trade_date=args.trade_date or "",
         status=args.status or "",
+        discovered_status=args.discovered_status or "",
+        reconciliation_status=args.reconciliation_status or "",
+        display_status=args.display_status or "",
+        results_sha256=args.results_sha256 or "",
     )
     print(f"marked_sent={1 if wrote else 0} run_id={args.run_id}")
     return 0
@@ -253,6 +267,10 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--run-root", default="")
     mark.add_argument("--trade-date", default=default_date)
     mark.add_argument("--status", default="")
+    mark.add_argument("--discovered-status", default="")
+    mark.add_argument("--reconciliation-status", default="")
+    mark.add_argument("--display-status", default="")
+    mark.add_argument("--results-sha256", default="")
     mark.add_argument("--ledger", default="outputs/live_pilot/state/confirm_sent_ledger.jsonl")
     mark.set_defaults(func=_cmd_mark_sent)
 

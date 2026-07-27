@@ -77,9 +77,10 @@ def _safe_float(value: object, default: float | None = None) -> float | None:
     try:
         if value in (None, ""):
             return default
-        return float(value)
+        numeric = float(value)
     except Exception:
         return default
+    return numeric if math.isfinite(numeric) else default
 
 
 def _safe_int(value: object, default: int = 0) -> int:
@@ -213,8 +214,11 @@ def _validate_payload(
                 f"planned_execution_payload_trade_invalid:index={idx}:ticker={ticker or 'missing'}:side={side or 'missing'}:quantity={quantity}"
             )
             continue
-        if price <= 0.0 and notional <= 0.0:
+        if price <= 0.0:
             fail_reasons.append(f"planned_execution_payload_trade_missing_price:index={idx}:ticker={ticker}")
+            continue
+        if notional <= 0.0:
+            fail_reasons.append(f"planned_execution_payload_trade_missing_notional:index={idx}:ticker={ticker}")
             continue
         row = dict(trade)
         row["ticker"] = ticker

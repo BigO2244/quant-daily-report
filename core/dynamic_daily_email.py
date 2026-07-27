@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,7 +23,7 @@ def _safe_float(value: object) -> float | None:
         numeric = float(str(value).strip())
     except (TypeError, ValueError):
         return None
-    return numeric
+    return numeric if math.isfinite(numeric) else None
 
 
 def _fmt_return(value: object) -> str:
@@ -280,9 +281,13 @@ def _open_order_count(snapshot: Mapping[str, Any]) -> int:
     return 0
 
 
-def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
+def build_live_pilot_account_payload(
+    repo_root: Path | str,
+    *,
+    run_root: Path | str | None = None,
+) -> dict[str, Any]:
     root = Path(repo_root)
-    run_root = _latest_live_pilot_run(root)
+    run_root = Path(run_root) if run_root is not None else _latest_live_pilot_run(root)
     latest_plan = _latest_live_pilot_plan(root)
     if run_root is None:
         plan_payload = _load_json(latest_plan) if latest_plan else {}
@@ -310,6 +315,13 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
     submitted_payload = _load_json(run_root / "live_pilot_orders_submitted.json")
     intended = _payload_rows(intended_payload)
     submitted = _payload_rows(submitted_payload)
+    broker_responses = execution_results.get("broker_responses")
+    if isinstance(broker_responses, list):
+        refreshed_rows = [
+            dict(row) for row in broker_responses if isinstance(row, Mapping)
+        ]
+        if refreshed_rows:
+            submitted = refreshed_rows
     snapshot = _load_json(run_root / "live_pilot_broker_snapshot_post.json")
     if not snapshot.get("account"):
         snapshot = _load_json(run_root / "live_pilot_broker_snapshot_pre.json")
@@ -318,7 +330,7 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
     positions = snapshot.get("positions") if isinstance(snapshot.get("positions"), list) else []
     filled = [
         row for row in submitted
-        if isinstance(row, dict) and str(row.get("status") or "").strip().lower() == "filled"
+        if isinstance(row, dict) and _row_status(row) == "filled"
     ]
     approved_buys = [row for row in intended if _row_side(row) == "BUY"]
     submitted_buys = [
@@ -376,8 +388,17 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
     )
     gate_decision = str(gate_state.get("decision") or "").strip().upper()
     payload_status = str(execution_results.get("status") or "").strip().upper()
+    operator_execution_status = str(
+        execution_results.get("operator_execution_status") or ""
+    ).strip().lower()
     if gate_decision == "BLOCKED":
         live_status = "BLOCKED"
+    elif operator_execution_status in {"executed", "reconciled_success"}:
+        live_status = "EXECUTED"
+    elif operator_execution_status == "dry_run":
+        live_status = "DRY_RUN"
+    elif operator_execution_status in {"submitted_unfilled", "open"}:
+        live_status = "SUBMITTED_UNFILLED"
     elif payload_status:
         live_status = payload_status
     elif gate_state:
@@ -385,6 +406,25 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
     else:
         live_status = "OK"
     gate_reason = gate_state.get("block_reason")
+    suppressed_reason = _first_present(
+        execution_results.get("blocked_or_suppressed_buy_reason"),
+        summary.get("blocked_or_suppressed_buy_reason"),
+        evidence.get("blocked_or_suppressed_buy_reason"),
+        gate_reason,
+        summary.get("reason_code"),
+    )
+    submitted_count = int(execution_results.get("submitted_count") or len(submitted))
+    filled_count = int(execution_results.get("filled_count") or len(filled))
+    if submitted_count > 0:
+        evidence = {
+            **evidence,
+            "filled_count": filled_count,
+            "fill_rate": filled_count / submitted_count,
+            "idle_cash_reason": _first_present(
+                execution_results.get("idle_cash_reason"),
+                evidence.get("idle_cash_reason"),
+            ),
+        }
     return {
         "status": live_status,
         "latest_run_id": summary.get("run_id") or run_root.name,
@@ -404,7 +444,7 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
         "escalated_buy_count": escalated_buy_count,
         "remaining_blocked_or_suppressed_buy_count": remaining_blocked_or_suppressed_buy_count,
         "blocked_or_suppressed_buy_reason": (
-            gate_reason or summary.get("reason_code")
+            suppressed_reason
             if gate_decision == "BLOCKED" or int(remaining_blocked_or_suppressed_buy_count or 0) > 0
             else "none"
         ),
@@ -444,9 +484,10 @@ def build_live_pilot_account_payload(repo_root: Path | str) -> dict[str, Any]:
             0,
         ),
         "escalation_reason": _first_present(
-            first_policy_row.get("escalation_reason"),
             execution_results.get("escalation_reason"),
             summary.get("escalation_reason"),
+            evidence.get("escalation_reason"),
+            first_policy_row.get("escalation_reason"),
             "none",
         ),
         "paper_live_divergence": _paper_live_divergence(root),
@@ -464,9 +505,17 @@ def _paper_live_divergence(repo_root: Path) -> str:
     return f"{status}" + (f" ({reason})" if reason else "")
 
 
-def render_dynamic_email_sections(repo_root: Path | str, trade_date: str) -> dict[str, str]:
+def render_dynamic_email_sections(
+    repo_root: Path | str,
+    trade_date: str,
+    *,
+    live_pilot_run_root: Path | str | None = None,
+) -> dict[str, str]:
     sleeve_payload = build_dynamic_sleeve_rows(repo_root, trade_date)
-    live_payload = build_live_pilot_account_payload(repo_root)
+    live_payload = build_live_pilot_account_payload(
+        repo_root,
+        run_root=live_pilot_run_root,
+    )
 
     text_lines = [
         "",

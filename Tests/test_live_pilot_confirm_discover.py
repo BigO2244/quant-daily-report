@@ -91,6 +91,29 @@ def test_append_ledger_is_idempotent(tmp_path: Path) -> None:
     assert len([ln for ln in ledger.read_text().splitlines() if ln.strip()]) == 1
 
 
+def test_confirmation_receipt_records_post_refresh_truth_and_hash(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    append_sent_ledger(
+        ledger,
+        run_id="r-final",
+        run_root="outputs/live_pilot/runs/r-final",
+        trade_date="2026-07-27",
+        status="SUBMITTED",
+        discovered_status="SUBMITTED_UNFILLED",
+        reconciliation_status="CLEAN",
+        display_status="EXECUTED",
+        results_sha256="abc123",
+    )
+
+    receipt = json.loads(ledger.read_text(encoding="utf-8"))
+    assert receipt["schema_version"] == "live_pilot_confirmation_receipt.v1"
+    assert receipt["discovered_status"] == "SUBMITTED_UNFILLED"
+    assert receipt["status_at_send"] == "SUBMITTED"
+    assert receipt["reconciliation_status"] == "CLEAN"
+    assert receipt["display_status"] == "EXECUTED"
+    assert receipt["results_sha256"] == "abc123"
+
+
 def test_running_run_is_not_terminal_and_not_pending(tmp_path: Path) -> None:
     runs = tmp_path / "runs"
     ledger = tmp_path / "ledger.jsonl"

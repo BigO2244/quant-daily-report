@@ -32,7 +32,15 @@ def test_bundle_status_valid_reuses_existing_bundle(tmp_path: Path, monkeypatch)
             "execution_status": "PLANNED",
             "planner_intended_trades_count": 1,
             "execution_eligible_trades_count": 1,
-            "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}],
+            "trades": [
+                {
+                    "ticker": "AAPL",
+                    "side": "BUY",
+                    "shares": 1,
+                    "entry_price": 100.0,
+                    "notional": 100.0,
+                }
+            ],
         },
     )
 
@@ -55,7 +63,15 @@ def test_bundle_status_force_refresh_marks_refresh_requested(tmp_path: Path, mon
             "execution_status": "PLANNED",
             "planner_intended_trades_count": 1,
             "execution_eligible_trades_count": 1,
-            "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 1}],
+            "trades": [
+                {
+                    "ticker": "AAPL",
+                    "side": "BUY",
+                    "shares": 1,
+                    "entry_price": 100.0,
+                    "notional": 100.0,
+                }
+            ],
         },
     )
 

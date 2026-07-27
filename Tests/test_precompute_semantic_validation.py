@@ -26,6 +26,22 @@ def _write_bundle(bundle: Path, *, strategy: str = "caerus_polaris", malformed_o
                 {"symbol": "AAPL", "side": "buy", "qty": 1},
                 {"symbol": "MSFT", "side": "sell"} if malformed_order else {"ticker": "MSFT", "action": "sell", "quantity": 2},
             ]
+            payload["trades"] = [
+                {
+                    "ticker": "AAPL",
+                    "side": "BUY",
+                    "shares": 1,
+                    "entry_price": 100.0,
+                    "notional": 100.0,
+                },
+                {
+                    "ticker": "MSFT",
+                    "side": "SELL",
+                    "shares": 2,
+                    "entry_price": 200.0,
+                    "notional": 400.0,
+                },
+            ]
         _write_json(bundle / name, payload)
 
 

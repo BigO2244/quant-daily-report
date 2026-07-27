@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,56 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return None, str(exc)
 
 
+def _non_finite_paths(value: Any, *, path: str = "$") -> list[str]:
+    failures: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            failures.extend(_non_finite_paths(item, path=f"{path}.{key}"))
+    elif isinstance(value, list):
+        for idx, item in enumerate(value):
+            failures.extend(_non_finite_paths(item, path=f"{path}[{idx}]"))
+    elif isinstance(value, float) and not math.isfinite(value):
+        failures.append(path)
+    return failures
+
+
+def _positive_finite(value: Any) -> bool:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(numeric) and numeric > 0.0
+
+
+def _planned_trade_failures(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return ["planned_execution_payload:not_object"]
+    trades = payload.get("trades")
+    if not isinstance(trades, list):
+        return ["planned_execution_payload:trades_not_list"]
+    failures: list[str] = []
+    for idx, trade in enumerate(trades):
+        if not isinstance(trade, dict):
+            failures.append(f"planned_execution_payload:trade[{idx}]:not_object")
+            continue
+        ticker = str(trade.get("ticker") or trade.get("symbol") or "").strip().upper()
+        side = str(trade.get("side") or trade.get("action") or "").strip().upper()
+        quantity = trade.get("shares", trade.get("quantity", trade.get("qty")))
+        price = trade.get("price", trade.get("entry_price"))
+        notional = trade.get("notional")
+        if not ticker:
+            failures.append(f"planned_execution_payload:trade[{idx}]:missing_ticker")
+        if side not in {"BUY", "SELL", "CLOSE", "REDUCE"}:
+            failures.append(f"planned_execution_payload:trade[{idx}]:invalid_side")
+        if not _positive_finite(quantity):
+            failures.append(f"planned_execution_payload:trade[{idx}]:invalid_quantity")
+        if not _positive_finite(price):
+            failures.append(f"planned_execution_payload:trade[{idx}]:missing_finite_price")
+        if not _positive_finite(notional):
+            failures.append(f"planned_execution_payload:trade[{idx}]:missing_finite_notional")
+    return failures
+
+
 def validate_precompute_bundle(
     bundle_dir: Path,
     *,
@@ -38,6 +89,8 @@ def validate_precompute_bundle(
     present: list[str] = []
     missing: list[str] = []
     invalid_json: list[dict[str, str]] = []
+    non_finite_values: list[dict[str, Any]] = []
+    semantic_failures: list[str] = []
     file_summaries: dict[str, dict[str, Any]] = {}
 
     for name in required_files:
@@ -55,6 +108,12 @@ def validate_precompute_bundle(
         }
         if error is not None:
             invalid_json.append({"file": name, "error": error})
+            continue
+        non_finite = _non_finite_paths(payload)
+        if non_finite:
+            non_finite_values.append({"file": name, "paths": non_finite})
+        if name == "planned_execution_payload.json":
+            semantic_failures.extend(_planned_trade_failures(payload))
 
     trade_date_mismatches: list[dict[str, str]] = []
     if trade_date:
@@ -74,6 +133,8 @@ def validate_precompute_bundle(
     failures: list[str] = []
     failures.extend(f"missing:{name}" for name in missing)
     failures.extend(f"invalid_json:{item['file']}" for item in invalid_json)
+    failures.extend(f"non_finite_json:{item['file']}:{path}" for item in non_finite_values for path in item["paths"])
+    failures.extend(semantic_failures)
     failures.extend(f"trade_date_mismatch:{item['file']}" for item in trade_date_mismatches)
 
     status = "OK" if not failures else "FAILED"
@@ -86,6 +147,8 @@ def validate_precompute_bundle(
         "present_files": present,
         "missing_files": missing,
         "invalid_json": invalid_json,
+        "non_finite_values": non_finite_values,
+        "semantic_failures": semantic_failures,
         "trade_date_mismatches": trade_date_mismatches,
         "validation_failures": failures,
         "integrity_summary": {
@@ -93,6 +156,8 @@ def validate_precompute_bundle(
             "present_count": len(present),
             "missing_count": len(missing),
             "invalid_json_count": len(invalid_json),
+            "non_finite_value_count": sum(len(item["paths"]) for item in non_finite_values),
+            "semantic_failure_count": len(semantic_failures),
             "trade_date_mismatch_count": len(trade_date_mismatches),
         },
         "files": file_summaries,

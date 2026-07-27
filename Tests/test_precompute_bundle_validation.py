@@ -14,7 +14,18 @@ REQUIRED_FILES = ("contract.json", "daily_snapshot.json", "signals.json", "plann
 
 def _write_bundle_file(bundle_dir: Path, name: str, trade_date: str = "2026-05-15") -> None:
     bundle_dir.mkdir(parents=True, exist_ok=True)
-    (bundle_dir / name).write_text(json.dumps({"trade_date": trade_date}) + "\n", encoding="utf-8")
+    payload = {"trade_date": trade_date}
+    if name == "planned_execution_payload.json":
+        payload["trades"] = [
+            {
+                "ticker": "AAPL",
+                "side": "BUY",
+                "shares": 1,
+                "entry_price": 100.0,
+                "notional": 100.0,
+            }
+        ]
+    (bundle_dir / name).write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
 
 def test_validate_precompute_bundle_requires_all_execution_artifacts(tmp_path: Path) -> None:
@@ -44,6 +55,26 @@ def test_validate_precompute_bundle_passes_complete_bundle(tmp_path: Path) -> No
     assert result["missing_files"] == []
     assert result["validation_failures"] == []
     assert result["integrity_summary"]["present_count"] == 4
+
+
+def test_validate_precompute_bundle_rejects_nonfinite_execution_values(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
+    for name in REQUIRED_FILES:
+        _write_bundle_file(bundle_dir, name)
+    payload_path = bundle_dir / "planned_execution_payload.json"
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["trades"][0]["entry_price"] = float("nan")
+    payload["trades"][0]["notional"] = float("inf")
+    payload_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    result = validate_precompute_bundle(bundle_dir, trade_date="2026-05-15")
+
+    assert result["status"] == "FAILED"
+    assert {
+        "$.trades[0].entry_price",
+        "$.trades[0].notional",
+    }.issubset(set(result["non_finite_values"][0]["paths"]))
+    assert result["integrity_summary"]["non_finite_value_count"] == 2
 
 
 def test_execution_self_heal_status_tracks_attempts_and_suppressed_side_effects(tmp_path: Path) -> None:

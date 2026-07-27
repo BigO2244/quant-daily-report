@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 from core.precompute_contract import (
@@ -36,7 +37,15 @@ def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
             "execution_status": "PLANNED",
             "planner_intended_trades_count": 1,
             "execution_eligible_trades_count": 1,
-            "trades": [{"ticker": "AAPL", "side": "BUY", "shares": 10}],
+            "trades": [
+                {
+                    "ticker": "AAPL",
+                    "side": "BUY",
+                    "shares": 10,
+                    "entry_price": 100.0,
+                    "notional": 1000.0,
+                }
+            ],
         },
     )
     assert contract_path.exists()
@@ -60,6 +69,44 @@ def test_validate_precompute_contract_missing() -> None:
     valid, reason = validate_precompute_contract(None, expected_trade_date="2026-03-17")
     assert valid is False
     assert reason == REASON_PRECOMPUTE_MISSING
+
+
+def test_nonfinite_execution_trade_writes_strict_json_and_invalid_contract(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    trade_date = "2026-03-17"
+    contract_path = write_precompute_bundle(
+        trade_date=trade_date,
+        run_id="run-bad-price",
+        mode="PAPER",
+        daily_snapshot={"asof": trade_date, "last_price": float("nan")},
+        signals_payload={"trade_date": trade_date},
+        execution_payload={
+            "trade_date": trade_date,
+            "execution_status": "PLANNED",
+            "trades": [
+                {
+                    "ticker": "KLAC",
+                    "side": "BUY",
+                    "shares": 1,
+                    "entry_price": float("nan"),
+                    "notional": float("nan"),
+                }
+            ],
+        },
+    )
+
+    raw_payload = (
+        contract_path.parent / "planned_execution_payload.json"
+    ).read_text(encoding="utf-8")
+    assert "NaN" not in raw_payload
+    assert "Infinity" not in raw_payload
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    assert contract["status"] == "invalid"
+    assert contract["validated_for_execution"] is False
+    assert contract["validation_failures"]
 
 
 def test_validate_precompute_contract_wrong_date() -> None:

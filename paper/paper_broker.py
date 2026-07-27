@@ -1234,6 +1234,8 @@ def _normalize_precomputed_trade_plan(
             shares = float(item.get("shares", item.get("quantity")) or 0.0)
         except Exception:
             shares = 0.0
+        if not math.isfinite(shares):
+            shares = 0.0
         try:
             price = float(
                 item.get("price")
@@ -1242,9 +1244,13 @@ def _normalize_precomputed_trade_plan(
             )
         except Exception:
             price = 0.0
+        if not math.isfinite(price):
+            price = 0.0
         try:
             notional = float(item.get("notional") or 0.0)
         except Exception:
+            notional = 0.0
+        if not math.isfinite(notional):
             notional = 0.0
         if price <= 0.0 and shares > 0.0 and notional > 0.0:
             price = abs(float(notional)) / abs(float(shares))

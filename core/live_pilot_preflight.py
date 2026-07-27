@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -63,7 +64,7 @@ def _positive_float(value: object) -> float | None:
         numeric = float(str(value or "").strip())
     except (TypeError, ValueError):
         return None
-    return numeric if numeric > 0 else None
+    return numeric if math.isfinite(numeric) and numeric > 0 else None
 
 
 def _env_mapping(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
@@ -260,7 +261,21 @@ def build_live_pilot_preflight_result(
             live_orders_allowed=False,
             operator_action=f"Set {LIVE_PILOT_SLEEVE_ENV} to the approved sleeve id before live pilot submission.",
         )
-    if order_notional is not None and float(order_notional) > cap:
+    finite_order_notional = _positive_float(order_notional)
+    if order_notional is not None and finite_order_notional is None:
+        return LivePilotPreflightResult(
+            status="BLOCKED",
+            reason_code="nonfinite_live_order_notional",
+            requested_mode=requested_mode,
+            broker_paper=bool(broker_paper),
+            base_url=base_url_norm,
+            live_trading_flag_set=live_flag,
+            capital_cap_usd=cap,
+            approved_pilot_sleeve_id=sleeve,
+            live_orders_allowed=False,
+            operator_action="Provide a finite positive order notional before live submission.",
+        )
+    if finite_order_notional is not None and finite_order_notional > cap:
         return LivePilotPreflightResult(
             status="BLOCKED",
             reason_code="order_notional_exceeds_live_capital_cap",

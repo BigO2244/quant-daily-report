@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -596,6 +597,13 @@ class AlpacaBroker:
         tif: str = "day",
         estimated_notional: float | None = None,
     ) -> Dict[str, Any]:
+        qty_float = float(qty)
+        if not math.isfinite(qty_float) or qty_float <= 0.0:
+            raise RuntimeError("Refusing market order with non-finite or non-positive quantity.")
+        if estimated_notional is not None:
+            estimated_notional_float = float(estimated_notional)
+            if not math.isfinite(estimated_notional_float) or estimated_notional_float <= 0.0:
+                raise RuntimeError("Refusing market order with non-finite or non-positive estimated notional.")
         validate_alpaca_submission_guardrails(
             broker_paper=bool(self.paper),
             base_url=self.base_url,
@@ -611,7 +619,6 @@ class AlpacaBroker:
                 f"base_url={self.base_url!r}"
             )
         side_norm = str(side).upper()
-        qty_float = float(qty)
         client_id = str(client_order_id)
         symbol_norm = str(symbol).upper()
         logger.info(
@@ -660,6 +667,12 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
+        qty_float = float(qty)
+        limit_price_float = float(limit_price)
+        if not math.isfinite(qty_float) or qty_float <= 0.0:
+            raise RuntimeError("Refusing limit order with non-finite or non-positive quantity.")
+        if not math.isfinite(limit_price_float) or limit_price_float <= 0.0:
+            raise RuntimeError("Refusing limit order with non-finite or non-positive limit price.")
         validate_alpaca_submission_guardrails(
             broker_paper=bool(self.paper),
             base_url=self.base_url,
@@ -675,10 +688,8 @@ class AlpacaBroker:
                 f"base_url={self.base_url!r}"
             )
         side_norm = str(side).upper()
-        qty_float = float(qty)
         symbol_norm = str(symbol).upper()
         client_id = str(client_order_id)
-        limit_price_float = float(limit_price)
         logger.info(
             "[ALPACA_SUBMIT] attempt order_type=limit symbol=%s side=%s qty=%.6f limit_price=%.6f notional=%.2f client_order_id=%s",
             symbol_norm,

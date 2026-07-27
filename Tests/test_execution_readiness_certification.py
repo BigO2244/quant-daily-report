@@ -256,3 +256,35 @@ def test_certification_emits_per_trade_retained_and_skipped_diagnostics(
     assert any(row["ticker"] == "VZ" and row["skip_reason"] == "min_notional" for row in diagnostics["skipped"])
     assert result["readiness_status"] == "WARN"
     assert broker.submit_calls == 0
+
+
+def test_certification_fails_nonfinite_planned_trade_before_broker_use(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _patch_symbol_resolution(monkeypatch)
+    _write_payload(
+        tmp_path,
+        "2026-06-24",
+        [
+            {
+                "ticker": "KLAC",
+                "side": "BUY",
+                "quantity": 1,
+                "price": float("nan"),
+                "notional": float("nan"),
+            }
+        ],
+    )
+    broker = FakeBroker(_account())
+
+    result = _certify(tmp_path, broker)
+
+    assert result["readiness_status"] == "FAIL"
+    assert any(
+        "planned_execution_payload_trade_missing_price" in reason
+        for reason in result["fail_reasons"]
+    )
+    assert result["expected_submissions"] == 0
+    assert broker.asset_lookups == []
+    assert broker.submit_calls == 0

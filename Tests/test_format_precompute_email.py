@@ -153,6 +153,57 @@ def test_format_precompute_email_handles_null_numeric_payload_fields(tmp_path):
     assert "Turnover: $0.00 (no cap applied)" in result.stdout
 
 
+def test_format_precompute_email_rejects_nonfinite_trade_evidence(tmp_path):
+    trade_date = "2026-07-27"
+    bundle_dir = tmp_path / "outputs" / "precompute" / trade_date
+    bundle_dir.mkdir(parents=True)
+    payload = {
+        "trade_date": trade_date,
+        "market_analyzer": {"regime": "LOW", "signal_bucket": "RISK_ON"},
+        "equity": 10000,
+        "achieved_cash_weight": 0.05,
+        "risk_summary": {"Gross exposure (%)": "95.0%", "# positions": 5},
+        "risk_meta": {
+            "turnover_requested": 1000,
+            "turnover_cap": 0,
+            "turnover_scaled": False,
+        },
+        "pricing_asof": "2026-07-24",
+        "trades": [
+            {
+                "ticker": "KLAC",
+                "side": "BUY",
+                "shares": 1,
+                "entry_price": float("nan"),
+                "notional": float("nan"),
+                "stop_loss": float("nan"),
+                "take_profit": float("nan"),
+            }
+        ],
+    }
+    (bundle_dir / "planned_execution_payload.json").write_text(
+        json.dumps(payload)
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.format_precompute_email"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "REPORT_DATE": trade_date,
+            "PYTHONPATH": str(REPO_ROOT),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Refusing to format invalid precompute evidence" in result.stderr
+    assert "non_finite_json:planned_execution_payload.json" in result.stderr
+
+
 def test_format_precompute_email_includes_dynamic_alpha_sleeves(tmp_path):
     trade_date = "2026-06-23"
     bundle_dir = tmp_path / "outputs" / "precompute" / trade_date

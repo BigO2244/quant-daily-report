@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.dynamic_daily_email import render_dynamic_email_sections
+from core.dynamic_daily_email import (
+    build_live_pilot_account_payload,
+    render_dynamic_email_sections,
+)
 from paper.build_execution_email import build_execution_email_text
 
 
@@ -282,3 +285,64 @@ def test_execution_email_uses_dynamic_sections_when_repo_root_is_supplied(tmp_pa
     assert "Dynamic Sleeve Inventory" in body
     assert "Polaris_Alpha" in body
     assert "Caerus Future" in body
+
+
+def test_live_account_payload_uses_explicit_run_and_refreshed_results(tmp_path: Path) -> None:
+    scoped = tmp_path / "outputs" / "live_pilot" / "runs" / "scoped-submit"
+    wrong = tmp_path / "outputs" / "live_pilot" / "runs" / "newer-dry"
+    _write_json(
+        scoped / "live_pilot_operator_summary.json",
+        {"run_id": "scoped-submit", "terminal_status": "SUBMITTED"},
+    )
+    _write_json(scoped / "live_pilot_reconciliation.json", {"status": "CLEAN"})
+    _write_json(
+        scoped / "live_pilot_evidence_metrics.json",
+        {"filled_count": 0, "fill_rate": 0.0, "idle_cash_reason": "submitted_not_filled"},
+    )
+    _write_json(
+        scoped / "live_pilot_orders_submitted.json",
+        {
+            "orders": [
+                {
+                    "symbol": "LRCX",
+                    "side": "SELL",
+                    "status": "pending_new",
+                    "escalation_reason": "not_applicable_non_buy_order",
+                }
+            ]
+        },
+    )
+    _write_json(
+        scoped / "execution_results.json",
+        {
+            "run_id": "scoped-submit",
+            "status": "SUBMITTED",
+            "operator_execution_status": "executed",
+            "submitted_count": 1,
+            "filled_count": 1,
+            "escalation_reason": "prior_unfilled_live_buy_attempts_detected",
+            "broker_responses": [
+                {
+                    "symbol": "LRCX",
+                    "side": "SELL",
+                    "status": "OrderStatus.FILLED",
+                }
+            ],
+        },
+    )
+    _write_json(
+        scoped / "live_pilot_broker_snapshot_post.json",
+        {"account": {"cash": "75", "equity": "500"}, "open_orders": [], "positions": []},
+    )
+    _write_json(
+        wrong / "live_pilot_operator_summary.json",
+        {"run_id": "newer-dry", "terminal_status": "DRY_RUN"},
+    )
+
+    payload = build_live_pilot_account_payload(tmp_path, run_root=scoped)
+
+    assert payload["latest_run_id"] == "scoped-submit"
+    assert payload["status"] == "EXECUTED"
+    assert len(payload["filled_orders"]) == 1
+    assert payload["evidence_metrics"]["fill_rate"] == 1.0
+    assert payload["escalation_reason"] == "prior_unfilled_live_buy_attempts_detected"

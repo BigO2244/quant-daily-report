@@ -192,6 +192,22 @@ print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
 }
 
+json_file_field() {
+    local path="$1"
+    local field="$2"
+    JSON_FILE_PATH="${path}" JSON_FILE_FIELD="${field}" "${PYTHON_BIN}" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["JSON_FILE_PATH"])
+if not path.exists():
+    raise SystemExit(1)
+payload = json.loads(path.read_text(encoding="utf-8"))
+print(payload.get(os.environ["JSON_FILE_FIELD"], ""))
+PY
+}
+
 confirm_completed_runs() (
     # Execute-completion hook: immediately confirm every terminal run for today
     # that is not yet confirmed. This closes the race that let the 2026-07-10
@@ -419,21 +435,30 @@ fi
 
 echo "=== LIVE_PILOT SCHEDULED SUBMISSION ==="
 LIVE_RUN_ID="${REPORT_DATE}T${RUN_TS}_live_pilot_cron_submit"
+LIVE_RUN_ROOT="outputs/live_pilot/runs/${LIVE_RUN_ID}"
 set +e
-LIVE_OUTPUT="$(CAERUS_LIVE_PILOT_DRY_RUN=0 "${PYTHON_BIN}" scripts/live_pilot_execute.py --plan "${PLAN_PATH}" --run-id "${LIVE_RUN_ID}" 2>&1)"
+LIVE_OUTPUT="$(CAERUS_LIVE_PILOT_DRY_RUN=0 "${PYTHON_BIN}" scripts/live_pilot_execute.py --plan "${PLAN_PATH}" --run-id "${LIVE_RUN_ID}")"
 LIVE_STATUS=$?
 set -e
 echo "${LIVE_OUTPUT}"
-LIVE_RUN_ROOT="$(summary_field "${LIVE_OUTPUT}" run_root || true)"
-LIVE_TERMINAL_STATUS="$(summary_field "${LIVE_OUTPUT}" terminal_status || true)"
-if [[ -n "${LIVE_RUN_ROOT}" ]]; then
-    write_live_pilot_pointer "${LIVE_TERMINAL_STATUS:-unknown}" "${LIVE_RUN_ID}" "${LIVE_RUN_ROOT}" "scheduled_submission_completed"
-fi
+LIVE_TERMINAL_STATUS="$(json_file_field "${LIVE_RUN_ROOT}/live_pilot_operator_summary.json" terminal_status || true)"
+write_live_pilot_pointer "${LIVE_TERMINAL_STATUS:-unknown}" "${LIVE_RUN_ID}" "${LIVE_RUN_ROOT}" "scheduled_submission_completed"
 
 # Execute-completion hook: confirm the just-completed submit run (and the dry
 # run) now, so an armed submission is reported even if it finished after the
 # scheduled confirm sweep. Dedupe keeps it idempotent with the 09:45 cron.
 confirm_completed_runs || true
+
+# Confirmation refreshes broker truth for the exact run. Re-read that canonical
+# result and supersede the pre-refresh workflow pointer so downstream reporting
+# cannot remain stuck on DRY_RUN or SUBMITTED_UNFILLED.
+LIVE_FINAL_STATUS="$(json_file_field "${LIVE_RUN_ROOT}/execution_results.json" status || true)"
+if [[ -n "${LIVE_FINAL_STATUS}" ]]; then
+    write_live_pilot_pointer "${LIVE_FINAL_STATUS}" "${LIVE_RUN_ID}" "${LIVE_RUN_ROOT}" "scheduled_submission_confirmed"
+    if [[ "${LIVE_FINAL_STATUS}" == "SUBMITTED" && "${LIVE_STATUS}" -ne 0 ]]; then
+        LIVE_STATUS=0
+    fi
+fi
 
 echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=${LIVE_STATUS}"
 exit "${LIVE_STATUS}"

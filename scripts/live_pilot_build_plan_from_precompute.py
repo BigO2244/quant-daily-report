@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -70,7 +71,7 @@ def _safe_float(value: object) -> float | None:
         numeric = float(str(value).strip())
     except (TypeError, ValueError):
         return None
-    return numeric
+    return numeric if math.isfinite(numeric) else None
 
 
 def _safe_positive_float(value: object) -> float | None:
