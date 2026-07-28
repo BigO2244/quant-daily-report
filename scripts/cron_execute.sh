@@ -94,7 +94,8 @@ export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"
 # staging scale (it only ever TIGHTENS; unset on the live lane -> live sizes
 # against real equity, unchanged).
 export CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
-export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-orion}"
+export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_polaris}"
+export CAERUS_PAPER_RECOVERY_POLICY="${CAERUS_PAPER_RECOVERY_POLICY:-weekly_rotation_guard_v1}"
 # Sells run through the SAME fail-closed gates as live (master flag + whitelist);
 # paper arms them with the wildcard so the full buy/sell/hold model is exercised.
 export CAERUS_LIVE_PILOT_SELLS_ENABLED="1"
@@ -372,6 +373,9 @@ set +e
 BUILD_OUTPUT="$(
     "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py \
         --trade-date "${REPORT_DATE}" \
+        --lane paper \
+        --recovery-policy "${CAERUS_PAPER_RECOVERY_POLICY}" \
+        --recovery-policy-config "${REPO_ROOT}/config/paper_recovery_policy.json" \
         --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}" \
         --capital-cap "${PLAN_CAP}" \
         --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}" \

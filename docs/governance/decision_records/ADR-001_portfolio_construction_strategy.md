@@ -1,6 +1,6 @@
 # ADR-001: Portfolio Construction Strategy
 
-Status: Accepted as current baseline, with Alpha Chase under research evaluation
+Status: Accepted baseline; temporary paper recovery observation approved 2026-07-28
 Date: 2026-06-26
 Owner: Caerus Research Program
 Runtime impact: documentation only
@@ -158,3 +158,55 @@ source alpha evidence.
 - FR-105 artifact completeness becomes the next implementation step.
 - Shadow Alpha Chase remains disabled by default.
 - Any future behavior change requires explicit governance approval.
+
+## 2026-07-28 Temporary Paper Recovery Addendum
+
+Brett approved execution of the drawdown recovery sequence on 2026-07-28 after
+the broker-truth ledgers showed a paper max drawdown of 6.205% through 2026-07-27
+and a live max drawdown of 9.020% through 2026-07-27.
+
+This approval creates a bounded exception to the earlier prohibition on paper
+allocation changes. It does not replace the sleeve-merge baseline and does not
+promote Alpha Chase, Orion, or any other strategy.
+
+The approved paper observation policy is `weekly_rotation_guard_v1`:
+
+- use the first retained target decision in each ISO week;
+- measure the relative 10-session performance of QQQ, SMH, and MTUM versus SPY
+  and RSP using strictly prior adjusted closes;
+- retain full exposure when clear, use 50% exposure at the warning threshold,
+  and 25% exposure at the lock threshold;
+- route undeployed weight to cash;
+- apply only in the paper execution lane;
+- fail closed if the weekly source, factor history, approval config, or
+  paper-lane identity cannot be proved.
+
+The retained replay from 2026-05-12 through 2026-07-27 produced the following
+10-basis-point-cost diagnostics:
+
+| Policy | Total return | Max drawdown | Average one-way turnover |
+|---|---:|---:|---:|
+| Stored daily targets | -7.565% | -11.622% | 41.725% |
+| Stored weekly targets | +1.425% | -4.399% | 10.073% |
+| Weekly targets plus rotation guard | +2.405% | -4.263% | 9.479% |
+
+The replay has 51 observations and zero missing price weight for the selected
+candidate. It is explicitly non-decision-grade for any broad-versus-concentrated
+claim because the post-2026-07-07 dynamic pre-concentration books were not
+retained. Its scope is sufficient only to authorize forward paper observation,
+not live influence.
+
+Before any future live review, the policy requires at least:
+
+- 20 forward paper sessions;
+- 10 sessions with clean target-attainment evidence;
+- a fresh owner decision.
+
+Live rearm is not authorized. The live account remains flat, the kill switch
+remains engaged, the live plan builder rejects the current target/Orion identity
+mismatch, and live execution requires an explicit positive capital cap no
+greater than $500.
+
+The machine-readable approval and thresholds live in
+`config/paper_recovery_policy.json`. Operating and rollback instructions live in
+`docs/runbooks/drawdown_recovery_2026-07-28.md`.

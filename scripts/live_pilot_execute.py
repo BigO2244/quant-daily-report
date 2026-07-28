@@ -2926,6 +2926,30 @@ def _run_live_pilot_core_path(
 
     reconciliation = _reconcile(dry_run=bool(gate.dry_run), intended=intended, submitted=submitted, errors=submit_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    try:
+        from core.lane_target_attainment import build_lane_target_attainment
+
+        target_attainment = build_lane_target_attainment(
+            plan=plan,
+            post_snapshot=post_snapshot,
+            reconciliation=reconciliation,
+            run_id=run_id,
+            trade_date=trade_date,
+            mode=str(getattr(gate, "requested_mode", "") or LIVE_PILOT_MODE),
+            dry_run=bool(gate.dry_run),
+        )
+        (run_root / "audit").mkdir(parents=True, exist_ok=True)
+        _write_json(
+            run_root
+            / "audit"
+            / f"execution_target_attainment_{trade_date}.json",
+            target_attainment,
+        )
+    except Exception as exc:
+        target_attainment = {
+            "status": "UNKNOWN_INSUFFICIENT_ARTIFACTS",
+            "reason_code": f"target_attainment_build_failed:{exc}",
+        }
     evidence_metrics = _build_evidence_metrics(
         dry_run=bool(gate.dry_run),
         intended=reporting_intended,
@@ -3012,6 +3036,8 @@ def _run_live_pilot_core_path(
         "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
         "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
+        "execution_target_attainment_status": target_attainment.get("status"),
+        "execution_target_attainment_reason": target_attainment.get("reason_code"),
         "run_root": str(run_root),
         # BLOCKER 3 audit trail: every order dropped at validation (plan-level or
         # asset-level), with its own reason_code — never silently absorbed into
@@ -3047,6 +3073,8 @@ def _run_live_pilot_core_path(
                 **entry_summary,
                 "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
                 "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
+                "execution_target_attainment_status": target_attainment.get("status"),
+                "execution_target_attainment_reason": target_attainment.get("reason_code"),
             },
         ),
     )

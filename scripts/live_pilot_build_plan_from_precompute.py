@@ -284,6 +284,10 @@ def build_live_pilot_plan(
     price_fetcher: PriceFetcher | None = None,
     sector_map: Mapping[str, str] | None = None,
     state_dir: Path | None = None,
+    lane: str | None = None,
+    recovery_policy: str | None = None,
+    recovery_policy_config: Path = Path("config/paper_recovery_policy.json"),
+    factor_history_fetcher: Callable[[str, str], pd.DataFrame] | None = None,
 ) -> dict[str, Any]:
     """Build a FULL rebalance target plan for the live pilot.
 
@@ -323,6 +327,102 @@ def build_live_pilot_plan(
             reason_code="live_pilot_signals_source_missing",
             diagnostics={"signals_path": str(signals_path)},
         )
+
+    recovery_policy_meta: dict[str, Any] | None = None
+    if recovery_policy:
+        if str(lane or "").strip().lower() != "paper":
+            return _emit_blocked_plan(
+                output_dir=output_dir,
+                trade_date=trade_date,
+                approved_sleeve=approved_sleeve,
+                capital_cap=float(capital_cap),
+                max_orders=int(max_orders),
+                allow_fractional=bool(allow_fractional),
+                reason_code="paper_recovery_policy_wrong_lane",
+                diagnostics={
+                    "lane": lane,
+                    "recovery_policy": recovery_policy,
+                },
+            )
+        try:
+            from core.paper_recovery_policy import (
+                derive_weekly_rotation_guard_payload,
+                fetch_factor_closes_yfinance,
+                validate_recovery_config,
+            )
+
+            config = _read_json(recovery_policy_config)
+            config_validation = validate_recovery_config(
+                config,
+                requested_policy=recovery_policy,
+            )
+            if config_validation.get("status") != "PASS":
+                raise ValueError(
+                    "recovery config blocked: "
+                    + ",".join(config_validation.get("reason_codes") or [])
+                )
+            derived_payload, recovery_policy_meta = (
+                derive_weekly_rotation_guard_payload(
+                    precompute_root=payload_path.parent.parent,
+                    trade_date=trade_date,
+                    factor_fetcher=(
+                        factor_history_fetcher
+                        or fetch_factor_closes_yfinance
+                    ),
+                )
+            )
+            recovery_policy_meta["config_path"] = str(recovery_policy_config)
+            recovery_policy_meta["config_validation"] = config_validation
+            recovery_dir = output_dir.parent / "recovery_targets"
+            recovery_dir.mkdir(parents=True, exist_ok=True)
+            derived_path = (
+                recovery_dir / f"paper_recovery_targets_{trade_date}.json"
+            )
+            _write_json(derived_path, derived_payload)
+            signals_path = derived_path
+        except Exception as exc:
+            return _emit_blocked_plan(
+                output_dir=output_dir,
+                trade_date=trade_date,
+                approved_sleeve=approved_sleeve,
+                capital_cap=float(capital_cap),
+                max_orders=int(max_orders),
+                allow_fractional=bool(allow_fractional),
+                reason_code="paper_recovery_policy_build_failed",
+                diagnostics={
+                    "recovery_policy": recovery_policy,
+                    "config_path": str(recovery_policy_config),
+                    "error": str(exc),
+                },
+            )
+
+    identity_validation: dict[str, Any] | None = None
+    if lane is not None:
+        from core.strategy_identity import validate_lane_strategy_identity
+
+        signals_payload = _read_json(signals_path)
+        identity = (
+            signals_payload.get("strategy_identity")
+            if isinstance(signals_payload, Mapping)
+            and isinstance(signals_payload.get("strategy_identity"), Mapping)
+            else {}
+        )
+        identity_validation = validate_lane_strategy_identity(
+            identity=identity,
+            approved_strategy=approved_sleeve,
+            lane=lane,
+        )
+        if identity_validation.get("status") != "PASS":
+            return _emit_blocked_plan(
+                output_dir=output_dir,
+                trade_date=trade_date,
+                approved_sleeve=approved_sleeve,
+                capital_cap=float(capital_cap),
+                max_orders=int(max_orders),
+                allow_fractional=bool(allow_fractional),
+                reason_code="strategy_identity_mismatch",
+                diagnostics={"strategy_identity_validation": identity_validation},
+            )
 
     # 1) Strategy target for the FULL universe (same loader paper uses).
     payload_cash_default = _safe_float(payload.get("cash_target_weight")) or 0.0
@@ -462,6 +562,12 @@ def build_live_pilot_plan(
             "target_name_count": len(target_portfolio),
             "risk_controls": result.to_artifact(),
             "price_sources": {row["symbol"]: row["price_source"] for row in target_portfolio},
+            "strategy_identity_validation": identity_validation
+            or {
+                "status": "UNVERIFIED",
+                "reason_code": "lane_not_supplied_to_builder",
+            },
+            "paper_recovery_policy": recovery_policy_meta,
         }
     )
 
@@ -643,6 +749,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--trade-date", default=None, help="Trade date under outputs/precompute/<DATE>")
     parser.add_argument("--precompute-root", default=str(DEFAULT_PRECOMPUTE_ROOT))
     parser.add_argument("--approved-sleeve", required=True)
+    parser.add_argument(
+        "--lane",
+        choices=("paper", "live_pilot"),
+        default=None,
+        help="Execution lane; production callers must set this for fail-closed strategy identity validation.",
+    )
+    parser.add_argument(
+        "--recovery-policy",
+        default=None,
+        help="Governed paper-only recovery policy id; rejected on non-paper lanes.",
+    )
+    parser.add_argument(
+        "--recovery-policy-config",
+        default="config/paper_recovery_policy.json",
+    )
     parser.add_argument("--capital-cap", type=float, default=DEFAULT_CAPITAL_CAP)
     parser.add_argument("--max-orders", type=int, default=DEFAULT_MAX_ORDERS)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -690,6 +811,9 @@ def main(argv: list[str] | None = None) -> int:
         allow_missing_sleeve=bool(args.allow_missing_sleeve),
         allow_fractional=bool(args.allow_fractional),
         state_dir=Path(args.state_dir) if args.state_dir else None,
+        lane=args.lane,
+        recovery_policy=args.recovery_policy,
+        recovery_policy_config=Path(args.recovery_policy_config),
     )
     print(
         json.dumps(

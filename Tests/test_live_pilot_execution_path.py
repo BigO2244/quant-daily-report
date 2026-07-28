@@ -706,9 +706,8 @@ def test_insufficient_live_buying_power_blocks_even_when_approved_cap_allows_pla
     assert submitted["orders"] == []
 
 
-def test_missing_env_cap_resolves_from_account_portfolio_value(tmp_path: Path) -> None:
-    # No env cap: the cap resolves dynamically from the account portfolio value
-    # (FakeBroker equity/portfolio_value = 500), so a missing env cap no longer blocks.
+def test_missing_env_cap_blocks_before_account_sizing(tmp_path: Path) -> None:
+    # Account value may tighten an owner-set ceiling, but it must never invent one.
     broker = FakeBroker()
     env = _env(dry_run="0")
     env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP")
@@ -723,13 +722,9 @@ def test_missing_env_cap_resolves_from_account_portfolio_value(tmp_path: Path) -
     )
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-no-env-cap"
-    assert result["terminal_status"] != "BLOCKED"
-    gate_state = _gate_state(run_root)
-    assert gate_state["decision"] == "ALLOWED"
-    assert gate_state["configured_cap_usd"] is None  # no env override present
-    assert gate_state["effective_cap_usd"] == 500.0  # from portfolio value
-    assert gate_state["cap_source"] == "portfolio_value"
-    assert gate_state["portfolio_value_usd"] == 500.0
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "missing_positive_live_pilot_capital_cap"
+    assert broker.submit_calls == 0
 
 
 def test_unresolvable_cap_blocks_when_no_account_value_and_no_env_cap(tmp_path: Path) -> None:
@@ -750,7 +745,7 @@ def test_unresolvable_cap_blocks_when_no_account_value_and_no_env_cap(tmp_path: 
 
     run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-cap-unresolved"
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "live_pilot_capital_cap_unresolved"
+    assert result["reason_code"] == "missing_positive_live_pilot_capital_cap"
     assert broker.submit_calls == 0
 
 
@@ -1248,19 +1243,19 @@ def test_unsupported_asset_class_does_not_submit(tmp_path: Path) -> None:
 
 
 def _nine_order_rotation_plan() -> dict[str, object]:
-    # 7 BUY targets; the 2 currently-held positions below (OLD1/OLD2) are absent
-    # from this target book, so the transition engine proposes SELLing both.
+    # 4 BUY targets fit under the governed $500 cap (including its buy buffer);
+    # the 2 held positions below are absent, so the engine proposes both exits.
     return {
         "target_portfolio": [
             {
                 "symbol": symbol,
                 "ticker": symbol,
                 "side": "BUY",
-                "target_weight": 0.05,
-                "price": 50.0,
+                "target_weight": 0.10,
+                "price": 25.0,
                 "sleeve": "polaris",
             }
-            for symbol in ("XOM", "MNST", "FTNT", "GM", "UNP", "PNC", "CVS")
+            for symbol in ("XOM", "MNST", "FTNT", "GM")
         ]
     }
 
@@ -1284,17 +1279,17 @@ class AssetAwareBroker(FakeBroker):
 
 
 def test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed(tmp_path: Path) -> None:
-    """2 sells + 7 buys, one buy symbol fails asset validation.
+    """2 sells + 4 buys, one buy symbol fails asset validation.
 
-    The bad buy is dropped (own reason_code); the 2 sells and 6 good buys still
-    plan/submit-intend, and reconcile treats intended as 8 (not 9) — the
+    The bad buy is dropped (own reason_code); the 2 sells and 3 good buys still
+    plan/submit-intend, and reconcile treats intended as 5 (not 6) — the
     dropped order never counts toward `intended`.
     """
     broker = AssetAwareBroker(
         bad_asset_symbol="FTNT",
-        buying_power="10000",
-        cash="10000",
-        equity="10000",
+        buying_power="1000",
+        cash="1000",
+        equity="1000",
         positions=[
             {"symbol": "ALLX", "qty": "1", "market_value": "100", "cost_basis": "100"},
             {"symbol": "COTY", "qty": "1", "market_value": "100", "cost_basis": "100"},
@@ -1302,10 +1297,9 @@ def test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed(tmp_path: Path
     )
     env = _env(dry_run="1", max_orders="10")
     env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "*"
-    # Large enough cap that all 7 buy targets ($500 notional each) fit — the
-    # base fixture's $500 cap would otherwise clip the buy book down to a
-    # single name on capital grounds, unrelated to what this test exercises.
-    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "100000"
+    # Keep the governed live ceiling while scaling the fake account so all
+    # target buys fit. This test isolates per-order asset partitioning.
+    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "500"
 
     result = run_live_pilot(
         plan=_nine_order_rotation_plan(),
@@ -1334,24 +1328,24 @@ def test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed(tmp_path: Path
     assert "asset_not_tradable" in dropped[0]["reason_code"]
 
     surviving_symbols = {row["symbol"] for row in intended["orders"]}
-    assert surviving_symbols == {"ALLX", "COTY", "XOM", "MNST", "GM", "UNP", "PNC", "CVS"}
+    assert surviving_symbols == {"ALLX", "COTY", "XOM", "MNST", "GM"}
     surviving_sides = [row["side"] for row in intended["orders"]]
     assert surviving_sides.count("SELL") == 2
-    assert surviving_sides.count("BUY") == 6
+    assert surviving_sides.count("BUY") == 3
 
     reconciliation = json.loads((run_root / "live_pilot_reconciliation.json").read_text())
     assert reconciliation["status"] == "DRY_RUN_NO_SUBMISSION"
-    # The dropped order never counts toward `intended` — reconcile sees 8, not 9.
-    assert reconciliation["intended_count"] == 8
-    assert reconciliation["submitted_count"] == 8
+    # The dropped order never counts toward `intended` — reconcile sees 5, not 6.
+    assert reconciliation["intended_count"] == 5
+    assert reconciliation["submitted_count"] == 5
 
 
 def test_stale_sell_whitelist_cannot_drop_held_position_exit(tmp_path: Path) -> None:
     """Broker inventory authorizes both held exits; the static list is stale."""
     broker = FakeBroker(
-        buying_power="10000",
-        cash="10000",
-        equity="10000",
+        buying_power="1000",
+        cash="1000",
+        equity="1000",
         positions=[
             {"symbol": "ALLX", "qty": "1", "market_value": "100", "cost_basis": "100"},
             {"symbol": "COTY", "qty": "1", "market_value": "100", "cost_basis": "100"},
@@ -1361,7 +1355,7 @@ def test_stale_sell_whitelist_cannot_drop_held_position_exit(tmp_path: Path) -> 
     # Only COTY is present in the stale static list. Both broker-held exits must
     # survive validation, while this dry run proves no broker submission occurs.
     env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "COTY"
-    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "100000"
+    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "500"
 
     result = run_live_pilot(
         plan=_nine_order_rotation_plan(),
@@ -1384,7 +1378,7 @@ def test_stale_sell_whitelist_cannot_drop_held_position_exit(tmp_path: Path) -> 
     surviving = {(row["symbol"], row["side"]) for row in intended["orders"]}
     assert ("ALLX", "SELL") in surviving
     assert ("COTY", "SELL") in surviving
-    assert sum(1 for row in intended["orders"] if row["side"] == "BUY") == 7
+    assert sum(1 for row in intended["orders"] if row["side"] == "BUY") == 4
 
 
 def test_all_orders_invalid_blocks_the_run(tmp_path: Path) -> None:

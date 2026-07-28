@@ -36,6 +36,7 @@ def _bundle(
     payload_trades: list[dict[str, object]] | None = None,
     trade_date: str = "2026-06-22",
     cash_target_weight: float | None = None,
+    strategy_identity: dict[str, object] | None = None,
 ) -> Path:
     bundle = tmp_path / "outputs" / "precompute" / trade_date
     bundle.mkdir(parents=True, exist_ok=True)
@@ -51,7 +52,20 @@ def _bundle(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (bundle / "signals.json").write_text(
-        json.dumps({"snapshot_date": trade_date, "signals": signals}, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "snapshot_date": trade_date,
+                "signals": signals,
+                **(
+                    {"strategy_identity": strategy_identity}
+                    if strategy_identity is not None
+                    else {}
+                ),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return bundle / "planned_execution_payload.json"
@@ -101,6 +115,125 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     assert by_symbol["AAPL"]["price_source"] == "payload_entry_price"
     assert by_symbol["AAPL"]["price"] == pytest.approx(250.0)
     assert by_symbol["MSFT"]["price_source"] == "yfinance_open"
+
+
+def test_live_lane_blocks_orion_label_when_targets_are_growth_engine(
+    tmp_path: Path,
+) -> None:
+    payload_path = _bundle(
+        tmp_path,
+        signals=[
+            {
+                "ticker": "AAPL",
+                "target_weight": 0.95,
+                "sleeve": "sleeve_trend",
+            }
+        ],
+        strategy_identity={
+            "execution_target_strategy_id": "growth_engine_v4",
+            "live_pilot_governed_strategy_id": "caerus_orion",
+            "live_pilot_tracks_approved_strategy": False,
+        },
+    )
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={"AAPL": 100.0},
+        approved_sleeve="orion",
+        lane="live_pilot",
+    )
+
+    assert plan["status"] == "BLOCKED"
+    assert plan["reason_code"] == "strategy_identity_mismatch"
+    validation = plan["block_diagnostics"]["strategy_identity_validation"]
+    assert validation["reason_code"] == "live_pilot_approved_strategy_target_mismatch"
+
+
+def test_paper_recovery_policy_uses_weekly_source_and_cannot_leak_to_live(
+    tmp_path: Path,
+) -> None:
+    identity = {
+        "live_strategy_id": "growth_engine_v4",
+        "execution_target_strategy_id": "growth_engine_v4",
+        "paper_governed_strategy_id": "caerus_polaris",
+        "paper_mapping_status": "ENGINE_BASELINE_ALIAS",
+    }
+    monday_path = _bundle(
+        tmp_path,
+        trade_date="2026-07-06",
+        signals=[
+            {
+                "ticker": "AAPL",
+                "target_weight": 0.95,
+                "sleeve": "sleeve_trend",
+            },
+            {"ticker": "CASH", "target_weight": 0.05},
+        ],
+        strategy_identity=identity,
+    )
+    current_path = _bundle(
+        tmp_path,
+        trade_date="2026-07-08",
+        signals=[
+            {
+                "ticker": "MSFT",
+                "target_weight": 0.95,
+                "sleeve": "sleeve_trend",
+            },
+            {"ticker": "CASH", "target_weight": 0.05},
+        ],
+        strategy_identity=identity,
+    )
+    assert monday_path.exists()
+    config_path = tmp_path / "paper_recovery_policy.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "policy_id": "weekly_rotation_guard_v1",
+                "approval_status": "APPROVED_FOR_PAPER_OBSERVATION",
+                "paper_only": True,
+                "live_eligible": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    dates = pd.bdate_range("2026-06-01", periods=25)
+    factors = pd.DataFrame(index=dates)
+    factors["SPY"] = [100 + index * 0.2 for index in range(len(dates))]
+    factors["RSP"] = [100 + index * 0.3 for index in range(len(dates))]
+    factors["QQQ"] = [110 - index * 0.3 for index in range(len(dates))]
+    factors["SMH"] = [120 - index * 0.8 for index in range(len(dates))]
+    factors["MTUM"] = [105 - index * 0.4 for index in range(len(dates))]
+
+    paper_plan = _build(
+        tmp_path,
+        current_path,
+        prices={"AAPL": 100.0},
+        approved_sleeve="caerus_polaris",
+        lane="paper",
+        recovery_policy="weekly_rotation_guard_v1",
+        recovery_policy_config=config_path,
+        factor_history_fetcher=lambda _start, _end: factors,
+        output_dir=tmp_path / "outputs" / "paper_lane" / "plans",
+    )
+    assert paper_plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    assert {row["symbol"] for row in paper_plan["target_portfolio"]} == {"AAPL"}
+    assert paper_plan["paper_recovery_policy"]["weekly_decision_date"] == "2026-07-06"
+    assert paper_plan["paper_recovery_policy"]["live_eligible"] is False
+
+    live_plan = _build(
+        tmp_path,
+        current_path,
+        prices={"MSFT": 100.0},
+        approved_sleeve="orion",
+        lane="live_pilot",
+        recovery_policy="weekly_rotation_guard_v1",
+        recovery_policy_config=config_path,
+    )
+    assert live_plan["status"] == "BLOCKED"
+    assert live_plan["reason_code"] == "paper_recovery_policy_wrong_lane"
 
 
 def test_sleeve_is_stamped_approved_with_provenance(tmp_path: Path) -> None:

@@ -395,10 +395,18 @@ def build_live_pilot_gate_result(
             "missing_live_pilot_approval",
             f"Set {LIVE_PILOT_APPROVED_ENV}=1 only after manual approval.",
         )
-    # Capital cap is resolved dynamically from the broker account (portfolio value)
-    # AFTER the pre-trade snapshot — see resolve_dynamic_cap() and run_live_pilot.
-    # It is therefore not required or ceiling-checked at this pre-snapshot gate; the
-    # optional CAERUS_LIVE_PILOT_CAPITAL_CAP env only ever tightens the resolved cap.
+    if cap is None:
+        return result(
+            "missing_positive_live_pilot_capital_cap",
+            f"Set an explicit positive {LIVE_PILOT_CAPITAL_CAP_ENV} no greater than "
+            f"${LIVE_PILOT_MAX_CAP_USD:.2f}.",
+        )
+    if cap > LIVE_PILOT_MAX_CAP_USD:
+        return result(
+            "live_pilot_capital_cap_exceeds_approved_max",
+            f"Reduce {LIVE_PILOT_CAPITAL_CAP_ENV} to no more than "
+            f"${LIVE_PILOT_MAX_CAP_USD:.2f}.",
+        )
     if sleeve is None:
         return result(
             "missing_live_pilot_sleeve_id",
@@ -466,18 +474,7 @@ def build_live_pilot_gate_result(
             "nonfinite_or_nonpositive_live_order_notional",
             "Live pilot order submission requires a finite positive pre-submit notional estimate.",
         )
-    # An unset CAERUS_LIVE_PILOT_CAPITAL_CAP means UNCAPPED, not blocked. The design
-    # intent is that live capital scales proportionally with portfolio assets — there
-    # is no fixed USD ceiling. The env cap is only ever an OPTIONAL manual tightening.
-    # When it is absent we log a non-blocking warning and let the order through at full
-    # portfolio-proportional sizing rather than halting execution.
-    if cap is None:
-        logger.warning(
-            "live_pilot_capital_cap_unset: %s is unset; treating live pilot as uncapped "
-            "(portfolio-proportional sizing, no fixed USD ceiling).",
-            LIVE_PILOT_CAPITAL_CAP_ENV,
-        )
-    elif finite_order_notional is not None and finite_order_notional > cap:
+    if finite_order_notional is not None and finite_order_notional > cap:
         return result(
             "order_notional_exceeds_live_pilot_cap",
             "Reduce or block the order; live pilot order notional exceeds the approved cap.",
@@ -723,13 +720,7 @@ def validate_live_pilot_plan(
     # the fail-closed sells master flag + broker inventory) and never consume the buying cap.
     buy_notional = sum(order.notional for order in orders if order.side == "BUY")
     if capital_cap_usd is None:
-        # Uncapped: a None cap means no fixed USD ceiling — buys size proportionally to
-        # portfolio value. Log a non-blocking warning and pass through rather than
-        # blocking (and never crash on float(None) via the comparison below).
-        logger.warning(
-            "live_pilot_capital_cap_unset: capital_cap_usd is None; treating buy notional "
-            "as uncapped (portfolio-proportional sizing, no fixed USD ceiling)."
-        )
+        batch_errors.append("live_pilot_capital_cap_unresolved")
     elif buy_notional > float(capital_cap_usd):
         batch_errors.append("live_pilot_total_notional_exceeds_cap")
 

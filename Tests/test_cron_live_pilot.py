@@ -30,10 +30,11 @@ def test_live_pilot_cron_execute_preserves_live_safety_gates() -> None:
     assert 'CAERUS_LIVE_PILOT_CRON_APPROVED="${CAERUS_LIVE_PILOT_CRON_APPROVED:-0}"' in text
     assert 'CAERUS_LIVE_PILOT_SUBMIT_APPROVED="${CAERUS_LIVE_PILOT_SUBMIT_APPROVED:-0}"' in text
     assert "missing_live_pilot_approval" in text
-    # Capital cap is resolved dynamically from the account portfolio value (no fixed
-    # $500 program ceiling); fail-closed to live_pilot_capital_cap_unresolved when it
-    # cannot be determined, and the resolved cap is what sizes the plan.
-    assert "resolve_dynamic_cap" in text
+    # Real-money capital requires an explicit positive ceiling at or below the
+    # governed $500 pilot maximum before a plan is constructed.
+    assert "LIVE_PILOT_APPROVED_MAX_CAP_USD" in text
+    assert "explicit_approved_cap" in text
+    assert "cap_exceeds_approved_max" in text
     assert "live_pilot_capital_cap_unresolved" in text
     assert '--capital-cap "${PLAN_CAP}"' in text
     assert "live_pilot_kill_switch_enabled" in text

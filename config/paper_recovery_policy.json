@@ -1,0 +1,26 @@
+{
+  "schema_version": "caerus_paper_recovery_policy_config_v1",
+  "policy_id": "weekly_rotation_guard_v1",
+  "enabled": true,
+  "approval_status": "APPROVED_FOR_PAPER_OBSERVATION",
+  "approved_by": "Brett Olson",
+  "approved_on": "2026-07-28",
+  "approval_basis": "Execute the recommended drawdown recovery sequence",
+  "paper_only": true,
+  "live_eligible": false,
+  "live_rearm_prohibited": true,
+  "research_replay": "outputs/research/drawdown_recovery/2026-07-28/drawdown_recovery_replay.json",
+  "acceptance_gates": {
+    "minimum_replay_observations": 50,
+    "maximum_average_one_way_turnover": 0.15,
+    "minimum_return_improvement_vs_daily": 0.05,
+    "minimum_drawdown_improvement_vs_daily": 0.05,
+    "maximum_missing_price_weight": 0.01,
+    "required_forward_paper_sessions_before_live_review": 20,
+    "required_clean_target_attainment_sessions": 10
+  },
+  "rollback": {
+    "action": "disable this config and hold the paper lane in cash",
+    "live_action": "none; live remains kill-switched and flat"
+  }
+}

@@ -407,27 +407,23 @@ def _run_no_env_cap(broker, plan, *, equity, run_id, tmp_path):
     return result, run_root
 
 
-def test_equity_far_above_old_ceiling_now_scales(tmp_path: Path) -> None:
-    # Dynamic cap: the $520 equity collar was removed, so a $5,000 account no longer
-    # blocks -- the cap tracks the account's portfolio value and the run proceeds.
+def test_large_account_cannot_replace_missing_explicit_cap(tmp_path: Path) -> None:
+    # Portfolio value may tighten a configured ceiling, but cannot authorize one.
     broker = FakeBroker(buying_power="5000", cash="5000", equity="5000")
     plan = {"target_portfolio": [_target_row("AAA", 0.1, 100.0)]}
     result, run_root = _run_no_env_cap(broker, plan, equity=5000, run_id="run-equity-regime", tmp_path=tmp_path)
-    assert result["terminal_status"] != "BLOCKED"
-    gate_state = json.loads((run_root / "live_pilot_gate_state.json").read_text())
-    assert gate_state["effective_cap_usd"] == 5000.0  # cap == portfolio value
-    assert gate_state["portfolio_value_usd"] == 5000.0
-    assert gate_state["cap_source"] == "portfolio_value"
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "missing_positive_live_pilot_capital_cap"
+    assert broker.submit_calls == 0
 
 
-def test_equity_moderately_above_old_ceiling_now_scales(tmp_path: Path) -> None:
-    # Equity $550 (above the removed $520 collar) also proceeds; cap == portfolio value.
+def test_moderate_account_cannot_replace_missing_explicit_cap(tmp_path: Path) -> None:
     broker = FakeBroker(buying_power="550", cash="550", equity="550")
     plan = {"target_portfolio": [_target_row("AAA", 0.4, 100.0)]}
     result, run_root = _run_no_env_cap(broker, plan, equity=550, run_id="run-collar", tmp_path=tmp_path)
-    assert result["terminal_status"] != "BLOCKED"
-    gate_state = json.loads((run_root / "live_pilot_gate_state.json").read_text())
-    assert gate_state["effective_cap_usd"] == 550.0
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "missing_positive_live_pilot_capital_cap"
+    assert broker.submit_calls == 0
 
 
 # --------------------------------------------------------------------------- #

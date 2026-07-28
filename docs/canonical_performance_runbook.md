@@ -6,6 +6,14 @@ This runbook describes how to operate the real-data canonical performance pipeli
 
 ## Upstream Artifacts
 
+For governed account performance shown on the quant dashboard, prefer the
+broker-truth ledger:
+
+- `outputs/ledger/paper/daily_nav.csv`
+
+`outputs/perf/nav_timeseries.csv` is a legacy model-NAV fallback and must be
+labeled as such. It must not silently replace broker account truth.
+
 Required in real-data mode:
 
 - `outputs/perf/nav_timeseries.csv`

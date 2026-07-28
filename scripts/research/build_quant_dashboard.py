@@ -1541,17 +1541,29 @@ class DashboardBuilder:
             run_root_arg=str(run_root) if run_root is not None else self.run_root_arg,
             trade_date_arg=report_date,
         )
+        broker_truth_paper_nav = (
+            self.repo_root / "outputs" / "ledger" / "paper" / "daily_nav.csv"
+        )
+        governed_nav_path = (
+            broker_truth_paper_nav
+            if broker_truth_paper_nav.exists()
+            else self.repo_root / "outputs" / "perf" / "nav_timeseries.csv"
+        )
         governed_performance = self._load_performance_dataset(
-            nav_path=self.repo_root / "outputs" / "perf" / "nav_timeseries.csv",
+            nav_path=governed_nav_path,
             benchmark_path=self.repo_root / "outputs" / "perf" / "benchmark_close_history.csv",
-            source_name="governed",
+            source_name=(
+                "broker_truth_paper"
+                if governed_nav_path == broker_truth_paper_nav
+                else "legacy_model_nav_fallback"
+            ),
         )
         overlay_nav_path = self.repo_root / "outputs" / "perf" / "live_overlay_nav_series.csv"
         overlay_benchmark_path = self.repo_root / "outputs" / "perf" / "live_overlay_benchmark_close_history.csv"
         overlay_performance = self._load_performance_dataset(
             nav_path=overlay_nav_path,
             benchmark_path=overlay_benchmark_path if overlay_benchmark_path.exists() else governed_performance["benchmark_path"],
-            source_name="live_overlay",
+            source_name="paper_broker_intraday_overlay",
         )
 
         governed_latest_nav = governed_performance["nav_rows"][-1] if governed_performance["nav_rows"] else {}
@@ -2036,6 +2048,20 @@ class DashboardBuilder:
         if gross_exposure is None and risk_cash_ratio is not None:
             gross_exposure = max(0.0, 1.0 - risk_cash_ratio)
 
+        target_metrics_payload = _read_json(
+            self.repo_root
+            / "outputs"
+            / "precompute"
+            / selected_trade_date_for_daily
+            / "signals.json"
+        )
+        target_book_metrics = (
+            target_metrics_payload.get("target_book_metrics")
+            if isinstance(target_metrics_payload, dict)
+            and isinstance(target_metrics_payload.get("target_book_metrics"), dict)
+            else {}
+        )
+        executed_turnover_pct = position_diag.get("executed_turnover_pct")
         risk = {
             "drawdown": perf_summary.get("current_drawdown"),
             "cash_position": (
@@ -2045,7 +2071,20 @@ class DashboardBuilder:
             ),
             "gross_exposure": gross_exposure,
             "largest_position_weight": position_diag.get("largest_position_weight"),
-            "turnover_pct": latest_nav.get("turnover_pct"),
+            "turnover_pct": executed_turnover_pct,
+            "executed_turnover_pct": executed_turnover_pct,
+            "desired_turnover_pct": target_book_metrics.get(
+                "desired_one_way_turnover_pct"
+            ),
+            "turnover_scope": (
+                "executed_broker_activity"
+                if executed_turnover_pct is not None
+                else "unavailable"
+            ),
+            "desired_turnover_scope": (
+                target_book_metrics.get("metric_scope")
+                or "unavailable"
+            ),
             "turnover_limit_pct": 0.35,
             "breaker_status": (
                 operator_summary.get("breaker_status")
