@@ -33,6 +33,43 @@ def _latest_jsonl(path: Path) -> dict[str, Any]:
     return rows[-1] if rows and isinstance(rows[-1], dict) else {}
 
 
+def _open_orders(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"live order ledger missing: {path}")
+    latest_by_id: dict[str, dict[str, Any]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            continue
+        order_id = str(
+            row.get("id")
+            or row.get("order_id")
+            or row.get("client_order_id")
+            or ""
+        ).strip()
+        if not order_id:
+            raise ValueError("live order ledger row missing stable order id")
+        latest_by_id[order_id] = row
+    terminal = {
+        "filled",
+        "canceled",
+        "cancelled",
+        "expired",
+        "rejected",
+        "done_for_day",
+        "replaced",
+        "stopped",
+        "suspended",
+    }
+    return [
+        row
+        for row in latest_by_id.values()
+        if str(row.get("status") or "").strip().lower() not in terminal
+    ]
+
+
 def _live_control(
     *,
     kill_state_path: Path,
@@ -49,17 +86,24 @@ def _live_control(
         if isinstance(positions_payload, list)
         else []
     )
+    orders_path = live_ledger_root / "orders.jsonl"
+    open_orders = _open_orders(orders_path)
     return {
         "kill_switch_engaged": kill.get("engaged") is True,
         "kill_switch_source": str(kill_state_path),
         "positions_count": len(positions),
-        "open_orders_count": 0,
+        "open_orders_count": len(open_orders),
+        "open_order_ids": [
+            str(row.get("id") or row.get("order_id") or row.get("client_order_id"))
+            for row in open_orders
+        ],
         "long_market_value": account.get("long_market_value"),
         "short_market_value": account.get("short_market_value"),
         "cash": account.get("cash"),
         "equity": account.get("equity"),
         "account_snapshot_pulled_at_utc": account.get("pulled_at_utc"),
         "positions_source": str(position_paths[-1]) if position_paths else None,
+        "orders_source": str(orders_path),
     }
 
 
