@@ -88,7 +88,7 @@ echo "trading_mode=${TRADING_MODE}"
 echo "alpaca_paper=${ALPACA_PAPER}"
 echo "alpaca_base_url=${ALPACA_BASE_URL}"
 echo "approved_sleeve=${CAERUS_LIVE_PILOT_SLEEVE_ID}"
-echo "capital_cap_mode=dynamic_portfolio_value"
+echo "capital_cap_mode=explicit_approved_ceiling"
 echo "lane_params_fingerprint=${CAERUS_LANE_PARAMS_FINGERPRINT}"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "schedule_enabled=${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"
@@ -304,28 +304,36 @@ if [[ "${ALPACA_BASE_URL:-}" != "https://api.alpaca.markets" && "${ALPACA_BASE_U
     exit 1
 fi
 
-# Resolve the capital cap dynamically from the account's portfolio value (no fixed
-# program ceiling; an optional CAERUS_LIVE_PILOT_CAPITAL_CAP only tightens it). The
-# same resolver is used by the execution path, so plan sizing and execution agree.
+# Live money requires an explicit dollar ceiling. Missing, malformed, non-positive,
+# or above-program values fail closed before plan construction. The executor later
+# tightens this ceiling to current portfolio value, so it can never expand here.
 CAP_RESOLVE="$(
     "${PYTHON_BIN}" - <<'PY'
-import os, sys
+import math
+import os
 try:
-    from brokers.alpaca_broker import AlpacaBroker
-    from core.live_pilot_guardrails import resolve_dynamic_cap
-    acct = AlpacaBroker.from_env().get_account() or {}
-    pv = acct.get("portfolio_value") or acct.get("equity")
-    cap, src = resolve_dynamic_cap(pv, os.environ)
-except Exception as exc:  # fail-closed: any error -> unresolved -> block
-    print("", f"error:{exc}", sep="\t")
-    sys.exit(0)
-print("" if cap is None else f"{cap:.2f}", src, sep="\t")
+    from core.live_pilot_guardrails import (
+        LIVE_PILOT_APPROVED_MAX_CAP_USD,
+        LIVE_PILOT_CAPITAL_CAP_ENV,
+    )
+    raw = str(os.environ.get(LIVE_PILOT_CAPITAL_CAP_ENV) or "").strip()
+    cap = float(raw)
+    if not math.isfinite(cap) or cap <= 0:
+        raise ValueError("cap_must_be_positive_and_finite")
+    if cap > LIVE_PILOT_APPROVED_MAX_CAP_USD:
+        raise ValueError(
+            f"cap_exceeds_approved_max:{cap:g}>{LIVE_PILOT_APPROVED_MAX_CAP_USD:g}"
+        )
+except Exception as exc:
+    print("", f"invalid_explicit_cap:{exc}", sep="\t")
+else:
+    print(f"{cap:.2f}", "explicit_approved_cap", sep="\t")
 PY
 )"
 PLAN_CAP="$(printf '%s' "${CAP_RESOLVE}" | cut -f1)"
 CAP_SOURCE="$(printf '%s' "${CAP_RESOLVE}" | cut -f2)"
 if [[ -z "${PLAN_CAP}" ]]; then
-    echo "FATAL: could not resolve live capital cap from portfolio value (source=${CAP_SOURCE})"
+    echo "FATAL: explicit live capital cap is missing or invalid (source=${CAP_SOURCE})"
     write_gate_state_blocked "live_pilot_capital_cap_unresolved"
     write_live_pilot_pointer "blocked" "${GATE_RUN_ID}" "${GATE_RUN_ROOT}" "live_pilot_capital_cap_unresolved"
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
@@ -351,6 +359,7 @@ set +e
 BUILD_OUTPUT="$(
     "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py \
         --trade-date "${REPORT_DATE}" \
+        --lane live_pilot \
         --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}" \
         --capital-cap "${PLAN_CAP}" \
         --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}" \

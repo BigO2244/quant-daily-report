@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.strategy_identity import strategy_identity_metadata
+from core.target_book_metrics import build_target_book_metrics, latest_prior_signals
 from core.trading_mode import canonical_trading_mode_label
 from paper.run_manager import safe_write_text
 
@@ -194,9 +195,25 @@ def write_precompute_bundle(
     daily_snapshot = dict(daily_snapshot or {})
     signals_payload = dict(signals_payload or {})
     execution_payload = dict(execution_payload or {})
-    daily_snapshot.setdefault("strategy_identity", identity)
-    signals_payload.setdefault("strategy_identity", identity)
-    execution_payload.setdefault("strategy_identity", identity)
+    prior_signals, prior_source = latest_prior_signals(
+        root=PRECOMPUTE_ROOT,
+        trade_date=trade_date,
+    )
+    target_metrics = build_target_book_metrics(
+        current_payload=signals_payload,
+        current_source=f"outputs/precompute/{trade_date}/signals.json",
+        previous_payload=prior_signals,
+        previous_source=prior_source,
+    )
+    daily_snapshot["strategy_identity"] = identity
+    signals_payload["strategy_identity"] = identity
+    execution_payload["strategy_identity"] = identity
+    daily_snapshot["target_book_metrics"] = target_metrics
+    signals_payload["target_book_metrics"] = target_metrics
+    execution_payload["target_book_metrics"] = target_metrics
+    execution_payload["desired_one_way_turnover_pct"] = target_metrics.get(
+        "desired_one_way_turnover_pct"
+    )
     for key, value in identity.items():
         execution_payload.setdefault(key, value)
     daily_snapshot = _json_safe(daily_snapshot)

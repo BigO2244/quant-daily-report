@@ -17,9 +17,7 @@ from core.live_pilot_guardrails import (
 
 
 def _approve_without_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reach the live-pilot submission branch with every gate satisfied and the
-    capital cap left unset. An unset cap means UNCAPPED (portfolio-proportional
-    sizing, no fixed USD ceiling), so the gate must pass through, not block."""
+    """Reach the live-pilot branch with every gate except the explicit cap."""
     for key in (
         "MODE",
         "WORKFLOW_KIND",
@@ -40,9 +38,7 @@ def _approve_without_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CAERUS_LIVE_PILOT_SUBMIT_APPROVED", "1")
 
 
-def test_gate_treats_unset_cap_as_uncapped_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
-    # An unset capital cap is UNCAPPED, not blocked: capital scales proportionally
-    # with portfolio assets, so the gate must pass the order through at full sizing.
+def test_gate_blocks_when_cap_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     _approve_without_cap(monkeypatch)
 
     result = build_live_pilot_gate_result(
@@ -53,24 +49,35 @@ def test_gate_treats_unset_cap_as_uncapped_passthrough(monkeypatch: pytest.Monke
     )
 
     assert result.capital_cap_usd is None
-    assert result.reason_code == "live_pilot_guardrails_satisfied"
-    assert result.status == "PASS"
-    assert result.live_orders_allowed is True
+    assert result.reason_code == "missing_positive_live_pilot_capital_cap"
+    assert result.status == "BLOCKED"
+    assert result.live_orders_allowed is False
 
 
-def test_submission_guardrail_passes_through_on_unset_cap(
+def test_submission_guardrail_raises_when_cap_is_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Must not raise: an unset cap is uncapped, so submission guardrails pass and the
-    # order is allowed through at full portfolio-proportional sizing.
     _approve_without_cap(monkeypatch)
 
-    result = validate_live_pilot_submission_guardrails(
+    with pytest.raises(RuntimeError, match="missing_positive_live_pilot_capital_cap"):
+        validate_live_pilot_submission_guardrails(
+            broker_paper=False,
+            base_url="https://api.alpaca.markets",
+            order_notional=300.0,
+        )
+
+
+def test_gate_blocks_cap_above_program_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    _approve_without_cap(monkeypatch)
+    monkeypatch.setenv(LIVE_PILOT_CAPITAL_CAP_ENV, "500.01")
+
+    result = build_live_pilot_gate_result(
         broker_paper=False,
         base_url="https://api.alpaca.markets",
         order_notional=300.0,
+        submission_intent=True,
     )
 
-    assert result.capital_cap_usd is None
-    assert result.status == "PASS"
-    assert result.live_orders_allowed is True
+    assert result.reason_code == "live_pilot_capital_cap_exceeds_approved_max"
+    assert result.status == "BLOCKED"
+    assert result.live_orders_allowed is False

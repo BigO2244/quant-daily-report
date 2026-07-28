@@ -154,6 +154,16 @@ class BuildQuantDashboardTest(unittest.TestCase):
                 "2026-04-07,10050,2050,0.796,0.796,0.004,500,0.05,0.05\n",
                 encoding="utf-8",
             )
+            (tmp_path / "outputs" / "ledger" / "paper").mkdir(
+                parents=True, exist_ok=True
+            )
+            (
+                tmp_path / "outputs" / "ledger" / "paper" / "daily_nav.csv"
+            ).write_text(
+                "date,equity,profit_loss,profit_loss_pct,base_value,source,pulled_at_utc\n"
+                "2026-04-07,9999,-1,-0.0001,10000,alpaca_portfolio_history,2026-04-08T12:00:00Z\n",
+                encoding="utf-8",
+            )
             (tmp_path / "outputs" / "perf" / "benchmark_close_history.csv").write_text(
                 "date,spy_close,spy_return\n"
                 "2026-04-07,505.0,0.001\n",
@@ -197,6 +207,13 @@ class BuildQuantDashboardTest(unittest.TestCase):
             legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
             self.assertEqual(legacy_payload["run_meta"]["report_date"], "2026-04-07")
             self.assertEqual(legacy_payload["run_meta"]["run_id"], "governed-fallback-2026-04-07")
+            self.assertEqual(
+                legacy_payload["builder_notes"]["performance"]["source_name"],
+                "broker_truth_paper",
+            )
+            self.assertEqual(
+                legacy_payload["governed_snapshot"]["portfolio_value"], 9999.0
+            )
             self.assertEqual(legacy_payload["run_meta"]["selected_governed_run"]["report_date"], "2026-04-07")
             self.assertIn("Showing governed dashboard state from 2026-04-07.", legacy_payload["run_meta"]["status_banner"])
             self.assertIn("newer broker snapshot is available", legacy_payload["run_meta"]["status_banner"])
@@ -618,7 +635,10 @@ class BuildQuantDashboardTest(unittest.TestCase):
             )
 
             legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
-            self.assertEqual(legacy_payload["run_meta"]["performance_source"], "live_overlay")
+            self.assertEqual(
+                legacy_payload["run_meta"]["performance_source"],
+                "paper_broker_intraday_overlay",
+            )
             self.assertEqual(legacy_payload["run_meta"]["portfolio_asof_date"], "2026-04-08")
             self.assertEqual(legacy_payload["run_meta"]["benchmark_asof_date"], "2026-04-08")
             self.assertEqual(legacy_payload["run_meta"]["comparison_mode"], "same_day")
@@ -720,7 +740,10 @@ class BuildQuantDashboardTest(unittest.TestCase):
             )
 
             legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
-            self.assertEqual(legacy_payload["run_meta"]["performance_source"], "live_overlay")
+            self.assertEqual(
+                legacy_payload["run_meta"]["performance_source"],
+                "paper_broker_intraday_overlay",
+            )
             self.assertIsNone(legacy_payload["perf_summary"]["mtd_return"])
             self.assertIsNone(legacy_payload["perf_summary"]["qtd_return"])
             self.assertIsNone(legacy_payload["perf_summary"]["since_inception_return"])
@@ -865,7 +888,10 @@ class BuildQuantDashboardTest(unittest.TestCase):
             )
 
             legacy_payload = json.loads((tmp_path / "web" / "dashboard" / "dashboard_data.json").read_text(encoding="utf-8"))
-            self.assertEqual(legacy_payload["run_meta"]["performance_source"], "live_overlay")
+            self.assertEqual(
+                legacy_payload["run_meta"]["performance_source"],
+                "paper_broker_intraday_overlay",
+            )
             self.assertEqual(legacy_payload["attribution"]["n_days"], 2)
             self.assertAlmostEqual(legacy_payload["attribution"]["cumulative_alpha"], 0.00505, places=6)
             self.assertAlmostEqual(legacy_payload["attribution"]["upside_capture"], 1.2)

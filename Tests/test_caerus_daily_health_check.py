@@ -154,6 +154,33 @@ def _write_base_artifacts(root: Path, *, reconciliation: dict | None = None, vix
     _write_json(run_root / "audit" / "execution_integrity.json", {"status": "OK", "findings": []})
 
 
+def test_strategy_identity_warns_when_live_target_does_not_track_approved_strategy(
+    tmp_path: Path,
+) -> None:
+    _write_base_artifacts(tmp_path)
+    signals_path = (
+        tmp_path / "outputs" / "precompute" / TRADE_DATE / "signals.json"
+    )
+    signals = json.loads(signals_path.read_text(encoding="utf-8"))
+    signals["strategy_identity"].update(
+        {
+            "execution_target_strategy_id": "growth_engine_v4",
+            "live_pilot_governed_strategy_id": "caerus_orion",
+            "live_pilot_mapping_status": "NOT_TRACKING_GOVERNED_STRATEGY",
+            "live_pilot_tracks_approved_strategy": False,
+        }
+    )
+    _write_json(signals_path, signals)
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    identity = next(
+        check for check in payload["checks"] if check["name"] == "Strategy identity"
+    )
+    assert identity["status"] == "YELLOW"
+    assert "LIVE_PILOT_STRATEGY_TARGET_MISMATCH" in identity["reason_codes"]
+
+
 def _status(payload: dict, name: str) -> str:
     return next(check["status"] for check in payload["checks"] if check["name"] == name)
 

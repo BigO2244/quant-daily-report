@@ -305,6 +305,7 @@ def _check_strategy_identity(root: Path, trade_date: str) -> CheckResult:
 
     live_strategy = None
     shadow_baseline = None
+    identity: dict[str, Any] = {}
     reason_codes: list[str] = []
     if recon:
         live_strategy = recon.get("live_strategy_id") or ((recon.get("strategy_alignment") or {}).get("live_strategy_id"))
@@ -313,6 +314,8 @@ def _check_strategy_identity(root: Path, trade_date: str) -> CheckResult:
         identity = signals.get("strategy_identity") if isinstance(signals.get("strategy_identity"), dict) else {}
         live_strategy = live_strategy or identity.get("live_strategy_id")
         shadow_baseline = shadow_baseline or identity.get("shadow_baseline_strategy")
+    elif isinstance(signals, dict) and isinstance(signals.get("strategy_identity"), dict):
+        identity = dict(signals["strategy_identity"])
     if recon_error:
         reason_codes.append(recon_error)
     if not live_strategy:
@@ -323,6 +326,22 @@ def _check_strategy_identity(root: Path, trade_date: str) -> CheckResult:
     evidence = [str(recon_path), str(signals_path)]
     if reason_codes:
         return CheckResult("Strategy identity", "RED", reason_codes, "Strategy identity is missing live or shadow identifiers.", evidence)
+    if (
+        identity.get("live_pilot_tracks_approved_strategy") is False
+        or str(identity.get("live_pilot_mapping_status") or "").upper()
+        == "NOT_TRACKING_GOVERNED_STRATEGY"
+    ):
+        return CheckResult(
+            "Strategy identity",
+            "YELLOW",
+            ["LIVE_PILOT_STRATEGY_TARGET_MISMATCH"],
+            (
+                f"Execution target={identity.get('execution_target_strategy_id') or live_strategy}; "
+                f"live-pilot governed strategy={identity.get('live_pilot_governed_strategy_id') or 'unknown'}; "
+                "live pilot must remain blocked."
+            ),
+            evidence,
+        )
     summary = f"Live strategy={live_strategy}; shadow baseline={shadow_baseline}."
     return CheckResult("Strategy identity", "GREEN", [], summary, evidence)
 
