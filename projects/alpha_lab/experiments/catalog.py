@@ -13,6 +13,10 @@ class DataAsset:
     dataset_id: str
     patterns: Tuple[str, ...]
     required_fields: Tuple[str, ...]
+    # A missing primary event tape is enough to block a source-readiness run.
+    # Checking it first avoids hashing large, already-certified price panels
+    # before the experiment's defining source even exists.
+    short_circuit_on_unready: bool = False
 
     @property
     def certification_path(self) -> str:
@@ -477,6 +481,7 @@ AI_POWER_GRID_EVENTS = DataAsset(
         "correction_status",
         "mapping_evidence",
     ),
+    short_circuit_on_unready=True,
 )
 
 
@@ -659,6 +664,7 @@ LANES = (
         ),
         local_readiness="BLOCKED_SOURCE_AUDITED_EVENT_TAPE",
         assets=(
+            AI_POWER_GRID_EVENTS,
             PIT_SECURITY_MASTER,
             PIT_MEMBERSHIP,
             PIT_OBSERVED_PRICES,
@@ -666,7 +672,6 @@ LANES = (
             PIT_CHARACTERISTICS,
             FACTOR_PANEL,
             SECTOR_RETURNS,
-            AI_POWER_GRID_EVENTS,
         ),
     ),
 )

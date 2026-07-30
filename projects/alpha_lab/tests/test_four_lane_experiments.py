@@ -88,6 +88,8 @@ def test_catalog_gates_frozen_cross_lane_controls_and_event_inputs():
         "source_payload_sha256",
         "mapping_evidence",
     } <= fields_by_lane["HYP-2026-013"]
+    assert LANES[-1].assets[0].asset_id == "ai_power_grid_event_tape_v1"
+    assert LANES[-1].assets[0].short_circuit_on_unready is True
 
 
 def test_frozen_signal_composites_use_declared_weights():
@@ -172,6 +174,37 @@ def test_data_gate_blocks_without_certified_pit_assets(tmp_path):
         )
     )
     assert evaluator_input["repo_root"] == str(tmp_path)
+
+
+def test_primary_event_source_short_circuits_without_reading_secondary_assets(tmp_path):
+    lane = LANES[-1]
+    source = REPO_ROOT / lane.spec_path
+    target = tmp_path / lane.spec_path
+    target.parent.mkdir(parents=True)
+    target.write_bytes(source.read_bytes())
+    for source_dir in (
+        REPO_ROOT / "projects/alpha_lab/factory",
+        REPO_ROOT / "projects/alpha_lab/experiments",
+    ):
+        target_dir = tmp_path / source_dir.relative_to(REPO_ROOT)
+        target_dir.mkdir(parents=True)
+        for path in source_dir.glob("*.py"):
+            (target_dir / path.name).write_bytes(path.read_bytes())
+
+    payload = run_lane(
+        repo_root=tmp_path,
+        hypothesis_id=lane.hypothesis_id,
+        run_id="test-primary-source-short-circuit",
+        checked_at=datetime(2026, 7, 15, 1, 0, tzinfo=timezone.utc),
+    )
+    provider_gate = json.loads(
+        (Path(payload["run_dir"]) / "provider_gate.json").read_text(encoding="utf-8")
+    )
+    assert provider_gate["assets"][0]["asset_id"] == "ai_power_grid_event_tape_v1"
+    assert provider_gate["assets"][0]["files"] == []
+    assert provider_gate["assets"][1]["readiness"]["blockers"] == [
+        "not_inspected_primary_event_source_unavailable"
+    ]
 
 
 def test_data_gate_rejects_path_traversal_before_writing(tmp_path):

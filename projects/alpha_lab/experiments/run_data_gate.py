@@ -316,6 +316,37 @@ def inspect_asset(repo_root: Path, asset: DataAsset, checked_at: datetime) -> Di
     }
 
 
+def _deferred_asset_result(asset: DataAsset, checked_at: datetime) -> Dict[str, Any]:
+    """Fail closed without touching secondary files after a primary source miss."""
+
+    readiness = ProviderReadiness(
+        provider_id=asset.provider_id,
+        dataset_id=asset.dataset_id,
+        status=ProviderStatus.BLOCKED,
+        checked_at=checked_at,
+        fields_available=(),
+        historical_point_in_time_verified=False,
+        evidence_hash=None,
+        blockers=("not_inspected_primary_event_source_unavailable",),
+    )
+    requirement = ProviderRequirement(
+        provider_id=asset.provider_id,
+        dataset_id=asset.dataset_id,
+        required_fields=asset.required_fields,
+    )
+    gate = evaluate_provider_readiness(requirement, readiness)
+    return {
+        "asset_id": asset.asset_id,
+        "patterns": asset.patterns,
+        "certification_path": asset.certification_path,
+        "files": [],
+        "requirement": requirement.to_dict(),
+        "readiness": readiness.to_dict(),
+        "gate": gate.to_dict(),
+        "gate_hash": gate.gate_hash,
+    }
+
+
 def run_lane(
     *,
     repo_root: Path,
@@ -340,7 +371,16 @@ def run_lane(
             if isinstance(prior_run_id, str) and prior_run_id != run_id:
                 prior_runs.append(prior_run_id)
     spec = _verify_spec(repo_root, lane.spec_path)
-    asset_results = [inspect_asset(repo_root, asset, checked_at) for asset in lane.assets]
+    asset_results = []
+    for index, asset in enumerate(lane.assets):
+        asset_result = inspect_asset(repo_root, asset, checked_at)
+        asset_results.append(asset_result)
+        if asset.short_circuit_on_unready and not asset_result["gate"]["ready"]:
+            asset_results.extend(
+                _deferred_asset_result(remaining, checked_at)
+                for remaining in lane.assets[index + 1 :]
+            )
+            break
     ready = all(item["gate"]["ready"] for item in asset_results)
     # This command is intentionally only a pre-return data gate. A READY result
     # authorizes a separate frozen evaluator run; it never reads the holdout.
