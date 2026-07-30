@@ -53,6 +53,7 @@ def test_four_lane_ids_are_append_only_and_unique():
         "HYP-2026-010",
         "HYP-2026-011",
         "HYP-2026-012",
+        "HYP-2026-013",
     ]
     assert len({lane.experiment_id for lane in LANES}) == len(LANES)
 
@@ -79,6 +80,14 @@ def test_catalog_gates_frozen_cross_lane_controls_and_event_inputs():
         "sector_return",
         "schedule_available_at",
     } <= fields_by_lane["HYP-2026-005"]
+    assert {
+        "event_id",
+        "issuer_security_id",
+        "official_published_at",
+        "availability_timestamp",
+        "source_payload_sha256",
+        "mapping_evidence",
+    } <= fields_by_lane["HYP-2026-013"]
 
 
 def test_frozen_signal_composites_use_declared_weights():

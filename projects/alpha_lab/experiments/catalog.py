@@ -448,6 +448,37 @@ PIT_ASSET_GROWTH_FEATURES = DataAsset(
     ),
 )
 
+AI_POWER_GRID_EVENTS = DataAsset(
+    asset_id="ai_power_grid_event_tape_v1",
+    provider_id="public.utility_iso_puc_ferc_sec",
+    dataset_id="source_audited_ai_power_grid_commitment_events",
+    patterns=(
+        "outputs/research/alpha_lab/data_spine/"
+        "ai_power_grid_events/*/data/events.jsonl.gz",
+    ),
+    required_fields=(
+        "event_id",
+        "project_id",
+        "issuer_security_id",
+        "issuer_cik",
+        "exposure_stratum",
+        "event_type",
+        "official_source",
+        "source_url",
+        "source_payload_sha256",
+        "official_published_at",
+        "availability_timestamp",
+        "availability_rule",
+        "location_or_serving_system",
+        "ai_data_center_evidence",
+        "commitment_evidence",
+        "event_novelty_status",
+        "supersedes_event_id",
+        "correction_status",
+        "mapping_evidence",
+    ),
+)
+
 
 SHARED = (
     PIT_SECURITY_MASTER,
@@ -616,6 +647,27 @@ LANES = (
         ),
         local_readiness="BLOCKED_DERIVED_ASSET",
         assets=SENSITIVITY_SHARED + (PIT_ASSET_GROWTH_FEATURES,),
+    ),
+    ExperimentLane(
+        hypothesis_id="HYP-2026-013",
+        experiment_id="EXP-2026-0013",
+        slug="ai_power_grid_commitments",
+        title="AI Power/Grid Commitment Events",
+        spec_path=(
+            "projects/alpha_lab/hypotheses/"
+            "HYP-2026-013_ai_power_grid_commitments.md"
+        ),
+        local_readiness="BLOCKED_SOURCE_AUDITED_EVENT_TAPE",
+        assets=(
+            PIT_SECURITY_MASTER,
+            PIT_MEMBERSHIP,
+            PIT_OBSERVED_PRICES,
+            TERMINAL_RETURN_SENSITIVITY,
+            PIT_CHARACTERISTICS,
+            FACTOR_PANEL,
+            SECTOR_RETURNS,
+            AI_POWER_GRID_EVENTS,
+        ),
     ),
 )
 

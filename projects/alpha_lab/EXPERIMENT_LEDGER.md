@@ -16,6 +16,7 @@ Append-only. Never delete failed or superseded experiments.
 | EXP-2026-0010 | HYP-2026-010 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0010.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0011 | HYP-2026-011 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0011.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0012 | HYP-2026-012 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0012.md` | `ITERATE` — `BLOCKED_DATA` |
+| EXP-2026-0013 | HYP-2026-013 | 2026-07-30 | `RUNNING` | `UNPROVEN` | Pending first immutable data-gate packet | `PENDING` — source-audited AI power/grid event tape required; returns and challenge period remain unread |
 
 ## State vocabulary
 
