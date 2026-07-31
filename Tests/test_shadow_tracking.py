@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
 from research.shadow_tracking.run import (
@@ -270,6 +271,41 @@ def test_shadow_performance_legitimate_inception_still_starts_at_one(tmp_path: P
     assert payload["status"] == "NO_PRIOR"
     assert payload["strategies"]["caerus_polaris"]["previous_nav"] == 1.0
     assert payload["strategies"]["caerus_polaris"]["nav"] == 1.01
+    attribution = payload["strategies"]["caerus_polaris"]["daily_attribution"]
+    assert attribution == [
+        {
+            "ticker": "AAA",
+            "target_weight": 1.0,
+            "close_to_close_return": 0.01,
+            "contribution": 0.01,
+        }
+    ]
+    assert payload["calculation_provenance"]["missing_price_policy"] == "fail_closed"
+
+
+def test_shadow_performance_fails_closed_when_weighted_ticker_return_is_missing(tmp_path: Path) -> None:
+    panel = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-01-01"), "ticker": "AAA", "close": 100.0},
+            {"date": pd.Timestamp("2026-01-02"), "ticker": "AAA", "close": 101.0},
+            {"date": pd.Timestamp("2026-01-01"), "ticker": "SPY", "close": 200.0},
+            {"date": pd.Timestamp("2026-01-02"), "ticker": "SPY", "close": 202.0},
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="SHADOW_RETURN_INPUT_MISSING_PRICE.*BBB"):
+        build_shadow_performance_payload(
+            panel=panel,
+            output_root=tmp_path / "shadow",
+            trade_date="2026-01-02",
+            previous_trade_date=None,
+            strategy_payloads={
+                "caerus_polaris": {"target_weights": {"BBB": 1.0}},
+                "caerus_orion": {"target_weights": {"AAA": 1.0}},
+                "caerus_lyra": {"target_weights": {"AAA": 1.0}},
+            },
+            data_status="OK",
+        )
 
 
 def test_shadow_performance_new_shadow_sleeves_incept_without_breaking_prior_chain(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from paper.trading_calendar import prev_trading_day
 from scripts.audit_shadow_promotion_readiness import build_promotion_audit, main
 
 
@@ -40,14 +41,48 @@ def _strategy(
 
 
 def _write_nav(path: Path, *, through_date: str = "2026-05-12") -> None:
-    rows = [
-        "date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark",
-        "2026-05-11,1.10,1.20,1.30,1.05",
-    ]
+    rows = ["date,caerus_polaris,caerus_orion,caerus_lyra,spy_benchmark"]
     if through_date >= "2026-05-12":
-        rows.append("2026-05-12,1.20,1.30,1.40,1.06")
+        rows.extend(
+            [
+                "2026-05-11,1.10,1.20,1.30,1.05",
+                "2026-05-12,1.20,1.30,1.40,1.06",
+            ]
+        )
+    else:
+        rows.extend(
+            [
+                "2026-05-08,1.00,1.10,1.20,1.00",
+                "2026-05-11,1.10,1.20,1.30,1.05",
+            ]
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def _reconciled_performance_strategies(trade_date: str) -> dict:
+    if trade_date >= "2026-05-12":
+        nav_pairs = {
+            "caerus_polaris": (1.10, 1.20),
+            "caerus_orion": (1.20, 1.30),
+            "caerus_lyra": (1.30, 1.40),
+            "spy_benchmark": (1.05, 1.06),
+        }
+    else:
+        nav_pairs = {
+            "caerus_polaris": (1.00, 1.10),
+            "caerus_orion": (1.10, 1.20),
+            "caerus_lyra": (1.20, 1.30),
+            "spy_benchmark": (1.00, 1.05),
+        }
+    return {
+        slug: {
+            "previous_nav": previous_nav,
+            "nav": nav,
+            "daily_return": nav / previous_nav - 1.0,
+        }
+        for slug, (previous_nav, nav) in nav_pairs.items()
+    }
 
 
 def _write_artifacts(
@@ -78,7 +113,7 @@ def _write_artifacts(
         comparison = {"trade_date": trade_date, "status": "NO_DATA", "reason_code": "PRICE_CACHE_STALE"}
     _write_json(latest / "comparison.json", comparison)
     _write_nav(root / "outputs" / "shadow_candidates" / "performance" / "shadow_nav_series.csv", through_date=trade_date)
-    dates = ["2026-05-12"] if forward_days else []
+    dates = ["2026-05-12"] if forward_days else [trade_date]
     for date in dates:
         _write_json(root / "outputs" / "shadow_candidates" / date / "shadow_evaluation.json", evaluation | {"trade_date": date})
         _write_json(root / "outputs" / "shadow_candidates" / date / "comparison.json", comparison | {"trade_date": date})
@@ -86,13 +121,12 @@ def _write_artifacts(
             root / "outputs" / "shadow_candidates" / date / "shadow_performance.json",
             {
                 "trade_date": date,
+                "previous_trade_date": prev_trading_day(date),
                 "status": "OK" if not scorecard_stale else "BROKEN_CHAIN",
                 "data_status": data_status,
                 "data_reason": data_reason,
-                "strategies": {
-                    slug: {"daily_return": 0.01, "nav": 1.0}
-                    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")
-                },
+                "return_convention": "weights_as_of_t",
+                "strategies": _reconciled_performance_strategies(date),
             },
         )
     _write_json(

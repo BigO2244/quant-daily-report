@@ -49,6 +49,23 @@ def _write_nav(path: Path, *, latest_date: str = "2026-05-12") -> None:
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
+def _reconciled_performance_strategies() -> dict:
+    nav_pairs = {
+        "caerus_polaris": (1.10, 1.20),
+        "caerus_orion": (1.20, 1.25),
+        "caerus_lyra": (1.30, 1.30),
+        "spy_benchmark": (1.05, 1.05),
+    }
+    return {
+        slug: {
+            "previous_nav": previous_nav,
+            "nav": nav,
+            "daily_return": nav / previous_nav - 1.0,
+        }
+        for slug, (previous_nav, nav) in nav_pairs.items()
+    }
+
+
 def _write_dated_artifacts(
     root: Path,
     trade_date: str,
@@ -74,10 +91,12 @@ def _write_dated_artifacts(
         dated / "shadow_performance.json",
         {
             "trade_date": trade_date,
+            "previous_trade_date": prev_trading_day(trade_date),
             "status": scorecard_status,
             "data_status": data_status,
             "data_reason": data_reason,
-            "strategies": {slug: {"nav": 1.0, "daily_return": 0.01} for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")},
+            "return_convention": "weights_as_of_t",
+            "strategies": _reconciled_performance_strategies(),
         },
     )
     _write_json(dated / "comparison.json", comparison)
@@ -115,10 +134,12 @@ def _write_artifacts(
         dated / "shadow_performance.json",
         {
             "trade_date": trade_date,
+            "previous_trade_date": prev_trading_day(trade_date),
             "status": scorecard_status,
             "data_status": data_status,
             "data_reason": data_reason,
-            "strategies": {slug: {"nav": 1.0, "daily_return": 0.01} for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra", "spy_benchmark")},
+            "return_convention": "weights_as_of_t",
+            "strategies": _reconciled_performance_strategies(),
         },
     )
     _write_json(dated / "comparison.json", comparison)

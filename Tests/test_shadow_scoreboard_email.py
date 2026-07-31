@@ -99,7 +99,8 @@ def test_shadow_scoreboard_renders_snapshot_when_artifacts_exist(tmp_path: Path)
     assert "Shadow Strategy Snapshot" in scoreboard["text"]
     assert "Polaris:" in scoreboard["text"]
     assert "Data status: OK" in scoreboard["text"]
-    assert "Today: +0.68%" in scoreboard["text"]
+    assert "Shadow close-to-close return (2026-05-04): +0.68%" in scoreboard["text"]
+    assert "these figures are not Paper account P&L" in scoreboard["text"]
     assert "vs SPY: -7.65%" in scoreboard["text"]
     assert "Learning readiness: HIGH" in scoreboard["text"]
 
@@ -129,7 +130,7 @@ def test_shadow_scoreboard_shows_no_data_daily_status(tmp_path: Path) -> None:
     scoreboard = build_shadow_scoreboard(tmp_path, "2026-05-04")
 
     assert "Data status: NO_DATA" in scoreboard["text"]
-    assert "Today: unavailable (PRICE_CACHE_STALE; cache coverage through 2026-05-03)" in scoreboard["text"]
+    assert "Shadow close-to-close return (2026-05-04): unavailable (PRICE_CACHE_STALE; cache coverage through 2026-05-03)" in scoreboard["text"]
     assert "Since inception: +3.47%" in scoreboard["text"]
 
 
@@ -159,7 +160,7 @@ def test_shadow_scoreboard_uses_completed_session_when_morning_artifact_is_false
     assert scoreboard["status"] == "OK"
     assert "Snapshot as of: 2026-05-19" in scoreboard["text"]
     assert "Data status: OK" in scoreboard["text"]
-    assert "Today: +0.68%" in scoreboard["text"]
+    assert "Shadow close-to-close return (2026-05-19): +0.68%" in scoreboard["text"]
     assert "PRICE_CACHE_STALE" not in scoreboard["text"]
     assert "Data status: NO_DATA" not in scoreboard["text"]
 

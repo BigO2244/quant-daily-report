@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
-from scripts.refresh_shadow_scorecard_artifacts import _append_nav_series
+from scripts.refresh_shadow_scorecard_artifacts import (
+    _append_nav_series,
+    _load_same_date_broker_context,
+    _publish_latest,
+)
 
 
 ALL_NAV_FIELDS = [
@@ -266,3 +271,76 @@ def test_append_accepts_first_alpha_nav_after_blank_pre_observation_row(tmp_path
     assert rows[-1]["date"] == "2026-06-23"
     assert rows[-1]["caerus_polaris_alpha"] == "0.934"
     assert rows[-1]["caerus_orion_alpha"] == "0.934"
+
+
+def _write_publish_bundle(output_root: Path, trade_date: str) -> list[str]:
+    required = [
+        "comparison.md",
+        "comparison.json",
+        "delta.json",
+        "shadow_performance.json",
+        "shadow_evaluation.json",
+        "longitudinal_metrics.json",
+        "stability_surface.json",
+        "promotion_readiness.json",
+        "promotion_readiness.md",
+        "feedback_loop_summary.json",
+    ]
+    dated = output_root / trade_date
+    dated.mkdir(parents=True)
+    for artifact in required:
+        content = f"dated:{trade_date}:{artifact}\n"
+        if artifact.endswith(".json"):
+            content = json.dumps({"trade_date": trade_date, "artifact": artifact})
+        (dated / artifact).write_text(content, encoding="utf-8")
+    return required
+
+
+def test_publish_latest_replaces_complete_bundle_including_readiness(tmp_path: Path) -> None:
+    output_root = tmp_path / "shadow"
+    latest = output_root / "latest"
+    latest.mkdir(parents=True)
+    (latest / "promotion_readiness.json").write_text('{"trade_date":"2026-06-22"}', encoding="utf-8")
+    required = _write_publish_bundle(output_root, "2026-06-23")
+
+    status = _publish_latest(output_root, "2026-06-23")
+
+    assert status["status"] == "OK"
+    assert sorted(path.name for path in latest.iterdir()) == sorted(required)
+    for artifact in required:
+        assert (latest / artifact).read_bytes() == (output_root / "2026-06-23" / artifact).read_bytes()
+    assert json.loads((latest / "promotion_readiness.json").read_text())["trade_date"] == "2026-06-23"
+
+
+def test_publish_latest_leaves_existing_bundle_untouched_when_dated_bundle_incomplete(tmp_path: Path) -> None:
+    output_root = tmp_path / "shadow"
+    latest = output_root / "latest"
+    latest.mkdir(parents=True)
+    marker = latest / "promotion_readiness.json"
+    marker.write_text('{"trade_date":"2026-06-22"}', encoding="utf-8")
+    _write_publish_bundle(output_root, "2026-06-23")
+    (output_root / "2026-06-23" / "longitudinal_metrics.json").unlink()
+
+    status = _publish_latest(output_root, "2026-06-23")
+
+    assert status["status"] == "WITHHELD"
+    assert status["published_artifacts"] == []
+    assert status["missing_artifacts"] == ["longitudinal_metrics.json"]
+    assert marker.read_text(encoding="utf-8") == '{"trade_date":"2026-06-22"}'
+
+
+def test_refresh_preserves_only_same_date_broker_context(tmp_path: Path) -> None:
+    dated = tmp_path / "2026-06-23"
+    dated.mkdir()
+    context = {
+        "trade_date": "2026-06-23",
+        "positions_count": 7,
+        "strategy_overlap": {"caerus_polaris": {"overlap_names_count": 0}},
+    }
+    (dated / "comparison.json").write_text(
+        json.dumps({"trade_date": "2026-06-23", "broker_context": context}),
+        encoding="utf-8",
+    )
+
+    assert _load_same_date_broker_context(dated, "2026-06-23") == context
+    assert _load_same_date_broker_context(dated, "2026-06-24") is None

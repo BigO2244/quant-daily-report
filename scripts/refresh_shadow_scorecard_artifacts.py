@@ -4,6 +4,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -256,29 +259,83 @@ def _remove_nav_series_date(*, output_root: Path, trade_date: str, reason: str) 
     }
 
 
+def _load_same_date_broker_context(dated_dir: Path, trade_date: str) -> dict[str, Any] | None:
+    path = dated_dir / "comparison.json"
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    broker_context = existing.get("broker_context") if isinstance(existing.get("broker_context"), dict) else None
+    if (
+        str(existing.get("trade_date") or "") != trade_date
+        or broker_context is None
+        or str(broker_context.get("trade_date") or "") != trade_date
+    ):
+        return None
+    return broker_context
+
+
 def _publish_latest(output_root: Path, trade_date: str) -> dict[str, Any]:
     dated_dir = output_root / trade_date
     latest_dir = output_root / "latest"
-    latest_dir.mkdir(parents=True, exist_ok=True)
-    missing: list[str] = []
-    published: list[str] = []
-    for artifact in ("comparison.md", "comparison.json", "delta.json", "shadow_evaluation.json", "feedback_loop_summary.json"):
-        source = dated_dir / artifact
-        if not source.exists():
-            missing.append(artifact)
-            continue
-        (latest_dir / artifact).write_bytes(source.read_bytes())
-        published.append(artifact)
-    for artifact in ("alpha_evidence_chain.json", "alpha_evidence_chain.md"):
-        source = dated_dir / artifact
-        if source.exists():
-            (latest_dir / artifact).write_bytes(source.read_bytes())
-            published.append(artifact)
+    required_artifacts = (
+        "comparison.md",
+        "comparison.json",
+        "delta.json",
+        "shadow_performance.json",
+        "shadow_evaluation.json",
+        "longitudinal_metrics.json",
+        "stability_surface.json",
+        "promotion_readiness.json",
+        "promotion_readiness.md",
+        "feedback_loop_summary.json",
+    )
+    optional_artifacts = ("alpha_evidence_chain.json", "alpha_evidence_chain.md")
+    missing = [artifact for artifact in required_artifacts if not (dated_dir / artifact).exists()]
+    if missing:
+        # Preflight the complete dated bundle before touching latest.  A partial
+        # overwrite can otherwise combine returns from one date with readiness
+        # evidence from another.
+        return {
+            "status": "WITHHELD",
+            "latest_dir": str(latest_dir),
+            "published_artifacts": [],
+            "missing_artifacts": missing,
+            "reason": "dated artifact bundle is incomplete; latest was not changed",
+        }
+
+    published = [*required_artifacts]
+    published.extend(artifact for artifact in optional_artifacts if (dated_dir / artifact).exists())
+    output_root.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    staging_dir = output_root / f".latest-staging-{token}"
+    backup_dir = output_root / f".latest-backup-{token}"
+    staging_dir.mkdir()
+    try:
+        for artifact in published:
+            shutil.copy2(dated_dir / artifact, staging_dir / artifact)
+
+        had_latest = latest_dir.exists()
+        if had_latest:
+            os.replace(latest_dir, backup_dir)
+        try:
+            os.replace(staging_dir, latest_dir)
+        except Exception:
+            if had_latest and backup_dir.exists():
+                os.replace(backup_dir, latest_dir)
+            raise
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir)
+        if backup_dir.exists() and latest_dir.exists():
+            shutil.rmtree(backup_dir)
     return {
-        "status": "OK" if not missing else "PARTIAL",
+        "status": "OK",
         "latest_dir": str(latest_dir),
         "published_artifacts": published,
-        "missing_artifacts": missing,
+        "missing_artifacts": [],
     }
 
 
@@ -317,7 +374,13 @@ def main(argv: list[str] | None = None) -> int:
         previous_trade_date=previous_trade_date,
         strategy_payloads=strategy_payloads,
     )
+    broker_context = _load_same_date_broker_context(dated_dir, trade_date)
     comparison_payload = shadow.build_comparison_payload(strategy_payloads, trade_date=trade_date, delta_payload=delta_payload)
+    if broker_context is not None:
+        # The artifact-only refresh does not query the broker. Preserve the
+        # already-captured same-session context rather than erasing the factual
+        # Paper/Shadow holdings comparison.
+        comparison_payload["broker_context"] = broker_context
     shadow_performance = shadow.build_shadow_performance_payload(
         panel=panel,
         output_root=output_root,
@@ -330,15 +393,43 @@ def main(argv: list[str] | None = None) -> int:
     (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2), encoding="utf-8")
     (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2), encoding="utf-8")
     (dated_dir / "shadow_performance.json").write_text(json.dumps(shadow_performance, indent=2), encoding="utf-8")
-    evaluation = shadow.build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
-    (dated_dir / "shadow_evaluation.json").write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
     (dated_dir / "comparison.md").write_text(shadow.build_comparison_markdown(comparison_payload, dated_dir=dated_dir), encoding="utf-8")
 
     nav_status = _append_nav_series(output_root=output_root, shadow_performance=shadow_performance)
-    feedback_summary = write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
-    publish_status = _publish_latest(output_root, trade_date)
-    evidence_chain = write_alpha_evidence_chain_artifacts(output_root=output_root, trade_date=trade_date)
-    publish_status = _publish_latest(output_root, trade_date)
+    if nav_status.get("status") == "OK":
+        # The NAV row must exist before evaluation and readiness are built.  The
+        # former order published a refreshed daily return beside stale
+        # longitudinal/readiness artifacts from the morning NO_DATA run.
+        evaluation = shadow.build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
+        (dated_dir / "shadow_evaluation.json").write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
+        shadow.write_phase_c_promotion_artifacts(
+            output_root=output_root,
+            trade_date=trade_date,
+            shadow_evaluation=evaluation,
+        )
+        feedback_summary = write_feedback_loop_artifacts(output_root=output_root, trade_date=trade_date, panel=panel)
+        evidence_chain = write_alpha_evidence_chain_artifacts(
+            output_root=output_root,
+            trade_date=trade_date,
+            assess_latest_pointer=False,
+        )
+        publish_status = _publish_latest(output_root, trade_date)
+    else:
+        # Never advance the latest pointer when the canonical NAV append failed.
+        # Dated artifacts remain available for incident diagnosis only.
+        feedback_summary = {"status": "WITHHELD", "reason": "canonical NAV append failed"}
+        evidence_chain = {
+            "status": "WITHHELD",
+            "can_start_20_60_day_evidence_collection": False,
+            "reporting_status": "WITHHELD",
+        }
+        publish_status = {
+            "status": "WITHHELD",
+            "latest_dir": str(output_root / "latest"),
+            "published_artifacts": [],
+            "missing_artifacts": [],
+            "reason": "canonical NAV append failed",
+        }
     result = {
         "trade_date": trade_date,
         "status": "OK" if nav_status.get("status") == "OK" and publish_status.get("status") == "OK" else "PARTIAL",

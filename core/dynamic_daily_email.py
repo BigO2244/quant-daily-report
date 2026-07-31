@@ -208,6 +208,7 @@ def build_dynamic_sleeve_rows(repo_root: Path | str, trade_date: str) -> dict[st
             artifact_status = shadow_source
         role = _role_for(entry.strategy_id, entry.role or "", manifest, raw)
         lifecycle = _lifecycle_for(entry.status, str(manifest.get("lifecycle_stage") or ""), entry.execution_impact)
+        data_status = str(metrics.get("data_status") or ("OK" if metrics else "UNAVAILABLE"))
         concentration = (
             f"HHI {_fmt_number(metrics.get('avg_hhi'), digits=3)}; "
             f"effN {_fmt_number(metrics.get('avg_effective_n'), digits=2)}; "
@@ -223,8 +224,8 @@ def build_dynamic_sleeve_rows(repo_root: Path | str, trade_date: str) -> dict[st
                 "registry_status": entry.status,
                 "manifest_stage": manifest.get("lifecycle_stage") or "unavailable",
                 "artifact_status": artifact_status,
-                "data_status": metrics.get("data_status") or ("OK" if metrics else "UNAVAILABLE"),
-                "today_return": _fmt_return(metrics.get("daily_return")),
+                "data_status": data_status,
+                "today_return": _fmt_return(metrics.get("daily_return")) if data_status == "OK" else "unavailable",
                 "since_inception_return": _fmt_return(metrics.get("cumulative_return")),
                 "turnover": _fmt_pct(metrics.get("avg_turnover") if metrics.get("avg_turnover") is not None else metrics.get("expected_turnover")),
                 "concentration": concentration,
@@ -270,6 +271,7 @@ def build_dynamic_sleeve_rows(repo_root: Path | str, trade_date: str) -> dict[st
         "registry_error": registry_error,
         "shadow_source": shadow_source,
         "shadow_dir": str(shadow_dir) if shadow_dir else "unavailable",
+        "shadow_as_of_date": shadow_dir.name if shadow_dir and len(shadow_dir.name) == 10 else "unavailable",
         "rows": rows,
     }
 
@@ -520,9 +522,10 @@ def render_dynamic_email_sections(
     text_lines = [
         "",
         "--- Dynamic Sleeve Inventory ---",
+        "Hypothetical Shadow metrics only; these are not Paper account returns.",
         f"Status: {sleeve_payload.get('status')}",
         f"Shadow artifact source: {sleeve_payload.get('shadow_source')} ({sleeve_payload.get('shadow_dir')})",
-        "Sleeve | Lifecycle | Role | Artifact | Data | Today | Since inception | Turnover | Concentration | Readiness",
+        f"Sleeve | Lifecycle | Role | Artifact | Data | Shadow 1D ({sleeve_payload.get('shadow_as_of_date')}) | Since inception | Turnover | Concentration | Readiness",
         "------ | --------- | ---- | -------- | ---- | ----- | --------------- | -------- | ------------- | ---------",
     ]
     for row in sleeve_payload.get("rows") or []:
@@ -603,6 +606,7 @@ def render_dynamic_email_sections(
     html_cell_style = "border:1px solid #ddd;padding:4px 6px;"
     html_section = (
         "<h3>Dynamic Sleeve Inventory</h3>"
+        "<p><b>Scope:</b> Hypothetical Shadow metrics only; these are not Paper account returns.</p>"
         f"<p><b>Status:</b> {html.escape(str(sleeve_payload.get('status')))}; "
         f"<b>Shadow artifact source:</b> {html.escape(str(sleeve_payload.get('shadow_source')))}</p>"
         f"<table style='{html_table_style}'>"
@@ -615,7 +619,7 @@ def render_dynamic_email_sections(
                 "Role",
                 "Artifact",
                 "Data",
-                "Today",
+                f"Shadow 1D ({sleeve_payload.get('shadow_as_of_date')})",
                 "Since inception",
                 "Turnover",
                 "Concentration",

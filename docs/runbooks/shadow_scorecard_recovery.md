@@ -126,6 +126,10 @@ Investigate with this runbook when any of these appear:
 - `shadow_nav_series.csv` latest date is behind latest `shadow_evaluation.json`.
 - Polaris, Orion, or Lyra valid-day counts stop advancing.
 - Latest Shadow directory exists but performance remains unavailable.
+- A large Shadow return appears without position-level attribution.
+- A Shadow return is described as Paper return or Paper baseline performance.
+- `latest/shadow_performance.json` and
+  `latest/promotion_readiness.json` have different trade dates.
 
 ## Primary Artifacts
 
@@ -343,6 +347,16 @@ Confirm:
 - No new `PRICE_CACHE_STALE`, `NO_PRIOR`, `NO_DATA`, or `BROKEN_CHAIN` appears.
 - The next forward scheduled run increments valid days when a new completed
   trading day is available.
+- Every displayed Shadow daily return reconciles to the dated performance
+  artifact, canonical NAV pair, and position contributions.
+- Every displayed Paper daily return reconciles to the broker-derived equity
+  pair in `outputs/perf/live_overlay_nav_series.csv`.
+- Shadow and Paper results are labeled separately; no Shadow model is described
+  as the executed Paper portfolio.
+- Dated performance, evaluation, longitudinal, stability, and promotion
+  readiness artifacts were published together for the same completed session.
+- Promotion language matches the dated research-only promotion-readiness
+  artifact and is not inferred from a one-day or cumulative return.
 
 ## What Not To Do
 
@@ -361,7 +375,9 @@ Confirm:
 
 ## Operator Recommendation
 
-After recovery, keep Polaris as the paper baseline. Orion and Lyra may resume
-promotion-window counting only after clean forward observation days accumulate
-after the recovery date. Use the promotion readiness audit for governance
-classification; recovery alone is not promotion evidence.
+After recovery, keep Polaris as the Shadow research baseline; it is not a label
+for the executed Paper account. Orion and Lyra may resume promotion-window
+counting only after clean forward observation days accumulate after the
+recovery date. Use the promotion readiness audit for governance classification;
+recovery, a single outsized session, or headline outperformance alone is not
+promotion evidence.

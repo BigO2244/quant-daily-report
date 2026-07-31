@@ -148,7 +148,14 @@ def _data_unavailable_reason(payload: dict[str, Any], comparison: dict[str, Any]
     return "; ".join(parts) if parts else "daily data unavailable"
 
 
-def _strategy_block(slug: str, evaluation: dict[str, Any], comparison: dict[str, Any], feedback: dict[str, Any]) -> list[str]:
+def _strategy_block(
+    slug: str,
+    evaluation: dict[str, Any],
+    comparison: dict[str, Any],
+    feedback: dict[str, Any],
+    *,
+    snapshot_date: str,
+) -> list[str]:
     strategies = evaluation.get("strategies") if isinstance(evaluation.get("strategies"), dict) else {}
     payload = strategies.get(slug) if isinstance(strategies.get(slug), dict) else {}
     spy = strategies.get(BENCHMARK_SLUG) if isinstance(strategies.get(BENCHMARK_SLUG), dict) else {}
@@ -184,9 +191,9 @@ def _strategy_block(slug: str, evaluation: dict[str, Any], comparison: dict[str,
 
     concentration = comparison_payload.get("weight_concentration") if isinstance(comparison_payload.get("weight_concentration"), dict) else {}
     if data_status == "OK":
-        today_line = f"Today: {_fmt_pct(payload.get('daily_return'))}"
+        today_line = f"Shadow close-to-close return ({snapshot_date}): {_fmt_pct(payload.get('daily_return'))}"
     else:
-        today_line = f"Today: unavailable ({_data_unavailable_reason(payload, comparison)})"
+        today_line = f"Shadow close-to-close return ({snapshot_date}): unavailable ({_data_unavailable_reason(payload, comparison)})"
     lines = [
         f"{DISPLAY_NAMES[slug]}:",
         f"Artifact status: {artifact_status}",
@@ -276,13 +283,23 @@ def build_shadow_scoreboard(
     lines = [
         "",
         "--- Shadow Strategy Snapshot ---",
-        "Diagnostic only; no trading or strategy-change instruction is implied.",
+        "Hypothetical Shadow diagnostics only; these figures are not Paper account P&L.",
+        "One-day return means prior close to snapshot-date close using Shadow target weights.",
         f"Artifact status: {'DEGRADED' if comparison.get('status') == 'NO_DATA' else 'OK'}",
         f"Snapshot as of: {fallback_trade_date or trade_date}",
         "",
     ]
+    snapshot_date = fallback_trade_date or trade_date
     for slug in MODEL_SLUGS:
-        lines.extend(_strategy_block(slug, evaluation, comparison, feedback))
+        lines.extend(
+            _strategy_block(
+                slug,
+                evaluation,
+                comparison,
+                feedback,
+                snapshot_date=snapshot_date,
+            )
+        )
         lines.append("")
     text = "\n".join(lines).rstrip() + "\n"
     lowered = text.lower()

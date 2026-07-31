@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from itertools import combinations
 from pathlib import Path
 
@@ -846,20 +847,50 @@ def build_shadow_performance_payload(
         if prev_nav_raw is None and chain_state in {"NO_PRIOR", "OK"}:
             prev_nav_raw = 1.0
         prev_nav = float(prev_nav_raw) if prev_nav_raw is not None else None
+        weights = pd.Series((strategy_payloads.get(slug) or {}).get("target_weights") or {}, dtype=float)
+        attribution: list[dict[str, float | str]] = []
+        if data_status != "NO_DATA":
+            if weights.empty:
+                raise RuntimeError(f"SHADOW_RETURN_INPUT_INVALID: {slug} has no target weights for {trade_date}")
+            if not bool(weights.map(math.isfinite).all()) or not bool((weights >= 0.0).all()):
+                raise RuntimeError(f"SHADOW_RETURN_INPUT_INVALID: {slug} has non-finite or negative target weights for {trade_date}")
+            gross_exposure = float(weights.sum())
+            if gross_exposure > 1.0 + 1e-8:
+                raise RuntimeError(
+                    f"SHADOW_RETURN_INPUT_INVALID: {slug} gross exposure {gross_exposure} exceeds 100% for {trade_date}"
+                )
+            missing_returns = sorted(str(ticker) for ticker in weights.index if ticker not in returns_by_ticker)
+            if missing_returns:
+                raise RuntimeError(
+                    f"SHADOW_RETURN_INPUT_MISSING_PRICE: {slug} missing close-to-close returns for "
+                    + ", ".join(missing_returns)
+                )
+            for ticker, weight in weights.items():
+                ticker_return = float(returns_by_ticker[str(ticker)])
+                attribution.append(
+                    {
+                        "ticker": str(ticker),
+                        "target_weight": round(float(weight), 10),
+                        "close_to_close_return": round(ticker_return, 10),
+                        "contribution": round(float(weight) * ticker_return, 10),
+                    }
+                )
+            attribution.sort(key=lambda row: abs(float(row["contribution"])), reverse=True)
+            recomputed_daily_return = float(sum(float(row["contribution"]) for row in attribution))
+        else:
+            gross_exposure = 0.0
+            recomputed_daily_return = 0.0
+
         if chain_state == "BROKEN_CHAIN":
-            daily_return = 0.0 if data_status == "NO_DATA" else round(
-                float(pd.Series((strategy_payloads.get(slug) or {}).get("target_weights") or {}, dtype=float).mul(pd.Series(returns_by_ticker), fill_value=0.0).sum()),
-                10,
-            )
+            daily_return = round(recomputed_daily_return, 10)
             nav = None
-            weight_count = int(len((strategy_payloads.get(slug) or {}).get("target_weights") or {})) if data_status != "NO_DATA" else 0
+            weight_count = int(len(weights)) if data_status != "NO_DATA" else 0
         elif data_status == "NO_DATA":
             daily_return = 0.0
             nav = prev_nav
             weight_count = 0
         else:
-            weights = pd.Series((strategy_payloads.get(slug) or {}).get("target_weights") or {}, dtype=float)
-            daily_return = round(float(weights.mul(pd.Series(returns_by_ticker), fill_value=0.0).sum()), 10)
+            daily_return = round(recomputed_daily_return, 10)
             nav = round(float(prev_nav * (1.0 + daily_return)), 10)
             weight_count = int(len(weights))
         strategies[slug] = {
@@ -871,8 +902,15 @@ def build_shadow_performance_payload(
             "nav": nav,
             "previous_nav": prev_nav,
             "weights_count": weight_count,
+            "gross_exposure": round(gross_exposure, 10),
+            "cash_weight": round(max(0.0, 1.0 - gross_exposure), 10),
+            "daily_attribution": attribution,
         }
 
+    if data_status != "NO_DATA" and BENCHMARK_SYMBOL not in returns_by_ticker:
+        raise RuntimeError(
+            f"SHADOW_RETURN_INPUT_MISSING_PRICE: {BENCHMARK_SYMBOL} has no close-to-close return for {trade_date}"
+        )
     if chain_state == "BROKEN_CHAIN":
         spy_prev_nav = None
         spy_return = round(float(returns_by_ticker.get(BENCHMARK_SYMBOL, 0.0)), 10) if data_status != "NO_DATA" else 0.0
@@ -887,6 +925,20 @@ def build_shadow_performance_payload(
         "nav": spy_nav,
         "previous_nav": spy_prev_nav,
         "weights_count": 1,
+        "gross_exposure": 1.0,
+        "cash_weight": 0.0,
+        "daily_attribution": (
+            [
+                {
+                    "ticker": BENCHMARK_SYMBOL,
+                    "target_weight": 1.0,
+                    "close_to_close_return": spy_return,
+                    "contribution": spy_return,
+                }
+            ]
+            if data_status != "NO_DATA"
+            else []
+        ),
     }
 
     return {
@@ -897,6 +949,13 @@ def build_shadow_performance_payload(
         "data_status": data_status,
         "data_reason": data_reason,
         "return_convention": "weights_as_of_t",
+        "calculation_provenance": {
+            "price_field": "close",
+            "start_date": previous_trade_date,
+            "end_date": trade_date,
+            "formula": "sum(target_weight * close_to_close_return); residual cash return = 0",
+            "missing_price_policy": "fail_closed",
+        },
         "strategies": strategies,
     }
 
