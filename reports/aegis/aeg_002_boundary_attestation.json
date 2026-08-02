@@ -1,0 +1,13 @@
+{
+  "as_of": "2026-08-02T22:00:00+00:00",
+  "autonomous_codex_dispatch_in_scope": false,
+  "base_commit": "ae29d8a1356defa11c2592115fecd5747759ed75",
+  "broker_or_order_submission_imports": [],
+  "external_model_api_imports": [],
+  "forbidden_changed_paths": [],
+  "governed_aiops_dispatch_invoked": false,
+  "prohibited_actions_invoked": [],
+  "scanner_command": "python scripts/validate_aegis_boundaries.py --base origin/agent/aegis-control-plane-166",
+  "scanner_status": "CLEAN",
+  "statement": "AEG-002 changes local registry, import, reconciliation, reporting, tests, documentation, and static Mission Control artifacts only. It does not change or invoke broker, execution, allocation, sizing, scheduler, cron, VM, deployment, paper, pilot, live, or capital behavior."
+}

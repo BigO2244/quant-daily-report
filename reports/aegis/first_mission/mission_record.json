@@ -1,0 +1,197 @@
+{
+  "approval_state": "PENDING",
+  "artifacts": [],
+  "created_at": "2026-08-02T22:26:47+00:00",
+  "decisions": [],
+  "edges": [
+    {
+      "child_task_id": "task_b12d077146da1f82294a",
+      "parent_task_id": "task_129612d493d710f05ae9"
+    },
+    {
+      "child_task_id": "task_ad539d0064e49ce11004",
+      "parent_task_id": "task_41de3eee593182d64d71"
+    },
+    {
+      "child_task_id": "task_a84352e27d8d98c823ab",
+      "parent_task_id": "task_608957fbee1179ff7f8e"
+    },
+    {
+      "child_task_id": "task_41de3eee593182d64d71",
+      "parent_task_id": "task_647b4913b1627efb9876"
+    },
+    {
+      "child_task_id": "task_608957fbee1179ff7f8e",
+      "parent_task_id": "task_78da86f6eab2d3d69fa9"
+    },
+    {
+      "child_task_id": "task_129612d493d710f05ae9",
+      "parent_task_id": "task_a84352e27d8d98c823ab"
+    },
+    {
+      "child_task_id": "task_78da86f6eab2d3d69fa9",
+      "parent_task_id": "task_ad539d0064e49ce11004"
+    }
+  ],
+  "id": "mission_7d6814f51ff218af9539",
+  "metadata": {
+    "as_of": "2026-08-02T22:00:00+00:00",
+    "next_action": "Review the five open executive decisions",
+    "origin": "NATIVE",
+    "owner_capability": "mission_planning",
+    "source_record_id": "AEG-002"
+  },
+  "next_action": "Review the five open executive decisions",
+  "objective": "Consolidate all active Alpha Lab, Atlas, sleeve research, data-collection, risk-validation, engineering, governance, and dashboard work into Aegis; identify duplicates, dependencies, blockers, unresolved states, and the next five decisions requiring Brett\u2019s attention.",
+  "origin": "NATIVE",
+  "owner_capability": "mission_planning",
+  "source_record_id": "AEG-002",
+  "state": "APPROVAL_REQUIRED",
+  "tasks": [
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "research",
+      "id": "task_647b4913b1627efb9876",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 1,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Research brief"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "modeling",
+      "id": "task_41de3eee593182d64d71",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 2,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Modeling plan"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "pit_validation",
+      "id": "task_ad539d0064e49ce11004",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 3,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "PIT and data validation"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "backtesting",
+      "id": "task_78da86f6eab2d3d69fa9",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 4,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Backtest protocol"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "portfolio_risk_analysis",
+      "id": "task_608957fbee1179ff7f8e",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 5,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Portfolio and risk analysis"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "engineering",
+      "id": "task_a84352e27d8d98c823ab",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 6,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Engineering implementation"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "verification_review",
+      "id": "task_129612d493d710f05ae9",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 7,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Independent verification"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "operations",
+      "id": "task_b12d077146da1f82294a",
+      "mission_id": "mission_7d6814f51ff218af9539",
+      "ordinal": 8,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Operations handoff"
+    }
+  ],
+  "updated_at": "2026-08-02T22:26:47+00:00"
+}

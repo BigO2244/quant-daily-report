@@ -46,10 +46,13 @@ def test_packet_and_manifest_are_hash_deterministic(tmp_path: Path) -> None:
     assert metadata[0]["sha256"] == "METADATA_ONLY"
 
 
-def test_aiops_adapter_requires_approval_and_preserves_governed_command() -> None:
-    adapter = AIOPSRunnerAdapter()
-    with pytest.raises(PermissionError): adapter.command("spec.md", "BUILD", approved=False)
-    assert adapter.command("spec.md", "BUILD", approved=True) == ["aiops", "run-all", "--spec", "spec.md", "--mode", "BUILD"]
+def test_aiops_adapter_requires_approval_and_preserves_governed_command(tmp_path: Path) -> None:
+    instance = service(tmp_path)
+    mission = instance.create_mission("Governed command")
+    adapter = AIOPSRunnerAdapter(instance.store)
+    with pytest.raises(PermissionError): adapter.command(mission["id"], mission["tasks"][0]["id"], "spec.md", "BUILD")
+    instance.approve(mission["id"], "test approval")
+    assert adapter.command(mission["id"], mission["tasks"][0]["id"], "spec.md", "BUILD") == ["aiops", "run-all", "--spec", "spec.md", "--mode", "BUILD"]
 
 
 def test_mission_control_model_and_dashboard_are_read_only_views(tmp_path: Path) -> None:
@@ -59,7 +62,7 @@ def test_mission_control_model_and_dashboard_are_read_only_views(tmp_path: Path)
     assert model[0]["id"] == mission["id"]
     assert len(model[0]["edges"]) == 7
     html = render_mission_control(instance)
-    assert "Aegis Mission Control" in html and "DAG edges" in html
+    assert "Aegis Mission Control" in html and "Task DAG" in html
 
 
 def test_aegis_has_no_forbidden_runtime_imports() -> None:

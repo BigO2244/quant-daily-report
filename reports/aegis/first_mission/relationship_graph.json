@@ -1,0 +1,1463 @@
+[
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_c071d4e069441eb42ee0",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_129612d493d710f05ae9"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_fb85a570cdf49bda9df3",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_41de3eee593182d64d71"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_44c2b3cf29d1307956c9",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_608957fbee1179ff7f8e"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_623481640d0ccfd269b4",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_647b4913b1627efb9876"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_a8c77a20fcead2148c50",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_78da86f6eab2d3d69fa9"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_73390edbb220642c1662",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_a84352e27d8d98c823ab"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_c298694b921931639b4c",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_ad539d0064e49ce11004"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:26:47+00:00",
+    "id": "edge_ce0935b856524d5012b4",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "native mission decomposition"
+    },
+    "relationship_type": "PARENT_OF",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "task_b12d077146da1f82294a"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_efa212cac84b36991646",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_08ccbb316df04a896864"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_509899022d4502a32620",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_08ee4477afead2b486c8"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_642ec347bde2743b867a",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_09dad6f99a2ed0093307"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_d701b739c93d216c962e",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_0bf671c5c155fdf729e6"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_49d8409c57fe06c7275f",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_0c7ed6e1defb06d1ad42"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_77d5b40c377abc60fdaa",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_0cb9b7b4cbd55d73ea95"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_5ea2e3f932baabae5ffe",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_0f3d21680336c9239671"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_300520079426ee18758d",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_0f67aff195be2ac96639"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_02b7c231d377af06b755",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_16242492e57b1649cd00"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_31a9085415789702bd77",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_173e9bef71db99709a16"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_640073e16e6cc32f8087",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_1a6bbaf131832db899ba"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_4465cba6f84e5c5b10d0",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_1b14e4e64fda5761e637"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_b71198dbd07870016e34",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_1c95422c1499bbb6d19f"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_ea228ad798667e8856be",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_1db16ac9c03b0e0f6f90"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_68c94c6fb8c9a17dde52",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_1e35a39510378d5b11b3"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_693ce3d9169e945843eb",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_1e627174cf42d830f823"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_1df4f9085415b3bf7d11",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_2106a0498109b8ea98d4"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_f20b087d640aaa1c48fa",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_2423e216bb115332e9b7"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e7f38a6f1e3bfb2c2a2c",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_2759237efd5fb6fe45dc"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_03568b57252db91d9810",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_29578a67b17f8310d90e"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_2ab70ef8b7024424f5fd",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_2b2dd5efadb1329104f2"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_20fd5ecf17770fba4e40",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_33e511231c9ae60584d4"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_620ae0b5453dea5fdadd",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_3402ee5f784e7d0ae691"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_80f2da1f697f5c04033b",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_36792a314b84de234b3d"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_45aad02a3646a4bc2ee1",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_37bc911d73a7448d54de"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_d1a4948a7c1919db86ad",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_3bed4ebda93bad55e893"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_7ac080ba15f8998add7d",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_3ce0633195d0782760d8"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_61bee0508a8efe391247",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_515ee83ad74a9b8d6938"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_c30991ca649b7885e41a",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_54201f0f09d958ddee27"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_069703b3cea0abba06c1",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_56c4f550c13218c52e88"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_4bf938caf6d8ab3a9068",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_5afadbfe545af083da3c"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_f914798612ecb9db7b9b",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_5dd65ea65f1a87c3b031"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_f500fe62467c0df53344",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_5ea5c8c1e6b83e79d7f8"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_0e7fca7fa1ca58d4f559",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_6191c957ea4cdc9c2769"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_30daf12a6f989997065f",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_65e12e9bf013c1e587e8"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_5e6ee338c6c4ee342f81",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_66bcd0fa20444f09b520"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e75352fd1199fcff783d",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_6736f8bcd01ba04fdbe4"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_d256cc7754c74a349711",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_6958bbdbff3bead54e39"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e3983cd609d229af2b08",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_6e1d04afbcc3f8d132e3"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_6ce8fa7a503a8d8df226",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_6ee2048945be67f6bedd"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_fff72b9a95be1230a850",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_70d69b6643749b279e8a"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_499f948fca33e688bfa9",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_71445c88c98b9d663a88"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_bb78b34ed2cac09bccfa",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_745709ae881ea958b98e"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_5807677cae02d6275381",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_7bcb2b71cafa2305607a"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_a5080183de8d1e257c2f",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_7ea32a2e0f121c8674a6"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e3825aaa6734e6729750",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_7fe5dfe4a7c2d8895a34"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_0c04d503f32a8d90bc7e",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_803568e0e510f4f99f56"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_6f226e6e8cb2b86947e1",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_821235a826607ea650b0"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_4487d5d611edd8139362",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_8816f4ac85f67606f064"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_f7267dfd04848747835a",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_8a3d48db906fb390bbb1"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_55074a6bd0133febfc9f",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_8aea0884a197780733e1"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e411c87f9f89eef8df95",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_8cb4b12a665b298c7e00"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_42ec743b6b0605f77204",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_8d507e96986b84cdd28e"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_c1e93a6a9d33f6c5dfaa",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_8f7e254ef797904c0af6"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_a8436daeaf54a6a1a938",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_955b17eb24ff84ea2016"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_4a1582933e2f5a822f5b",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_97853041355657cfd7cf"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_babc6f0e473dc626e31e",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_97c4178e7482b3adee19"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_110953eebab5fd219c66",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_9a348f0e3295a1ffa07a"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_ce653d32f120d7f855eb",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_9a4c5900a06ad8b23cdc"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_5038d7fe67ad6e4be7bd",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_9ca862eb29dc2d7142be"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_f0961cbd49da7f441168",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_a29eb064efbae54b51b0"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_821325b401258f06da2d",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_a6091cfabb418c4eda41"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_2f107875e6534c79091a",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_a70a58469de4ede7a624"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_0c810e6e8b294a41caa1",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_aa125722a22cd634394f"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_a83c7e1eeea8343f7b65",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_aa2fcc888155adc66b6c"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_41d3f1306a107c5a4c67",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_abedd8471dff09757c32"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_3a2109eaf48456332bf8",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b32fec8fb55be74e0264"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_d231a1c20f298ff3c654",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b3a9f139e808d8ce6f12"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_390a572b7691a4cb2809",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b4e027460e9c200f3f6c"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_aceec9b1f46dc5bed0da",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b60d86781bb2a5ba074d"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_f02c460f293baf406d97",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b6a892f501707661effb"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_460d38c67cc3dd64faee",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b6f19de9fb630e22f938"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_891adaf477e9c965e3dc",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b9256567a76cc7f0db34"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e4a2258755fad5b571d2",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_b965f722871a985c6890"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e38da5da360f8e1f424f",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_ba1ac4e49905dbfa0ce6"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_9a95d87b840043e31006",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_baf6e22e13461fb9bbe9"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_bdfc91e67ae9a822eca4",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_bb810af0213c8e202162"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e35b9b7a5d0c72c6b96d",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_bc712893ecc5cfab1a09"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_010a662df60c9899254f",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_bf142a32ad580e444a57"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_e07d3e719d67b7c831c6",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_bfc7b12d6b57545d655e"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_d1103dc982650b711803",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_c09b27ece2bd98c4dc0a"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_1e3372a75fa397e02568",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_c19b83938876b66408d5"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_ba68bb3832f30e706217",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_c64d61d0eb8f831dce12"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_24c1b23938fd2bd21443",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_c9055e44dcecf89fbc08"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_b9ff8946a680b4841152",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_c9d19469dc2736fb8bb8"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_3806af09c55286040d95",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_cbd267d6ec08d0c5bbbc"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_a0e5164cde2df7a638ff",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_cd4c590e288d4ac56c45"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_1fb216a47deb48e15821",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_cdbef9e13757eabe5eea"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_0a9cbc51f6785da336a5",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_d0f0cb8e9c471a64540d"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_2f5a4c9e4d4c1206b7dd",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_d41cc8d6818dbb62da4e"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_309419ab44b6cffeeab8",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_d84115c132c726071ee1"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_bb4deba7322e5a0f420c",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_d8cc76b519fdb6ec005b"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_84d65cadc48234ff4f21",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_dad508193d4a500678b1"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_b6386f6ffb3cd5374a4e",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_df32193eca3f6565abba"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_8f3083c511e79f59bb28",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_df663ae3ff41eba43597"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_cf52eff9c2e703a62a93",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_dfde33340a3c5975ec60"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_1c4596cefe7f2e7ed572",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_e4290dbe506427044d13"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_9d55a7fe515eae3f099e",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_e60627d9ab2dcc29b114"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_45e92dc39e8b3eccb216",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_e64fbc19ac653b2ebb62"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_935820a500f1dbc86ae8",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_edf6ffba0a247908cb83"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_2a63aed0fc7de700aa26",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_f0852ccc47bbdb14e83d"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_cd3b22a2c09833ff6bcd",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_f6b3feae6eab9831255f"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_906f9f701faa1c1d7877",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_f8ea3a521ea71c1017df"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_36c07a7694b72e538644",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_9eae8e1958258ec66dce"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_f9fe73fd415ba145c4bf"
+  },
+  {
+    "certainty": "HIGH",
+    "created_at": "2026-08-02T22:00:00+00:00",
+    "id": "edge_58511b1a1a07919c2547",
+    "inference_rule": null,
+    "provenance": {
+      "evidence": "AEG-002 explicit consolidation scope",
+      "source_id": "source_87cce58ac787c53a1c7d"
+    },
+    "relationship_type": "RELATED_TO",
+    "source_id": "mission_7d6814f51ff218af9539",
+    "target_id": "entity_fed2c80f3917cf7be66d"
+  }
+]

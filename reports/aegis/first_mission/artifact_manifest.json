@@ -1,0 +1,107 @@
+{
+  "artifacts": [
+    {
+      "path": "reports/aegis/aeg_002_boundary_attestation.json",
+      "sha256": "5c20023f41cf9c641accbd83748b30b6625402ff8fb9c22b7430a7469a885c66"
+    },
+    {
+      "path": "reports/aegis/aeg_002_pr167_readiness_review.md",
+      "sha256": "2490bcc06fb23aa82241e4534bebd9c8ac508f226ab9e3008d887034bbd159e5"
+    },
+    {
+      "path": "reports/aegis/aeg_002_validation_summary.md",
+      "sha256": "d6824f0bf52da0cfff2ff7c5b6adabacacd60270612951adb1e1e2a897454e8e"
+    },
+    {
+      "path": "reports/aegis/briefs/2026-08-02.json",
+      "sha256": "4695403dd271a269b74aad02201d5da48a58e64ab6530b11e88ed21cc6b34a22"
+    },
+    {
+      "path": "reports/aegis/briefs/2026-08-02.md",
+      "sha256": "c1c83851b863fc340358eeed11925fef0fb810fa6903289c41e46966a2a1321c"
+    },
+    {
+      "path": "reports/aegis/briefs/latest.json",
+      "sha256": "4695403dd271a269b74aad02201d5da48a58e64ab6530b11e88ed21cc6b34a22"
+    },
+    {
+      "path": "reports/aegis/briefs/latest.md",
+      "sha256": "c1c83851b863fc340358eeed11925fef0fb810fa6903289c41e46966a2a1321c"
+    },
+    {
+      "path": "reports/aegis/first_mission/artifact_manifest.json",
+      "sha256": "ab93d73f9f70d7d54725f11cb7213c448e9e31f0401f51704bd1c0ef7f27dcf8"
+    },
+    {
+      "path": "reports/aegis/first_mission/blocker_report.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "reports/aegis/first_mission/boundary_attestation.json",
+      "sha256": "db6a80ed4d2bb5eadb6e13dd880f1a7871fa23de1772c72069136938f1e3b933"
+    },
+    {
+      "path": "reports/aegis/first_mission/decision_queue.json",
+      "sha256": "7b46c57f458a6368db33ab5aa866e2546b199536464a831429ae2a01d81d253c"
+    },
+    {
+      "path": "reports/aegis/first_mission/mission_record.json",
+      "sha256": "96083f67b850c835c74d5e0a0a30e579b8d195f4924af7bd8074509c3237d278"
+    },
+    {
+      "path": "reports/aegis/first_mission/relationship_graph.json",
+      "sha256": "31bfedba0e52753e91549ca0b5981bbe16c0f4159bd17ab3bc09df8667fb4b9c"
+    },
+    {
+      "path": "reports/aegis/import/current_state_import_manifest.json",
+      "sha256": "eb357df33326ec3d753b062caede5427dec8b2a156d8a85ee1650a841c5afce3"
+    },
+    {
+      "path": "reports/aegis/import/current_state_import_summary.md",
+      "sha256": "3061a36896efe43e954189dbf019d12b6e6f53bf1aaeb78b2f24a222cba80603"
+    },
+    {
+      "path": "reports/aegis/import/legacy_work_migration_report.md",
+      "sha256": "f6ea722b53338ced88c689d9af6f453d70d7c6f4e32824015d2b1c302c12254c"
+    },
+    {
+      "path": "reports/aegis/import/source_provenance.json",
+      "sha256": "787daa05648ac3b09cd2bd328b976fba8b9565167aec383f32558f8c5351ec2f"
+    },
+    {
+      "path": "reports/aegis/import/unresolved_state_items.json",
+      "sha256": "39fb1ca4d1d5f43f4ec08743b7b0090d08eb3628c7143e0e614e64c15217615c"
+    },
+    {
+      "path": "reports/aegis/mission_control.html",
+      "sha256": "c31217cd736e2d2cbefb315b3989332e3e0adb17e6d7d6fbabcda73a93249c9e"
+    },
+    {
+      "path": "reports/aegis/reconciliation/exact_duplicates.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "reports/aegis/reconciliation/orphaned_records.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "reports/aegis/reconciliation/probable_duplicates.json",
+      "sha256": "ac0cb325074d8dd378b5f03095505ef4ce1816a84d58b9dc9e549af4d3f82c20"
+    },
+    {
+      "path": "reports/aegis/reconciliation/recommended_actions.json",
+      "sha256": "ac0cb325074d8dd378b5f03095505ef4ce1816a84d58b9dc9e549af4d3f82c20"
+    },
+    {
+      "path": "reports/aegis/reconciliation/reconciliation_summary.md",
+      "sha256": "3250707254a9d0b1cb9197deaa756c0c959e6061ca31fbd90bb96f6c06de51fc"
+    },
+    {
+      "path": "reports/aegis/reconciliation/state_conflicts.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    }
+  ],
+  "manifest_sha256": "c56a2e25f9f635b1fd701be9438f8c5824ec876b812eb9b9d2990a4da46c09a4",
+  "mission_id": "mission_7d6814f51ff218af9539",
+  "schema_version": "aegis-artifact-manifest-v1"
+}
