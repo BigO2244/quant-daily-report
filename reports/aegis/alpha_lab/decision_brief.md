@@ -74,11 +74,38 @@ Evidence: [EXP-2026-0008 Alpha Card](https://github.com/BigO2244/quant-daily-rep
 
 Accepting these decisions clears the three `FROZEN_EVALUATED_REVIEW` items
 without making an alpha, promotion, production, or capital claim. The next
-source-reported Alpha Lab item is insider-conviction clusters
-(`HYP-2026-003`), currently `FROZEN_DATA_READY_GATE_PENDING`. Its explicit next
-action is to rerun the frozen gate against the rebuilt fail-closed original-XML
-tape. This brief recommends reviewing that gate as the next Alpha Lab research
-action; it does not authorize or execute it.
+source-reported Alpha Lab item was insider-conviction clusters
+(`HYP-2026-003`), recorded as `FROZEN_DATA_READY_GATE_PENDING` in the pinned
+2026-07-24 source snapshot. The gate-run update below supersedes that next
+action without rewriting the historical source state.
+
+## Insider-conviction gate-run update — 2026-08-03
+
+The frozen HYP-2026-003 data gate was run on the authoritative GCP Alpha Lab
+research root at `2026-08-03T18:07:57Z`. It created append-only run packet
+`20260803T180757Z-hyp-2026-003-data-gate-v1` with manifest hash
+`15228845dbfc4d9bdc732c6f3fec2be775d3d8e584eb4276e960ccb28c0d3263`.
+
+Result: `BLOCKED_DATA / UNPROVEN`.
+
+- The rebuilt original Form 4 XML event tape passed its frozen provider gate.
+  It contains 137,522 retained events and 113,248 eligible purchases after
+  excluding 1,733 amendment-affected issuers fail-closed.
+- Security identity, universe membership, filing-time characteristics, factor
+  controls, sector controls, and effective-dated CIK mapping passed.
+- The sole blocked asset is `pit_prices_liquidity_v1`. Its independently
+  verified delisting/terminal-settlement payout and historical PIT
+  certification remain incomplete.
+- Zero return variants were attempted. The gate did not calculate returns or
+  select holdout observations, although its integrity checks hash the complete
+  certified datasets, including return-bearing files spanning the holdout.
+- No alpha claim, evaluator run, production action, or capital action is
+  permitted from this result.
+
+The next permitted research action is to resolve and certify the frozen exact
+historical delisting/terminal-settlement contract. The existing sensitivity
+envelope cannot silently replace that requirement. A separately reviewed
+HYP-2026-003 evaluator must also exist before any return test can run.
 
 ## Owner response format
 
