@@ -1,13 +1,13 @@
 # AEG-002 Validation Summary
 
-As of: 2026-08-02T22:00:00Z
+As of: 2026-08-03T17:15:00Z
 Branch: `agent/aeg-002-operationalize-aegis`
-Stacked base: `origin/agent/aegis-control-plane-166` (`ae29d8a`)
+Current base: `origin/main` (`8423812`)
 
 ## Targeted Aegis and AIOPS validation
 
 - `pytest -q Tests/test_aegis.py Tests/test_aegis_operational.py Tests/test_aiops_cli.py Tests/test_aiops_plan.py`
-  - **30 passed**.
+  - **31 passed**.
   - Covers mission/task lifecycle, v1→v2 migration, foreign keys, import
     idempotency and rollback, stable IDs, edge identity, task/hierarchy/graph
     cycle rejection, reconciliation, priority stability, decision persistence,
@@ -23,7 +23,7 @@ Stacked base: `origin/agent/aegis-control-plane-166` (`ae29d8a`)
 
 ## Boundary validation
 
-- `python scripts/validate_aegis_boundaries.py --base origin/agent/aegis-control-plane-166`
+- `python scripts/validate_aegis_boundaries.py --base origin/main`
   - `AEGIS_BOUNDARY_STATUS: CLEAN`.
 - AST scan found no Aegis imports from broker, order-submission/execution,
   allocation, scheduler, paper, pilot, live, capital, OpenAI, or Anthropic
@@ -39,9 +39,11 @@ Stacked base: `origin/agent/aegis-control-plane-166` (`ae29d8a`)
 - Total records inspected: 105; unresolved state: Atlas (no configured current
   repository evidence found).
 - Dry-run completed without writes; actual import generated the required
-  manifests, reconciliation outputs, source provenance, Mission Control, five
-  decision entries, and approval-required mission
-  `mission_7d6814f51ff218af9539`.
+  manifests, reconciliation outputs, source provenance, Mission Control, three
+  evidence-backed decision entries, and approval-required mission
+  `mission_cf8d52158414de4af557`. The queue deliberately remains below five
+  entries when the persisted evidence does not support additional concrete
+  decisions.
 - JSON artifacts passed `python -m json.tool` parsing.
 
 ## Full-suite status

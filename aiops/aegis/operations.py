@@ -52,9 +52,9 @@ class Operationalizer:
             candidates.append({"decision_type": "REQUEST_FURTHER_EVIDENCE", "question": f"How should unresolved initiative {item['name']} be classified?", "recommended_action": "Request current source evidence before assigning an active or completed state", "alternatives": ["Park as unresolved", "Link additional evidence"], "evidence_links": ["reports/aegis/import/unresolved_state_items.json"], "confidence": "INSUFFICIENT_EVIDENCE", "risk_if_delayed": "Initiative remains unresolved", "risk_if_approved": "Premature classification could misstate current work"})
         for item in reconciliation:
             candidates.append({"decision_type": "APPROVE_RECONCILIATION", "question": f"Approve the recommended handling for {item['category']} record {item['id']}?", "recommended_action": item["recommended_action"], "alternatives": ["Defer", "Request further evidence"], "evidence_links": ["reports/aegis/reconciliation/recommended_actions.json"], "confidence": "MEDIUM" if item["evidence"] else "LOW", "risk_if_delayed": "Registry ambiguity persists", "risk_if_approved": "Incorrect linkage could obscure distinct work"})
-        while len(candidates) < 5:
-            candidates.append({"decision_type": "REQUEST_FURTHER_EVIDENCE", "question": f"Which evidence source should be reviewed next for consolidation checkpoint {len(candidates) + 1}?", "recommended_action": "Review the persisted source provenance before choosing a lifecycle state", "alternatives": ["Defer review"], "evidence_links": ["reports/aegis/import/source_provenance.json"], "confidence": "INSUFFICIENT_EVIDENCE", "risk_if_delayed": "Registry coverage remains incomplete", "risk_if_approved": "No state change; review effort only"})
         queued = []
+        # A requested queue capacity is not evidence to fabricate decisions.
+        # Return fewer than five entries when the persisted sources support fewer.
         for candidate in candidates[:5]:
             candidate.update({"id": stable_id("decision", {"mission": mission_id, "question": candidate["question"]}), "mission_id": mission_id, "decision_owner": "Brett", "due_date": None, "status": "OPEN", "rationale": "", "final_decision_event": None})
             self.store.queue_decision(candidate, as_of); queued.append(candidate)

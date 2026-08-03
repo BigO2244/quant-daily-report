@@ -12,8 +12,8 @@
       "reports/aegis/aeg_002_pr167_readiness_review.md"
     ],
     "final_decision_event": null,
-    "id": "decision_a317ea16f48809283bc3",
-    "mission_id": "mission_7d6814f51ff218af9539",
+    "id": "decision_9ac8f853ef97ae1d415f",
+    "mission_id": "mission_cf8d52158414de4af557",
     "question": "Approve the non-executing AEG-002 consolidation mission for continued registry work?",
     "rationale": "",
     "recommended_action": "Approve only the registry and review scope",
@@ -34,8 +34,8 @@
       "reports/aegis/import/unresolved_state_items.json"
     ],
     "final_decision_event": null,
-    "id": "decision_694a8af6f2ce0ef387b0",
-    "mission_id": "mission_7d6814f51ff218af9539",
+    "id": "decision_305f63a68c6c15038bbf",
+    "mission_id": "mission_cf8d52158414de4af557",
     "question": "How should unresolved initiative Atlas be classified?",
     "rationale": "",
     "recommended_action": "Request current source evidence before assigning an active or completed state",
@@ -56,55 +56,13 @@
       "reports/aegis/reconciliation/recommended_actions.json"
     ],
     "final_decision_event": null,
-    "id": "decision_42f4e64d133a351126cc",
-    "mission_id": "mission_7d6814f51ff218af9539",
-    "question": "Approve the recommended handling for PROBABLE_DUPLICATE record recon_47b6ea2f71c5c2c75e77?",
+    "id": "decision_ae65f87c4e8aebbc86a0",
+    "mission_id": "mission_cf8d52158414de4af557",
+    "question": "Approve the recommended handling for PROBABLE_DUPLICATE record recon_83a324ceef67fb9e32a8?",
     "rationale": "",
     "recommended_action": "Review only; no automatic merge",
     "risk_if_approved": "Incorrect linkage could obscure distinct work",
     "risk_if_delayed": "Registry ambiguity persists",
-    "status": "OPEN"
-  },
-  {
-    "alternatives": [
-      "Defer review"
-    ],
-    "confidence": "INSUFFICIENT_EVIDENCE",
-    "decision_owner": "Brett",
-    "decision_type": "REQUEST_FURTHER_EVIDENCE",
-    "due_date": null,
-    "evidence_links": [
-      "reports/aegis/import/source_provenance.json"
-    ],
-    "final_decision_event": null,
-    "id": "decision_ed02ee735b40adabd352",
-    "mission_id": "mission_7d6814f51ff218af9539",
-    "question": "Which evidence source should be reviewed next for consolidation checkpoint 4?",
-    "rationale": "",
-    "recommended_action": "Review the persisted source provenance before choosing a lifecycle state",
-    "risk_if_approved": "No state change; review effort only",
-    "risk_if_delayed": "Registry coverage remains incomplete",
-    "status": "OPEN"
-  },
-  {
-    "alternatives": [
-      "Defer review"
-    ],
-    "confidence": "INSUFFICIENT_EVIDENCE",
-    "decision_owner": "Brett",
-    "decision_type": "REQUEST_FURTHER_EVIDENCE",
-    "due_date": null,
-    "evidence_links": [
-      "reports/aegis/import/source_provenance.json"
-    ],
-    "final_decision_event": null,
-    "id": "decision_bf9809a4ee3e4891510c",
-    "mission_id": "mission_7d6814f51ff218af9539",
-    "question": "Which evidence source should be reviewed next for consolidation checkpoint 5?",
-    "rationale": "",
-    "recommended_action": "Review the persisted source provenance before choosing a lifecycle state",
-    "risk_if_approved": "No state change; review effort only",
-    "risk_if_delayed": "Registry coverage remains incomplete",
     "status": "OPEN"
   }
 ]

@@ -1,41 +1,41 @@
 {
   "approval_state": "PENDING",
   "artifacts": [],
-  "created_at": "2026-08-02T22:26:47+00:00",
+  "created_at": "2026-08-03T17:26:18+00:00",
   "decisions": [],
   "edges": [
     {
-      "child_task_id": "task_b12d077146da1f82294a",
-      "parent_task_id": "task_129612d493d710f05ae9"
+      "child_task_id": "task_67a71080119510eab7c6",
+      "parent_task_id": "task_17982738fc812de9394e"
     },
     {
-      "child_task_id": "task_ad539d0064e49ce11004",
-      "parent_task_id": "task_41de3eee593182d64d71"
+      "child_task_id": "task_17982738fc812de9394e",
+      "parent_task_id": "task_1ead84f2ecb9384791ef"
     },
     {
-      "child_task_id": "task_a84352e27d8d98c823ab",
-      "parent_task_id": "task_608957fbee1179ff7f8e"
+      "child_task_id": "task_baf668702781bb849beb",
+      "parent_task_id": "task_67a71080119510eab7c6"
     },
     {
-      "child_task_id": "task_41de3eee593182d64d71",
-      "parent_task_id": "task_647b4913b1627efb9876"
+      "child_task_id": "task_1ead84f2ecb9384791ef",
+      "parent_task_id": "task_89d6be5690e9f561fa95"
     },
     {
-      "child_task_id": "task_608957fbee1179ff7f8e",
-      "parent_task_id": "task_78da86f6eab2d3d69fa9"
+      "child_task_id": "task_89d6be5690e9f561fa95",
+      "parent_task_id": "task_9ae646052bbd17aee8e6"
     },
     {
-      "child_task_id": "task_129612d493d710f05ae9",
-      "parent_task_id": "task_a84352e27d8d98c823ab"
+      "child_task_id": "task_52dddd04af07582ba9e0",
+      "parent_task_id": "task_b958ee97b151b978e0e0"
     },
     {
-      "child_task_id": "task_78da86f6eab2d3d69fa9",
-      "parent_task_id": "task_ad539d0064e49ce11004"
+      "child_task_id": "task_b958ee97b151b978e0e0",
+      "parent_task_id": "task_baf668702781bb849beb"
     }
   ],
-  "id": "mission_7d6814f51ff218af9539",
+  "id": "mission_cf8d52158414de4af557",
   "metadata": {
-    "as_of": "2026-08-02T22:00:00+00:00",
+    "as_of": "2026-08-03T17:15:00+00:00",
     "next_action": "Review the five open executive decisions",
     "origin": "NATIVE",
     "owner_capability": "mission_planning",
@@ -51,8 +51,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "research",
-      "id": "task_647b4913b1627efb9876",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_9ae646052bbd17aee8e6",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 1,
       "output_contract": {
         "required": [
@@ -69,8 +69,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "modeling",
-      "id": "task_41de3eee593182d64d71",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_89d6be5690e9f561fa95",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 2,
       "output_contract": {
         "required": [
@@ -87,8 +87,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "pit_validation",
-      "id": "task_ad539d0064e49ce11004",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_1ead84f2ecb9384791ef",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 3,
       "output_contract": {
         "required": [
@@ -105,8 +105,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "backtesting",
-      "id": "task_78da86f6eab2d3d69fa9",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_17982738fc812de9394e",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 4,
       "output_contract": {
         "required": [
@@ -123,8 +123,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "portfolio_risk_analysis",
-      "id": "task_608957fbee1179ff7f8e",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_67a71080119510eab7c6",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 5,
       "output_contract": {
         "required": [
@@ -141,8 +141,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "engineering",
-      "id": "task_a84352e27d8d98c823ab",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_baf668702781bb849beb",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 6,
       "output_contract": {
         "required": [
@@ -159,8 +159,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "verification_review",
-      "id": "task_129612d493d710f05ae9",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_b958ee97b151b978e0e0",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 7,
       "output_contract": {
         "required": [
@@ -177,8 +177,8 @@
     {
       "approval_state": "NOT_REQUIRED",
       "capability": "operations",
-      "id": "task_b12d077146da1f82294a",
-      "mission_id": "mission_7d6814f51ff218af9539",
+      "id": "task_52dddd04af07582ba9e0",
+      "mission_id": "mission_cf8d52158414de4af557",
       "ordinal": 8,
       "output_contract": {
         "required": [
@@ -193,5 +193,5 @@
       "title": "Operations handoff"
     }
   ],
-  "updated_at": "2026-08-02T22:26:47+00:00"
+  "updated_at": "2026-08-03T17:26:18+00:00"
 }

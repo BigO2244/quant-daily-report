@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-08-02T22:00:00+00:00",
+  "as_of": "2026-08-03T17:15:00+00:00",
   "imports": [
     {
       "dry_run": false,
@@ -564,7 +564,7 @@
       ],
       "records_changed": 92,
       "records_seen": 92,
-      "snapshot_id": "snapshot_7806f90ab2051a48ced0",
+      "snapshot_id": "snapshot_31a7bdb588fddbe149d0",
       "source_id": "source_87cce58ac787c53a1c7d",
       "unresolved": [
         {
@@ -590,7 +590,7 @@
         "entity_f8ea3a521ea71c1017df",
         "entity_2423e216bb115332e9b7",
         "entity_6958bbdbff3bead54e39",
-        "entity_f9fe73fd415ba145c4bf"
+        "entity_485f25486c4b7c9c2463"
       ],
       "provenance": [
         {
@@ -810,7 +810,7 @@
           "source_url": "https://github.com/BigO2244/quant-daily-report/pull/162"
         },
         {
-          "entity_id": "entity_f9fe73fd415ba145c4bf",
+          "entity_id": "entity_485f25486c4b7c9c2463",
           "fields": [
             "assignees",
             "base_branch",
@@ -825,12 +825,12 @@
             "updated_at"
           ],
           "source_id": "source_9eae8e1958258ec66dce",
-          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/167"
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/168"
         }
       ],
       "records_changed": 13,
       "records_seen": 13,
-      "snapshot_id": "snapshot_d672773c8f5d6a9c21d7",
+      "snapshot_id": "snapshot_b915c2ffb19d356727d7",
       "source_id": "source_9eae8e1958258ec66dce",
       "unresolved": []
     }

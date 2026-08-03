@@ -16,6 +16,7 @@ from aiops.aegis.domain import stable_id
 from aiops.aegis.importers import FixtureGitHubAdapter, GitHubImporter, RepositoryStateImporter
 from aiops.aegis.priority import PriorityEngine
 from aiops.aegis.reconciliation import ReconciliationEngine
+from aiops.aegis.operations import Operationalizer
 from aiops.aegis.service import AIOPSRunnerAdapter, AegisService
 from aiops.aegis.store import MIGRATIONS, AegisStore
 from aiops.cli import main
@@ -100,6 +101,15 @@ def test_reconciliation_priority_and_decision_queue_are_deterministic(tmp_path: 
     service.store.queue_decision(decision, AS_OF); assert service.store.decisions_queue()[0]["id"] == "decision_test"
     service.store.resolve_queue_decision("decision_test", "APPROVED", "reviewed", "Brett", AS_OF)
     assert service.store.decisions_queue()[0]["final_decision_event"]["owner"] == "Brett"
+
+
+def test_decision_queue_does_not_pad_missing_evidence(tmp_path: Path) -> None:
+    store = AegisStore(tmp_path / "aegis.sqlite")
+    operationalizer = Operationalizer(store, tmp_path)
+    mission = operationalizer.service.create_mission("Evidence-only decision queue")
+    queued = operationalizer._queue_decisions(mission["id"], [], [], AS_OF)
+    assert len(queued) == 1
+    assert all("checkpoint" not in item["question"] for item in queued)
 
 
 def test_brief_is_reproducible_for_same_snapshot(tmp_path: Path) -> None:
