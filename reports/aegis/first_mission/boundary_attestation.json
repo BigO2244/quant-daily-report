@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-08-03T17:15:00+00:00",
+  "as_of": "2026-08-03T18:10:00+00:00",
   "prohibited_actions_invoked": [],
   "statement": "Registry import and report generation only; no production, trading, broker, scheduler, VM, deployment, or capital mutation.",
   "status": "NON_EXECUTING"

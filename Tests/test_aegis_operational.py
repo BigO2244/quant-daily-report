@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from aiops.aegis.alpha_lab import AlphaLabImporter, FixtureAlphaLabAdapter
 from aiops.aegis.api import handler
 from aiops.aegis.brief import ExecutiveBriefGenerator
 from aiops.aegis.domain import stable_id
@@ -31,6 +32,18 @@ def make_service(tmp_path: Path) -> AegisService:
 
 def entity(entity_id: str, name: str, kind: str = "MISSION", status: str = "ACTIVE") -> dict:
     return {"id": entity_id, "entity_type": kind, "name": name, "status": status, "origin": "NATIVE", "source_record_id": entity_id, "metadata": {}}
+
+
+def alpha_lab_snapshot() -> dict:
+    return {
+        "pr": {"number": 160, "title": "Add Alpha Lab CIO control plane", "state": "OPEN", "isDraft": True, "url": "https://github.test/pull/160", "headRefName": "project/alpha-lab", "headRefOid": "abc123", "updatedAt": AS_OF},
+        "documents": {
+            "CURRENT_STATE.md": "# State\n\nAs of 2026-07-24 UTC, evidence is frozen.\n",
+            "STRATEGY_BACKLOG.md": "| Priority | Idea family | Research state | Initial class | Mechanism question | Immediate constraint |\n|---:|---|---|---|---|---|\n| 1 | Current Caerus decomposition | `FROZEN_BLOCKED_DATA` | `UNPROVEN` | Is there residual edge? | Certified decision tape |\n| 2 | Residual momentum | `FROZEN_EVALUATED_REVIEW` | `UNPROVEN` | Is residual momentum useful? | Review EXP-2 park verdict |\n| 3 | Short reversal | `FROZEN_EVALUATED_REVIEW` | `UNPROVEN` | Is reversal useful? | Review EXP-3 park verdict |\n",
+            "EXPERIMENT_LEDGER.md": "| Experiment | Hypothesis | Frozen date | State | Primary classification | Evidence packet | Verdict |\n|---|---|---|---|---|---|---|\n| EXP-1 | HYP-2026-001 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-1.md` | `ITERATE` — `BLOCKED_DATA` |\n| EXP-2 | HYP-2026-002 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2.md` | `PARK` — `NON_POSITIVE_VALIDATION` |\n| EXP-3 | HYP-2026-003 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-3.md` | `PARK` — `COST_FAILURE` |\n",
+            "DECISION_LOG.md": "| Date | Object | Decision | Evidence | Rationale | Next permitted state |\n|---|---|---|---|---|---|\n| 2026-07-14 | Alpha Lab project | `PURSUE` | Audit | Establish falsification process | Experiment registration |\n",
+        },
+    }
 
 
 def test_forward_migration_upgrades_v1_and_enforces_foreign_keys(tmp_path: Path) -> None:
@@ -87,6 +100,41 @@ def test_repository_import_marks_absent_initiative_unresolved(tmp_path: Path) ->
     assert any(item["name"] == "Atlas" for item in result.unresolved)
     assert any(item["source_record_id"] == "fr_registry:FR-900" for item in store.entities("MISSION"))
     assert RepositoryStateImporter(store, tmp_path).import_state(AS_OF).records_changed == 0
+
+
+def test_alpha_lab_import_is_pinned_idempotent_and_evidence_backed(tmp_path: Path) -> None:
+    store = AegisStore(tmp_path / "alpha.sqlite")
+    importer = AlphaLabImporter(store, "owner/repo")
+    adapter = FixtureAlphaLabAdapter(alpha_lab_snapshot())
+    dry = importer.import_state(adapter, AS_OF, dry_run=True)
+    assert dry.import_result.dry_run and store.entities() == []
+    first = importer.import_state(adapter, AS_OF)
+    second = importer.import_state(adapter, AS_OF)
+    assert len(first.portfolio) == 3 and len(first.blockers) == 1
+    assert [item["alpha_lab"]["experiment_id"] for item in first.decision_candidates] == ["EXP-2", "EXP-3"]
+    assert second.import_result.records_changed == 0
+    assert all(item["source_commit"] == "abc123" for item in first.portfolio)
+    assert all(item["source_reported_as_of"] == "2026-07-24" for item in first.portfolio)
+    assert store.relationships(relationship_type="BLOCKED_BY")[0]["provenance"]["source_commit"] == "abc123"
+
+
+def test_operationalizer_creates_isolated_alpha_lab_mission(tmp_path: Path) -> None:
+    (tmp_path / "config/research").mkdir(parents=True)
+    (tmp_path / "docs/governance").mkdir(parents=True)
+    (tmp_path / "research/alpha_lab_v1").mkdir(parents=True)
+    (tmp_path / "config/research/strategy_registry.json").write_text('{"strategies": []}', encoding="utf-8")
+    (tmp_path / "docs/governance/fr_registry.md").write_text("# Empty fixture\n", encoding="utf-8")
+    store = AegisStore(tmp_path / "operational.sqlite")
+    operationalizer = Operationalizer(store, tmp_path)
+    result = operationalizer.run(AS_OF, FixtureGitHubAdapter([]), alpha_lab_adapter=FixtureAlphaLabAdapter(alpha_lab_snapshot()))
+    alpha = result["alpha_lab"]
+    assert alpha["mission"]["state"] == "APPROVAL_REQUIRED"
+    assert alpha["mission"]["source_record_id"] == "alpha_lab:github:PR:160"
+    assert len(alpha["decisions"]) == 2 and len(alpha["blockers"]) == 1
+    assert {item["mission_id"] for item in alpha["decisions"]} == {alpha["mission"]["id"]}
+    assert len(store.traverse(alpha["mission"]["id"], "out", "TRACKED_BY_PR")) == 1
+    repeated = operationalizer.run(AS_OF, FixtureGitHubAdapter([]), alpha_lab_adapter=FixtureAlphaLabAdapter(alpha_lab_snapshot()))
+    assert all(item["records_changed"] == 0 for item in repeated["imports"])
 
 
 def test_reconciliation_priority_and_decision_queue_are_deterministic(tmp_path: Path) -> None:

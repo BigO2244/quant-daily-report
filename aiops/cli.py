@@ -15,6 +15,7 @@ from .spec_parser import REQUIRED_PARSE_HEADERS, SpecValidationError, parse_head
 from .util import VALID_MODES
 from .verify import run_verify
 from .aegis import AegisService, AegisStore
+from .aegis.alpha_lab import GitHubAlphaLabAdapter
 from .aegis.api import serve as serve_aegis
 from .aegis.dashboard import render_mission_control
 from .aegis.brief import ExecutiveBriefGenerator
@@ -88,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     mission_link = mission_sub.add_parser("link-github"); mission_link.add_argument("mission_id"); mission_link.add_argument("--entity", required=True); mission_link.add_argument("--type", choices=("PR", "ISSUE"), required=True); mission_link.add_argument("--as-of")
     mission_import = mission_sub.add_parser("import-current-state")
     mission_import.add_argument("--repo-root", default="."); mission_import.add_argument("--output-root", default="reports/aegis"); mission_import.add_argument("--as-of"); mission_import.add_argument("--dry-run", action="store_true")
+    mission_import.add_argument("--alpha-lab-pr", type=int, default=160)
     github_group = mission_import.add_mutually_exclusive_group(); github_group.add_argument("--github-live", action="store_true"); github_group.add_argument("--github-fixture")
 
     return parser
@@ -209,10 +211,18 @@ def main(argv: list[str] | None = None) -> int:
                 except KeyError as exc: print(f"ERROR: {exc}"); return 1
             if args.mission_command == "import-current-state":
                 adapter = None
-                if args.github_live: adapter = GitHubCLIAdapter("BigO2244/quant-daily-report")
+                alpha_lab_adapter = None
+                if args.github_live:
+                    adapter = GitHubCLIAdapter("BigO2244/quant-daily-report")
+                    alpha_lab_adapter = GitHubAlphaLabAdapter("BigO2244/quant-daily-report", args.alpha_lab_pr)
                 elif args.github_fixture: adapter = FixtureGitHubAdapter(json.loads(Path(args.github_fixture).read_text(encoding="utf-8")))
-                result = Operationalizer(service.store, Path(args.repo_root)).run(as_of, adapter, dry_run=args.dry_run, output_root=None if args.dry_run else Path(args.output_root))
-                print(json.dumps(result if args.dry_run else {"mission_id": result["mission"]["id"], "decisions": len(result["decisions"])}, indent=2, sort_keys=True)); return 0
+                result = Operationalizer(service.store, Path(args.repo_root)).run(as_of, adapter, dry_run=args.dry_run, output_root=None if args.dry_run else Path(args.output_root), alpha_lab_adapter=alpha_lab_adapter)
+                if args.dry_run:
+                    print(json.dumps(result, indent=2, sort_keys=True)); return 0
+                summary = {"mission_id": result["mission"]["id"], "decisions": len(result["decisions"])}
+                if result.get("alpha_lab"):
+                    summary.update({"alpha_lab_mission_id": result["alpha_lab"]["mission"]["id"], "alpha_lab_decisions": len(result["alpha_lab"]["decisions"]), "alpha_lab_blockers": len(result["alpha_lab"]["blockers"])})
+                print(json.dumps(summary, indent=2, sort_keys=True)); return 0
 
     print(f"ERROR: unknown command: {args.command}")
     return 1

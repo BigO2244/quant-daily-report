@@ -695,5 +695,201 @@
     ],
     "source_id": "source_9eae8e1958258ec66dce",
     "source_url": "https://github.com/BigO2244/quant-daily-report/pull/168"
+  },
+  {
+    "entity_id": "entity_af8bda8491d5acf7d718",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Current Caerus decomposition",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_c4f4c58330479efd8410",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Earnings revisions / PEAD",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_69e4a93ab6f6eab78362",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Insider-conviction clusters",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_8e9eb38c39046bd4ef7f",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Options-information lead",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_ea0ad08247377b57b157",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Supply-chain shock diffusion",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_83705a0bcb10b1aafda9",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Residual momentum",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_0dcc3d2e3b36ac1fe3ab",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Stock-specific return seasonality",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_6d12ab25bb0b4c069104",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Short-horizon reversal",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_ee17af802cabf4f42a0b",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Cross-asset trend",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_e2de5b9063fc0072ae06",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Executive/managerial tone surprise",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_cbfba7370de684407b55",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Net payout and share issuance",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_2c353bee66396251a835",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Asset growth / investment",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_be041bc90545e0ed5dca",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "Defense procurement-intent events",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_403da725bfcc352bd1ae",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_row_key": "AI power/grid commitment events",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_ec788e26131c70c81bed",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0001",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_5e6a0fc145cea0571b02",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0002",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_eb4a54add939308f7455",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0003",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_dbde6e97473b6c261f12",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0004",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_f3aafca9198816fd6555",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0005",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_2570285fa4e0ba63556d",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0006",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_d40fd29c29c30338b1b8",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0007",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_9fadec8a9a318848bade",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0008",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_e8ee54d6897791a6aa01",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0009",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_ff1d8f8fa70fd11e45c1",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0010",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_a7e3e5757d9991d4a526",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0011",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_f0c0820c909c76f504e2",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0012",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_bcd5a9d20bff7d6a8556",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+    "source_row_key": "EXP-2026-0013",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+  },
+  {
+    "entity_id": "entity_638ee73cdc31361e0897",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_path": "projects/alpha_lab/DECISION_LOG.md",
+    "source_row_key": "2026-07-14:Alpha Lab project",
+    "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
   }
 ]

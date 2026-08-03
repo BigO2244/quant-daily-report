@@ -12,8 +12,8 @@
       "reports/aegis/aeg_002_pr167_readiness_review.md"
     ],
     "final_decision_event": null,
-    "id": "decision_9ac8f853ef97ae1d415f",
-    "mission_id": "mission_cf8d52158414de4af557",
+    "id": "decision_ba622ba8fe599cff8219",
+    "mission_id": "mission_32751b57af1889a0ea85",
     "question": "Approve the non-executing AEG-002 consolidation mission for continued registry work?",
     "rationale": "",
     "recommended_action": "Approve only the registry and review scope",
@@ -34,8 +34,8 @@
       "reports/aegis/import/unresolved_state_items.json"
     ],
     "final_decision_event": null,
-    "id": "decision_305f63a68c6c15038bbf",
-    "mission_id": "mission_cf8d52158414de4af557",
+    "id": "decision_c94829ba8c1c91a8d654",
+    "mission_id": "mission_32751b57af1889a0ea85",
     "question": "How should unresolved initiative Atlas be classified?",
     "rationale": "",
     "recommended_action": "Request current source evidence before assigning an active or completed state",
@@ -56,11 +56,55 @@
       "reports/aegis/reconciliation/recommended_actions.json"
     ],
     "final_decision_event": null,
-    "id": "decision_ae65f87c4e8aebbc86a0",
-    "mission_id": "mission_cf8d52158414de4af557",
-    "question": "Approve the recommended handling for PROBABLE_DUPLICATE record recon_83a324ceef67fb9e32a8?",
+    "id": "decision_5eea3b55988c36621858",
+    "mission_id": "mission_32751b57af1889a0ea85",
+    "question": "Approve the recommended handling for EXACT_DUPLICATE record recon_17570372cffde032de81?",
     "rationale": "",
-    "recommended_action": "Review only; no automatic merge",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "risk_if_approved": "Incorrect linkage could obscure distinct work",
+    "risk_if_delayed": "Registry ambiguity persists",
+    "status": "OPEN"
+  },
+  {
+    "alternatives": [
+      "Defer",
+      "Request further evidence"
+    ],
+    "confidence": "MEDIUM",
+    "decision_owner": "Brett",
+    "decision_type": "APPROVE_RECONCILIATION",
+    "due_date": null,
+    "evidence_links": [
+      "reports/aegis/reconciliation/recommended_actions.json"
+    ],
+    "final_decision_event": null,
+    "id": "decision_d5dcbbc13f6e8aeb9c69",
+    "mission_id": "mission_32751b57af1889a0ea85",
+    "question": "Approve the recommended handling for EXACT_DUPLICATE record recon_14636643c83ea21cd96e?",
+    "rationale": "",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "risk_if_approved": "Incorrect linkage could obscure distinct work",
+    "risk_if_delayed": "Registry ambiguity persists",
+    "status": "OPEN"
+  },
+  {
+    "alternatives": [
+      "Defer",
+      "Request further evidence"
+    ],
+    "confidence": "MEDIUM",
+    "decision_owner": "Brett",
+    "decision_type": "APPROVE_RECONCILIATION",
+    "due_date": null,
+    "evidence_links": [
+      "reports/aegis/reconciliation/recommended_actions.json"
+    ],
+    "final_decision_event": null,
+    "id": "decision_3249d664ef2752beba3d",
+    "mission_id": "mission_32751b57af1889a0ea85",
+    "question": "Approve the recommended handling for EXACT_DUPLICATE record recon_424e67965fdcf3d6f385?",
+    "rationale": "",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
     "risk_if_approved": "Incorrect linkage could obscure distinct work",
     "risk_if_delayed": "Registry ambiguity persists",
     "status": "OPEN"

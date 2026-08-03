@@ -3,6 +3,17 @@
 Status: Proposed in stacked draft PR
 Scope: Local, deterministic, non-executing control plane
 
+## Alpha Lab MVP evidence boundary
+
+The Alpha Lab operational view reads `CURRENT_STATE.md`, `STRATEGY_BACKLOG.md`,
+`EXPERIMENT_LEDGER.md`, and `DECISION_LOG.md` from draft PR #160 at its immutable
+head commit. The importer preserves the source-reported date independently from
+the capture timestamp. Backlog lifecycle labels and constraints are copied
+verbatim; only explicit `BLOCKED` states produce blocker edges, and only ledger
+rows already in `REVIEW` with a `PARK` verdict produce owner-decision entries.
+This mapping is research planning provenance and grants no promotion, trading,
+allocation, execution, scheduling, deployment, or capital authority.
+
 ## Decision
 
 Extend PR #167 through forward schema migration 2. Preserve the v1 mission,

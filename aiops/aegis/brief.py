@@ -21,12 +21,15 @@ class ExecutiveBriefGenerator:
         blockers = [item for item in entities if "BLOCK" in item["status"]] + [item for item in missions if item["state"] == "BLOCKED"]
         stale = [item for item in source_health if item["status"] != "CURRENT"]
         unresolved = [item for item in entities if item["status"] == "STATUS_UNRESOLVED"]
+        alpha_portfolio = [item for item in entities if item["metadata"].get("alpha_lab_record_type") == "RESEARCH_FAMILY"]
+        alpha_blockers = [item for item in entities if item["metadata"].get("alpha_lab_record_type") == "BLOCKER"]
         prior = self.store.briefs(); prior_ids = set(prior[-1]["payload"].get("mission_ids", [])) if prior else set()
         payload: dict[str, Any] = {
             "schema_version": "aegis-executive-brief-v1", "as_of": as_of,
             "executive_summary": {"missions": len(missions), "open_decisions": len(decisions), "blockers": len(blockers), "unresolved": len(unresolved)},
             "mission_portfolio": missions, "top_priorities": priorities, "decisions_required": decisions,
-            "blockers": blockers, "research_progress": [e for e in entities if e["entity_type"] in {"INITIATIVE", "MISSION"} and "RESEARCH" in e["status"]],
+            "blockers": blockers, "research_progress": [e for e in entities if e["entity_type"] in {"INITIATIVE", "MISSION"} and ("RESEARCH" in e["status"] or e["metadata"].get("alpha_lab_record_type") == "RESEARCH_FAMILY")],
+            "alpha_lab": {"portfolio": alpha_portfolio, "blockers": alpha_blockers},
             "engineering_progress": [m for m in missions if m.get("owner_capability") == "engineering"],
             "validation_and_risk": {"reconciliation": reconciliation, "source_health": source_health},
             "stale_or_unowned_work": stale + [m for m in missions if not m.get("owner_capability")],
@@ -56,6 +59,9 @@ class ExecutiveBriefGenerator:
         )
         for title, key, formatter in mappings:
             lines.extend(["", f"## {title}", ""]); values = payload[key]; lines.extend([f"- {formatter(item)}" for item in values] or ["- None recorded."])
+        alpha = payload.get("alpha_lab", {"portfolio": [], "blockers": []})
+        lines.extend(["", "## Alpha Lab MVP", "", f"- Fact: {len(alpha['portfolio'])} research families and {len(alpha['blockers'])} explicit blockers imported from pinned source evidence."])
+        lines.extend([f"- {item['name']} — {item['status']} — {item['metadata'].get('next_action', '')}" for item in alpha["portfolio"]] or ["- No Alpha Lab snapshot imported."])
         lines.extend(["", "## Validation and Risk", "", f"- Fact: {len(payload['validation_and_risk']['reconciliation'])} reconciliation items; {len(payload['validation_and_risk']['source_health'])} source-health records.", "", "## Stale or Unowned Work", ""])
         lines.extend([f"- {item.get('id', item.get('source_id', 'unknown'))}" for item in payload["stale_or_unowned_work"]] or ["- None recorded."])
         lines.extend(["", "## Newly Imported Work", "", f"- Fact: {len(payload['newly_imported_work'])} imported registry entities.", "", "## Completed Since Prior Brief", ""])

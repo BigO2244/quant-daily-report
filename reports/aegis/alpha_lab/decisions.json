@@ -1,0 +1,86 @@
+[
+  {
+    "alpha_lab": {
+      "experiment_id": "EXP-2026-0006",
+      "hypothesis_id": "HYP-2026-006",
+      "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+      "verdict": "PARK \u2014 NON_POSITIVE_VALIDATION"
+    },
+    "alternatives": [
+      "Request further evidence",
+      "Authorize a new hypothesis revision"
+    ],
+    "confidence": "HIGH",
+    "decision_owner": "Brett",
+    "decision_type": "PARK_RESEARCH",
+    "due_date": null,
+    "evidence_links": [
+      "projects/alpha_lab/evidence/EXP-2026-0006.md"
+    ],
+    "final_decision_event": null,
+    "id": "decision_b13300423562719b3be9",
+    "mission_id": "mission_1ace1edede9d73889ccf",
+    "question": "Accept the frozen EXP-2026-0006 PARK verdict?",
+    "rationale": "",
+    "recommended_action": "Accept PARK for this experiment only; do not retire or reweight production strategy behavior",
+    "risk_if_approved": "The experiment is parked; no production or capital behavior changes",
+    "risk_if_delayed": "The evaluated experiment remains in REVIEW and Alpha Lab ownership is ambiguous",
+    "status": "OPEN"
+  },
+  {
+    "alpha_lab": {
+      "experiment_id": "EXP-2026-0007",
+      "hypothesis_id": "HYP-2026-007",
+      "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+      "verdict": "PARK \u2014 NON_POSITIVE_VALIDATION"
+    },
+    "alternatives": [
+      "Request further evidence",
+      "Authorize a new hypothesis revision"
+    ],
+    "confidence": "HIGH",
+    "decision_owner": "Brett",
+    "decision_type": "PARK_RESEARCH",
+    "due_date": null,
+    "evidence_links": [
+      "projects/alpha_lab/evidence/EXP-2026-0007.md"
+    ],
+    "final_decision_event": null,
+    "id": "decision_127fc4db60b37f784703",
+    "mission_id": "mission_1ace1edede9d73889ccf",
+    "question": "Accept the frozen EXP-2026-0007 PARK verdict?",
+    "rationale": "",
+    "recommended_action": "Accept PARK for this experiment only; do not retire or reweight production strategy behavior",
+    "risk_if_approved": "The experiment is parked; no production or capital behavior changes",
+    "risk_if_delayed": "The evaluated experiment remains in REVIEW and Alpha Lab ownership is ambiguous",
+    "status": "OPEN"
+  },
+  {
+    "alpha_lab": {
+      "experiment_id": "EXP-2026-0008",
+      "hypothesis_id": "HYP-2026-008",
+      "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+      "verdict": "PARK \u2014 NON_POSITIVE_VALIDATION_AND_COST_FAILURE"
+    },
+    "alternatives": [
+      "Request further evidence",
+      "Authorize a new hypothesis revision"
+    ],
+    "confidence": "HIGH",
+    "decision_owner": "Brett",
+    "decision_type": "PARK_RESEARCH",
+    "due_date": null,
+    "evidence_links": [
+      "projects/alpha_lab/evidence/EXP-2026-0008.md"
+    ],
+    "final_decision_event": null,
+    "id": "decision_42c490aa1006fa200816",
+    "mission_id": "mission_1ace1edede9d73889ccf",
+    "question": "Accept the frozen EXP-2026-0008 PARK verdict?",
+    "rationale": "",
+    "recommended_action": "Accept PARK for this experiment only; do not retire or reweight production strategy behavior",
+    "risk_if_approved": "The experiment is parked; no production or capital behavior changes",
+    "risk_if_delayed": "The evaluated experiment remains in REVIEW and Alpha Lab ownership is ambiguous",
+    "status": "OPEN"
+  }
+]

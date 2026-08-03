@@ -6,6 +6,7 @@ OBJECTIVE: Operationalize Aegis as the deterministic registry and executive inte
 ## FILES
 
 create:
+- aiops/aegis/alpha_lab.py
 - aiops/aegis/importers.py
 - aiops/aegis/reconciliation.py
 - aiops/aegis/priority.py
@@ -22,6 +23,9 @@ modify:
 ## ACCEPTANCE CRITERIA
 
 - Current repository and GitHub planning metadata import idempotently with provenance.
+- Alpha Lab PR #160 governance files import at a pinned commit into a dedicated,
+  approval-required mission with source-reported dates, explicit blockers, and
+  owner-review decisions.
 - Hierarchy and typed graph relationships are persistent, deterministic, and cycle-safe.
 - Reconciliation, priorities, decisions, briefs, Mission Control, and mission-first CLI are operational.
 - The first consolidation mission remains non-executing and approval-required.

@@ -85,7 +85,7 @@ class GitHubImporter:
             number = str(record["number"])
             entity_id = stable_id("entity", {"source": "github", "repository": self.repository, "type": record_type, "id": number})
             state = "DRAFT" if record_type == "PR" and record.get("isDraft") else "READY" if record_type == "PR" else "OPEN"
-            metadata = {
+            source_metadata = {
                 "repository": self.repository, "external_id": number, "record_type": record_type,
                 "labels": sorted(label.get("name", "") for label in record.get("labels", [])),
                 "assignees": sorted(assignee.get("login", "") for assignee in record.get("assignees", [])),
@@ -93,11 +93,13 @@ class GitHubImporter:
                 "draft": bool(record.get("isDraft")), "branch": record.get("headRefName"),
                 "commit": record.get("headRefOid"), "base_branch": record.get("baseRefName"),
             }
+            existing = self.store.entity(entity_id)
+            entity_metadata = {**existing["metadata"], **source_metadata} if existing else source_metadata
             entities.append({"id": entity_id, "entity_type": "EXTERNAL_RECORD", "name": str(record["title"]), "status": state,
-                             "origin": "IMPORTED", "source_record_id": f"github:{self.repository}:{record_type}:{number}", "metadata": metadata})
+                             "origin": "IMPORTED", "source_record_id": f"github:{self.repository}:{record_type}:{number}", "metadata": entity_metadata})
             references.append({"id": stable_id("external", {"source": source_id, "type": record_type, "id": number}), "entity_id": entity_id,
-                               "source_id": source_id, "external_type": record_type, "external_id": number, "url": record.get("url"), "state": state, "metadata": metadata})
-            provenance.append({"entity_id": entity_id, "source_id": source_id, "source_url": record.get("url"), "fields": sorted(metadata)})
+                               "source_id": source_id, "external_type": record_type, "external_id": number, "url": record.get("url"), "state": state, "metadata": source_metadata})
+            provenance.append({"entity_id": entity_id, "source_id": source_id, "source_url": record.get("url"), "fields": sorted(source_metadata)})
             for linked_number in sorted(set(self._LINK_PATTERN.findall(record.get("body") or "")), key=int):
                 target_id = stable_id("entity", {"source": "github", "repository": self.repository, "type": "ISSUE", "id": linked_number})
                 relations.append((entity_id, target_id, "TRACKED_BY_ISSUE", {"evidence": f"explicit body reference to #{linked_number}", "source_url": record.get("url")}, "HIGH", "github_explicit_link_v1"))
@@ -194,6 +196,10 @@ class RepositoryStateImporter:
             mentioned = name.casefold().replace(" ", "_") in registry_text or name.casefold() in registry_text
             status = "SOURCE_EVIDENCE_PRESENT" if evidence or mentioned else "STATUS_UNRESOLVED"
             entity = {"id": self._taxonomy_id("INITIATIVE", name), "entity_type": "INITIATIVE", "name": name, "status": status, "origin": "NATIVE", "source_record_id": f"taxonomy:{name.casefold().replace(' ', '_')}", "metadata": {"evidence_paths": evidence, "registry_mention": mentioned}}
+            existing = self.store.entity(entity["id"])
+            if existing and existing["status"] == "SOURCE_REPORTED_ACTIVE_RESEARCH":
+                entity["status"] = existing["status"]
+                entity["metadata"] = {**entity["metadata"], **existing["metadata"]}
             entities.append(entity); hierarchy.append((entities[1]["id"], entity["id"], {"evidence": evidence or ["configured taxonomy target"], "rule": "explicit_taxonomy_v1"}))
             provenance.append({"entity_id": entity["id"], "evidence_paths": evidence})
         return entities, hierarchy, provenance, unresolved

@@ -1,21 +1,22 @@
 # AEG-002 Validation Summary
 
-As of: 2026-08-03T17:15:00Z
+As of: 2026-08-03T18:10:00Z
 Branch: `agent/aeg-002-operationalize-aegis`
 Current base: `origin/main` (`8423812`)
 
 ## Targeted Aegis and AIOPS validation
 
 - `pytest -q Tests/test_aegis.py Tests/test_aegis_operational.py Tests/test_aiops_cli.py Tests/test_aiops_plan.py`
-  - **31 passed**.
+  - **33 passed**.
   - Covers mission/task lifecycle, v1→v2 migration, foreign keys, import
     idempotency and rollback, stable IDs, edge identity, task/hierarchy/graph
     cycle rejection, reconciliation, priority stability, decision persistence,
     brief reproducibility, persisted approval enforcement, REST, CLI, and the
     boundary scanner.
-- Relevant AIOPS/Aegis plus execution-integrity, lifecycle/timeline,
-  confirmation, transition determinism, cron-reference, and dashboard-shell
-  contracts: **72 passed**.
+- Relevant AIOPS/Aegis, Alpha Lab v1/v2, execution-integrity,
+  lifecycle/timeline, confirmation, transition determinism, cron-reference,
+  and dashboard-shell contracts: **85 passed** with seven existing pandas
+  future warnings.
 - `python -m py_compile aiops/cli.py aiops/aegis/*.py scripts/validate_aegis_boundaries.py`: passed.
 - `git diff --check`: passed.
 - No repository format/lint command is configured; compilation, tests, JSON
@@ -36,14 +37,22 @@ Current base: `origin/main` (`8423812`)
 
 - Live read-only GitHub import via authenticated `gh`: 13 open records.
 - Repository evidence import: 92 taxonomy/strategy/FR records.
-- Total records inspected: 105; unresolved state: Atlas (no configured current
+- Pinned Alpha Lab PR #160 import: 38 initiative, research-family, blocker,
+  experiment, and owner-decision records from four governance files at commit
+  `2b4f6c99216a2764d3692735f0e3f783ce7dca0a`.
+- Total records inspected: 143; unresolved state: Atlas (no configured current
   repository evidence found).
 - Dry-run completed without writes; actual import generated the required
-  manifests, reconciliation outputs, source provenance, Mission Control, three
-  evidence-backed decision entries, and approval-required mission
-  `mission_cf8d52158414de4af557`. The queue deliberately remains below five
-  entries when the persisted evidence does not support additional concrete
-  decisions.
+  manifests, reconciliation outputs, source provenance, Mission Control, and
+  approval-required consolidation mission `mission_32751b57af1889a0ea85`.
+- The isolated Alpha Lab MVP mission is
+  `mission_1ace1edede9d73889ccf`: 14 research-family rows, eight explicit
+  blockers, and three evidence-backed PARK decisions. Source-reported state is
+  explicitly dated 2026-07-24 even though the snapshot was captured later.
+- Decision generation never pads a queue when persisted evidence supports fewer
+  concrete decisions.
+- A second live import against the same database and snapshot reported zero
+  changed records for repository, GitHub, and Alpha Lab sources.
 - JSON artifacts passed `python -m json.tool` parsing.
 
 ## Full-suite status
