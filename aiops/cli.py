@@ -13,6 +13,9 @@ from .run_all import run_all
 from .spec_parser import REQUIRED_PARSE_HEADERS, SpecValidationError, parse_headers, validate_headers
 from .util import VALID_MODES
 from .verify import run_verify
+from .aegis import AegisService, AegisStore
+from .aegis.api import serve as serve_aegis
+from .aegis.dashboard import render_mission_control
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +45,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_all_cmd = subparsers.add_parser("run-all", help="Execute parse → plan → dispatch → run → verify")
     run_all_cmd.add_argument("--spec", required=True, dest="spec_path", help="Path to spec markdown file")
     run_all_cmd.add_argument("--mode", required=True, choices=VALID_MODES, help="Execution mode")
+
+    aegis_cmd = subparsers.add_parser("aegis", help="Operate the local, non-trading Aegis control plane")
+    aegis_cmd.add_argument("--db", default="reports/aegis/aegis.sqlite", help="SQLite database path")
+    aegis_sub = aegis_cmd.add_subparsers(dest="aegis_command", required=True)
+    create_cmd = aegis_sub.add_parser("create", help="Create a deterministic mission")
+    create_cmd.add_argument("--objective", required=True)
+    inspect_cmd = aegis_sub.add_parser("inspect", help="Inspect one mission or the mission portfolio")
+    inspect_cmd.add_argument("--mission")
+    approve_cmd = aegis_sub.add_parser("approve", help="Record explicit approval for an approval-required mission")
+    approve_cmd.add_argument("--mission", required=True)
+    approve_cmd.add_argument("--rationale", required=True)
+    brief_cmd = aegis_sub.add_parser("brief", help="Render a deterministic executive brief")
+    brief_cmd.add_argument("--dashboard-out", help="Optional local HTML artifact path; does not deploy it")
+    serve_cmd = aegis_sub.add_parser("serve", help="Start an explicit local REST server")
+    serve_cmd.add_argument("--host", default="127.0.0.1")
+    serve_cmd.add_argument("--port", type=int, default=8765)
 
     return parser
 
@@ -107,6 +126,36 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "run-all":
         return run_all(Path(args.spec_path), mode_override=args.mode)
+    if args.command == "aegis":
+        service = AegisService(AegisStore(Path(args.db)))
+        if args.aegis_command == "create":
+            print(json.dumps(service.create_mission(args.objective), indent=2, sort_keys=True))
+            return 0
+        if args.aegis_command == "inspect":
+            payload = service.store.mission(args.mission) if args.mission else service.store.missions()
+            if args.mission and payload is None:
+                print(f"ERROR: mission not found: {args.mission}")
+                return 1
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        if args.aegis_command == "approve":
+            try:
+                print(json.dumps(service.approve(args.mission, args.rationale), indent=2, sort_keys=True))
+                return 0
+            except (KeyError, ValueError) as exc:
+                print(f"ERROR: {exc}")
+                return 1
+        if args.aegis_command == "brief":
+            brief = service.executive_brief()
+            print(brief, end="")
+            if args.dashboard_out:
+                destination = Path(args.dashboard_out)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(render_mission_control(service), encoding="utf-8")
+            return 0
+        if args.aegis_command == "serve":
+            serve_aegis(service, args.host, args.port)
+            return 0
 
     print(f"ERROR: unknown command: {args.command}")
     return 1
