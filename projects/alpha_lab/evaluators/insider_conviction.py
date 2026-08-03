@@ -52,7 +52,6 @@ INCOMPLETE_OBLIGATIONS = (
     "issuer_event_and_year_contribution_limits",
     "twenty_sixty_day_year_sign_and_challenge_gates",
     "two_x_cost_and_reference_capital_capacity_gates",
-    "owner_resolution_of_frozen_five_total_variants_versus_five_listed_alternatives",
 )
 
 
@@ -294,36 +293,66 @@ def build_events(rows: Iterable[Mapping[str, Any]]) -> tuple[list[Event], list[E
     singles: list[Event] = []
     clusters: list[Event] = []
     prior_by_issuer: Dict[str, list[tuple[tuple[str, str, str, datetime], Dict[str, Any]]]] = {}
-    completed_owner_sets: Dict[str, set[tuple[str, ...]]] = {}
-    for key, item in purchases:
-        issuer, owner, accession, _ = key
-        singles.append(
-            Event(
-                event_id="single:{}:{}:{}".format(issuer, item["accepted"].isoformat(), owner),
-                security_id=str(item["row"]["security_id"]),
-                issuer_cik=issuer,
-                accepted_at=item["accepted"],
-                available_at=item["available"],
-                owner_ids=(owner,),
-                purchase_dollars=item["dollars"],
-                average_role_score=_role_score(item["row"]),
-                kind="SINGLE",
-            )
-        )
-        history = [
+    batch_start = 0
+    while batch_start < len(purchases):
+        first_key, first_item = purchases[batch_start]
+        issuer = first_key[0]
+        accepted = first_item["accepted"]
+        batch_end = batch_start + 1
+        while batch_end < len(purchases):
+            next_key, next_item = purchases[batch_end]
+            if next_key[0] != issuer or next_item["accepted"] != accepted:
+                break
+            batch_end += 1
+        batch = purchases[batch_start:batch_end]
+        prior_history = [
             prior
             for prior in prior_by_issuer.get(issuer, [])
-            if 0 <= (item["accepted"] - prior[1]["accepted"]).days <= 10
+            if 0 <= (accepted - prior[1]["accepted"]).days <= 10
         ]
-        history.append((key, item))
+        history = prior_history + batch
         by_owner: Dict[
             str, list[tuple[tuple[str, str, str, datetime], Dict[str, Any]]]
         ] = {}
         for prior in history:
             by_owner.setdefault(prior[0][1], []).append(prior)
         owners = tuple(sorted(by_owner))
-        if len(owners) >= 2 and owners not in completed_owner_sets.setdefault(issuer, set()):
-            completed_owner_sets[issuer].add(owners)
+        prior_owners = {prior[0][1] for prior in prior_history}
+        completes_cluster = len(prior_owners) < 2 and len(owners) >= 2
+        if len(owners) < 2:
+            owner = owners[0]
+            security_ids = {
+                str(purchase[1]["row"]["security_id"]) for purchase in batch
+            }
+            if len(security_ids) != 1:
+                raise ContractValidationError(
+                    "one issuer single batch resolves to multiple security_ids"
+                )
+            singles.append(
+                Event(
+                    event_id="single:{}:{}:{}".format(
+                        issuer, accepted.isoformat(), owner
+                    ),
+                    security_id=next(iter(security_ids)),
+                    issuer_cik=issuer,
+                    accepted_at=accepted,
+                    available_at=max(purchase[1]["available"] for purchase in batch),
+                    owner_ids=(owner,),
+                    purchase_dollars=sum(purchase[1]["dollars"] for purchase in batch),
+                    average_role_score=max(
+                        _role_score(purchase[1]["row"]) for purchase in batch
+                    ),
+                    kind="SINGLE",
+                )
+            )
+        if completes_cluster:
+            security_ids = {
+                str(purchase[1]["row"]["security_id"]) for purchase in history
+            }
+            if len(security_ids) != 1:
+                raise ContractValidationError(
+                    "one issuer cluster resolves to multiple security_ids"
+                )
             purchase_dollars = sum(
                 purchase[1]["dollars"]
                 for item_owner in owners
@@ -336,19 +365,20 @@ def build_events(rows: Iterable[Mapping[str, Any]]) -> tuple[list[Event], list[E
             clusters.append(
                 Event(
                     event_id="cluster:{}:{}:{}".format(
-                        issuer, item["accepted"].isoformat(), ",".join(owners)
+                        issuer, accepted.isoformat(), ",".join(owners)
                     ),
-                    security_id=str(item["row"]["security_id"]),
+                    security_id=next(iter(security_ids)),
                     issuer_cik=issuer,
-                    accepted_at=item["accepted"],
-                    available_at=item["available"],
+                    accepted_at=accepted,
+                    available_at=max(purchase[1]["available"] for purchase in batch),
                     owner_ids=owners,
                     purchase_dollars=purchase_dollars,
                     average_role_score=sum(owner_role_scores) / len(owner_role_scores),
                     kind="CLUSTER",
                 )
             )
-        prior_by_issuer.setdefault(issuer, []).append((key, item))
+        prior_by_issuer.setdefault(issuer, []).extend(batch)
+        batch_start = batch_end
     return clusters, singles
 
 

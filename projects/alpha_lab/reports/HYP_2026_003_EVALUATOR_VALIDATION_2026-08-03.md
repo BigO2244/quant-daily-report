@@ -15,9 +15,21 @@ Classification: `RESEARCH_ONLY_NON_EXECUTIONAL`
 - Research state: `UNPROVEN / BLOCKED`.
 - Challenge period: not accessed.
 
+## Frozen governance clarifications
+
+Approved by Brett Olson on 2026-08-03 before any return access:
+
+- Option B comparator: the first purchase retains its single event; the filing
+  that first completes the cluster creates only the cluster event; no earlier
+  event is removed using future information.
+- The 120-day hold is removed from the formal variant family. It remains a
+  descriptive diagnostic only. The formal family is five total variants:
+  primary, CEO/CFO-required, three-insider minimum, five-basis-point purchase-
+  value floor, and 20-day hold.
+
 ## Validation results
 
-- Full Alpha Lab test collection: `105 passed`.
+- Full Alpha Lab test collection: `109 passed`.
 - Focused settlement, evaluator, control-plane, gate, and data-spine tests:
   `81 passed` before the final Form 4 certification hardening; the full
   collection above includes the final state.

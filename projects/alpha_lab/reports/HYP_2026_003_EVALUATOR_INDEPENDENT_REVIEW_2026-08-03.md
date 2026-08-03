@@ -68,18 +68,21 @@ independently reviewed person/control identity or must fail closed on every
 unresolved pair. A reporting-owner CIK alone does not satisfy the frozen
 independence rule.
 
-### High — the single-purchase comparator remains ambiguous
+### Resolved after review — causal single-purchase comparator
 
-Every eligible filing is emitted as a single event, including the filing that
-simultaneously completes a cluster. This avoids using later filings to erase a
-single event, but it also puts the cluster-triggering purchase into both the
-cluster and single portfolios. The frozen phrase “otherwise eligible
-single-insider purchases” does not resolve this overlap.
+Brett Olson approved Option B before any return access. The first eligible
+filing creates and retains its original single-purchase event. A later filing
+that first completes a qualifying cluster creates only the cluster event; it
+does not create another single event, and the earlier single is never removed
+using future information. Later purchases during the cluster cooldown enrich
+attribution only. Candidate construction now applies the rule when the cluster
+is formed and while the 10-calendar-day cluster window remains active. The full
+60-session cooldown and stateful single portfolio remain unimplemented and are
+still explicit evaluator blockers.
 
-A causal comparator rule must be frozen before returns are read. At minimum it
-must specify whether the first filing remains a single event, whether the
-cluster-completing filing is excluded from the single comparator at that
-timestamp, and how overlapping issuer exposure is handled.
+The post-review tie rule treats distinct filings with the exact same SEC
+acceptance timestamp as one public-information batch. If that batch completes
+a cluster, none of its filings becomes an artificial earlier single event.
 
 ### High — settlement readiness still depends on substantive human evidence review
 
@@ -120,12 +123,13 @@ settlement auditor bounds its price query at 2024-12-31, but hashing a combined
 panel still reads the underlying file bytes. The strongest lock is a separately
 materialized, immutable, manifest-bound pre-2025 extract for every input.
 
-### Medium — the frozen variant budget is internally ambiguous
+### Resolved after review — frozen variant budget
 
-The hypothesis says a maximum of five total variants including the primary,
-then lists five alternatives, which would total six. Implementing only the
-primary is safe. Before multiple-testing work begins, the owner must freeze
-which four alternatives are in-family or amend the total budget explicitly.
+Brett Olson removed the 120-day hold from the formal variant family before any
+return access. The five formal variants are now the primary plus CEO/CFO-
+required, three-insider minimum, five-basis-point purchase-value floor, and
+20-day hold. The 120-day result remains a descriptive diagnostic only and
+cannot enter promotion, parameter selection, or multiple-testing correction.
 
 ## Material safety improvements made during review
 
@@ -140,8 +144,8 @@ which four alternatives are in-family or amend the total budget explicitly.
   classification.
 - Aggregated multiple transaction rows within an owner/accession event rather
   than emitting duplicate transactions as separate events.
-- Preserved causal single events instead of removing them using later cluster
-  knowledge.
+- Implemented the approved Option B comparator without removing earlier single
+  events using later cluster knowledge.
 - Made every missing portfolio, inference, matching, cost, capacity, and
   challenge obligation explicit; no alpha claim is permitted.
 - Strengthened terminal-settlement population, source, timing, uniqueness,
@@ -156,8 +160,8 @@ which four alternatives are in-family or amend the total budget explicitly.
    supersession resolution, or exclude only information known as of each event.
 3. Certify natural-person, role, and common-control identity without title or
    name heuristics; report unresolved coverage loss.
-4. Freeze the causal single-purchase comparator and resolve the five-versus-six
-   variant inconsistency without inspecting returns.
+4. Carry the approved Option B comparator through the stateful single portfolio
+   and implement only the five approved formal variants.
 5. Complete and independently attest the explicit terminal-action population;
    reconcile cash/share units and price adjustments; retain exact source
    locators and reviewer evidence.
@@ -188,3 +192,14 @@ capital path.
 The 2025-01-01 through 2026-06-30 challenge period must remain locked. Neither
 settlement certification nor completion of the discovery evaluator would by
 itself authorize challenge access.
+
+## Governance-delta revalidation
+
+The approved Option B and five-variant clarification were re-reviewed after
+implementation. The formal family is exactly the primary plus four
+alternatives; 120-day CAR is diagnostic only. The amended hypothesis body
+recomputes to its declared SHA-256
+`c8426e20909f2a45e936b06339defae99b06989c3fbce16333456cf418d3f75b`.
+Forty-three focused evaluator, settlement, control-plane, and four-lane tests
+passed; Python compilation and `git diff --check` passed. No challenge data was
+opened.

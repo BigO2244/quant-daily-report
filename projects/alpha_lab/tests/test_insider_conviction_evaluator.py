@@ -120,7 +120,64 @@ def test_build_events_forms_cluster_only_from_certified_independent_people():
     clusters, singles = build_events(rows)
     assert len(clusters) == 1
     assert clusters[0].owner_ids == ("person:11", "person:12")
-    assert [event.security_id for event in singles] == ["S1", "S1", "S2"]
+    assert [event.security_id for event in singles] == ["S1", "S2"]
+
+
+def test_option_b_keeps_first_single_and_suppresses_cluster_window_singles():
+    rows = [
+        _purchase(
+            issuer="1", security="S1", owner="11", accepted="2020-01-01T20:00:00Z", control="A"
+        ),
+        _purchase(
+            issuer="1", security="S1", owner="12", accepted="2020-01-05T20:00:00Z", control="B"
+        ),
+        _purchase(
+            issuer="1", security="S1", owner="13", accepted="2020-01-06T20:00:00Z", control="C"
+        ),
+    ]
+
+    clusters, singles = build_events(rows)
+
+    assert len(clusters) == 1
+    assert clusters[0].owner_ids == ("person:11", "person:12")
+    assert [event.owner_ids for event in singles] == [("person:11",)]
+
+
+def test_option_b_same_acceptance_batch_creates_no_artificial_first_single():
+    rows = [
+        _purchase(
+            issuer="1", security="S1", owner="11", accepted="2020-01-01T20:00:00Z", control="A"
+        ),
+        _purchase(
+            issuer="1", security="S1", owner="12", accepted="2020-01-01T20:00:00Z", control="B"
+        ),
+    ]
+
+    clusters, singles = build_events(rows)
+
+    assert len(clusters) == 1
+    assert singles == []
+
+
+def test_same_acceptance_batch_atomically_includes_all_new_cluster_owners():
+    rows = [
+        _purchase(
+            issuer="1", security="S1", owner="11", accepted="2020-01-01T20:00:00Z", control="A"
+        ),
+        _purchase(
+            issuer="1", security="S1", owner="12", accepted="2020-01-05T20:00:00Z", control="B"
+        ),
+        _purchase(
+            issuer="1", security="S1", owner="13", accepted="2020-01-05T20:00:00Z", control="C"
+        ),
+    ]
+
+    clusters, singles = build_events(rows)
+
+    assert len(clusters) == 1
+    assert clusters[0].owner_ids == ("person:11", "person:12", "person:13")
+    assert clusters[0].purchase_dollars == 3000
+    assert [event.owner_ids for event in singles] == [("person:11",)]
 
 
 def test_build_events_ignores_uncertified_legacy_control_group_field():
@@ -134,7 +191,7 @@ def test_build_events_ignores_uncertified_legacy_control_group_field():
     ]
     clusters, singles = build_events(rows)
     assert len(clusters) == 1
-    assert len(singles) == 2
+    assert len(singles) == 1
 
 
 def test_certified_independent_person_id_prevents_controlled_vehicle_cluster():
@@ -164,7 +221,7 @@ def test_build_events_aggregates_same_owner_transactions_without_extra_buyer():
     assert len(clusters) == 1
     assert len(clusters[0].owner_ids) == 2
     assert clusters[0].purchase_dollars == 4500
-    assert len(singles) == 2
+    assert len(singles) == 1
 
 
 def test_build_events_rejects_noncausal_availability_without_guessing_10b5_1():
@@ -267,3 +324,17 @@ def test_frozen_spec_runs_through_generic_boundary_without_orders(tmp_path, monk
     assert result["result"]["variant_count"] == 1
     assert result["promotion_performed"] is False
     assert result["trading_behavior_changed"] is False
+
+
+def test_frozen_governance_clarifications_are_bounded_before_return_access():
+    text = (
+        ROOT / "projects/alpha_lab/hypotheses/HYP-2026-003_insider_conviction_clusters.md"
+    ).read_text(encoding="utf-8")
+    formal_variants = text.split("- Maximum variants in this family:", 1)[1].split(
+        "- Multiple-testing correction:", 1
+    )[0]
+
+    assert "120-day hold" not in formal_variants
+    assert "The 120-day return remains a\n  descriptive secondary diagnostic only" in formal_variants
+    assert "completing filing creates only the cluster event" in text
+    assert "No earlier single event is removed or reclassified" in text
