@@ -1124,8 +1124,14 @@ def test_original_form4_stream_excludes_amended_issuer_and_certifies_clean_subse
             / "outputs/research/alpha_lab/provider_readiness/form4_event_tape_v1.json"
         ).read_text(encoding="utf-8")
     )
-    assert certification["status"] == "READY"
-    assert certification["historical_point_in_time_verified"] is True
+    assert certification["status"] == "BLOCKED"
+    assert certification["historical_point_in_time_verified"] is False
+    assert certification["evaluator_contract"] == {
+        "beneficial_owner_independence_certified": False,
+        "causal_amendment_lineage_certified": False,
+        "prechallenge_extract": False,
+    }
+    assert "causal_amendment_lineage_not_certified" in certification["blockers"]
 
 
 def test_readiness_does_not_mislabel_8k_stream_as_form4_coverage(tmp_path, monkeypatch):

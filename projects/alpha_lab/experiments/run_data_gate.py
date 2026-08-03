@@ -194,6 +194,7 @@ def inspect_asset(repo_root: Path, asset: DataAsset, checked_at: datetime) -> Di
     fields_available: Sequence[str] = ()
     pit_verified = False
     evidence_hash = None
+    evaluator_contract: Dict[str, Any] = {}
     status = ProviderStatus.BLOCKED
     if not files:
         blockers.append("required_data_files_absent")
@@ -259,6 +260,14 @@ def inspect_asset(repo_root: Path, asset: DataAsset, checked_at: datetime) -> Di
         if evidence_hash != expected_evidence_hash:
             blockers.append("certification_evidence_hash_mismatch")
             evidence_hash = None
+        declared_evaluator_contract = certification.get("evaluator_contract", {})
+        if not isinstance(declared_evaluator_contract, dict):
+            blockers.append("evaluator_contract_invalid")
+        elif evidence_hash is not None:
+            # These fields are covered by the certification evidence hash.  They
+            # are propagated for an evaluator to enforce stricter holdout and
+            # causal-lineage rules without trusting caller-supplied flags.
+            evaluator_contract = dict(declared_evaluator_contract)
         requested_status = certification.get("status", "UNVERIFIED")
         try:
             status = ProviderStatus(requested_status)
@@ -313,6 +322,7 @@ def inspect_asset(repo_root: Path, asset: DataAsset, checked_at: datetime) -> Di
         "readiness": readiness.to_dict(),
         "gate": gate.to_dict(),
         "gate_hash": gate.gate_hash,
+        "evaluator_contract": evaluator_contract,
     }
 
 
@@ -344,6 +354,7 @@ def _deferred_asset_result(asset: DataAsset, checked_at: datetime) -> Dict[str, 
         "readiness": readiness.to_dict(),
         "gate": gate.to_dict(),
         "gate_hash": gate.gate_hash,
+        "evaluator_contract": {},
     }
 
 
@@ -447,7 +458,9 @@ def run_lane(
         "provider_gate_hash": canonical_hash(gate_packet),
         "assets": {
             item["asset_id"]: {
+                **item["evaluator_contract"],
                 "files": item["files"],
+                "gate": item["gate"],
                 "gate_hash": item["gate_hash"],
             }
             for item in asset_results
