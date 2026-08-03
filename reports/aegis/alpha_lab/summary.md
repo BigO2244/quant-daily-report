@@ -7,6 +7,7 @@ Mission: mission_1ace1edede9d73889ccf (`APPROVAL_REQUIRED`)
 - Research families: 14
 - Explicit blockers: 8
 - Evidence-backed owner decisions: 3
+- Decision brief: `reports/aegis/alpha_lab/decision_brief.md`
 - Source: pinned PR #160 governance files
 - Scope: research planning and review only; no trading, allocation, execution, scheduling, or capital authority.
 
