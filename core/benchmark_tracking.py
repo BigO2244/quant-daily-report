@@ -321,9 +321,27 @@ def update_benchmark_vs_spy(
     if not trade_date:
         trade_date = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
 
+    benchmark_path = Path(benchmark_path)
     records, existing_inception = load_benchmark_with_meta(benchmark_path)
-    workspace = Path(workspace_root) if workspace_root is not None else Path.cwd()
-    recovered_records = _recover_benchmark_records_from_run_summaries(workspace)
+
+    # Recovery is scoped to an explicitly-authorized workspace.  The canonical
+    # benchmark keeps the historical default of recovering from the current
+    # repository, but alternate output paths must not silently ingest records
+    # from that repository.  Callers using an alternate workspace can opt in by
+    # passing workspace_root.
+    workspace: Path | None
+    if workspace_root is not None:
+        workspace = Path(workspace_root)
+    elif benchmark_path.resolve() == (Path.cwd() / BENCHMARK_PATH).resolve():
+        workspace = Path.cwd()
+    else:
+        workspace = None
+
+    recovered_records = (
+        _recover_benchmark_records_from_run_summaries(workspace)
+        if workspace is not None
+        else []
+    )
     merged_records = _merge_benchmark_records(records, recovered_records)
     recovered_history = merged_records != records
     if recovered_history:
