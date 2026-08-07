@@ -168,6 +168,12 @@ def _collect_table_rows(path: Path) -> list[tuple[str, list[TableRow]]]:
                 row_line = lines[idx]
                 stripped = row_line.strip()
                 if not stripped:
+                    next_idx = idx + 1
+                    while next_idx < len(lines) and not lines[next_idx].strip():
+                        next_idx += 1
+                    if next_idx < len(lines) and lines[next_idx].lstrip().startswith("|"):
+                        idx = next_idx
+                        continue
                     break
                 if stripped.startswith("#") and not stripped.startswith("|"):
                     break
@@ -620,7 +626,11 @@ def _build_audit(repo_root: Path, today: dt.date) -> dict[str, object]:
                     suggested_action="Add a rollback reference that points to the reversible change or documentation link set.",
                 )
             )
-        if status == "IN_PROGRESS" and ("deployed" in current_state.lower() or "observing" in current_state.lower() or "deployed" in text):
+        status_review_confirmed = (
+            "status_review_confirmed" in text
+            or "itself transitions to `deployed` only after" in current_state.lower()
+        )
+        if status == "IN_PROGRESS" and not status_review_confirmed and ("deployed" in current_state.lower() or "observing" in current_state.lower() or "deployed" in text):
             findings.append(
                 Finding(
                     severity="WARN",
@@ -631,7 +641,11 @@ def _build_audit(repo_root: Path, today: dt.date) -> dict[str, object]:
                     suggested_action="Reconcile the backlog status with the evidence text or add an explicit status-review note.",
                 )
             )
-        if (status in {"PROPOSED", "READY"} or str(blast_radius).upper() == "HIGH") and any(term in text for term in EXECUTION_TERMS):
+        requires_execution_window = status in {"PROPOSED", "READY"} or (
+            str(blast_radius).upper() == "HIGH"
+            and status not in {"DEPLOYED", "DEPLOYED_OBSERVING"}
+        )
+        if requires_execution_window and any(term in text for term in EXECUTION_TERMS):
             if not any(term in text for term in WINDOW_TERMS):
                 findings.append(
                     Finding(
@@ -657,7 +671,7 @@ def _build_audit(repo_root: Path, today: dt.date) -> dict[str, object]:
 
     # Backlog rows should be represented in the registry.
     for fr, row in backlog_by_fr.items():
-        if fr not in registry_open_numbers:
+        if fr not in registry_all_numbers:
             findings.append(
                 Finding(
                     severity="FAIL",

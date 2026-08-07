@@ -21,7 +21,7 @@ List what Codex must not solve in this task.
 
 - `path/to/file.py`
 - `path/to/test_file.py`
-- `docs/path/to/doc.md`
+- Documentation file to update, when applicable.
 
 ## Forbidden Changes
 

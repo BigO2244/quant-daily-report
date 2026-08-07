@@ -173,6 +173,8 @@ def test_universe_unknown_family_fails_loudly(tmp_path: Path) -> None:
 
 
 def test_real_caerus_large_cap_family_certification_counts() -> None:
+    if not (DEFAULT_DATA_DIR / "security_master.csv").exists():
+        pytest.skip("certified PIT universe artifacts are not present in this checkout")
     expected = {
         "2014-01-02": 1197,
         "2020-01-02": 1243,

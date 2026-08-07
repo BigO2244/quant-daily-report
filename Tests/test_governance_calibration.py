@@ -24,6 +24,7 @@ from research.governance_calibration import (  # noqa: E402
 )
 from research.governance_maturity import build_governance_maturity  # noqa: E402
 from research.promotion_governance import build_promotion_governance  # noqa: E402
+from core.strategy_registry import active_shadow_security_selection_ids  # noqa: E402
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -270,7 +271,7 @@ def test_reclassification_shows_old_and_new_decisions(tmp_path):
     assert r["schema_version"] == SCHEMA_VERSION_RECLASSIFICATION
     assert r["available"] is True
     strategies_seen = {row["strategy"] for row in r["comparisons"]}
-    assert strategies_seen == {"caerus_polaris", "caerus_orion", "caerus_lyra"}
+    assert strategies_seen == set(active_shadow_security_selection_ids())
     # On the synthetic clean inputs every strategy has 5 or 10 positions.
     # Under OLD fixed caps (0.10 / 0.40 / 0.60), Orion (5 positions × 0.20)
     # and Lyra (5 positions × 0.20) would have been blocked on max_name and

@@ -250,7 +250,12 @@ def ensure_price_panel(
         local_panel = load_local_price_panel(symbols=symbols, start_date=start_date, end_date=end_date)
         local_panel = apply_provider_aliases(local_panel, aliased_tickers)
 
-    panel = pd.concat([cache_panel, local_panel], ignore_index=True) if not cache_panel.empty or not local_panel.empty else pd.DataFrame()
+    if cache_panel.empty:
+        panel = local_panel.copy()
+    elif local_panel.empty:
+        panel = cache_panel.copy()
+    else:
+        panel = pd.concat([cache_panel, local_panel], ignore_index=True)
     if not panel.empty:
         panel = panel.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
         panel = filter_panel_window(panel, start_date=start_date, end_date=end_date)

@@ -951,11 +951,22 @@ def execute_lifecycle(
         }
         rebudget_skipped = buy_limit_skipped
 
-    final_execution_trades = pd.concat(
-        [sell_trades.copy(), rebuilt_buy_trades],
-        ignore_index=True,
-        sort=False,
-    ).reindex(columns=executable_trades.columns if executable_trades is not None else None)
+    final_trade_frames = [
+        frame
+        for frame in (sell_trades.copy(), rebuilt_buy_trades)
+        if not frame.empty
+    ]
+    if final_trade_frames:
+        final_execution_trades = pd.concat(
+            final_trade_frames,
+            ignore_index=True,
+            sort=False,
+        )
+    else:
+        final_execution_trades = pd.DataFrame()
+    final_execution_trades = final_execution_trades.reindex(
+        columns=executable_trades.columns if executable_trades is not None else None
+    )
     final_buy_orders = _build_shadow_orders(
         rebuilt_buy_trades,
         request.run_id,

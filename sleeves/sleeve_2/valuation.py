@@ -293,7 +293,11 @@ def compute_pe_ratios(
 
         if new_rows:
             new_df = pd.DataFrame(new_rows)
-            cache_df = pd.concat([cache_df, new_df], ignore_index=True)
+            cache_df = (
+                new_df.copy()
+                if cache_df.empty
+                else pd.concat([cache_df, new_df], ignore_index=True)
+            )
             _save_pe_cache(cache_df)
 
     # ── Compute TTM P/E as of backtest date ──────────────────────────────

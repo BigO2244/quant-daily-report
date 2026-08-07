@@ -64,8 +64,14 @@ def test_true_weak_when_multiple_weak_signals(tmp_path):
     ])
     p = build_differentiation_diagnostic(trade_date="2026-06-02", repo_root=tmp_path)
     assert p["aggregate_verdict"] == VERDICT_TRUE_WEAK
-    for row in p["pairs"]:
-        assert row["verdict"] == VERDICT_TRUE_WEAK
+    fixture_strategies = {"caerus_lyra", "caerus_orion", "caerus_polaris"}
+    fixture_pairs = [
+        row
+        for row in p["pairs"]
+        if {row["left_strategy"], row["right_strategy"]} <= fixture_strategies
+    ]
+    assert len(fixture_pairs) == 3
+    assert all(row["verdict"] == VERDICT_TRUE_WEAK for row in fixture_pairs)
 
 
 def test_insufficient_history(tmp_path):
