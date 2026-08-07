@@ -186,6 +186,43 @@ class TestUpdateBenchmarkVsSpy:
         assert len(data["records"]) == 1
         assert data["records"][0]["date"] == "2026-03-18"
 
+    def test_custom_benchmark_path_does_not_recover_from_current_workspace(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        run_root = workspace / "outputs" / "runs" / "2026-03-17T093500-0400_abc123"
+        run_root.mkdir(parents=True)
+        (run_root / "trading_day_summary.json").write_text(
+            json.dumps(
+                {
+                    "trade_date": "2026-03-17",
+                    "generated_at": "2026-03-17T13:35:00+00:00",
+                    "broker_context": {"broker_preflight_equity": 99000.0},
+                    "benchmark": {"spy_value": 495.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(workspace)
+
+        broker = tmp_path / "isolated" / "broker_snapshot_latest.json"
+        benchmark = tmp_path / "isolated" / "benchmark_vs_spy.json"
+        broker.parent.mkdir(parents=True)
+        _write_broker(broker, 100000.0)
+
+        with _mock_spy(500.0):
+            result = update_benchmark_vs_spy(
+                trade_date="2026-03-18",
+                broker_snapshot_path=broker,
+                benchmark_path=benchmark,
+            )
+
+        assert result is not None
+        data = json.loads(benchmark.read_text(encoding="utf-8"))
+        assert [record["date"] for record in data["records"]] == ["2026-03-18"]
+
     def test_append_new_day(self, tmp_paths) -> None:
         broker, benchmark = tmp_paths
         _write_broker(broker, 101000.0)
