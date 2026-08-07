@@ -142,6 +142,9 @@ class ExecutionRequest:
     rebudget_total_equity: float | None = None
     artifact_expectations: Mapping[str, Any] = field(default_factory=dict)
     capital_budget_override: Mapping[str, Any] = field(default_factory=dict)
+    # Migrated authority path: when present, Trader must use these approved
+    # targets exactly and may not discover or substitute a target source.
+    approved_execution_package: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,32 @@ def compute_transition_trades(
     """Compute paper's transition trade frame without submitting orders."""
 
     cfg = config.paper_config
+    if request.approved_execution_package is not None:
+        from authority.contracts import AuthorityContractError
+        from authority.pipeline import execution_package_from_dict
+
+        try:
+            package = execution_package_from_dict(request.approved_execution_package)
+        except AuthorityContractError as exc:
+            raise ValueError(f"invalid approved execution package: {exc}") from exc
+        raw_trades = _precomputed_trades_frame(
+            tuple(dict(row) for row in package.approved_target_rows)
+        )
+        return raw_trades, {
+            "source": "approved_execution_package",
+            "precomputed_trade_plan_used": True,
+            "authority_package_id": package.package_id,
+            "authority_package_hash": package.content_hash,
+            "risk_package_id": package.risk_package_id,
+            "risk_hash": package.risk_hash,
+            "deadband_skipped": [],
+            "deadband_skipped_count": 0,
+            "cash_sweep_added_shares": 0,
+            "cash_sweep_iterations": 0,
+            "cash_sweep_tickers": [],
+            "cash_sweep_remaining_dollars": None,
+            "target_cash_weight": float(request.target_cash_weight),
+        }
     if request.precomputed_trade_plan_used or request.precomputed_trades:
         raw_trades = _precomputed_trades_frame(request.precomputed_trades)
         trade_meta: dict[str, Any] = {
@@ -381,7 +410,7 @@ def _precomputed_trades_frame(rows: tuple[dict[str, Any], ...]) -> pd.DataFrame:
     cols = ["ticker", "side", "shares", "price", "slippage_cost", "notional", "reason"]
     normalized: list[dict[str, Any]] = []
     for row in rows:
-        ticker = str(row.get("ticker") or "").upper()
+        ticker = str(row.get("ticker") or row.get("symbol") or "").upper()
         side = str(row.get("side") or "").upper()
         shares = abs(_safe_float(row.get("shares") or row.get("quantity"), 0.0))
         price = _safe_float(row.get("price") or row.get("entry_price"), 0.0)
