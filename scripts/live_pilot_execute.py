@@ -719,6 +719,11 @@ def _build_core_request(
         planning_account=planning_account,
         run_id=run_id,
         price_basis="live_broker_snapshot",
+        approved_execution_package=(
+            plan.get("approved_execution_package")
+            if isinstance(plan.get("approved_execution_package"), Mapping)
+            else None
+        ),
     )
     return request, malformed
 

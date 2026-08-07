@@ -26,6 +26,7 @@ def execution_package_from_dict(payload: Mapping[str, Any]) -> ExecutionPackage:
         trade_date=str(payload.get("trade_date") or ""),
         risk_package_id=str(payload.get("risk_package_id") or ""),
         risk_hash=str(payload.get("risk_hash") or ""),
+        approved_cash_weight=payload.get("approved_cash_weight"),
         approved_target_rows=tuple(rows),
         source_refs=tuple(payload.get("source_refs") or ()),
     )
@@ -42,6 +43,7 @@ def execution_package_from_risk(risk: RiskPackage) -> ExecutionPackage:
         trade_date=risk.trade_date,
         risk_package_id=risk.package_id,
         risk_hash=risk.content_hash,
+        approved_cash_weight=risk.approved_cash_weight,
         approved_target_rows=risk.approved_target_rows,
         source_refs=(*risk.source_refs, f"risk:{risk.package_id}"),
     )
@@ -82,7 +84,7 @@ def wrap_precompute_payload(
 ) -> tuple[EvidencePackage, DecisionPackage, RiskPackage, ExecutionPackage]:
     """Wrap an existing precompute payload without recomputing its targets.
 
-    The payload must explicitly carry ``target_portfolio`` or ``trades``. A
+    The payload must explicitly carry portfolio target weights. A
     downstream component cannot silently recover targets from another source.
     """
     trade_date = str(payload.get("trade_date") or "").strip()
@@ -92,9 +94,16 @@ def wrap_precompute_payload(
     if raw_targets is None:
         raw_targets = payload.get("target_rows")
     if raw_targets is None:
-        raw_targets = payload.get("trades")
+        raw_targets = payload.get("signals")
+    if raw_targets is None:
+        candidate_trades = payload.get("trades")
+        if isinstance(candidate_trades, list) and all(
+            isinstance(row, Mapping) and "target_weight" in row
+            for row in candidate_trades
+        ):
+            raw_targets = candidate_trades
     if not isinstance(raw_targets, list):
-        raise AuthorityContractError("precompute payload lacks explicit target_portfolio/trades")
+        raise AuthorityContractError("precompute payload lacks explicit portfolio targets")
     observations = payload.get("evidence") or payload.get("signals") or raw_targets
     if not isinstance(observations, list):
         observations = raw_targets
@@ -110,6 +119,7 @@ def wrap_precompute_payload(
         evidence=evidence,
         target_rows=raw_targets,
         source_refs=evidence_refs,
+        target_cash_weight=float(payload.get("cash_target_weight") or 0.0),
     )
     risk = build_risk_package(
         package_id=risk_id,
@@ -117,5 +127,6 @@ def wrap_precompute_payload(
         approved_target_rows=decision.target_rows,
         constraints=risk_constraints or {},
         source_refs=(f"decision:{decision.package_id}",),
+        approved_cash_weight=float(payload.get("cash_target_weight") or 0.0),
     )
     return evidence, decision, risk, execution_package_from_risk(risk)

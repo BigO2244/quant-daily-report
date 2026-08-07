@@ -51,6 +51,16 @@ def _validate_trade_date(value: str) -> None:
         raise AuthorityContractError(f"invalid trade_date: {value!r}") from exc
 
 
+def _cash_weight(value: Any, field_name: str) -> float:
+    try:
+        weight = float(value)
+    except (TypeError, ValueError) as exc:
+        raise AuthorityContractError(f"{field_name} must be numeric") from exc
+    if not 0.0 <= weight <= 1.0:
+        raise AuthorityContractError(f"{field_name} must be between 0 and 1")
+    return weight
+
+
 def _rows(rows: Sequence[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ...]:
     normalized = []
     for raw in rows:
@@ -114,6 +124,7 @@ class DecisionPackage:
     evidence_package_id: str
     evidence_hash: str
     authority: str
+    target_cash_weight: float
     target_rows: tuple[Mapping[str, Any], ...]
     source_refs: tuple[str, ...]
     content_hash: str = field(init=False)
@@ -126,6 +137,7 @@ class DecisionPackage:
         if not self.package_id or not self.evidence_package_id or not self.evidence_hash:
             raise AuthorityContractError("decision lineage fields are required")
         _validate_trade_date(self.trade_date)
+        object.__setattr__(self, "target_cash_weight", _cash_weight(self.target_cash_weight, "target_cash_weight"))
         object.__setattr__(self, "target_rows", _rows(self.target_rows))
         object.__setattr__(self, "source_refs", _refs(self.source_refs))
         object.__setattr__(self, "content_hash", _hash(self.to_dict(include_hash=False)))
@@ -138,6 +150,7 @@ class DecisionPackage:
             "evidence_package_id": self.evidence_package_id,
             "evidence_hash": self.evidence_hash,
             "authority": self.authority,
+            "target_cash_weight": self.target_cash_weight,
             "target_rows": [_thaw(row) for row in self.target_rows],
             "source_refs": list(self.source_refs),
         }
@@ -153,6 +166,7 @@ class RiskPackage:
     trade_date: str
     decision_package_id: str
     decision_hash: str
+    approved_cash_weight: float
     approved_target_rows: tuple[Mapping[str, Any], ...]
     constraints: Mapping[str, Any]
     source_refs: tuple[str, ...]
@@ -164,6 +178,7 @@ class RiskPackage:
         if not self.decision_package_id or not self.decision_hash:
             raise AuthorityContractError("risk package must bind to Decision")
         _validate_trade_date(self.trade_date)
+        object.__setattr__(self, "approved_cash_weight", _cash_weight(self.approved_cash_weight, "approved_cash_weight"))
         object.__setattr__(self, "approved_target_rows", _rows(self.approved_target_rows))
         object.__setattr__(self, "constraints", _freeze(self.constraints))
         object.__setattr__(self, "source_refs", _refs(self.source_refs))
@@ -176,6 +191,7 @@ class RiskPackage:
             "trade_date": self.trade_date,
             "decision_package_id": self.decision_package_id,
             "decision_hash": self.decision_hash,
+            "approved_cash_weight": self.approved_cash_weight,
             "approved_target_rows": [_thaw(row) for row in self.approved_target_rows],
             "constraints": _thaw(self.constraints),
             "source_refs": list(self.source_refs),
@@ -192,6 +208,7 @@ class ExecutionPackage:
     trade_date: str
     risk_package_id: str
     risk_hash: str
+    approved_cash_weight: float
     approved_target_rows: tuple[Mapping[str, Any], ...]
     source_refs: tuple[str, ...]
     content_hash: str = field(init=False)
@@ -202,6 +219,7 @@ class ExecutionPackage:
         if not self.risk_package_id or not self.risk_hash:
             raise AuthorityContractError("execution package must bind to Risk")
         _validate_trade_date(self.trade_date)
+        object.__setattr__(self, "approved_cash_weight", _cash_weight(self.approved_cash_weight, "approved_cash_weight"))
         object.__setattr__(self, "approved_target_rows", _rows(self.approved_target_rows))
         object.__setattr__(self, "source_refs", _refs(self.source_refs))
         object.__setattr__(self, "content_hash", _hash(self.to_dict(include_hash=False)))
@@ -213,6 +231,7 @@ class ExecutionPackage:
             "trade_date": self.trade_date,
             "risk_package_id": self.risk_package_id,
             "risk_hash": self.risk_hash,
+            "approved_cash_weight": self.approved_cash_weight,
             "approved_target_rows": [_thaw(row) for row in self.approved_target_rows],
             "source_refs": list(self.source_refs),
         }
@@ -261,13 +280,13 @@ def build_evidence_package(*, package_id: str, trade_date: str, source_refs: Seq
     return EvidencePackage(EVIDENCE_SCHEMA_VERSION, package_id, trade_date, tuple(source_refs), tuple(dict(r) for r in observations))
 
 
-def build_decision_package(*, package_id: str, trade_date: str, evidence: EvidencePackage, target_rows: Sequence[Mapping[str, Any]], source_refs: Sequence[str]) -> DecisionPackage:
+def build_decision_package(*, package_id: str, trade_date: str, evidence: EvidencePackage, target_rows: Sequence[Mapping[str, Any]], source_refs: Sequence[str], target_cash_weight: float = 0.0) -> DecisionPackage:
     if trade_date != evidence.trade_date:
         raise AuthorityContractError("Decision trade_date must match Evidence")
-    return DecisionPackage(DECISION_SCHEMA_VERSION, package_id, trade_date, evidence.package_id, evidence.content_hash, "DECISION", tuple(dict(r) for r in target_rows), tuple(source_refs))
+    return DecisionPackage(DECISION_SCHEMA_VERSION, package_id, trade_date, evidence.package_id, evidence.content_hash, "DECISION", target_cash_weight, tuple(dict(r) for r in target_rows), tuple(source_refs))
 
 
-def build_risk_package(*, package_id: str, decision: DecisionPackage, approved_target_rows: Sequence[Mapping[str, Any]], constraints: Mapping[str, Any], source_refs: Sequence[str]) -> RiskPackage:
+def build_risk_package(*, package_id: str, decision: DecisionPackage, approved_target_rows: Sequence[Mapping[str, Any]], constraints: Mapping[str, Any], source_refs: Sequence[str], approved_cash_weight: float | None = None) -> RiskPackage:
     decision_by_symbol = {str(row["symbol"]): row for row in decision.target_rows}
     approved = _rows(approved_target_rows)
     if not {row["symbol"] for row in approved}.issubset(decision_by_symbol):
@@ -290,4 +309,7 @@ def build_risk_package(*, package_id: str, decision: DecisionPackage, approved_t
                 raise AuthorityContractError(
                     f"Risk may constrain but not increase Decision {field_name}"
                 )
-    return RiskPackage(RISK_SCHEMA_VERSION, package_id, decision.trade_date, decision.package_id, decision.content_hash, approved, constraints, tuple(source_refs))
+    risk_cash = decision.target_cash_weight if approved_cash_weight is None else _cash_weight(approved_cash_weight, "approved_cash_weight")
+    if risk_cash + 1e-12 < decision.target_cash_weight:
+        raise AuthorityContractError("Risk may constrain but not reduce Decision cash weight")
+    return RiskPackage(RISK_SCHEMA_VERSION, package_id, decision.trade_date, decision.package_id, decision.content_hash, risk_cash, approved, constraints, tuple(source_refs))
