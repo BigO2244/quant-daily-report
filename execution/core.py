@@ -187,23 +187,50 @@ def compute_transition_trades(
             package = execution_package_from_dict(request.approved_execution_package)
         except AuthorityContractError as exc:
             raise ValueError(f"invalid approved execution package: {exc}") from exc
-        raw_trades = _precomputed_trades_frame(
-            tuple(dict(row) for row in package.approved_target_rows)
+        approved_rows = [dict(row) for row in package.approved_target_rows]
+        if approved_rows and not all("target_weight" in row for row in approved_rows):
+            raise ValueError("approved execution package rows must contain target_weight")
+        approved_targets = pd.DataFrame(
+            [
+                {
+                    "ticker": str(row.get("symbol") or row.get("ticker") or "").upper(),
+                    "sleeve": str(row.get("sleeve") or "approved_execution_package"),
+                    "target_weight": float(row.get("target_weight") or 0.0),
+                }
+                for row in approved_rows
+            ],
+            columns=["ticker", "sleeve", "target_weight"],
+        )
+        approved_prices = (
+            request.prices.copy()
+            if isinstance(request.prices, pd.Series)
+            else pd.Series(dtype=float)
+        )
+        for row in approved_rows:
+            symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
+            price = _safe_float(row.get("price") or row.get("entry_price"), 0.0)
+            if symbol and price > 0.0:
+                approved_prices.loc[symbol] = price
+        from paper import paper_broker as paper_broker_module
+
+        raw_trades, base_meta = paper_broker_module.build_rebalance_trades(
+            holdings=request.holdings,
+            targets=approved_targets,
+            prices=approved_prices,
+            total_equity=float(request.total_equity),
+            starting_cash=float(request.starting_cash),
+            target_cash_weight=float(package.approved_cash_weight),
+            cfg=cfg,
         )
         return raw_trades, {
+            **dict(base_meta),
             "source": "approved_execution_package",
-            "precomputed_trade_plan_used": True,
+            "precomputed_trade_plan_used": False,
             "authority_package_id": package.package_id,
             "authority_package_hash": package.content_hash,
             "risk_package_id": package.risk_package_id,
             "risk_hash": package.risk_hash,
-            "deadband_skipped": [],
-            "deadband_skipped_count": 0,
-            "cash_sweep_added_shares": 0,
-            "cash_sweep_iterations": 0,
-            "cash_sweep_tickers": [],
-            "cash_sweep_remaining_dollars": None,
-            "target_cash_weight": float(request.target_cash_weight),
+            "target_cash_weight": float(package.approved_cash_weight),
         }
     if request.precomputed_trade_plan_used or request.precomputed_trades:
         raw_trades = _precomputed_trades_frame(request.precomputed_trades)

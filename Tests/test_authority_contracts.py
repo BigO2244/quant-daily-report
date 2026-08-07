@@ -64,6 +64,20 @@ def test_risk_cannot_reverse_or_increase_decision_targets():
         )
 
 
+def test_risk_cannot_reduce_decision_cash_reserve():
+    rows = [{"symbol": "AAPL", "target_weight": 0.8}]
+    evidence = build_evidence_package(
+        package_id="evidence:test", trade_date="2026-08-07", source_refs=["signals.json"], observations=rows
+    )
+    decision = build_decision_package(
+        package_id="decision:test", trade_date="2026-08-07", evidence=evidence,
+        target_rows=rows, target_cash_weight=0.2, source_refs=["signals.json"],
+    )
+    with pytest.raises(AuthorityContractError, match="not reduce"):
+        build_risk_package(
+            package_id="risk:test", decision=decision, approved_target_rows=rows,
+            approved_cash_weight=0.1, constraints={}, source_refs=["decision:decision:test"],
+        )
 def test_package_rows_are_deeply_immutable():
     evidence = build_evidence_package(
         package_id="evidence:test", trade_date="2026-08-07", source_refs=["signals.json"],
@@ -77,7 +91,7 @@ def test_package_rows_are_deeply_immutable():
 
 def test_wrap_precompute_requires_explicit_targets_and_auditor_is_read_only():
     evidence, decision, risk, execution = wrap_precompute_payload(
-        {"trade_date": "2026-08-07", "trades": _rows()},
+        {"trade_date": "2026-08-07", "target_portfolio": _rows()},
         evidence_refs=["outputs/precompute/2026-08-07/signals.json"],
         decision_id="decision:2026-08-07",
         risk_id="risk:2026-08-07",

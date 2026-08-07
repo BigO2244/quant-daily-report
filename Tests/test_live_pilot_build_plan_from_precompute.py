@@ -103,6 +103,11 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     tp = plan["target_portfolio"]
     assert {r["symbol"] for r in tp} == {"AAPL", "MSFT", "JNJ"}
     assert all(r["price"] > 0 for r in tp)
+    approved = plan["approved_execution_package"]
+    assert approved["schema_version"] == "caerus.execution.v1"
+    assert approved["approved_target_rows"] == tp
+    assert approved["approved_cash_weight"] == pytest.approx(plan["cash_target_weight"])
+    assert all(Path(path).exists() for path in plan["authority_package_paths"].values())
     # The shared temporary pilot cap clips AAPL to 30%; unclassified sector-cap
     # behavior is unchanged and remains outside this guardrail change.
     assert tp[0]["symbol"] == "AAPL"

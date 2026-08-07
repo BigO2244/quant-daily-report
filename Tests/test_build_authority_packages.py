@@ -9,7 +9,8 @@ def test_build_authority_packages_cli(tmp_path):
     payload = tmp_path / "payload.json"
     payload.write_text(json.dumps({
         "trade_date": "2026-08-07",
-        "trades": [{"symbol": "AAPL", "side": "BUY", "shares": 1, "price": 100}],
+        "target_portfolio": [{"symbol": "AAPL", "target_weight": 0.2, "price": 100}],
+        "cash_target_weight": 0.8,
     }))
     out = tmp_path / "authority"
     result = subprocess.run(

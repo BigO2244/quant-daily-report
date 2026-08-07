@@ -541,6 +541,66 @@ def build_live_pilot_plan(
             risk_controls=result.to_artifact(),
         )
 
+    # Canonical authority chain. Alpha/precompute supplies evidence; Decision
+    # owns the original target; Risk may only reduce it; Trader receives the
+    # hash-verified risk-approved target package.
+    from authority.contracts import (
+        build_decision_package,
+        build_evidence_package,
+        build_risk_package,
+    )
+    from authority.pipeline import execution_package_from_risk
+
+    lane_id = str(lane or "manual")
+    authority_stem = f"{trade_date}:{lane_id}:{approved_sleeve}"
+    decision_target_rows = [
+        {
+            "symbol": _clean_symbol(row.get("ticker")),
+            "sleeve": str(row.get("sleeve") or ""),
+            "target_weight": float(row.get("target_weight") or 0.0),
+        }
+        for _, row in targets.iterrows()
+    ]
+    evidence = build_evidence_package(
+        package_id=f"evidence:{authority_stem}",
+        trade_date=trade_date,
+        source_refs=(str(signals_path), str(payload_path)),
+        observations=decision_target_rows,
+    )
+    decision = build_decision_package(
+        package_id=f"decision:{authority_stem}",
+        trade_date=trade_date,
+        evidence=evidence,
+        target_rows=decision_target_rows,
+        target_cash_weight=float(cash_target_weight),
+        source_refs=(str(signals_path), str(payload_path)),
+    )
+    risk = build_risk_package(
+        package_id=f"risk:{authority_stem}",
+        decision=decision,
+        approved_target_rows=target_portfolio,
+        approved_cash_weight=float(result.cash_target_weight),
+        constraints=result.to_artifact(),
+        source_refs=(f"decision:{decision.package_id}",),
+    )
+    execution = execution_package_from_risk(risk)
+    authority_dir = output_dir / "authority" / trade_date
+    authority_paths = {
+        "evidence": authority_dir / "evidence_package.json",
+        "decision": authority_dir / "decision_package.json",
+        "risk": authority_dir / "risk_package.json",
+        "execution": authority_dir / "execution_package.json",
+    }
+    authority_payloads = {
+        "evidence": evidence.to_dict(),
+        "decision": decision.to_dict(),
+        "risk": risk.to_dict(),
+        "execution": execution.to_dict(),
+    }
+    authority_dir.mkdir(parents=True, exist_ok=True)
+    for name, path in authority_paths.items():
+        _write_json(path, authority_payloads[name])
+
     plan = _plan_scaffold(
         trade_date=trade_date,
         approved_sleeve=approved_sleeve,
@@ -568,6 +628,10 @@ def build_live_pilot_plan(
                 "reason_code": "lane_not_supplied_to_builder",
             },
             "paper_recovery_policy": recovery_policy_meta,
+            "approved_execution_package": execution.to_dict(),
+            "authority_package_paths": {
+                name: str(path) for name, path in authority_paths.items()
+            },
         }
     )
 
