@@ -232,6 +232,89 @@ LIVE_PILOT_SETTLED_CASH_LOOKBACK_ENV = "CAERUS_LIVE_PILOT_SETTLED_CASH_ORDER_LOO
 LIVE_PILOT_SETTLED_CASH_LOOKBACK_DEFAULT = 100
 LIVE_PILOT_GFV_SETTLED_CASH_UNAVAILABLE = "live_pilot_gfv_settled_cash_unavailable"
 LIVE_PILOT_GFV_SELL_OF_UNSETTLED_ACQUISITION = "live_pilot_gfv_sell_of_unsettled_acquisition"
+LIVE_PILOT_FRACTIONAL_POLICY_MISMATCH = "live_pilot_fractional_policy_mismatch"
+LIVE_PILOT_FRACTIONAL_POLICY_INVALID = "live_pilot_fractional_policy_invalid"
+
+_TRUE_POLICY_VALUES = frozenset({"1", "true", "yes", "y", "on"})
+_FALSE_POLICY_VALUES = frozenset({"0", "false", "no", "n", "off"})
+
+
+def _parse_optional_policy_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in _TRUE_POLICY_VALUES:
+        return True
+    if text in _FALSE_POLICY_VALUES:
+        return False
+    return None
+
+
+def _resolve_fractional_policy(
+    plan: Mapping[str, Any],
+    env: Mapping[str, str],
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Resolve one immutable fractional policy for dry-run and submission.
+
+    Versioned plans produced by the current builder carry ``allow_fractional``.
+    That declared value is authoritative. A contradictory runtime override must
+    fail closed instead of silently changing target quantities after a clean dry
+    run. Legacy plans without the field retain the historical env/default-false
+    behavior.
+    """
+
+    env_name = "CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"
+    plan_declared = "allow_fractional" in plan
+    plan_value = _parse_optional_policy_bool(plan.get("allow_fractional")) if plan_declared else None
+    env_raw = env.get(env_name)
+    env_declared = env_raw is not None and str(env_raw).strip() != ""
+    env_value = _parse_optional_policy_bool(env_raw) if env_declared else None
+
+    metadata: dict[str, Any] = {
+        "plan_allow_fractional_declared": plan_declared,
+        "plan_allow_fractional": plan_value,
+        "runtime_allow_fractional_declared": env_declared,
+        "runtime_allow_fractional": env_value,
+    }
+    if plan_declared and plan_value is None:
+        metadata.update(
+            {
+                "fractional_policy_status": "INVALID",
+                "fractional_policy_source": "plan",
+                "effective_allow_fractional": None,
+            }
+        )
+        return False, LIVE_PILOT_FRACTIONAL_POLICY_INVALID, metadata
+    if env_declared and env_value is None:
+        metadata.update(
+            {
+                "fractional_policy_status": "INVALID",
+                "fractional_policy_source": "runtime",
+                "effective_allow_fractional": None,
+            }
+        )
+        return False, LIVE_PILOT_FRACTIONAL_POLICY_INVALID, metadata
+    if plan_declared and env_declared and plan_value != env_value:
+        metadata.update(
+            {
+                "fractional_policy_status": "MISMATCH",
+                "fractional_policy_source": "plan",
+                "effective_allow_fractional": plan_value,
+            }
+        )
+        return bool(plan_value), LIVE_PILOT_FRACTIONAL_POLICY_MISMATCH, metadata
+
+    effective = bool(plan_value if plan_declared else env_value if env_declared else False)
+    metadata.update(
+        {
+            "fractional_policy_status": "PASS",
+            "fractional_policy_source": "plan" if plan_declared else "runtime_or_default",
+            "effective_allow_fractional": effective,
+        }
+    )
+    return effective, None, metadata
 
 # Machine-readable halt-state convergence contract. Every halted run records
 # whether the NEXT scheduled run is expected to self-heal (the next plan is
@@ -2376,6 +2459,7 @@ def _run_live_pilot_core_path(
     trade_date: str,
     output_root: Path | str,
     now_et: dt.datetime | None,
+    allow_fractional: bool,
 ) -> dict[str, Any]:
     planning_equity_cap = _finite_float(env.get("CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP"))
     request, malformed = _build_core_request(
@@ -2444,8 +2528,7 @@ def _run_live_pilot_core_path(
         fractional_sell_min_trade_usd = 1.0
     config = live_pilot_execution_config(
         approved_cap_usd=gate.capital_cap_usd,
-        allow_fractional=str(env.get("CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL") or "").strip().lower()
-        in {"1", "true", "yes", "y", "on"},
+        allow_fractional=bool(allow_fractional),
         allow_fractional_sells=paper_fractional_exit_enabled,
         fractional_sell_min_trade_usd=float(fractional_sell_min_trade_usd),
         max_orders=int(gate.max_orders or 1),
@@ -3278,6 +3361,11 @@ def run_live_pilot(
     preflight["trade_date"] = trade_date
     preflight["generated_at"] = _now_utc()
     preflight["orders_submitted"] = 0
+    allow_fractional, fractional_policy_error, fractional_policy = _resolve_fractional_policy(
+        plan,
+        environ,
+    )
+    preflight.update(fractional_policy)
     _write_json(run_root / "live_pilot_preflight.json", preflight)
 
     payload = {
@@ -3295,6 +3383,7 @@ def run_live_pilot(
         "order_policy": LIVE_PILOT_ENTRY_EXECUTION_POLICY,
         "entry_execution_policy": LIVE_PILOT_ENTRY_EXECUTION_POLICY,
         "entry_escalation_session_limit": LIVE_PILOT_ENTRY_ESCALATION_SESSION_LIMIT,
+        **fractional_policy,
     }
     _write_json(run_root / "live_pilot_execution_payload.json", payload)
 
@@ -3306,6 +3395,20 @@ def run_live_pilot(
             env=environ,
             reason_code=gate.reason_code,
             operator_action=gate.operator_action,
+            preflight=preflight,
+        )
+
+    if fractional_policy_error:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code=fractional_policy_error,
+            operator_action=(
+                "Make CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL match the immutable plan "
+                "allow_fractional policy, then repeat the dry run before submission."
+            ),
             preflight=preflight,
         )
 
@@ -3442,6 +3545,7 @@ def run_live_pilot(
         trade_date=trade_date,
         output_root=output_root,
         now_et=now_et,
+        allow_fractional=allow_fractional,
     )
 
 
