@@ -64,17 +64,19 @@ def test_argo_phase_b_is_advisory_only_no_runtime_change(tmp_path: Path) -> None
     assert "no retirement" in payload["explicit_non_goals"]
 
 
-def test_argo_phase_b_forces_phoenix_as_top_research_priority(tmp_path: Path) -> None:
+def test_argo_phase_b_prioritizes_cassiopeia_after_phoenix_capacity_failure(tmp_path: Path) -> None:
     _base_fixture(tmp_path)
 
     payload = build_argo_phase_b_research_priority(trade_date="2026-06-17", repo_root=tmp_path, write=False)
 
     ranking = payload["research_priority_ranking"]
-    assert ranking[0]["sleeve_id"] == "phoenix"
-    assert ranking[0]["priority_classification"] == "BLOCKED_EXTERNAL"
+    assert ranking[0]["sleeve_id"] == "cassiopeia"
+    assert ranking[0]["priority_classification"] == "BLOCKED_DATA"
     assert ranking[0]["research_priority_rank"] == 1
-    assert "pit_liquidity_ohlcv_unavailable" in ranking[0]["blockers"]
-    assert payload["highest_roi_research_task"]["sleeve_id"] == "phoenix"
+    assert "event_contract_missing" in ranking[0]["blockers"]
+    phoenix = next(row for row in ranking if row["sleeve_id"] == "phoenix")
+    assert "capacity_below_5pct_adv_policy" in phoenix["blockers"]
+    assert payload["highest_roi_research_task"]["sleeve_id"] == "cassiopeia"
 
 
 def test_argo_phase_b_marks_lyra_independent_research_as_stop_work(tmp_path: Path) -> None:

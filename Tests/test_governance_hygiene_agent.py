@@ -82,6 +82,26 @@ def test_extract_fr_number_supports_suffixes() -> None:
     assert gha._extract_fr_number("FR-036d MCP conformance audit") == "FR-036d"
 
 
+def test_collect_table_rows_allows_blank_lines_between_rows(tmp_path: Path) -> None:
+    table = tmp_path / "table.md"
+    _write(
+        table,
+        """| FR | Title | Registry status |
+|---|---|---|
+| FR-001 | First | READY |
+
+| FR-002 | Second | RESEARCH_ONLY |
+
+## Next Section
+""",
+    )
+
+    tables = gha._collect_table_rows(table)
+
+    assert len(tables) == 1
+    assert [row.cells[0] for row in tables[0][1]] == ["FR-001", "FR-002"]
+
+
 def test_detects_registry_path_duplicate_and_archive_warning(tmp_path: Path) -> None:
     _fixture_repo(tmp_path)
 

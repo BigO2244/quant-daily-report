@@ -9,7 +9,7 @@ def _rsi(close: pd.Series, window: int) -> pd.Series:
     losses = (-delta).clip(lower=0.0)
     avg_gain = gains.rolling(window, min_periods=window).mean()
     avg_loss = losses.rolling(window, min_periods=window).mean()
-    rs = avg_gain / avg_loss.replace(0.0, pd.NA)
+    rs = avg_gain / avg_loss.mask(avg_loss.eq(0.0))
     rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi.fillna(50.0)
 

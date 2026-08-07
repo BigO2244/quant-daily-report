@@ -376,9 +376,11 @@
   "inputs_summary": {
     "config": {
       "allow_fractional": true,
+      "allow_fractional_sells": false,
       "benchmark_ticker": "SPY",
       "cash_buffer_bps": 0.0,
       "cash_target_weight_default": 0.0875652909,
+      "fractional_sell_min_trade_dollars": 1.0,
       "halt_on_data_error": true,
       "initial_equity": 10673.46,
       "market_cutoff_time_et": "15:45",

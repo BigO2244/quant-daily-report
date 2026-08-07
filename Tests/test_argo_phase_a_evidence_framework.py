@@ -36,15 +36,15 @@ def _base_fixture(root: Path) -> None:
     )
 
 
-def test_argo_phase_a_marks_phoenix_external_dependency_blocked(tmp_path: Path) -> None:
+def test_argo_phase_a_marks_pending_phoenix_liquidity_not_ready(tmp_path: Path) -> None:
     _base_fixture(tmp_path)
 
     payload = build_argo_phase_a_evidence_framework(trade_date="2026-06-17", repo_root=tmp_path, write=False)
 
     phoenix = next(row for row in payload["sleeve_scores"] if row["sleeve_id"] == "phoenix")
-    assert phoenix["classification"] == "EXTERNAL_DEPENDENCY_BLOCKED"
-    assert "nasdaq_data_link_qelx06_temporary_disablement" in phoenix["blockers"]
-    assert "pit_liquidity_ohlcv_unavailable" in phoenix["blockers"]
+    assert phoenix["classification"] == "NOT_READY"
+    assert phoenix["blockers"] == ["pit_liquidity_source_missing"]
+    assert all("qelx06" not in blocker.lower() for blocker in phoenix["blockers"])
 
 
 def test_argo_phase_a_is_research_only_no_runtime_change(tmp_path: Path) -> None:

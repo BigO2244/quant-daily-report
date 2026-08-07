@@ -58,16 +58,33 @@ Archived copies are retained for auditability.
 | FR-072 | Governance Hygiene Agent | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_072_governance_hygiene_agent.md` | ACTIVE | Read-only governance auditor is implemented with deterministic tests; output artifacts only, no auto-patch, auto-commit, or cron. Phase B scheduling requires separate approval. |
 | FR-073 | Sleeve Numeric Diagnostics and Cash-Routing Explainability | `DEPLOYED_OBSERVING` | `docs/governance/fr_active_backlog.md` | ACTIVE | Diagnostic-only sleeve numeric trace and cash-route explainability. Produces `outputs/runs/<RUN_ID>/audit/sleeve_numeric_trace_<sleeve_id>_<trade_date>.json` when available; no execution, allocation, sizing, ranking, or risk-threshold behavior change. |
 | FR-074 | Execution Reliability Framework | `DEPLOYED_OBSERVING` | `docs/governance/fr_active/fr_074_execution_reliability_framework.md` | ACTIVE | Phase A observe-first operational invariant framework. Produces `outputs/runs/<RUN_ID>/audit/execution_reliability_report_<TRADE_DATE>.json`, normalizes existing execution integrity, target-attainment, reconciliation, precompute, and sleeve numeric evidence, and surfaces deterministic reliability score/status in operator summary without changing strategy, sleeve, sizing, allocation, cash policy, or broker submission semantics. |
-
+| FR-076 | Reliability Historical Replay | `RESEARCH_REVIEW_COMPLETE` | `docs/governance/fr_active/fr_076_reliability_historical_replay.md` | ACTIVE | Research-only historical reliability review; no runtime or execution changes. |
+| FR-077 | Data Trust and Decision-Grade Evidence Audit | `DRAFT_RESEARCH_REVIEW` | `docs/governance/fr_active/fr_077_data_trust_and_decision_grade_evidence_audit.md` | ACTIVE | Research-only data-trust audit retained as decision evidence. |
+| FR-078 | Artifact Coverage Matrix and Required Evidence Gate | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_078_artifact_coverage_matrix_and_required_evidence_gate.md` | ACTIVE | Canonical FR-078 gate; the FR-078-to-FR-084 synthesis is supporting evidence under the same lineage. |
+| FR-079 | Evidence-Labeled Performance Rebuild | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_079_evidence_labeled_performance_rebuild.md` | ACTIVE | Research-only performance-evidence rebuild. |
+| FR-080 | Broker / Model Reconciliation Backfill | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_080_broker_model_reconciliation_backfill.md` | ACTIVE | Read-only reconciliation evidence work; no broker submission changes. |
+| FR-081 | PIT Benchmark / Universe Integrity Audit | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_081_pit_benchmark_universe_integrity_audit.md` | ACTIVE | Research-only point-in-time benchmark and universe integrity audit. |
+| FR-082 | Sleeve Promotion Evidence Gate | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_082_sleeve_promotion_evidence_gate.md` | ACTIVE | Research-only promotion evidence gate; does not promote or allocate capital. |
+| FR-083 | Reliability Coverage Hardening | `RESEARCH_REVIEW_COMPLETE_OBSERVE_FIRST` | `docs/governance/fr_active/fr_083_reliability_coverage_hardening.md` | ACTIVE | Observe-first reliability coverage review; existing execution authority remains unchanged. |
+| FR-084 | Pilot Capital Readiness Checklist | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_084_pilot_capital_readiness_checklist.md` | ACTIVE | Research-only checklist; not an authorization for live capital. |
 | FR-085 | Shadow Scorecard Publication Integrity Gates | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | Reporting-integrity publication gates for the Shadow CIO scorecard (freshness + internal-consistency). Implemented on branch `fix/scorecard-publication-gates` (draft PR #117, commit `2ee5cd5`); not yet deployed. Moves to the deployed tables after merge and observation. |
 | FR-086 | Shadow Refresh Alpha Inception Handling & NAV Restatement | `PROMOTION_READY` | `docs/governance/fr_active_backlog.md` | ACTIVE | NAV-continuity freeze root-caused to mixed/legacy-scale history; date-aware alpha inception handling + VM NAV restatement (29 rows, 2026-05-12 → 2026-06-23). Implemented on branch `fix/shadow-refresh-freeze` (draft PR #118, commit `7529c95`); not yet deployed. Moves to the deployed tables after merge and observation. |
+| FR-100 | Capital Readiness Framework and Trust Model | `DRAFT_GOVERNANCE_FRAMEWORK_NOT_CAPITAL_GATE` | `docs/governance/fr_active/fr_100_capital_readiness_framework.md` | ACTIVE | Governance framework only; does not authorize pilot or production capital. |
+| FR-101 | Decision-Grade Evidence Window Program | `RESEARCH_ONLY` | `docs/governance/fr_active/fr_101_decision_grade_evidence_window_program.md` | ACTIVE | Research-only decision-evidence window program. |
+| FR-102 | Pilot Capital Infrastructure Readiness | `RESEARCH_ONLY_IMPLEMENTATION_STARTED` | `docs/governance/fr_active/fr_102_pilot_capital_infrastructure_readiness.md` | ACTIVE | Infrastructure readiness evidence only; no live-capital authorization. |
+| FR-103 | Monday Pilot Capital Readiness Decision | `SUPERSEDED_BY_FR104_LEVEL_2_5_EVIDENCE_COLLECTION` | `docs/governance/fr_active/fr_103_monday_pilot_capital_readiness_decision.md` | SUPPORTING | Superseded decision record retained as supporting evidence for FR-104. |
+| FR-104 | LIVE_PILOT Unlock Program | `LEVEL_2_5_PILOT_EVIDENCE_COLLECTION_READY_WITH_MANUAL_APPROVAL` | `docs/governance/fr_active/fr_104_live_pilot_unlock_program.md` | ACTIVE | Manual-approval evidence lane only; tightly capped and not a general live-capital authorization. |
 
 ## FR Numbering Exceptions
 
 The following paired documents intentionally reuse FR numbers for auditability:
 
 - FR-051 / FR-056: FR-056 is a superseded archival appendix to FR-051. Keep both files for historical traceability; treat the pair as one canonical lineage.
+- FR-063: `fr_063_orion_lyra_redundancy_study.md` is the canonical active study; the archived strategy-differentiation deep dive is retained as historical supporting evidence.
 - FR-067: the Stage 0 source-comparison spec and the Vela research spec intentionally share FR-067 as paired evidence for the same FR lineage.
+- FR-068: the Orion/Lyra PIT rebaseline and Phase C disposition documents are supporting packets under the canonical PIT universe architecture recorded in the location audit.
+- FR-069: `fr_069_research_lab_modular_sleeve_architecture.md` is the canonical parent; the other FR-069 onboarding, evidence, scaffolding, readiness, parity, and sleeve-study files are supporting packets in the same program lineage.
+- FR-078: `fr_078_artifact_coverage_matrix_and_required_evidence_gate.md` is canonical; the FR-078-to-FR-084 synthesis is a supporting cross-program evidence summary.
 
 ## Active Numbering Note
 

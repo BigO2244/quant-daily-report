@@ -413,7 +413,7 @@ def build_dynamic_strategy_allocation(
     missing_strategies = [c for c in STRATEGIES if c not in nav_in_window.columns]
     nav_indexed = nav_in_window.set_index("date")
     available_nav = nav_indexed.reindex(columns=list(STRATEGIES))
-    strategy_returns = available_nav.astype(float).pct_change().dropna(how="all")
+    strategy_returns = available_nav.astype(float).pct_change(fill_method=None).dropna(how="all")
 
     reason_codes: list[str] = []
     if missing_strategies:

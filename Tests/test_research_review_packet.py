@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from core.strategy_registry import active_shadow_security_selection_ids
 from research.review_packet import build_research_review_packet
 
 
@@ -751,7 +752,7 @@ def test_tier3_sections_populate_when_artifacts_exist(tmp_path):
     final = result["sections"]["final_control_summary"]
     assert final["current_recommendation"] == "No promotion recommended"
     assert final["polaris_status"] == "BENCHMARK_CONTROL"
-    assert set(final["strategy_statuses"]) == {"caerus_polaris", "caerus_orion", "caerus_lyra"}
+    assert set(final["strategy_statuses"]) == set(active_shadow_security_selection_ids())
     assert "caerus_phoenix" not in final["strategy_statuses"]
     assert "caerus_argo" not in final["strategy_statuses"]
     markdown = (tmp_path / "outputs" / "research_review" / trade_date / "research_review.md").read_text()
@@ -784,9 +785,7 @@ def test_final_control_summary_surfaces_fixture_active_phoenix_without_overlay(t
 
     final = result["sections"]["final_control_summary"]
     assert list(final["strategy_statuses"]) == [
-        "caerus_polaris",
-        "caerus_orion",
-        "caerus_lyra",
+        *active_shadow_security_selection_ids(),
         "caerus_phoenix",
     ]
     assert final["strategy_statuses"]["caerus_phoenix"]["status"] == "HOLD"

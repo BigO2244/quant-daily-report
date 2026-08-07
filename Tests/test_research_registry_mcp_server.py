@@ -734,7 +734,7 @@ def test_execution_target_attainment_flags_reconciled_underdeployment(tmp_path: 
     assert payload["reconciled_but_target_miss"] is True
 
 
-def test_execution_target_attainment_flags_stale_pre_buy_cash_snapshot(tmp_path: Path) -> None:
+def test_execution_target_attainment_prioritizes_pending_buys_over_stale_snapshot(tmp_path: Path) -> None:
     outputs = _execution_target_attainment_fixture(
         tmp_path,
         buy_latest_status="OrderStatus.PENDING_NEW",
@@ -746,7 +746,7 @@ def test_execution_target_attainment_flags_stale_pre_buy_cash_snapshot(tmp_path:
         {"outputs_root": str(outputs), "trade_date": "2026-06-12"},
     )
 
-    assert payload["status"] == "WARN_POSTTRADE_SNAPSHOT_STALE_OR_PRE_BUY"
+    assert payload["status"] == "WARN_UNDERDEPLOYED_PENDING_BUY_FILLS"
     assert payload["actual_posttrade_cash_source"] == "posttrade_account_snapshot"
     assert payload["actual_posttrade_cash_timestamp"] == "2026-06-12T13:36:11.531954+00:00"
     assert payload["posttrade_cash_snapshot_stale"] is True
@@ -755,6 +755,7 @@ def test_execution_target_attainment_flags_stale_pre_buy_cash_snapshot(tmp_path:
     assert payload["pending_buy_count"] == 2
     assert payload["filled_buy_count"] == 0
     assert payload["buy_fill_status_source"] == "execution_results_order_lifecycle"
+    assert "posttrade cash snapshot appears stale or pre-buy" in payload["warnings"]
 
 
 def test_execution_target_attainment_fails_incomplete_rejected_buys(tmp_path: Path) -> None:

@@ -75,7 +75,11 @@ def compute_metrics(ret: pd.Series, benchmark: pd.Series) -> dict[str, float]:
     yearly = (1 + r).groupby(r.index.year).prod() - 1
     pct_positive_years = float((yearly > 0).mean()) if len(yearly) else np.nan
     b = b.reindex(r.index)
-    corr = float(r.corr(b)) if len(b.dropna()) > 1 else np.nan
+    corr = (
+        float(r.corr(b))
+        if len(b.dropna()) > 1 and r.nunique() > 1 and b.nunique() > 1
+        else np.nan
+    )
     beta = float(r.cov(b) / b.var()) if len(b.dropna()) > 1 and b.var() > 0 else np.nan
     return {
         "cagr": float(cagr),

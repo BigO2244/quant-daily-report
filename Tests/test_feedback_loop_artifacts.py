@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from core.feedback_loop_artifacts import write_feedback_loop_artifacts
+from core.strategy_registry import active_shadow_security_selection_ids
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -168,5 +169,6 @@ def test_feedback_loop_writes_compact_rolling_index(tmp_path: Path) -> None:
 
     assert "trade_date,strategy_slug,strategy,daily_return,turnover,top_3_concentration,valid_days,attribution_status,regime,learning_readiness" in csv_text
     assert payload["schema_version"] == "feedback_loop_rolling_index_v1"
-    assert payload["row_count"] == 3
-    assert {row["strategy_slug"] for row in payload["rows"]} == {"caerus_polaris", "caerus_orion", "caerus_lyra"}
+    expected_strategies = set(active_shadow_security_selection_ids())
+    assert payload["row_count"] == len(expected_strategies)
+    assert {row["strategy_slug"] for row in payload["rows"]} == expected_strategies

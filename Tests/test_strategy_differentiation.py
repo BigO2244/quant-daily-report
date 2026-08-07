@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from itertools import combinations
 from pathlib import Path
 
 import pandas as pd
 
+from core.strategy_registry import active_shadow_security_selection_ids
 from research.strategy_differentiation import build_strategy_differentiation
 from research.strategy_differentiation import build_strategy_differentiation_deep
 
@@ -12,6 +14,20 @@ from research.strategy_differentiation import build_strategy_differentiation_dee
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _find_pair(payload: dict, left: str, right: str) -> dict:
+    expected = {left, right}
+    return next(
+        row
+        for row in payload["pairs"]
+        if {row["left_strategy"], row["right_strategy"]} == expected
+    )
+
+
+def _expected_pair_order() -> list[str]:
+    order = tuple(reversed(active_shadow_security_selection_ids()))
+    return [f"{left}:{right}" for left, right in combinations(order, 2)]
 
 
 def _write_comparison(root: Path, trade_date: str, *, overlap: bool) -> None:
@@ -132,7 +148,7 @@ def test_high_overlap_high_correlation_is_weak(tmp_path):
 
     payload = build_strategy_differentiation(trade_date=trade_date, repo_root=tmp_path)
 
-    lyra_orion = payload["pairs"][0]
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
     assert lyra_orion["left_strategy"] == "caerus_lyra"
     assert lyra_orion["right_strategy"] == "caerus_orion"
     assert lyra_orion["differentiation_readiness_flag"] == "WEAK"
@@ -146,12 +162,9 @@ def test_low_overlap_low_correlation_is_stronger_with_missing_factor_graceful(tm
 
     payload = build_strategy_differentiation(trade_date=trade_date, repo_root=tmp_path)
 
-    assert [f"{row['left_strategy']}:{row['right_strategy']}" for row in payload["pairs"]] == [
-        "caerus_lyra:caerus_orion",
-        "caerus_lyra:caerus_polaris",
-        "caerus_orion:caerus_polaris",
-    ]
-    assert payload["pairs"][0]["differentiation_readiness_flag"] in {"READY", "WATCH"}
+    assert [f"{row['left_strategy']}:{row['right_strategy']}" for row in payload["pairs"]] == _expected_pair_order()
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
+    assert lyra_orion["differentiation_readiness_flag"] in {"READY", "WATCH"}
     assert "factor_exposure_missing" in payload["reason_codes"]
 
 
@@ -163,7 +176,7 @@ def test_strategy_differentiation_uses_date_bounded_shadow_inputs(tmp_path):
 
     payload = build_strategy_differentiation(trade_date="2026-04-03", repo_root=tmp_path)
 
-    assert payload["pairs"][0]["holdings_overlap_percentage"] == 0.0
+    assert _find_pair(payload, "caerus_lyra", "caerus_orion")["holdings_overlap_percentage"] == 0.0
     assert payload["available"] is True
 
 
@@ -179,8 +192,9 @@ def test_strategy_differentiation_uses_exact_factor_and_position_contributions(t
     assert payload["position_contributions_available"] is True
     assert "factor_exposure_missing" not in payload["reason_codes"]
     assert "position_contributions_missing" not in payload["reason_codes"]
-    assert payload["pairs"][0]["common_top_contributors"] == ["AAA"]
-    assert payload["pairs"][0]["common_top_detractors"] == ["BBB"]
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
+    assert lyra_orion["common_top_contributors"] == ["AAA"]
+    assert lyra_orion["common_top_detractors"] == ["BBB"]
 
 
 def test_strategy_differentiation_uses_date_bounded_factor_and_contribution_fallback(tmp_path):
@@ -234,8 +248,9 @@ def test_strategy_differentiation_parses_contribution_report(tmp_path):
 
     assert payload["position_contributions_available"] is True
     assert "position_contribution_source_contribution_report" in payload["reason_codes"]
-    assert payload["pairs"][0]["common_top_contributors"] == ["AAA"]
-    assert payload["pairs"][0]["common_top_detractors"] == ["BBB"]
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
+    assert lyra_orion["common_top_contributors"] == ["AAA"]
+    assert lyra_orion["common_top_detractors"] == ["BBB"]
 
 
 def test_strategy_differentiation_empty_contribution_file_is_explicit(tmp_path):
@@ -267,8 +282,9 @@ def test_deep_strategy_differentiation_high_overlap_high_corr_is_weak(tmp_path):
     payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
 
     assert payload["aggregate_verdict"] == "WEAK_DIFFERENTIATION"
-    assert payload["pairs"][0]["windows"]["20"]["holdings_overlap"] == 1.0
-    assert "high_overlap_high_correlation" in payload["pairs"][0]["reason_codes"]
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
+    assert lyra_orion["windows"]["20"]["holdings_overlap"] == 1.0
+    assert "high_overlap_high_correlation" in lyra_orion["reason_codes"]
 
 
 def test_deep_strategy_differentiation_low_overlap_low_corr_can_be_strong(tmp_path):
@@ -278,13 +294,10 @@ def test_deep_strategy_differentiation_low_overlap_low_corr_can_be_strong(tmp_pa
 
     payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
 
-    assert [f"{row['left_strategy']}:{row['right_strategy']}" for row in payload["pairs"]] == [
-        "caerus_lyra:caerus_orion",
-        "caerus_lyra:caerus_polaris",
-        "caerus_orion:caerus_polaris",
-    ]
-    assert payload["pairs"][0]["active_share_proxy"] == 1.0
-    assert payload["pairs"][0]["verdict"] in {"STRONG_DIFFERENTIATION", "MODERATE_DIFFERENTIATION"}
+    assert [f"{row['left_strategy']}:{row['right_strategy']}" for row in payload["pairs"]] == _expected_pair_order()
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
+    assert lyra_orion["active_share_proxy"] == 1.0
+    assert lyra_orion["verdict"] in {"STRONG_DIFFERENTIATION", "MODERATE_DIFFERENTIATION"}
 
 
 def test_deep_strategy_differentiation_insufficient_observations_blocks_strong(tmp_path):
@@ -294,8 +307,9 @@ def test_deep_strategy_differentiation_insufficient_observations_blocks_strong(t
 
     payload = build_strategy_differentiation_deep(trade_date=trade_date, repo_root=tmp_path)
 
-    assert payload["pairs"][0]["verdict"] != "STRONG_DIFFERENTIATION"
-    assert "insufficient_observations_block_strong_verdict" in payload["pairs"][0]["reason_codes"]
+    lyra_orion = _find_pair(payload, "caerus_lyra", "caerus_orion")
+    assert lyra_orion["verdict"] != "STRONG_DIFFERENTIATION"
+    assert "insufficient_observations_block_strong_verdict" in lyra_orion["reason_codes"]
 
 
 def test_deep_strategy_differentiation_missing_factor_lowers_confidence(tmp_path):

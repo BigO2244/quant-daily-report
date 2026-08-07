@@ -380,6 +380,8 @@ def _corr_from_vectors(left: dict[str, float], right: dict[str, float]) -> float
     if len(symbols) < 2:
         return None
     frame = pd.DataFrame({"left": [left.get(s, 0.0) for s in symbols], "right": [right.get(s, 0.0) for s in symbols]})
+    if frame["left"].nunique() < 2 or frame["right"].nunique() < 2:
+        return None
     return _round(frame["left"].corr(frame["right"]))
 
 
@@ -478,6 +480,8 @@ def _corr_for_window(returns: pd.DataFrame | None, left: str, right: str, window
         return None, 0
     aligned = returns[[left, right]].dropna().tail(window)
     if aligned.shape[0] < 2:
+        return None, int(aligned.shape[0])
+    if aligned[left].nunique() < 2 or aligned[right].nunique() < 2:
         return None, int(aligned.shape[0])
     return _round(aligned[left].corr(aligned[right])), int(aligned.shape[0])
 
@@ -654,7 +658,7 @@ def build_strategy_differentiation(
         ret_corr = None
         if returns is not None and left in returns.columns and right in returns.columns:
             aligned = returns[[left, right]].dropna()
-            if aligned.shape[0] >= 2:
+            if aligned.shape[0] >= 2 and aligned[left].nunique() >= 2 and aligned[right].nunique() >= 2:
                 ret_corr = _round(aligned[left].corr(aligned[right]))
         sector = _sector_overlap(factors.get(left, {}), factors.get(right, {}))
         factor_sim = _factor_similarity(factors.get(left, {}), factors.get(right, {}))

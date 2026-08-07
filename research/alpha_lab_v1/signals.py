@@ -26,7 +26,7 @@ def build_alpha_lab_signal_frame(panel: pd.DataFrame) -> pd.DataFrame:
     # H5: post-move drift
     df["large_up_1d"] = df.groupby("date")["r1"].rank(method="average", pct=True) >= 0.90
     df["post_move_drift_signal"] = (
-        grouped["large_up_1d"].shift(2).fillna(False).astype(bool)
+        grouped["large_up_1d"].shift(2).astype("boolean").fillna(False).astype(bool)
         & (grouped["r1"].shift(1) > 0)
         & (df["r1"] > 0)
     )
@@ -40,5 +40,5 @@ def build_alpha_lab_signal_frame(panel: pd.DataFrame) -> pd.DataFrame:
         spy["spy_above_200dma"] = (spy["close"] > spy["spy_ema200"]).astype(bool)
         regime = spy[["date", "spy_above_200dma"]]
     df = df.merge(regime, on="date", how="left")
-    df["spy_above_200dma"] = df["spy_above_200dma"].fillna(False)
+    df["spy_above_200dma"] = df["spy_above_200dma"].astype("boolean").fillna(False).astype(bool)
     return df

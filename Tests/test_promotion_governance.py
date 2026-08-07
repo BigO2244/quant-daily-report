@@ -404,8 +404,13 @@ def test_deterministic_strategy_ordering(tmp_path):
     # then -max_observation_count, then strategy name. With the default
     # fixture Lyra (PROMOTE) outranks Orion (HOLD/blocked diff).
     ranking = first["challenger_rankings"]
-    assert [row["strategy"] for row in ranking] == ["caerus_lyra", "caerus_orion"]
-    assert [row["rank"] for row in ranking] == [1, 2]
+    assert [row["strategy"] for row in ranking] == [
+        "caerus_lyra",
+        "caerus_orion",
+        "caerus_orion_alpha",
+        "caerus_polaris_alpha",
+    ]
+    assert [row["rank"] for row in ranking] == [1, 2, 3, 4]
 
 
 def test_artifacts_are_written(tmp_path):
