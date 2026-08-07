@@ -2590,9 +2590,17 @@ def _run_live_pilot_core_path(
     )
     source_trades = _core_rows_from_frame(executable_trades, plan=plan)
     if not source_trades:
+        # The execution core is authoritative after whole-share rounding,
+        # deadband, and min-trade filtering. ``full_need`` is a pre-rounding
+        # cap diagnostic and must not turn a genuinely attained target into an
+        # insufficient-buying-power error.
+        tradable_capital = float(capital_gate.get("tradable_capital_usd") or 0.0)
         had_buy_demand = (
             float(capital_budget.get("requested_buy_notional") or 0.0) > 0.0
-            or full_need + 1e-9 >= float(config.orders.min_trade_usd)
+            or (
+                full_need + 1e-9 >= float(config.orders.min_trade_usd)
+                and full_need > tradable_capital + 1e-9
+            )
         )
         if settled_result.fail_closed and had_buy_demand:
             # Order history was unavailable -> settled cash treated as $0 -> buys blocked.
