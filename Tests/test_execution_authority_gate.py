@@ -7,6 +7,7 @@ from authority.contracts import build_decision_package, build_evidence_package, 
 from authority.pipeline import execution_package_from_risk
 from execution.core import ExecutionRequest, compute_transition_trades, paper_execution_config
 from paper.paper_broker import PaperConfig
+from scripts.live_pilot_execute import _build_core_request
 
 
 def _config():
@@ -105,3 +106,35 @@ def test_migrated_path_preserves_approved_no_action():
     trades, meta = compute_transition_trades(request=request, config=_config())
     assert trades.empty
     assert meta["source"] == "approved_execution_package"
+
+
+def test_live_request_rebudget_inputs_come_from_approved_package():
+    rows = [{"symbol": "AAPL", "target_weight": 0.2, "price": 100.0}]
+    evidence = build_evidence_package(
+        package_id="evidence:test", trade_date="2026-08-07", source_refs=["signals.json"], observations=rows,
+    )
+    decision = build_decision_package(
+        package_id="decision:test", trade_date="2026-08-07", evidence=evidence,
+        target_rows=rows, target_cash_weight=0.8, source_refs=["signals.json"],
+    )
+    risk = build_risk_package(
+        package_id="risk:test", decision=decision, approved_target_rows=rows,
+        approved_cash_weight=0.8, constraints={}, source_refs=["decision:decision:test"],
+    )
+    package = execution_package_from_risk(risk).to_dict()
+    request, malformed = _build_core_request(
+        pre_snapshot={
+            "account": {"equity": "1000", "cash": "1000", "buying_power": "1000"},
+            "positions": [],
+        },
+        plan={
+            "cash_target_weight": 0.0,
+            "target_portfolio": [{"symbol": "MSFT", "target_weight": 0.9, "price": 50.0}],
+            "approved_execution_package": package,
+        },
+        run_id="authority-request",
+    )
+    assert malformed == []
+    assert request is not None
+    assert list(request.targets["ticker"]) == ["AAPL"]
+    assert request.target_cash_weight == 0.8

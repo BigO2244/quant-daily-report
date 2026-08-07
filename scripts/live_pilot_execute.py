@@ -692,14 +692,33 @@ def _build_core_request(
         # approved_cap_usd, so this only tightens.
         cash = min(cash, equity)
     holdings, holding_prices, malformed = _holding_frames_from_snapshot(pre_snapshot)
-    targets, target_prices = _target_rows_from_plan(plan, equity=equity)
+    approved_package_payload = (
+        plan.get("approved_execution_package")
+        if isinstance(plan.get("approved_execution_package"), Mapping)
+        else None
+    )
+    if approved_package_payload is not None:
+        from authority.pipeline import execution_package_from_dict
+
+        approved_package = execution_package_from_dict(approved_package_payload)
+        approved_plan = {
+            "target_portfolio": [dict(row) for row in approved_package.approved_target_rows]
+        }
+        targets, target_prices = _target_rows_from_plan(approved_plan, equity=equity)
+    else:
+        approved_package = None
+        targets, target_prices = _target_rows_from_plan(plan, equity=equity)
     prices = holding_prices.copy()
     for symbol, price in target_prices.items():
         prices.loc[symbol] = float(price)
     # Carry the risk-adjusted cash target through execution so live matches paper.
     # Paper holds this cash back (circuit breaker, sector trim); a legacy plan without
     # the field defaults to 0.0 (prior behavior).
-    cash_target_weight = _finite_float(plan.get("cash_target_weight"))
+    cash_target_weight = (
+        float(approved_package.approved_cash_weight)
+        if approved_package is not None
+        else _finite_float(plan.get("cash_target_weight"))
+    )
     if cash_target_weight is None or cash_target_weight < 0.0:
         cash_target_weight = 0.0
     planning_account = {
@@ -719,11 +738,7 @@ def _build_core_request(
         planning_account=planning_account,
         run_id=run_id,
         price_basis="live_broker_snapshot",
-        approved_execution_package=(
-            plan.get("approved_execution_package")
-            if isinstance(plan.get("approved_execution_package"), Mapping)
-            else None
-        ),
+        approved_execution_package=approved_package_payload,
     )
     return request, malformed
 
