@@ -12,7 +12,9 @@ from core.live_pilot_guardrails import account_id_hash
 from scripts.live_pilot_execute import (
     LIVE_PILOT_BLOCKED_EXISTING_POSITIONS_REQUIRE_ROTATION,
     LIVE_PILOT_BLOCKED_INSUFFICIENT_BUYING_POWER,
+    LIVE_PILOT_FRACTIONAL_POLICY_MISMATCH,
     LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED,
+    _resolve_fractional_policy,
     refresh_live_pilot_reconciliation,
     run_live_pilot,
 )
@@ -366,6 +368,46 @@ def test_dry_run_writes_isolated_artifacts_and_does_not_submit(tmp_path: Path) -
     history = json.loads((run_root / "live_pilot_entry_attempt_history.json").read_text())
     assert history["orders"][0]["sleeve"] == "polaris"
     assert history["orders"][0]["source_strategy_id"] == "polaris"
+
+
+def test_fractional_policy_uses_plan_and_rejects_runtime_mismatch(tmp_path: Path) -> None:
+    plan = {**_plan(), "allow_fractional": False}
+    env = _env(dry_run="0")
+    env["CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL"] = "1"
+    broker = FakeBroker()
+
+    effective, reason, metadata = _resolve_fractional_policy(plan, env)
+    assert effective is False
+    assert reason == LIVE_PILOT_FRACTIONAL_POLICY_MISMATCH
+    assert metadata["fractional_policy_status"] == "MISMATCH"
+
+    result = run_live_pilot(
+        plan=plan,
+        broker=broker,
+        env=env,
+        run_id="fractional-policy-mismatch",
+        output_root=tmp_path / "outputs" / "live_pilot",
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == LIVE_PILOT_FRACTIONAL_POLICY_MISMATCH
+    assert broker.submit_calls == 0
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "fractional-policy-mismatch"
+    preflight = json.loads((run_root / "live_pilot_preflight.json").read_text(encoding="utf-8"))
+    assert preflight["plan_allow_fractional"] is False
+    assert preflight["runtime_allow_fractional"] is True
+    assert preflight["effective_allow_fractional"] is False
+
+
+def test_fractional_policy_preserves_legacy_runtime_behavior() -> None:
+    effective, reason, metadata = _resolve_fractional_policy(
+        _plan(),
+        {"CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL": "1"},
+    )
+
+    assert effective is True
+    assert reason is None
+    assert metadata["fractional_policy_source"] == "runtime_or_default"
 
 
 def test_live_snapshot_timeout_remains_single_attempt_and_fail_closed(tmp_path: Path) -> None:
