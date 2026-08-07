@@ -857,10 +857,14 @@ def execute_lifecycle(
             targets=request.targets,
             prices=request.prices,
             total_equity=float(
-                request.rebudget_total_equity
-                if request.rebudget_total_equity is not None
-                else post_sell_budget_meta.get("post_sell_equity")
-                or request.total_equity
+                request.total_equity
+                if request.approved_execution_package is not None
+                else (
+                    request.rebudget_total_equity
+                    if request.rebudget_total_equity is not None
+                    else post_sell_budget_meta.get("post_sell_equity")
+                    or request.total_equity
+                )
             ),
             buy_budget=float(buy_budget or 0.0),
             cfg=cfg,
