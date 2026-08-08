@@ -3654,6 +3654,95 @@ def refresh_live_pilot_reconciliation(
     reconciliation["broker_status_refresh_claims_broker_truth"] = not bool(refresh_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
 
+    preflight_payload = (
+        _load_plan(run_root / "live_pilot_preflight.json")
+        if (run_root / "live_pilot_preflight.json").exists()
+        else {}
+    )
+    execution_payload = (
+        _load_plan(run_root / "live_pilot_execution_payload.json")
+        if (run_root / "live_pilot_execution_payload.json").exists()
+        else {}
+    )
+    trade_date = str(
+        preflight_payload.get("trade_date")
+        or execution_payload.get("trade_date")
+        or os.getenv("REPORT_DATE")
+        or ""
+    )
+
+    # Reconciliation refresh changes the broker-truth lifecycle state, so the
+    # dependent target-attainment audit must be refreshed in the same write
+    # boundary. Prefer targets already captured by the run audit; this avoids
+    # rereading a mutable external plan after execution. Older runs without a
+    # captured audit may fall back to their recorded plan path.
+    target_attainment_path = (
+        run_root / "audit" / f"execution_target_attainment_{trade_date}.json"
+    )
+    prior_target_attainment = (
+        _load_plan(target_attainment_path) if target_attainment_path.exists() else {}
+    )
+    captured_positions = prior_target_attainment.get("positions")
+    target_plan: dict[str, Any] | None = None
+    target_plan_source = ""
+    if isinstance(captured_positions, list):
+        target_plan = {
+            "target_portfolio": [
+                {
+                    "symbol": row.get("symbol"),
+                    "target_weight": row.get("target_weight"),
+                }
+                for row in captured_positions
+                if isinstance(row, Mapping)
+                and str(row.get("symbol") or "").strip()
+                and _finite_float(row.get("target_weight")) is not None
+            ],
+            "cash_target_weight": prior_target_attainment.get("target_cash_weight"),
+        }
+        target_plan_source = f"{target_attainment_path}:captured_targets"
+    else:
+        plan_reference = str(execution_payload.get("plan_path") or "").strip()
+        if plan_reference:
+            recorded_plan_path = Path(plan_reference)
+            if not recorded_plan_path.is_absolute():
+                recorded_plan_path = REPO_ROOT / recorded_plan_path
+            try:
+                target_plan = _load_plan(recorded_plan_path)
+                target_plan_source = str(recorded_plan_path)
+            except Exception as exc:
+                target_plan = None
+                target_plan_source = f"{recorded_plan_path}:unavailable:{exc}"
+
+    target_attainment: dict[str, Any] = {}
+    if target_plan is not None:
+        try:
+            from core.lane_target_attainment import build_lane_target_attainment
+
+            target_attainment = build_lane_target_attainment(
+                plan=target_plan,
+                post_snapshot=post_snapshot,
+                reconciliation=reconciliation,
+                run_id=run_root.name,
+                trade_date=trade_date,
+                mode=_derive_execution_mode(run_root),
+                dry_run=False,
+            )
+            target_sources = dict(target_attainment.get("source_artifacts") or {})
+            target_sources["plan"] = target_plan_source
+            target_attainment["source_artifacts"] = target_sources
+        except Exception as exc:
+            target_attainment = {
+                "schema_version": "caerus_lane_target_attainment_v1",
+                "run_id": run_root.name,
+                "trade_date": trade_date,
+                "account_scope": _derive_execution_mode(run_root),
+                "status": "UNKNOWN_INSUFFICIENT_BROKER_SNAPSHOT",
+                "reason_code": f"target_attainment_refresh_failed:{exc}",
+                "source_artifacts": {"plan": target_plan_source},
+            }
+        target_attainment_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(target_attainment_path, target_attainment)
+
     capital_gate = (
         _load_plan(run_root / "live_pilot_capital_gate.json")
         if (run_root / "live_pilot_capital_gate.json").exists()
@@ -3765,21 +3854,20 @@ def refresh_live_pilot_reconciliation(
             reconciliation_state=reconciliation.get("state"),
         ),
     }
+    if target_attainment:
+        summary.update(
+            {
+                "execution_target_attainment_status": target_attainment.get("status"),
+                "execution_target_attainment_reason": target_attainment.get("reason_code"),
+            }
+        )
     summary.update(entry_summary)
     _write_json(run_root / "live_pilot_operator_summary.json", summary)
     _write_json(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
             run_id=run_root.name,
-            trade_date=str(
-                (
-                    json.loads((run_root / "live_pilot_preflight.json").read_text(encoding="utf-8"))
-                    if (run_root / "live_pilot_preflight.json").exists()
-                    else {}
-                ).get("trade_date")
-                or os.getenv("REPORT_DATE")
-                or ""
-            ),
+            trade_date=trade_date,
             terminal_status=str(summary.get("terminal_status") or ""),
             reason_code=reconciliation.get("status"),
             intended=reporting_intended,
@@ -3792,6 +3880,14 @@ def refresh_live_pilot_reconciliation(
                 **entry_summary,
                 "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
                 "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
+                **(
+                    {
+                        "execution_target_attainment_status": target_attainment.get("status"),
+                        "execution_target_attainment_reason": target_attainment.get("reason_code"),
+                    }
+                    if target_attainment
+                    else {}
+                ),
             },
         ),
     )
